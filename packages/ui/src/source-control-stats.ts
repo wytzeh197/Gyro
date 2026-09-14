@@ -66,3 +66,16 @@ export function sourceControlTotalsScope(totals: SourceControlTotals) {
 export function sourceControlTotalsLabel(totals: SourceControlTotals) {
   return totals.kind === "clean" ? "Clean" : "Count unavailable";
 }
+
+/** Short visible scope, so the pair is never only explained by a tooltip. */
+export function sourceControlTotalsBadge(totals: SourceControlTotals) {
+  switch (totals.kind) {
+    case "branch":
+    case "clean":
+      return "vs main";
+    case "working-tree":
+      return "uncommitted";
+    case "unavailable":
+      return "";
+  }
+}

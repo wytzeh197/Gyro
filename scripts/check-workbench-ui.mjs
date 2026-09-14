@@ -4864,7 +4864,9 @@ expect(
     !chatSidebarSource.includes("CLI session location") &&
     !chatSidebarSource.includes("Start in the focused project") &&
     !chatSidebarSource.includes(": profile.command") &&
-    chatSidebarSource.includes("commandProfiles.map") &&
+    chatSidebarSource.includes("readyCommandProfiles.map") &&
+    chatSidebarSource.includes("blockedCommandProfiles.map") &&
+    chatSidebarSource.includes("More tools") &&
     chatSidebarSource.includes("Search") &&
     chatSidebarSource.includes("gyro-sidebar-project-chat-list") &&
     chatSidebarSource.includes("Pinned") &&

@@ -1,7 +1,17 @@
 import { ArrowDown, ArrowUp, FileCode2, RefreshCw } from "lucide-react";
 
+export function comparisonScopeLabel(
+  comparison?: "working-tree" | "index" | "branch",
+  staged = false,
+) {
+  if (comparison === "branch") return "main ↔ Working Tree";
+  if (comparison === "index" || staged) return "HEAD ↔ Index";
+  return "Index ↔ Working Tree";
+}
+
 export function ScmReviewToolbar({
   staged,
+  comparison,
   summary,
   canNavigate,
   onPrevious,
@@ -10,6 +20,7 @@ export function ScmReviewToolbar({
   onOpenFile,
 }: {
   staged: boolean;
+  comparison?: "working-tree" | "index" | "branch";
   summary: string;
   canNavigate: boolean;
   onPrevious: () => void;
@@ -19,7 +30,7 @@ export function ScmReviewToolbar({
 }) {
   return (
     <div className="gyro-review-toolbar">
-      <span>{staged ? "HEAD ↔ Index" : "Index ↔ Working Tree"}</span>
+      <span>{comparisonScopeLabel(comparison, staged)}</span>
       <span className="gyro-review-summary" role="status">
         {summary}
       </span>

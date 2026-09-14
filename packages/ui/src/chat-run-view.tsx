@@ -296,6 +296,7 @@ function RunWorkGroup({
         aria-label={`${text.label}, ${text.description}. ${detailLabel}`}
         className="gyro-run-group-toggle"
         onClick={() => setIsExpanded((current) => !current)}
+        title={detailLabel}
         type="button"
       >
         <span aria-hidden="true" className="gyro-run-row-icon">
@@ -318,7 +319,6 @@ function RunWorkGroup({
           ) : null}
         </span>
         <span aria-hidden="true" className="gyro-run-group-disclosure">
-          <span>{detailLabel}</span>
           {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </button>

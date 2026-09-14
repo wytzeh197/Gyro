@@ -1193,11 +1193,14 @@ export type WorkbenchTurn = {
   reconciledAt?: string;
 };
 
+export type SourceControlComparison = "working-tree" | "index" | "branch";
+
 export type SourceControlDiff = {
   workspacePath: string;
   path: string;
   originalPath?: string;
   staged: boolean;
+  comparison?: SourceControlComparison;
 };
 
 export type EditorTab = {
@@ -1380,6 +1383,7 @@ export type SourceControlState = {
     additions: number;
     deletions: number;
     partial: boolean;
+    files?: SourceControlFile[];
   } | null;
   files: SourceControlFile[];
   lastCheckedAt?: string;

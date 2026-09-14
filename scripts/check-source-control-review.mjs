@@ -6,6 +6,7 @@ import {
 } from "../packages/ui/src/workbench-state.ts";
 import {
   sourceControlTotals,
+  sourceControlTotalsBadge,
   sourceControlTotalsLabel,
   sourceControlTotalsScope,
 } from "../packages/ui/src/source-control-stats.ts";
@@ -155,5 +156,13 @@ assert.deepEqual(
   "a repository Gyro cannot read has no count to show",
 );
 assert.equal(sourceControlTotalsLabel({ kind: "clean" }), "Clean");
+assert.equal(
+  sourceControlTotalsBadge({ kind: "branch", additions: 1, deletions: 0 }),
+  "vs main",
+);
+assert.equal(
+  sourceControlTotalsBadge({ kind: "working-tree", additions: 1, deletions: 0 }),
+  "uncommitted",
+);
 
 console.log("Source-control review tab lifecycle checks passed.");

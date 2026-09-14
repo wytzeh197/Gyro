@@ -1,4 +1,5 @@
 import { createBrowserHostVisibility } from "./browser-host-visibility";
+import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
@@ -114,6 +115,7 @@ import {
   type ChatRailDiffTools,
   type ChatRailTerminalTools,
   type ChatCompanionTabId,
+  type ChatCompanionWidthMode,
   type SideChatMessage,
   type SideChatState,
   type ChatSidePanelId,
@@ -1257,9 +1259,10 @@ export function App() {
     legacyPanel: legacyRailPanel,
     paneId: SOLO_CHAT_PANE_ID,
   });
-  const setCompanionWidth = useCallback((width: number) => {
-    dispatchCompanion({ type: "resize-panel", width });
-    dispatchWorkbench({ type: "set-chat-panel-width", width });
+  const setCompanionWidth = useCallback((width: number, mode?: ChatCompanionWidthMode) => {
+    const browser = mode === "browser";
+    dispatchCompanion(browser ? { type: "resize-dock", width, mode: "browser" } : { type: "resize-dock", width });
+    dispatchWorkbench(browser ? { type: "set-browser-companion-width", width } : { type: "set-chat-companion-width", width });
   }, []);
   // --- Transient side chats -------------------------------------------------
   // The Side chat tab runs against a session of its own so the model answers
@@ -1531,7 +1534,7 @@ export function App() {
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
-    companionWidth: companion.panelWidth,
+    companionWidth: companion.dockWidth,
     browserCompanionWidth: companion.browserDockWidth,
     onCompanionWidthChange: setCompanionWidth,
     onOpenCompanionTab: (tab: ChatCompanionTabId) => {
@@ -5324,6 +5327,20 @@ export function App() {
       workspacePath,
       workbench.ide.sourceControl.files,
     ],
+  );
+
+  const loadComparisonDiff = useCallback(
+    (
+      file: { path: string; originalPath?: string; staged?: boolean },
+      comparison: "working-tree" | "index" | "branch",
+    ) =>
+      loadGitComparisonDiff(
+        activeSession?.workspacePath ?? workspacePath,
+        file,
+        comparison,
+        isTauriRuntime(),
+      ),
+    [activeSession?.workspacePath, workspacePath],
   );
 
   /**
@@ -15463,7 +15480,7 @@ export function App() {
             ? fileReviewTools
             : undefined
         }
-        onLoadChangeDiff={loadInlineChangeDiff}
+        onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
         onEditQueuedMessage={(messageId) => {
           focusChatPane(pane);
           editQueuedChatMessage(messageId);
@@ -15643,7 +15660,7 @@ export function App() {
       onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
       fileReview={fileReviewTools}
-      onLoadChangeDiff={loadInlineChangeDiff}
+      onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
       onEditQueuedMessage={editQueuedChatMessage}
       onRemoveQueuedMessage={removeQueuedChatMessage}
       onSteerQueuedMessage={steerQueuedChatMessage}
@@ -16018,7 +16035,7 @@ export function App() {
                     }
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                     fileReview={fileReviewTools}
-                    onLoadChangeDiff={loadInlineChangeDiff}
+                    onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
                     onEditQueuedMessage={editQueuedChatMessage}
                     onRemoveQueuedMessage={removeQueuedChatMessage}
                     onSteerQueuedMessage={steerQueuedChatMessage}
