@@ -152,7 +152,10 @@ import themePreviewLight from "./assets/theme-preview-light.png";
 import themePreviewDark from "./assets/theme-preview-dark.png";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
-import { finalAssistantResponseText } from "./chat-commentary";
+import {
+  finalAssistantResponseText,
+  stripHiddenControlMarkers,
+} from "./chat-commentary";
 import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
   askAboutFilePrompt,
@@ -7475,6 +7478,8 @@ type ChatSurfaceProps = {
   onEditQueuedMessage?: (messageId: string) => void;
   onRemoveQueuedMessage?: (messageId: string) => void;
   onSteerQueuedMessage?: (messageId: string) => void;
+  /** True when an open project file can be captured for the Editor action. */
+  canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
@@ -7782,6 +7787,7 @@ export function ChatSurface({
   onEditQueuedMessage,
   onRemoveQueuedMessage,
   onSteerQueuedMessage,
+  canAttachEditorSnapshot = false,
   onAttachMediaFiles,
   onReusePrompt,
   onStopChat,
@@ -8551,6 +8557,7 @@ export function ChatSurface({
                 onSend={onSend}
                 isSending={isSending}
                 onStop={sideChat?.onStop}
+                canAttachEditorSnapshot={canAttachEditorSnapshot}
                 constrainToParent
                 sessionModel={sessionModel}
                 providerReadiness={providerReadiness}
@@ -8688,6 +8695,7 @@ export function ChatSurface({
             branchCatalog={branchCatalog}
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
+            canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
             onStop={onStopChat}
@@ -8907,6 +8915,7 @@ export function ChatSurface({
             branchName={branchName}
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
+            canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
             onStop={onStopChat}
@@ -22455,6 +22464,7 @@ function Composer({
   branchCatalog,
   onDraftChange,
   onRemoveAttachment,
+  canAttachEditorSnapshot = false,
   onAttachMediaFiles,
   onSend,
   onStop,
@@ -22502,6 +22512,8 @@ function Composer({
   branchCatalog?: GitBranchCatalog;
   onDraftChange: (value: string) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
+  /** True when an open project file can be captured for the Editor action. */
+  canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
   onSend: () => void;
   onStop?: () => void;
@@ -22973,48 +22985,30 @@ function Composer({
     label,
     menuPane: "root" as const,
   });
+  // One compact menu: attach, capture the open editor, plan, goal. The folder
+  // chip and ⌘K already cover folder and search, and Council stays out of the
+  // menu until it can run. Slash commands keep every action reachable.
   const contextItems: ComposerPopoverItem[] = [
     {
-      action: "attach-editor-snapshot",
-      icon: FileCode2,
-      label: "Editor",
-      sectionLabel: "Context",
-      tooltip: "Capture saved or unsaved editor text",
-    },
-    {
-      action: "select-media",
-      icon: ImagePlus,
-      label: "Image",
-    },
-    {
-      action: "select-file",
+      action: "attach-files",
       icon: Paperclip,
-      label: "File",
+      label: "Attach",
+      tooltip: "Images, videos, or project files",
     },
-    {
-      action: "select-folder",
-      icon: Folder,
-      label: "Folder",
-    },
-    {
-      action: "search-workspace",
-      icon: Search,
-      label: "Search",
-      sectionLabel: "Tools",
-    },
+    ...(canAttachEditorSnapshot
+      ? [
+          {
+            action: "attach-editor-snapshot",
+            icon: FileCode2,
+            label: "Editor",
+            tooltip: "Capture saved or unsaved editor text",
+          },
+        ]
+      : []),
     {
       action: "set-chat-mode-plan",
       icon: Lightbulb,
       label: "Plan",
-    },
-    {
-      // Kept visible while frozen so the capability is discoverable, but
-      // disabled rather than clickable — it cannot run yet.
-      action: COUNCIL_COMING_SOON ? undefined : "set-chat-mode-council",
-      detail: COUNCIL_COMING_SOON ? COUNCIL_COMING_SOON_LABEL : undefined,
-      disabled: COUNCIL_COMING_SOON,
-      icon: Users,
-      label: "Council",
     },
     {
       action: "add-goal",
@@ -26762,15 +26756,17 @@ function providerActivityFromEvent(event: SessionEvent) {
   };
 }
 
+/** A commentary note that held nothing but a title marker. A note with real
+ * narration under a stray marker stays, and the run rail strips the marker. */
 function isHiddenSessionTitleActivity(event: SessionEvent) {
   const payload = eventPayloadRecord(event);
+  const label = stringFromEventPayload(payload, "label") ?? event.message;
   return (
     event.kind === "system-event" &&
     payload?.kind === "provider-activity" &&
     stringFromEventPayload(payload, "activityKind") === "commentary" &&
-    (stringFromEventPayload(payload, "label") ?? event.message).includes(
-      "GYRO_SESSION_TITLE:",
-    )
+    label.includes("GYRO_SESSION_TITLE:") &&
+    !stripHiddenControlMarkers(label).trim()
   );
 }
 

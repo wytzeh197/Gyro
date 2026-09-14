@@ -28939,7 +28939,7 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Preserve a quiet outline behind macOS traffic lights when Light mode is inactive.
-   Concentric with the native 14px dots at trafficLightPosition (16, 16). */
+   Concentric with the native 14px dots at trafficLightPosition (16, 17). */
 :root[data-theme="light"][data-window-active="false"]
   .gyro-sidebar-persistent-header::after {
   background:
@@ -28966,7 +28966,7 @@ button.gyro-account-menu-row:hover,
   left: 16px;
   pointer-events: none;
   position: absolute;
-  top: 16px;
+  top: 17px;
   width: 58px;
   z-index: 0;
 }
@@ -37034,6 +37034,13 @@ textarea:focus-visible,
   max-height: none;
 }
 
+/* Dark mode: the side panel terminal shares the tab bar's surface so the strip
+   and the canvas read as one panel. The xterm theme draws transparently, so
+   the canvas token is what shows. */
+:root[data-theme="dark"] .gyro-chat-companion-content {
+  --gyro-terminal-canvas: var(--gyro-pane);
+}
+
 .gyro-chat-companion .gyro-browser-preview.is-chat {
   background: var(--gyro-pane);
   border: 0;
@@ -38677,17 +38684,19 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
-/* Split chats own their overlays; usage details anchor to the composer rather
-   than extending leftward from the small context ring. */
-.gyro-chat-surface.is-tiled .gyro-composer-context-meter {
+/* Thread and split chats own their overlays; usage details anchor to the
+   composer rather than extending leftward from the small context ring. The
+   thread canvas clips overflow, so a ring-anchored card was cut off whenever
+   the ring sat less than the card's width from the pane's left edge. */
+.gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-context-meter {
   position: static;
 }
 
-.gyro-chat-surface.is-tiled .gyro-composer-bar {
+.gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-bar {
   position: relative;
 }
 
-.gyro-chat-surface.is-tiled .gyro-composer-context-tooltip {
+.gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-context-tooltip {
   box-sizing: border-box;
   left: auto;
   right: 0;
@@ -38696,7 +38705,8 @@ textarea:focus-visible,
   max-width: 100%;
 }
 
-.gyro-chat-surface.is-tiled .gyro-composer-context-tooltip::after {
+.gyro-chat-surface:is(.is-thread, .is-tiled)
+  .gyro-composer-context-tooltip::after {
   display: none;
 }
 
@@ -40401,8 +40411,9 @@ textarea:focus-visible,
   cursor: default;
 }
 
-/* Native 14px traffic lights sit at y 16, so their centre is at 23px. Pad 28px
-   navigation buttons by 9px so they share that centreline. */
+/* The single and tiled chat headers put their content on a ~24.5px centreline.
+   Native 14px traffic lights sit at y 17, and 28px navigation buttons padded by
+   11px land on that same line, so the whole top bar reads as one row. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings),
 .gyro-sidebar-windowbar.is-settings,
 .gyro-sidebar-restore-cluster {
@@ -40410,7 +40421,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-top: 9px;
+  padding-top: 11px;
   padding-bottom: 0;
 }
 

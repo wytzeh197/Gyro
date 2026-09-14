@@ -1364,6 +1364,8 @@ export type WorkbenchAction =
       toGroupId: string;
       fromGroupId?: string;
     }
+  /** The user moving to the Workspace tab, as opposed to a file or tool opening it. */
+  | { type: "enter-workspace" }
   | { type: "ide-select-view"; view: IdeViewId }
   | { type: "ide-toggle-minimap" }
   | { type: "ide-toggle-assistant" }
@@ -1773,6 +1775,23 @@ export function workbenchReducer(
               ? false
               : state.isToolPanelOpen,
       };
+    // The Workspace tab is a place, not a chat. Entering it from elsewhere must
+    // not carry the open session into the AI side chat, so a sidebar left on the
+    // AI view comes back to the explorer; the AI view stays one click away.
+    case "enter-workspace": {
+      const isInWorkspace =
+        state.activeDestination === "workspace" &&
+        state.activeWorkspaceLayout === "code";
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide:
+          !isInWorkspace && state.ide.activeView === "ai"
+            ? { ...state.ide, activeView: "explorer" }
+            : state.ide,
+      };
+    }
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
     case "open-tool-panel": {
@@ -3059,7 +3078,8 @@ export function workbenchReducer(
         ...state,
         ide: {
           ...state.ide,
-          activeView: "ai",
+          // Recording a call never switches the sidebar: a session working in
+          // the background would otherwise pull the AI chat open in Workspace.
           aiToolCalls: state.ide.aiToolCalls.some(
             (toolCall) => toolCall.id === action.toolCall.id,
           )

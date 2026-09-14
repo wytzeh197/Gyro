@@ -2720,7 +2720,7 @@ export function App() {
           },
         }));
         // Mirror the call into the Workspace AI view so tool use is visible
-        // where the work is happening, not only in the chat transcript.
+        // where the work is happening, without switching the sidebar to it.
         dispatchWorkbench({
           type: "ide-record-ai-tool-call",
           toolCall: ideAiToolCallFromActivity(activity),
@@ -3437,7 +3437,13 @@ export function App() {
   }, []);
 
   const selectWorkspaceLayout = useCallback((layout: WorkspaceLayoutId) => {
-    dispatchWorkbench({ type: "select-workspace-layout", layout });
+    // Moving to Workspace from the sidebar or search must not bring the open
+    // session along into the AI side chat.
+    dispatchWorkbench(
+      layout === "code"
+        ? { type: "enter-workspace" }
+        : { type: "select-workspace-layout", layout },
+    );
   }, []);
 
   const openToolPanel = useCallback(
@@ -8351,7 +8357,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: "image" | "video" | "media" | "workspace-file") => {
+    async (kind: "image" | "video" | "media" | "workspace-file" | "any") => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -8379,7 +8385,9 @@ export function App() {
                 ? "Attach videos"
                 : kind === "media"
                   ? "Attach media"
-                  : "Attach workspace file",
+                  : kind === "any"
+                    ? "Attach files"
+                    : "Attach workspace file",
           filters:
             kind === "image"
               ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
@@ -8427,12 +8435,22 @@ export function App() {
         const rejected: string[] = [];
         let limitExceeded = false;
         for (const path of paths) {
+          // "any" is the composer's single Attach picker: media keeps its
+          // limits, and anything else is a project file.
           const attachmentKind =
-            kind === "media"
+            kind === "media" || kind === "any"
               ? isSupportedChatVideoPath(path)
                 ? "video"
-                : "image"
+                : kind === "media" || isSupportedChatImagePath(path)
+                  ? "image"
+                  : "workspace-file"
               : kind;
+          if (attachmentKind === "workspace-file" && !workspacePath) {
+            rejected.push(
+              `${workspaceName(path)}: select a project to attach project files`,
+            );
+            continue;
+          }
           if (
             attachmentKind !== "workspace-file" &&
             remaining[attachmentKind] <= 0
@@ -8520,6 +8538,8 @@ export function App() {
     }
   }, [activeDraftKey, activeSessionId, notify]);
 
+  // The composer only offers Editor when an open project file can be captured.
+  const canAttachEditorSnapshot = Boolean(workspacePath && selectedFile);
   const attachEditorSnapshot = useCallback(async () => {
     if (!isTauriRuntime() || !workspacePath || !selectedFile) {
       notify(
@@ -9038,6 +9058,9 @@ export function App() {
       switch (action) {
         case "new-chat":
           startNewChat();
+          break;
+        case "attach-files":
+          void selectChatAttachment("any");
           break;
         case "add-context":
         case "select-file":
@@ -15473,7 +15496,7 @@ export function App() {
         onCompleteOnboardingStep={(step) =>
           dispatchWorkbench({ type: "complete-onboarding-step", step })
         }
-        onAttachMediaFiles={(files) => {
+        canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={(files) => {
           focusChatPane(pane);
           void attachDroppedMedia(files, {
             draftKey: paneDraftKey,
@@ -15731,7 +15754,7 @@ export function App() {
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-      onAttachMediaFiles={attachDroppedMedia}
+      canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
       onComposerAction={handleComposerAction}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
@@ -16102,7 +16125,7 @@ export function App() {
                         step,
                       })
                     }
-                    onAttachMediaFiles={attachDroppedMedia}
+                    canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
                     onComposerAction={handleComposerAction}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
@@ -16749,7 +16772,7 @@ export function App() {
           onCompleteOnboardingStep={(step) =>
             dispatchWorkbench({ type: "complete-onboarding-step", step })
           }
-          onAttachMediaFiles={attachDroppedMedia}
+          canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}
@@ -17667,6 +17690,10 @@ function loadChatGridState(): ChatGridState {
 
 function isSupportedChatVideoPath(path: string) {
   return /\.(?:mp4|m4v|mov|webm)$/i.test(path.trim());
+}
+
+function isSupportedChatImagePath(path: string) {
+  return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
 }
 
 // IPC header values must be ASCII; file names and paths may not be.

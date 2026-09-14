@@ -17995,6 +17995,20 @@ fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
     std::env::current_dir().map_err(Into::into)
 }
 
+/// Gyro reads a session title only from a chat's first turn. Later turns say so
+/// outright: a resumed thread still holds the opening instruction, and models
+/// otherwise keep writing the marker into every reply.
+const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. Write it only in this first reply; later replies in this chat must not include it.\n";
+const SESSION_TITLE_LATER_TURN_INSTRUCTION: &str = "This is not the first turn of this chat. Do not write a GYRO_SESSION_TITLE line; Gyro only reads it on a chat's first turn.\n";
+
+fn session_title_instruction(suggest_title: bool) -> &'static str {
+    if suggest_title {
+        SESSION_TITLE_FIRST_TURN_INSTRUCTION
+    } else {
+        SESSION_TITLE_LATER_TURN_INSTRUCTION
+    }
+}
+
 fn openai_codex_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
@@ -18011,11 +18025,7 @@ fn openai_codex_chat_prompt(
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .unwrap_or("OpenAI model");
-    let title_instruction = if suggest_title {
-        "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker.\n"
-    } else {
-        ""
-    };
+    let title_instruction = session_title_instruction(suggest_title);
     let mutation_instruction = if allow_mutations {
         "You may edit files, run commands, and complete requested workspace changes directly. Gyro applies approved file changes through its own guarded transaction. If a native file-change callback is declined, re-read the affected files before reporting the outcome: the user may have rejected it, or Gyro may already have applied the reviewed change. Report the actual on-disk state and do not claim failure from the callback decision alone."
     } else {
@@ -18062,11 +18072,7 @@ fn claude_chat_prompt(
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .unwrap_or("no selected workspace");
-    let title_instruction = if suggest_title {
-        "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker.\n"
-    } else {
-        ""
-    };
+    let title_instruction = session_title_instruction(suggest_title);
     let action_instruction = if allow_actions {
         "Use tools when they are needed to complete the user's request. Commands and file changes must follow Gyro's permission decisions. If Gyro reports that it already applied reviewed file changes, do not retry the write; re-read the files and continue. Do not commit, push, or perform destructive actions unless the user explicitly asks.\n"
     } else {
@@ -20337,7 +20343,14 @@ fn provider_context_usage_with_window(
 
 fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
     let text = extract_codex_agent_message_text(value)?;
-    if text.contains("GYRO_SESSION_TITLE:") || text.contains("GYRO_ARTIFACTS:") {
+    // A stray control marker is removed rather than dropping the note: a later
+    // turn can repeat the title line above real narration.
+    let text = if text.contains("GYRO_") {
+        strip_hidden_control_markers(&text).message.trim().to_string()
+    } else {
+        text
+    };
+    if text.trim().is_empty() {
         return None;
     }
     let item = value.get("item")?;
@@ -27236,6 +27249,13 @@ while True:
 
         let claude_resumed = claude_chat_prompt("next", Some("/tmp/project"), false, true, true);
         assert!(!claude_resumed.contains("GYRO_ARTIFACTS:"));
+        // Titles are read on the first turn only, and later turns say so.
+        assert!(claude_resumed.contains("Do not write a GYRO_SESSION_TITLE line"));
+        assert!(!claude_resumed.contains("name the session immediately"));
+        let claude_opening = claude_chat_prompt("start", Some("/tmp/project"), true, true, false);
+        assert!(claude_opening.contains("name the session immediately"));
+        assert!(claude_opening.contains("Write it only in this first reply"));
+        assert!(!claude_opening.contains("Do not write a GYRO_SESSION_TITLE line"));
         assert!(claude_resumed.contains("must follow Gyro's permission decisions"));
         let codex_resumed =
             openai_codex_chat_prompt("next", Some("/workspace"), Some("GPT"), false, false, true);
@@ -27847,6 +27867,25 @@ while True:
         assert_eq!(commentary.id, "message_1");
         assert_eq!(commentary.kind, "commentary");
         assert_eq!(commentary.label, "I’ll inspect the workspace first.");
+        let titled = extract_provider_commentary_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "message_2",
+                "type": "agent_message",
+                "text": "GYRO_SESSION_TITLE: Fix popover\nI’m checking the popover styles."
+            }
+        }))
+        .expect("a stray title line keeps its narration");
+        assert_eq!(titled.label, "I’m checking the popover styles.");
+        assert!(extract_provider_commentary_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "message_3",
+                "type": "agent_message",
+                "text": "GYRO_SESSION_TITLE: Fix popover"
+            }
+        }))
+        .is_none());
 
         let retained = provider_activities_for_response(
             vec![commentary.clone(), command.clone()],

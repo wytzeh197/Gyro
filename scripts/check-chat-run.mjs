@@ -708,6 +708,19 @@ for (const answer of [
     `answers stay answers: ${answer}`,
   );
 }
+// Progress narration names more verbs than "checking" — an observation that
+// closes on "Next I'm finding…" is still a note about the work.
+for (const narration of [
+  "The popover is clipped on its left side. Next I'm finding its styles and markup.",
+  "The header sits 2px low. Now I'm measuring the traffic lights.",
+  "Both paths build the answer. I'm comparing how they peel preambles.",
+]) {
+  assert.equal(
+    isAssistantPreambleBlock(narration),
+    true,
+    `progress narration is a preamble: ${narration}`,
+  );
+}
 
 // A real preamble event that trails the last tool (so it is peeled from the
 // closing answer) must not be drawn twice — once in the main pass and once
