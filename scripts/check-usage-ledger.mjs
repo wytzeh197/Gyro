@@ -35,6 +35,27 @@ assert.deepEqual(
   ],
 );
 
+assert.deepEqual(
+  planUsageNotices("anthropic", [
+    { id: "five-hour", label: "5-hour limit", usedPercent: 57 },
+  ]),
+  [],
+);
+
+{
+  const cycleIds = [
+    "2026-08-04T13:30:00.259542+00:00",
+    "2026-08-04T13:29:59.918311+00:00",
+  ].map(
+    (resetsAt) =>
+      planUsageNotices("anthropic", [
+        { id: "five-hour", label: "5-hour limit", usedPercent: 84, resetsAt },
+      ])[0].cycleId,
+  );
+  assert.equal(cycleIds[0], "2026-08-04T13:30:00.000Z");
+  assert.equal(cycleIds[1], cycleIds[0]);
+}
+
 assert.equal(DAILY_PACE_NOTICE_PERCENT, 14);
 
 assert.equal(

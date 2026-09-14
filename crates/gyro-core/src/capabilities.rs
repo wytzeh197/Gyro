@@ -647,7 +647,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open.",
+        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTest,
@@ -672,7 +672,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::TerminalOpen,
         class: CapabilityClass::TerminalExecute,
-        description: "Open one visible, model-owned long-running process in Gyro Terminal. For builds and other finite commands, use gyro_terminal_wait with the returned resource.id to await completion and then continue the task.",
+        description: "Open one visible, model-owned long-running process in Gyro Terminal. For builds and other finite commands, use gyro_terminal_wait with the returned resource.id to await completion and then continue the task. A process still running when the turn ends is watched under the reply; if it exits without the user or model stopping it, Gyro relaunches the same command.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalRead,
@@ -682,12 +682,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::TerminalWait,
         class: CapabilityClass::TerminalObserve,
-        description: "Wait for this chat’s model-owned command to finish, without restarting it or repeatedly reading output. Pass the resource.id returned by terminal_open or a background workspace task. Returns completed, exitCode, and bounded output, or still running after timeoutMs (default/max 60000). If still running, call this tool again; when completed, inspect exitCode and continue the user’s task. For remote CI builds, start a watcher such as gh run watch RUN_ID --exit-status in terminal_open, then wait here. A timeout does not stop the command. Do not finish the task merely because a wait timed out.",
+        description: "Wait for this chat’s model-owned command to finish, without restarting it or repeatedly reading output. Pass the resource.id returned by terminal_open or a background workspace task. Returns completed, exitCode, and bounded output, or still running after timeoutMs (default 60000, max 300000). For builds and other long commands, prefer one long wait over repeated short ones. If still running, call this tool again; when completed, inspect exitCode and continue the user’s task. For remote CI builds, start a watcher such as gh run watch RUN_ID --exit-status in terminal_open, then wait here. A timeout does not stop the command. Do not finish the task merely because a wait timed out.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalStop,
         class: CapabilityClass::TerminalExecute,
-        description: "Stop this chat's model-owned terminal process.",
+        description: "Stop this chat's model-owned terminal process. An explicit stop is not relaunched.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,

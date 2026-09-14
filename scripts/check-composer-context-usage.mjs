@@ -5,6 +5,7 @@ import {
 } from "../apps/desktop/src/provider-usage-state.ts";
 
 import {
+  composerContextUsageForModel,
   composerLimitWindows,
   estimateComposerContextUsage,
   formatLimitReset,
@@ -196,6 +197,36 @@ const grok46Fallback = estimateComposerContextUsage([], "hello", {
   modelLabel: "Grok 4.6",
 });
 assert.equal(grok46Fallback.windowLabel, "500K");
+
+// Browsing another model must rescale the same occupancy against that
+// model's window immediately, rather than keep the previous model's remaining.
+const grok45Preview = composerContextUsageForModel(grok46Fallback, {
+  providerId: "xai",
+  modelId: "grok-4.5",
+  modelLabel: "Grok 4.5",
+  contextWindowTokens: 131_072,
+});
+assert.equal(grok45Preview.usedTokens, grok46Fallback.usedTokens);
+assert.equal(grok45Preview.windowLabel, "131K");
+assert.equal(grok45Preview.modelLabel, "Grok 4.5");
+assert.match(grok45Preview.detail, /Grok 4\.5/);
+const opusPreview = composerContextUsageForModel(grok46Fallback, {
+  providerId: "anthropic",
+  modelId: "claude-opus-5",
+  modelLabel: "Claude Opus 5",
+  contextWindowTokens: 1_000_000,
+});
+assert.equal(opusPreview.windowLabel, "1M");
+assert.equal(opusPreview.remainingLabel, "1M");
+assert.equal(
+  composerContextUsageForModel(grok46Fallback, {
+    providerId: "xai",
+    modelId: "grok-4.6",
+    modelLabel: "Grok 4.6",
+    contextWindowTokens: 500_000,
+  }),
+  grok46Fallback,
+);
 
 const now = Date.parse("2026-07-27T10:00:00.000Z");
 

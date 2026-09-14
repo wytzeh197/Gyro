@@ -59,6 +59,7 @@ import type {
   SurfaceId,
   Task,
   TaskStatus,
+  TerminalKeepAlive,
   TerminalPane,
   TerminalPaneLayout,
   TerminalPaneStatus,
@@ -1452,6 +1453,12 @@ export type WorkbenchAction =
       workingDirectory?: string;
       governedSessionId?: string;
       governedProviderId?: string;
+      exitCode?: number | null;
+    }
+  | {
+      type: "set-terminal-pane-keep-alive";
+      paneId: string;
+      keepAlive?: TerminalKeepAlive;
     }
   | {
       type: "set-terminal-pane-attention";
@@ -1533,6 +1540,7 @@ export type WorkbenchAction =
   | { type: "browser-back" }
   | { type: "browser-forward" }
   | { type: "browser-reload" }
+  | { type: "browser-loaded"; url: string }
   | { type: "browser-device"; device: BrowserPreviewDevice }
   | { type: "browser-capture-start" }
   | {
@@ -3147,7 +3155,13 @@ export function workbenchReducer(
         ...state,
         terminalPanes: exists
           ? state.terminalPanes.map((pane) =>
-              pane.id === action.pane.id ? action.pane : pane,
+              pane.id === action.pane.id
+                ? {
+                    ...action.pane,
+                    keepAlive: action.pane.keepAlive ?? pane.keepAlive,
+                    layout: action.pane.layout ?? pane.layout,
+                  }
+                : pane,
             )
           : [...state.terminalPanes, action.pane],
       };
@@ -3215,6 +3229,10 @@ export function workbenchReducer(
         action.governedSessionId ?? existingPane?.governedSessionId;
       const nextGovernedProviderId =
         action.governedProviderId ?? existingPane?.governedProviderId;
+      const nextExitCode =
+        action.status === "running" || action.status === "waiting"
+          ? null
+          : (action.exitCode ?? existingPane?.exitCode);
       if (
         existingPane &&
         existingPane.command === nextCommand &&
@@ -3225,7 +3243,8 @@ export function workbenchReducer(
         existingPane.output === action.output &&
         existingPane.status === action.status &&
         existingPane.governedSessionId === nextGovernedSessionId &&
-        existingPane.governedProviderId === nextGovernedProviderId
+        existingPane.governedProviderId === nextGovernedProviderId &&
+        existingPane.exitCode === nextExitCode
       ) {
         return state;
       }
@@ -3246,7 +3265,26 @@ export function workbenchReducer(
                 workingDirectory: nextWorkingDirectory,
                 governedSessionId: nextGovernedSessionId,
                 governedProviderId: nextGovernedProviderId,
+                exitCode: nextExitCode,
               }
+            : pane,
+        ),
+      };
+    }
+    case "set-terminal-pane-keep-alive": {
+      if (
+        state.terminalPanes.some(
+          (pane) =>
+            pane.id === action.paneId && pane.keepAlive === action.keepAlive,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        terminalPanes: state.terminalPanes.map((pane) =>
+          pane.id === action.paneId
+            ? { ...pane, keepAlive: action.keepAlive }
             : pane,
         ),
       };
@@ -3778,6 +3816,32 @@ export function workbenchReducer(
           captureError: undefined,
           latestCapture: undefined,
           verificationMessage: "Loading…",
+        },
+      };
+    }
+    case "browser-loaded": {
+      const preview = state.browserPreview;
+      const history = [...preview.history];
+      let historyIndex = preview.historyIndex;
+      if (historyIndex >= 0 && preview.status === "loading") {
+        // A submitted navigation or history step may finish at a redirect URL.
+        history[historyIndex] = action.url;
+      } else if (history[historyIndex] !== action.url) {
+        // A link followed inside the native page is also a history entry.
+        history.splice(historyIndex + 1);
+        history.push(action.url);
+        historyIndex = history.length - 1;
+      }
+      return {
+        ...state,
+        browserPreview: {
+          ...preview,
+          url: action.url,
+          history,
+          historyIndex,
+          status: "ready",
+          nativeHost: true,
+          verificationMessage: `Native · ${action.url}`,
         },
       };
     }

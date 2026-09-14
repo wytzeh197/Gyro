@@ -97,6 +97,11 @@ pub(super) fn execute(
             "completed": snapshot.status != "running",
             "exitCode": snapshot.exit_code,
             "pane": snapshot,
+            "stoppedBy": if request.capability_id == CapabilityId::TerminalStop {
+                serde_json::Value::from("model")
+            } else {
+                serde_json::Value::Null
+            },
             "owner": {
                 "kind": "model",
                 "sessionId": owned.session_id,

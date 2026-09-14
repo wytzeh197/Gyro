@@ -171,6 +171,8 @@ export type {
   Task,
   TaskDefinition,
   TaskStatus,
+  TerminalKeepAlive,
+  TerminalKeepAlivePhase,
   TerminalPane,
   TerminalPaneLayout,
   TerminalPaneStatus,
@@ -553,3 +555,20 @@ export {
 
 export { ChatRun } from "./chat-run-view";
 export type { RunModel } from "./chat-run";
+export {
+  decideKeepAlive,
+  isKeepAliveCommand,
+  keepAliveBackoffMs,
+  keepAliveKind,
+  keepAliveStatusLabel,
+  keepAliveTitle,
+  keepAliveWatchesFromPanes,
+  KEEP_ALIVE_MAX_RESTARTS,
+} from "./chat-keep-alive";
+export type {
+  KeepAliveDecision,
+  KeepAliveKind,
+  KeepAlivePhase,
+  KeepAliveWatch,
+} from "./chat-keep-alive";
+export { ChatKeepAlive } from "./chat-keep-alive-view";

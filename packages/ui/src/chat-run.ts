@@ -115,6 +115,12 @@ export type BrowserAction =
 /** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
   | { kind: "say"; id: string; at: string; text: string }
+  /**
+   * A reasoning-summary headline ("Checking file sizes"). Not narration — the
+   * agent did not say it to the person — so it only ever stands in for the
+   * "Thinking" beat at the live tail and is dropped from settled work.
+   */
+  | { kind: "status"; id: string; at: string; text: string }
   | {
       kind: "work";
       id: string;
@@ -219,6 +225,228 @@ export function runWorkGroupText(group: WorkGroup): RunRowText {
     label: failed ? problem : running ? inProgress : complete,
     description: `${count} ${count === 1 ? "action" : "actions"}`,
   };
+}
+
+/**
+ * A stretch of the run between two things the agent said.
+ *
+ * Narration is the story; the tool calls under it are how. So the run reads as
+ * say → work → say → work, and a finished work stretch folds to one summary
+ * line ("Ran 3 commands, Read 1 file") that opens onto its calls. Approvals
+ * split a stretch like narration does, because work after a decision is a
+ * different stretch of work.
+ */
+export type RunSegment =
+  | { kind: "say"; id: string; step: Extract<RunStep, { kind: "say" }> }
+  | { kind: "ask"; id: string; step: Extract<RunStep, { kind: "ask" }> }
+  | {
+      kind: "work";
+      id: string;
+      steps: Array<Extract<RunStep, { kind: "work" | "status" }>>;
+    };
+
+export function segmentRunSteps(steps: RunStep[]): RunSegment[] {
+  const segments: RunSegment[] = [];
+  for (const step of steps) {
+    if (step.kind === "say") {
+      segments.push({ kind: "say", id: step.id, step });
+      continue;
+    }
+    if (step.kind === "ask") {
+      segments.push({ kind: "ask", id: step.id, step });
+      continue;
+    }
+    const previous = segments.at(-1);
+    if (previous?.kind === "work") {
+      previous.steps.push(step);
+      continue;
+    }
+    // Keyed by the first beat, which never changes as the stretch grows, so a
+    // summary row keeps its expanded state while later calls land in it.
+    segments.push({ kind: "work", id: `segment-${step.id}`, steps: [step] });
+  }
+  return segments;
+}
+
+/** Only the calls in a stretch; reasoning headlines are not work. */
+export function segmentWorkSteps(
+  steps: RunStep[],
+): Array<Extract<RunStep, { kind: "work" }>> {
+  return steps.filter(
+    (step): step is Extract<RunStep, { kind: "work" }> => step.kind === "work",
+  );
+}
+
+type SegmentCountKey =
+  | "command"
+  | "read"
+  | "file"
+  | "search"
+  | "browser"
+  | "other";
+
+const SEGMENT_PHRASES = {
+  command: (n) => `Ran ${n} ${n === 1 ? "command" : "commands"}`,
+  read: (n) => `Read ${n} ${n === 1 ? "file" : "files"}`,
+  file: (n) => `Edited ${n} ${n === 1 ? "file" : "files"}`,
+  search: (n) => `Ran ${n} ${n === 1 ? "search" : "searches"}`,
+  browser: (n) => `${n} browser ${n === 1 ? "action" : "actions"}`,
+  other: (n) => `${n} other tool ${n === 1 ? "call" : "calls"}`,
+} as const satisfies Record<SegmentCountKey, (count: number) => string>;
+
+/** Past this many named kinds the rest fold into "N other tool calls". */
+const SEGMENT_NAMED_PARTS = 3;
+
+/**
+ * One line for a finished stretch of work: "Ran 3 commands, Read 1 file,
+ * 3 other tool calls".
+ *
+ * Kinds are named in the order they first happened, so the line retells the
+ * stretch rather than sorting it. Edits and reads count distinct paths — two
+ * edits to one file are one edited file — while everything else counts calls,
+ * folded repeats included. A failure is appended rather than hidden inside a
+ * count, because it is the one thing in the line a person may need to act on.
+ */
+export function summarizeSegment(steps: RunStep[]): string {
+  const counts = new Map<SegmentCountKey, number>();
+  const paths = { file: new Set<string>(), read: new Set<string>() };
+  let failed = 0;
+  const add = (key: SegmentCountKey, amount: number) =>
+    counts.set(key, (counts.get(key) ?? 0) + amount);
+
+  for (const step of segmentWorkSteps(steps)) {
+    const { item } = step;
+    const times = step.repeat ?? 1;
+    if (item.status === "failed") failed += 1;
+    switch (item.kind) {
+      case "command":
+      case "search":
+      case "browser":
+        add(item.kind, times);
+        break;
+      case "file":
+      case "read": {
+        const path = item.path;
+        if (!path) {
+          add(item.kind, times);
+        } else if (!paths[item.kind].has(path)) {
+          paths[item.kind].add(path);
+          add(item.kind, 1);
+        } else {
+          add(item.kind, 0);
+        }
+        break;
+      }
+      case "tool":
+      case "memory":
+      case "context":
+        add("other", times);
+        break;
+    }
+  }
+
+  const named = [...counts.keys()].filter((key) => key !== "other");
+  const shown = named.slice(0, SEGMENT_NAMED_PARTS);
+  const folded =
+    (counts.get("other") ?? 0) +
+    named
+      .slice(SEGMENT_NAMED_PARTS)
+      .reduce((sum, key) => sum + (counts.get(key) ?? 0), 0);
+  const parts = shown.map((key) => SEGMENT_PHRASES[key](counts.get(key)!));
+  if (folded > 0) {
+    parts.push(
+      parts.length === 0
+        ? `Used ${folded} ${folded === 1 ? "tool" : "tools"}`
+        : SEGMENT_PHRASES.other(folded),
+    );
+  }
+  if (failed > 0) {
+    parts.push(`${failed} failed`);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * The live tail of a stretch: its newest calls, and how many scrolled out of
+ * view above them. The in-flight call is always the newest, so it is never the
+ * one hidden.
+ */
+export function liveWindow<T>(
+  steps: T[],
+  max = 4,
+): { visible: T[]; hiddenCount: number } {
+  const hiddenCount = Math.max(0, steps.length - max);
+  return { visible: steps.slice(hiddenCount), hiddenCount };
+}
+
+/**
+ * The wording for one exact call inside a stretch: the verb, then the thing it
+ * ran on — "Ran git remote -v", "Read src/app.ts".
+ *
+ * `runRowText` names a call by what it was for ("Ran tests"), which is right
+ * for a standalone row. Under a summary that already says "Ran 3 commands" the
+ * purpose is implied, and the concrete command is what someone expanded the
+ * line to see.
+ */
+export function runCallText(
+  step: Extract<RunStep, { kind: "work" }>,
+): RunRowText {
+  const item = step.item;
+  const running = item.status === "running";
+  switch (item.kind) {
+    case "command":
+      return {
+        label: running ? "Running" : "Ran",
+        description: displayCommand(item.command),
+      };
+    case "file":
+      return { label: running ? "Editing" : "Edited", description: item.path };
+    case "read": {
+      const target = readTarget(item.path);
+      const image = item.media === "image";
+      const verb = image
+        ? running
+          ? "Viewing"
+          : "Viewed"
+        : running
+          ? "Reading"
+          : "Read";
+      return target
+        ? { label: verb, description: target }
+        : { label: `${verb} ${image ? "image" : "file"}` };
+    }
+    case "search": {
+      const verb = running ? "Searching" : "Searched";
+      if (!item.query) {
+        return {
+          label: `${verb} ${item.scope === "web" ? "the web" : "project"}`,
+        };
+      }
+      return {
+        label: item.scope === "web" ? `${verb} the web for` : `${verb} for`,
+        description: item.query,
+      };
+    }
+    case "tool":
+    case "memory":
+    case "context":
+    case "browser":
+      return runRowText(step);
+  }
+}
+
+/**
+ * The command as typed, without the shell wrapper and `cd` preamble providers
+ * put around it: `/bin/zsh -lc 'cd /repo && git status'` → `git status`.
+ */
+function displayCommand(command: string): string {
+  const wrapped = /^\s*(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])([\s\S]*)\1\s*$/.exec(
+    command,
+  );
+  const inner = wrapped ? wrapped[2]! : command;
+  return (
+    inner.replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "").trim() || inner
+  );
 }
 
 function workGroupStatus(
@@ -356,6 +584,24 @@ export function buildRunModel(
 
   for (const event of visible) {
     if (consumedResponseIds.has(event.id)) {
+      continue;
+    }
+    const reasoning = reasoningTextFromEvent(event);
+    if (reasoning) {
+      // A replayed or re-sent summary is the same beat, not a second one.
+      const previous = steps.at(-1);
+      if (
+        previous?.kind === "status" &&
+        (previous.id === event.id || previous.text === reasoning)
+      ) {
+        continue;
+      }
+      steps.push({
+        kind: "status",
+        id: event.id,
+        at: event.createdAt,
+        text: reasoning,
+      });
       continue;
     }
     const commentary = commentaryTextFromEvent(event);
@@ -533,8 +779,11 @@ function partitionClosingResponse(
   }
 
   const before = events.slice(0, index + 1);
+  // A reasoning headline is not work: an answer that only follows the model
+  // thinking is still the opening line of a live run.
   const followsWork = before.some(
-    (event) => event.kind !== "assistant-message",
+    (event) =>
+      event.kind !== "assistant-message" && !reasoningTextFromEvent(event),
   );
   if (isRunning && !followsWork) {
     return undefined;
@@ -665,7 +914,7 @@ function runPhase(
   // not paint "Stopped" while the provider process is still running — that is
   // exactly the "random stop" look mid-tool.
   if (isRunning) {
-    if (steps.length === 0) {
+    if (steps.length === 0 || steps.every((step) => step.kind === "status")) {
       return { name: "thinking" };
     }
     return response ? { name: "finalizing" } : { name: "working" };
@@ -816,6 +1065,9 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
       // Commentary is prose, not work. It reaches the rail as a `say` step via
       // the assistant-message path, so it must not become a row here.
       return undefined;
+    case "reasoning":
+      // A reasoning headline becomes a `status` step, never a tool row.
+      return undefined;
     case "tool": {
       const raw = text(payload, "tool") ?? detail ?? label;
       // A provider calling Gyro's browser directly is still a browser beat.
@@ -901,6 +1153,22 @@ function commentaryTextFromEvent(event: SessionEvent): string | undefined {
     return undefined;
   }
   return (text(payload, "label") ?? event.message).trim() || undefined;
+}
+
+/** The headline of a provider reasoning summary, when this event carries one. */
+function reasoningTextFromEvent(event: SessionEvent): string | undefined {
+  if (event.kind !== "system-event") return undefined;
+  const payload = record(event.payload);
+  if (
+    text(payload, "kind") !== "provider-activity" ||
+    text(payload, "activityKind") !== "reasoning"
+  ) {
+    return undefined;
+  }
+  return (
+    (text(payload, "label") ?? event.message).replace(/\*\*/g, "").trim() ||
+    undefined
+  );
 }
 
 /**
@@ -1065,13 +1333,13 @@ export function runHeaderLabel(
     case "thinking":
     case "working":
     case "finalizing":
-      return elapsedLabel ? `Working · ${elapsedLabel}` : "Working";
+      return elapsedLabel ? `Working for ${elapsedLabel}` : "Working";
     // The clock is still honest here — the turn never ended — and its compact
     // placement keeps the activity itself as the header's main message.
     case "retrying":
       return elapsedLabel ? `Retrying · ${elapsedLabel}` : "Retrying";
     case "done":
-      return elapsedLabel ? `Worked · ${elapsedLabel}` : "Worked";
+      return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
     case "failed":
       // User cancel is "Stopped"; a real failure is "Failed" so recovery copy
       // and tone can differ without a second chrome system.
@@ -1157,7 +1425,7 @@ export function runRetryText(
  * dumb two-span render and makes the wording assertable.
  */
 export function runRowText(step: RunStep): RunRowText {
-  if (step.kind === "say") {
+  if (step.kind === "say" || step.kind === "status") {
     return { label: step.text };
   }
   if (step.kind === "ask") {

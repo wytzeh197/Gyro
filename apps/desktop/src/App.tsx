@@ -1,6 +1,7 @@
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
+import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
@@ -516,6 +517,10 @@ const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
+// Mirrors the native limits so oversized files are rejected before they are
+// read into memory.
+const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_CHAT_VIDEO_BYTES = 200 * 1024 * 1024;
 const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
@@ -2782,6 +2787,26 @@ export function App() {
             });
             terminalOutputRevisionRef.current[snapshot.paneId] =
               snapshot.outputRevision;
+            const stoppedBy = stringFromRecord(
+              recordFromUnknown(payload.data),
+              "stoppedBy",
+            );
+            if (stoppedBy === "model") {
+              const existing = terminalPanesRef.current.find(
+                (item) => item.id === snapshot.paneId,
+              );
+              if (existing?.keepAlive) {
+                dispatchWorkbench({
+                  type: "set-terminal-pane-keep-alive",
+                  paneId: snapshot.paneId,
+                  keepAlive: {
+                    ...existing.keepAlive,
+                    phase: "stopped",
+                    stopOrigin: "model",
+                  },
+                });
+              }
+            }
           }
         }
         if (payload.resource.kind === "browser") {
@@ -7848,10 +7873,6 @@ export function App() {
               recordProviderHealthOutput(providerId, verified.output, verified);
             }
           }
-          dispatchWorkbench({
-            type: "select-destination",
-            destination: "providers",
-          });
           notify(
             "provider",
             source === "login-exit"
@@ -8404,6 +8425,7 @@ export function App() {
           ),
         };
         const prepared: ChatAttachment[] = [];
+        const rejected: string[] = [];
         let limitExceeded = false;
         for (const path of paths) {
           const attachmentKind =
@@ -8419,33 +8441,41 @@ export function App() {
             limitExceeded = true;
             continue;
           }
-          if (attachmentKind !== "workspace-file") {
-            remaining[attachmentKind] -= 1;
-          }
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_attachment",
-            {
-              request: {
-                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
-                path,
-                workspacePath,
-                kind: attachmentKind,
+          // One bad file must not discard the rest of the selection.
+          try {
+            const attachment = await invoke<ChatAttachment>(
+              "prepare_chat_attachment",
+              {
+                request: {
+                  sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                  path,
+                  workspacePath,
+                  kind: attachmentKind,
+                },
               },
-            },
-          );
-          prepared.push({
-            ...attachment,
-            previewUrl:
-              attachment.kind === "image" || attachment.kind === "video"
-                ? convertFileSrc(attachment.path)
-                : undefined,
-          });
+            );
+            if (attachmentKind !== "workspace-file") {
+              remaining[attachmentKind] -= 1;
+            }
+            prepared.push({
+              ...attachment,
+              previewUrl:
+                attachment.kind === "image" || attachment.kind === "video"
+                  ? convertFileSrc(attachment.path)
+                  : undefined,
+            });
+          } catch (error) {
+            rejected.push(`${workspaceName(path)}: ${String(error)}`);
+          }
         }
         if (prepared.length) {
           setChatAttachments((current) => ({
             ...current,
             [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
           }));
+        }
+        if (rejected.length) {
+          notify("command-failed", "Attachment rejected", rejected.join("\n"));
         }
         if (limitExceeded) {
           notify(
@@ -8577,7 +8607,7 @@ export function App() {
         ),
       };
       const prepared: ChatAttachment[] = [];
-      let rejectedCount = 0;
+      const rejected: string[] = [];
       let limitExceeded = false;
       for (const file of files) {
         const kind =
@@ -8588,29 +8618,38 @@ export function App() {
           limitExceeded = true;
           continue;
         }
-        remaining[kind] -= 1;
-        try {
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_attachment",
-            {
-              request: {
-                sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
-                path: "",
-                workspacePath: attachmentWorkspacePath,
-                kind,
-                name:
-                  file.name ||
-                  `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`,
-                bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
-              },
-            },
+        const name =
+          file.name ||
+          `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+        const byteLimit =
+          kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+        if (file.size > byteLimit) {
+          rejected.push(
+            `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
           );
+          continue;
+        }
+        try {
+          const headers: Record<string, string> = {
+            "x-gyro-kind": kind,
+            "x-gyro-name": base64Utf8(name),
+            "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
+          };
+          if (attachmentWorkspacePath) {
+            headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
+          }
+          const attachment = await invoke<ChatAttachment>(
+            "prepare_chat_media_upload",
+            new Uint8Array(await file.arrayBuffer()),
+            { headers },
+          );
+          remaining[kind] -= 1;
           prepared.push({
             ...attachment,
             previewUrl: convertFileSrc(attachment.path),
           });
-        } catch {
-          rejectedCount += 1;
+        } catch (error) {
+          rejected.push(`${name}: ${String(error)}`);
         }
       }
       if (prepared.length) {
@@ -8628,12 +8667,9 @@ export function App() {
           "Media limit reached",
           `Attach up to ${MAX_CHAT_IMAGES_PER_MESSAGE} images and ${MAX_CHAT_VIDEOS_PER_MESSAGE} videos per message`,
         );
-      } else if (rejectedCount > 0) {
-        notify(
-          "command-failed",
-          "Media rejected",
-          `${rejectedCount} file${rejectedCount === 1 ? " was" : "s were"} not accepted`,
-        );
+      }
+      if (rejected.length) {
+        notify("command-failed", "Media rejected", rejected.join("\n"));
       }
     },
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
@@ -11803,6 +11839,7 @@ export function App() {
       output,
       status,
       hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+      exitCode: snapshot.exitCode ?? null,
     });
     if (
       snapshot.output !== undefined &&
@@ -12023,6 +12060,18 @@ export function App() {
 
   const stopTerminalPane = useCallback(
     async (paneId: string) => {
+      const pane = terminalPanesRef.current.find((item) => item.id === paneId);
+      if (pane?.keepAlive) {
+        dispatchWorkbench({
+          type: "set-terminal-pane-keep-alive",
+          paneId,
+          keepAlive: {
+            ...pane.keepAlive,
+            phase: "stopped",
+            stopOrigin: "user",
+          },
+        });
+      }
       if (!isTauriRuntime()) {
         dispatchWorkbench({
           type: "set-terminal-pane-status",
@@ -12276,6 +12325,18 @@ export function App() {
 
   const restartTerminalPane = useCallback(
     async (paneId: string) => {
+      const pane = terminalPanesRef.current.find((item) => item.id === paneId);
+      if (pane?.keepAlive && pane.keepAlive.phase !== "relaunching") {
+        dispatchWorkbench({
+          type: "set-terminal-pane-keep-alive",
+          paneId,
+          keepAlive: {
+            ...pane.keepAlive,
+            phase: "relaunching",
+            stopOrigin: undefined,
+          },
+        });
+      }
       if (!isTauriRuntime()) {
         dispatchWorkbench({
           type: "set-terminal-pane-status",
@@ -12331,6 +12392,12 @@ export function App() {
       workbench.terminalPanes,
     ],
   );
+
+  useChatKeepAliveSupervisor({
+    dispatch: dispatchWorkbench,
+    panes: workbench.terminalPanes,
+    restart: restartTerminalPane,
+  });
 
   const resizeTerminalPane = useCallback(
     async (paneId: string, cols: number, rows: number) => {
@@ -12425,6 +12492,12 @@ export function App() {
         return false;
       }
       try {
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "loading",
+          message: "Loading…",
+          nativeHost: true,
+        });
         await invoke("session_browser_open", {
           request: {
             sessionId: sessionBrowserKey,
@@ -12433,12 +12506,6 @@ export function App() {
             bounds: bounds ?? undefined,
             visible: bounds != null,
           },
-        });
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "ready",
-          message: `Native · ${normalizedPreviewUrl(url)}`,
-          nativeHost: true,
         });
         return true;
       } catch (error) {
@@ -12489,9 +12556,16 @@ export function App() {
       void invoke("session_browser_history", {
         sessionId: sessionBrowserKey,
         direction: "back",
-      }).catch(() => undefined);
+      }).catch((error) => {
+        notify("command-failed", "Browser back failed", String(error));
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message: String(error),
+        });
+      });
     }
-  }, [sessionBrowserKey]);
+  }, [notify, sessionBrowserKey]);
 
   const handleBrowserForward = useCallback(() => {
     dispatchWorkbench({ type: "browser-forward" });
@@ -12499,18 +12573,32 @@ export function App() {
       void invoke("session_browser_history", {
         sessionId: sessionBrowserKey,
         direction: "forward",
-      }).catch(() => undefined);
+      }).catch((error) => {
+        notify("command-failed", "Browser forward failed", String(error));
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message: String(error),
+        });
+      });
     }
-  }, [sessionBrowserKey]);
+  }, [notify, sessionBrowserKey]);
 
   const handleBrowserReload = useCallback(() => {
     dispatchWorkbench({ type: "browser-reload" });
     if (isTauriRuntime()) {
       void invoke("session_browser_reload", {
         sessionId: sessionBrowserKey,
-      }).catch(() => undefined);
+      }).catch((error) => {
+        notify("command-failed", "Browser reload failed", String(error));
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message: String(error),
+        });
+      });
     }
-  }, [sessionBrowserKey]);
+  }, [notify, sessionBrowserKey]);
 
   const toggleBrowserPanel = useCallback(() => {
     dispatchWorkbench({ type: "set-chat-panel" });
@@ -12574,17 +12662,20 @@ export function App() {
         kind?: string;
         sessionId: string;
         title?: string;
+        url?: string;
       }>("session-browser-event", (event) => {
-        if (
-          event.payload.sessionId !== sessionBrowserKey ||
-          event.payload.kind !== "title"
+        if (event.payload.sessionId !== sessionBrowserKey) return;
+        if (event.payload.kind === "loaded" && event.payload.url) {
+          dispatchWorkbench({ type: "browser-loaded", url: event.payload.url });
+        } else if (
+          event.payload.kind === "title" &&
+          event.payload.title !== undefined
         ) {
-          return;
+          dispatchWorkbench({
+            type: "browser-title",
+            title: event.payload.title,
+          });
         }
-        dispatchWorkbench({
-          type: "browser-title",
-          title: event.payload.title,
-        });
       });
     } catch {
       unlisten = Promise.resolve(undefined);
@@ -12756,10 +12847,10 @@ export function App() {
     let disposed = false;
     const url = normalizedPreviewUrl(workbench.browserPreview.url);
 
-    // Native host navigates itself. `ensureSessionBrowser` owns its terminal
-    // state so an open failure cannot be overwritten as a healthy blank page.
+    // Native button handlers already issue navigation/history/reload commands.
+    // Reopening here would turn a history step into a second navigation.
     if (isTauriRuntime() && browserNativeHost) {
-      void ensureSessionBrowser(url);
+      if (!workbench.browserPreview.nativeHost) void ensureSessionBrowser(url);
       return () => {
         disposed = true;
         window.clearTimeout(timeout);
@@ -12833,6 +12924,7 @@ export function App() {
     ensureSessionBrowser,
     workbench.browserPreview.status,
     workbench.browserPreview.url,
+    workbench.browserPreview.nativeHost,
   ]);
 
   const createTask = useCallback(() => {
@@ -13422,10 +13514,7 @@ export function App() {
           dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
           break;
         case "open-browser-preview":
-          dispatchWorkbench({
-            type: "browser-navigate",
-            url: workbench.browserPreview.url,
-          });
+          handleBrowserNavigate(workbench.browserPreview.url);
           break;
         case "show-diffs":
           dispatchWorkbench({
@@ -13479,6 +13568,7 @@ export function App() {
       addWorkspaceFolder,
       createAutomation,
       createTask,
+      handleBrowserNavigate,
       notify,
       openWorkspace,
       openWorkspaceConfiguration,
@@ -16139,22 +16229,14 @@ export function App() {
                   })
                 }
                 onAddTerminalPane={addTerminalPane}
-                onBrowserBack={() =>
-                  dispatchWorkbench({ type: "browser-back" })
-                }
+                onBrowserBack={handleBrowserBack}
                 onBrowserDeviceChange={(device) =>
                   dispatchWorkbench({ type: "browser-device", device })
                 }
-                onBrowserForward={() =>
-                  dispatchWorkbench({ type: "browser-forward" })
-                }
-                onBrowserNavigate={(url) =>
-                  dispatchWorkbench({ type: "browser-navigate", url })
-                }
+                onBrowserForward={handleBrowserForward}
+                onBrowserNavigate={handleBrowserNavigate}
                 onBrowserOpenExternal={openBrowserPreviewExternal}
-                onBrowserReload={() =>
-                  dispatchWorkbench({ type: "browser-reload" })
-                }
+                onBrowserReload={handleBrowserReload}
                 onBrowserScreenshot={captureBrowserPreview}
                 onBrowserUrlChange={(url) =>
                   dispatchWorkbench({ type: "set-browser-url", url })
@@ -17585,6 +17667,15 @@ function loadChatGridState(): ChatGridState {
 
 function isSupportedChatVideoPath(path: string) {
   return /\.(?:mp4|m4v|mov|webm)$/i.test(path.trim());
+}
+
+// IPC header values must be ASCII; file names and paths may not be.
+function base64Utf8(value: string) {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(value)) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
 }
 
 function loadRemovedProjectPaths(): string[] {
@@ -19847,14 +19938,14 @@ function approvalNotificationCopy(
             : "Codex";
   if (mode === "gated") {
     return {
-      title: "Ask before executing",
+      title: "Ask for approval",
       detail: `${providerName} will ask before commands and file edits.`,
     };
   }
 
   if (mode === "auto") {
     return {
-      title: "Auto approve",
+      title: "Approve for me",
       detail: `${providerName} can work without prompts inside the workspace boundary.`,
     };
   }

@@ -2229,6 +2229,27 @@ if (codexProfile) {
     unchangedTerminalState === state,
     "Unchanged terminal snapshots should not create new workbench state.",
   );
+  state = workbenchReducer(state, {
+    type: "set-terminal-pane-keep-alive",
+    paneId: pane.id,
+    keepAlive: { turnId: "turn-keep", restartCount: 0, phase: "watching" },
+  });
+  expect(
+    state.terminalPanes.find((item) => item.id === pane.id)?.keepAlive
+      ?.phase === "watching",
+    "Keep-alive arming failed.",
+  );
+  const armedPane = state.terminalPanes.find((item) => item.id === pane.id);
+  const { keepAlive: _ignoredKeepAlive, ...paneWithoutKeepAlive } = armedPane;
+  state = workbenchReducer(state, {
+    type: "upsert-background-terminal-pane",
+    pane: { ...paneWithoutKeepAlive, output: "still running" },
+  });
+  expect(
+    state.terminalPanes.find((item) => item.id === pane.id)?.keepAlive
+      ?.turnId === "turn-keep",
+    "Keep-alive should survive a background pane upsert.",
+  );
   const movedTerminalState = workbenchReducer(state, {
     type: "sync-terminal-pane-snapshot",
     paneId: pane.id,
@@ -3806,8 +3827,8 @@ expect(
     surfaceSource.includes(
       'isRunning ? "Assistant update" : "Final response"',
     ) &&
-    runSource.includes("`Working · ${elapsedLabel}`") &&
-    runSource.includes("`Worked · ${elapsedLabel}`") &&
+    runSource.includes("`Working for ${elapsedLabel}`") &&
+    runSource.includes("`Worked for ${elapsedLabel}`") &&
     runSource.includes("export function formatRunDuration") &&
     surfaceSource.includes("formatMessageTime(event.createdAt)") &&
     surfaceSource.includes('aria-label="Copy message"') &&
@@ -3824,6 +3845,9 @@ expect(
     styleSource.includes("max-width: min(78%, 720px)") &&
     styleSource.includes(".gyro-user-message-meta") &&
     styleSource.includes(".gyro-user-message-bubble") &&
+    !/\.gyro-chat-surface\.has-companion\s+\.gyro-user-message-bubble \{\s*background: #000;/.test(
+      styleSource,
+    ) &&
     styleSource.includes(
       ".gyro-message.is-user:hover .gyro-user-message-meta",
     ) &&
@@ -4583,6 +4607,16 @@ expect(
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
     tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
+    desktopRustSource.includes("apply_macos_traffic_light_position") &&
+    desktopRustSource.includes("inset_macos_traffic_lights") &&
+    desktopRustSource.includes("standardWindowButton") &&
+    desktopRustSource.includes("MAIN_TRAFFIC_LIGHT_X") &&
+    desktopRustSource.includes("MAIN_TRAFFIC_LIGHT_Y") &&
+    desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
+    desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
+    readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
+      "crate::apply_macos_traffic_light_position(&main)",
+    ) &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -4717,13 +4751,18 @@ expect(
     /(?:^|\n):root\[data-theme="dark"\] \.gyro-chat-thread-topbar \{\n  background: var\(--gyro-app\);/.test(
       styleSource,
     ) &&
-    /gyro-chat-thread-topbar,[\s\S]{0,240}gyro-chat-thread-canvas,[\s\S]{0,240}gyro-chat-transcript,[\s\S]{0,240}gyro-chat-composer-dock \{\n  background: var\(--gyro-pane\);/.test(
+    /gyro-chat-thread-topbar,[\s\S]{0,240}gyro-chat-thread-canvas,[\s\S]{0,240}gyro-chat-transcript \{\n  background: var\(--gyro-pane\);/.test(
       chatDesignSource,
     ) &&
     /data-theme="dark"[\s\S]{0,160}gyro-chat-thread-topbar,[\s\S]{0,500}background: var\(--gyro-app\);/.test(
       chatDesignSource,
+    ) &&
+    // Only the composer is solid; the changes pill and queue float over the
+    // transcript, which runs down behind them.
+    /gyro-chat-composer-dock \{\n  background: linear-gradient\([\s\S]{0,120}var\(--gyro-chat-dock-solid\) var\(--gyro-composer-solid-height/.test(
+      chatDesignSource,
     ),
-  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark.",
+  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, with only the composer solid in the dock.",
 );
 
 expect(
@@ -5457,6 +5496,34 @@ expect(
     !surfaceSource.includes("<strong>Workbench activity</strong>") &&
     !surfaceSource.includes("Open terminal\n          </button>"),
   "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer.",
+);
+expect(
+  styleSource.includes(
+    ".gyro-chat-surface.is-thread .gyro-chat-thread-canvas > .gyro-chat-transcript",
+  ) &&
+    styleSource.includes("scrollbar-width: none") &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-thread .gyro-chat-transcript::-webkit-scrollbar",
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread .gyro-chat-transcript::-webkit-scrollbar",
+    ).some(
+      (rule) =>
+        rule.includes("display: none") &&
+        rule.includes("height: 0") &&
+        rule.includes("width: 0"),
+    ),
+  "Chat transcripts should scroll without a visible scrollbar.",
+);
+expect(
+  surfaceSource.includes("function isLoadedTranscriptClipped") &&
+    surfaceSource.includes("TRANSCRIPT_OVERFLOW_SLACK") &&
+    surfaceSource.includes(
+      "hasMoreBefore && onLoadEarlier && isLoadedChatClipped",
+    ) &&
+    surfaceSource.includes("setIsLoadedChatClipped(isLoadedTranscriptClipped"),
+  "Load earlier messages should appear only when loaded chat messages do not fit on screen.",
 );
 expect(
   surfaceSource.includes("function safeAssistantLinkUrl") &&
@@ -6446,9 +6513,19 @@ expect(
 expect(
   surfaceSource.includes("OpenAI permissions") &&
     surfaceSource.includes("Anthropic permissions") &&
-    surfaceSource.includes('gatedLabel: "Ask first"') &&
-    surfaceSource.includes('autoLabel: "Auto Approve"') &&
+    surfaceSource.includes('gatedLabel: "Ask for approval"') &&
+    surfaceSource.includes('autoLabel: "Approve for me"') &&
     surfaceSource.includes('directLabel: "Full access"') &&
+    surfaceSource.includes("detail: approvalCopy.gatedDetail") &&
+    surfaceSource.includes("detail: approvalCopy.autoDetail") &&
+    surfaceSource.includes("detail: approvalCopy.directDetail") &&
+    surfaceSource.includes("Always ask before commands and file edits") &&
+    surfaceSource.includes(
+      "Unrestricted access to the internet and any file on your computer",
+    ) &&
+    surfaceSource.includes("icon: Hand") &&
+    surfaceSource.includes("icon: Clock") &&
+    surfaceSource.includes("ApprovalChipIcon") &&
     !surfaceSource.includes('action: "toggle-access"') &&
     !surfaceSource.includes("Codex settings") &&
     !surfaceSource.includes("Claude settings") &&
@@ -7329,7 +7406,7 @@ expect(
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&
-    surfaceSource.includes("limitWindows.map((window)") &&
+    surfaceSource.includes("displayedLimitWindows.map((window)") &&
     styleSource.includes(".gyro-composer-limit-summary"),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
@@ -7456,7 +7533,13 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("contextUsage.remainingLabel") &&
+    surfaceSource.includes("composerContextUsageForModel") &&
+    surfaceSource.includes("previewComposerContextModel") &&
+    surfaceSource.includes("displayedContextUsage") &&
+    surfaceSource.includes("displayedContextUsage.remainingLabel") &&
+    surfaceSource.includes("composerModelPickerItem") &&
+    surfaceSource.includes("${preview.remainingLabel} remaining") &&
+    styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "reportedModelId !== model.modelId",

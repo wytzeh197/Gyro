@@ -136,7 +136,7 @@ export function resolveCleanMachinePath(
 
   if (!hasReadyProvider) {
     blockedReason =
-      providerBlockMessage || "Connect a local provider before sending.";
+      providerBlockMessage || "Connect a provider to start chatting.";
     nextAction = providerBlockAction;
     nextActionLabel = providerBlockActionLabel;
     placeholder = input.providerBlockPlaceholder?.trim()

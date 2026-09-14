@@ -231,15 +231,6 @@ export function estimateComposerContextUsage(
           reportedTotalTokens ?? 0,
         );
   const usedTokens = Math.max(0, reportedTokens + liveEstimatedTokens);
-  const remainingTokens = Math.max(0, contextWindowTokens - usedTokens);
-  const percent = Math.min(
-    100,
-    Math.max(0, Math.round((usedTokens / contextWindowTokens) * 100)),
-  );
-  const percentLabel = usedTokens > 0 && percent === 0 ? "<1%" : `${percent}%`;
-  const usedLabel = formatCompactTokenCount(usedTokens);
-  const remainingLabel = formatCompactTokenCount(remainingTokens);
-  const windowLabel = formatCompactTokenCount(contextWindowTokens);
   const isReported = reportedInputTokens !== undefined;
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
   const isOtherModelReading = Boolean(
@@ -256,6 +247,65 @@ export function estimateComposerContextUsage(
         : "Reported by the provider for the latest completed turn on this model."
     : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
+  return finishComposerContextUsage({
+    contextWindowTokens,
+    detail,
+    modelLabel,
+    source: isReported ? "reported" : "estimated",
+    usedTokens,
+  });
+}
+
+/**
+ * Re-read the same occupancy against another model's window.
+ *
+ * The thread does not shrink when you browse the picker. Only the window
+ * changes, so remaining tokens and the fill level have to follow the model
+ * under the pointer — not stay locked to whichever model last answered.
+ */
+export function composerContextUsageForModel(
+  usage: ComposerContextUsage,
+  model: ContextModelSelection,
+): ComposerContextUsage {
+  const contextWindowTokens = resolveContextWindow(undefined, model);
+  const modelLabel = model.modelLabel ?? model.modelId ?? usage.modelLabel;
+  if (
+    contextWindowTokens === usage.contextWindowTokens &&
+    modelLabel === usage.modelLabel
+  ) {
+    return usage;
+  }
+  return finishComposerContextUsage({
+    contextWindowTokens,
+    detail: `Thread occupancy shown against ${modelLabel}'s context window.`,
+    modelLabel,
+    source: usage.source,
+    usedTokens: usage.usedTokens,
+  });
+}
+
+function finishComposerContextUsage({
+  contextWindowTokens,
+  detail,
+  modelLabel,
+  source,
+  usedTokens,
+}: {
+  contextWindowTokens: number;
+  detail: string;
+  modelLabel: string;
+  source: ComposerContextUsage["source"];
+  usedTokens: number;
+}): ComposerContextUsage {
+  const remainingTokens = Math.max(0, contextWindowTokens - usedTokens);
+  const percent = Math.min(
+    100,
+    Math.max(0, Math.round((usedTokens / contextWindowTokens) * 100)),
+  );
+  const percentLabel = usedTokens > 0 && percent === 0 ? "<1%" : `${percent}%`;
+  const usedLabel = formatCompactTokenCount(usedTokens);
+  const remainingLabel = formatCompactTokenCount(remainingTokens);
+  const windowLabel = formatCompactTokenCount(contextWindowTokens);
   return {
     contextWindowTokens,
     detail,
@@ -265,7 +315,7 @@ export function estimateComposerContextUsage(
     usedTokens,
     percentLabel,
     remainingLabel,
-    source: isReported ? "reported" : "estimated",
+    source,
     title: `${modelLabel} context`,
     usedLabel,
     windowLabel,

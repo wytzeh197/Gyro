@@ -12,10 +12,7 @@
   > .gyro-chat-thread-canvas,
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-transcript,
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-composer-dock {
+  .gyro-chat-transcript {
   background: var(--gyro-pane);
 }
 
@@ -27,11 +24,30 @@
   > .gyro-chat-thread-canvas,
 :root[data-theme="dark"]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-transcript,
-:root[data-theme="dark"]
+  .gyro-chat-transcript {
+  background: var(--gyro-app);
+}
+
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
+  --gyro-chat-dock-solid: var(--gyro-pane);
+}
+
+:root[data-theme="dark"] .gyro-chat-surface:is(.is-thread, .is-empty) {
+  --gyro-chat-dock-solid: var(--gyro-app);
+}
+
+/* Only the composer is solid. The live changes pill, queue, and plan card
+   float over the transcript, which runs down behind them to the composer;
+   a short fade keeps text from meeting the composer's edge. Until the dock
+   is measured the whole dock stays solid. */
+:root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-composer-dock {
-  background: var(--gyro-app);
+  background: linear-gradient(
+    to top,
+    var(--gyro-chat-dock-solid) var(--gyro-composer-solid-height, 100%),
+    transparent calc(var(--gyro-composer-solid-height, 100%) + 16px)
+  );
 }
 
 :root[data-theme]
@@ -106,10 +122,11 @@
   .gyro-user-message-meta {
   color: var(--gyro-faint);
   font-size: 11px;
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 3px;
+  /* In flow, not absolute: an out-of-flow footer overlapped the run header's
+     Continue chip below it and, in other containers, the prompt text itself. */
+  justify-self: end;
+  margin-top: 4px;
+  position: relative;
 }
 
 :root[data-theme]
@@ -120,7 +137,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
   .gyro-assistant-response {
-  font: 14px/1.65 var(--gyro-font-sans);
+  font: 14.5px/1.65 var(--gyro-font-sans);
   text-align: left;
 }
 
@@ -136,7 +153,7 @@
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-run::before {
+  .gyro-run.is-groups::before {
   content: "";
   position: absolute;
   left: 0;
@@ -209,7 +226,10 @@
   display: none;
 }
 
-:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-run-rail {
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-run.is-groups
+  .gyro-run-rail {
   gap: 8px;
   padding-left: 12px;
 }
@@ -250,6 +270,238 @@
   animation: none;
 }
 
+/* Segment layout: narration as body text, each stretch of work as muted 14px
+   lines on a 25px pitch, flush left under a 13px header and hairline. No spine
+   and no indent — the type does the structuring. */
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
+  color: var(--gyro-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  min-height: 0;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments:has(> .gyro-run-rail)
+  > .gyro-run-header {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-rail {
+  gap: 0;
+  padding-left: 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row-item::after {
+  content: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row-item
+  + .gyro-run-row-item {
+  margin-top: 6px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-say-item
+  + .gyro-run-row-item,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row-item
+  + .gyro-run-say-item {
+  margin-top: 10px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row.is-say {
+  display: block;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row.is-say
+  .gyro-run-row-icon {
+  display: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-row.is-say
+  .gyro-run-row-label {
+  color: var(--gyro-text);
+  display: block;
+  font-size: 14.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.4;
+  transition: color 240ms ease;
+}
+/* Once the answer is in, narration steps back so the response leads. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments.is-settled
+  .gyro-run-row.is-say
+  .gyro-run-row-label {
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-calls {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--gyro-muted);
+  display: flex;
+  font: 14px/20px var(--gyro-font-sans);
+  gap: 8px;
+  letter-spacing: -0.005em;
+  max-width: 100%;
+  min-height: 25px;
+  padding: 0;
+  text-align: left;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-segment-toggle, .gyro-run-calls-more, .gyro-run-call.is-actionable) {
+  cursor: pointer;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-segment-toggle, .gyro-run-calls-more, .gyro-run-call.is-actionable):hover {
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-calls-more {
+  color: var(--gyro-faint);
+  padding-left: 22px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-call
+  .gyro-run-row-icon {
+  flex: none;
+  height: 14px;
+  transform: none;
+  width: 14px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-text {
+  display: flex;
+  gap: 0.3em;
+  min-width: 0;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-verb {
+  flex: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-call-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-call-meta, .gyro-run-row-repeat, .gyro-run-row-stat) {
+  flex: none;
+  font-size: 14px;
+  white-space: nowrap;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-meta {
+  color: var(--gyro-faint);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-call.is-failed
+  :is(.gyro-run-row-icon, .gyro-run-call-meta) {
+  color: var(--gyro-danger);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-call.is-running
+  .gyro-run-call-text {
+  animation: gyro-run-breathe 1.6s ease-in-out infinite;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-segment-chevron, .gyro-run-call-chevron) {
+  color: var(--gyro-faint);
+  flex: none;
+  transition: transform 120ms ease;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-segment.is-expanded
+  .gyro-run-segment-chevron {
+  transform: rotate(90deg);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-segment.is-failed
+  .gyro-run-segment-label {
+  color: var(--gyro-danger);
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-pulse {
+  animation: gyro-run-breathe 1.6s ease-in-out infinite;
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
+  margin-top: 4px;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-pulse
+  .gyro-run-row-icon {
+  display: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-pulse-label {
+  font-weight: 400;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-problem {
+  padding-left: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme]
+    .gyro-chat-surface
+    .gyro-run.is-segments
+    :is(.gyro-run-pulse, .gyro-run-call.is-running .gyro-run-call-text) {
+    animation: none;
+  }
+}
+
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run-change-summary.is-complete {
@@ -281,6 +533,25 @@
   .gyro-chat-surface
   .gyro-chat-run-change-summary.is-complete
   > header
+  strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-keep-alive {
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: none;
+  margin-top: 16px;
+  min-height: 44px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-keep-alive-text
   strong {
   font-size: 12px;
   font-weight: 500;

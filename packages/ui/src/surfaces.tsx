@@ -37,6 +37,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDashed,
+  Clock,
   Columns2,
   Command,
   Copy,
@@ -63,6 +64,7 @@ import {
   Goal,
   GripVertical,
   Hammer,
+  Hand,
   HardDrive,
   Hash,
   HelpCircle,
@@ -93,10 +95,13 @@ import {
   Pin,
   Pause as PauseIcon,
   Play,
+  PlugZap,
   Plus,
   RefreshCw,
+  createLucideIcon,
   Search,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
@@ -171,6 +176,9 @@ import {
   type ReviewScope,
 } from "./review-scope";
 import { ChatRun } from "./chat-run-view";
+import { keepAliveWatchesFromPanes } from "./chat-keep-alive";
+import { ChatKeepAlive } from "./chat-keep-alive-view";
+import type { KeepAliveWatch } from "./chat-keep-alive";
 import {
   ChatArtifacts,
   chatArtifactsFromEvent,
@@ -178,10 +186,12 @@ import {
 } from "./chat-artifacts";
 import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
+  composerContextUsageForModel,
   composerLimitWindows,
   estimateComposerContextUsage,
   type ComposerContextUsage,
   type ComposerLimitWindow,
+  type ContextModelSelection,
 } from "./context-usage";
 import {
   DAILY_PACE_NOTICE_PERCENT,
@@ -381,6 +391,16 @@ import {
 
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
+const AutoApproveIcon = createLucideIcon("AutoApprove", [
+  [
+    "path",
+    {
+      d: "M10.8 2.8Q12 2.3 13.2 2.8L19.2 5.1Q21 5.8 21 7.8V12.5C21 18.2 17.3 21.5 12 21.5S3 18.2 3 12.5V7.8Q3 5.8 4.8 5.1Z",
+      key: "outline",
+    },
+  ],
+  ["path", { d: "m8 9 2 3-2 3M13 15h3", key: "terminal" }],
+]);
 const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
   ai: Sparkles,
   browser: Globe2,
@@ -414,6 +434,26 @@ const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
  * frames, narrow enough that a reader who scrolled up stays scrolled up.
  */
 const TRANSCRIPT_BOTTOM_SLACK = 72;
+/**
+ * Ignore sub-pixel rounding when deciding whether loaded messages actually
+ * overflow the area above the composer dock.
+ */
+const TRANSCRIPT_OVERFLOW_SLACK = 8;
+
+function isLoadedTranscriptClipped(transcript: HTMLElement) {
+  const styles = window.getComputedStyle(transcript);
+  const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+  const loadEarlier = transcript.querySelector(".gyro-chat-load-earlier");
+  const loadEarlierHeight =
+    loadEarlier instanceof HTMLElement ? loadEarlier.offsetHeight : 0;
+  const messageHeight = Math.max(
+    0,
+    transcript.scrollHeight - paddingTop - paddingBottom - loadEarlierHeight,
+  );
+  const visibleAboveDock = Math.max(0, transcript.clientHeight - paddingBottom);
+  return messageHeight > visibleAboveDock + TRANSCRIPT_OVERFLOW_SLACK;
+}
 
 function restingSidebarWidth() {
   if (typeof window === "undefined") {
@@ -7785,6 +7825,7 @@ export function ChatSurface({
   const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
   const [isTranscriptAwayFromBottom, setIsTranscriptAwayFromBottom] =
     useState(false);
+  const [isLoadedChatClipped, setIsLoadedChatClipped] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [liveChangesTarget, setLiveChangesTarget] =
     useState<HTMLDivElement | null>(null);
@@ -7974,6 +8015,7 @@ export function ChatSurface({
     const transcript = transcriptRef.current;
     if (!transcript) {
       setIsTranscriptAwayFromBottom(false);
+      setIsLoadedChatClipped(false);
       return;
     }
     const distanceFromBottom =
@@ -7989,6 +8031,7 @@ export function ChatSurface({
     }
     lastTranscriptScrollTopRef.current = transcript.scrollTop;
     setIsTranscriptAwayFromBottom(!isAtBottom);
+    setIsLoadedChatClipped(isLoadedTranscriptClipped(transcript));
   }, []);
   /** Re-seat the transcript at the bottom, but only while it is following. */
   const pinTranscriptToBottom = useCallback(() => {
@@ -8033,8 +8076,9 @@ export function ChatSurface({
     });
     return () => window.cancelAnimationFrame(animationFrame);
   }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
-  // The dock overlays the transcript. Reserve its changing height only at the
-  // end of the scroll content so older messages remain visible behind it.
+  // The dock overlays the transcript. Only the composer is reserved at the end
+  // of the scroll content: the changes pill, queue, and plan card float, so the
+  // conversation runs down behind them to the composer.
   useEffect(() => {
     const transcript = transcriptRef.current;
     const dock = liveChangesTarget?.parentElement;
@@ -8043,10 +8087,19 @@ export function ChatSurface({
     }
     const updateDockClearance = () => {
       if (dock) {
+        const dockBounds = dock.getBoundingClientRect();
+        const composer = dock.querySelector<HTMLElement>(
+          ":scope > .gyro-composer-shell",
+        );
+        const composerHeight = `${Math.ceil(
+          dockBounds.bottom -
+            (composer?.getBoundingClientRect().top ?? dockBounds.top),
+        )}px`;
         transcript.style.setProperty(
           "--gyro-composer-dock-height",
-          `${Math.ceil(dock.getBoundingClientRect().height)}px`,
+          composerHeight,
         );
+        dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
       }
       pinTranscriptToBottom();
       updateTranscriptScrollPosition();
@@ -8182,6 +8235,29 @@ export function ChatSurface({
   const fileReviewPendingTurnIds = fileReview?.pendingTurnIds;
   const onFileReviewKeep = fileReview?.onKeep;
   const onFileReviewAsk = fileReview?.onAsk;
+  const keepAlives = useMemo(
+    () => keepAliveWatchesFromPanes(terminalPanes ?? []),
+    [terminalPanes],
+  );
+  const onOpenKeepAlive = useCallback(
+    (paneId: string) => {
+      onSelectChatPanel?.("terminal");
+      railTerminalTools?.onSelectTerminalPane?.(paneId);
+    },
+    [onSelectChatPanel, railTerminalTools],
+  );
+  const onStopKeepAlive = useCallback(
+    (paneId: string) => {
+      railTerminalTools?.onKillTerminalPane?.(paneId);
+    },
+    [railTerminalTools],
+  );
+  const onRelaunchKeepAlive = useCallback(
+    (paneId: string) => {
+      railTerminalTools?.onRestartTerminalPane?.(paneId);
+    },
+    [railTerminalTools],
+  );
   const transcriptContent = useMemo(
     () => (
       <>
@@ -8229,8 +8305,12 @@ export function ChatSurface({
               onSendPrompt: handleArtifactPrompt,
             }}
             isActive={turn.id === activeTurnId}
+            keepAlives={keepAlives.filter((watch) => watch.turnId === turn.id)}
             liveChangesTarget={liveChangesTarget}
             onOpenBrowserUrl={onBrowserNavigate}
+            onOpenKeepAlive={onOpenKeepAlive}
+            onRelaunchKeepAlive={onRelaunchKeepAlive}
+            onStopKeepAlive={onStopKeepAlive}
             fileReview={
               isFileReviewEnabled
                 ? {
@@ -8310,8 +8390,12 @@ export function ChatSurface({
       onFileReviewKeep,
       onGoalAction,
       onLoadChangeDiff,
+      onOpenKeepAlive,
       onOpenToolPanel,
+      onRelaunchKeepAlive,
       onSelectChatPanel,
+      onStopKeepAlive,
+      keepAlives,
       onProviderApprovalAction,
       onProviderStatusAction,
       railDiffTools?.onUndo,
@@ -8758,7 +8842,7 @@ export function ChatSurface({
           ref={transcriptRef}
           role="log"
         >
-          {hasMoreBefore && onLoadEarlier ? (
+          {hasMoreBefore && onLoadEarlier && isLoadedChatClipped ? (
             <div className="gyro-chat-load-earlier">
               <button
                 disabled={isLoadingEarlier}
@@ -13421,6 +13505,7 @@ export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
 
 type ChatThreadProps = {
   isSending?: boolean;
+  terminalPanes?: TerminalPane[];
   events: SessionEvent[];
   draft: string;
   onDraftChange: (value: string) => void;
@@ -13429,6 +13514,7 @@ type ChatThreadProps = {
 
 export function ChatThread({
   isSending = false,
+  terminalPanes,
   events,
   draft,
   onDraftChange,
@@ -13437,6 +13523,7 @@ export function ChatThread({
   return (
     <ChatSurface
       isComposerSending={isSending}
+      terminalPanes={terminalPanes}
       config={{
         commandProfiles: [],
         modelProviders: [],
@@ -17603,6 +17690,7 @@ export function BrowserPreviewSurface({
             >
               <button
                 aria-label="Back"
+                title="Back"
                 disabled={!canGoBack || showingCapture}
                 onClick={onBack}
                 type="button"
@@ -17611,6 +17699,7 @@ export function BrowserPreviewSurface({
               </button>
               <button
                 aria-label="Forward"
+                title="Forward"
                 disabled={!canGoForward || showingCapture}
                 onClick={onForward}
                 type="button"
@@ -17619,6 +17708,7 @@ export function BrowserPreviewSurface({
               </button>
               <button
                 aria-label="Reload"
+                title="Reload"
                 disabled={showingCapture || isBlank}
                 onClick={reloadFrame}
                 type="button"
@@ -17642,7 +17732,13 @@ export function BrowserPreviewSurface({
                 aria-label="Browser URL"
                 onChange={(event) => {
                   setAddressValue(event.target.value);
-                  onUrlChange?.(event.target.value);
+                  if (!isChat) onUrlChange?.(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (isChat && event.key === "Escape") {
+                    setAddressValue(isBlank ? "" : preview.url);
+                    event.currentTarget.blur();
+                  }
                 }}
                 placeholder={
                   isChat ? "Search or enter a URL" : "https://example.com"
@@ -17674,6 +17770,7 @@ export function BrowserPreviewSurface({
               <button
                 className="gyro-browser-menu-trigger"
                 aria-label="Browser options"
+                title="Browser options"
                 aria-expanded={isBrowserMenuOpen}
                 aria-haspopup="menu"
                 onClick={() => setIsBrowserMenuOpen((open) => !open)}
@@ -17686,6 +17783,11 @@ export function BrowserPreviewSurface({
               className={`gyro-browser-actions${isChat ? " is-overflow-menu" : ""}${isBrowserMenuOpen ? " is-open" : ""}`}
               role="group"
               aria-label="Browser actions"
+              onClick={(event) => {
+                if ((event.target as Element).closest("button:not(:disabled)")) {
+                  setIsBrowserMenuOpen(false);
+                }
+              }}
             >
               {hasCapture ? (
                 <div
@@ -20028,8 +20130,8 @@ export function SettingsSurface({
                     ? "Full access"
                     : config.requireCommandApproval ||
                         config.requireFileEditApproval
-                      ? "Ask first"
-                      : "Auto approve"
+                      ? "Ask for approval"
+                      : "Approve for me"
                 }
                 detail="Approval behavior follows Permissions and the chat’s selected approval mode."
               />
@@ -21517,6 +21619,8 @@ type ComposerPopoverItem = {
   /** Soften connected/disconnected contrast without washing brand color out. */
   disconnected?: boolean;
   hideIcon?: boolean;
+  /** Catalog window for a model row, used to preview remaining context live. */
+  contextWindowTokens?: number;
 };
 
 type ComposerSlashCommand = {
@@ -22286,26 +22390,15 @@ function providerApprovalCopy(
           : providerId === "gemini"
             ? "Gemini permissions"
             : "OpenAI permissions";
-  const agentName =
-    providerId === "anthropic"
-      ? "Claude"
-      : providerId === "kimi"
-        ? "Kimi"
-        : providerId === "xai"
-          ? "Grok"
-          : providerId === "gemini"
-            ? "Gemini"
-            : "Codex";
   const base = isAnthropic
     ? {
         title: providerTitle,
-        gatedLabel: "Ask first",
-        gatedDetail: "Claude asks before tools and edits",
-        autoLabel: "Auto Approve",
-        autoDetail:
-          "Runs commands and edits without asking. Separate Gyro tool permissions can still require approval.",
+        gatedLabel: "Ask for approval",
+        gatedDetail: "Always ask before commands and file edits",
+        autoLabel: "Approve for me",
+        autoDetail: "Allow work within provider and project limits",
         directLabel: "Full access",
-        directDetail: "Claude can use Git, network, and user tools directly",
+        directDetail: "Unrestricted access to the internet and any file on your computer",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
         commandDetail: "Claude tool calls use the backend command policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
@@ -22313,15 +22406,12 @@ function providerApprovalCopy(
       }
     : {
         title: providerTitle,
-        gatedLabel: "Ask first",
-        gatedDetail: `${agentName} asks before commands and file edits`,
-        autoLabel: "Auto Approve",
-        autoDetail:
-          providerId === "openai"
-            ? "Runs commands and edits in the project without asking. Can still ask for network access, writes outside the project, or restricted tools."
-            : "Runs commands and edits without asking. Separate provider or Gyro tool permissions can still require approval.",
+        gatedLabel: "Ask for approval",
+        gatedDetail: "Always ask before commands and file edits",
+        autoLabel: "Approve for me",
+        autoDetail: "Allow work within provider and project limits",
         directLabel: "Full access",
-        directDetail: `${agentName} can use Git, network, and user tools directly`,
+        directDetail: "Unrestricted access to the internet and any file on your computer",
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
         commandDetail: "Codex command execution uses the backend policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
@@ -22337,6 +22427,32 @@ function providerApprovalCopy(
           ? base.autoLabel
           : base.gatedLabel,
     settingsDetail: `Backend: ${backendSummary}`,
+  };
+}
+
+function composerModelPickerItem(
+  providerId: ProviderId,
+  model: { id: string; displayName: string; contextWindowTokens?: number },
+  activeModelId: string | undefined,
+  contextUsage?: ComposerContextUsage,
+): ComposerPopoverItem {
+  const preview = contextUsage
+    ? composerContextUsageForModel(contextUsage, {
+        providerId,
+        modelId: model.id,
+        modelLabel: model.displayName,
+        contextWindowTokens: model.contextWindowTokens,
+      })
+    : undefined;
+  return {
+    action: `select-provider-model:${providerId}:${model.id}`,
+    active: model.id === activeModelId,
+    contextWindowTokens: model.contextWindowTokens,
+    detail: preview ? `${preview.remainingLabel} remaining` : undefined,
+    hideIcon: true,
+    icon: Sparkles,
+    kind: "model",
+    label: model.displayName,
   };
 }
 
@@ -22472,6 +22588,24 @@ function Composer({
     "root" | "model" | "effort" | "provider" | "provider-model" | "settings"
   >("root");
   const [isModelMenuAdvancedOpen, setIsModelMenuAdvancedOpen] = useState(false);
+  const [previewedContextModel, setPreviewedContextModel] = useState<
+    ContextModelSelection | undefined
+  >(undefined);
+  const displayedContextUsage =
+    contextUsage && previewedContextModel
+      ? composerContextUsageForModel(contextUsage, previewedContextModel)
+      : contextUsage;
+  const displayedLimitWindows =
+    previewedContextModel?.providerId &&
+    previewedContextModel.providerId !==
+      (sessionModel?.providerId ?? config.selectedProviderId)
+      ? composerLimitWindows(
+          [],
+          previewedContextModel,
+          providerUsageByProvider?.[previewedContextModel.providerId]
+            ?.windows ?? [],
+        )
+      : limitWindows;
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -22516,12 +22650,7 @@ function Composer({
     if (activePopover !== "provider") {
       setModelMenuPane("root");
       setIsModelMenuAdvancedOpen(false);
-    }
-  }, [activePopover]);
-  useEffect(() => {
-    if (activePopover !== "provider") {
-      setModelMenuPane("root");
-      setIsModelMenuAdvancedOpen(false);
+      setPreviewedContextModel(undefined);
     }
   }, [activePopover]);
   useEffect(() => {
@@ -22621,6 +22750,12 @@ function Composer({
       : approvalMode === "auto"
         ? "gyro-composer-chip is-auto-approve"
         : "gyro-composer-chip";
+  const ApprovalChipIcon =
+    approvalMode === "direct"
+      ? ShieldAlert
+      : approvalMode === "auto"
+        ? AutoApproveIcon
+        : Hand;
   const isStopAction = Boolean(
     !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
   );
@@ -22747,16 +22882,16 @@ function Composer({
   const providerModelItems: ComposerPopoverItem[] = [
     ...(modelPickerProvider
       ? [
-          ...modelPickerProvider.models.map((model) => ({
-            action: `select-provider-model:${modelPickerProvider.id}:${model.id}`,
-            active:
-              modelPickerProvider.id === effectiveProviderId &&
-              model.id === activeModelIdForPicker,
-            icon: Sparkles,
-            hideIcon: true,
-            kind: "model" as const,
-            label: model.displayName,
-          })),
+          ...modelPickerProvider.models.map((model) =>
+            composerModelPickerItem(
+              modelPickerProvider.id,
+              model,
+              modelPickerProvider.id === effectiveProviderId
+                ? activeModelIdForPicker
+                : undefined,
+              contextUsage,
+            ),
+          ),
         ]
       : []),
   ];
@@ -22775,14 +22910,14 @@ function Composer({
     : [];
   // Direct access to models for the provider already in use.
   const currentModelItems: ComposerPopoverItem[] = displayProvider
-    ? displayProvider.models.map((model) => ({
-        action: `select-provider-model:${displayProvider.id}:${model.id}`,
-        active: model.id === effectiveModelId,
-        hideIcon: true,
-        icon: Sparkles,
-        kind: "model" as const,
-        label: model.displayName,
-      }))
+    ? displayProvider.models.map((model) =>
+        composerModelPickerItem(
+          displayProvider.id,
+          model,
+          effectiveModelId,
+          contextUsage,
+        ),
+      )
     : [];
   const hasEffortChoice = Boolean(
     providerReasoningEffort && effortItems.length > 0,
@@ -23136,6 +23271,33 @@ function Composer({
   };
   // Navigation inside the chip's menu must not reach the composer's action
   // handler — only leaf choices (a model, an effort, a provider) do.
+  const previewComposerContextModel = (item: ComposerPopoverItem) => {
+    if (
+      item.kind !== "model" ||
+      !item.action?.startsWith("select-provider-model:")
+    ) {
+      setPreviewedContextModel(undefined);
+      return;
+    }
+    const rest = item.action.slice("select-provider-model:".length);
+    const sep = rest.indexOf(":");
+    if (sep <= 0) {
+      setPreviewedContextModel(undefined);
+      return;
+    }
+    const providerId = rest.slice(0, sep);
+    const modelId = rest.slice(sep + 1);
+    if (!isProviderId(providerId) || !modelId) {
+      setPreviewedContextModel(undefined);
+      return;
+    }
+    setPreviewedContextModel({
+      contextWindowTokens: item.contextWindowTokens,
+      modelId,
+      modelLabel: item.label,
+      providerId,
+    });
+  };
   const runModelMenuAction = (action?: string, item?: ComposerPopoverItem) => {
     if (item?.kind === "disclosure") {
       setIsModelMenuAdvancedOpen((current) => !current);
@@ -23664,6 +23826,11 @@ function Composer({
       !hasUserWorkspace ? (
         <div className="gyro-composer-blocker" role="status">
           <span>
+            <PlugZap
+              className="gyro-composer-blocker-icon"
+              size={15}
+              aria-hidden="true"
+            />
             {isCliUpdating
               ? "Updating a provider CLI. Sending will unlock when it finishes."
               : cleanMachinePath.readinessLabel}
@@ -23721,7 +23888,7 @@ function Composer({
                 type="button"
                 {...menuProps("approval")}
               >
-                <ShieldCheck size={14} />
+                <ApprovalChipIcon size={14} />
                 <span className="gyro-composer-label">
                   {approvalCopy.chipLabel}
                 </span>
@@ -23735,19 +23902,22 @@ function Composer({
                     {
                       action: "set-approval-gated",
                       active: approvalMode === "gated",
-                      icon: ShieldCheck,
+                      detail: approvalCopy.gatedDetail,
+                      icon: Hand,
                       label: approvalCopy.gatedLabel,
                     },
                     {
                       action: "set-approval-auto",
                       active: approvalMode === "auto",
-                      icon: ShieldCheck,
+                      detail: approvalCopy.autoDetail,
+                      icon: Clock,
                       label: approvalCopy.autoLabel,
                     },
                     {
                       action: "set-approval-direct",
                       active: approvalMode === "direct",
-                      icon: ShieldCheck,
+                      detail: approvalCopy.directDetail,
+                      icon: ShieldAlert,
                       kind: "permission-direct",
                       label: approvalCopy.directLabel,
                     },
@@ -23824,19 +23994,23 @@ function Composer({
           </button>
         ) : null}
         <div className="gyro-composer-spacer" />
-        {contextUsage ? (
-          <div className="gyro-composer-context-meter">
+        {displayedContextUsage ? (
+          <div
+            className={`gyro-composer-context-meter${
+              previewedContextModel ? " is-previewing" : ""
+            }`}
+          >
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-              aria-label={contextUsage.label}
+              aria-label={displayedContextUsage.label}
               aria-valuemax={100}
               aria-valuemin={0}
-              aria-valuenow={contextUsage.percent}
+              aria-valuenow={displayedContextUsage.percent}
               className="gyro-composer-context-wheel"
               role="progressbar"
               style={
                 {
-                  "--context-usage": `${contextUsage.percent * 3.6}deg`,
+                  "--context-usage": `${displayedContextUsage.percent * 3.6}deg`,
                 } as CSSProperties
               }
               tabIndex={0}
@@ -23850,26 +24024,29 @@ function Composer({
             >
               <header>
                 <strong>Context</strong>
-                <span>{contextUsage.percentLabel}</span>
+                <span>{displayedContextUsage.percentLabel}</span>
               </header>
+              <p className="gyro-composer-context-model">
+                {displayedContextUsage.modelLabel}
+              </p>
               <div className="gyro-composer-context-value">
-                <strong>{contextUsage.usedLabel}</strong>
+                <strong>{displayedContextUsage.usedLabel}</strong>
                 <span>
-                  of {contextUsage.windowLabel} · {contextUsage.remainingLabel}{" "}
-                  remaining
+                  of {displayedContextUsage.windowLabel} ·{" "}
+                  {displayedContextUsage.remainingLabel} remaining
                 </span>
               </div>
               <div
                 aria-label="Context window used"
                 aria-valuemax={100}
                 aria-valuemin={0}
-                aria-valuenow={contextUsage.percent}
+                aria-valuenow={displayedContextUsage.percent}
                 className="gyro-composer-context-bar"
                 role="progressbar"
               >
-                <span style={{ width: `${contextUsage.percent}%` }} />
+                <span style={{ width: `${displayedContextUsage.percent}%` }} />
               </div>
-              {limitWindows.length > 0 || providerUsage ? (
+              {displayedLimitWindows.length > 0 || providerUsage ? (
                 <div
                   aria-label="Plan usage limits"
                   className="gyro-composer-limit-summary"
@@ -23877,8 +24054,8 @@ function Composer({
                   <span className="gyro-composer-limit-title">
                     Plan usage limits
                   </span>
-                  {limitWindows.length > 0 ? (
-                    limitWindows.map((window) => (
+                  {displayedLimitWindows.length > 0 ? (
+                    displayedLimitWindows.map((window) => (
                       <ComposerLimitRow key={window.id} window={window} />
                     ))
                   ) : (
@@ -23933,6 +24110,7 @@ function Composer({
               id={`${popoverBaseId}-provider`}
               items={[modelMenuBackItem("Provider"), ...providerItems]}
               onAction={runModelMenuAction}
+              onItemPreview={previewComposerContextModel}
               placement={providerPopoverPlacement}
             />
           ) : activePopover === "provider" &&
@@ -24003,6 +24181,7 @@ function Composer({
                         : modelMenuItems
               }
               onAction={runModelMenuAction}
+              onItemPreview={previewComposerContextModel}
               placement={providerPopoverPlacement}
             />
           ) : null}
@@ -25037,6 +25216,10 @@ function ChatTurn({
   artifactActions,
   fileReview,
   isActive,
+  keepAlives = [],
+  onOpenKeepAlive,
+  onRelaunchKeepAlive,
+  onStopKeepAlive,
   liveChangesTarget,
   onOpenBrowserUrl,
   onLoadChangeDiff,
@@ -25068,6 +25251,10 @@ function ChatTurn({
     onAsk?: (path: string) => void;
   };
   isActive: boolean;
+  keepAlives?: KeepAliveWatch[];
+  onOpenKeepAlive?: (paneId: string) => void;
+  onRelaunchKeepAlive?: (paneId: string) => void;
+  onStopKeepAlive?: (paneId: string) => void;
   liveChangesTarget?: HTMLDivElement | null;
   onOpenBrowserUrl?: (url: string) => void;
   onLoadChangeDiff?: (path: string) => Promise<string>;
@@ -25322,6 +25509,15 @@ function ChatTurn({
             </div>
           </div>
         ) : null}
+        {keepAlives.map((watch) => (
+          <ChatKeepAlive
+            key={watch.paneId}
+            watch={watch}
+            onOpen={onOpenKeepAlive}
+            onRelaunch={onRelaunchKeepAlive}
+            onStop={onStopKeepAlive}
+          />
+        ))}
         {!isRunning && runModel.phase.name === "done" ? (
           <ChatRunChangeSummary
             decisions={fileReviewRecords}

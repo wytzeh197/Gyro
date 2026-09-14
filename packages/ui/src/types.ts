@@ -339,6 +339,18 @@ export type SettingsSectionId =
 export type TerminalPaneStatus =
   "restored" | "running" | "waiting" | "done" | "failed";
 export type TerminalPaneAttention = "waiting" | "failed";
+export type TerminalKeepAlivePhase =
+  | "watching"
+  | "relaunching"
+  | "stopped"
+  | "exited";
+export type TerminalKeepAlive = {
+  turnId: string;
+  restartCount: number;
+  phase: TerminalKeepAlivePhase;
+  stopOrigin?: "user" | "model";
+  lastRelaunchedAt?: string;
+};
 
 export type TerminalTemplate = 1 | 2 | 4 | 6 | 8 | 12 | 16;
 export type TerminalPaneLayout = "auto" | "wide" | "compact";
@@ -361,6 +373,12 @@ export type TerminalPane = {
   layout?: TerminalPaneLayout;
   createdAt: string;
   owner?: ModelResourceOwner;
+  exitCode?: number | null;
+  /**
+   * Chat-owned process that should outlive the turn. Gyro watches it under
+   * the final reply and relaunches if it dies without a person or model stop.
+   */
+  keepAlive?: TerminalKeepAlive;
   /**
    * Set only once the backend confirms the pane launched under Gyro's approval
    * policy, so the CLI surface reports governance rather than claiming it.

@@ -337,7 +337,23 @@ export type UsageSafetyNotice = {
 };
 
 /** The points at which a measured plan allowance becomes worth interrupting for. */
-export const PLAN_USAGE_NOTICE_THRESHOLDS = [50, 80, 90, 95] as const;
+export const PLAN_USAGE_NOTICE_THRESHOLDS = [80, 90, 95] as const;
+
+const PLAN_USAGE_CYCLE_BUCKET_MS = 15 * 60 * 1000;
+
+/**
+ * Providers report a window's reset with sub-second jitter between polls, so
+ * the raw value would start a new notification cycle on every refresh. Round it
+ * to a quarter hour: distinct windows stay distinct, repeated polls collapse.
+ */
+function planUsageCycleId(resetsAt: string | undefined) {
+  if (!resetsAt) return "rolling";
+  const time = Date.parse(resetsAt);
+  if (!Number.isFinite(time)) return resetsAt;
+  return new Date(
+    Math.round(time / PLAN_USAGE_CYCLE_BUCKET_MS) * PLAN_USAGE_CYCLE_BUCKET_MS,
+  ).toISOString();
+}
 
 /**
  * One day's even share of a 100% weekly stop, rounded to the nearest percent.
@@ -374,7 +390,7 @@ export function planUsageNotices(
       if (!threshold) return [];
       return [
         {
-          cycleId: window.resetsAt ?? "rolling",
+          cycleId: planUsageCycleId(window.resetsAt),
           percent: Math.min(100, Math.max(0, Math.round(percent))),
           providerId,
           threshold,
