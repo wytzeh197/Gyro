@@ -45,7 +45,7 @@ const OWN_NEXT_STEP_EXCEPTION = /^Let me know\b/i;
  * narration, however long the block.
  */
 const OWN_PROGRESS_SENTENCE =
-  /^(?:(?:so|then|and|but|first|next|now|meanwhile)[,]?\s+)?I['\u2019]m\s+(?:now\s+|first\s+|also\s+|still\s+)?(?:checking|looking|reading|searching|inspecting|verifying|running|testing|tracing|reviewing|pulling|gathering|confirming|investigating)\b/i;
+  /^(?:(?:so|then|and|but|first|next|now|meanwhile)[,]?\s+)?I['\u2019]m\s+(?:now\s+|first\s+|also\s+|still\s+)?(?:checking|looking|reading|searching|inspecting|verifying|running|testing|tracing|reviewing|pulling|gathering|confirming|investigating|finding|locating|opening|measuring|comparing|examining|mapping)\b/i;
 
 const ONLINE_GREETING = /\bis online and working\b/i;
 

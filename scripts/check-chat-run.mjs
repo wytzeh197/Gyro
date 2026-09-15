@@ -708,6 +708,19 @@ for (const answer of [
     `answers stay answers: ${answer}`,
   );
 }
+// Progress narration names more verbs than "checking" — an observation that
+// closes on "Next I'm finding…" is still a note about the work.
+for (const narration of [
+  "The popover is clipped on its left side. Next I'm finding its styles and markup.",
+  "The header sits 2px low. Now I'm measuring the traffic lights.",
+  "Both paths build the answer. I'm comparing how they peel preambles.",
+]) {
+  assert.equal(
+    isAssistantPreambleBlock(narration),
+    true,
+    `progress narration is a preamble: ${narration}`,
+  );
+}
 
 // A real preamble event that trails the last tool (so it is peeled from the
 // closing answer) must not be drawn twice — once in the main pass and once
@@ -1324,4 +1337,22 @@ assert.equal(
   ).steps.length,
   1,
   "a re-sent reasoning headline should stay one beat",
+);
+
+// Gyro's own edit tool names its path only on the completed call. That call is
+// a changed file; a failed proposal changed nothing.
+const proposedEdit = buildRunModel([
+  capabilityCall("workspace-propose-edit", { status: "running" }),
+  capabilityCall("workspace-propose-edit", {
+    resource: { id: "p1", kind: "proposal", label: "src/app.ts" },
+  }),
+  capabilityCall("workspace-propose-edit", {
+    status: "failed",
+    resource: { id: "p2", kind: "proposal", label: "src/rejected.ts" },
+  }),
+]);
+assert.deepEqual(
+  proposedEdit.files.map((file) => file.path),
+  ["src/app.ts"],
+  "a completed propose-edit call should count as a changed file",
 );

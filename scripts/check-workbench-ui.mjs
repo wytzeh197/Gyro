@@ -3140,6 +3140,43 @@ expect(
   "Background source-control refresh should not steal the active IDE view.",
 );
 
+// Switching to the Workspace tab must not carry the open session into the AI
+// side chat, and a working session's tool calls must not open it either.
+let sessionHandoffState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "select-workspace-layout",
+  layout: "thread",
+});
+sessionHandoffState = workbenchReducer(sessionHandoffState, {
+  type: "ide-record-ai-tool-call",
+  toolCall: { id: "call-1", name: "Bash", status: "running" },
+});
+expect(
+  sessionHandoffState.ide.activeView !== "ai" &&
+    sessionHandoffState.ide.aiToolCalls.length === 1,
+  "A session's tool calls should be recorded without switching the Workspace sidebar to AI.",
+);
+sessionHandoffState = workbenchReducer(
+  workbenchReducer(sessionHandoffState, { type: "ide-select-view", view: "ai" }),
+  { type: "select-workspace-layout", layout: "thread" },
+);
+const enteredWorkspaceState = workbenchReducer(sessionHandoffState, {
+  type: "enter-workspace",
+});
+expect(
+  enteredWorkspaceState.activeDestination === "workspace" &&
+    enteredWorkspaceState.activeWorkspaceLayout === "code" &&
+    enteredWorkspaceState.ide.activeView === "explorer",
+  "Entering Workspace from Sessions should open the explorer, not the session in the AI side chat.",
+);
+const stayInWorkspaceAiState = workbenchReducer(
+  workbenchReducer(enteredWorkspaceState, { type: "ide-select-view", view: "ai" }),
+  { type: "enter-workspace" },
+);
+expect(
+  stayInWorkspaceAiState.ide.activeView === "ai",
+  "Re-selecting Workspace while already there should keep the AI view the user chose.",
+);
+
 let previewState = createInitialWorkbenchState();
 previewState = workbenchReducer(previewState, {
   type: "ide-open-tab",
@@ -4034,7 +4071,8 @@ expect(
     tauriSource.includes("extract_provider_activity") &&
     tauriSource.includes("extract_provider_commentary_activity") &&
     tauriSource.includes("provider_activities_for_response") &&
-    tauriSource.includes('text.contains("GYRO_SESSION_TITLE:")') &&
+    tauriSource.includes("strip_hidden_control_markers(&text)") &&
+    tauriSource.includes("SESSION_TITLE_LATER_TURN_INSTRUCTION") &&
     tauriSource.includes("polished, scannable Markdown") &&
     tauriSource.includes("provider_activity_event_entry") &&
     tauriSource.includes("append_system_events_with_turn_id") &&
@@ -4606,7 +4644,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 17 &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("inset_macos_traffic_lights") &&
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("standardWindowButton") &&
@@ -6304,15 +6342,16 @@ expect(
 );
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
-    surfaceSource.includes('sectionLabel: "Context"') &&
-    surfaceSource.includes('sectionLabel: "Tools"') &&
+    surfaceSource.includes('action: "attach-files"') &&
+    surfaceSource.includes('label: "Attach"') &&
+    surfaceSource.includes("...(canAttachEditorSnapshot") &&
     surfaceSource.includes('label: "Editor"') &&
-    surfaceSource.includes('label: "Image"') &&
-    surfaceSource.includes('label: "File"') &&
-    surfaceSource.includes('label: "Folder"') &&
     surfaceSource.includes('label: "Goal"') &&
     surfaceSource.includes('label: "Plan"') &&
-    surfaceSource.includes('label: "Search"') &&
+    !surfaceSource.includes('label: "Image"') &&
+    !surfaceSource.includes('label: "File"') &&
+    !surfaceSource.includes('label: "Folder"') &&
+    !surfaceSource.includes('label: "Search"') &&
     surfaceSource.includes('action: "set-chat-mode-plan"') &&
     surfaceSource.includes("icon: Lightbulb") &&
     !surfaceSource.includes('title="Add"') &&
@@ -6326,6 +6365,7 @@ expect(
     ) &&
     !surfaceSource.includes("Attach a folder or file") &&
     !surfaceSource.includes("Find commands and files") &&
+    appSource.includes('case "attach-files":') &&
     appSource.includes('case "select-file":') &&
     appSource.includes('case "add-plan":') &&
     !appSource.includes("Coming soon") &&
@@ -6598,7 +6638,7 @@ expect(
     ).some(
       (rule) =>
         rule.includes("left: 16px") &&
-        rule.includes("top: 16px") &&
+        rule.includes("top: 17px") &&
         rule.includes("height: 14px") &&
         rule.includes("width: 58px"),
     ) &&
@@ -7406,7 +7446,7 @@ expect(
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&
-    surfaceSource.includes("displayedLimitWindows.map((window)") &&
+    surfaceSource.includes("limitWindows.map((window)") &&
     styleSource.includes(".gyro-composer-limit-summary"),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
@@ -7533,13 +7573,11 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("composerContextUsageForModel") &&
-    surfaceSource.includes("previewComposerContextModel") &&
-    surfaceSource.includes("displayedContextUsage") &&
-    surfaceSource.includes("displayedContextUsage.remainingLabel") &&
+    surfaceSource.includes("contextUsage.remainingLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
-    !surfaceSource.includes("${preview.remainingLabel} remaining") &&
-    styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
+    // Hovering a model in the picker must not open the context card over it.
+    !surfaceSource.includes("previewComposerContextModel") &&
+    !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "reportedModelId !== model.modelId",

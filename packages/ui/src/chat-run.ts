@@ -4,6 +4,7 @@ import {
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
+  stripHiddenControlMarkers,
   structuredCommentaryBlocks,
 } from "./chat-commentary.ts";
 import {
@@ -747,8 +748,8 @@ function partitionClosingResponse(
   isRunning: boolean,
 ): ClosingResponse | undefined {
   // A saved provider response is the conclusion even when late capability
-  // events or live sequence numbers place work after it. Keep its segments
-  // together without promoting commentary or a previous attempt's answer.
+  // events or live sequence numbers place work after it. Move only its closing
+  // blocks, without promoting commentary or a previous attempt's answer.
   const durable = events.findLast(isDurableAssistantResponse);
   if (durable) {
     const responseId = durable.id.split("#segment-")[0];
@@ -757,9 +758,18 @@ function partitionClosingResponse(
       event.id.split("#segment-")[0] === responseId &&
       event.sessionId === durable.sessionId &&
       event.turnId === durable.turnId;
+    // A block the saved reply placed before later work was spoken mid-run.
+    // Dragging it down beside the answer made it read as the answer's opening
+    // whenever the preamble wording check missed it, so it keeps its place.
+    const lastIndex = events.findLastIndex(belongsToResponse);
+    let firstIndex = lastIndex;
+    while (firstIndex > 0 && belongsToResponse(events[firstIndex - 1]!)) {
+      firstIndex -= 1;
+    }
     events = [
-      ...events.filter((event) => !belongsToResponse(event)),
-      ...events.filter(belongsToResponse),
+      ...events.slice(0, firstIndex),
+      ...events.slice(lastIndex + 1),
+      ...events.slice(firstIndex, lastIndex + 1),
     ];
   }
   let end = events.length;
@@ -1164,7 +1174,10 @@ function commentaryTextFromEvent(event: SessionEvent): string | undefined {
   ) {
     return undefined;
   }
-  return (text(payload, "label") ?? event.message).trim() || undefined;
+  return (
+    stripHiddenControlMarkers(text(payload, "label") ?? event.message).trim() ||
+    undefined
+  );
 }
 
 /** The headline of a provider reasoning summary, when this event carries one. */
@@ -1253,6 +1266,16 @@ function workItemFromCapabilityCall(
       status,
       tool: humanizeCapabilityId(capabilityId),
     };
+  }
+
+  // Gyro's own edit tool changes a file just like a provider edit does. The
+  // path only arrives on the completed call; a failed proposal changed nothing.
+  if (
+    capabilityId === "workspace-propose-edit" &&
+    resourceLabel &&
+    status !== "failed"
+  ) {
+    return { kind: "file", id, status, path: resourceLabel };
   }
 
   if (capabilityId.startsWith("browser-")) {
@@ -1944,9 +1967,13 @@ function isHiddenRunEvent(event: SessionEvent) {
   if (text(payload, "kind") !== "provider-activity") {
     return false;
   }
+  // A stray marker is stripped from the note, not a reason to hide it; only a
+  // label that held nothing but markers disappears.
   const label = text(payload, "label") ?? event.message;
   return (
-    label.includes("GYRO_SESSION_TITLE:") || label.includes("GYRO_ARTIFACTS:")
+    (label.includes("GYRO_SESSION_TITLE:") ||
+      label.includes("GYRO_ARTIFACTS:")) &&
+    !stripHiddenControlMarkers(label).trim()
   );
 }
 

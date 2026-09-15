@@ -212,3 +212,113 @@ assert.equal(
   "live commentary must not be promoted to a durable conclusion",
 );
 console.log("late-activity final-response regressions passed");
+
+// A saved reply holds every text block of the turn. A block spoken before the
+// tools must stay on the rail, not reappear above the answer once the turn
+// settles — even when its wording escapes the preamble heuristics.
+const midRunNote =
+  "The context usage popover is clipped on its left side. It opens centred above the ring, but in a narrow pane it runs past the chat pane's left edge, so the model name and the \"Limits\" label get cut off. Next I'm finding its styles and markup.";
+const closingAnswer =
+  "I fixed the clipped usage popover.\n\n**The issue:** the popover was pinned to the ring.";
+const readActivity = (id, timelineSequence) =>
+  event(id, "system-event", "Read styles.css", {
+    kind: "provider-activity",
+    activityKind: "read",
+    activityId: id,
+    label: "Read styles.css",
+    status: "done",
+    timelineSequence,
+  });
+for (const [label, prefix] of [
+  ["plain", ""],
+  ["title marker", "GYRO_SESSION_TITLE: Fix clipped popover\n"],
+]) {
+  const note = `${prefix}${midRunNote}`;
+  const saved = event(
+    "saved-reply",
+    "assistant-message",
+    `${note}\n\n${closingAnswer}`,
+    {
+      kind: "provider-response",
+      status: "done",
+      timelineSequence: 2,
+      segments: [
+        { start: 0, sequence: 0, afterActivityId: null },
+        { start: note.length + 2, sequence: 2, afterActivityId: "read-2" },
+      ],
+    },
+  );
+  for (const events of [
+    [readActivity("read-1", 0), readActivity("read-2", 1), saved],
+    [saved, readActivity("read-1", 0), readActivity("read-2", 1)],
+  ]) {
+    const run = buildRunModel(events);
+    assert.equal(
+      run.response?.message,
+      closingAnswer,
+      `${label}: the final reply is only the closing block`,
+    );
+    const notes = run.steps.filter(
+      (step) => step.kind === "say" && step.text.includes("clipped on its left"),
+    );
+    assert.equal(notes.length, 1, `${label}: the mid-run note stays on the rail once`);
+    assert.ok(
+      !notes[0].text.includes("GYRO_SESSION_TITLE"),
+      `${label}: the rail note never shows the control marker`,
+    );
+  }
+}
+// Without block marks the wording backstop still keeps the note out.
+const unmarked = buildRunModel([
+  readActivity("read-1", 0),
+  event("unmarked-reply", "assistant-message", `${midRunNote}\n\n${closingAnswer}`, {
+    kind: "provider-response",
+    status: "done",
+    timelineSequence: 1,
+  }),
+]);
+assert.ok(
+  !unmarked.response?.message.includes("clipped on its left"),
+  "an unmarked saved reply must still peel progress narration",
+);
+console.log("mid-run narration regressions passed");
+
+// A later turn that repeats the title line keeps its narration on the rail;
+// only the marker is removed, and a marker-only note still disappears.
+const commentaryNote = (id, label) =>
+  event(id, "system-event", label, {
+    kind: "provider-activity",
+    activityKind: "commentary",
+    activityId: id,
+    label,
+    status: "done",
+    timelineSequence: 0,
+  });
+const titledNote = buildRunModel(
+  [
+    commentaryNote(
+      "titled-note",
+      "GYRO_SESSION_TITLE: Fix popover\nI'm checking the popover styles.",
+    ),
+    readActivity("read-after-note", 1),
+  ],
+  { isRunning: true },
+);
+assert.deepEqual(
+  titledNote.steps.filter((step) => step.kind === "say").map((step) => step.text),
+  ["I'm checking the popover styles."],
+  "a stray title line must not hide the note it sits above",
+);
+const markerOnlyNote = buildRunModel(
+  [
+    commentaryNote("marker-only", "GYRO_SESSION_TITLE: Fix popover"),
+    readActivity("read-after-marker", 1),
+  ],
+  { isRunning: true },
+);
+assert.equal(
+  markerOnlyNote.steps.filter((step) => step.kind === "say").length,
+  0,
+  "a note that is only a title marker stays hidden",
+);
+console.log("stray title marker regressions passed");
