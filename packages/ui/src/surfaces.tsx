@@ -189,12 +189,10 @@ import {
 } from "./chat-artifacts";
 import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
-  composerContextUsageForModel,
   composerLimitWindows,
   estimateComposerContextUsage,
   type ComposerContextUsage,
   type ComposerLimitWindow,
-  type ContextModelSelection,
 } from "./context-usage";
 import {
   DAILY_PACE_NOTICE_PERCENT,
@@ -7244,6 +7242,19 @@ function chatDragSource(dataTransfer: DataTransfer) {
 }
 
 /**
+ * Any image or video goes to the attachment step, even a format it cannot use,
+ * so an unsupported file is named there instead of the drop silently failing.
+ */
+function isChatMediaFile(file: File) {
+  return (
+    /^(?:image|video)\//.test(file.type) ||
+    /\.(?:png|jpe?g|webp|gif|heic|heif|tiff?|bmp|avif|mp4|m4v|mov|webm)$/i.test(
+      file.name,
+    )
+  );
+}
+
+/**
  * WebKit exposes DataTransfer.types as a DOMStringList, whereas Chromium uses
  * an array. DOMStringList has `contains`, but no `includes`; calling the
  * latter made dragover throw on macOS before the grid could enable its drop
@@ -7955,9 +7966,7 @@ export function ChatSurface({
   const handleMediaDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
       const files = Array.from(event.dataTransfer.files).filter(
-        (file) =>
-          /^(?:image|video)\//.test(file.type) ||
-          /\.(?:png|jpe?g|webp|mp4|m4v|mov|webm)$/i.test(file.name),
+        isChatMediaFile,
       );
       if (!files.length) {
         return;
@@ -8621,6 +8630,7 @@ export function ChatSurface({
         ]
           .filter(Boolean)
           .join(" ")}
+        onDragEnterCapture={handleMediaDragOver}
         onDragOverCapture={handleMediaDragOver}
         onDropCapture={handleMediaDrop}
       >
@@ -8763,6 +8773,7 @@ export function ChatSurface({
       ]
         .filter(Boolean)
         .join(" ")}
+      onDragEnterCapture={handleMediaDragOver}
       onDragOverCapture={handleMediaDragOver}
       onDropCapture={handleMediaDrop}
     >
@@ -11354,11 +11365,6 @@ function ChatEnvironmentPopover({
               changesDetail
             )}
           </strong>
-          {sourceControlTotalsBadge(changeTotals) ? (
-            <small className="gyro-review-scope-badge">
-              {sourceControlTotalsBadge(changeTotals)}
-            </small>
-          ) : null}
           <ChevronRight aria-hidden="true" size={13} />
         </button>
         <button
@@ -21768,7 +21774,6 @@ function ComposerPopover({
   id,
   items,
   onAction,
-  onItemPreview,
   placement = "up",
   title,
 }: {
@@ -21778,7 +21783,6 @@ function ComposerPopover({
   id: string;
   items: ComposerPopoverItem[];
   onAction: (action?: string, item?: ComposerPopoverItem) => void;
-  onItemPreview?: (item: ComposerPopoverItem) => void;
   placement?: "up" | "down";
   title?: string;
 }) {
@@ -21940,16 +21944,6 @@ function ComposerPopover({
                   className="gyro-composer-menu-primary"
                   disabled={item.disabled}
                   onClick={() => onAction(item.action, item)}
-                  onFocus={() => {
-                    if (!item.disabled) {
-                      onItemPreview?.(item);
-                    }
-                  }}
-                  onPointerEnter={() => {
-                    if (!item.disabled) {
-                      onItemPreview?.(item);
-                    }
-                  }}
                   role="menuitem"
                   title={item.tooltip}
                   type="button"
@@ -21981,16 +21975,6 @@ function ComposerPopover({
               className={itemClassName}
               disabled={item.disabled}
               onClick={() => onAction(item.action, item)}
-              onFocus={() => {
-                if (!item.disabled) {
-                  onItemPreview?.(item);
-                }
-              }}
-              onPointerEnter={() => {
-                if (!item.disabled) {
-                  onItemPreview?.(item);
-                }
-              }}
               role="menuitem"
               title={item.tooltip}
               type="button"
@@ -22590,24 +22574,6 @@ function Composer({
     "root" | "model" | "effort" | "provider" | "provider-model" | "settings"
   >("root");
   const [isModelMenuAdvancedOpen, setIsModelMenuAdvancedOpen] = useState(false);
-  const [previewedContextModel, setPreviewedContextModel] = useState<
-    ContextModelSelection | undefined
-  >(undefined);
-  const displayedContextUsage =
-    contextUsage && previewedContextModel
-      ? composerContextUsageForModel(contextUsage, previewedContextModel)
-      : contextUsage;
-  const displayedLimitWindows =
-    previewedContextModel?.providerId &&
-    previewedContextModel.providerId !==
-      (sessionModel?.providerId ?? config.selectedProviderId)
-      ? composerLimitWindows(
-          [],
-          previewedContextModel,
-          providerUsageByProvider?.[previewedContextModel.providerId]
-            ?.windows ?? [],
-        )
-      : limitWindows;
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -22652,7 +22618,6 @@ function Composer({
     if (activePopover !== "provider") {
       setModelMenuPane("root");
       setIsModelMenuAdvancedOpen(false);
-      setPreviewedContextModel(undefined);
     }
   }, [activePopover]);
   useEffect(() => {
@@ -23253,33 +23218,6 @@ function Composer({
   };
   // Navigation inside the chip's menu must not reach the composer's action
   // handler — only leaf choices (a model, an effort, a provider) do.
-  const previewComposerContextModel = (item: ComposerPopoverItem) => {
-    if (
-      item.kind !== "model" ||
-      !item.action?.startsWith("select-provider-model:")
-    ) {
-      setPreviewedContextModel(undefined);
-      return;
-    }
-    const rest = item.action.slice("select-provider-model:".length);
-    const sep = rest.indexOf(":");
-    if (sep <= 0) {
-      setPreviewedContextModel(undefined);
-      return;
-    }
-    const providerId = rest.slice(0, sep);
-    const modelId = rest.slice(sep + 1);
-    if (!isProviderId(providerId) || !modelId) {
-      setPreviewedContextModel(undefined);
-      return;
-    }
-    setPreviewedContextModel({
-      contextWindowTokens: item.contextWindowTokens,
-      modelId,
-      modelLabel: item.label,
-      providerId,
-    });
-  };
   const runModelMenuAction = (action?: string, item?: ComposerPopoverItem) => {
     if (item?.kind === "disclosure") {
       setIsModelMenuAdvancedOpen((current) => !current);
@@ -23686,9 +23624,7 @@ function Composer({
         aria-haspopup="menu"
         onPaste={(event) => {
           const files = Array.from(event.clipboardData.files).filter(
-            (file) =>
-              /^(?:image|video)\//.test(file.type) ||
-              /\.(?:png|jpe?g|webp|mp4|m4v|mov|webm)$/i.test(file.name),
+            isChatMediaFile,
           );
           if (files.length) {
             event.preventDefault();
@@ -23976,23 +23912,19 @@ function Composer({
           </button>
         ) : null}
         <div className="gyro-composer-spacer" />
-        {displayedContextUsage ? (
-          <div
-            className={`gyro-composer-context-meter${
-              previewedContextModel ? " is-previewing" : ""
-            }`}
-          >
+        {contextUsage ? (
+          <div className="gyro-composer-context-meter">
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-              aria-label={displayedContextUsage.label}
+              aria-label={contextUsage.label}
               aria-valuemax={100}
               aria-valuemin={0}
-              aria-valuenow={displayedContextUsage.percent}
+              aria-valuenow={contextUsage.percent}
               className="gyro-composer-context-wheel"
               role="progressbar"
               style={
                 {
-                  "--context-usage": `${displayedContextUsage.percent * 3.6}deg`,
+                  "--context-usage": `${contextUsage.percent * 3.6}deg`,
                 } as CSSProperties
               }
               tabIndex={0}
@@ -24006,29 +23938,29 @@ function Composer({
             >
               <header>
                 <strong>Context</strong>
-                <span>{displayedContextUsage.percentLabel}</span>
+                <span>{contextUsage.percentLabel}</span>
               </header>
               <p className="gyro-composer-context-model">
-                {displayedContextUsage.modelLabel}
+                {contextUsage.modelLabel}
               </p>
               <div className="gyro-composer-context-value">
-                <strong>{displayedContextUsage.usedLabel}</strong>
+                <strong>{contextUsage.usedLabel}</strong>
                 <span>
-                  of {displayedContextUsage.windowLabel} ·{" "}
-                  {displayedContextUsage.remainingLabel} remaining
+                  of {contextUsage.windowLabel} ·{" "}
+                  {contextUsage.remainingLabel} remaining
                 </span>
               </div>
               <div
                 aria-label="Context window used"
                 aria-valuemax={100}
                 aria-valuemin={0}
-                aria-valuenow={displayedContextUsage.percent}
+                aria-valuenow={contextUsage.percent}
                 className="gyro-composer-context-bar"
                 role="progressbar"
               >
-                <span style={{ width: `${displayedContextUsage.percent}%` }} />
+                <span style={{ width: `${contextUsage.percent}%` }} />
               </div>
-              {displayedLimitWindows.length > 0 || providerUsage ? (
+              {limitWindows.length > 0 || providerUsage ? (
                 <div
                   aria-label="Plan usage limits"
                   className="gyro-composer-limit-summary"
@@ -24036,8 +23968,8 @@ function Composer({
                   <span className="gyro-composer-limit-title">
                     Plan usage limits
                   </span>
-                  {displayedLimitWindows.length > 0 ? (
-                    displayedLimitWindows.map((window) => (
+                  {limitWindows.length > 0 ? (
+                    limitWindows.map((window) => (
                       <ComposerLimitRow key={window.id} window={window} />
                     ))
                   ) : (
@@ -24092,7 +24024,6 @@ function Composer({
               id={`${popoverBaseId}-provider`}
               items={[modelMenuBackItem("Provider"), ...providerItems]}
               onAction={runModelMenuAction}
-              onItemPreview={previewComposerContextModel}
               placement={providerPopoverPlacement}
             />
           ) : activePopover === "provider" &&
@@ -24163,7 +24094,6 @@ function Composer({
                         : modelMenuItems
               }
               onAction={runModelMenuAction}
-              onItemPreview={previewComposerContextModel}
               placement={providerPopoverPlacement}
             />
           ) : null}

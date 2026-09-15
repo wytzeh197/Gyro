@@ -7,6 +7,13 @@ import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
 import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
+import {
+  chatAttachmentKindForPath,
+  chatAttachmentPickerFilters,
+  chatAttachmentPickerTitle,
+  isSupportedChatVideoPath,
+  type ChatAttachmentPickerKind,
+} from "./chat-attachment-picker";
 import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
 import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -8357,7 +8364,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: "image" | "video" | "media" | "workspace-file" | "any") => {
+    async (kind: ChatAttachmentPickerKind) => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -8378,43 +8385,8 @@ export function App() {
         const selected = await open({
           directory: false,
           multiple: kind !== "workspace-file",
-          title:
-            kind === "image"
-              ? "Attach images"
-              : kind === "video"
-                ? "Attach videos"
-                : kind === "media"
-                  ? "Attach media"
-                  : kind === "any"
-                    ? "Attach files"
-                    : "Attach workspace file",
-          filters:
-            kind === "image"
-              ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
-              : kind === "video"
-                ? [
-                    {
-                      name: "Videos",
-                      extensions: ["mp4", "m4v", "mov", "webm"],
-                    },
-                  ]
-                : kind === "media"
-                  ? [
-                      {
-                        name: "Media",
-                        extensions: [
-                          "png",
-                          "jpg",
-                          "jpeg",
-                          "webp",
-                          "mp4",
-                          "m4v",
-                          "mov",
-                          "webm",
-                        ],
-                      },
-                    ]
-                  : undefined,
+          title: chatAttachmentPickerTitle(kind),
+          filters: chatAttachmentPickerFilters(kind),
         });
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
@@ -8435,16 +8407,7 @@ export function App() {
         const rejected: string[] = [];
         let limitExceeded = false;
         for (const path of paths) {
-          // "any" is the composer's single Attach picker: media keeps its
-          // limits, and anything else is a project file.
-          const attachmentKind =
-            kind === "media" || kind === "any"
-              ? isSupportedChatVideoPath(path)
-                ? "video"
-                : kind === "media" || isSupportedChatImagePath(path)
-                  ? "image"
-                  : "workspace-file"
-              : kind;
+          const attachmentKind = chatAttachmentKindForPath(kind, path);
           if (attachmentKind === "workspace-file" && !workspacePath) {
             rejected.push(
               `${workspaceName(path)}: select a project to attach project files`,
@@ -15496,7 +15459,8 @@ export function App() {
         onCompleteOnboardingStep={(step) =>
           dispatchWorkbench({ type: "complete-onboarding-step", step })
         }
-        canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={(files) => {
+        canAttachEditorSnapshot={canAttachEditorSnapshot}
+        onAttachMediaFiles={(files) => {
           focusChatPane(pane);
           void attachDroppedMedia(files, {
             draftKey: paneDraftKey,
@@ -15754,7 +15718,8 @@ export function App() {
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-      canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
+      canAttachEditorSnapshot={canAttachEditorSnapshot}
+      onAttachMediaFiles={attachDroppedMedia}
       onComposerAction={handleComposerAction}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
@@ -16125,7 +16090,8 @@ export function App() {
                         step,
                       })
                     }
-                    canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
+                    canAttachEditorSnapshot={canAttachEditorSnapshot}
+                    onAttachMediaFiles={attachDroppedMedia}
                     onComposerAction={handleComposerAction}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
@@ -16772,7 +16738,8 @@ export function App() {
           onCompleteOnboardingStep={(step) =>
             dispatchWorkbench({ type: "complete-onboarding-step", step })
           }
-          canAttachEditorSnapshot={canAttachEditorSnapshot} onAttachMediaFiles={attachDroppedMedia}
+          canAttachEditorSnapshot={canAttachEditorSnapshot}
+          onAttachMediaFiles={attachDroppedMedia}
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}
@@ -17686,14 +17653,6 @@ function loadChatGridState(): ChatGridState {
   } catch {
     return createInitialChatGridState();
   }
-}
-
-function isSupportedChatVideoPath(path: string) {
-  return /\.(?:mp4|m4v|mov|webm)$/i.test(path.trim());
-}
-
-function isSupportedChatImagePath(path: string) {
-  return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
 }
 
 // IPC header values must be ASCII; file names and paths may not be.

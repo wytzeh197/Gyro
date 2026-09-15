@@ -8,6 +8,7 @@ mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 mod browser_knowledge;
 mod command_file_changes;
+use command_file_changes::observed_command_file_activities;
 
 use anyhow::Context;
 use base64::Engine as _;
@@ -16461,28 +16462,6 @@ fn codex_item_activity(
     }
 }
 
-fn observed_command_file_activities(
-    id: &str,
-    snapshot: command_file_changes::CommandFileSnapshot,
-) -> Vec<ProviderActivity> {
-    snapshot
-        .changed_paths()
-        .into_iter()
-        .enumerate()
-        .map(|(index, path)| {
-            let path = path.to_string_lossy().into_owned();
-            ProviderActivity {
-                id: format!("{id}-observed-file-{index}"),
-                kind: "file".into(),
-                label: format!("Updated {path}"),
-                detail: Some(path),
-                note: None,
-                status: "done".into(),
-            }
-        })
-        .collect()
-}
-
 /// Turn a Codex app-server file-change record into path-specific activity.
 ///
 /// A workspace is shared by every chat pane, so a pathless “Updated files” row
@@ -19308,6 +19287,10 @@ struct StreamingCommandState {
     /// "this CLI printed plain text", which decide different fallbacks.
     parsed_stream_json: bool,
     last_emit_at: Option<Instant>,
+    /// Explicit file operands of each shell command still waiting for its
+    /// result. Claude Code runs shell edits itself, so this is the only way
+    /// those edits reach the turn's changed files.
+    command_file_snapshots: HashMap<String, command_file_changes::CommandFileSnapshot>,
 }
 
 impl StreamingCommandState {
@@ -19334,6 +19317,7 @@ impl StreamingCommandState {
             stdout_line_buffer: String::new(),
             parsed_stream_json: false,
             last_emit_at: None,
+            command_file_snapshots: HashMap::new(),
         }
     }
 
@@ -19709,6 +19693,12 @@ fn run_streaming_command(
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
     stream_state.flush_pending_delta(app, request, true);
+    for activity in stream_state.finish_command_file_changes() {
+        if let Some(activity) = stream_state.push_activity(activity) {
+            let activity_sequence = stream_state.activity_sequence(&activity);
+            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
+        }
+    }
     // Published before the termination checks below, so a stopped or timed-out
     // run reports the session it started rather than losing it to the bail.
     observed_session_id.clone_from(&stream_state.provider_session_id);
@@ -19944,6 +19934,11 @@ fn handle_provider_stdout_line(
         return;
     }
     let activities = extract_provider_activities(&value);
+    let observed_files = stream_state.observe_command_file_changes(
+        &value,
+        &activities,
+        request.workspace_path.as_deref(),
+    );
     if !activities.is_empty() {
         // Tools only start after the text block before them closed. Without
         // this, a marker line followed straight by a tool call left the
@@ -19956,6 +19951,12 @@ fn handle_provider_stdout_line(
             }
         }
         stream_state.note_intervening_work();
+    }
+    for activity in observed_files {
+        if let Some(activity) = stream_state.push_activity(activity) {
+            let activity_sequence = stream_state.activity_sequence(&activity);
+            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
+        }
     }
     if let Some(chunk) = extract_provider_text_chunk(&value) {
         match chunk {
@@ -20346,7 +20347,10 @@ fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<Pro
     // A stray control marker is removed rather than dropping the note: a later
     // turn can repeat the title line above real narration.
     let text = if text.contains("GYRO_") {
-        strip_hidden_control_markers(&text).message.trim().to_string()
+        strip_hidden_control_markers(&text)
+            .message
+            .trim()
+            .to_string()
     } else {
         text
     };

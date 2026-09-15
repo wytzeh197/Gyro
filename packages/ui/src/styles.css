@@ -83,10 +83,7 @@
   --gyro-theme-preview-light-canvas: #f8f9fb;
   --gyro-theme-preview-light-content: #e9eef5;
   --gyro-sidebar-mode-track: #202020;
-  --gyro-sidebar-mode-track-border: rgba(255, 255, 255, 0.04);
   --gyro-sidebar-mode-active: #383838;
-  --gyro-sidebar-mode-active-border: rgba(255, 255, 255, 0.04);
-  --gyro-sidebar-mode-active-shadow: rgba(0, 0, 0, 0.12);
   --gyro-shadow: rgba(0, 0, 0, 0.34);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
   --gyro-focus-ring: var(--gyro-accent);
@@ -27174,8 +27171,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-meter:hover .gyro-composer-context-tooltip,
-.gyro-composer-context-meter:focus-within .gyro-composer-context-tooltip,
-.gyro-composer-context-meter.is-previewing .gyro-composer-context-tooltip {
+.gyro-composer-context-meter:focus-within .gyro-composer-context-tooltip {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
@@ -35111,10 +35107,7 @@ button.gyro-account-menu-row:hover,
    shared track visible in both themes so the selected pill has a stable home. */
 :root[data-theme="light"] {
   --gyro-sidebar-mode-track: #e9eaec;
-  --gyro-sidebar-mode-track-border: rgba(24, 33, 44, 0.08);
   --gyro-sidebar-mode-active: #ffffff;
-  --gyro-sidebar-mode-active-border: rgba(24, 33, 44, 0.1);
-  --gyro-sidebar-mode-active-shadow: rgba(24, 33, 44, 0.1);
 }
 
 .gyro-sidebar-mode-group,
@@ -35128,10 +35121,10 @@ button.gyro-account-menu-row:hover,
   box-sizing: border-box;
   max-width: 100%;
   background: var(--gyro-sidebar-mode-track);
-  border: 1px solid var(--gyro-sidebar-mode-track-border);
-  box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
-  gap: 2px;
-  padding: 2px;
+  border: 0;
+  box-shadow: none;
+  gap: 0;
+  padding: 0;
 }
 
 /* Let the selected button own its highlight so both segments stay inside
@@ -35145,7 +35138,8 @@ button.gyro-account-menu-row:hover,
   .gyro-sidebar-mode-group
   > .gyro-sidebar-mode-row {
   box-sizing: border-box;
-  border: 1px solid transparent;
+  border: 0;
+  border-radius: var(--gyro-premium-radius-md);
 }
 
 .gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active,
@@ -35153,8 +35147,7 @@ button.gyro-account-menu-row:hover,
   .gyro-sidebar-mode-group
   > .gyro-sidebar-mode-row.is-active {
   background: var(--gyro-sidebar-mode-active);
-  border-color: var(--gyro-sidebar-mode-active-border);
-  box-shadow: 0 1px 2px var(--gyro-sidebar-mode-active-shadow);
+  box-shadow: none;
 }
 
 /* Keep session actions and the project list close to the surface selector. */

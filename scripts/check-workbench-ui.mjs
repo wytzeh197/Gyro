@@ -4071,7 +4071,7 @@ expect(
     tauriSource.includes("extract_provider_activity") &&
     tauriSource.includes("extract_provider_commentary_activity") &&
     tauriSource.includes("provider_activities_for_response") &&
-    tauriSource.includes("strip_hidden_control_markers(&text).message") &&
+    tauriSource.includes("strip_hidden_control_markers(&text)") &&
     tauriSource.includes("SESSION_TITLE_LATER_TURN_INSTRUCTION") &&
     tauriSource.includes("polished, scannable Markdown") &&
     tauriSource.includes("provider_activity_event_entry") &&
@@ -7446,7 +7446,7 @@ expect(
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&
-    surfaceSource.includes("displayedLimitWindows.map((window)") &&
+    surfaceSource.includes("limitWindows.map((window)") &&
     styleSource.includes(".gyro-composer-limit-summary"),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
@@ -7573,13 +7573,11 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("composerContextUsageForModel") &&
-    surfaceSource.includes("previewComposerContextModel") &&
-    surfaceSource.includes("displayedContextUsage") &&
-    surfaceSource.includes("displayedContextUsage.remainingLabel") &&
+    surfaceSource.includes("contextUsage.remainingLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
-    !surfaceSource.includes("${preview.remainingLabel} remaining") &&
-    styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
+    // Hovering a model in the picker must not open the context card over it.
+    !surfaceSource.includes("previewComposerContextModel") &&
+    !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "reportedModelId !== model.modelId",

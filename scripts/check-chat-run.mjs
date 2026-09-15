@@ -1338,3 +1338,21 @@ assert.equal(
   1,
   "a re-sent reasoning headline should stay one beat",
 );
+
+// Gyro's own edit tool names its path only on the completed call. That call is
+// a changed file; a failed proposal changed nothing.
+const proposedEdit = buildRunModel([
+  capabilityCall("workspace-propose-edit", { status: "running" }),
+  capabilityCall("workspace-propose-edit", {
+    resource: { id: "p1", kind: "proposal", label: "src/app.ts" },
+  }),
+  capabilityCall("workspace-propose-edit", {
+    status: "failed",
+    resource: { id: "p2", kind: "proposal", label: "src/rejected.ts" },
+  }),
+]);
+assert.deepEqual(
+  proposedEdit.files.map((file) => file.path),
+  ["src/app.ts"],
+  "a completed propose-edit call should count as a changed file",
+);

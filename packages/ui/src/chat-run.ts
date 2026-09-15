@@ -1268,6 +1268,16 @@ function workItemFromCapabilityCall(
     };
   }
 
+  // Gyro's own edit tool changes a file just like a provider edit does. The
+  // path only arrives on the completed call; a failed proposal changed nothing.
+  if (
+    capabilityId === "workspace-propose-edit" &&
+    resourceLabel &&
+    status !== "failed"
+  ) {
+    return { kind: "file", id, status, path: resourceLabel };
+  }
+
   if (capabilityId.startsWith("browser-")) {
     return {
       kind: "browser",
