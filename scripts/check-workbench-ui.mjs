@@ -396,7 +396,10 @@ const menuBarStyleSource = readRepoFile("apps/desktop/src/menu-bar.css");
 const menuBarRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/menu_bar.rs",
 );
-const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const desktopRustSource = [
+  readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+].join("\n");
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
   // them; the point of the check is that the two still agree, so it asserts
@@ -3788,7 +3791,8 @@ expect(
     appSource.includes('streamEvent.phase === "started"') &&
     appSource.includes('streamEvent.phase === "completed"') &&
     appSource.includes("applyProviderChatStreamDeltas") &&
-    appSource.includes("applyProviderChatStreamActivity") &&
+    providerStreamSource.includes("applyProviderChatStreamActivity") &&
+    appSource.includes("applyProviderChatStreamPresentation") &&
     appSource.includes('streamEvent.phase === "activity"') &&
     appSource.includes("sessionBatches.map((batch) => ({") &&
     providerStreamSource.includes(
