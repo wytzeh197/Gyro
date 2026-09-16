@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 
 import {
+  providerApiKeyEnvName,
   providerCatalog,
+  providerSupportsApiKey,
   providersForConfig,
 } from "../packages/ui/src/provider-catalog.ts";
 
@@ -58,6 +60,10 @@ const envProvider = resolved("xai", {
 });
 assert.equal(envProvider.authMode, "env");
 assert.equal(envProvider.apiKeyRef, "provider-env:XAI_API_KEY");
+
+assert.equal(providerSupportsApiKey("xai"), true);
+assert.equal(providerApiKeyEnvName("xai"), "XAI_API_KEY");
+assert.equal(providerSupportsApiKey("ollama"), false);
 
 console.log("provider identity checks passed");
 

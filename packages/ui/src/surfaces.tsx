@@ -40,6 +40,7 @@ import {
   Circle,
   CircleDashed,
   Clock,
+  CodeXml,
   Columns2,
   Command,
   Copy,
@@ -368,9 +369,11 @@ import {
   isProviderExecutable,
   isProviderId,
   isProviderRuntimeUsable,
+  providerApiKeyEnvName,
   providerCapabilities,
   providerDefaultModelId,
   providerNeedsSignInRepair,
+  providerSupportsApiKey,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -1958,12 +1961,6 @@ export function AppChrome({
             >
               <PanelLeft size={16} strokeWidth={1.5} />
             </button>
-            <button aria-label="Back" disabled type="button">
-              <ArrowLeft size={18} strokeWidth={1.5} />
-            </button>
-            <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={18} strokeWidth={1.5} />
-            </button>
           </div>
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
@@ -2724,7 +2721,12 @@ type ScmGraphRow = {
   /** Lane the commit's dot sits in. */
   lane: number;
   /** Paths from the upper row boundary through the dot to the lower boundary. */
-  edges: Array<{ from: number; to: number; half: "top" | "bottom"; color: number }>;
+  edges: Array<{
+    from: number;
+    to: number;
+    half: "top" | "bottom";
+    color: number;
+  }>;
   /** No child in the loaded window, so the lane's line starts at the dot. */
   startsHere: boolean;
   /** No parent in the loaded window, so the lane's line stops at the dot. */
@@ -2763,7 +2765,12 @@ function scmGraphRows(
       if (expected[index] === undefined) continue;
       const arrives = expected[index] === commit.hash;
       if (!(startsHere && index === lane)) {
-        edges.push({ from: index, to: arrives ? lane : index, half: "top", color: index });
+        edges.push({
+          from: index,
+          to: arrives ? lane : index,
+          half: "top",
+          color: index,
+        });
       }
       if (arrives) expected[index] = undefined;
     }
@@ -2780,11 +2787,17 @@ function scmGraphRows(
       edges.push({ from: lane, to: target, half: "bottom", color: target });
     });
     for (let index = 0; index < expected.length; index += 1) {
-      if (expected[index] !== undefined &&
-          !edges.some((edge) => edge.half === "bottom" && edge.to === index)) {
+      if (
+        expected[index] !== undefined &&
+        !edges.some((edge) => edge.half === "bottom" && edge.to === index)
+      ) {
         edges.push({ from: index, to: index, half: "bottom", color: index });
-      } else if (expected[index] !== undefined &&
-          edges.some((edge) => edge.half === "top" && edge.to === index && index !== lane)) {
+      } else if (
+        expected[index] !== undefined &&
+        edges.some(
+          (edge) => edge.half === "top" && edge.to === index && index !== lane,
+        )
+      ) {
         edges.push({ from: index, to: index, half: "bottom", color: index });
       }
     }
@@ -3954,40 +3967,36 @@ function WorkspaceSidebarContent({
                 <PanelLeft size={16} strokeWidth={1.5} />
               </button>
             ) : null}
-            <button aria-label="Back" disabled type="button">
-              <ArrowLeft size={18} strokeWidth={1.5} />
-            </button>
-            <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={18} strokeWidth={1.5} />
-            </button>
+          </div>
+          <div
+            aria-label="Primary surfaces"
+            className="gyro-titlebar-switch"
+            data-active-mode={isIdeSidebar ? "workspace" : "sessions"}
+            role="group"
+          >
+            <SidebarModeRow
+              icon={<MessageSquare size={15} strokeWidth={1.5} />}
+              label="Sessions"
+              isActive={
+                activeDestination === "workspace" &&
+                activeWorkspaceLayout !== "code"
+              }
+              onClick={onSelectSessions}
+            />
+            <SidebarModeRow
+              icon={<CodeXml size={15} strokeWidth={1.5} />}
+              label="Workspace"
+              isActive={
+                activeDestination === "workspace" &&
+                activeWorkspaceLayout === "code"
+              }
+              onClick={() => onSelectWorkspaceLayout("code")}
+            />
           </div>
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
             data-tauri-drag-region
-          />
-        </div>
-
-        <div
-          aria-label="Primary surfaces"
-          className="gyro-sidebar-mode-group"
-          data-active-mode={isIdeSidebar ? "workspace" : "sessions"}
-        >
-          <SidebarModeRow
-            label="Sessions"
-            isActive={
-              activeDestination === "workspace" &&
-              activeWorkspaceLayout !== "code"
-            }
-            onClick={onSelectSessions}
-          />
-          <SidebarModeRow
-            label="Workspace"
-            isActive={
-              activeDestination === "workspace" &&
-              activeWorkspaceLayout === "code"
-            }
-            onClick={() => onSelectWorkspaceLayout("code")}
           />
         </div>
       </div>
@@ -4488,7 +4497,9 @@ function WorkspaceSidebarContent({
                       <span className="is-removed">
                         −{scmTotals.deletions.toLocaleString()}
                       </span>
-                      <small>{sourceControlTotalsBadge(scmTotals)}</small>
+                      {scmTotals.kind === "working-tree" ? (
+                        <small>{sourceControlTotalsBadge(scmTotals)}</small>
+                      ) : null}
                     </span>
                   ) : (
                     <span
@@ -6642,26 +6653,34 @@ function WorkspaceExplorerRow({
   );
 }
 
+/* Icon-only in the title bar: the label is the accessible name and the tooltip,
+   so the switch stays narrow enough to share the row with window navigation. */
 function SidebarModeRow({
+  icon,
   label,
   isActive,
   onClick,
 }: {
+  icon: ReactNode;
   label: string;
   isActive?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
+      aria-label={label}
       aria-pressed={isActive === true}
       className={
-        isActive ? "gyro-sidebar-mode-row is-active" : "gyro-sidebar-mode-row"
+        isActive
+          ? "gyro-titlebar-switch-option is-active"
+          : "gyro-titlebar-switch-option"
       }
       data-sidebar-mode={label.toLowerCase()}
       onClick={onClick}
+      title={label}
       type="button"
     >
-      <span>{label}</span>
+      {icon}
     </button>
   );
 }
@@ -8239,9 +8258,9 @@ export function ChatSurface({
       ),
     [composerProviderUsage?.windows, contextModel, transcriptEvents],
   );
-  // Manual compaction is an explicit Codex app-server feature. A provider
-  // selection alone is not enough: wait until this chat owns a resumable
-  // Codex thread, otherwise the command would promise work it cannot do.
+  // Manual compaction still runs only against a resumable Codex thread.
+  // The slash command stays listed so `/compact` can be found; the action
+  // explains itself when this chat cannot compact yet.
   const canCompactContext = useMemo(
     () =>
       contextModel.providerId === "openai" &&
@@ -9549,7 +9568,6 @@ function ChatSurfaceControls({
           className={[
             "gyro-chat-surface-button",
             isToolPanelOpen ? "is-active" : "",
-            drawerHasModelActivity ? "has-model-activity" : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -9558,9 +9576,6 @@ function ChatSurfaceControls({
           type="button"
         >
           <PanelBottom size={16} />
-          {drawerHasModelActivity ? (
-            <span aria-hidden="true" className="gyro-model-activity-dot" />
-          ) : null}
         </button>
       ) : null}
       {showPanel && !isDockOpen && onToggleDock ? (
@@ -16024,6 +16039,10 @@ export function ProvidersSurface({
   providerHandoffs = [],
   onToggleProvider,
   onTestProvider,
+  providerApiKeyConfigured,
+  savingProviderApiKeyId,
+  onSaveProviderApiKey,
+  onClearProviderApiKey,
   onQueueProviderHandoff,
   onAddCustomProfile,
 }: {
@@ -16033,6 +16052,13 @@ export function ProvidersSurface({
   providerHandoffs?: ProviderHandoff[];
   onToggleProvider?: (providerId: string) => void;
   onTestProvider?: (providerId: string) => void;
+  providerApiKeyConfigured?: Partial<Record<string, boolean>>;
+  savingProviderApiKeyId?: string;
+  onSaveProviderApiKey?: (
+    providerId: string,
+    value: string,
+  ) => Promise<boolean>;
+  onClearProviderApiKey?: (providerId: string) => void;
   onQueueProviderHandoff?: (request: {
     fromProviderId: string;
     toProviderId: string;
@@ -16394,6 +16420,13 @@ export function ProvidersSurface({
           />
         </SettingsSection>
       </section>
+      <ProviderApiKeySection
+        config={config}
+        providerApiKeyConfigured={providerApiKeyConfigured}
+        savingProviderApiKeyId={savingProviderApiKeyId}
+        onSaveProviderApiKey={onSaveProviderApiKey}
+        onClearProviderApiKey={onClearProviderApiKey}
+      />
     </div>
   );
 }
@@ -19480,6 +19513,13 @@ type SettingsSurfaceProps = {
   onTestProvider?: (providerId: string) => void;
   /** Repairs a connected provider whose credential the provider itself rejected. */
   onSignInProvider?: (providerId: string) => void;
+  providerApiKeyConfigured?: Partial<Record<string, boolean>>;
+  savingProviderApiKeyId?: string;
+  onSaveProviderApiKey?: (
+    providerId: string,
+    value: string,
+  ) => Promise<boolean>;
+  onClearProviderApiKey?: (providerId: string) => void;
   providerStatuses?: ProviderStatus[];
   onSelectProviderDefaultModel?: (
     providerId: ProviderId,
@@ -19522,10 +19562,127 @@ type SettingsSurfaceProps = {
   onRemoveWorkspaceContribution?: (id: string) => void;
 };
 
-/**
- * A native `<details>` stays open until its own summary is pressed again, so
- * the disclosure is controlled here to dismiss it like every other dropdown.
- */
+function ProviderApiKeySection({
+  config,
+  providerApiKeyConfigured,
+  savingProviderApiKeyId,
+  onSaveProviderApiKey,
+  onClearProviderApiKey,
+}: Pick<
+  SettingsSurfaceProps,
+  | "config"
+  | "providerApiKeyConfigured"
+  | "savingProviderApiKeyId"
+  | "onSaveProviderApiKey"
+  | "onClearProviderApiKey"
+>) {
+  const providers = providersForConfig(config).filter((provider) =>
+    providerSupportsApiKey(provider.id),
+  );
+  const [selectedId, setSelectedId] = useState("openai");
+  const provider =
+    providers.find((item) => item.id === selectedId) ?? providers[0];
+  if (!provider) return null;
+  return (
+    <SettingsGroup label="Connect with an API key">
+      <div className="gyro-provider-api-key-section">
+        <label>
+          <span>Provider</span>
+          <SettingsSelect
+            aria-label="API key provider"
+            disabled={Boolean(savingProviderApiKeyId)}
+            onChange={(event) => setSelectedId(event.target.value)}
+            value={provider.id}
+          >
+            {providers.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.displayName}
+              </option>
+            ))}
+          </SettingsSelect>
+        </label>
+        <ProviderApiKeyField
+          key={provider.id}
+          configured={Boolean(providerApiKeyConfigured?.[provider.id])}
+          envName={providerApiKeyEnvName(provider.id)}
+          onClear={() => onClearProviderApiKey?.(provider.id)}
+          onSave={
+            onSaveProviderApiKey
+              ? (value) => onSaveProviderApiKey(provider.id, value)
+              : undefined
+          }
+          saving={Boolean(savingProviderApiKeyId)}
+        />
+      </div>
+    </SettingsGroup>
+  );
+}
+
+function ProviderApiKeyField({
+  configured,
+  envName,
+  onClear,
+  onSave,
+  saving = false,
+}: {
+  configured: boolean;
+  envName?: string;
+  onClear?: () => void;
+  onSave?: (value: string) => Promise<boolean> | undefined;
+  saving?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  return (
+    <div className="gyro-provider-api-key">
+      <strong>API key</strong>
+      <span>
+        Stored securely in macOS Keychain.
+        {envName ? (
+          <>
+            {" "}
+            An existing <code>{envName}</code> environment value takes priority.
+          </>
+        ) : null}
+      </span>
+      <input
+        aria-label="Provider API key"
+        autoComplete="off"
+        disabled={saving}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder={
+          configured ? "Key saved — paste to replace" : "Paste API key"
+        }
+        spellCheck={false}
+        type="password"
+        value={draft}
+      />
+      <div>
+        <button
+          className="gyro-primary-button"
+          disabled={saving || !onSave || draft.trim().length === 0}
+          onClick={async () => {
+            if (await onSave?.(draft.trim())) setDraft("");
+          }}
+          type="button"
+        >
+          {saving ? "Saving…" : configured ? "Replace key" : "Save key"}
+        </button>
+        {configured ? (
+          <button
+            className="gyro-danger-button"
+            disabled={saving}
+            onClick={() => onClear?.()}
+            type="button"
+          >
+            Remove key
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Dismiss the disclosure when clicking outside its controls. */
 function ProviderDetailsMenu({
   children,
   label,
@@ -19728,6 +19885,10 @@ export function SettingsSurface({
   onToggleProvider,
   onTestProvider,
   onSignInProvider,
+  providerApiKeyConfigured,
+  savingProviderApiKeyId,
+  onSaveProviderApiKey,
+  onClearProviderApiKey,
   providerStatuses,
   onSelectProviderDefaultModel,
   selectedUsageProviderId,
@@ -20547,6 +20708,13 @@ export function SettingsSurface({
                 </SettingsRow>
               </SettingsGroup>
             )}
+            <ProviderApiKeySection
+              config={config}
+              providerApiKeyConfigured={providerApiKeyConfigured}
+              savingProviderApiKeyId={savingProviderApiKeyId}
+              onSaveProviderApiKey={onSaveProviderApiKey}
+              onClearProviderApiKey={onClearProviderApiKey}
+            />
           </SettingsSection>
         ) : null}
 
@@ -23137,6 +23305,16 @@ function Composer({
       label: "Show command help",
     },
     {
+      action: "compact-context",
+      command: "/compact",
+      description: "Summarize earlier conversation",
+      hint: canCompactContext
+        ? "This keeps the important context while making room for the rest of the chat."
+        : "Codex can compact this chat after the first reply. Other providers are not supported yet.",
+      icon: Archive,
+      label: "Compact context",
+    },
+    {
       action: "add-goal",
       command: "/goal",
       description: sessionGoal?.text
@@ -23274,15 +23452,6 @@ function Composer({
       description: "Open the current workspace diff",
       icon: ScrollText,
       label: "Show diff",
-    },
-    {
-      action: "compact-context",
-      available: canCompactContext,
-      command: "/compact",
-      description: "Summarize earlier conversation",
-      hint: "This keeps the important context while making room for the rest of the chat.",
-      icon: Archive,
-      label: "Compact context",
     },
   ];
   // What the next send is about to buy. A Council send is its seats plus a

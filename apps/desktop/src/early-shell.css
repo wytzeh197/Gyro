@@ -159,3 +159,30 @@ html[data-theme="light"] .gyro-early-shell-composer {
 html[data-theme="light"] .gyro-early-shell-send {
   background: #1d2329;
 }
+.gyro-embedded-boundary {
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  min-height: 100vh;
+  max-width: 560px;
+  margin: auto;
+  padding: 32px;
+  font:
+    14px/1.6 system-ui,
+    sans-serif;
+  color: #a8a8a8;
+}
+.gyro-embedded-boundary h1 {
+  color: #ededed;
+  font-size: 22px;
+  line-height: 1.3;
+}
+.gyro-embedded-boundary p {
+  margin: 6px 0;
+}
+html[data-theme="light"] .gyro-embedded-boundary {
+  color: #555;
+}
+html[data-theme="light"] .gyro-embedded-boundary h1 {
+  color: #222;
+}

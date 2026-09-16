@@ -1,3 +1,4 @@
+import { useProviderApiKeys } from "./provider-api-keys";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
@@ -248,6 +249,7 @@ import {
   deriveLatestMenuBarOutcome,
   deriveMenuBarSnapshot,
 } from "./menu-bar-state";
+import { useUnreadCompletedChats } from "./unread-completed-chats";
 
 const MonacoEditor = lazy(() => import("./monaco-editor"));
 const SourceControlDiffEditor = lazy(
@@ -964,9 +966,13 @@ export function App() {
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
-  const [unreadCompletedSessionIds, setUnreadCompletedSessionIds] = useState<
-    string[]
-  >([]);
+  const {
+    unreadCompletedSessionIds,
+    acknowledgeFinishedChat: acknowledgeUnreadCompletedChat,
+    markUnreadCompletedChatIfNeeded,
+    forgetUnreadCompletedChat,
+    clearUnreadCompletedChat,
+  } = useUnreadCompletedChats(sessionEventsById);
   const [menuBarOutcome, setMenuBarOutcome] = useState<MenuBarOutcome>();
   const [finishedMenuBarOutcomes, setFinishedMenuBarOutcomes] = useState<
     MenuBarOutcome[]
@@ -2220,11 +2226,7 @@ export function App() {
     (sessionId: string, isSending: boolean) => {
       if (isSending) {
         sendingSessionIdsRef.current.add(sessionId);
-        setUnreadCompletedSessionIds((current) =>
-          current.includes(sessionId)
-            ? current.filter((id) => id !== sessionId)
-            : current,
-        );
+        clearUnreadCompletedChat(sessionId);
       } else {
         if (sendingSessionIdsRef.current.has(sessionId)) {
           queuedDeliveryNotBeforeRef.current.set(sessionId, Date.now() + 3_000);
@@ -2235,7 +2237,7 @@ export function App() {
         updateSendingSessions(current, sessionId, isSending),
       );
     },
-    [],
+    [clearUnreadCompletedChat],
   );
   const replaceSendingSessionId = useCallback(
     (fromSessionId: string, toSessionId: string) => {
@@ -2330,16 +2332,13 @@ export function App() {
             outcome.targetId !== latestMenuBarOutcome.targetId,
         ),
       ]);
-      if (
-        latestMenuBarOutcome.kind === "chat" &&
-        (activeWorkspaceLayoutRef.current !== "thread" ||
-          activeSessionIdRef.current !== latestMenuBarOutcome.targetId)
-      ) {
-        setUnreadCompletedSessionIds((current) =>
-          current.includes(latestMenuBarOutcome.targetId)
-            ? current
-            : [latestMenuBarOutcome.targetId, ...current],
-        );
+      if (latestMenuBarOutcome.kind === "chat") {
+        markUnreadCompletedChatIfNeeded(latestMenuBarOutcome.targetId, {
+          isViewing:
+            activeWorkspaceLayoutRef.current === "thread" &&
+            activeSessionIdRef.current === latestMenuBarOutcome.targetId,
+          outcomeId: latestMenuBarOutcome.id,
+        });
       }
     }
   }, [latestMenuBarOutcome]);
@@ -6691,23 +6690,23 @@ export function App() {
     [activateWorkspacePath, openWorkspace, startNewChat],
   );
 
-  const acknowledgeFinishedChat = useCallback((sessionId: string) => {
-    setUnreadCompletedSessionIds((current) =>
-      current.includes(sessionId)
-        ? current.filter((id) => id !== sessionId)
-        : current,
-    );
-    setFinishedMenuBarOutcomes((current) =>
-      current.filter(
-        (outcome) => outcome.kind !== "chat" || outcome.targetId !== sessionId,
-      ),
-    );
-    setMenuBarOutcome((current) =>
-      current?.kind === "chat" && current.targetId === sessionId
-        ? undefined
-        : current,
-    );
-  }, []);
+  const acknowledgeFinishedChat = useCallback(
+    (sessionId: string) => {
+      acknowledgeUnreadCompletedChat(sessionId);
+      setFinishedMenuBarOutcomes((current) =>
+        current.filter(
+          (outcome) =>
+            outcome.kind !== "chat" || outcome.targetId !== sessionId,
+        ),
+      );
+      setMenuBarOutcome((current) =>
+        current?.kind === "chat" && current.targetId === sessionId
+          ? undefined
+          : current,
+      );
+    },
+    [acknowledgeUnreadCompletedChat],
+  );
 
   useEffect(() => {
     if (activeWorkspaceLayout === "thread" && activeSessionId) {
@@ -7101,9 +7100,7 @@ export function App() {
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
-      setUnreadCompletedSessionIds((current) =>
-        current.filter((id) => id !== sessionId),
-      );
+      forgetUnreadCompletedChat(sessionId);
       setChatMessageQueues((current) => {
         if (!current[sessionId]) {
           return current;
@@ -7121,6 +7118,7 @@ export function App() {
     [
       activeSessionId,
       capabilityRunsBySessionId,
+      forgetUnreadCompletedChat,
       notify,
       sessions,
       workbench.terminalPanes,
@@ -13338,6 +13336,13 @@ export function App() {
     [config, connectProvider, notify, recordProviderHealthOutput],
   );
 
+  const providerApiKeyProps = useProviderApiKeys(
+    config,
+    isTauriRuntime(),
+    notify,
+    testProvider,
+  );
+
   const queueProviderHandoff = useCallback(
     ({
       fromProviderId,
@@ -16553,6 +16558,7 @@ export function App() {
           }
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
+          {...providerApiKeyProps}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           providerStatuses={workbench.providerStatuses}
@@ -16701,6 +16707,7 @@ export function App() {
             });
           }}
           onQueueProviderHandoff={queueProviderHandoff}
+          {...providerApiKeyProps}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           providerHandoffs={workbench.providerHandoffs}

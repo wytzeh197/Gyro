@@ -1,14 +1,17 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
+import { resolveBootSurface } from "./surface-boundary";
 import "./early-shell.css";
 import "./theme.css";
 
-const isMenuBarSurface =
-  new URLSearchParams(window.location.search).get("surface") === "menu-bar";
-document.documentElement.dataset.surface = isMenuBarSurface
-  ? "menu-bar"
-  : "main";
+const bootSurface = resolveBootSurface({
+  browserAgent: "__gyroBrowserAgentInstalled" in window,
+  framed: window.self !== window.top,
+  surface: new URLSearchParams(window.location.search).get("surface"),
+});
+const isMenuBarSurface = bootSurface === "menu-bar";
+document.documentElement.dataset.surface = bootSurface;
 
 const systemTheme = () =>
   window.matchMedia?.("(prefers-color-scheme: dark)").matches
@@ -67,7 +70,16 @@ const root = ReactDOM.createRoot(rootElement);
 
 // Paint a chat-shaped shell immediately; the full App (and packages/ui)
 // arrives asynchronously so cold start never blocks on the big modules.
-if (isMenuBarSurface) {
+if (bootSurface === "embedded") {
+  document.title = "Gyro · App interface";
+  root.render(
+    <main className="gyro-embedded-boundary">
+      <h1>This address opens Gyro</h1>
+      <p>Use the main window for Terminal, Files, Review, and Canvas.</p>
+      <p>To preview your project here, enter its web address above.</p>
+    </main>,
+  );
+} else if (isMenuBarSurface) {
   void Promise.all([
     import("./MenuBarPopover"),
     import("./menu-bar.css"),

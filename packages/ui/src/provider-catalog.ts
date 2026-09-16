@@ -70,6 +70,37 @@ type ProviderCatalogEntry = ModelProviderConfig & {
   allowedTools: string[];
 };
 
+/** Providers that can authenticate with a pasted API key stored in Keychain. */
+export function providerSupportsApiKey(providerId: string) {
+  return (
+    providerId === "openai" ||
+    providerId === "anthropic" ||
+    providerId === "xai" ||
+    providerId === "gemini" ||
+    providerId === "kimi" ||
+    providerId === "cursor"
+  );
+}
+
+export function providerApiKeyEnvName(providerId: string) {
+  switch (providerId) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "xai":
+      return "XAI_API_KEY";
+    case "gemini":
+      return "GEMINI_API_KEY";
+    case "kimi":
+      return "MOONSHOT_API_KEY";
+    case "cursor":
+      return "CURSOR_API_KEY";
+    default:
+      return undefined;
+  }
+}
+
 export const providerCatalog: ProviderCatalogEntry[] = [
   {
     id: "openai",

@@ -260,7 +260,11 @@ export {
   reviewScopeFromTotals,
   reviewScopeTitle,
 } from "./review-scope";
-export type { ReviewFile, ReviewScope, ReviewScopeListing } from "./review-scope";
+export type {
+  ReviewFile,
+  ReviewScope,
+  ReviewScopeListing,
+} from "./review-scope";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
@@ -353,7 +357,9 @@ export {
   isProviderExecutable,
   isProviderRuntimeUsable,
   normalizedConfig,
+  providerApiKeyEnvName,
   providerCatalog,
+  providerSupportsApiKey,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
   providerCapabilities,

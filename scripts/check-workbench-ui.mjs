@@ -584,7 +584,7 @@ expect(
     surfaceSource.includes("!isCliUpdating &&") &&
     appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
     styleSource.includes("Sessions/Workspace is navigation") &&
-    styleSource.includes("background: var(--gyro-segment-bg);") &&
+    styleSource.includes("var(--gyro-sidebar-mode-active)") &&
     appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
     surfaceSource.includes("{zone.label}"),
   "Each tiled chat should publish a pane drag payload and label every split drop target.",
@@ -943,6 +943,16 @@ const coreIpcSource = readRepoFile("crates/gyro-core/src/ipc.rs");
 const coreProviderHealthSource = readRepoFile(
   "crates/gyro-core/src/provider_health.rs",
 );
+const coreCredentialsSource = readRepoFile(
+  "crates/gyro-core/src/credentials.rs",
+);
+const providerApiKeysSource = readRepoFile(
+  "apps/desktop/src/provider-api-keys.ts",
+);
+const nativeProviderApiKeysSource = readRepoFile(
+  "apps/desktop/src-tauri/src/provider_api_keys.rs",
+);
+const catalogSource = readRepoFile("packages/ui/src/provider-catalog.ts");
 const coreCliPathSource = readRepoFile("crates/gyro-core/src/cli_path.rs");
 const coreProviderStreamSource = readRepoFile(
   "crates/gyro-core/src/provider_stream.rs",
@@ -4321,7 +4331,12 @@ expect(
 expect(
   appSource.includes("unreadCompletedSessionIds") &&
     appSource.includes('latestMenuBarOutcome.kind === "chat"') &&
-    appSource.includes('activeWorkspaceLayoutRef.current !== "thread"') &&
+    appSource.includes("useUnreadCompletedChats(sessionEventsById)") &&
+    appSource.includes(
+      "markUnreadCompletedChatIfNeeded(latestMenuBarOutcome.targetId",
+    ) &&
+    appSource.includes('activeWorkspaceLayoutRef.current === "thread"') &&
+    appSource.includes("outcomeId: latestMenuBarOutcome.id") &&
     appSource.includes("acknowledgeFinishedChat(sessionId);") &&
     appSource.includes("completedSessionIds={unreadCompletedSessionIds}") &&
     surfaceSource.includes("isUnreadComplete") &&
@@ -5063,10 +5078,8 @@ expect(
   "New CLI should require a project while sidebar project lists contain only chats.",
 );
 expect(
-  styleSource.includes(".gyro-sidebar-mode-row:focus-visible") &&
-    styleSource.includes(
-      ".gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:focus-visible",
-    ) &&
+  styleSource.includes(".gyro-titlebar-switch-option:hover") &&
+    styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes(
       "box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft)",
     ),
@@ -6078,6 +6091,16 @@ expect(
     surfaceSource.includes("XAI_API_KEY") &&
     surfaceSource.includes('provider.authStatus === "connected"') &&
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
+    surfaceSource.includes("function ProviderApiKeyField") &&
+    surfaceSource.includes("Paste API key") &&
+    surfaceSource.includes("Stored securely in macOS Keychain") &&
+    providerApiKeysSource.includes("set_provider_api_key") &&
+    providerApiKeysSource.includes("clear_provider_api_key") &&
+    providerApiKeysSource.includes("provider_api_key_status") &&
+    nativeProviderApiKeysSource.includes("async fn set_provider_api_key") &&
+    nativeProviderApiKeysSource.includes("async fn clear_provider_api_key") &&
+    catalogSource.includes("export function providerSupportsApiKey") &&
+    coreCredentialsSource.includes("pub fn set_stored_provider_api_key") &&
     surfaceSource.includes("onTestProvider?.(provider.id)") &&
     surfaceSource.includes("gyro-settings-provider-actions") &&
     surfaceSource.includes("providerAuthSummary(provider.id)") &&
@@ -6457,6 +6480,9 @@ expect(
   ["/help", "/branch", "/review", "/test", "/diff", "/compact"].every(
     (command) => surfaceSource.includes(`command: "${command}"`),
   ) &&
+    !surfaceSource.includes("available: canCompactContext") &&
+    surfaceSource.indexOf('command: "/help"') <
+      surfaceSource.indexOf('command: "/compact"') &&
     surfaceSource.includes("description: string") &&
     surfaceSource.includes("available?: boolean") &&
     surfaceSource.includes("const availableSlashCommands") &&
@@ -6595,7 +6621,9 @@ expect(
     !appSource.includes(
       'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
     ) &&
-    appSource.includes("const turnGoal = overrideContext?.goal ?? activeSessionGoal") &&
+    appSource.includes(
+      "const turnGoal = overrideContext?.goal ?? activeSessionGoal",
+    ) &&
     appSource.includes('const modeChanged = await changeChatMode("normal")') &&
     appSource.includes("if (!modeChanged)"),
   "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
@@ -6671,10 +6699,8 @@ expect(
     styleSource.includes(".gyro-sidebar-titlebar-drag-region") &&
     styleSource.includes(".gyro-main-titlebar-drag-region") &&
     styleSource.includes(".gyro-chat-empty-drag-region") &&
-    styleSource.includes(".gyro-sidebar-mode-group") &&
-    styleSource.includes(
-      ".gyro-sidebar-persistent-header > .gyro-sidebar-mode-group",
-    ) &&
+    styleSource.includes(".gyro-titlebar-switch") &&
+    styleSource.includes(".gyro-titlebar-switch-option") &&
     styleSource.includes(
       ".gyro-sidebar-persistent-header > .gyro-sidebar-windowbar",
     ) &&
@@ -6933,7 +6959,7 @@ for (const className of [
   "gyro-browser-console-pill",
   "gyro-account-button",
   "gyro-sidebar-windowbar",
-  "gyro-sidebar-mode-group",
+  "gyro-titlebar-switch",
   "gyro-diff-tree-directory",
   "gyro-git-action-strip",
   "gyro-sidebar-section-toggle",
@@ -7066,10 +7092,8 @@ expect(
   surfaceSource.includes(
     'data-active-mode={isIdeSidebar ? "workspace" : "sessions"}',
   ) &&
-    styleSource.includes(
-      '.gyro-sidebar-mode-group[data-active-mode="workspace"]::before',
-    ) &&
-    styleSource.includes(".gyro-sidebar-mode-row > span") &&
+    styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
+    styleSource.includes("justify-content: center") &&
     styleSource.includes("font-weight: 450") &&
     styleSource.includes("font-weight: 500") &&
     styleSource.includes("line-height: 16px") &&

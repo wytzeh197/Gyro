@@ -1,3 +1,4 @@
+mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
 pub(crate) use window_controls::apply_macos_traffic_light_position;
@@ -12626,7 +12627,7 @@ fn usage_refresh_fallback(
 /// cached OIDC token — not on the public inference API. The TUI's
 /// "Weekly limit: 46%" is exactly `creditUsagePercent` from that response.
 fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_with_gui_path("grok");
+    let mut process = command_for_provider("grok", "xai");
     process
         .args([
             "--no-auto-update",
@@ -12680,7 +12681,13 @@ fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, 
             &serde_json::json!({
                 "id": 2,
                 "method": "authenticate",
-                "params": { "methodId": "cached_token" },
+                "params": {
+                    "methodId": if gyro_core::provider_has_api_key("xai") {
+                        "xai.api_key"
+                    } else {
+                        "cached_token"
+                    }
+                },
             }),
         )?;
         let auth = receive_codex_app_server_response(&messages, 2, deadline)?;
@@ -13462,7 +13469,7 @@ fn warn_unrecorded_rate_limits(error: &str) {
 }
 
 fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_with_gui_path("codex");
+    let mut process = command_for_provider("codex", "openai");
     process
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
@@ -14930,14 +14937,14 @@ fn acp_auth_methods(runtime: AcpProviderRuntime) -> Vec<String> {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     if runtime.program == "grok" {
-        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+        let preferred = if gyro_core::provider_has_api_key("xai") {
             "xai.api_key"
         } else {
             "cached_token"
         };
         methods.sort_by_key(|method| usize::from(method != preferred));
     } else if runtime.program == "gemini" {
-        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+        let preferred = if gyro_core::provider_has_api_key("gemini") {
             Some("gemini-api-key")
         } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
             || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
@@ -15319,7 +15326,7 @@ fn run_openai_codex_chat(
         can_resume,
     );
 
-    let mut process = command_with_gui_path("codex");
+    let mut process = command_for_provider("codex", "openai");
     process.current_dir(cwd);
     let args = codex_chat_args(
         resume_cursor.and_then(|cursor| {
@@ -15508,7 +15515,7 @@ fn run_openai_codex_app_server_chat(
         request.mode == ChatMode::Normal,
         can_resume,
     );
-    let mut process = command_with_gui_path("codex");
+    let mut process = command_for_provider("codex", "openai");
     let capability_args = codex_capability_mcp_config_args(app, request)?;
     process
         .current_dir(&cwd)
@@ -16023,7 +16030,7 @@ fn run_openai_codex_context_compaction(
     resume_cursor: &ProviderResumeCursor,
 ) -> anyhow::Result<()> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let mut process = command_with_gui_path("codex");
+    let mut process = command_for_provider("codex", "openai");
     process
         .current_dir(&cwd)
         .args(["app-server", "--stdio"])
@@ -17213,7 +17220,7 @@ fn run_anthropic_claude_chat(
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let mut process = command_with_gui_path("claude");
+    let mut process = command_for_provider("claude", "anthropic");
     process.current_dir(cwd);
     // `--print` exits when the reply ends, and takes native background shells
     // and monitors with it: a dev build started that way died mid-compile and
@@ -21057,6 +21064,12 @@ fn command_with_gui_path(command: &str) -> Command {
     process
 }
 
+fn command_for_provider(command: &str, provider_id: &str) -> Command {
+    let mut process = command_with_gui_path(command);
+    gyro_core::apply_stored_provider_api_key(&mut process, provider_id);
+    process
+}
+
 struct ProviderProcessGuard {
     child: Child,
 }
@@ -24007,6 +24020,9 @@ pub fn run() {
             check_provider_auth,
             check_browser_preview,
             check_provider_health,
+            provider_api_keys::provider_api_key_status,
+            provider_api_keys::set_provider_api_key,
+            provider_api_keys::clear_provider_api_key,
             check_cli_updates_command,
             apply_cli_updates_command,
             system_access::check_system_access,
