@@ -224,8 +224,8 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import {
+  applyProviderChatStreamPresentation,
   applyProviderChatStreamDeltas,
-  applyProviderChatStreamActivity,
   settleOpenProviderActivitiesForTurn,
   isProviderStatusEvent,
   limitSessionEventsForUi,
@@ -1190,12 +1190,20 @@ export function App() {
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
-    () => workspaceFolderPaths(
+    () =>
+      workspaceFolderPaths(
+        activeWorkspaceRoot,
+        workbench.preferences.workspaceFolders,
+        activeWorkspaceRoot
+          ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+              ?.primaryFolder
+          : undefined,
+      ),
+    [
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
-      activeWorkspaceRoot ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]?.primaryFolder : undefined,
-    ),
-    [activeWorkspaceRoot, workbench.preferences.workspaceFolders, workbench.preferences.projectDetails],
+      workbench.preferences.projectDetails,
+    ],
   );
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
@@ -1273,11 +1281,22 @@ export function App() {
     legacyPanel: legacyRailPanel,
     paneId: SOLO_CHAT_PANE_ID,
   });
-  const setCompanionWidth = useCallback((width: number, mode?: ChatCompanionWidthMode) => {
-    const browser = mode === "browser";
-    dispatchCompanion(browser ? { type: "resize-dock", width, mode: "browser" } : { type: "resize-dock", width });
-    dispatchWorkbench(browser ? { type: "set-browser-companion-width", width } : { type: "set-chat-companion-width", width });
-  }, []);
+  const setCompanionWidth = useCallback(
+    (width: number, mode?: ChatCompanionWidthMode) => {
+      const browser = mode === "browser";
+      dispatchCompanion(
+        browser
+          ? { type: "resize-dock", width, mode: "browser" }
+          : { type: "resize-dock", width },
+      );
+      dispatchWorkbench(
+        browser
+          ? { type: "set-browser-companion-width", width }
+          : { type: "set-chat-companion-width", width },
+      );
+    },
+    [],
+  );
   // --- Transient side chats -------------------------------------------------
   // The Side chat tab runs against a session of its own so the model answers
   // with the same workspace, branch, model and permissions as the chat it sits
@@ -2212,7 +2231,9 @@ export function App() {
         }
         sendingSessionIdsRef.current.delete(sessionId);
       }
-      setSendingSessionIds((current) => updateSendingSessions(current, sessionId, isSending));
+      setSendingSessionIds((current) =>
+        updateSendingSessions(current, sessionId, isSending),
+      );
     },
     [],
   );
@@ -3081,9 +3102,12 @@ export function App() {
         }
         return;
       }
-      if (streamEvent.phase === "activity") {
+      if (
+        streamEvent.phase === "context-usage" ||
+        streamEvent.phase === "activity"
+      ) {
         flushProviderStreamBatches();
-        applyProviderChatStreamActivity(
+        applyProviderChatStreamPresentation(
           optimisticEventsRef,
           (value) => setEventsForSession(streamEvent.sessionId, value),
           streamEvent,
@@ -8574,7 +8598,9 @@ export function App() {
     ) => {
       const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
       const attachmentSessionId = target ? target.sessionId : activeSessionId;
-      const attachmentWorkspacePath = target ? target.workspacePath : workspacePath;
+      const attachmentWorkspacePath = target
+        ? target.workspacePath
+        : workspacePath;
       const existing = chatAttachments[attachmentDraftKey] ?? [];
       const remaining = {
         image: Math.max(
@@ -8667,18 +8693,12 @@ export function App() {
     async (mode: ChatMode) => {
       if (!activeSessionId) {
         setPendingNewChatMode(mode);
-        if (mode === "plan" || mode === "council") {
-          setPendingNewChatGoal(undefined);
-        }
         return true;
       }
 
-      const shouldClearGoal =
-        (mode === "plan" || mode === "council") && Boolean(activeSessionGoal);
-      const shouldChangeMode = activeChatMode !== mode;
-      if (!shouldClearGoal && !shouldChangeMode) {
-        return true;
-      }
+      // A goal is the outcome, a mode is how the turn runs: neither cancels
+      // the other. Entering Plan mode used to delete the goal outright.
+      if (activeChatMode === mode) return true;
 
       const modeMessage =
         mode === "plan"
@@ -8690,46 +8710,25 @@ export function App() {
         const now = new Date().toISOString();
         setEvents((current) => [
           ...current,
-          ...(shouldClearGoal
-            ? [
-                createGoalSessionEvent(activeSessionId, "Goal cleared", {
-                  action: "clear",
-                }),
-              ]
-            : []),
-          ...(shouldChangeMode
-            ? [
-                {
-                  id: `chat-mode-${Date.now()}`,
-                  sessionId: activeSessionId,
-                  createdAt: now,
-                  kind: "chat-mode-changed" as const,
-                  message: modeMessage,
-                  payload: { mode },
-                },
-              ]
-            : []),
+          {
+            id: `chat-mode-${Date.now()}`,
+            sessionId: activeSessionId,
+            createdAt: now,
+            kind: "chat-mode-changed" as const,
+            message: modeMessage,
+            payload: { mode },
+          },
         ]);
         return true;
       }
 
       try {
-        if (shouldClearGoal) {
-          await invoke<SessionEvent>("append_chat_context_event", {
-            sessionId: activeSessionId,
-            eventKind: "goal-updated",
-            message: "Goal cleared",
-            payload: { action: "clear" },
-          });
-        }
-        if (shouldChangeMode) {
-          await invoke<SessionEvent>("append_chat_context_event", {
-            sessionId: activeSessionId,
-            eventKind: "chat-mode-changed",
-            message: modeMessage,
-            payload: { mode },
-          });
-        }
+        await invoke<SessionEvent>("append_chat_context_event", {
+          sessionId: activeSessionId,
+          eventKind: "chat-mode-changed",
+          message: modeMessage,
+          payload: { mode },
+        });
         await refreshEvents(activeSessionId);
         return true;
       } catch (error) {
@@ -8737,7 +8736,7 @@ export function App() {
         return false;
       }
     },
-    [activeChatMode, activeSessionGoal, activeSessionId, notify, refreshEvents],
+    [activeChatMode, activeSessionId, notify, refreshEvents],
   );
 
   const handleComposerAction = useCallback(
@@ -9061,11 +9060,9 @@ export function App() {
           startNewChat({ workspacePath: "" });
           break;
         case "add-goal":
+          // Setting an outcome no longer drops the user out of Plan mode.
           dispatchWorkbench({ type: "set-chat-panel" });
           setIsGoalComposerActive(true);
-          if (activeChatMode === "plan") {
-            void changeChatMode("normal");
-          }
           break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
@@ -9084,9 +9081,7 @@ export function App() {
               : action.endsWith("council")
                 ? "council"
                 : "normal";
-            if (mode === "plan" || mode === "council") {
-              setIsGoalComposerActive(false);
-            }
+            // A half-typed goal survives a mode change.
             void changeChatMode(mode);
           }
           break;
@@ -9201,11 +9196,20 @@ export function App() {
           if (!isTauriRuntime()) {
             break;
           }
-          void invoke<ProviderContextCompactionResponse>(
-            "compact_provider_chat",
-            { sessionId: activeSessionId },
-          )
-            .then(() => refreshEvents(activeSessionId))
+          const compactionTurnId = crypto.randomUUID();
+          void invoke<SessionEvent>("append_user_message", {
+            sessionId: activeSessionId,
+            message: "/compact",
+            turnId: compactionTurnId,
+          })
+            .then(async () => {
+              await refreshEvents(activeSessionId);
+              await invoke<ProviderContextCompactionResponse>(
+                "compact_provider_chat",
+                { sessionId: activeSessionId, turnId: compactionTurnId },
+              );
+            })
+            .finally(() => refreshEvents(activeSessionId))
             .catch((error) =>
               notify(
                 "command-failed",
@@ -9465,8 +9469,9 @@ export function App() {
       const turnAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
       const turnMode = overrideContext?.mode ?? activeChatMode;
-      const requestedTurnGoal = overrideContext?.goal ?? activeSessionGoal;
-      const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal;
+      // Every mode carries the goal, Plan included: planning toward a stated
+      // outcome is the case the goal exists for.
+      const turnGoal = overrideContext?.goal ?? activeSessionGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
       const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
       const targetSession = targetSessionId
@@ -12513,7 +12518,9 @@ export function App() {
     createBrowserHostVisibility((command, args) => invoke(command, args)),
   );
   const handleBrowserHostBoundsChange = useCallback(
-    (bounds: { x: number; y: number; width: number; height: number } | null) => {
+    (
+      bounds: { x: number; y: number; width: number; height: number } | null,
+    ) => {
       if (!isTauriRuntime()) return;
       return updateBrowserHostVisibility(
         sessionBrowserKey,
@@ -15557,7 +15564,8 @@ export function App() {
             ? fileReviewTools
             : undefined
         }
-        onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
+        onLoadChangeDiff={loadInlineChangeDiff}
+        onLoadComparisonDiff={loadComparisonDiff}
         onEditQueuedMessage={(messageId) => {
           focusChatPane(pane);
           editQueuedChatMessage(messageId);
@@ -15738,7 +15746,8 @@ export function App() {
       onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
       fileReview={fileReviewTools}
-      onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
+      onLoadChangeDiff={loadInlineChangeDiff}
+      onLoadComparisonDiff={loadComparisonDiff}
       onEditQueuedMessage={editQueuedChatMessage}
       onRemoveQueuedMessage={removeQueuedChatMessage}
       onSteerQueuedMessage={steerQueuedChatMessage}
@@ -15910,7 +15919,8 @@ export function App() {
             workspacePath: path,
             paths: folders,
           });
-          if (path === activeWorkspaceRoot) setSelectedWorkspaceRoot(primaryFolder ?? path);
+          if (path === activeWorkspaceRoot)
+            setSelectedWorkspaceRoot(primaryFolder ?? path);
         },
       }}
       onRemoveProject={requestRemoveProject}
@@ -16114,7 +16124,8 @@ export function App() {
                     }
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                     fileReview={fileReviewTools}
-                    onLoadChangeDiff={loadInlineChangeDiff} onLoadComparisonDiff={loadComparisonDiff}
+                    onLoadChangeDiff={loadInlineChangeDiff}
+                    onLoadComparisonDiff={loadComparisonDiff}
                     onEditQueuedMessage={editQueuedChatMessage}
                     onRemoveQueuedMessage={removeQueuedChatMessage}
                     onSteerQueuedMessage={steerQueuedChatMessage}
@@ -16524,7 +16535,9 @@ export function App() {
           onOpenSystemAccessSettings={(scope: SystemAccessScopeId) =>
             void openSystemAccessSettings(scope)
           }
-          onResetUiState={() => dispatchWorkbench({ type: "reset-ui-preferences" })}
+          onResetUiState={() =>
+            dispatchWorkbench({ type: "reset-ui-preferences" })
+          }
           onSectionChange={(section: SettingsSectionId) =>
             dispatchWorkbench({ type: "set-settings-section", section })
           }

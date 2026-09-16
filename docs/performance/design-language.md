@@ -83,3 +83,32 @@ and resolve the measured cancellation/retry ambiguities. Do not copy the sample
 
 Visual evidence and interaction measurements are in `2026-09-11/`. The measured
 report distinguishes prototype checks from full desktop runtime verification.
+
+## Goal and plan status ramp
+
+The goal states the outcome; the plan describes the route. Completing every step
+does not complete the goal. Changing chat mode preserves both the saved goal and
+a goal draft. Plan mode carries the goal into the planning request.
+
+| State | Label | Mark | Token |
+| --- | --- | --- | --- |
+| Not started | Not started | Open circle | `--gyro-faint` |
+| In progress | Working | Dashed ring; rotation only without reduced motion | `--gyro-status-running` |
+| Complete | Completed | Filled check | `--gyro-status-success` |
+| Blocked | Blocked | Minus in outlined circle | `--gyro-status-failed` |
+| Approval | Awaiting approval | Diamond | `--gyro-status-waiting` |
+
+Dark status colors are tuned for graphite; light values resolve through the light
+blue, success, warning, danger and muted tokens. Plan mode itself is neutral.
+Use `ListChecks` for the plan and `Goal` for the outcome affordance.
+
+`SessionGoalBand` has hero, thread and rail densities. The thread adds a compact
+steps count and an Open plan action; rail density omits the duplicate clock.
+The rail renders the same editable goal above either Document or Steps. Blocking
+is an explicit item action; the normal check cycle stays todo → working → complete.
+Progress labels expose blocked counts to assistive technology as well as a dot.
+
+Use `--gyro-radius-xl` on the goal row, plan artifact and plan decision surface.
+At 620px, goal actions wrap and remain reachable. Reduced motion removes status
+rotation and progress transitions. Verification notes live in
+[`docs/design/goal-and-plan/design-qa.md`](../design/goal-and-plan/design-qa.md).

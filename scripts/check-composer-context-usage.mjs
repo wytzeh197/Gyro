@@ -325,11 +325,10 @@ const merged = composerLimitWindows(
 assert.equal(merged[0].id, "five-hour");
 assert.equal(merged[0].percent, 84);
 assert.equal(merged[0].severity, "warning");
-assert.equal(merged[1].id, "weekly");
-assert.equal(merged[1].percent, undefined);
+assert.equal(merged.length, 1);
 
 // Limits belong to the provider, not the thread: another provider's windows
-// never carry over, so the meter falls back to its own unreported pair.
+// never carry over, and no default pair is invented.
 const crossProvider = composerLimitWindows(
   [
     event("11", "assistant-message", "hi", {
@@ -345,14 +344,10 @@ const crossProvider = composerLimitWindows(
 );
 assert.deepEqual(
   crossProvider.map((window) => [window.id, window.percent, window.status]),
-  [
-    ["five-hour", undefined, "unknown"],
-    ["weekly", undefined, "unknown"],
-  ],
+  [],
 );
 
-// A plan-based provider that has not reported yet still lists both windows,
-// rather than showing a context bar with no limits under it.
+// No account reading means no inferred plan limits.
 const unreported = composerLimitWindows(
   [],
   { providerId: "anthropic" },
@@ -361,14 +356,10 @@ const unreported = composerLimitWindows(
 );
 assert.deepEqual(
   unreported.map((window) => [window.id, window.label, window.percentLabel]),
-  [
-    ["five-hour", "5-hour limit", "—"],
-    ["weekly", "Weekly limit", "—"],
-  ],
+  [],
 );
 
-// A reported window keeps its own label and level; only the missing half is
-// filled in.
+// A weekly-only account must not gain an invented five-hour limit.
 const partial = composerLimitWindows(
   [
     event("12", "assistant-message", "hi", {
@@ -389,11 +380,26 @@ const partial = composerLimitWindows(
 );
 assert.deepEqual(
   partial.map((window) => [window.id, window.label, window.percent]),
-  [
-    ["five-hour", "5-hour limit", undefined],
-    ["weekly", "Weekly · all models", 42],
-  ],
+  [["weekly", "Weekly · all models", 42]],
 );
+
+// Either account limit can exist alone, including a real zero reading.
+for (const providerId of ["openai", "anthropic", "kimi", "xai"]) {
+  for (const [id, label] of [
+    ["weekly", "Weekly window"],
+    ["five-hour", "5-hour limit"],
+  ]) {
+    assert.deepEqual(
+      composerLimitWindows(
+        [],
+        { providerId },
+        [{ id, label, usedPercent: 0 }],
+        now,
+      ).map((window) => [window.id, window.percent]),
+      [[id, 0]],
+    );
+  }
+}
 
 // A provider naming its own allowance is left alone; the standard pair would
 // be limits it never claimed.
@@ -422,15 +428,11 @@ assert.equal(
   0,
 );
 
-// Kimi meters the same pair Claude and Codex do, so it lists them before the
-// first reading arrives rather than a context bar standing in for a plan.
+// Kimi also waits for actual account limits before showing any rows.
 const kimiDefaults = composerLimitWindows([], { providerId: "kimi" }, [], now);
 assert.deepEqual(
   kimiDefaults.map((window) => [window.id, window.label, window.percentLabel]),
-  [
-    ["five-hour", "5-hour limit", "—"],
-    ["weekly", "Weekly limit", "—"],
-  ],
+  [],
 );
 
 // A window Gyro does not model is the provider describing its own allowance,
@@ -492,7 +494,7 @@ const expired = composerLimitWindows(
 );
 assert.deepEqual(
   expired.map((window) => window.percent),
-  [undefined, undefined],
+  [],
 );
 const newWindow = composerLimitWindows(
   separateWindows,
@@ -536,3 +538,105 @@ const recoveredState = providerUsageFromSnapshot({
 });
 assert.equal(recoveredState.error, undefined);
 assert.equal(recoveredState.stale, false);
+// Real stream updates must move the meter before a response is completed.
+const {
+  applyProviderChatStreamContextUsage,
+  applyProviderChatStreamActivity,
+  applyProviderChatStreamDeltas,
+} = await import("../apps/desktop/src/provider-stream-events.ts");
+for (const mode of ["normal", "plan", "goal", "council"]) {
+  const model = {
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+    contextWindowTokens: 100_000,
+  };
+  let live = [{ ...event("live-user", "user-message", "hello"), turnId: mode }];
+  const ref = { current: new Map([["session-1", live]]) };
+  const set = (update) => {
+    live = typeof update === "function" ? update(live) : update;
+  };
+  const frame = {
+    sessionId: "session-1",
+    turnId: mode,
+    providerId: "openai",
+    modelId: model.modelId,
+    eventId: "usage",
+    sequence: 1,
+    phase: "context-usage",
+    contextUsage: {
+      inputTokens: 12_000,
+      outputTokens: 100,
+      totalTokens: 12_100,
+    },
+  };
+  applyProviderChatStreamContextUsage(ref, set, frame);
+  assert.equal(
+    estimateComposerContextUsage(live, "", model).usedTokens,
+    12_100,
+  );
+  applyProviderChatStreamActivity(ref, set, {
+    ...frame,
+    phase: "activity",
+    sequence: 2,
+    activityId: "read",
+    activityLabel: "Read",
+    activityDetail: "x".repeat(400),
+    activityStatus: "done",
+  });
+  assert.ok(estimateComposerContextUsage(live, "", model).usedTokens > 12_100);
+  applyProviderChatStreamDeltas(ref, set, [
+    { ...frame, phase: "delta", sequence: 3, textDelta: "y".repeat(400) },
+  ]);
+  applyProviderChatStreamContextUsage(ref, set, {
+    ...frame,
+    sequence: 4,
+    contextUsage: { inputTokens: 15_000, outputTokens: 100 },
+  });
+  assert.equal(
+    estimateComposerContextUsage(live, "", model).usedTokens,
+    15_100,
+  );
+  // Growing an existing assistant row must count only text after the reading.
+  applyProviderChatStreamDeltas(ref, set, [
+    { ...frame, phase: "delta", sequence: 5, textDelta: "z".repeat(400) },
+  ]);
+  assert.equal(
+    estimateComposerContextUsage(live, "", model).usedTokens,
+    15_200,
+  );
+  assert.equal(
+    live.filter((item) => item.payload?.kind === "provider-context-usage")
+      .length,
+    1,
+  );
+  // Compaction is a replacement reading, not a monotonic billing total.
+  applyProviderChatStreamContextUsage(ref, set, {
+    ...frame,
+    sequence: 6,
+    contextUsage: { inputTokens: 3_000, outputTokens: 0 },
+  });
+  assert.equal(estimateComposerContextUsage(live, "", model).usedTokens, 3_000);
+  live = live.map((item) =>
+    item.kind === "assistant-message"
+      ? {
+          ...item,
+          payload: {
+            kind: "provider-response",
+            contextUsage: { inputTokens: 4_000, outputTokens: 0 },
+          },
+        }
+      : item,
+  );
+  assert.equal(estimateComposerContextUsage(live, "", model).usedTokens, 4_000);
+}
+const toolOnly = [
+  event("tool", "system-event", "Read file", {
+    kind: "provider-activity",
+    detail: "x".repeat(4_000),
+  }),
+];
+assert.ok(
+  estimateComposerContextUsage(toolOnly, "", { providerId: "xai" })
+    .usedTokens >= 1_000,
+);
+console.log("Live context stream checks passed.");

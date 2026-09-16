@@ -85,7 +85,9 @@ mod git_main_comparison;
 mod menu_bar;
 mod reply_segments;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
+mod provider_context;
 mod session_browser;
+use provider_context::*;
 mod source_control_review;
 mod system_access;
 mod terminal_capability;
@@ -1874,31 +1876,6 @@ struct ProviderRunnerOutput {
     streamed_text: Option<StreamedText>,
 }
 
-/// What a turn consumed of the model's context window.
-///
-/// Every count is optional because the provider CLIs disagree about what they
-/// report: Codex and Claude Code both publish token usage, while the ACP agents
-/// publish none. Zero-filling the gap would read downstream as "this turn used
-/// no context" and throw away the composer's own estimate, so an unreported
-/// count stays absent and only the window — which Gyro can always resolve —
-/// is guaranteed to be present.
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProviderContextUsage {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cached_input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    total_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model_context_window: Option<u64>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProviderActivity {
     id: String,
@@ -3585,7 +3562,13 @@ async fn run_provider_chat(
 async fn compact_provider_chat(
     app: tauri::AppHandle,
     session_id: String,
+    turn_id: Option<String>,
 ) -> Result<ProviderContextCompactionResponse, String> {
+    let run_id = turn_id
+        .as_deref()
+        .map(parse_uuid)
+        .transpose()?
+        .unwrap_or_else(Uuid::new_v4);
     {
         let manager = app.state::<ProviderCancellationManager>();
         let mut flags = manager
@@ -3605,7 +3588,7 @@ async fn compact_provider_chat(
     let worker_app = app.clone();
     let worker_session_id = session_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        compact_provider_chat_blocking(worker_app, worker_session_id)
+        compact_provider_chat_blocking(worker_app, worker_session_id, run_id)
     })
     .await
     .map_err(|error| format!("context compaction worker failed: {error}"));
@@ -5482,6 +5465,7 @@ fn run_provider_chat_blocking(
 fn compact_provider_chat_blocking(
     app: tauri::AppHandle,
     session_id: String,
+    run_id: Uuid,
 ) -> Result<ProviderContextCompactionResponse, String> {
     let store = open_store()?;
     let session_uuid = parse_uuid(&session_id)?;
@@ -5491,7 +5475,6 @@ fn compact_provider_chat_blocking(
         .ok_or_else(|| "provider chat session no longer exists".to_string())?;
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
-    let run_id = Uuid::new_v4();
     let mut request = ProviderChatRequest {
         session_id: session_id.clone(),
         message: "/compact".into(),
@@ -14744,6 +14727,7 @@ fn run_ollama_chat(
     );
     let mut response = None;
     let run_result = (|| {
+        let mut turn_usage = OllamaTurnUsage::default();
         for _ in 0..OLLAMA_MAX_TOOL_ROUNDS {
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
@@ -14777,6 +14761,7 @@ fn run_ollama_chat(
                     error
                 }
             })?;
+            turn_usage.observe(turn.input_tokens, turn.output_tokens);
             anyhow::ensure!(
                 !tools.is_empty() || turn.tool_calls.is_empty(),
                 "Ollama returned tool calls although no tools were offered"
@@ -14847,7 +14832,7 @@ fn run_ollama_chat(
                 model_context_window: discovered.context_window_tokens,
                 ..ProviderContextUsage::default()
             }),
-            billed_usage: None,
+            billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
             response: response.content,
             resume_cursor: None,
@@ -15759,6 +15744,7 @@ fn run_openai_codex_app_server_chat(
             match method {
                 "thread/tokenUsage/updated" => {
                     if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                        emit_provider_context_usage(app, request, &usage);
                         context_usage = Some(usage);
                     }
                 }
@@ -18021,7 +18007,10 @@ fn openai_codex_chat_prompt(
              User message:\n{message}"
         );
     }
-    let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
+    // The shared provider context may already carry this exact guide.
+    // Keep one full copy; never shorten it or remove any tool declarations.
+    let guide = browser_knowledge::SIDE_PANEL_GUIDE;
+    let artifact_instruction = if message.contains(guide) { "" } else { guide };
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -18064,7 +18053,10 @@ fn claude_chat_prompt(
             "{title_instruction}{action_instruction}Selected workspace: {workspace}\n\nUser message:\n{message}"
         );
     }
-    let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
+    // The shared provider context may already carry this exact guide.
+    // Keep one full copy; never shorten it or remove any tool declarations.
+    let guide = browser_knowledge::SIDE_PANEL_GUIDE;
+    let artifact_instruction = if message.contains(guide) { "" } else { guide };
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -18122,6 +18114,7 @@ fn completed_response_has_chat_artifact(response: &str) -> bool {
 
 fn valid_chat_artifact(value: &serde_json::Value) -> bool {
     const ALLOWED_KINDS: &[&str] = &[
+        "canvas",
         "decision",
         "command",
         "completion",
@@ -18154,6 +18147,10 @@ fn valid_chat_artifact(value: &serde_json::Value) -> bool {
         return false;
     }
     match kind {
+        "canvas" => {
+            bounded_string("content", 12_000).is_some()
+                && matches!(bounded_string("format", 12), Some("text" | "code"))
+        }
         "decision" => value
             .get("options")
             .and_then(serde_json::Value::as_array)
@@ -19895,6 +19892,22 @@ fn handle_provider_stdout_line(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return;
     };
+    let previous_usage = stream_state.context_usage.clone();
+    handle_provider_stdout_value(&value, app, request, stream_state);
+    // Publish after the frame's text/tools so the UI checkpoint includes them.
+    if stream_state.context_usage != previous_usage {
+        if let Some(usage) = &stream_state.context_usage {
+            emit_provider_context_usage(app, request, usage);
+        }
+    }
+}
+
+fn handle_provider_stdout_value(
+    value: &serde_json::Value,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    stream_state: &mut StreamingCommandState,
+) {
     stream_state.parsed_stream_json = true;
     if value.get("type").and_then(serde_json::Value::as_str) == Some("system")
         && value.get("subtype").and_then(serde_json::Value::as_str) == Some("init")
@@ -19902,28 +19915,28 @@ fn handle_provider_stdout_line(
         timing::mark(TimingStage::ProtocolReady);
     }
     if stream_state.provider_session_id.is_none() {
-        stream_state.provider_session_id = extract_provider_session_id(&value);
+        stream_state.provider_session_id = extract_provider_session_id(value);
     }
-    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value) {
+    if let Some(context_usage) = provider_context_usage_from_codex_exec(value) {
         // Codex reports the turn's running total, so the newest reading is both
         // what the window holds and what the turn billed.
         stream_state.billed_usage = Some(context_usage.clone());
         stream_state.context_usage = Some(context_usage);
         stream_state.context_usage_is_per_request = false;
-    } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(&value) {
+    } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(value) {
         stream_state.apply_claude_context_usage(frame, context_usage);
     }
     enforce_call_token_ceiling(app, request, stream_state);
-    if let Some(rate_limit) = provider_rate_limit_from_claude_stream(&value) {
+    if let Some(rate_limit) = provider_rate_limit_from_claude_stream(value) {
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
     }
-    if provider_stream_opens_text_content_block(&value) {
+    if provider_stream_opens_text_content_block(value) {
         // A new block means the previous one closed, so a title marker that
         // ended it without a newline is complete.
         publish_streamed_session_title(app, request, &stream_state.assistant_text, true);
         stream_state.note_new_text_content_block();
     }
-    if let Some(commentary) = extract_provider_commentary_activity(&value) {
+    if let Some(commentary) = extract_provider_commentary_activity(value) {
         if let Some(activity) = stream_state.push_activity(commentary) {
             let activity_sequence = stream_state.activity_sequence(&activity);
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
@@ -19933,7 +19946,7 @@ fn handle_provider_stdout_line(
         stream_state.note_intervening_work();
         return;
     }
-    let activities = extract_provider_activities(&value);
+    let activities = extract_provider_activities(value);
     let observed_files = stream_state.observe_command_file_changes(
         &value,
         &activities,
@@ -19958,7 +19971,7 @@ fn handle_provider_stdout_line(
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
         }
     }
-    if let Some(chunk) = extract_provider_text_chunk(&value) {
+    if let Some(chunk) = extract_provider_text_chunk(value) {
         match chunk {
             ProviderTextChunk::Delta(delta) => {
                 let delta = sanitize_provider_text_delta(&delta);
@@ -20021,125 +20034,6 @@ fn separate_streamed_text_block(existing: &str, delta: &str) -> Option<String> {
         return None;
     }
     Some(format!("\n\n{delta}"))
-}
-
-fn provider_context_usage_from_app_server(
-    params: &serde_json::Value,
-) -> Option<ProviderContextUsage> {
-    let token_usage = params.get("tokenUsage")?;
-    let last = token_usage.get("last")?;
-    Some(ProviderContextUsage {
-        input_tokens: Some(last.get("inputTokens")?.as_u64()?),
-        cached_input_tokens: last
-            .get("cachedInputTokens")
-            .and_then(serde_json::Value::as_u64),
-        output_tokens: last.get("outputTokens").and_then(serde_json::Value::as_u64),
-        reasoning_output_tokens: last
-            .get("reasoningOutputTokens")
-            .and_then(serde_json::Value::as_u64),
-        total_tokens: last.get("totalTokens").and_then(serde_json::Value::as_u64),
-        model_context_window: token_usage
-            .get("modelContextWindow")
-            .and_then(serde_json::Value::as_u64),
-    })
-}
-
-fn provider_context_usage_from_codex_exec(
-    value: &serde_json::Value,
-) -> Option<ProviderContextUsage> {
-    if value.get("type").and_then(serde_json::Value::as_str) != Some("turn.completed") {
-        return None;
-    }
-    let usage = value.get("usage")?;
-    Some(ProviderContextUsage {
-        input_tokens: Some(usage.get("input_tokens")?.as_u64()?),
-        cached_input_tokens: usage
-            .get("cached_input_tokens")
-            .and_then(serde_json::Value::as_u64),
-        output_tokens: usage
-            .get("output_tokens")
-            .and_then(serde_json::Value::as_u64),
-        reasoning_output_tokens: usage
-            .get("reasoning_output_tokens")
-            .and_then(serde_json::Value::as_u64),
-        total_tokens: usage
-            .get("total_tokens")
-            .and_then(serde_json::Value::as_u64),
-        model_context_window: usage
-            .get("model_context_window")
-            .or_else(|| value.get("model_context_window"))
-            .and_then(serde_json::Value::as_u64),
-    })
-}
-
-/// What a Claude Code usage frame is counting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeUsageFrame {
-    /// One request, so the counts describe what the window holds.
-    Request,
-    /// Every request in the turn added together.
-    Turn,
-}
-
-/// Read a turn's token usage out of Claude Code's `stream-json` output.
-///
-/// Claude Code reports the request's cached tokens separately from the tokens
-/// it actually sent, so `input_tokens` alone describes a few hundred tokens of
-/// a conversation holding hundreds of thousands. What occupies the window is
-/// the sum of the fresh input and both cache buckets, and that sum is what the
-/// composer meter needs.
-///
-/// Each `assistant` frame reports the one request that produced it, so its
-/// counts are the conversation as the model saw it. The closing `result` frame
-/// instead sums every request the turn made — a turn that ran ten tools bills
-/// the re-sent conversation ten times over, which read as 1.18M tokens against
-/// a 200K window. Only its `modelUsage` window is worth keeping.
-fn provider_context_usage_from_claude_stream(
-    value: &serde_json::Value,
-) -> Option<(ClaudeUsageFrame, ProviderContextUsage)> {
-    let frame_type = value.get("type").and_then(serde_json::Value::as_str)?;
-    let (frame, usage) = match frame_type {
-        "result" => (ClaudeUsageFrame::Turn, value.get("usage")?),
-        "assistant" => (
-            ClaudeUsageFrame::Request,
-            value.get("message")?.get("usage")?,
-        ),
-        _ => return None,
-    };
-    let field = |key: &str| usage.get(key).and_then(serde_json::Value::as_u64);
-    let fresh_input = field("input_tokens")?;
-    let cache_creation = field("cache_creation_input_tokens").unwrap_or_default();
-    let cache_read = field("cache_read_input_tokens").unwrap_or_default();
-    let input_tokens = fresh_input + cache_creation + cache_read;
-    let output_tokens = field("output_tokens").unwrap_or_default();
-    Some((
-        frame,
-        ProviderContextUsage {
-            input_tokens: Some(input_tokens),
-            cached_input_tokens: Some(cache_creation + cache_read),
-            output_tokens: Some(output_tokens),
-            reasoning_output_tokens: None,
-            total_tokens: Some(input_tokens + output_tokens),
-            model_context_window: claude_stream_context_window(value),
-        },
-    ))
-}
-
-/// The context window Claude Code attributes to the model it just ran.
-///
-/// Only the `result` frame carries `modelUsage`, and it is keyed by model id,
-/// so the window is read from whichever entry reports one rather than by
-/// matching a name Gyro would have to keep in step with the CLI's aliases.
-fn claude_stream_context_window(value: &serde_json::Value) -> Option<u64> {
-    value
-        .get("modelUsage")?
-        .as_object()?
-        .values()
-        .find_map(|entry| {
-            entry
-                .get("contextWindow")
-                .and_then(serde_json::Value::as_u64)
-        })
 }
 
 /// Read a plan limit out of Claude Code's `rate_limit_event` frame.
@@ -20266,82 +20160,6 @@ fn merge_provider_rate_limit(
 ///
 /// Keep in step with `providerCatalog` in `packages/ui/src/provider-catalog.ts`;
 /// `check-workbench-ui` asserts the two agree.
-fn provider_model_context_window(provider_id: &str, model_id: Option<&str>) -> Option<u64> {
-    let model_id = model_id.map(str::trim).unwrap_or_default();
-    let window = match provider_id {
-        "openai" => match model_id {
-            "gpt-6-astra" => 272_000,
-            "gpt-5.4-mini" => 400_000,
-            _ => 1_050_000,
-        },
-        "anthropic" => match model_id {
-            "claude-haiku-4-5" => 200_000,
-            _ => 1_000_000,
-        },
-        "kimi" => 1_000_000,
-        "gemini" => 1_000_000,
-        "xai" => match model_id {
-            "grok-4.6" | "" => 500_000,
-            _ => 131_072,
-        },
-        _ => return None,
-    };
-    Some(window)
-}
-
-/// Whether a usage record claims more of the window than the window holds.
-///
-/// The composer reads these counts as "what the conversation occupies", which
-/// a run cannot push past the window itself.
-fn exceeds_context_window(usage: &ProviderContextUsage) -> bool {
-    let Some(window) = usage.model_context_window.filter(|window| *window > 0) else {
-        return false;
-    };
-    let occupied = usage
-        .total_tokens
-        .unwrap_or_default()
-        .max(usage.input_tokens.unwrap_or_default() + usage.output_tokens.unwrap_or_default());
-    occupied > window
-}
-
-/// Guarantee a turn's usage record carries a context window.
-///
-/// The composer meter reports "used of window". A provider that reports usage
-/// without a window, or reports nothing at all, would otherwise be measured
-/// against a hardcoded default, so the window is filled in from Gyro's own
-/// catalog and a provider with no usage at all still emits a window-only
-/// record. The absent counts are what tell the composer to keep estimating.
-fn provider_context_usage_with_window(
-    reported: Option<ProviderContextUsage>,
-    provider_id: &str,
-    model_id: Option<&str>,
-) -> Option<ProviderContextUsage> {
-    let catalog_window = provider_model_context_window(provider_id, model_id);
-    match reported {
-        Some(mut usage) => {
-            if usage.model_context_window.is_none() {
-                usage.model_context_window = catalog_window;
-            }
-            if exceeds_context_window(&usage) {
-                // No conversation can occupy more of the window than it holds,
-                // so a reading this large is a billing total the CLI summed
-                // over the turn — `codex exec` reports only that shape. Keeping
-                // the window and dropping the counts leaves the composer on its
-                // own estimate instead of "1.18M of 200K".
-                usage = ProviderContextUsage {
-                    model_context_window: usage.model_context_window,
-                    ..ProviderContextUsage::default()
-                };
-            }
-            Some(usage)
-        }
-        None => catalog_window.map(|window| ProviderContextUsage {
-            model_context_window: Some(window),
-            ..ProviderContextUsage::default()
-        }),
-    }
-}
-
 fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
     let text = extract_codex_agent_message_text(value)?;
     // A stray control marker is removed rather than dropping the note: a later
@@ -20860,6 +20678,31 @@ fn emit_provider_chat_event(
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
 
+fn emit_provider_context_usage(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    usage: &ProviderContextUsage,
+) {
+    let usage = provider_context_usage_with_window(
+        Some(usage.clone()),
+        &request.provider_id,
+        request.model_id.as_deref(),
+    );
+    let _ = app.emit(
+        PROVIDER_CHAT_EVENT,
+        serde_json::json!({
+            "sessionId": request.session_id,
+            "turnId": request.turn_id,
+            "providerId": request.provider_id,
+            "modelId": request.model_id,
+            "eventId": Uuid::new_v4().to_string(),
+            "sequence": next_provider_event_sequence(app, &request.session_id),
+            "phase": "context-usage",
+            "contextUsage": usage,
+        }),
+    );
+}
+
 fn emit_provider_activity_event(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -21156,7 +20999,13 @@ const HISTORY_OLDER_CHARS: usize = 400;
 fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
     let store = open_store().ok()?;
-    let events = store.read_recent_events(session_uuid, 40).ok()?;
+    // Scan the existing bounded event window before selecting conversation.
+    // Tool activity must not consume the 40-message history allowance.
+    let events = store.read_events(session_uuid).ok()?;
+    conversation_history_from_events(events)
+}
+
+fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
     let mut lines = Vec::new();
     for event in events {
         let role = match event.kind {
@@ -21175,6 +21024,9 @@ fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String>
     // spend one of the full-length slots on text the prompt already carries.
     if lines.last().is_some_and(|(role, _)| *role == "User") {
         lines.pop();
+    }
+    if lines.len() > 40 {
+        lines.drain(..lines.len() - 40);
     }
     // Clip from the far end: the tail is the thread being continued, the head
     // is background.
@@ -25524,6 +25376,22 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_turn_is_told_the_goal_it_is_planning_toward() {
+        // Plan mode used to clear the goal before the turn was built, so the
+        // one turn whose whole job is reaching the outcome never heard it.
+        let mut request = anthropic_provider_request();
+        request.mode = ChatMode::Plan;
+        request.goal = Some(SessionGoalContext {
+            text: "Ship the plan rail".into(),
+            status: "active".into(),
+        });
+
+        let planning = provider_context_message(&request);
+        assert!(planning.contains("Plan mode is read-only."));
+        assert!(planning.contains("Active Gyro session goal: Ship the plan rail"));
+    }
+
+    #[test]
     fn goal_marker_is_captured_and_never_shown_in_the_bubble() {
         let stripped = strip_hidden_control_markers(
             "GYRO_GOAL_UPDATE: {\"status\":\"complete\"}\n\nThe rail is shipped.",
@@ -27217,6 +27085,82 @@ while True:
             "You may edit files, run commands, and complete requested workspace changes directly."
         ));
         assert!(!full_access_prompt.contains("Do not edit files"));
+    }
+
+    #[test]
+    fn ollama_turn_usage_counts_tool_rounds_without_fabricating_missing_counts() {
+        let mut usage = OllamaTurnUsage::default();
+        assert!(usage.measured().is_none());
+        usage.observe(Some(100), Some(20));
+        usage.observe(Some(180), Some(30));
+        let measured = usage.measured().unwrap();
+        assert_eq!(measured.input_tokens, Some(280));
+        assert_eq!(measured.output_tokens, Some(50));
+        assert_eq!(measured.total_tokens, Some(330));
+        usage.observe(None, Some(10));
+        assert!(usage.measured().is_none());
+        usage.observe(Some(0), Some(0));
+        assert!(usage.measured().is_none());
+    }
+
+    #[test]
+    fn handoff_history_keeps_messages_despite_tool_activity() {
+        let session = Uuid::new_v4();
+        let event =
+            |kind, text: &str| SessionEvent::new(session, kind, text, serde_json::json!({}));
+        let mut events = vec![
+            event(SessionEventKind::UserMessage, "Keep all tools available"),
+            event(SessionEventKind::AssistantMessage, "Understood"),
+        ];
+        for _ in 0..100 {
+            events.push(event(SessionEventKind::SystemEvent, "tool activity"));
+        }
+        events.push(event(SessionEventKind::UserMessage, "Current request"));
+        let history = conversation_history_from_events(events).unwrap();
+        assert!(history.contains("Keep all tools available"));
+        assert!(history.contains("Understood"));
+        assert!(!history.contains("tool activity"));
+        assert!(!history.contains("Current request"));
+    }
+
+    #[test]
+    fn handoff_history_keeps_its_message_and_character_limits() {
+        let session = Uuid::new_v4();
+        let events = (0..45)
+            .map(|index| {
+                SessionEvent::new(
+                    session,
+                    SessionEventKind::AssistantMessage,
+                    format!("message-{index:02} {}", "x".repeat(3_000)),
+                    serde_json::json!({}),
+                )
+            })
+            .collect();
+        let history = conversation_history_from_events(events).unwrap();
+        let messages: Vec<_> = history.split("\n\n").collect();
+        assert_eq!(messages.len(), 40);
+        assert!(messages[0].starts_with("Assistant: message-05"));
+        assert!(messages[39].starts_with("Assistant: message-44"));
+        assert!(messages[0].chars().count() < 450);
+        assert!(messages[39].chars().count() > 2_000);
+        assert!(messages[39].chars().count() < 2_050);
+    }
+
+    #[test]
+    fn opening_prompts_include_one_complete_side_panel_guide() {
+        let request = anthropic_provider_request();
+        let context = provider_context_message_for_turn(&request, None, PromptTurn::default());
+        let guide = browser_knowledge::SIDE_PANEL_GUIDE;
+        assert_eq!(context.matches(guide).count(), 1);
+        let codex = openai_codex_chat_prompt(&context, None, None, true, true, false);
+        let claude = claude_chat_prompt(&context, None, true, true, false);
+        for prompt in [&codex, &claude] {
+            assert_eq!(prompt.matches(guide).count(), 1);
+            assert!(prompt.contains(&context));
+            assert!(prompt.contains("GYRO_SESSION_TITLE:"));
+        }
+        assert!(openai_codex_chat_prompt("hello", None, None, true, true, false).contains(guide));
+        assert!(claude_chat_prompt("hello", None, true, true, false).contains(guide));
     }
 
     #[test]
@@ -29756,6 +29700,26 @@ while True:
         );
         assert!(extracted.items.is_empty());
         assert_eq!(extracted.message, "Visible response.");
+    }
+
+    #[test]
+    fn chat_artifact_canvas_preserves_content_and_rejects_invalid_formats() {
+        let artifact = serde_json::json!({"id":"draft", "kind":"canvas", "title":"Draft", "format":"code", "content":"  const n = 1;\n"});
+        assert!(valid_chat_artifact(&artifact));
+        let response = format!("GYRO_ARTIFACTS: {{\"items\":[{artifact}]}}\nReady.");
+        let extracted = extract_chat_artifact_marker(&response);
+        assert_eq!(extracted.items[0]["content"], "  const n = 1;\n");
+        assert_eq!(extracted.message.trim(), "Ready.");
+        for format in ["html", "javascript", ""] {
+            let mut invalid = artifact.clone();
+            invalid["format"] = serde_json::json!(format);
+            assert!(!valid_chat_artifact(&invalid));
+        }
+        for content in [" ".to_string(), "x".repeat(12_001)] {
+            let mut invalid = artifact.clone();
+            invalid["content"] = serde_json::json!(content);
+            assert!(!valid_chat_artifact(&invalid));
+        }
     }
 
     #[test]

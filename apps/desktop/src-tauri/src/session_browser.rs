@@ -571,6 +571,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (tag === "input" || tag === "textarea" || tag === "select") {{
       node.value = isCredentialField(el) ? "[redacted-credential]" : String(el.value || "").slice(0, 120);
     }}
+    // Retain the existing traversal budget: deduplication must not hide more of the page.
     budget.left -= 64;
     if (depth >= maxDepth) return node;
     const children = el.childNodes;
@@ -579,6 +580,12 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       if (child) node.children.push(child);
     }}
     if (node.children.length === 0) delete node.children;
+    // Expanded layout wrappers repeat all descendant text as their name.
+    // Keep labels and leaf summaries, but send that prose only once.
+    if (node.children && ["body", "div", "section", "main", "article", "nav", "header", "footer", "aside"].includes(tag)
+        && !el.getAttribute("aria-label") && !el.getAttribute("title")) delete node.name;
+    if (node.children && node.children.length === 1 && node.children[0].type === "text"
+        && node.children[0].text === node.name) delete node.children;
     if (!node.name) delete node.name;
     return node;
   }};

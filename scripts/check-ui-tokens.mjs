@@ -55,6 +55,25 @@ expect(
   "Monaco must ship matching dark and light Gyro themes.",
 );
 
+// --gyro-warning was never defined, so five call sites silently rendered a
+// hardcoded amber that never responded to the light theme. The real token is
+// --gyro-warn; keep the typo unrepresentable.
+expect(
+  !styles.includes("--gyro-warning"),
+  "Agent-state amber is --gyro-warn. --gyro-warning is undefined and has no light-theme value.",
+);
+
+const lightThemeBlock = styles.match(
+  /:root\[data-theme="light"\]\s*\{[\s\S]*?\n\}/,
+)?.[0];
+expect(
+  Boolean(lightThemeBlock) &&
+    ["running", "waiting", "success", "warning", "failed"].every((state) =>
+      lightThemeBlock.includes(`--gyro-status-${state}:`),
+    ),
+  "Every agent state that carries meaning needs a light-theme value; the dark ramp drops to roughly 2:1 on white.",
+);
+
 const allowedGradient = [
   /transparent,\s*rgba\(0,\s*0,\s*0/,
   /transparent,\s*var\(--gyro-surface-raised\)/,
@@ -79,9 +98,17 @@ for (const { line, n } of gradientLines) {
   // The maximum-effort slider uses a distinct fill as a state indicator.
   // Keep this exception confined to its fill and track, not general surfaces.
   const rulePrefix = styles.slice(0, styleLines.slice(0, n).join("\n").length);
-  const selector = rulePrefix.slice(rulePrefix.lastIndexOf("}") + 1).split("{")[0].trim();
-  const isMaxEffortIndicator = /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(selector);
-  const allowed = isMaxEffortIndicator || allowedGradient.some((pattern) => pattern.test(window));
+  const selector = rulePrefix
+    .slice(rulePrefix.lastIndexOf("}") + 1)
+    .split("{")[0]
+    .trim();
+  const isMaxEffortIndicator =
+    /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
+      selector,
+    );
+  const allowed =
+    isMaxEffortIndicator ||
+    allowedGradient.some((pattern) => pattern.test(window));
   expect(
     allowed,
     `Decorative gradient at packages/ui/src/styles.css:${n} is not on the content allowlist: ${line.trim()}`,

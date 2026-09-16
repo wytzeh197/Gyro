@@ -13,10 +13,11 @@ import type { ChatSidePanelId } from "./types.ts";
  */
 export type ChatCompanionTabId = Extract<
   ChatSidePanelId,
-  "review" | "terminal" | "browser" | "files" | "side-chat"
+  "review" | "terminal" | "browser" | "files" | "side-chat" | "canvas"
 >;
 
 export const chatCompanionTabIds: ChatCompanionTabId[] = [
+  "canvas",
   "review",
   "terminal",
   "browser",
@@ -25,6 +26,7 @@ export const chatCompanionTabIds: ChatCompanionTabId[] = [
 ];
 
 export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
+  canvas: "Canvas",
   review: "Review",
   terminal: "Terminal",
   browser: "Browser",
@@ -88,14 +90,14 @@ export function clampChatPanelWidth(width: number, available?: number) {
 export const CHAT_COMPANION_MIN_WIDTH = 320;
 export const CHAT_COMPANION_MAX_WIDTH = 720;
 export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
-/** Browser focus follows Codex's split: a readable conversation beside a broad page. */
+/** Leave room to read the conversation while inspecting the page. */
 export const BROWSER_COMPANION_MIN_WIDTH = 440;
 export const BROWSER_COMPANION_MAX_WIDTH = 1_040;
-export const BROWSER_COMPANION_DEFAULT_WIDTH = 860;
+export const BROWSER_COMPANION_DEFAULT_WIDTH = 720;
 /** One deliberate keyboard nudge, large enough to be useful without jumping. */
 export const CHAT_COMPANION_KEYBOARD_STEP = 24;
 const CHAT_TRANSCRIPT_MIN_WIDTH = 480;
-const BROWSER_TRANSCRIPT_MIN_WIDTH = 360;
+const BROWSER_TRANSCRIPT_MIN_WIDTH = 480;
 
 /**
  * Below this the dock would leave the transcript unreadable, so a pane narrower

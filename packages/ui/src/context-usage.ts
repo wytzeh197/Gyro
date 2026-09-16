@@ -69,7 +69,13 @@ function eventPayload(event: SessionEvent) {
   return recordFromUnknown(event.payload);
 }
 
-function estimatedEventCharacters(event: SessionEvent) {
+export function estimatedEventCharacters(event: SessionEvent) {
+  const payload = eventPayload(event);
+  if (event.kind === "system-event" && payload?.kind === "provider-activity") {
+    return [event.message, payload.detail, payload.note]
+      .filter((value): value is string => typeof value === "string")
+      .join("\n").length;
+  }
   return event.kind === "session-created" ||
     event.kind === "system-event" ||
     event.kind === "chat-mode-changed" ||
@@ -169,6 +175,18 @@ export function estimateComposerContextUsage(
     const payload = eventPayload(event);
     const usage = recordFromUnknown(payload?.contextUsage);
     if (!usage) continue;
+    // A completed response replaces the live checkpoint even when its streamed
+    // assistant row has retained an earlier position in the event array.
+    if (
+      payload?.kind === "provider-context-usage" &&
+      events.some(
+        (item) =>
+          item.turnId === event.turnId &&
+          item.sessionId === event.sessionId &&
+          eventPayload(item)?.kind === "provider-response",
+      )
+    )
+      continue;
 
     const eventModelId = stringValue(payload, "modelId");
     const matchesModel =
@@ -211,15 +229,31 @@ export function estimateComposerContextUsage(
     model,
   );
 
+  const checkpoint =
+    reportedEventIndex >= 0
+      ? recordFromUnknown(
+          eventPayload(events[reportedEventIndex]!)?.contextCharacterBaseline,
+        )
+      : undefined;
   let estimatedCharacters = draft.length;
   for (
-    let index = reportedEventIndex >= 0 ? reportedEventIndex + 1 : 0;
+    let index = checkpoint
+      ? 0
+      : reportedEventIndex >= 0
+        ? reportedEventIndex + 1
+        : 0;
     index < events.length;
     index += 1
   ) {
     const event = events[index];
     if (event) {
-      estimatedCharacters += estimatedEventCharacters(event);
+      const previous = checkpoint
+        ? (finiteNumber(checkpoint, event.id) ?? 0)
+        : 0;
+      estimatedCharacters += Math.max(
+        0,
+        estimatedEventCharacters(event) - previous,
+      );
     }
   }
   const liveEstimatedTokens = estimateTokens(estimatedCharacters);
@@ -244,7 +278,7 @@ export function estimateComposerContextUsage(
       ? `Measured on the last turn, which ran on ${reportedModelId}; the thread carries the same content into this model.`
       : liveEstimatedTokens > 0
         ? "Provider-reported usage plus an estimate for newer thread content and this draft."
-        : "Reported by the provider for the latest completed turn on this model."
+        : "Latest context usage reported by the provider."
     : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
   return finishComposerContextUsage({
@@ -323,37 +357,6 @@ function finishComposerContextUsage({
 }
 
 const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
-
-/**
- * Providers whose accounts actually meter plan windows we can surface.
- *
- * OpenAI/Claude/Kimi: 5h + weekly. xAI/Grok Build: weekly credit window only.
- * Gemini: no plan-window API — local ledger only.
- */
-const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>([
-  "anthropic",
-  "kimi",
-  "openai",
-  "xai",
-]);
-
-/**
- * Default empty plan rows before the first poll, per provider shape.
- *
- * Listed from the start so a fresh session does not look like “no limits”
- * before the first reading arrives.
- */
-function defaultPlanLimitWindows(
-  providerId: ProviderId | undefined,
-): ProviderUsageWindow[] {
-  if (providerId === "xai") {
-    return [{ id: "weekly", label: "Weekly limit" }];
-  }
-  return [
-    { id: "five-hour", label: "5-hour limit" },
-    { id: "weekly", label: "Weekly limit" },
-  ];
-}
 
 /**
  * When a window resets, phrased the way a limit is actually read.
@@ -515,23 +518,8 @@ export function composerLimitWindows(
     if (window.resetsAt && Date.parse(window.resetsAt) <= now) byId.delete(id);
   }
 
-  // A provider that names windows Gyro does not model is describing its own
-  // allowance, and padding it with the standard pair would invent limits it
-  // never claimed. Only a provider still speaking the standard vocabulary gets
-  // the missing halves filled in.
-  const speaksDefaultWindows = [...byId.keys()].every((id) =>
-    LIMIT_WINDOW_ORDER.includes(id),
-  );
-  if (
-    model.providerId &&
-    PLAN_LIMIT_PROVIDERS.has(model.providerId) &&
-    speaksDefaultWindows
-  ) {
-    for (const window of defaultPlanLimitWindows(model.providerId)) {
-      if (!byId.has(window.id)) byId.set(window.id, window);
-    }
-  }
-
+  // Only show allowances actually reported for this account. Provider identity
+  // alone does not establish which plan windows a user has.
   return [...byId.values()]
     .sort((left, right) => {
       const leftRank = LIMIT_WINDOW_ORDER.indexOf(left.id);
