@@ -20,6 +20,8 @@ const MAX_COLUMNS = 12;
 const MAX_ROWS = 100;
 
 export type ChatArtifactActions = {
+  onOpenCanvas?: (id: string) => void;
+  onOpenPreview?: (url?: string) => void;
   onOpenFiles?: () => void;
   onOpenTool?: (tool: WorkbenchPaneTab) => void;
   onOpenExternalPreview?: (url?: string) => void;
@@ -105,19 +107,25 @@ function ChatArtifactCard({
       {isExpanded ? (
         <div className="gyro-chat-artifact-body">
           <ChatArtifactContent actions={actions} artifact={artifact} />
+          {actions?.onOpenCanvas && ["canvas", "table", "diagram"].includes(artifact.kind) ? (
+            <ArtifactFooterAction label="Open in Canvas" onClick={() => actions.onOpenCanvas?.(artifact.id)} />
+          ) : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function ChatArtifactContent({
+export function ChatArtifactContent({
   actions,
   artifact,
 }: {
   actions?: ChatArtifactActions;
   artifact: ChatArtifact;
 }) {
+  if (artifact.kind === "canvas") {
+    return <pre className={`gyro-canvas-document is-${artifact.format}`}>{artifact.content}</pre>;
+  }
   if (artifact.kind === "decision") {
     return (
       <>
@@ -261,7 +269,7 @@ function ChatArtifactContent({
       <div className="gyro-chat-artifact-preview">
         <button
           className="gyro-chat-artifact-preview-card"
-          onClick={() => actions?.onOpenTool?.("browser")}
+          onClick={() => actions?.onOpenPreview ? actions.onOpenPreview(artifact.url) : actions?.onOpenTool?.("browser")}
           type="button"
         >
           <span className="gyro-chat-artifact-preview-media">
@@ -286,7 +294,7 @@ function ChatArtifactContent({
         </button>
         <div className="gyro-chat-artifact-footer-actions">
           <button
-            onClick={() => actions?.onOpenTool?.("browser")}
+            onClick={() => actions?.onOpenPreview ? actions.onOpenPreview(artifact.url) : actions?.onOpenTool?.("browser")}
             type="button"
           >
             Open in panel
@@ -422,6 +430,13 @@ function normalizeChatArtifact(value: unknown): ChatArtifact | undefined {
   const kind = stringValue(item?.kind);
   if (!id || !title || !kind) return undefined;
   const status = artifactStatus(item?.status);
+  if (kind === "canvas") {
+    const content = typeof item?.content === "string" ? item.content : "";
+    const format = item?.format;
+    return content.trim() && [...content].length <= 12000 && (format === "text" || format === "code")
+      ? { id, kind, title, status, content, format }
+      : undefined;
+  }
   if (kind === "decision") {
     const options = arrayValue(item?.options)
       .slice(0, 5)
@@ -577,6 +592,7 @@ function artifactIcon(kind: ChatArtifact["kind"]) {
   if (kind === "command") return <Terminal {...props} />;
   if (kind === "completion") return <Check {...props} />;
   if (kind === "workspace") return <FileText {...props} />;
+  if (kind === "canvas") return <FileText {...props} />;
   if (kind === "preview") return <Globe2 {...props} />;
   if (kind === "table") return <Table2 {...props} />;
   if (kind === "diagram") return <Network {...props} />;

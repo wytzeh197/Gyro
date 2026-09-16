@@ -105,16 +105,34 @@ function expect(condition, message) {
   before.preferences.workspaceKeybindings = { "workspace.open": null };
   before.preferences.missionSessionIds = ["active-mission"];
   const after = workbenchReducer(before, { type: "reset-ui-preferences" });
-  expect(after.preferences.mainColor === "#0874df", "UI reset restores the default palette.");
-  expect(after.terminalPanes === before.terminalPanes && after.ide === before.ide && after.providerSessions === before.providerSessions && after.tasks === before.tasks,
-    "UI reset preserves open terminal panes, editor state, provider sessions, and tasks.");
-  expect(after.preferences.workspaceTrust === before.preferences.workspaceTrust &&
-    after.preferences.workspaceKeybindings === before.preferences.workspaceKeybindings &&
-    after.preferences.missionSessionIds === before.preferences.missionSessionIds,
-    "UI reset preserves workspace trust, keyboard overrides, and mission ownership.");
-  const cleared = workbenchReducer(before, { type: "set-workspace-keybinding", commandId: "terminal.split", keybinding: null });
-  expect(cleared.preferences.workspaceKeybindings["terminal.split"] === null,
-    "Clearing a keybinding persists an explicit unassigned override.");
+  expect(
+    after.preferences.mainColor === "#0874df",
+    "UI reset restores the default palette.",
+  );
+  expect(
+    after.terminalPanes === before.terminalPanes &&
+      after.ide === before.ide &&
+      after.providerSessions === before.providerSessions &&
+      after.tasks === before.tasks,
+    "UI reset preserves open terminal panes, editor state, provider sessions, and tasks.",
+  );
+  expect(
+    after.preferences.workspaceTrust === before.preferences.workspaceTrust &&
+      after.preferences.workspaceKeybindings ===
+        before.preferences.workspaceKeybindings &&
+      after.preferences.missionSessionIds ===
+        before.preferences.missionSessionIds,
+    "UI reset preserves workspace trust, keyboard overrides, and mission ownership.",
+  );
+  const cleared = workbenchReducer(before, {
+    type: "set-workspace-keybinding",
+    commandId: "terminal.split",
+    keybinding: null,
+  });
+  expect(
+    cleared.preferences.workspaceKeybindings["terminal.split"] === null,
+    "Clearing a keybinding persists an explicit unassigned override.",
+  );
 }
 
 function readRepoFile(path) {
@@ -360,7 +378,9 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
-const scmFileActionsSource = readRepoFile("packages/ui/src/scm-file-actions.tsx");
+const scmFileActionsSource = readRepoFile(
+  "packages/ui/src/scm-file-actions.tsx",
+);
 const inlineApprovalSource = readRepoFile(
   "packages/ui/src/inline-approval-card.tsx",
 );
@@ -376,7 +396,10 @@ const menuBarStyleSource = readRepoFile("apps/desktop/src/menu-bar.css");
 const menuBarRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/menu_bar.rs",
 );
-const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const desktopRustSource = [
+  readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+].join("\n");
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
   // them; the point of the check is that the two still agree, so it asserts
@@ -571,7 +594,9 @@ expect(
     surfaceSource.includes("gyro-sidebar-scm-directory") &&
     surfaceSource.includes("gyro-sidebar-scm-state is-") &&
     surfaceSource.includes('className="gyro-sidebar-scm-stage"') &&
-    scmFileActionsSource.includes('className="gyro-scm-file-actions-trigger"') &&
+    scmFileActionsSource.includes(
+      'className="gyro-scm-file-actions-trigger"',
+    ) &&
     surfaceSource.includes("function workspaceParentFolder") &&
     cssRules(styleSource, ".gyro-sidebar-scm-row").some(
       (rule) =>
@@ -579,9 +604,10 @@ expect(
           "grid-template-columns: 16px minmax(0, 1fr) 24px 24px 18px",
         ) && rule.includes("min-height: 30px"),
     ) &&
-    cssRules(styleSource, ".gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger").some((rule) =>
-      rule.includes("opacity: 0"),
-    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger",
+    ).some((rule) => rule.includes("opacity: 0")) &&
     !cssRules(styleSource, ".gyro-sidebar-scm-row > button").some((rule) =>
       rule.includes("grid-template-columns"),
     ),
@@ -1815,8 +1841,12 @@ state = workbenchReducer(state, {
   path: "/Users/example/Shared",
 });
 expect(
-  JSON.stringify(workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/extra")) === JSON.stringify(["/extra", "/project"]) &&
-    JSON.stringify(workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/removed")) === JSON.stringify(["/project", "/extra"]),
+  JSON.stringify(
+    workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/extra"),
+  ) === JSON.stringify(["/extra", "/project"]) &&
+    JSON.stringify(
+      workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/removed"),
+    ) === JSON.stringify(["/project", "/extra"]),
   "Primary folder selection should lead workspace actions and safely fall back when removed.",
 );
 const testedWorkspaceRoots = workspaceFolderPaths(
@@ -3156,7 +3186,10 @@ expect(
   "A session's tool calls should be recorded without switching the Workspace sidebar to AI.",
 );
 sessionHandoffState = workbenchReducer(
-  workbenchReducer(sessionHandoffState, { type: "ide-select-view", view: "ai" }),
+  workbenchReducer(sessionHandoffState, {
+    type: "ide-select-view",
+    view: "ai",
+  }),
   { type: "select-workspace-layout", layout: "thread" },
 );
 const enteredWorkspaceState = workbenchReducer(sessionHandoffState, {
@@ -3169,7 +3202,10 @@ expect(
   "Entering Workspace from Sessions should open the explorer, not the session in the AI side chat.",
 );
 const stayInWorkspaceAiState = workbenchReducer(
-  workbenchReducer(enteredWorkspaceState, { type: "ide-select-view", view: "ai" }),
+  workbenchReducer(enteredWorkspaceState, {
+    type: "ide-select-view",
+    view: "ai",
+  }),
   { type: "enter-workspace" },
 );
 expect(
@@ -3755,7 +3791,8 @@ expect(
     appSource.includes('streamEvent.phase === "started"') &&
     appSource.includes('streamEvent.phase === "completed"') &&
     appSource.includes("applyProviderChatStreamDeltas") &&
-    appSource.includes("applyProviderChatStreamActivity") &&
+    providerStreamSource.includes("applyProviderChatStreamActivity") &&
+    appSource.includes("applyProviderChatStreamPresentation") &&
     appSource.includes('streamEvent.phase === "activity"') &&
     appSource.includes("sessionBatches.map((batch) => ({") &&
     providerStreamSource.includes(
@@ -4646,10 +4683,18 @@ expect(
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
     tauriConfig.app.windows[0].trafficLightPosition.y === 17 &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("inset_macos_traffic_lights") &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("standardWindowButton") &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("MAIN_TRAFFIC_LIGHT_X") &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("MAIN_TRAFFIC_LIGHT_Y") &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
+      "inset_macos_traffic_lights",
+    ) &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
+      "standardWindowButton",
+    ) &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
+      "MAIN_TRAFFIC_LIGHT_X",
+    ) &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
+      "MAIN_TRAFFIC_LIGHT_Y",
+    ) &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
@@ -6353,7 +6398,7 @@ expect(
     !surfaceSource.includes('label: "Folder"') &&
     !surfaceSource.includes('label: "Search"') &&
     surfaceSource.includes('action: "set-chat-mode-plan"') &&
-    surfaceSource.includes("icon: Lightbulb") &&
+    surfaceSource.includes("icon: ListChecks") &&
     !surfaceSource.includes('title="Add"') &&
     !surfaceSource.includes('label: "Photos"') &&
     !surfaceSource.includes('label: "Spreadsheet"') &&
@@ -6433,6 +6478,27 @@ expect(
     desktopRustSource.includes("run_openai_codex_context_compaction"),
   "Slash commands should discover and route workspace actions, while manual compaction remains Codex-only and visible through its lifecycle.",
 );
+const compactAction = appSource.slice(
+  appSource.indexOf('case "compact-context":'),
+  appSource.indexOf(
+    'case "open-terminal-panel":',
+    appSource.indexOf('case "compact-context":'),
+  ),
+);
+expect(
+  surfaceSource.includes('draft.trim().toLowerCase() === "/compact"') &&
+    compactAction.includes('invoke<SessionEvent>("append_user_message"') &&
+    compactAction.includes('message: "/compact"') &&
+    compactAction.indexOf('"append_user_message"') <
+      compactAction.indexOf('"compact_provider_chat"') &&
+    compactAction.includes(
+      "sessionId: activeSessionId, turnId: compactionTurnId",
+    ) &&
+    desktopRustSource.includes(
+      "compact_provider_chat_blocking(worker_app, worker_session_id, run_id)",
+    ),
+  "Standalone compaction should persist a user message before running and associate compaction activity with that same turn.",
+);
 expect(
   styleSource.includes(".gyro-composer-context-wheel") &&
     /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
@@ -6480,7 +6546,12 @@ expect(
     surfaceSource.includes('className="gyro-plan-artifact-preview"') &&
     surfaceSource.includes("Yes, implement") &&
     surfaceSource.includes('onPlanDecision?.("approve")') &&
-    surfaceSource.includes('activePanel === "plan" && sessionPlan?.content') &&
+    // The document arm is still gated on the plan panel and a written plan,
+    // but a reader can now cross to the checklist instead of the two being
+    // mutually exclusive arms of one branch.
+    /activePanel === "plan" &&\s*sessionPlan\?\.content/.test(surfaceSource) &&
+    surfaceSource.includes('planView === "document"') &&
+    surfaceSource.includes('aria-label="Plan view"') &&
     surfaceSource.includes("content={sessionPlan.content}") &&
     surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
@@ -6516,14 +6587,18 @@ expect(
     styleSource.includes("backdrop-filter: none") &&
     surfaceSource.includes(") : sessionGoal?.text ? (") &&
     appSource.includes("const changeChatMode = useCallback") &&
-    appSource.includes('mode === "plan" || mode === "council"') &&
-    appSource.includes("Boolean(activeSessionGoal)") &&
-    appSource.includes(
+    // A goal is the outcome and a mode is how the turn runs, so neither
+    // cancels the other. Planning toward a stated outcome is the case the
+    // goal exists for; entering Plan mode used to delete it and then hide it
+    // from the very turn that needed it.
+    !appSource.includes("shouldClearGoal") &&
+    !appSource.includes(
       'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
     ) &&
+    appSource.includes("const turnGoal = overrideContext?.goal ?? activeSessionGoal") &&
     appSource.includes('const modeChanged = await changeChatMode("normal")') &&
     appSource.includes("if (!modeChanged)"),
-  "Completion-only edit summaries, composer overlays, light context pills, and Goal/Plan exclusivity should remain enforced.",
+  "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
 );
 expect(
   styleSource.includes(
@@ -7679,7 +7754,7 @@ expect(
     surfaceSource.includes("is-unmeasured") &&
     styleSource.includes(".gyro-composer-limit-bar.is-unmeasured") &&
     cssRules(styleSource, ".gyro-composer-limit-bar").some((rule) =>
-      rule.includes("height: 5px"),
+      rule.includes("height: 4px"),
     ) &&
     styleSource.includes(".gyro-composer-limit-row.is-critical") &&
     styleSource.includes(
@@ -7727,7 +7802,7 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("function SessionGoalStatusRow") &&
+  surfaceSource.includes("function SessionGoalBand") &&
     surfaceSource.includes(
       'const label = isActive ? "Pursuing goal" : "Goal completed"',
     ) &&

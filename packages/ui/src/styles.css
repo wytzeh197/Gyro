@@ -394,8 +394,7 @@
 }
 
 .gyro-composer-attachment small,
-.gyro-transcript-attachment small,
-.gyro-session-goal small {
+.gyro-transcript-attachment small {
   color: var(--gyro-text-muted, #9299a3);
   font-size: 12px;
 }
@@ -413,8 +412,11 @@
   gap: 5px;
 }
 
+/* Plan mode is a constraint, not an alert. Amber in this app means "needs
+   attention", so the chip reads neutral like every other composer chip and
+   lets the mode's own words carry the read-only fact. */
 .gyro-composer-chip.is-plan {
-  color: var(--gyro-warning, #e3ad54);
+  color: var(--gyro-muted);
 }
 
 .gyro-composer-chip.is-council {
@@ -799,26 +801,6 @@
   background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
 }
 
-.gyro-session-goal {
-  align-items: flex-start;
-  border: 1px solid var(--gyro-border, #30343a);
-  border-radius: 8px;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  padding: 10px;
-}
-
-.gyro-session-goal > div:nth-child(2) {
-  display: grid;
-  gap: 3px;
-}
-
-.gyro-session-goal.is-complete strong {
-  opacity: 0.65;
-  text-decoration: line-through;
-}
-
 .gyro-plan-item-actions,
 .gyro-chat-run-controls {
   align-items: center;
@@ -870,6 +852,20 @@
   --gyro-permission-full: #c2510a;
   --gyro-danger: #b4232e;
   --gyro-success: #197a4c;
+  /* Agent state reads on white too. The dark ramp above is tuned for #181818
+     and drops to roughly 2:1 on a light surface, so every state that carries
+     meaning is restated here from the light semantic colors already set. */
+  --gyro-status-running: var(--gyro-blue);
+  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-success: var(--gyro-success);
+  --gyro-status-warning: var(--gyro-warn);
+  --gyro-status-failed: var(--gyro-danger);
+  --gyro-status-cancelled: var(--gyro-muted);
+  --gyro-status-disabled: color-mix(
+    in srgb,
+    var(--gyro-muted) 60%,
+    transparent
+  );
   --gyro-sidebar-text: #343a42;
   --gyro-hover-text: #171a1f;
   --gyro-topbar: rgba(255, 255, 255, 0.97);
@@ -2984,15 +2980,30 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-text);
 }
 
+/* The ramp. Fill, glyph, and word move together so a step's state survives
+   greyscale, colour-blindness, and reduced motion — never colour alone. */
+.gyro-plan-check.is-todo {
+  color: var(--gyro-faint);
+}
+
+.gyro-plan-check.is-in-progress {
+  border-color: var(--gyro-status-running);
+  color: var(--gyro-status-running);
+}
+
+.gyro-plan-check.is-in-progress svg {
+  animation: gyro-chat-activity-spin 1.1s linear infinite;
+}
+
 .gyro-plan-check.is-complete {
-  background: var(--gyro-primary-bg);
-  border-color: var(--gyro-primary-bg);
-  color: var(--gyro-primary-text);
+  background: var(--gyro-status-success);
+  border-color: var(--gyro-status-success);
+  color: var(--gyro-app);
 }
 
 .gyro-plan-check.is-blocked {
-  border-color: var(--gyro-danger);
-  color: var(--gyro-danger);
+  border-color: var(--gyro-status-failed);
+  color: var(--gyro-status-failed);
 }
 
 .gyro-plan-empty {
@@ -9453,13 +9464,9 @@ textarea:focus-visible {
 
 .gyro-workspace-trust-banner {
   align-items: center;
-  background: color-mix(
-    in srgb,
-    var(--gyro-warning, #e3ad54) 10%,
-    var(--gyro-surface)
-  );
+  background: color-mix(in srgb, var(--gyro-warn) 10%, var(--gyro-surface));
   border-bottom: 1px solid
-    color-mix(in srgb, var(--gyro-warning, #e3ad54) 34%, var(--gyro-border));
+    color-mix(in srgb, var(--gyro-warn) 34%, var(--gyro-border));
   color: var(--gyro-muted);
   display: grid;
   font-size: 11px;
@@ -9470,7 +9477,7 @@ textarea:focus-visible {
 }
 
 .gyro-workspace-trust-banner > svg {
-  color: var(--gyro-warning, #e3ad54);
+  color: var(--gyro-warn);
 }
 
 .gyro-workspace-trust-banner span {
@@ -14521,7 +14528,7 @@ body {
 .gyro-plan-artifact-card {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 14px;
+  border-radius: var(--gyro-radius-xl);
   color: var(--gyro-text);
   overflow: hidden;
   text-align: left;
@@ -20140,7 +20147,7 @@ textarea:focus-visible,
 }
 
 .gyro-sidebar-thread[data-state="waiting"] .gyro-sidebar-terminal-state {
-  color: var(--gyro-warning, #e3ad54);
+  color: var(--gyro-status-waiting);
 }
 
 .gyro-sidebar-thread[data-state="failed"] .gyro-sidebar-terminal-state {
@@ -24334,6 +24341,99 @@ button.gyro-settings-row em::after {
   background: #ffffff;
 }
 
+/* Outcome and route, stacked as siblings under one hairline. The band owns
+   only the seam between them; each row keeps its own styling so either can
+   render alone. */
+.gyro-session-goal-band {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 14px;
+}
+
+.gyro-session-goal-band[data-density="hero"] {
+  margin: 0 auto 14px;
+  max-width: 807px;
+  width: 100%;
+}
+
+.gyro-session-goal-band > .gyro-session-goal-status {
+  margin: 0;
+}
+
+/* The route, at a glance, for readers who are not looking at the rail. It
+   counts steps and says so — it is never a meter for the goal itself. */
+.gyro-plan-strip {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: grid;
+  font-size: 12px;
+  gap: var(--gyro-space-standard);
+  grid-template-columns: 13px max-content minmax(0, 1fr) auto;
+  padding: 6px 11px 0;
+}
+
+.gyro-plan-strip-mark {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  height: 13px;
+  justify-content: center;
+  width: 13px;
+}
+
+.gyro-plan-strip-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gyro-plan-strip-count[data-blocked="true"] {
+  color: var(--gyro-status-failed);
+}
+
+.gyro-plan-strip-track {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border-radius: 999px;
+  height: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gyro-plan-strip-track.is-empty {
+  background: transparent;
+}
+
+.gyro-plan-strip-track > span {
+  background: var(--gyro-status-success);
+  display: block;
+  height: 100%;
+  transition: width var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-plan-strip-open {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.gyro-plan-strip-open:hover {
+  color: var(--gyro-text);
+}
+
+@media (max-width: 1100px) {
+  /* The rail is already narrow here; the strip keeps the count and the bar. */
+  .gyro-plan-strip-open {
+    font-size: 0;
+  }
+
+  .gyro-plan-strip-open::after {
+    content: "→";
+    font-size: 12px;
+  }
+}
+
 /* The active outcome belongs with the transcript, not only in the optional
    side rail or composer chip. It is intentionally a one-line status row: the
    goal remains readable without becoming another card competing with the
@@ -24342,7 +24442,7 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 17px;
+  border-radius: var(--gyro-radius-xl);
   box-sizing: border-box;
   display: grid;
   gap: 6px;
@@ -24369,6 +24469,15 @@ button.gyro-settings-row em::after {
 
 .gyro-session-goal-status.is-active .gyro-session-goal-status-mark svg {
   animation: gyro-chat-activity-spin 1.1s linear infinite;
+}
+
+/* Rotation is the least of the three signals. With it removed the dashed ring
+   and the state word still separate working from not started. */
+@media (prefers-reduced-motion: reduce) {
+  .gyro-session-goal-status.is-active .gyro-session-goal-status-mark svg,
+  .gyro-plan-check.is-in-progress svg {
+    animation: none;
+  }
 }
 
 .gyro-session-goal-status > strong {
@@ -24430,15 +24539,84 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-session-goal-status {
-  background: #ffffff;
-  border-color: #e7e9ed;
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border);
+}
+
+/* In the rail the goal is a companion to the checklist beside it, not the
+   lead element of a transcript, so it drops to the rail's own scale. */
+.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status {
+  border-radius: var(--gyro-radius-md);
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  margin: 0;
+  min-height: 0;
+  padding: 7px 9px;
+}
+
+.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status > strong {
+  font-size: 12px;
+  grid-column: 2;
+}
+
+.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status-text {
+  font-size: 12px;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.gyro-plan-goal-section {
+  min-width: 0;
+}
+.gyro-plan-goal-section .gyro-session-goal-band {
+  margin: 0;
+}
+.gyro-plan-rail.is-document > .gyro-plan-goal-section {
+  padding: 12px clamp(14px, 3vw, 24px) 0;
+}
+.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status-actions {
+  grid-column: 3;
+  grid-row: 1 / 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-plan-progress > span,
+  .gyro-plan-strip-track > span {
+    transition: none;
+  }
+}
+
+/* Two stops, so a written plan and its checklist stop being an either/or. */
+.gyro-plan-view-toggle {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.gyro-plan-view-toggle button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 9px;
+}
+
+.gyro-plan-view-toggle button[aria-pressed="true"] {
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-view-toggle button:hover[aria-pressed="false"] {
+  color: var(--gyro-text);
 }
 
 @media (max-width: 620px) {
   .gyro-session-goal-status {
     align-items: start;
     grid-template-columns: 14px minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
     padding: 8px 9px;
   }
 
@@ -24456,8 +24634,13 @@ button.gyro-settings-row em::after {
     grid-row: 1;
   }
 
+  /* Wrapped, never hidden: a goal set on a narrow window must still be
+     completable. Hiding Complete and Clear here was a functional loss
+     dressed as a responsive rule. */
   .gyro-session-goal-status-actions {
-    display: none;
+    grid-column: 2 / -1;
+    grid-row: 3;
+    justify-self: end;
   }
 }
 
@@ -26306,7 +26489,7 @@ button.gyro-account-menu-row:hover,
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-bottom: 0;
-  border-radius: 14px 14px 0 0;
+  border-radius: var(--gyro-radius-xl) var(--gyro-radius-xl) 0 0;
   box-shadow: 0 18px 44px rgb(0 0 0 / 28%);
   box-sizing: border-box;
   color: var(--gyro-text);
@@ -26343,6 +26526,12 @@ button.gyro-account-menu-row:hover,
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.gyro-plan-decision-goal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-plan-decision-card > header small,
@@ -26885,11 +27074,11 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-tooltip {
-  background: #15171a;
-  border: 1px solid #3a3f47;
+  background: var(--gyro-premium-panel);
+  border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: 6px;
   bottom: calc(100% + 12px);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   color: var(--gyro-premium-text);
   font-size: 12px;
   line-height: 1.4;
@@ -26915,24 +27104,24 @@ button.gyro-account-menu-row:hover,
   justify-content: space-between;
   min-height: 34px;
   padding: 0 11px;
-  border-bottom: 1px solid #2c3036;
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
 }
 
 .gyro-composer-context-tooltip > header strong {
-  color: #f0f2f5;
+  color: var(--gyro-premium-text);
   font-size: 12px;
   font-weight: 650;
 }
 
 .gyro-composer-context-tooltip > header span {
-  background: #24282e;
-  border: 1px solid #343941;
+  background: transparent;
+  border: 0;
   border-radius: 4px;
-  color: #c5cbd4;
+  color: var(--gyro-premium-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 20px;
-  padding: 0 6px;
+  padding: 0;
 }
 
 .gyro-composer-context-value {
@@ -26944,7 +27133,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-value strong {
-  color: #f4f6f8;
+  color: var(--gyro-premium-text);
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
@@ -26952,20 +27141,20 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-value span {
-  color: #969da8;
+  color: var(--gyro-premium-muted);
 }
 
 .gyro-composer-context-bar {
-  background: #282c32;
-  border: 1px solid #30353c;
+  background: var(--gyro-premium-hairline);
+  border: 0;
   border-radius: 2px;
-  height: 6px;
+  height: 4px;
   margin: 9px 11px 11px;
   overflow: hidden;
 }
 
 .gyro-composer-context-bar > span {
-  background: #9aa3ae;
+  background: var(--gyro-premium-muted);
   border-radius: 2px;
   display: block;
   height: 100%;
@@ -26973,11 +27162,11 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-limit-summary {
-  border-top: 1px solid #2c3036;
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 11px 12px;
+  gap: 9px;
+  padding: 9px 11px 11px;
 }
 
 .gyro-plan-usage-notice {
@@ -27079,7 +27268,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-limit-title,
 .gyro-composer-limit-summary small {
-  color: #969da8;
+  color: var(--gyro-premium-muted);
   font-size: 12px;
 }
 
@@ -27103,7 +27292,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-limit-heading em {
-  color: #8d949f;
+  color: var(--gyro-premium-muted);
   font-size: 12px;
   font-style: normal;
   white-space: nowrap;
@@ -27111,7 +27300,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-limit-heading strong,
 .gyro-composer-limit-heading b {
-  color: #d9dde3;
+  color: var(--gyro-premium-text);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
@@ -27119,15 +27308,19 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-limit-bar {
-  background: color-mix(in srgb, var(--gyro-muted) 20%, transparent);
+  background: var(--gyro-premium-hairline);
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
-  height: 5px;
+  box-shadow: none;
+  height: 4px;
   overflow: hidden;
 }
 
 .gyro-composer-limit-bar > span {
-  background: var(--gyro-accent);
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 45%,
+    var(--gyro-premium-muted)
+  );
   border-radius: inherit;
   display: block;
   height: 100%;
@@ -27152,15 +27345,15 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-limit-bar.is-unmeasured {
   background-image: repeating-linear-gradient(
     -45deg,
-    color-mix(in srgb, var(--gyro-muted) 26%, transparent) 0 3px,
+    color-mix(in srgb, var(--gyro-muted) 14%, transparent) 0 3px,
     transparent 3px 6px
   );
 }
 
 .gyro-composer-context-tooltip::after {
-  background: #15171a;
-  border-bottom: 1px solid #3a3f47;
-  border-right: 1px solid #3a3f47;
+  background: var(--gyro-premium-panel);
+  border-bottom: 1px solid var(--gyro-premium-hairline-strong);
+  border-right: 1px solid var(--gyro-premium-hairline-strong);
   bottom: -4px;
   content: "";
   height: 7px;
@@ -27178,7 +27371,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-model {
-  color: #969da8;
+  color: var(--gyro-premium-muted);
   font-size: 12px;
   margin: 8px 11px 0;
 }
@@ -27857,6 +28050,19 @@ button.gyro-account-menu-row:hover,
   padding: 0 7px;
 }
 
+/* A blocked step is the one state the count alone cannot show: 4/7 looks the
+   same whether the remaining three are waiting or stuck. */
+.gyro-plan-progress-label[data-blocked="true"]::before {
+  background: var(--gyro-status-failed);
+  border-radius: 999px;
+  content: "";
+  display: inline-block;
+  height: 5px;
+  margin-right: 5px;
+  vertical-align: 1px;
+  width: 5px;
+}
+
 .gyro-plan-progress {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   height: 2px;
@@ -27864,7 +28070,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-plan-progress > span {
-  background: var(--gyro-success);
+  background: var(--gyro-status-success);
   display: block;
   height: 100%;
   transition: width var(--gyro-premium-motion) var(--gyro-premium-ease);
@@ -37133,6 +37339,7 @@ textarea:focus-visible,
 }
 .gyro-browser-new-tab {
   align-items: center;
+  background: var(--gyro-pane);
   color: var(--gyro-muted);
   display: flex;
   flex-direction: column;
@@ -37192,7 +37399,8 @@ textarea:focus-visible,
 
 :root[data-theme="light"]
   .gyro-chat-surface.has-companion
-  .gyro-user-message-bubble p {
+  .gyro-user-message-bubble
+  p {
   color: var(--gyro-text);
 }
 
@@ -37498,12 +37706,21 @@ textarea:focus-visible,
   width: 100%;
   height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+}
+.gyro-source-control-review > .gyro-review-toolbar,
+.gyro-source-control-review > .gyro-syntax-notice {
+  flex: 0 0 auto;
+}
+.gyro-source-control-review > :last-child {
+  flex: 1 1 0;
+  min-height: 0;
 }
 .gyro-source-control-review-editor {
   min-height: 0;
-  height: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 .gyro-source-control-review-editor .monaco-editor,
 .gyro-source-control-review-editor .monaco-diff-editor {
@@ -39739,22 +39956,18 @@ textarea:focus-visible,
   position: relative;
 }
 
-.gyro-scm-graph-line {
-  border-radius: 1px;
-  bottom: 0;
-  opacity: 0.55;
+.gyro-scm-graph-lines {
+  height: 100%;
+  left: 0;
+  overflow: visible;
   position: absolute;
   top: 0;
-  transform: translateX(-50%);
-  width: 1.5px;
-}
-
-.gyro-scm-graph-line.is-start {
-  top: 50%;
-}
-
-.gyro-scm-graph-line.is-end {
-  bottom: 50%;
+  width: 100%;
+  fill: none;
+  opacity: 0.55;
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .gyro-scm-graph-dot {
@@ -40428,19 +40641,18 @@ textarea:focus-visible,
 /* Gyro Browser: the agent's presence on the page it is using. */
 .gyro-browser-agent-strip {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-accent) 8%, var(--gyro-pane));
+  background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
   color: var(--gyro-text);
   display: flex;
   flex-shrink: 0;
   font-size: 12px;
   gap: 8px;
-  min-height: 32px;
-  padding: 4px 8px 4px 12px;
+  min-height: 28px;
+  padding: 2px 8px;
 }
 
 .gyro-browser-agent-dot {
-  animation: gyro-browser-agent-pulse 1.4s ease-in-out infinite;
   background: var(--gyro-accent);
   border-radius: 50%;
   flex: 0 0 auto;
@@ -40573,7 +40785,9 @@ textarea:focus-visible,
   padding: 0 8px;
 }
 
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-preview-toolbar {
   gap: 6px;
   grid-template-columns: auto minmax(0, 1fr) 28px;
 }
@@ -40582,7 +40796,10 @@ textarea:focus-visible,
   gap: 0;
 }
 
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-nav-group > button,
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-nav-group
+  > button,
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-menu-trigger,
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > button,
 .gyro-chat-companion.is-browser-address .gyro-chat-companion-tabs button {
@@ -40596,10 +40813,20 @@ textarea:focus-visible,
   padding: 0;
 }
 
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-nav-group > button:hover:not(:disabled),
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-menu-trigger:hover,
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > button:hover:not(:disabled),
-.gyro-chat-companion.is-browser-address .gyro-chat-companion-tabs button:hover:not(:disabled) {
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-nav-group
+  > button:hover:not(:disabled),
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-menu-trigger:hover,
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-url-bar
+  > button:hover:not(:disabled),
+.gyro-chat-companion.is-browser-address
+  .gyro-chat-companion-tabs
+  button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
 }
@@ -40627,8 +40854,13 @@ textarea:focus-visible,
   padding-left: 6px;
 }
 
-.gyro-chat-companion.is-browser-address .gyro-chat-companion-tabs button:focus-visible,
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar button:focus-visible {
+.gyro-chat-companion.is-browser-address
+  .gyro-chat-companion-tabs
+  button:focus-visible,
+.gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-preview-toolbar
+  button:focus-visible {
   outline: 2px solid var(--gyro-accent);
   outline-offset: -2px;
 }
@@ -40857,4 +41089,41 @@ textarea:focus-visible,
 
 .gyro-run-row-label {
   font-weight: 450;
+}
+
+/* Goal and plan: reserve a row for the shared outcome in both rail views. */
+.gyro-chat-surface.has-environment .gyro-chat-tool-rail.has-plan {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+.gyro-chat-tool-rail.has-plan > .gyro-plan-goal-section {
+  padding-block: 8px;
+}
+.gyro-plan-harness > header {
+  flex-wrap: wrap;
+}
+@media (max-width: 980px) {
+  .gyro-chat-surface.is-thread.has-environment.has-plan {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-chat-surface.is-thread.has-plan > .gyro-plan-rail {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+}
+
+.gyro-chat-surface.has-environment .gyro-plan-rail.is-document {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/* Status and hover actions occupy the same trailing slot without displacing
+   the state word into the narrow checkmark column. */
+.gyro-plan-harness .gyro-plan-item > small {
+  grid-column: 3;
+  grid-row: 1;
+  white-space: nowrap;
+}
+.gyro-plan-harness .gyro-plan-item-actions {
+  position: absolute;
+  right: 6px;
+  top: 8px;
 }

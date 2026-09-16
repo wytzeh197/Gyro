@@ -290,9 +290,9 @@ assert.equal(
 );
 assert.equal(clampBrowserCompanionWidth(10_000), BROWSER_COMPANION_MAX_WIDTH);
 assert.equal(
-  clampBrowserCompanionWidth(10_000, 900),
-  540,
-  "a wide Browser keeps 360px for the nearby conversation",
+  clampBrowserCompanionWidth(10_000, 1040),
+  560,
+  "a wide Browser keeps 480px for the nearby conversation",
 );
 assert.equal(
   clampChatCompanionWidth(800, 900),

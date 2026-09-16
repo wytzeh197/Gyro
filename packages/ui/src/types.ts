@@ -37,6 +37,7 @@ export type WorkbenchMode = "local" | "worktree";
  * picking one never closes the pane.
  */
 export type ChatSidePanelId =
+  | "canvas"
   | "tools"
   | "environment"
   | "plan"
@@ -830,6 +831,7 @@ export type ProviderResumeCursor = {
 };
 
 export type ProviderChatStreamPhase =
+  | "context-usage"
   | "started"
   | "activity"
   | "delta"
@@ -848,6 +850,12 @@ export type ProviderChatStreamEvent = {
   sequence: number;
   activitySequence?: number | null;
   phase: ProviderChatStreamPhase;
+  contextUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    modelContextWindow?: number;
+  } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;
   activityId?: string | null;
@@ -927,6 +935,7 @@ export type ChatArtifactStatus =
   "streaming" | "ready" | "stale" | "failed" | "completed";
 
 export type ChatArtifactKind =
+  | "canvas"
   | "decision"
   | "command"
   | "completion"
@@ -954,6 +963,14 @@ export type ChatArtifactDecisionOption = {
 };
 
 export type ChatArtifact =
+  | {
+      id: string;
+      kind: "canvas";
+      title: string;
+      status?: ChatArtifactStatus;
+      format: "text" | "code";
+      content: string;
+    }
   | {
       id: string;
       kind: "decision";

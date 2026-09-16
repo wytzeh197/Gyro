@@ -1,3 +1,4 @@
+import { estimatedEventCharacters } from "@gyro-dev/ui/context-usage";
 import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
 export const MAX_CHAT_RESPONSE_CHARS = 64_000;
@@ -1028,4 +1029,61 @@ function recordFromUnknown(
     return undefined;
   }
   return value as Record<string, unknown>;
+}
+
+/** Replace the live checkpoint, retaining a baseline for rows updated in place. */
+export function applyProviderChatStreamContextUsage(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: SessionEventsSetter,
+  streamEvent: ProviderChatStreamEvent,
+) {
+  const turnId = streamEvent.turnId;
+  if (!turnId || !streamEvent.contextUsage) return;
+  const id = `${streamEvent.sessionId}-context-${turnId}`;
+  const update = (items: SessionEvent[]): SessionEvent[] => [
+    ...items.filter((event) => event.id !== id),
+    {
+      id,
+      sessionId: streamEvent.sessionId,
+      turnId,
+      createdAt: new Date().toISOString(),
+      kind: "system-event",
+      message: "",
+      payload: {
+        kind: "provider-context-usage",
+        providerId: streamEvent.providerId,
+        modelId: streamEvent.modelId,
+        contextUsage: streamEvent.contextUsage,
+        contextCharacterBaseline: Object.fromEntries(
+          items.map((event) => [event.id, estimatedEventCharacters(event)]),
+        ),
+      },
+    },
+  ];
+  optimisticEventsRef.current.set(
+    streamEvent.sessionId,
+    limitSessionEventsForUi(
+      update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+    ),
+  );
+  setEvents((current) => limitSessionEventsForUi(update(current)));
+}
+
+/** Apply UI-only provider stream frames that must render without batching text. */
+export function applyProviderChatStreamPresentation(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: SessionEventsSetter,
+  streamEvent: ProviderChatStreamEvent,
+) {
+  if (streamEvent.phase === "activity") {
+    applyProviderChatStreamActivity(optimisticEventsRef, setEvents, streamEvent);
+    return;
+  }
+  if (streamEvent.phase === "context-usage") {
+    applyProviderChatStreamContextUsage(
+      optimisticEventsRef,
+      setEvents,
+      streamEvent,
+    );
+  }
 }

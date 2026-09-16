@@ -1,4 +1,5 @@
 import { WorkspaceSearchResults } from "./workspace-search-results";
+import { chatMediaFiles } from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
 import {
   SidebarProjectCard,
@@ -36,6 +37,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Circle,
   CircleDashed,
   Clock,
   Columns2,
@@ -72,7 +74,6 @@ import {
   ImagePlus,
   KeyRound,
   Laptop,
-  Lightbulb,
   ListChecks,
   LayoutPanelLeft,
   LockKeyhole,
@@ -181,6 +182,9 @@ import {
 import { ChatRun } from "./chat-run-view";
 import { keepAliveWatchesFromPanes } from "./chat-keep-alive";
 import { ChatKeepAlive } from "./chat-keep-alive-view";
+import { latestCanvasArtifacts } from "./chat-canvas";
+import { ChatCanvas, type CanvasDrafts } from "./chat-canvas-view";
+import "./chat-canvas.css";
 import type { KeepAliveWatch } from "./chat-keep-alive";
 import {
   ChatArtifacts,
@@ -2719,8 +2723,8 @@ const SCM_GRAPH_LANE_LIMIT = 5;
 type ScmGraphRow = {
   /** Lane the commit's dot sits in. */
   lane: number;
-  /** Every lane carrying a line through this row, the commit's own included. */
-  lanes: number[];
+  /** Paths from the upper row boundary through the dot to the lower boundary. */
+  edges: Array<{ from: number; to: number; half: "top" | "bottom"; color: number }>;
   /** No child in the loaded window, so the lane's line starts at the dot. */
   startsHere: boolean;
   /** No parent in the loaded window, so the lane's line stops at the dot. */
@@ -2754,21 +2758,34 @@ function scmGraphRows(
     const waiting = expected.indexOf(commit.hash);
     const startsHere = waiting === -1;
     const lane = startsHere ? claim(commit.hash) : waiting;
-    // A commit with several children is waited on by several lanes; they all
-    // arrive here, so the duplicates close rather than run on empty.
+    const edges: ScmGraphRow["edges"] = [];
     for (let index = 0; index < expected.length; index += 1) {
-      if (index !== lane && expected[index] === commit.hash) {
-        expected[index] = undefined;
+      if (expected[index] === undefined) continue;
+      const arrives = expected[index] === commit.hash;
+      if (!(startsHere && index === lane)) {
+        edges.push({ from: index, to: arrives ? lane : index, half: "top", color: index });
       }
+      if (arrives) expected[index] = undefined;
     }
-    const lanes = expected.reduce<number[]>(
-      (open, slot, index) => (slot === undefined ? open : [...open, index]),
-      [],
-    );
-    expected[lane] = parents[0];
-    for (const parent of parents.slice(1)) {
-      if (!expected.includes(parent)) {
-        claim(parent);
+    parents.forEach((parent, index) => {
+      let target = expected.indexOf(parent);
+      if (target === -1) {
+        if (index === 0) {
+          expected[lane] = parent;
+          target = lane;
+        } else {
+          target = claim(parent);
+        }
+      }
+      edges.push({ from: lane, to: target, half: "bottom", color: target });
+    });
+    for (let index = 0; index < expected.length; index += 1) {
+      if (expected[index] !== undefined &&
+          !edges.some((edge) => edge.half === "bottom" && edge.to === index)) {
+        edges.push({ from: index, to: index, half: "bottom", color: index });
+      } else if (expected[index] !== undefined &&
+          edges.some((edge) => edge.half === "top" && edge.to === index && index !== lane)) {
+        edges.push({ from: index, to: index, half: "bottom", color: index });
       }
     }
     while (expected.length > 0 && expected[expected.length - 1] === undefined) {
@@ -2776,7 +2793,7 @@ function scmGraphRows(
     }
     return {
       lane,
-      lanes,
+      edges,
       startsHere,
       endsHere: parents.length === 0,
       isMerge: parents.length > 1,
@@ -4954,26 +4971,25 @@ function WorkspaceSidebarContent({
                               aria-hidden="true"
                               className="gyro-scm-graph-rail"
                             >
-                              {(row?.lanes ?? []).map((lane) => (
-                                <span
-                                  className={[
-                                    "gyro-scm-graph-line",
-                                    lane === row?.lane && row?.startsHere
-                                      ? "is-start"
-                                      : "",
-                                    lane === row?.lane && row?.endsHere
-                                      ? "is-end"
-                                      : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  key={lane}
-                                  style={{
-                                    background: scmGraphLaneColor(lane),
-                                    left: `${scmGraphLaneOffset(lane)}px`,
-                                  }}
-                                />
-                              ))}
+                              <svg
+                                className="gyro-scm-graph-lines"
+                                viewBox={`0 0 ${scmHistoryRailWidth} 24`}
+                                preserveAspectRatio="none"
+                              >
+                                {(row?.edges ?? []).map((edge, edgeIndex) => {
+                                  const from = scmGraphLaneOffset(edge.from);
+                                  const to = scmGraphLaneOffset(edge.to);
+                                  const top = edge.half === "top" ? 0 : 12;
+                                  return (
+                                    <path
+                                      key={edgeIndex}
+                                      d={`M ${from} ${top} C ${from} ${top + 6}, ${to} ${top + 6}, ${to} ${top + 12}`}
+                                      stroke={scmGraphLaneColor(edge.color)}
+                                      vectorEffect="non-scaling-stroke"
+                                    />
+                                  );
+                                })}
+                              </svg>
                               <span
                                 className="gyro-scm-graph-dot"
                                 style={{
@@ -7242,19 +7258,6 @@ function chatDragSource(dataTransfer: DataTransfer) {
 }
 
 /**
- * Any image or video goes to the attachment step, even a format it cannot use,
- * so an unsupported file is named there instead of the drop silently failing.
- */
-function isChatMediaFile(file: File) {
-  return (
-    /^(?:image|video)\//.test(file.type) ||
-    /\.(?:png|jpe?g|webp|gif|heic|heif|tiff?|bmp|avif|mp4|m4v|mov|webm)$/i.test(
-      file.name,
-    )
-  );
-}
-
-/**
  * WebKit exposes DataTransfer.types as a DOMStringList, whereas Chromium uses
  * an array. DOMStringList has `contains`, but no `includes`; calling the
  * latter made dragover throw on macOS before the grid could enable its drop
@@ -7614,6 +7617,7 @@ const chatStartSuggestions: Array<{
 ];
 
 const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
+  canvas: FileText,
   review: FileDiff,
   terminal: SquareTerminal,
   browser: Globe,
@@ -7965,9 +7969,7 @@ export function ChatSurface({
   );
   const handleMediaDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      const files = Array.from(event.dataTransfer.files).filter(
-        isChatMediaFile,
-      );
+      const files = chatMediaFiles(event.dataTransfer);
       if (!files.length) {
         return;
       }
@@ -8072,6 +8074,45 @@ export function ChatSurface({
     });
   }, []);
   const transcriptSessionId = transcriptEvents[0]?.sessionId;
+  const canvasArtifacts = useMemo(
+    () =>
+      latestCanvasArtifacts(transcriptEvents.flatMap(chatArtifactsFromEvent)),
+    [transcriptEvents],
+  );
+  const [selectedCanvasId, setSelectedCanvasId] = useState<string>();
+  const [canvasDraftsBySession, setCanvasDraftsBySession] = useState<
+    Record<string, CanvasDrafts>
+  >({});
+  const openCanvas = useCallback(
+    (id: string) => {
+      setSelectedCanvasId(id);
+      onSelectChatPanel?.("canvas");
+    },
+    [onSelectChatPanel],
+  );
+  const canvasRevision = JSON.stringify(
+    canvasArtifacts.filter((item) => item.kind === "canvas"),
+  );
+  const previousCanvasRevision = useRef({
+    sessionId: transcriptSessionId,
+    revision: canvasRevision,
+  });
+  useEffect(() => {
+    const previous = previousCanvasRevision.current;
+    previousCanvasRevision.current = {
+      sessionId: transcriptSessionId,
+      revision: canvasRevision,
+    };
+    const latest = canvasArtifacts
+      .filter((item) => item.kind === "canvas")
+      .at(-1);
+    if (
+      latest &&
+      previous.sessionId === transcriptSessionId &&
+      previous.revision !== canvasRevision
+    )
+      openCanvas(latest.id);
+  }, [canvasArtifacts, canvasRevision, openCanvas, transcriptSessionId]);
   useLayoutEffect(() => {
     // Reused chat surfaces must not inherit another chat's scroll position.
     // Use the rendered events so deferred history loads are seated as well.
@@ -8276,18 +8317,24 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
-        {sessionGoal?.text ? (
-          <SessionGoalStatusRow
-            goal={sessionGoal}
-            onComplete={() =>
-              onGoalAction?.(
-                sessionGoal.status === "complete" ? "reopen" : "complete",
-              )
-            }
-            onEdit={() => onComposerAction?.("add-goal")}
-            onClear={() => onGoalAction?.("clear")}
-          />
-        ) : null}
+        <SessionGoalBand
+          goal={sessionGoal?.text ? sessionGoal : undefined}
+          plan={sessionPlan}
+          density="thread"
+          onComplete={
+            sessionGoal?.text
+              ? () =>
+                  onGoalAction?.(
+                    sessionGoal.status === "complete" ? "reopen" : "complete",
+                  )
+              : undefined
+          }
+          onEdit={() => onComposerAction?.("add-goal")}
+          onClear={() => onGoalAction?.("clear")}
+          onOpenPlan={
+            activeRailPanel === "plan" ? undefined : onTogglePlanPanel
+          }
+        />
         {looseEvents.map((event) => (
           <ChatEvent
             event={event}
@@ -8302,14 +8349,24 @@ export function ChatSurface({
         {turns.map((turn, turnIndex) => (
           <ChatTurn
             artifactActions={{
-              onOpenFiles: () => onComposerAction?.("open-files"),
-              // A changed-file card belongs with the conversation. Sending its
-              // diff through the generic workspace handler opens the bottom
-              // drawer (and can restore its last Terminal tab), which loses
-              // the file the reader just selected. Codex keeps this review in
-              // the adjacent panel, so route only diffs there; other artifacts
-              // still use their native tools.
+              onOpenCanvas: openCanvas,
+              onOpenPreview: (url) => {
+                onSelectChatPanel?.("browser");
+                if (url && /^https?:\/\//i.test(url)) onBrowserNavigate?.(url);
+              },
+              onOpenFiles: () =>
+                onSelectChatPanel
+                  ? onSelectChatPanel("files")
+                  : onComposerAction?.("open-files"),
+              // Artifact actions belong beside their owning conversation.
               onOpenTool: (tab) => {
+                if (
+                  (tab === "browser" || tab === "terminal") &&
+                  onSelectChatPanel
+                ) {
+                  onSelectChatPanel(tab);
+                  return;
+                }
                 if (tab === "diff" && onSelectChatPanel) {
                   onSelectChatPanel("review");
                   return;
@@ -8393,6 +8450,7 @@ export function ChatSurface({
     ),
     [
       onMutationApprovalAction,
+      openCanvas,
       onBrowserNavigate,
       onBrowserOpenExternal,
       onComposerAction,
@@ -8546,7 +8604,24 @@ export function ChatSurface({
             : companionWidth
         }
       >
-        {railPanel === "files" ? (
+        {railPanel === "canvas" ? (
+          <ChatCanvas
+            key={transcriptSessionId ?? "draft"}
+            artifacts={canvasArtifacts}
+            selectedId={selectedCanvasId}
+            onSelect={setSelectedCanvasId}
+            onSendPrompt={handleArtifactPrompt}
+            drafts={canvasDraftsBySession[transcriptSessionId ?? "draft"] ?? {}}
+            setDrafts={(update) =>
+              setCanvasDraftsBySession((current) => ({
+                ...current,
+                [transcriptSessionId ?? "draft"]: update(
+                  current[transcriptSessionId ?? "draft"] ?? {},
+                ),
+              }))
+            }
+          />
+        ) : railPanel === "files" ? (
           <CompanionFiles
             files={files}
             onOpenFile={onOpenCompanionFile}
@@ -8682,8 +8757,9 @@ export function ChatSurface({
             )}
           </h1>
           {sessionGoal?.text ? (
-            <SessionGoalStatusRow
+            <SessionGoalBand
               goal={sessionGoal}
+              density="hero"
               onComplete={() =>
                 onGoalAction?.(
                   sessionGoal.status === "complete" ? "reopen" : "complete",
@@ -8909,6 +8985,7 @@ export function ChatSurface({
           ) : null}
           {isPlanReadyForDecision && sessionPlan ? (
             <PlanDecisionCard
+              goal={sessionGoal?.text ? sessionGoal : undefined}
               isPending={isPlanDecisionPending}
               onDecision={handlePlanDecision}
               onOpenPlan={onTogglePlanPanel}
@@ -8978,11 +9055,13 @@ export function ChatSurface({
 const PLAN_DECISION_VISIBLE_STEPS = 3;
 
 function PlanDecisionCard({
+  goal,
   isPending,
   onDecision,
   onOpenPlan,
   plan,
 }: {
+  goal?: SessionGoal;
   isPending: boolean;
   onDecision: (decision: "approve" | "reject") => void;
   onOpenPlan?: () => void;
@@ -9009,6 +9088,13 @@ function PlanDecisionCard({
             {plan.title ? `${plan.title} · ` : ""}
             {stepLabel}
           </small>
+          {/* Approving a route reads better next to the destination. This
+              says what the plan is for, never that it will get there. */}
+          {goal?.text ? (
+            <small className="gyro-plan-decision-goal">
+              Toward: {goal.text}
+            </small>
+          ) : null}
         </div>
         <button
           className="gyro-plan-decision-open"
@@ -9186,7 +9272,7 @@ function PlanArtifactCard({
           type="button"
         >
           <span aria-hidden="true" className="gyro-plan-artifact-mark">
-            <Lightbulb size={14} />
+            <ListChecks size={14} />
           </span>
           {/* The card is one of many in a long transcript, so it leads with the
               plan's own title rather than the word "Plan". */}
@@ -9708,6 +9794,12 @@ function ChatSidePanel({
     value: string;
   }>();
   const [goalEditor, setGoalEditor] = useState<string>();
+  /**
+   * A written plan used to hide its own checklist: the document and the steps
+   * were two arms of one branch, so whichever the model produced last was the
+   * only one reachable. The default still follows the plan's shape.
+   */
+  const [planView, setPlanView] = useState<"document" | "steps">("document");
   const handledEditorRequestTokenRef = useRef<number>();
   useEffect(() => {
     if (
@@ -9775,6 +9867,8 @@ function ChatSidePanel({
       : "No items";
   const completedPlanItems =
     sessionPlan?.items.filter((item) => item.status === "complete").length ?? 0;
+  const blockedPlanItems =
+    sessionPlan?.items.filter((item) => item.status === "blocked").length ?? 0;
   const planProgress =
     planItemCount > 0
       ? Math.round((completedPlanItems / planItemCount) * 100)
@@ -9910,13 +10004,100 @@ function ChatSidePanel({
     );
   }
 
-  if (activePanel === "plan" && sessionPlan?.content) {
+  const planGoalBand = (
+    <div className="gyro-plan-goal-section">
+      {goalEditor !== undefined ? (
+        <form
+          className="gyro-plan-inline-editor is-goal"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitGoalEditor();
+          }}
+        >
+          <input
+            aria-label="Session goal"
+            autoFocus
+            maxLength={240}
+            onChange={(event) => setGoalEditor(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setGoalEditor(undefined);
+            }}
+            placeholder="Define the outcome for this chat"
+            value={goalEditor}
+          />
+          <button
+            aria-label="Save session goal"
+            disabled={!goalEditor.trim()}
+            title="Save session goal"
+            type="submit"
+          >
+            <Check size={13} />
+          </button>
+          <button
+            aria-label="Cancel session goal"
+            onClick={() => setGoalEditor(undefined)}
+            title="Cancel"
+            type="button"
+          >
+            <X size={13} />
+          </button>
+        </form>
+      ) : sessionGoal?.text ? (
+        <SessionGoalBand
+          goal={sessionGoal}
+          density="rail"
+          onComplete={() =>
+            onGoalAction?.(
+              sessionGoal.status === "complete" ? "reopen" : "complete",
+            )
+          }
+          onEdit={() => setGoalEditor(sessionGoal.text)}
+          onClear={() => onGoalAction?.("clear")}
+        />
+      ) : (
+        <button
+          className="gyro-rail-row is-action"
+          onClick={() => onComposerAction?.("add-goal")}
+          type="button"
+        >
+          <Goal size={14} />
+          <span>Set session goal</span>
+        </button>
+      )}
+    </div>
+  );
+
+  if (
+    activePanel === "plan" &&
+    sessionPlan?.content &&
+    planView === "document"
+  ) {
     return (
       <aside className="gyro-plan-rail is-document" aria-label="Plan document">
         <header>
           <div>
-            <Lightbulb aria-hidden="true" size={15} />
+            <ListChecks aria-hidden="true" size={15} />
             <strong>Plan</strong>
+          </div>
+          <div
+            className="gyro-plan-view-toggle"
+            role="group"
+            aria-label="Plan view"
+          >
+            <button
+              aria-pressed="true"
+              onClick={() => setPlanView("document")}
+              type="button"
+            >
+              Document
+            </button>
+            <button
+              aria-pressed="false"
+              onClick={() => setPlanView("steps")}
+              type="button"
+            >
+              Steps
+            </button>
           </div>
           <button
             aria-label="Close plan document"
@@ -9927,6 +10108,7 @@ function ChatSidePanel({
             <X size={14} />
           </button>
         </header>
+        {planGoalBand}
         <PlanDocument
           content={sessionPlan.content}
           onOpenBrowserUrl={onBrowserNavigate}
@@ -9975,17 +10157,44 @@ function ChatSidePanel({
           terminalLabel={terminalLabel}
           workspacePath={workspacePath}
         />
+        {planGoalBand}
         <section className="gyro-plan-harness" aria-label="Plan harness">
           <header>
             <div className="gyro-plan-harness-title">
-              <Lightbulb size={15} />
+              <ListChecks size={15} />
               <div>
                 <strong>{sessionPlan?.title ?? "Plan"}</strong>
                 <span>{planLabel} · model-managed checklist</span>
               </div>
             </div>
+            {sessionPlan?.content ? (
+              <div
+                className="gyro-plan-view-toggle"
+                role="group"
+                aria-label="Plan view"
+              >
+                <button
+                  aria-pressed="false"
+                  onClick={() => setPlanView("document")}
+                  type="button"
+                >
+                  Document
+                </button>
+                <button
+                  aria-pressed="true"
+                  onClick={() => setPlanView("steps")}
+                  type="button"
+                >
+                  Steps
+                </button>
+              </div>
+            ) : null}
             {planItemCount > 0 ? (
-              <strong className="gyro-plan-progress-label">
+              <strong
+                className="gyro-plan-progress-label"
+                aria-label={`${completedPlanItems} of ${planItemCount} steps completed${blockedPlanItems > 0 ? `, ${blockedPlanItems} blocked` : ""}`}
+                data-blocked={blockedPlanItems > 0 ? "true" : undefined}
+              >
                 {completedPlanItems}/{planItemCount}
               </strong>
             ) : null}
@@ -10003,102 +10212,6 @@ function ChatSidePanel({
             </div>
           ) : null}
           <div className="gyro-rail-section">
-            {goalEditor !== undefined ? (
-              <form
-                className="gyro-plan-inline-editor is-goal"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  submitGoalEditor();
-                }}
-              >
-                <input
-                  aria-label="Session goal"
-                  autoFocus
-                  maxLength={240}
-                  onChange={(event) => setGoalEditor(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setGoalEditor(undefined);
-                  }}
-                  placeholder="Define the outcome for this chat"
-                  value={goalEditor}
-                />
-                <button
-                  aria-label="Save session goal"
-                  disabled={!goalEditor.trim()}
-                  title="Save session goal"
-                  type="submit"
-                >
-                  <Check size={13} />
-                </button>
-                <button
-                  aria-label="Cancel session goal"
-                  onClick={() => setGoalEditor(undefined)}
-                  title="Cancel"
-                  type="button"
-                >
-                  <X size={13} />
-                </button>
-              </form>
-            ) : sessionGoal?.text ? (
-              <article className={`gyro-session-goal is-${sessionGoal.status}`}>
-                <Goal size={15} />
-                <div>
-                  <small>Session goal</small>
-                  <strong>{sessionGoal.text}</strong>
-                </div>
-                <div className="gyro-plan-item-actions">
-                  <button
-                    aria-label="Edit goal"
-                    onClick={() => setGoalEditor(sessionGoal.text)}
-                    type="button"
-                  >
-                    <Edit3 size={12} />
-                  </button>
-                  <button
-                    aria-label={
-                      sessionGoal.status === "complete"
-                        ? "Reopen goal"
-                        : "Complete goal"
-                    }
-                    onClick={() =>
-                      onGoalAction?.(
-                        sessionGoal.status === "complete"
-                          ? "reopen"
-                          : "complete",
-                      )
-                    }
-                    title={
-                      sessionGoal.status === "complete"
-                        ? "Reopen goal"
-                        : "Complete goal"
-                    }
-                    type="button"
-                  >
-                    {sessionGoal.status === "complete" ? (
-                      <RefreshCw size={12} />
-                    ) : (
-                      <Check size={12} />
-                    )}
-                  </button>
-                  <button
-                    aria-label="Clear goal"
-                    onClick={() => onGoalAction?.("clear")}
-                    type="button"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </article>
-            ) : (
-              <button
-                className="gyro-rail-row is-action"
-                onClick={() => onComposerAction?.("add-goal")}
-                type="button"
-              >
-                <Goal size={14} />
-                <span>Set session goal</span>
-              </button>
-            )}
             {planEditor?.mode === "add" ? (
               <form
                 className="gyro-plan-inline-editor"
@@ -10171,9 +10284,11 @@ function ChatSidePanel({
                     {item.status === "complete" ? (
                       <Check size={13} />
                     ) : item.status === "blocked" ? (
-                      <X size={13} />
-                    ) : (
+                      <Minus size={13} />
+                    ) : item.status === "in-progress" ? (
                       <CircleDashed size={13} />
+                    ) : (
+                      <Circle size={13} />
                     )}
                   </button>
                   {planEditor?.mode === "edit" &&
@@ -10252,6 +10367,36 @@ function ChatSidePanel({
                           type="button"
                         >
                           <Edit3 size={11} />
+                        </button>
+                        {/* Blocked is a claim about the world, not a stop on
+                            the check button's cycle: one stray click should
+                            never strand a step there. */}
+                        <button
+                          aria-label={
+                            item.status === "blocked"
+                              ? `Unblock ${item.title}`
+                              : `Mark ${item.title} blocked`
+                          }
+                          onClick={() =>
+                            onPlanItemStatusChange?.(
+                              item.id,
+                              item.status === "blocked"
+                                ? "in-progress"
+                                : "blocked",
+                            )
+                          }
+                          title={
+                            item.status === "blocked"
+                              ? "Unblock step"
+                              : "Mark blocked"
+                          }
+                          type="button"
+                        >
+                          {item.status === "blocked" ? (
+                            <RefreshCw size={11} />
+                          ) : (
+                            <Minus size={11} />
+                          )}
                         </button>
                         <button
                           aria-label={`Remove ${item.title}`}
@@ -10677,6 +10822,7 @@ function ChatCompanionDock({
                   {
                     {
                       review: "⌃⇧G",
+                      canvas: "",
                       terminal: "⌃`",
                       browser: "⌘T",
                       files: "⌘P",
@@ -11597,17 +11743,18 @@ function formatAttachmentSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** One register with the activity thread: a step reports state in words. */
 function planStatusLabel(status: SessionPlanItemStatus) {
   switch (status) {
     case "in-progress":
-      return "doing";
+      return "Working";
     case "complete":
-      return "done";
+      return "Completed";
     case "blocked":
-      return "blocked";
+      return "Blocked";
     case "todo":
     default:
-      return "todo";
+      return "Not started";
   }
 }
 
@@ -17799,7 +17946,9 @@ export function BrowserPreviewSurface({
               role="group"
               aria-label="Browser actions"
               onClick={(event) => {
-                if ((event.target as Element).closest("button:not(:disabled)")) {
+                if (
+                  (event.target as Element).closest("button:not(:disabled)")
+                ) {
                   setIsBrowserMenuOpen(false);
                 }
               }}
@@ -17901,13 +18050,14 @@ export function BrowserPreviewSurface({
           <div className="gyro-browser-agent-strip" role="status">
             <span aria-hidden="true" className="gyro-browser-agent-dot" />
             <span className="gyro-browser-agent-text">
-              <strong>Gyro is using this page</strong>
+              <strong>Browser</strong>
               <span>{agentActivity}</span>
             </span>
             {onStopAgent ? (
               <button
                 className="gyro-browser-agent-stop"
                 onClick={onStopAgent}
+                title="Stop the current response"
                 type="button"
               >
                 Stop
@@ -22391,7 +22541,8 @@ function providerApprovalCopy(
         autoLabel: "Approve for me",
         autoDetail: "Allow work within provider and project limits",
         directLabel: "Full access",
-        directDetail: "Unrestricted access to the internet and any file on your computer",
+        directDetail:
+          "Unrestricted access to the internet and any file on your computer",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
         commandDetail: "Claude tool calls use the backend command policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
@@ -22404,7 +22555,8 @@ function providerApprovalCopy(
         autoLabel: "Approve for me",
         autoDetail: "Allow work within provider and project limits",
         directLabel: "Full access",
-        directDetail: "Unrestricted access to the internet and any file on your computer",
+        directDetail:
+          "Unrestricted access to the internet and any file on your computer",
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
         commandDetail: "Codex command execution uses the backend policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
@@ -22877,11 +23029,7 @@ function Composer({
   // Direct access to models for the provider already in use.
   const currentModelItems: ComposerPopoverItem[] = displayProvider
     ? displayProvider.models.map((model) =>
-        composerModelPickerItem(
-          displayProvider.id,
-          model,
-          effectiveModelId,
-        ),
+        composerModelPickerItem(displayProvider.id, model, effectiveModelId),
       )
     : [];
   const hasEffortChoice = Boolean(
@@ -22972,7 +23120,7 @@ function Composer({
       : []),
     {
       action: "set-chat-mode-plan",
-      icon: Lightbulb,
+      icon: ListChecks,
       label: "Plan",
     },
     {
@@ -23012,7 +23160,7 @@ function Composer({
           command: "/plan",
           description: "Plan before making changes",
           hint: "Gyro works out the steps and shows them to you first. Nothing on your computer changes until you agree.",
-          icon: LockKeyhole,
+          icon: ListChecks,
           label: "Plan mode",
         },
     // No `/council` while frozen: a slash command has no disabled state, so
@@ -23158,6 +23306,11 @@ function Composer({
     ],
   );
   const requestSend = () => {
+    if (draft.trim().toLowerCase() === "/compact" && onComposerAction) {
+      onDraftChange("");
+      onComposerAction("compact-context");
+      return;
+    }
     onSend();
   };
   const costPreviewTitle = `Each seat carries this chat's context, and the synthesizer then reads their answers. Estimated total for one send: ${turnCost.label}.`;
@@ -23623,9 +23776,7 @@ function Composer({
         aria-expanded={isSlashMenuOpen}
         aria-haspopup="menu"
         onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files).filter(
-            isChatMediaFile,
-          );
+          const files = chatMediaFiles(event.clipboardData);
           if (files.length) {
             event.preventDefault();
             onAttachMediaFiles?.(files);
@@ -23857,7 +24008,7 @@ function Composer({
             title="Remove Plan mode"
             type="button"
           >
-            <LockKeyhole size={13} />
+            <ListChecks size={13} />
             <span className="gyro-composer-label">Plan</span>
             <X
               aria-hidden="true"
@@ -23946,8 +24097,8 @@ function Composer({
               <div className="gyro-composer-context-value">
                 <strong>{contextUsage.usedLabel}</strong>
                 <span>
-                  of {contextUsage.windowLabel} ·{" "}
-                  {contextUsage.remainingLabel} remaining
+                  of {contextUsage.windowLabel} · {contextUsage.remainingLabel}{" "}
+                  remaining
                 </span>
               </div>
               <div
@@ -25732,42 +25883,67 @@ function ChatRunChangeSummary({
 }
 
 /**
- * One quiet, persistent statement of the outcome for this chat. Goals used to
- * be visible only in the composer or the optional environment rail, so the
- * work timeline could read as an unconnected list of tool calls. This row
- * keeps the outcome and its controls in the same visual language as a turn.
+ * The outcome and the route, as siblings. A session has one goal and, because
+ * a plan is replaced wholesale on every revision, many plans — so the goal is
+ * never drawn as the plan's header. Each row stands alone: a chat with no plan
+ * shows only the goal, a plan with no goal shows only the steps, and neither
+ * row ever invents the other.
  */
-function SessionGoalStatusRow({
+function SessionGoalBand({
   goal,
+  plan,
+  density = "thread",
   onClear,
   onComplete,
   onEdit,
+  onOpenPlan,
 }: {
-  goal: SessionGoal;
+  goal?: SessionGoal;
+  plan?: SessionPlan;
+  density?: "hero" | "thread" | "rail";
   onClear?: () => void;
   onComplete?: () => void;
   onEdit?: () => void;
+  onOpenPlan?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
-  const isActive = goal.status === "active";
+  const isActive = goal?.status === "active";
   useEffect(() => {
     if (!isActive) return;
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
   }, [isActive]);
 
-  const startedAt = Date.parse(goal.createdAt ?? goal.updatedAt ?? "");
-  const finishedAt = Date.parse(goal.updatedAt ?? "");
+  const startedAt = Date.parse(goal?.createdAt ?? goal?.updatedAt ?? "");
+  const finishedAt = Date.parse(goal?.updatedAt ?? "");
   const durationEnd =
     isActive || !Number.isFinite(finishedAt) ? now : finishedAt;
-  const duration = Number.isFinite(startedAt)
-    ? formatRunDuration(
-        Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
-      )
-    : undefined;
+  // The rail sits beside the thread, which already carries the running clock.
+  const duration =
+    Number.isFinite(startedAt) && density !== "rail"
+      ? formatRunDuration(
+          Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
+        )
+      : undefined;
   const label = isActive ? "Pursuing goal" : "Goal completed";
 
-  return (
+  const steps = plan?.items ?? [];
+  const completedSteps = steps.filter(
+    (item) => item.status === "complete",
+  ).length;
+  const blockedSteps = steps.filter((item) => item.status === "blocked").length;
+  // A plan the model wrote as prose is still a plan worth pointing at, even
+  // before it has a single checklist step.
+  const hasPlan = Boolean(plan && (steps.length > 0 || plan.content));
+  // The strip belongs where the plan is not already on screen. In the rail the
+  // checklist and its own progress bar sit directly below.
+  const showPlanStrip = hasPlan && density === "thread";
+
+  if (!goal?.text && !showPlanStrip) {
+    return null;
+  }
+
+  const goalRow = goal?.text ? (
     <section
       aria-label={`${label}: ${goal.text}`}
       className={`gyro-session-goal-status is-${goal.status}`}
@@ -25815,6 +25991,65 @@ function SessionGoalStatusRow({
         ) : null}
       </span>
     </section>
+  ) : null;
+
+  if (!showPlanStrip) {
+    return (
+      <div className="gyro-session-goal-band" data-density={density}>
+        {goalRow}
+      </div>
+    );
+  }
+
+  const stepProgress =
+    steps.length > 0 ? Math.round((completedSteps / steps.length) * 100) : 0;
+  // Steps completed is not the goal met: the plan can finish and leave the
+  // outcome unreached. This strip only ever counts steps.
+  const stepSummary =
+    steps.length > 0
+      ? `${completedSteps} of ${steps.length} steps`
+      : "Plan ready to review";
+
+  return (
+    <div className="gyro-session-goal-band" data-density={density}>
+      {goalRow}
+      <div className="gyro-plan-strip">
+        <span aria-hidden="true" className="gyro-plan-strip-mark">
+          <ListChecks size={13} />
+        </span>
+        <span
+          className="gyro-plan-strip-count"
+          data-blocked={blockedSteps > 0 ? "true" : undefined}
+        >
+          {stepSummary}
+          {blockedSteps > 0 ? ` · ${blockedSteps} blocked` : ""}
+        </span>
+        {steps.length > 0 ? (
+          <div
+            aria-label={`Plan steps completed: ${stepSummary}`}
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={stepProgress}
+            className="gyro-plan-strip-track"
+            role="progressbar"
+          >
+            <span style={{ width: `${stepProgress}%` }} />
+          </div>
+        ) : (
+          <span className="gyro-plan-strip-track is-empty" />
+        )}
+        {onOpenPlan ? (
+          <button
+            className="gyro-plan-strip-open"
+            onClick={onOpenPlan}
+            title="Open plan"
+            type="button"
+          >
+            Open plan
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -26730,7 +26965,11 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
   if (event.kind === "system-event" && payload?.surface === "desktop-ide") {
     return true;
   }
-  if (event.kind === "system-event" && payloadKind === "workspace-context") {
+  if (
+    event.kind === "system-event" &&
+    (payloadKind === "workspace-context" ||
+      payloadKind === "provider-context-usage")
+  ) {
     return true;
   }
   if (

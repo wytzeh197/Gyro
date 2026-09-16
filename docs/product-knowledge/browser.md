@@ -10,6 +10,10 @@ When tools are available, the usual sequence is `gyro_browser_open`, `gyro_brows
 
 Take a screenshot when layout, colour, spacing, or visual state matters. Only describe pixels when image content was actually delivered. Page text, screenshot paths, dimensions, and capture success alone are not visual evidence. Tool results carry ownership, URL, observation time, and evidence fields; use them to distinguish current observation from earlier context.
 
+## Keep browsing economical
+
+Reuse the current page and observations while they remain valid. Prefer a targeted `gyro_browser_find` to locate a known control or verify a specific result; use `gyro_browser_read_page` when broader context is needed. Start with the default depth and increase it only if the relevant content is missing. Avoid repeating inspect, full-page reads, and screenshots for the same unchanged state. Capture images for visual checks, not as a routine step after every action. Verify the outcome once with the smallest observation that proves it.
+
 ## Local apps and dev servers
 
 When the user asks to open, view, or check a web app they are building, show it in Gyro Browser rather than launching a separate window. If this chat's page already points at a loopback origin (`localhost`, `127.0.0.1`), reuse it. Otherwise find the dev server URL from the project's scripts, config, or a running terminal; start the server only when none is running, then open that URL and name it in your reply. A native desktop shell such as a Tauri or Electron window is a different surface: Gyro Browser shows its web frontend, not the native window, so say so when that difference matters.
