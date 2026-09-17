@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import ts from "typescript";
+import { totalFileChangeCounts } from "../packages/ui/src/file-change-counts.ts";
+import { filesForReviewScope } from "../packages/ui/src/review-scope.ts";
 
 import {
   askAboutFilePrompt,
@@ -208,6 +212,80 @@ assert.deepEqual(
   "a path edited twice is one file, keeping the note the agent left with it",
 );
 
+// --- Unknown counts and rendered badges --------------------------------------
+
+const unknownTurn = latestFileReviewTurn([
+  fileEdit("unknown.ts", { additions: undefined, deletions: undefined }),
+]);
+assert.equal(unknownTurn.files[0].additions, undefined);
+assert.equal(unknownTurn.files[0].deletions, undefined);
+const unknownListing = filesForReviewScope(
+  { kind: "turn", turnId: unknownTurn.turnId },
+  { turnFiles: unknownTurn.files },
+);
+assert.deepEqual(unknownListing.files, [
+  { path: "unknown.ts", additions: undefined, deletions: undefined },
+]);
+const measured = [
+  { additions: 9, deletions: 2 },
+  { additions: 3, deletions: 0 },
+];
+assert.deepEqual(totalFileChangeCounts(measured), {
+  additions: 12,
+  deletions: 2,
+});
+assert.equal(
+  totalFileChangeCounts([...measured, ...unknownTurn.files]),
+  undefined,
+);
+assert.equal(totalFileChangeCounts([{ additions: 3 }]), undefined);
+assert.equal(
+  totalFileChangeCounts([{ additions: -1, deletions: 0 }]),
+  undefined,
+);
+assert.equal(
+  totalFileChangeCounts([{ additions: NaN, deletions: 0 }]),
+  undefined,
+);
+assert.equal(totalFileChangeCounts([]), undefined);
+assert.deepEqual(totalFileChangeCounts([{ additions: 0, deletions: 0 }]), {
+  additions: 0,
+  deletions: 0,
+});
+
+// Render the actual shared badges used by live, completed, and Review surfaces.
+const badgeUrl = new URL(
+  "../packages/ui/src/file-change-counts-view.tsx",
+  import.meta.url,
+);
+const requireUi = createRequire(badgeUrl);
+const { createElement } = requireUi("react");
+const { renderToStaticMarkup } = requireUi("react-dom/server");
+const compiled = ts.transpileModule(readFileSync(badgeUrl, "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+}).outputText;
+const badgeModule = { exports: {} };
+new Function("require", "module", "exports", compiled)(
+  requireUi,
+  badgeModule,
+  badgeModule.exports,
+);
+const renderCounts = (counts) =>
+  renderToStaticMarkup(
+    createElement(badgeModule.exports.FileChangeCountBadges, { counts }),
+  );
+assert.equal(renderCounts(undefined), "<span>Line counts unavailable</span>");
+assert.equal(
+  renderCounts({ additions: 3 }),
+  "<span>Line counts unavailable</span>",
+);
+assert.match(renderCounts({ additions: 9, deletions: 2 }), />\+9<.*>−2</);
+assert.match(renderCounts({ additions: 0, deletions: 0 }), />\+0<.*>−0</);
+assert.equal(
+  renderCounts(totalFileChangeCounts([...measured, {}])),
+  "<span>Line counts unavailable</span>",
+);
+
 // --- The inline diff ---------------------------------------------------------
 
 const preview = diffPreviewLines(
@@ -249,6 +327,17 @@ const surfaces = readFileSync(
   "utf8",
 );
 const cardStart = surfaces.indexOf("function ChatRunChangeSummary(");
+assert.doesNotMatch(surfaces, /additions: file\.additions \?\? 0/);
+const turnSource = surfaces.slice(
+  surfaces.indexOf("function ChatTurn("),
+  cardStart,
+);
+assert.doesNotMatch(
+  turnSource,
+  /fileStats:/,
+  "turn totals must not borrow shared Git counts",
+);
+assert.match(surfaces, /FileChangeCountBadges counts=\{totals\}/);
 assert.ok(cardStart > 0, "the review card should be findable in surfaces.tsx");
 const card = surfaces.slice(
   cardStart,

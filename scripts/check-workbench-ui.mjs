@@ -3920,7 +3920,7 @@ expect(
     runSource.includes("`${minutes}m`") &&
     runSource.includes("`${seconds}s`") &&
     surfaceSource.includes("buildRunModel(") &&
-    surfaceSource.includes("providerActivityPathsMatch") &&
+    !surfaceSource.includes("providerActivityPathsMatch") &&
     runSource.includes('case "file":') &&
     runSource.includes('"Ran command"') &&
     runSource.includes('case "context":') &&
@@ -4023,12 +4023,12 @@ expect(
     runSource.includes('case "commentary":') &&
     runViewSource.includes("gyro-run-row-label") &&
     runSource.includes("stripUpdatedPrefix") &&
-    surfaceSource.includes("sourceControlFileForActivityPath") &&
+    surfaceSource.includes("totalFileChangeCounts(files)") &&
     runSource.includes("mergeFileChange") &&
     runSource.includes("files: FileChange[]") &&
-    surfaceSource.includes("fileStats: (path)") &&
-    surfaceSource.includes("sourceControlFileDelta") &&
-    surfaceSource.includes("sourceControlStatsForActivityPath") &&
+    !surfaceSource.includes("fileStats: (path)") &&
+    !surfaceSource.includes("sourceControlFileDelta") &&
+    surfaceSource.includes("FileChangeCountBadges counts={totals}") &&
     surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
     runViewSource.includes("gyro-run-row-stat") &&
     runSource.includes("mergeFileChange(files, item)") &&

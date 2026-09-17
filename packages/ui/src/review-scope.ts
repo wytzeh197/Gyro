@@ -21,8 +21,8 @@ export type ReviewScope =
 export type ReviewFile = {
   path: string;
   originalPath?: string;
-  additions: number;
-  deletions: number;
+  additions?: number;
+  deletions?: number;
   staged?: boolean;
 };
 
@@ -102,8 +102,8 @@ export function filesForReviewScope(
     sourceControl?: SourceControlState;
     turnFiles?: Array<{
       path: string;
-      additions: number;
-      deletions: number;
+      additions?: number;
+      deletions?: number;
     }>;
   } = {},
 ): ReviewScopeListing {

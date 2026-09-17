@@ -167,6 +167,8 @@ import {
   isKeptCurrent,
 } from "./file-review";
 import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
+import { totalFileChangeCounts } from "./file-change-counts";
+import { FileChangeCountBadges } from "./file-change-counts-view";
 import {
   sourceControlTotals,
   sourceControlTotalsBadge,
@@ -7873,7 +7875,7 @@ export function ChatSurface({
     kind: "proposed",
   });
   const [reviewTurnFiles, setReviewTurnFiles] =
-    useState<Array<{ path: string; additions: number; deletions: number }>>();
+    useState<Array<{ path: string; additions?: number; deletions?: number }>>();
   /**
    * Whether the transcript should keep itself at the bottom as it grows.
    *
@@ -9748,8 +9750,8 @@ function ChatSidePanel({
   reviewScope?: ReviewScope;
   reviewTurnFiles?: Array<{
     path: string;
-    additions: number;
-    deletions: number;
+    additions?: number;
+    deletions?: number;
   }>;
   onLoadComparisonDiff?: (
     file: {
@@ -25492,7 +25494,7 @@ function ChatTurn({
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: (
     path?: string,
-    files?: Array<{ path: string; additions: number; deletions: number }>,
+    files?: Array<{ path: string; additions?: number; deletions?: number }>,
   ) => void;
   onUndoChanges?: () => void;
   onMutationApprovalAction?: (
@@ -25539,19 +25541,12 @@ function ChatTurn({
   const isPlanResponseTurn = Boolean(
     plan?.content && plan.sourceTurnId === turn.id,
   );
+  // Counts belong to this turn's events. Shared Git totals (or differences
+  // between their totals) cannot measure an individual turn's edits.
   const runModel = buildRunModel(turn.timelineEvents, {
     isRunning,
     startedAt,
     durationMs: turn.durationMs ?? elapsedMsBetween(startedAt, completedAt),
-    fileStats: (path) => {
-      const file = sourceControlFileForActivityPath(path, sourceControl);
-      return file
-        ? sourceControlFileDelta(
-            file,
-            sourceControlStatsForActivityPath(path, sourceControlBaseline),
-          )
-        : undefined;
-    },
     status: providerStatus
       ? {
           status: providerStatus.status,
@@ -25579,8 +25574,8 @@ function ChatTurn({
       string,
       {
         path: string;
-        additions: number;
-        deletions: number;
+        additions?: number;
+        deletions?: number;
         intent?: string;
       }
     >();
@@ -25588,8 +25583,8 @@ function ChatTurn({
       if (file.path.trim().toLowerCase() === "files") continue;
       files.set(file.path, {
         path: file.path,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
+        additions: file.additions,
+        deletions: file.deletions,
         intent: file.intent,
       });
     }
@@ -25774,11 +25769,10 @@ function LiveFileChanges({
   files,
   onReview,
 }: {
-  files: Array<{ path: string; additions: number; deletions: number }>;
+  files: Array<{ path: string; additions?: number; deletions?: number }>;
   onReview?: (path?: string) => void;
 }) {
-  const additions = files.reduce((total, file) => total + file.additions, 0);
-  const deletions = files.reduce((total, file) => total + file.deletions, 0);
+  const totals = totalFileChangeCounts(files);
   return (
     <button
       className="gyro-chat-run-change-summary-trigger"
@@ -25789,8 +25783,7 @@ function LiveFileChanges({
       <strong>
         {files.length} {files.length === 1 ? "file" : "files"} changed
       </strong>
-      {additions > 0 ? <em className="is-added">+{additions}</em> : null}
-      {deletions > 0 ? <em className="is-removed">-{deletions}</em> : null}
+      <FileChangeCountBadges counts={totals} />
     </button>
   );
 }
@@ -25820,8 +25813,8 @@ function ChatRunChangeSummary({
   decisions?: Map<string, FileReviewRecord>;
   files: Array<{
     path: string;
-    additions: number;
-    deletions: number;
+    additions?: number;
+    deletions?: number;
     intent?: string;
   }>;
   isReviewable?: boolean;
@@ -25838,13 +25831,7 @@ function ChatRunChangeSummary({
   if (!files.length) return null;
   const visibleFiles = showAllFiles ? files : files.slice(0, 6);
   const hiddenCount = files.length - 6;
-  const totals = files.reduce(
-    (current, file) => ({
-      additions: current.additions + file.additions,
-      deletions: current.deletions + file.deletions,
-    }),
-    { additions: 0, deletions: 0 },
-  );
+  const totals = totalFileChangeCounts(files);
   const fileLabel = files.length === 1 ? "file" : "files";
   const canExpandDiff = Boolean(onLoadChangeDiff);
   const reviewFiles = () => {
@@ -25876,8 +25863,7 @@ function ChatRunChangeSummary({
             Edited {files.length} {fileLabel}
           </strong>
           <small>
-            <em className="is-added">+{totals.additions}</em>
-            <em className="is-removed">-{totals.deletions}</em>
+            <FileChangeCountBadges counts={totals} />
             {keptCount > 0 ? (
               <em className="is-kept">
                 {keptCount} of {files.length} kept
@@ -25910,8 +25896,7 @@ function ChatRunChangeSummary({
             );
             const stats = (
               <small>
-                <em className="is-added">+{file.additions}</em>
-                <em className="is-removed">-{file.deletions}</em>
+                <FileChangeCountBadges counts={file} />
               </small>
             );
 
@@ -26322,54 +26307,6 @@ function formatMessageTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function providerActivityPathsMatch(first: string, second: string) {
-  const normalize = (path: string) =>
-    path.replaceAll("\\", "/").replace(/\/+/g, "/").replace(/\/$/, "");
-  const firstPath = normalize(first);
-  const secondPath = normalize(second);
-  return (
-    firstPath === secondPath ||
-    firstPath.endsWith(`/${secondPath}`) ||
-    secondPath.endsWith(`/${firstPath}`)
-  );
-}
-
-function sourceControlFileForActivityPath(
-  activityPath: string,
-  sourceControl?: SourceControlState,
-) {
-  return sourceControl?.files.find((file) =>
-    providerActivityPathsMatch(activityPath, file.path),
-  );
-}
-
-function sourceControlStatsForActivityPath(
-  activityPath: string,
-  stats?: Record<string, { additions: number; deletions: number }>,
-) {
-  return Object.entries(stats ?? {}).find(([path]) =>
-    providerActivityPathsMatch(activityPath, path),
-  )?.[1];
-}
-
-function sourceControlFileDelta(
-  current: Pick<SourceControlFile, "additions" | "deletions">,
-  baseline?: { additions: number; deletions: number },
-) {
-  if (!baseline) {
-    return {
-      additions: current.additions,
-      deletions: current.deletions,
-    };
-  }
-  const additionsDelta = current.additions - baseline.additions;
-  const deletionsDelta = current.deletions - baseline.deletions;
-  return {
-    additions: Math.max(0, additionsDelta) + Math.max(0, -deletionsDelta),
-    deletions: Math.max(0, deletionsDelta) + Math.max(0, -additionsDelta),
-  };
 }
 
 type AssistantResponseBlock =
