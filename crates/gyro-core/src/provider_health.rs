@@ -3,7 +3,7 @@ use crate::execution::{
 };
 use crate::{
     check_acp_health, check_kimi_acp_health, discover_ollama_models, provider_descriptor,
-    KimiAcpHealthStatus, ProviderHealthKind,
+    provider_has_api_key, stored_provider_api_key_env, KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -55,13 +55,14 @@ impl ProviderHealthService {
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", request.provider_id))?;
         match descriptor.health_kind {
             ProviderHealthKind::CodexCli => self.check_openai(request),
-            ProviderHealthKind::ClaudeCli => self.cli_check(
+            ProviderHealthKind::ClaudeCli => self.check_cli_or_stored_key(
                 "anthropic",
                 "provider-cli",
                 "claude",
                 &["auth", "status"],
                 Some("claude auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
+                &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             ),
             ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::CursorCli => Ok(acp_provider_health(&request.provider_id)),
@@ -88,7 +89,8 @@ impl ProviderHealthService {
         if should_skip_codex_login_for_external_env(
             request.base_url.as_deref(),
             request.api_key_ref.as_deref(),
-        ) {
+        ) || provider_has_api_key("openai")
+        {
             return Ok(env_provider_health(
                 "openai",
                 request.api_key_ref.as_deref(),
@@ -106,6 +108,29 @@ impl ProviderHealthService {
         )
     }
 
+    fn check_cli_or_stored_key(
+        &self,
+        provider_id: &str,
+        auth_owner: &str,
+        command: &str,
+        args: &[&str],
+        login_command: Option<&str>,
+        secret_storage: &str,
+        env_names: &[&str],
+    ) -> Result<ProviderHealthCheck> {
+        if provider_has_api_key(provider_id) {
+            return Ok(env_provider_health(provider_id, None, env_names));
+        }
+        self.cli_check(
+            provider_id,
+            auth_owner,
+            command,
+            args,
+            login_command,
+            secret_storage,
+        )
+    }
+
     fn cli_check(
         &self,
         provider_id: &str,
@@ -119,7 +144,7 @@ impl ProviderHealthService {
             .chain(args.iter().copied())
             .collect::<Vec<_>>()
             .join(" ");
-        let output = match command_output(command, args) {
+        let output = match command_output(command, args, provider_id) {
             Ok(output) => output,
             Err(CommandOutputError::Unavailable(error)) => {
                 format!("{command} unavailable: {error}")
@@ -261,14 +286,14 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         _ => return kimi_provider_health(),
     };
     if provider_id == "xai" {
-        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+        let preferred = if provider_has_api_key("xai") {
             "xai.api_key"
         } else {
             "cached_token"
         };
         auth_methods.sort_by_key(|method| usize::from(*method != preferred));
     } else if provider_id == "gemini" {
-        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+        let preferred = if provider_has_api_key("gemini") {
             Some("gemini-api-key")
         } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
             || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
@@ -355,9 +380,15 @@ fn env_provider_health(
         .iter()
         .find(|env_name| std::env::var_os(env_name.as_str()).is_some())
         .cloned();
+    let keychain_key = provider_has_api_key(provider_id) && present_env.is_none();
     let output = if let Some(env_name) = present_env.as_deref() {
         format!(
             "{provider_id} provider-env auth available; {env_name} is set; value not read by Gyro."
+        )
+    } else if keychain_key {
+        let env_name = env_names.first().map(String::as_str).unwrap_or("API_KEY");
+        format!(
+            "{provider_id} provider-env auth available; {env_name} is stored in macOS Keychain; key value omitted."
         )
     } else {
         format!(
@@ -368,7 +399,7 @@ fn env_provider_health(
 
     ProviderHealthCheck {
         provider_id: provider_id.into(),
-        runtime_status: if present_env.is_some() {
+        runtime_status: if present_env.is_some() || keychain_key {
             "ready".into()
         } else {
             "not-logged-in".into()
@@ -378,8 +409,16 @@ fn env_provider_health(
         login_command: None,
         account_label: None,
         subscription_label: None,
-        provider_mode: Some("environment-owned auth".into()),
-        secret_storage: "Environment variable or provider SDK store".into(),
+        provider_mode: Some(if keychain_key {
+            "keychain-owned auth".into()
+        } else {
+            "environment-owned auth".into()
+        }),
+        secret_storage: if keychain_key {
+            "macOS Keychain".into()
+        } else {
+            "Environment variable or provider SDK store".into()
+        },
         privacy_note: "Gyro stores readiness summaries only; provider tokens stay outside Gyro."
             .into(),
         diagnostics_opt_in: false,
@@ -474,10 +513,15 @@ enum CommandOutputError {
     Terminated(String),
 }
 
-fn command_output(command: &str, args: &[&str]) -> std::result::Result<String, CommandOutputError> {
+fn command_output(
+    command: &str,
+    args: &[&str],
+    provider_id: &str,
+) -> std::result::Result<String, CommandOutputError> {
     let mut result = command_output_with_limits(
         command,
         args,
+        provider_id,
         PROVIDER_HEALTH_TIMEOUT,
         PROVIDER_HEALTH_MAX_STDOUT_CHARS,
         PROVIDER_HEALTH_MAX_STDERR_CHARS,
@@ -494,6 +538,7 @@ fn command_output(command: &str, args: &[&str]) -> std::result::Result<String, C
         result = command_output_with_limits(
             command,
             args,
+            provider_id,
             PROVIDER_HEALTH_TIMEOUT,
             PROVIDER_HEALTH_MAX_STDOUT_CHARS,
             PROVIDER_HEALTH_MAX_STDERR_CHARS,
@@ -534,6 +579,7 @@ fn is_transient_health_result(result: &std::result::Result<String, CommandOutput
 fn command_output_with_limits(
     command: &str,
     args: &[&str],
+    provider_id: &str,
     timeout: Duration,
     max_stdout_chars: usize,
     max_stderr_chars: usize,
@@ -548,6 +594,9 @@ fn command_output_with_limits(
             OsString::from("PATH"),
             Some(OsString::from(crate::cli_path::augmented_gui_path())),
         ));
+    }
+    if let Some((name, value)) = stored_provider_api_key_env(provider_id) {
+        request.env.push((name, Some(value)));
     }
     let outcome = run_command(request, CancellationToken::default(), |_| {})
         .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
@@ -659,6 +708,7 @@ mod tests {
         let error = command_output_with_limits(
             "/bin/sh",
             &["-c", "sleep 5"],
+            "openai",
             Duration::from_millis(50),
             128,
             128,
@@ -677,6 +727,7 @@ mod tests {
         let output = command_output_with_limits(
             "/bin/sh",
             &["-c", "printf 123456789"],
+            "openai",
             Duration::from_secs(1),
             4,
             4,
@@ -692,6 +743,7 @@ mod tests {
         let output = command_output_with_limits(
             "/bin/sh",
             &["-c", "exit 17"],
+            "openai",
             Duration::from_secs(1),
             128,
             128,

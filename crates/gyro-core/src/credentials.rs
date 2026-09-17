@@ -11,15 +11,17 @@
 //! key would break the very run being protected. A scrubbed run keeps the keys
 //! the launched provider needs for its own auth and drops every other one.
 
+use anyhow::Result;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Environment variables a provider needs to authenticate as itself.
 ///
 /// Anything not listed here is stripped from that provider's runs, including
 /// the other providers' keys — a Claude run has no reason to hold an xAI key.
-fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str] {
+pub fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str] {
     match provider_id {
         "anthropic" => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
         "openai" => &["OPENAI_API_KEY"],
@@ -33,6 +35,104 @@ fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str] {
         "cursor" => &["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"],
         _ => &[],
     }
+}
+
+/// Stable Keychain account for a provider API key saved in Gyro Settings.
+pub fn provider_api_key_account(provider_id: &str) -> String {
+    format!("provider:{provider_id}")
+}
+
+/// The env var a provider CLI reads when Gyro injects a stored API key.
+pub fn provider_api_key_env_name(provider_id: &str) -> Option<&'static str> {
+    provider_credential_env_vars(provider_id).first().copied()
+}
+
+pub fn provider_supports_api_key(provider_id: &str) -> bool {
+    provider_api_key_env_name(provider_id).is_some()
+}
+
+/// Map a provider program name (`grok`, `codex`, …) to its Gyro provider id.
+pub fn provider_id_from_program(program: &str) -> Option<&'static str> {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "codex" => Some("openai"),
+        "claude" => Some("anthropic"),
+        "grok" => Some("xai"),
+        "gemini" => Some("gemini"),
+        "kimi" => Some("kimi"),
+        "cursor-agent" => Some("cursor"),
+        _ => None,
+    }
+}
+
+pub fn stored_provider_api_key(provider_id: &str) -> Result<Option<String>> {
+    if !provider_supports_api_key(provider_id) {
+        return Ok(None);
+    }
+    let value = crate::keychain::get_api_key(&provider_api_key_account(provider_id))?;
+    Ok(value.filter(|item| !item.trim().is_empty()))
+}
+
+pub fn set_stored_provider_api_key(provider_id: &str, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("API key is empty");
+    }
+    if !provider_supports_api_key(provider_id) {
+        anyhow::bail!("this provider does not accept an API key in Gyro");
+    }
+    crate::keychain::set_api_key(&provider_api_key_account(provider_id), trimmed)
+}
+
+pub fn clear_stored_provider_api_key(provider_id: &str) -> Result<()> {
+    if !provider_supports_api_key(provider_id) {
+        anyhow::bail!("this provider does not accept an API key in Gyro");
+    }
+    crate::keychain::delete_api_key(&provider_api_key_account(provider_id))
+}
+
+/// True when the process environment or Gyro's Keychain already holds a key.
+pub fn provider_has_api_key(provider_id: &str) -> bool {
+    if let Some(env_name) = provider_api_key_env_name(provider_id) {
+        if std::env::var_os(env_name).is_some() {
+            return true;
+        }
+    }
+    stored_provider_api_key(provider_id)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// Copy a Keychain-stored provider key into a child command when the process
+/// environment does not already provide one. Process env always wins.
+pub fn apply_stored_provider_api_key(command: &mut Command, provider_id: &str) {
+    if let Some((name, value)) = stored_provider_api_key_env(provider_id) {
+        command.env(name, value);
+    }
+    // Explicitly select environment authentication for this process, without
+    // replacing the user's existing Codex login or persisting the key there.
+    if provider_id == "openai" && provider_has_api_key(provider_id) {
+        command.args([
+            "-c",
+            "model_providers.openai.env_key=\"OPENAI_API_KEY\"",
+            "-c",
+            "model_providers.openai.requires_openai_auth=false",
+        ]);
+    }
+}
+
+pub fn stored_provider_api_key_env(provider_id: &str) -> Option<(OsString, OsString)> {
+    let env_name = provider_api_key_env_name(provider_id)?;
+    if std::env::var_os(env_name).is_some() {
+        return None;
+    }
+    let value = stored_provider_api_key(provider_id).ok().flatten()?;
+    Some((OsString::from(env_name), OsString::from(value)))
 }
 
 /// Environment variable names that carry a secret regardless of who set them.
@@ -311,6 +411,38 @@ mod tests {
         ] {
             assert!(!env_name_is_credential(name), "{name} should be kept");
         }
+    }
+
+    #[test]
+    fn provider_program_names_map_to_ids() {
+        assert_eq!(provider_id_from_program("grok"), Some("xai"));
+        assert_eq!(
+            provider_id_from_program("/usr/local/bin/codex"),
+            Some("openai")
+        );
+        assert_eq!(provider_id_from_program("claude"), Some("anthropic"));
+        assert_eq!(provider_id_from_program("git"), None);
+    }
+
+    #[test]
+    fn api_key_option_is_named_per_provider() {
+        assert_eq!(provider_api_key_env_name("xai"), Some("XAI_API_KEY"));
+        assert_eq!(provider_api_key_account("xai"), "provider:xai");
+        assert!(provider_supports_api_key("openai"));
+        assert!(!provider_supports_api_key("ollama"));
+    }
+
+    #[test]
+    fn unsupported_providers_and_blank_keys_never_access_keychain() {
+        assert!(stored_provider_api_key("ollama").unwrap().is_none());
+        assert!(stored_provider_api_key_env("opencode").is_none());
+        assert!(set_stored_provider_api_key("openai", "  \n").is_err());
+        assert!(set_stored_provider_api_key("unknown", "test-value").is_err());
+        assert!(clear_stored_provider_api_key("unknown").is_err());
+        let mut command = Command::new("unused");
+        apply_stored_provider_api_key(&mut command, "unknown");
+        assert_eq!(command.get_envs().count(), 0);
+        assert_eq!(command.get_args().count(), 0);
     }
 
     #[test]

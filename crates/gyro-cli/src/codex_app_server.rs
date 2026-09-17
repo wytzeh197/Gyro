@@ -189,6 +189,7 @@ where
     let started_at = Instant::now();
     let mut protocol_guard = ProtocolGuard::new(started_at, request.timeout);
     let mut command = Command::new(&request.program);
+    gyro_core::apply_stored_provider_api_key(&mut command, "openai");
     command
         .args(&request.program_args)
         .args(["app-server", "--stdio"])

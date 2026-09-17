@@ -73,8 +73,12 @@ pub use council::{
     DEFAULT_SEAT_TIMEOUT_SECONDS, DEFAULT_SYNTHESIZER_TIMEOUT_SECONDS, SYNTHESIZER_SYSTEM_PROMPT,
 };
 pub use credentials::{
-    credential_store_paths, env_name_is_credential, path_is_credential_store,
-    relative_path_is_in_credential_store, CredentialPolicy,
+    apply_stored_provider_api_key, clear_stored_provider_api_key, credential_store_paths,
+    env_name_is_credential, path_is_credential_store, provider_api_key_account,
+    provider_api_key_env_name, provider_credential_env_vars, provider_has_api_key,
+    provider_id_from_program, provider_supports_api_key, relative_path_is_in_credential_store,
+    set_stored_provider_api_key, stored_provider_api_key, stored_provider_api_key_env,
+    CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{

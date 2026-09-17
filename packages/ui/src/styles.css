@@ -1089,18 +1089,6 @@ button {
   width: 20px;
 }
 
-.gyro-surface-switch {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  display: grid;
-  gap: 3px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  height: 30px;
-  padding: 0;
-}
-
 .gyro-surface-row {
   align-items: center;
   background: transparent;
@@ -1146,35 +1134,6 @@ button {
   padding: 0 0 12px;
 }
 
-.gyro-sidebar-mode-group {
-  background: var(--gyro-sidebar-soft);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
-  display: grid;
-  gap: 2px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0 0 8px;
-  padding: 2px;
-}
-
-.gyro-sidebar-mode-row {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--gyro-sidebar-text);
-  display: inline-flex;
-  font-size: var(--gyro-font-body);
-  font-weight: 650;
-  justify-content: center;
-  min-height: 28px;
-  min-width: 0;
-  padding: 0 6px;
-  position: relative;
-  text-align: center;
-  width: 100%;
-}
-
 .gyro-sidebar-action,
 .gyro-sidebar-row,
 .gyro-footer-button {
@@ -1199,8 +1158,6 @@ button {
 
 .gyro-sidebar-action:hover,
 .gyro-sidebar-action.is-active,
-.gyro-sidebar-mode-row:hover,
-.gyro-sidebar-mode-row.is-active,
 .gyro-sidebar-row:hover,
 .gyro-sidebar-row.is-active,
 .gyro-footer-button:hover,
@@ -1209,11 +1166,6 @@ button {
   color: var(--gyro-hover-text);
 }
 
-.gyro-sidebar-mode-row.is-active::before {
-  display: none;
-}
-
-.gyro-sidebar-mode-row span,
 .gyro-sidebar-row span,
 .gyro-sidebar-row small,
 .gyro-footer-button span {
@@ -6932,16 +6884,6 @@ textarea:focus-visible {
     0 8px 18px var(--gyro-shadow);
 }
 
-.gyro-surface-switch {
-  background: var(--gyro-segment-bg);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  gap: 2px;
-  height: 34px;
-  padding: 3px;
-}
-
 .gyro-surface-row {
   border-radius: 6px;
   height: 26px;
@@ -7548,13 +7490,6 @@ textarea:focus-visible {
 
 .gyro-sidebar-head {
   padding: 0;
-}
-
-.gyro-surface-switch {
-  background: var(--gyro-control-bg);
-  border-color: var(--gyro-border);
-  height: 32px;
-  padding: 2px;
 }
 
 .gyro-surface-row {
@@ -11312,15 +11247,6 @@ textarea:focus-visible {
   min-height: 28px;
 }
 
-.gyro-app-shell.is-chat-shell .gyro-surface-switch {
-  background: #111216;
-  border-color: #25282d;
-  box-shadow: none;
-  gap: 2px;
-  height: 28px;
-  padding: 2px;
-}
-
 .gyro-app-shell.is-chat-shell .gyro-surface-row {
   background: transparent;
   border: 1px solid transparent;
@@ -11354,28 +11280,6 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-actions {
   gap: 3px;
   padding-bottom: 6px;
-}
-
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  background: #111216;
-  border-color: #25282d;
-  gap: 2px;
-  margin-bottom: 8px;
-  padding: 2px;
-}
-
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
-  border-radius: 6px;
-  color: #d7d4cf;
-  font-size: var(--gyro-font-body);
-  min-height: 28px;
-  padding: 0 6px;
-}
-
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active {
-  background: #202329;
-  color: #efede8;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action,
@@ -13284,36 +13188,6 @@ textarea:focus-visible {
   min-width: 34px;
 }
 
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  background: #17181b;
-  border: 1px solid #34373d;
-  border-radius: 8px;
-  display: grid;
-  gap: 2px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0 0 12px;
-  padding: 2px;
-}
-
-.gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
-  border-radius: 6px;
-  color: #d8d9dc;
-  font-size: var(--gyro-font-body);
-  font-weight: 650;
-  min-height: 27px;
-  padding: 0 6px;
-}
-
-.gyro-sidebar-mode-row:hover,
-.gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active {
-  background: #303339;
-  color: #f0f1f3;
-}
-
 .gyro-sidebar-actions,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-actions {
   gap: 2px;
@@ -13755,22 +13629,6 @@ body {
   width: 20px;
 }
 
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  background: color-mix(in srgb, var(--gyro-premium-app) 76%, #000 24%);
-  border-color: var(--gyro-premium-line);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-}
-
-:root[data-theme="light"] .gyro-sidebar-mode-group,
-:root[data-theme="light"]
-  .gyro-app-shell.is-chat-shell
-  .gyro-sidebar-mode-group {
-  background: var(--gyro-premium-panel-strong);
-}
-
-.gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row,
 .gyro-sidebar-action,
 .gyro-sidebar-row,
 .gyro-sidebar-project-row,
@@ -13784,10 +13642,6 @@ body {
   color: var(--gyro-premium-muted);
 }
 
-.gyro-sidebar-mode-row:hover,
-.gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active,
 .gyro-sidebar-action:hover,
 .gyro-sidebar-action.is-active,
 .gyro-sidebar-row:hover,
@@ -15369,14 +15223,6 @@ body {
   padding-right: 56px;
 }
 
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  border-color: transparent;
-  box-shadow:
-    inset 0 0 0 0.5px var(--gyro-premium-hairline-soft),
-    inset 0 1px 0 var(--gyro-premium-inset-highlight);
-}
-
 .gyro-sidebar-action.is-active::before,
 .gyro-sidebar-row.is-active::before,
 .gyro-sidebar-thread.is-active::before,
@@ -15384,11 +15230,6 @@ body {
   inset: 8px auto 8px 4px;
   opacity: 0.9;
   width: 1px;
-}
-
-.gyro-sidebar:has(.gyro-sidebar-mode-group[data-active-mode="terminal-grid"])
-  .gyro-sidebar-thread.is-active::before {
-  display: none;
 }
 
 .gyro-pane-tabs button.is-active,
@@ -15401,7 +15242,6 @@ body {
     inset 0 0 0 0.5px var(--gyro-premium-hairline-soft);
 }
 
-.gyro-sidebar-mode-row.is-active,
 .gyro-surface-row.is-active,
 .gyro-sidebar-action.is-active,
 .gyro-sidebar-row.is-active,
@@ -17113,15 +16953,9 @@ body {
 }
 
 /* Premium focus refinement */
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  border-radius: var(--gyro-premium-radius-md);
-}
 
 .gyro-sidebar-window-actions button,
 .gyro-sidebar-restore-button,
-.gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row,
 .gyro-sidebar-action,
 .gyro-sidebar-row,
 .gyro-sidebar-project-row,
@@ -17483,20 +17317,11 @@ textarea,
 
 .gyro-provider-model-picker button.is-active,
 .gyro-settings-nav button.is-active,
-.gyro-sidebar-mode-row.is-active,
 .gyro-surface-row.is-active {
   box-shadow:
     inset 0 0 0 0.5px var(--gyro-premium-hairline-strong),
     inset 0 -1px 0
       color-mix(in srgb, var(--gyro-premium-accent) 62%, transparent);
-}
-
-.gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active,
-.gyro-sidebar-mode-row:focus-visible,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:focus-visible {
-  box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft);
-  outline: none;
 }
 
 .gyro-session-actions,
@@ -18982,98 +18807,6 @@ body,
   border-top: 1px solid var(--gyro-premium-hairline-soft);
 }
 
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
-  background: color-mix(in srgb, var(--gyro-app) 72%, var(--gyro-sidebar) 28%);
-  border: 1px solid var(--gyro-premium-hairline);
-  border-radius: var(--gyro-premium-radius-md);
-  box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
-  isolation: isolate;
-  overflow: hidden;
-  padding: 2px;
-  position: relative;
-}
-
-.gyro-sidebar-persistent-header > .gyro-sidebar-mode-group {
-  margin-right: 0;
-}
-
-.gyro-sidebar-mode-group::before {
-  background: var(--gyro-premium-control);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-premium-radius-sm);
-  box-sizing: border-box;
-  box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
-  content: "";
-  inset: 2px auto 2px 2px;
-  pointer-events: none;
-  position: absolute;
-  transform: translateX(0);
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-  width: calc((100% - 6px) / 2);
-  z-index: 0;
-}
-
-.gyro-sidebar-mode-group[data-active-mode="workspace"]::before {
-  transform: translateX(calc(100% + 2px));
-}
-
-.gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  color: var(--gyro-premium-muted);
-  display: inline-flex;
-  font-size: var(--gyro-font-body);
-  font-weight: 450;
-  justify-content: center;
-  letter-spacing: 0;
-  line-height: 16px;
-  position: relative;
-  text-align: center;
-  transition:
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-  z-index: 1;
-}
-
-.gyro-sidebar-mode-row > span,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row > span {
-  display: block;
-  line-height: 16px;
-  text-align: center;
-  width: 100%;
-}
-
-.gyro-sidebar-mode-row:hover,
-.gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active,
-.gyro-sidebar-mode-row:focus-visible,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:focus-visible {
-  background: transparent;
-  box-shadow: none;
-  color: var(--gyro-premium-text);
-}
-
-.gyro-sidebar-mode-row.is-active > span,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active > span {
-  font-weight: 500;
-}
-
-.gyro-sidebar-mode-row:active {
-  transform: scale(0.985);
-}
-
-.gyro-sidebar-mode-group ~ .gyro-sidebar-actions,
-.gyro-sidebar-mode-group ~ .gyro-sidebar-section,
-.gyro-sidebar-mode-group ~ .gyro-ide-sidebar-activity,
-.gyro-sidebar-mode-group ~ .gyro-sidebar-project-chat-list {
-  animation: gyro-native-surface-enter 160ms var(--gyro-premium-ease) both;
-}
-
 .gyro-sidebar-action,
 .gyro-sidebar-row,
 .gyro-sidebar-project-row,
@@ -19859,10 +19592,6 @@ textarea:focus-visible,
 }
 
 @media (max-width: 780px) {
-  .gyro-sidebar-mode-group::before {
-    transition-duration: var(--gyro-premium-motion-fast);
-  }
-
   .gyro-editor-pane {
     grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
   }
@@ -19874,8 +19603,6 @@ textarea:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gyro-sidebar-mode-group::before,
-  .gyro-sidebar-mode-row,
   .gyro-sidebar-action,
   .gyro-sidebar-row,
   .gyro-sidebar-project-row,
@@ -19894,10 +19621,6 @@ textarea:focus-visible,
     transition-duration: 1ms !important;
   }
 
-  .gyro-sidebar-mode-group ~ .gyro-sidebar-actions,
-  .gyro-sidebar-mode-group ~ .gyro-sidebar-section,
-  .gyro-sidebar-mode-group ~ .gyro-ide-sidebar-activity,
-  .gyro-sidebar-mode-group ~ .gyro-sidebar-project-chat-list,
   .gyro-workspace-route.is-thread > .gyro-workspace-primary,
   .gyro-workspace-route.is-code > .gyro-workspace-primary,
   .gyro-workspace-route.is-terminal-grid > .gyro-workspace-tool-panel {
@@ -19985,12 +19708,6 @@ textarea:focus-visible,
     var(--gyro-sidebar-soft) 90%
   );
   box-shadow: inset 1px 0 0 var(--gyro-accent);
-}
-
-.gyro-sidebar-mode-group::before {
-  background: var(--gyro-premium-control);
-  border-color: var(--gyro-premium-hairline-strong);
-  border-width: 0.5px;
 }
 
 .gyro-pane-tabs button.is-active,
@@ -21576,6 +21293,48 @@ button.gyro-settings-row em::after {
 
 .gyro-settings-select:disabled {
   color: var(--gyro-faint);
+}
+
+.gyro-provider-api-key-section {
+  padding: 16px;
+  max-width: 520px;
+}
+.gyro-provider-api-key-section > label {
+  display: grid;
+  gap: 8px;
+}
+.gyro-provider-api-key {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.gyro-provider-api-key > strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+}
+
+.gyro-provider-api-key > span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.gyro-provider-api-key > input {
+  background: var(--gyro-premium-control);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 8px;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.gyro-provider-api-key > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .gyro-usage-toolbar {
@@ -24553,7 +24312,9 @@ button.gyro-settings-row em::after {
   padding: 7px 9px;
 }
 
-.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status > strong {
+.gyro-session-goal-band[data-density="rail"]
+  .gyro-session-goal-status
+  > strong {
   font-size: 12px;
   grid-column: 2;
 }
@@ -28557,12 +28318,6 @@ button.gyro-account-menu-row:hover,
   background: var(--gyro-ide-editor-bg);
 }
 
-.gyro-sidebar-mode-row:focus-visible {
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-focus);
-  outline: 0;
-}
-
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-ide-sidebar-activity {
   border-bottom: 1px solid var(--gyro-ide-region-border-soft);
   gap: 3px;
@@ -30250,8 +30005,13 @@ button.gyro-account-menu-row:hover,
     var(--gyro-premium-ease);
 }
 
+/* Workspace shifts the whole bar right by the 44px activity rail, so its own
+   inset gives that much back plus the Sessions gutter: 44 + 46 == 90, the
+   left inset the Sessions title bar uses. The surface switch then lands on the
+   same pixel in both surfaces instead of jogging as the user crosses between
+   them. */
 .gyro-app-shell.is-workspace-chrome-active .gyro-sidebar-windowbar {
-  padding-left: 49px;
+  padding-left: 46px;
 }
 
 @media (max-width: 1280px) and (min-width: 981px) {
@@ -32481,32 +32241,9 @@ button.gyro-account-menu-row:hover,
  * Sidebar rhythm.
  *
  * One row shape for every list in the rail: a 32px row, a 17px icon column,
- * and a full-bleed hover pill. The mode tabs drop their box so the rail reads
- * as a single column of rows instead of a control parked on top of a list, and
- * the section labels take the air that tells you which list they head.
+ * and a full-bleed hover pill. The section labels take the air that tells you
+ * which list they head.
  */
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group,
-:root[data-theme="light"] .gyro-sidebar-mode-group,
-:root[data-theme="light"]
-  .gyro-app-shell.is-chat-shell
-  .gyro-sidebar-mode-group {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding: 0;
-}
-
-.gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
-  border-radius: var(--gyro-radius-md);
-  font-size: var(--gyro-font-support);
-  min-height: 30px;
-  min-width: 0;
-  padding-block: 5px;
-}
 
 .gyro-sidebar-action,
 .gyro-sidebar-row,
@@ -35314,46 +35051,6 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"] {
   --gyro-sidebar-mode-track: #e9eaec;
   --gyro-sidebar-mode-active: #ffffff;
-}
-
-.gyro-sidebar-mode-group,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group,
-:root[data-theme="light"] .gyro-sidebar-mode-group,
-:root[data-theme="light"]
-  .gyro-app-shell.is-chat-shell
-  .gyro-sidebar-mode-group {
-  margin-top: 4px;
-  margin-bottom: 8px;
-  box-sizing: border-box;
-  max-width: 100%;
-  background: var(--gyro-sidebar-mode-track);
-  border: 0;
-  box-shadow: none;
-  gap: 0;
-  padding: 0;
-}
-
-/* Let the selected button own its highlight so both segments stay inside
-   their grid cells when the Workspace sidebar is resized. */
-.gyro-sidebar-mode-group::before {
-  content: none;
-}
-
-.gyro-sidebar-mode-group > .gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell
-  .gyro-sidebar-mode-group
-  > .gyro-sidebar-mode-row {
-  box-sizing: border-box;
-  border: 0;
-  border-radius: var(--gyro-premium-radius-md);
-}
-
-.gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell
-  .gyro-sidebar-mode-group
-  > .gyro-sidebar-mode-row.is-active {
-  background: var(--gyro-sidebar-mode-active);
-  box-shadow: none;
 }
 
 /* Keep session actions and the project list close to the surface selector. */
@@ -41126,4 +40823,133 @@ textarea:focus-visible,
   position: absolute;
   right: 6px;
   top: 8px;
+}
+
+/* ==========================================================================
+   Title-bar surface switch
+   ========================================================================== */
+
+/* Sessions and Workspace move up onto the window-navigation row as one compact
+   segmented control. The sidebar then opens straight into Search and the chat
+   list instead of spending a full row on two words, and the switch reads as
+   window chrome — which is what it is — rather than as the first list item.
+
+   Icon-only by necessity and by intent: at a 224px sidebar the row has no
+   space for labels beside the traffic lights, and the accessible name plus the
+   native tooltip carry the meaning. A brand-new class name keeps this clear of
+   the layered .gyro-sidebar-mode-* overrides the old stacked control needed. */
+.gyro-titlebar-switch {
+  align-items: center;
+  background: var(--gyro-sidebar-mode-track);
+  border-radius: var(--gyro-premium-radius-lg);
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 2px;
+}
+
+.gyro-titlebar-switch-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-premium-radius-md);
+  box-shadow: none;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-titlebar-switch-option:hover {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-text);
+}
+
+/* Quiet enough to belong to the sidebar rather than lead it. The selected chip
+   is the full selected colour dialled two thirds of the way back toward the
+   track it sits on, so the chip still reads as raised in both themes without
+   becoming the brightest thing in the sidebar. It also owns its own highlight rather than a sliding
+   track pseudo-element, so the two segments cannot drift out of their cells. */
+.gyro-titlebar-switch-option.is-active,
+.gyro-titlebar-switch-option.is-active:hover {
+  background: color-mix(
+    in srgb,
+    var(--gyro-sidebar-mode-active) 65%,
+    var(--gyro-sidebar-mode-track)
+  );
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+/* The switch runs out to the sidebar's content column — the same 214px right
+   edge New Session, Search and every row below it use — so the title bar reads
+   as part of the sidebar rather than stopping short of it. The cap keeps two
+   icons from stretching into a banner when the Workspace sidebar is dragged
+   wider than its default 224px. */
+.gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
+  padding-right: 9px;
+  position: relative;
+}
+
+.gyro-titlebar-switch {
+  flex: 1 1 auto;
+  max-width: 88px;
+}
+
+.gyro-titlebar-switch-option {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+/* A full-width switch leaves no room for a drag strip in the flow, so the strip
+   becomes a layer beneath the controls instead: the whole 48px bar drags,
+   except where a button sits on top of it. */
+.gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar:not(.is-settings)
+  > .gyro-sidebar-titlebar-drag-region {
+  inset: 0;
+  min-width: 0;
+  position: absolute;
+  z-index: 0;
+}
+
+.gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar:not(.is-settings)
+  > .gyro-titlebar-switch {
+  position: relative;
+  z-index: 1;
+}
+
+/* The persistent header replaces the old mode group as the element the sidebar
+   body follows, so the enter animation keeps its anchor. */
+.gyro-sidebar-persistent-header ~ .gyro-sidebar-actions,
+.gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
+.gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
+.gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
+  animation: gyro-native-surface-enter 160ms var(--gyro-premium-ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-titlebar-switch-option,
+  .gyro-sidebar-persistent-header ~ .gyro-sidebar-actions,
+  .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
+  .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
+  .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Workspace hands the sidebar-hide control to the activity rail, so the title
+   bar there has one fewer button. Reserve the slot anyway: the switch is what
+   moves between the two surfaces, and it must not jump sideways as it does. */
+.gyro-sidebar-windowbar > .gyro-sidebar-window-actions {
+  min-width: 28px;
 }

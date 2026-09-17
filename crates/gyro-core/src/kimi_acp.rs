@@ -1,4 +1,6 @@
-use crate::credentials::CredentialPolicy;
+use crate::credentials::{
+    apply_stored_provider_api_key, provider_id_from_program, CredentialPolicy,
+};
 use crate::execution::{configure_process_group, terminate_process_group};
 use crate::security::redact_secrets;
 use crate::CancellationToken;
@@ -151,6 +153,9 @@ impl KimiAcpConnection {
         }
         for (key, _) in request.credentials.env_overrides() {
             command.env_remove(key);
+        }
+        if let Some(provider_id) = provider_id_from_program(&request.program.to_string_lossy()) {
+            apply_stored_provider_api_key(&mut command, provider_id);
         }
         if std::path::Path::new(&request.program)
             .file_name()

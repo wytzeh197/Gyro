@@ -1,6 +1,8 @@
 import { FileDiff, GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PlainDiffView } from "./plain-diff-view.tsx";
+import { totalFileChangeCounts } from "./file-change-counts.ts";
+import { FileChangeCountBadges } from "./file-change-counts-view.tsx";
 import {
   filesForReviewScope,
   reviewComparisonForScope,
@@ -29,7 +31,7 @@ export function GitComparisonReview({
 }: {
   scope: ReviewScope;
   sourceControl?: SourceControlState;
-  turnFiles?: Array<{ path: string; additions: number; deletions: number }>;
+  turnFiles?: Array<{ path: string; additions?: number; deletions?: number }>;
   workspacePath?: string;
   onLoadDiff?: (
     file: ReviewFile,
@@ -53,14 +55,7 @@ export function GitComparisonReview({
     }
     setSelectedPath(listing.files[0]?.path);
   }, [listing.files, selectedPath]);
-  const additions = listing.files.reduce(
-    (sum, file) => sum + file.additions,
-    0,
-  );
-  const deletions = listing.files.reduce(
-    (sum, file) => sum + file.deletions,
-    0,
-  );
+  const totals = totalFileChangeCounts(listing.files);
   const empty = reviewScopeEmptyCopy(scope);
   const hasFiles = listing.files.length > 0;
 
@@ -79,9 +74,7 @@ export function GitComparisonReview({
         <strong>{reviewScopeTitle(scope)}</strong>
         {hasFiles ? (
           <span>
-            <span className="gyro-diff-added-count">+{additions}</span>
-            {" · "}
-            <span className="gyro-diff-removed-count">−{deletions}</span>
+            <FileChangeCountBadges counts={totals} />
             {" · "}
             {listing.files.length}{" "}
             {listing.files.length === 1 ? "file" : "files"}
@@ -119,12 +112,7 @@ export function GitComparisonReview({
                 >
                   <span>{relative}</span>
                   <small>
-                    {file.additions > 0 ? (
-                      <em className="is-added">+{file.additions}</em>
-                    ) : null}
-                    {file.deletions > 0 ? (
-                      <em className="is-removed">−{file.deletions}</em>
-                    ) : null}
+                    <FileChangeCountBadges counts={file} />
                   </small>
                 </button>
               );

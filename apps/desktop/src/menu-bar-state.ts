@@ -187,7 +187,7 @@ function providerOutcome(
       const finishedAt =
         stringFromRecord(payload, "completedAt") ?? event.createdAt;
       const outcome: MenuBarOutcome = {
-        id: `chat:${sessionId}:${event.id}`,
+        id: `chat:${sessionId}:${event.turnId || event.id}`,
         kind: "chat",
         targetId: sessionId,
         title: session?.title || "Gyro chat",

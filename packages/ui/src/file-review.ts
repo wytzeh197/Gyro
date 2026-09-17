@@ -25,8 +25,8 @@ import type {
 /** A changed file as the card receives it. */
 export type FileReviewFile = {
   path: string;
-  additions: number;
-  deletions: number;
+  additions?: number;
+  deletions?: number;
   /** What the agent said it was doing, when it said anything. */
   intent?: string;
 };
@@ -279,8 +279,8 @@ export function latestFileReviewTurn(
     }
     files.set(path, {
       path,
-      additions: item.additions ?? 0,
-      deletions: item.deletions ?? 0,
+      additions: item.additions ?? files.get(path)?.additions,
+      deletions: item.deletions ?? files.get(path)?.deletions,
       intent: item.intent ?? files.get(path)?.intent,
     });
     latestTurnId = turnId;

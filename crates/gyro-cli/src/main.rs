@@ -14,7 +14,7 @@ use gyro_core::{
     create_worktree, discover_ollama_models,
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
-    keychain, ollama_chat, prepare_claude_provider_mutation_transaction,
+    ollama_chat, prepare_claude_provider_mutation_transaction,
     prepare_provider_mutation_transaction, provider_descriptor,
     recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
     AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
@@ -1784,14 +1784,14 @@ fn cli_acp_auth_methods(runtime: CliAcpProviderRuntime) -> Vec<String> {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     if runtime.label == "xAI" {
-        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+        let preferred = if gyro_core::provider_has_api_key("xai") {
             "xai.api_key"
         } else {
             "cached_token"
         };
         methods.sort_by_key(|method| usize::from(method != preferred));
     } else if runtime.label == "Gemini" {
-        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+        let preferred = if gyro_core::provider_has_api_key("gemini") {
             Some("gemini-api-key")
         } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
             || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
@@ -2254,6 +2254,11 @@ fn build_cli_provider_invocation(
     // environment, so it keeps only the provider's own auth.
     request.credentials =
         CredentialPolicy::for_provider(profile.provider_id.as_deref().unwrap_or_default());
+    if let Some((name, value)) =
+        gyro_core::stored_provider_api_key_env(profile.provider_id.as_deref().unwrap_or_default())
+    {
+        request.env.push((name, Some(value)));
+    }
     request.timeout = Duration::from_secs(timeout_seconds);
     request.max_stdout_chars = 256_000;
     request.max_stderr_chars = 64_000;
@@ -5468,7 +5473,7 @@ fn config_command(args: ConfigArgs) -> Result<()> {
                     ))
                 }
             };
-            keychain::set_api_key(&provider.api_key_ref, &value).map_err(|error| {
+            gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(|error| {
                 cli_failure(
                     CliErrorCategory::ExecutionFailed,
                     format!("store provider key in macOS Keychain: {error}"),
