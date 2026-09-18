@@ -4875,6 +4875,9 @@ fn setup_command(args: SetupArgs) -> Result<()> {
                 base_url: provider.base_url.clone(),
                 api_key_ref: Some(provider.api_key_ref.clone()),
                 kind: provider.kind.clone(),
+                // `doctor` is a readiness report, not a user action: a probe
+                // taken moments ago is the same answer.
+                force: false,
             });
             let (status, message, next) = match health {
                 Ok(health) if health.runtime_status == "ready" => {

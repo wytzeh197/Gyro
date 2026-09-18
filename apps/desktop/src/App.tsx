@@ -1,4 +1,10 @@
 import { useProviderApiKeys } from "./provider-api-keys";
+import {
+  providerHealthDetailsFromCheck,
+  providerHealthRequest,
+  providerProbeKeyFor,
+  type ProviderHealthCheck,
+} from "./provider-health-probes";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
@@ -314,21 +320,6 @@ type LspBridgeResponse = {
   result?: unknown;
   error?: unknown;
   messages?: unknown[];
-};
-
-type ProviderHealthCheck = {
-  providerId: string;
-  output: string;
-  runtimeStatus: string;
-  authOwner: string;
-  authCommand?: string | null;
-  loginCommand?: string | null;
-  accountLabel?: string | null;
-  subscriptionLabel?: string | null;
-  providerMode?: string | null;
-  secretStorage: string;
-  privacyNote: string;
-  diagnosticsOptIn: boolean;
 };
 
 type ProviderChatResponse = {
@@ -653,61 +644,6 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
 
 function providerLoginCommandText(profile: CommandProfile) {
   return [profile.command, ...profile.args].join(" ");
-}
-
-function providerHealthRequest(
-  provider: ModelProviderConfig | undefined,
-  providerId?: string,
-  options?: { force?: boolean },
-) {
-  return {
-    apiKeyRef: provider?.apiKeyRef,
-    baseUrl: provider?.baseUrl,
-    // A person waiting on Connect, or a sign-in that just finished, must never
-    // be told the previous probe's answer. Readiness sweeps leave this unset.
-    force: options?.force ? true : undefined,
-    providerId: provider?.id ?? providerId,
-  };
-}
-
-/**
- * A value that changes only when a probe would read something different.
- *
- * The readiness sweep below keys on this rather than on the provider array,
- * because `providersForConfig` returns a fresh array on every config write —
- * including the background Ollama model discovery that changes only the local
- * model list. Keys here mean an unrelated update cannot start a second round of
- * provider CLI probes.
- */
-function providerProbeKey(provider: ModelProviderConfig) {
-  return [
-    provider.id,
-    provider.enabled ? "on" : "off",
-    provider.authStatus,
-    provider.authMode,
-    provider.apiKeyRef ?? "",
-    provider.baseUrl ?? "",
-  ].join("\u001f");
-}
-
-function providerHealthDetailsFromCheck(
-  check: ProviderHealthCheck,
-  fallback: ProviderHealthDetails,
-): ProviderHealthDetails {
-  return {
-    ...fallback,
-    accountLabel: check.accountLabel ?? fallback.accountLabel,
-    authCommand: check.authCommand ?? fallback.authCommand,
-    authOwner: check.authOwner as ProviderHealthDetails["authOwner"],
-    diagnosticsOptIn: check.diagnosticsOptIn,
-    loginCommand: check.loginCommand ?? fallback.loginCommand,
-    privacyNote: check.privacyNote,
-    providerMode: check.providerMode ?? fallback.providerMode,
-    runtimeStatus:
-      check.runtimeStatus as ProviderHealthDetails["runtimeStatus"],
-    secretStorage: check.secretStorage,
-    subscriptionLabel: check.subscriptionLabel ?? fallback.subscriptionLabel,
-  };
 }
 
 /**
@@ -7731,10 +7667,7 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
-              // Pressing Connect is an explicit action taken because the
-              // previous state was not good enough, so it probes for real. A
-              // cached answer here could send someone straight back into the
-              // failure they pressed Connect to fix.
+              // Connect is a user action, so it probes for real.
               request: providerHealthRequest(provider, providerId, {
                 force: true,
               }),
@@ -7929,8 +7862,7 @@ export function App() {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
           if (source === "login-exit") {
-            // The sign-in just wrote credentials, so any cached "not signed in"
-            // is known to be stale — probe for real instead of serving it.
+            // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
               {
@@ -8004,10 +7936,8 @@ export function App() {
             continue;
           }
 
-          // A polled repeat of the same question. This is served from the probe
-          // cache for a window shorter than a sign-in, and the login-exit path
-          // above forces a fresh probe — so the watcher no longer spawns a
-          // provider CLI on every tick just to ask again.
+          // A polled repeat; the probe cache answers it, and the login-exit
+          // path above forces the fresh probe that matters.
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
@@ -13340,8 +13270,7 @@ export function App() {
       if (isProviderId(providerId) && isTauriRuntime()) {
         try {
           check = await invoke<ProviderHealthCheck>("check_provider_health", {
-            // An explicit "Test provider" is a person asking for the truth now,
-            // so it never answers from the readiness-sweep probe cache.
+            // "Test provider" means now, not a cached answer.
             request: providerHealthRequest(provider, providerId, {
               force: true,
             }),
@@ -13694,7 +13623,7 @@ export function App() {
     // discovery, a preference change — must not restart the sweep and re-spawn
     // every provider CLI behind it.
   }, [
-    config.modelProviders.map(providerProbeKey).join("\u001e"),
+    providerProbeKeyFor(config.modelProviders),
     isShellOptimizing,
     recordProviderHealthOutput,
   ]);

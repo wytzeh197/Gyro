@@ -53,12 +53,12 @@ use gyro_core::{
     OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
     ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
     ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
-    SessionOrigin, SessionStore, SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin,
-    UsageOutcome, UsageTokens, UsageTotals, WorkspaceCheckReport, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS,
-    COUNCIL_MIN_SEATS, FILE_REVIEW_SCHEMA, MAX_SUMMARY_FILES, OLLAMA_CANCELLED_MESSAGE,
+    ProviderHealthRequest, ProviderMutationJournalContext, ProviderRunPayload,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens,
+    UsageTotals, WorkspaceCheckReport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
+    CAPABILITY_SCHEMA_V1, CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
+    FILE_REVIEW_SCHEMA, MAX_SUMMARY_FILES, OLLAMA_CANCELLED_MESSAGE,
     OPENAI_COMPAT_CANCELLED_MESSAGE, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
     WORKSPACE_UNAVAILABLE_MESSAGE,
 };
@@ -74,7 +74,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc, Arc, Condvar, Mutex, OnceLock, Weak,
 };
 use std::time::{Duration, Instant, SystemTime};
@@ -87,6 +87,7 @@ use walkdir::WalkDir;
 mod browser_smoke;
 mod git_line_counts;
 mod git_main_comparison;
+mod launch_integrity;
 mod menu_bar;
 mod reply_segments;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
@@ -6984,9 +6985,7 @@ fn load_config_blocking() -> Result<GyroConfig, String> {
     GyroConfig::load(&paths).map_err(to_string)
 }
 
-/// Warm local storage so the desktop shell can open the chat UI immediately
-/// while this work finishes. The frontend keeps non-essential actions gated
-/// until this returns successfully.
+/// Warm local storage so the shell can open the chat UI while this finishes.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WarmDesktopShellReport {
@@ -7018,19 +7017,10 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
     let config = GyroConfig::load(&paths).map_err(to_string)?;
 
     // Index maintenance and pool prefill run here so the first interactive
-    // list_sessions / create_session is already hot.
-    //
-    // `pragma quick_check` deliberately does not. It is a full integrity scan
-    // whose cost grows with the whole database — including the WAL — and the
-    // shell gate below cannot act on the answer anyway: corruption is already
-    // reported as a non-fatal field so the user is never trapped on the
-    // optimizing screen. Paying a whole-database scan on the launch path to
-    // decorate a screen that is about to be dismissed is the wrong trade, so it
-    // moves to the same background probe that serves doctor.
+    // list_sessions / create_session is already hot. The integrity scan does
+    // not: see `launch_integrity`.
     let store = SessionStore::open(paths.clone()).map_err(to_string)?;
     store.maintain().map_err(to_string)?;
-    // The recent page is what the sidebar opens with, so reading it here is
-    // real warm-up rather than a second copy of a query the UI runs anyway.
     let session_count = store
         .list_sessions_limited(Some(DESKTOP_SHELL_SESSION_PAGE))
         .map_err(to_string)?
@@ -7042,15 +7032,11 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
 
     let (session_pool_warmed, automation_pool_warmed) = warm_store_pools(&paths)?;
 
-    // Integrity stays available to the report, but is no longer something the
-    // shell waits for. The scan starts here and publishes into this static.
-    defer_desktop_integrity_check(paths.clone());
-    let integrity = desktop_integrity_status();
+    // The scan runs beside the launch, so nothing below waits on it.
+    launch_integrity::defer_launch_integrity_check(paths.clone());
+    let integrity = launch_integrity::launch_integrity_status();
 
     Ok(WarmDesktopShellReport {
-        // Warm-up completed far enough for the shell to unlock. Integrity is
-        // reported separately so corruption can be diagnosed without trapping
-        // the user on the optimizing gate forever.
         ready: true,
         session_count,
         provider_count: config.model_providers.len(),
@@ -7060,45 +7046,6 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
         integrity,
     })
 }
-
-/// 0 = scan still running, 1 = ok, 2 = the scan reported a problem.
-static DESKTOP_INTEGRITY_STATUS: AtomicU8 = AtomicU8::new(0);
-
-const DESKTOP_INTEGRITY_RUNNING: u8 = 0;
-const DESKTOP_INTEGRITY_OK: u8 = 1;
-const DESKTOP_INTEGRITY_FAILED: u8 = 2;
-
-fn desktop_integrity_status() -> String {
-    match DESKTOP_INTEGRITY_STATUS.load(Ordering::Relaxed) {
-        DESKTOP_INTEGRITY_RUNNING => "checking".to_string(),
-        DESKTOP_INTEGRITY_OK => "ok".to_string(),
-        _ => "failed (see logs)".to_string(),
-    }
-}
-
-/// Run `pragma quick_check` off the launch path, once per process.
-///
-/// The result is published into [`DESKTOP_INTEGRITY_STATUS`] so a later report
-/// can read it without ever making the user wait for a full database scan.
-fn defer_desktop_integrity_check(paths: GyroPaths) {
-    if DESKTOP_INTEGRITY_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    std::thread::spawn(move || {
-        let outcome = SessionStore::open(paths).and_then(|store| store.quick_check());
-        match outcome {
-            Ok(()) => DESKTOP_INTEGRITY_STATUS.store(DESKTOP_INTEGRITY_OK, Ordering::Relaxed),
-            Err(error) => {
-                // Surface corruption without failing anything: the shell is
-                // already open, and doctor/repair paths dig deeper from here.
-                eprintln!("gyro desktop shell: deferred sqlite quick_check reported: {error}");
-                DESKTOP_INTEGRITY_STATUS.store(DESKTOP_INTEGRITY_FAILED, Ordering::Relaxed);
-            }
-        }
-    });
-}
-
-static DESKTOP_INTEGRITY_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 async fn get_account_session() -> Result<AccountSessionState, String> {

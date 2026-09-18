@@ -1071,7 +1071,10 @@ mod tests {
         invalidate_provider_health_cache();
         let request = cache_probe_request("ollama", Some("http://127.0.0.1:9/api"));
         let mut poisoned = ProviderHealthService
-            .check(cache_probe_request("ollama", Some("http://127.0.0.1:9/api")))
+            .check(cache_probe_request(
+                "ollama",
+                Some("http://127.0.0.1:9/api"),
+            ))
             .unwrap();
         poisoned.output = "cached for the first endpoint".into();
         poisoned.runtime_status = "ready".into();
