@@ -7107,7 +7107,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 8px") &&
+    styleSource.includes("--gyro-premium-radius-md: 9px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
     styleSource.includes("--gyro-app: #181818") &&
     styleSource.includes("--gyro-pane: #1e1e1e") &&

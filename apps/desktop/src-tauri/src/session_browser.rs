@@ -1393,14 +1393,25 @@ pub async fn session_browser_open(
     mut request: SessionBrowserOpenRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
     if request.workspace_key.is_empty() {
-        let store = super::open_store()?;
-        let session = store
-            .get_session(super::parse_uuid(&request.session_id)?)
-            .map_err(super::to_string)?
-            .ok_or_else(|| "browser chat no longer exists".to_string())?;
-        request.workspace_key = super::session_execution_workspace(&session, store.paths())?
-            .display()
-            .to_string();
+        // Resolve the chat's workspace on a blocking worker: this is a SQLite
+        // open plus a read, and it used to hold an async-runtime thread while
+        // every other IPC call queued. Creating the webview stays on this task
+        // so Tauri keeps its own main-thread hop.
+        let session_id = request.session_id.clone();
+        request.workspace_key = tauri::async_runtime::spawn_blocking(move || {
+            let store = super::open_store()?;
+            let session = store
+                .get_session(super::parse_uuid(&session_id)?)
+                .map_err(super::to_string)?
+                .ok_or_else(|| "browser chat no longer exists".to_string())?;
+            Ok::<String, String>(
+                super::session_execution_workspace(&session, store.paths())?
+                    .display()
+                    .to_string(),
+            )
+        })
+        .await
+        .map_err(|error| format!("browser workspace worker failed: {error}"))??;
     }
     open_session_browser(&app, request)
 }

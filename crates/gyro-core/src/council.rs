@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -744,6 +745,11 @@ pub fn read_seat_artifact(run_dir: &Path, seat_id: Uuid) -> Result<String> {
     fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))
 }
 
+/// Replace `path` with `bytes` durably: the temporary is created private, its
+/// contents are flushed to disk before the rename, and the directory entry is
+/// synced after it. Without those fsyncs a crash between rename and writeback
+/// can leave a zero-length seat or synthesis artifact whose session event still
+/// claims a body, which is how a finished council run reads as truncated.
 fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -755,15 +761,43 @@ fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<()> {
             .unwrap_or("council"),
         Uuid::new_v4()
     ));
-    fs::write(&tmp, bytes).with_context(|| format!("write {}", tmp.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("secure {}", tmp.display()))?;
+    let result = (|| -> Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        // Open private rather than widening later: set_permissions after the
+        // write leaves a window where the body is readable by other users.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            let mut file = options
+                .open(&tmp)
+                .with_context(|| format!("create {}", tmp.display()))?;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("secure {}", tmp.display()))?;
+            file.write_all(bytes)?;
+            file.flush()?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        {
+            let mut file = options
+                .open(&tmp)
+                .with_context(|| format!("create {}", tmp.display()))?;
+            file.write_all(bytes)?;
+            file.flush()?;
+            file.sync_all()?;
+        }
+        fs::rename(&tmp, path).with_context(|| format!("rename into {}", path.display()))?;
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .with_context(|| format!("sync council directory {}", parent.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, path).with_context(|| format!("rename into {}", path.display()))?;
-    Ok(())
+    result
 }
 
 // --- Synthesizer prompt + parse ----------------------------------------------
@@ -1536,5 +1570,32 @@ Ship advisory council first.
             final_run_status(&seats, true, true),
             CouncilRunStatus::Cancelled
         );
+    }
+
+    #[test]
+    fn artifact_writes_replace_cleanly_and_stay_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path().join("run");
+        let first = write_synthesis_artifact(&run_dir, "first body").unwrap();
+        let second = write_synthesis_artifact(&run_dir, "second body").unwrap();
+        assert_eq!(first, second);
+        assert_eq!(fs::read_to_string(&second).unwrap(), "second body");
+
+        // A rewrite must not leave the temporary behind: council run dirs are
+        // listed to surface artifacts, and stale `.tmp-` files read as results.
+        let residue: Vec<_> = fs::read_dir(&run_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp-"))
+            .collect();
+        assert!(residue.is_empty(), "left temporaries behind: {residue:?}");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&second).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "artifact bodies must stay private");
+        }
     }
 }

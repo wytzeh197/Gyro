@@ -2330,7 +2330,7 @@ fn create_worktree_session_blocking(
     reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let plan = create_worktree(&paths, PathBuf::from(workspace_path), branch, worktree_name)
         .map_err(to_string)?;
 
@@ -3164,7 +3164,7 @@ fn execute_claimed_automation(
         .provider_label
         .clone()
         .or_else(|| Some(automation.provider.clone()));
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let session = store
         .create_session_with_context(
             &workspace_path,
@@ -8074,6 +8074,21 @@ async fn resolve_provider_approval(
     app: tauri::AppHandle,
     request: ProviderApprovalDecisionRequest,
 ) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || resolve_provider_approval_blocking(app, request))
+        .await
+        .map_err(|error| format!("provider approval worker failed: {error}"))?
+}
+
+/// Approving a reviewed file set opens the session store, writes a durable
+/// mutation journal, fsyncs every changed file and appends a session event.
+/// That is seconds of disk work for a large edit set, so it runs on a blocking
+/// worker; left on the async runtime it starved the IPC thread pool and every
+/// other command — session lists, event reads, terminal reads — stalled behind
+/// one approval.
+fn resolve_provider_approval_blocking(
+    app: tauri::AppHandle,
+    request: ProviderApprovalDecisionRequest,
+) -> Result<SessionEvent, String> {
     let decision = match request.decision.as_str() {
         "approve" => ProviderApprovalDecision::Approve,
         "reject" => ProviderApprovalDecision::Reject,
@@ -8087,7 +8102,7 @@ async fn resolve_provider_approval(
         .remove(&request.approval_id)
         .ok_or_else(|| "this provider approval is no longer pending".to_string())?;
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let mut payload = pending.payload;
     let mut provider_decision = decision;
     let mut pending_mutation: Option<PendingProviderMutationCommit> = None;
@@ -13750,7 +13765,7 @@ fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     paths.ensure().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let sessions = store.list_sessions().map_err(to_string)?;
     let provider_health = collect_provider_health_for_diagnostics(&config);
     let mut recent_run_diagnostics = Vec::new();

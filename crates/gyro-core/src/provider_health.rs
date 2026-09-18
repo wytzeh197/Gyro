@@ -47,6 +47,19 @@ pub struct ProviderHealthCheck {
 }
 
 #[derive(Default)]
+/// How to probe one provider CLI for readiness. These were six adjacent `&str`
+/// parameters, where transposing `auth_owner` and `command` still compiled and
+/// silently reported the wrong login instructions; named fields make the call
+/// sites checkable.
+struct CliProbe<'a> {
+    provider_id: &'a str,
+    auth_owner: &'a str,
+    command: &'a str,
+    args: &'a [&'a str],
+    login_command: Option<&'a str>,
+    secret_storage: &'a str,
+}
+
 pub struct ProviderHealthService;
 
 impl ProviderHealthService {
@@ -56,12 +69,14 @@ impl ProviderHealthService {
         match descriptor.health_kind {
             ProviderHealthKind::CodexCli => self.check_openai(request),
             ProviderHealthKind::ClaudeCli => self.check_cli_or_stored_key(
-                "anthropic",
-                "provider-cli",
-                "claude",
-                &["auth", "status"],
-                Some("claude auth login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
+                &CliProbe {
+                    provider_id: "anthropic",
+                    auth_owner: "provider-cli",
+                    command: "claude",
+                    args: &["auth", "status"],
+                    login_command: Some("claude auth login"),
+                    secret_storage: "Provider CLI, OS Keychain, or provider-owned files",
+                },
                 &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             ),
             ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
@@ -98,48 +113,36 @@ impl ProviderHealthService {
             ));
         }
 
-        self.cli_check(
-            "openai",
-            "provider-cli",
-            "codex",
-            &["login", "status"],
-            Some("codex login --device-auth"),
-            "Provider CLI, OS Keychain, or provider-owned files",
-        )
+        self.cli_check(&CliProbe {
+            provider_id: "openai",
+            auth_owner: "provider-cli",
+            command: "codex",
+            args: &["login", "status"],
+            login_command: Some("codex login --device-auth"),
+            secret_storage: "Provider CLI, OS Keychain, or provider-owned files",
+        })
     }
 
     fn check_cli_or_stored_key(
         &self,
-        provider_id: &str,
-        auth_owner: &str,
-        command: &str,
-        args: &[&str],
-        login_command: Option<&str>,
-        secret_storage: &str,
+        probe: &CliProbe<'_>,
         env_names: &[&str],
     ) -> Result<ProviderHealthCheck> {
-        if provider_has_api_key(provider_id) {
-            return Ok(env_provider_health(provider_id, None, env_names));
+        if provider_has_api_key(probe.provider_id) {
+            return Ok(env_provider_health(probe.provider_id, None, env_names));
         }
-        self.cli_check(
+        self.cli_check(probe)
+    }
+
+    fn cli_check(&self, probe: &CliProbe<'_>) -> Result<ProviderHealthCheck> {
+        let &CliProbe {
             provider_id,
             auth_owner,
             command,
             args,
             login_command,
             secret_storage,
-        )
-    }
-
-    fn cli_check(
-        &self,
-        provider_id: &str,
-        auth_owner: &str,
-        command: &str,
-        args: &[&str],
-        login_command: Option<&str>,
-        secret_storage: &str,
-    ) -> Result<ProviderHealthCheck> {
+        } = probe;
         let auth_command = std::iter::once(command)
             .chain(args.iter().copied())
             .collect::<Vec<_>>()

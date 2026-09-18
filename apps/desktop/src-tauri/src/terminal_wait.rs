@@ -18,6 +18,37 @@ pub(super) fn timeout(arguments: &serde_json::Value) -> anyhow::Result<Duration>
     Ok(Duration::from_millis(millis))
 }
 
+/// Sleep between status checks without holding the process or resource locks.
+/// A bounded wait yields a tool result; it never kills a still-running command.
+pub(super) fn wait(
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    mut read: impl FnMut() -> anyhow::Result<TerminalPaneSnapshot>,
+) -> anyhow::Result<TerminalPaneSnapshot> {
+    let started = Instant::now();
+    let mut exited_at = None;
+    loop {
+        if cancellation.is_cancelled() {
+            anyhow::bail!("command wait cancelled");
+        }
+        let snapshot = read()?;
+        // Process exit can race the PTY reader's final output. Give it a bounded
+        // drain period; descendants may keep the PTY open after the command exits.
+        let finished = if snapshot.status != "running" {
+            let exited = exited_at.get_or_insert_with(Instant::now);
+            snapshot.output_complete || exited.elapsed() >= Duration::from_millis(500)
+        } else {
+            false
+        };
+        if finished || started.elapsed() >= timeout {
+            return Ok(snapshot);
+        }
+        std::thread::sleep(
+            Duration::from_millis(100).min(timeout.saturating_sub(started.elapsed())),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,37 +176,6 @@ mod tests {
         assert_eq!(
             CapabilityId::from_provider_tool_name("gyro_terminal_wait"),
             Some(CapabilityId::TerminalWait)
-        );
-    }
-}
-
-/// Sleep between status checks without holding the process or resource locks.
-/// A bounded wait yields a tool result; it never kills a still-running command.
-pub(super) fn wait(
-    timeout: Duration,
-    cancellation: &CancellationToken,
-    mut read: impl FnMut() -> anyhow::Result<TerminalPaneSnapshot>,
-) -> anyhow::Result<TerminalPaneSnapshot> {
-    let started = Instant::now();
-    let mut exited_at = None;
-    loop {
-        if cancellation.is_cancelled() {
-            anyhow::bail!("command wait cancelled");
-        }
-        let snapshot = read()?;
-        // Process exit can race the PTY reader's final output. Give it a bounded
-        // drain period; descendants may keep the PTY open after the command exits.
-        let finished = if snapshot.status != "running" {
-            let exited = exited_at.get_or_insert_with(Instant::now);
-            snapshot.output_complete || exited.elapsed() >= Duration::from_millis(500)
-        } else {
-            false
-        };
-        if finished || started.elapsed() >= timeout {
-            return Ok(snapshot);
-        }
-        std::thread::sleep(
-            Duration::from_millis(100).min(timeout.saturating_sub(started.elapsed())),
         );
     }
 }

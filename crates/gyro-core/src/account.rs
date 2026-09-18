@@ -21,6 +21,24 @@ const TOKEN_ACCESS: &str = "access-token";
 const TOKEN_REFRESH: &str = "refresh-token";
 const TOKEN_ID: &str = "id-token";
 const REMOTE_OIDC_DISABLED_MESSAGE: &str = "remote OIDC access is disabled until Gyro verifies ID token signatures against the issuer JWKS";
+/// Bare `ureq::get`/`ureq::post` inherit a default agent with no read timeout,
+/// so an issuer that accepts the connection and then stalls would hang sign-in
+/// and token refresh forever. Every other Gyro HTTP caller builds a bounded
+/// agent; discovery and token exchange use this one.
+const OIDC_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const OIDC_READ_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn bounded_agent(connect: Duration, read: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(connect)
+        .timeout_read(read)
+        .timeout_write(read)
+        .build()
+}
+
+fn oidc_agent() -> ureq::Agent {
+    bounded_agent(OIDC_CONNECT_TIMEOUT, OIDC_READ_TIMEOUT)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PkceFlow {
@@ -221,7 +239,8 @@ fn authorize_local_device(paths: &GyroPaths) -> Result<AccountSessionState> {
 
 fn discover_oidc(config: &AccountOidcConfig) -> Result<OidcDiscovery> {
     let discovery_url = issuer_url(config)?.join(".well-known/openid-configuration")?;
-    ureq::get(discovery_url.as_str())
+    oidc_agent()
+        .get(discovery_url.as_str())
         .call()
         .map_err(|error| anyhow!("OIDC discovery failed: {error}"))?
         .into_json()
@@ -282,7 +301,8 @@ fn refresh_tokens(
 
 fn post_token_request(token_endpoint: &str, body: &str) -> Result<TokenResponse> {
     let token_endpoint = secure_https_url("OIDC token endpoint", token_endpoint)?;
-    ureq::post(token_endpoint.as_str())
+    oidc_agent()
+        .post(token_endpoint.as_str())
         .set("content-type", "application/x-www-form-urlencoded")
         .send_string(body)
         .map_err(|error| anyhow!("OIDC token request failed: {error}"))?
@@ -634,5 +654,61 @@ mod tests {
         config.redirect_loopback_base = "http://localhost.evil.example".into();
         let error = ensure_oidc_configured(&config).unwrap_err();
         assert!(error.to_string().contains("127.0.0.1 or localhost"));
+    }
+
+    #[test]
+    fn bounded_agents_give_up_on_a_stalled_issuer() {
+        use std::io::Read;
+        use std::net::TcpListener;
+
+        // An issuer that completes the TCP handshake and then never answers is
+        // the case a default ureq agent cannot escape: it has no read timeout,
+        // so sign-in and token refresh would block their thread forever. The
+        // probe uses a short budget; the production budget is asserted below.
+        let read_timeout = Duration::from_millis(400);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut sink = [0u8; 1024];
+                let _ = stream.read(&mut sink);
+                std::thread::sleep(Duration::from_secs(30));
+            }
+        });
+
+        let started = Instant::now();
+        let error = bounded_agent(OIDC_CONNECT_TIMEOUT, read_timeout)
+            .get(&format!(
+                "http://{address}/.well-known/openid-configuration"
+            ))
+            .call()
+            .expect_err("a stalled issuer must not hang the caller");
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(error, ureq::Error::Transport(_)),
+            "expected a transport timeout, got {error}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "gave up after {elapsed:?}, so the read timeout was not applied"
+        );
+    }
+
+    #[test]
+    fn oidc_calls_use_a_bounded_budget() {
+        // Discovery and token exchange must stay on a finite budget; a regression
+        // back to bare `ureq::get`/`ureq::post` would restore the unbounded wait.
+        assert!(OIDC_CONNECT_TIMEOUT > Duration::ZERO);
+        assert!(OIDC_READ_TIMEOUT > Duration::ZERO);
+        assert!(OIDC_READ_TIMEOUT <= Duration::from_secs(30));
+        // Split so this assertion does not match its own source text.
+        let bare_get = ["ureq", "::get("].concat();
+        let bare_post = ["ureq", "::post("].concat();
+        let source = include_str!("account.rs");
+        assert!(
+            !source.contains(&bare_get) && !source.contains(&bare_post),
+            "OIDC requests must go through oidc_agent(), not the default agent"
+        );
     }
 }
