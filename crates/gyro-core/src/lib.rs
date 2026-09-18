@@ -17,6 +17,7 @@ pub mod keychain;
 pub mod kimi_acp;
 pub mod mutations;
 pub mod ollama;
+pub mod openai_compatible;
 pub mod paths;
 pub mod policy;
 pub mod provider_contract;
@@ -132,6 +133,12 @@ pub use ollama::{
     ollama_tool_chat_with_progress, OllamaChatRequest, OllamaChatResponse, OllamaDiscovery,
     OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,
+};
+pub use openai_compatible::{
+    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
+    openai_compat_tool_chat, openai_compat_tool_chat_with_progress, OpenAiCompatChatRequest,
+    OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel, OpenAiCompatToolCall,
+    OPENAI_COMPAT_CANCELLED_MESSAGE,
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};

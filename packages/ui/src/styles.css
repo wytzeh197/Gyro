@@ -123,13 +123,16 @@
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.04);
   --gyro-premium-focus: var(--gyro-focus-ring);
   --gyro-scrim: rgba(0, 0, 0, 0.58);
-  /* Corner ladder. Every literal radius in this sheet snaps to one of these
-     steps, so 5/6/7 and 14/15/18 no longer read as three different corners. */
-  --gyro-premium-radius-xs: 4px;
-  --gyro-premium-radius-sm: 6px;
-  --gyro-premium-radius-md: 8px;
-  --gyro-premium-radius-lg: 10px;
-  --gyro-premium-radius-xl: 12px;
+  /* Corner ladder. Every control radius in this sheet resolves through one of
+     these steps, so there is exactly one place to retune the app's corners.
+     The ramp is softened one step from the old 4/6/8/10/12: badges and
+     hairline chips stay crisp at the bottom, while cards and panels round
+     enough to read as modern without turning short controls into lozenges. */
+  --gyro-premium-radius-xs: 5px;
+  --gyro-premium-radius-sm: 7px;
+  --gyro-premium-radius-md: 9px;
+  --gyro-premium-radius-lg: 12px;
+  --gyro-premium-radius-xl: 14px;
   --gyro-premium-radius-composer: 16px;
   --gyro-seam-radius: 12px;
   --gyro-radius-xs: var(--gyro-premium-radius-xs);
@@ -287,7 +290,7 @@
   align-items: center;
   background: var(--gyro-surface-raised, #202328);
   border: 1px solid var(--gyro-border, #30343a);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: flex;
   gap: 7px;
   max-width: 240px;
@@ -297,7 +300,7 @@
 .gyro-composer-attachment.is-image {
   background: #15171a;
   border-color: rgba(255, 255, 255, 0.13);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: block;
   height: 72px;
   max-width: none;
@@ -326,7 +329,7 @@
 
 .gyro-composer-attachment > img,
 .gyro-transcript-attachment > img {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   height: 72px;
   object-fit: cover;
   width: 96px;
@@ -459,7 +462,7 @@
 /* Why runs are stopped, or which budget is about to stop them. */
 .gyro-composer-safety-notice {
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-text, #f0f0f0);
   display: flex;
   gap: 9px;
@@ -499,7 +502,7 @@
 .gyro-composer-safety-notice button {
   background: color-mix(in srgb, var(--gyro-text, #f0f0f0) 10%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text, #f0f0f0);
   flex: none;
   font: inherit;
@@ -514,7 +517,7 @@
   background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
   border: 1px solid
     color-mix(in srgb, var(--gyro-warn, #e8b45f) 34%, transparent);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-text, #f0f0f0);
   display: flex;
   gap: 9px;
@@ -542,13 +545,13 @@
 .gyro-composer-cost-confirm button {
   background: transparent;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted, #b3b3b3);
   flex: none;
   font: inherit;
   font-size: 12px;
   margin-left: auto;
-  padding: 4px 9px;
+  padding: 4px 10px;
 }
 
 .gyro-composer-cost-confirm button + button {
@@ -565,7 +568,7 @@
   border-radius: 999px;
   color: var(--gyro-text, #f0f0f0);
   font-size: 10px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 :root[data-theme="light"] .gyro-council-preflight-chip {
@@ -632,7 +635,7 @@
   background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
   color: var(--gyro-accent, #7aa7ff);
   font-size: 10px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 .gyro-council-meta {
@@ -645,7 +648,7 @@
   background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 10%, transparent);
   border: 1px solid
     color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text, #f0f0f0);
   font-size: 12px;
   margin: 0;
@@ -664,7 +667,7 @@
 
 .gyro-council-seat {
   border: 1px solid var(--gyro-border, #303030);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   overflow: hidden;
 }
 
@@ -719,7 +722,7 @@
 
 .gyro-council-seat-output {
   background: var(--gyro-code-bg, #0c0c0c);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-code-text, #e6e6e6);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
@@ -743,7 +746,7 @@
 .gyro-council-actions button:not([aria-label]) {
   background: var(--gyro-control-bg, #1b1b1b);
   border: 1px solid var(--gyro-border, #303030);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text, #f0f0f0);
   cursor: pointer;
   font-size: 12px;
@@ -1072,7 +1075,7 @@ button {
 .gyro-brand-mark {
   align-items: center;
   background: var(--gyro-accent-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-brand-text);
   display: grid;
   flex: 0 0 auto;
@@ -1093,7 +1096,7 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: flex;
   font-size: 13px;
@@ -1140,7 +1143,7 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-sidebar-text);
   display: grid;
   font-size: var(--gyro-font-body);
@@ -1219,7 +1222,7 @@ button {
   align-content: start;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 8px;
@@ -1265,7 +1268,7 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-sidebar-text);
   display: grid;
   min-width: 0;
@@ -1284,7 +1287,7 @@ button {
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 30px;
-  padding: 5px 7px;
+  padding: 5px 8px;
 }
 
 .gyro-sidebar-thread.is-indent {
@@ -1345,7 +1348,7 @@ button {
 .gyro-sidebar-more-button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #8b8e95;
   font-size: 12px;
   justify-self: start;
@@ -1436,7 +1439,7 @@ button {
 .gyro-session-row:hover,
 .gyro-session-row:focus-within {
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-hover-text);
 }
 
@@ -1452,13 +1455,13 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: inherit;
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr);
   min-height: 28px;
-  padding: 4px 7px;
+  padding: 4px 8px;
   text-align: left;
   transition: padding-right var(--gyro-premium-motion) var(--gyro-premium-ease);
   width: 100%;
@@ -1502,7 +1505,7 @@ button {
   align-items: center;
   background: rgba(25, 26, 24, 0.92);
   border: 1px solid rgba(244, 241, 235, 0.1);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   display: flex;
   gap: 1px;
@@ -1540,7 +1543,7 @@ button {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   display: inline-flex;
   height: 22px;
@@ -1568,7 +1571,7 @@ button {
 .gyro-session-menu {
   background: rgba(31, 32, 30, 0.99);
   border: 1px solid rgba(244, 241, 235, 0.13);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 14px 34px rgba(0, 0, 0, 0.38),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -1585,7 +1588,7 @@ button {
 .gyro-session-menu button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font-size: 12px;
   min-height: 28px;
@@ -1659,7 +1662,7 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-faint);
   display: grid;
   font-size: 13px;
@@ -1756,13 +1759,13 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   color: var(--gyro-text);
   display: grid;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr);
   min-height: 34px;
-  padding: 4px 7px;
+  padding: 4px 8px;
   text-align: left;
   width: 100%;
 }
@@ -1830,13 +1833,13 @@ button {
 .gyro-account-menu {
   background: rgba(45, 45, 45, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   bottom: 54px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
   display: grid;
   gap: 1px;
   left: 0;
-  padding: 9px;
+  padding: 10px;
   position: absolute;
   width: 190px;
   z-index: 30;
@@ -1846,7 +1849,7 @@ button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #f2f2f2;
   display: grid;
   font-size: 13px;
@@ -2096,7 +2099,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-faint);
   display: inline-flex;
   height: 26px;
@@ -2129,7 +2132,7 @@ button.gyro-account-menu-row:hover {
 .gyro-secondary-button,
 .gyro-icon-button {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: inline-flex;
   font-size: 13px;
   gap: 7px;
@@ -2142,7 +2145,7 @@ button.gyro-account-menu-row:hover {
   border: 1px solid var(--gyro-primary-bg);
   color: var(--gyro-primary-text);
   font-weight: 700;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-primary-button:hover {
@@ -2160,7 +2163,7 @@ button.gyro-account-menu-row:hover {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-strong);
   color: var(--gyro-text);
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-icon-button {
@@ -2225,7 +2228,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   min-height: 28px;
@@ -2387,7 +2390,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   height: 30px;
@@ -2408,9 +2411,9 @@ button.gyro-account-menu-row:hover {
 
 .gyro-message.is-user > div:last-child {
   background: var(--gyro-user-bubble);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-user-bubble-text);
-  padding: 9px 11px;
+  padding: 10px 12px;
 }
 
 .gyro-message.is-system > div:last-child {
@@ -2446,7 +2449,7 @@ button.gyro-account-menu-row:hover {
 .gyro-tool-detail-panel {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 18px 42px var(--gyro-heavy-shadow);
   color: var(--gyro-text);
   margin-top: 8px;
@@ -2460,7 +2463,7 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr) 24px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-tool-detail-header strong,
@@ -2499,7 +2502,7 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 9px 10px 0;
+  padding: 10px 10px 0;
 }
 
 .gyro-tool-detail-grid strong {
@@ -2570,7 +2573,7 @@ button.gyro-account-menu-row:hover {
   display: flex;
   gap: 7px;
   min-height: 42px;
-  padding: 7px 9px;
+  padding: 8px 10px;
 }
 
 .gyro-composer-spacer {
@@ -2627,7 +2630,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-grid;
   height: 28px;
@@ -2648,7 +2651,7 @@ button.gyro-account-menu-row:hover {
 .gyro-chat-surface-button:has(.gyro-chat-surface-button-label) {
   display: inline-flex;
   gap: 5px;
-  padding-inline: 7px;
+  padding-inline: 8px;
   width: auto;
 }
 
@@ -2748,7 +2751,7 @@ button.gyro-account-menu-row:hover {
   border-top: 1px solid var(--gyro-border);
   display: grid;
   gap: 3px;
-  padding-top: 9px;
+  padding-top: 10px;
 }
 
 .gyro-rail-section:first-of-type {
@@ -2768,7 +2771,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 8px;
@@ -2820,13 +2823,13 @@ button.gyro-account-menu-row:hover {
 
 .gyro-plan-item {
   align-items: start;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 8px;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   min-width: 0;
-  padding: 7px 4px;
+  padding: 8px 4px;
 }
 
 .gyro-plan-item + .gyro-plan-item {
@@ -2858,7 +2861,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 4px;
   grid-template-columns: minmax(0, 1fr) 26px 26px;
@@ -2895,7 +2898,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -3030,7 +3033,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 10px;
   grid-template-columns: 28px minmax(0, 1fr);
@@ -3066,7 +3069,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 8px;
@@ -3222,7 +3225,7 @@ button.gyro-account-menu-row:hover {
 .gyro-terminal-controlbar input {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   min-height: 30px;
   min-width: 160px;
@@ -3282,7 +3285,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-accent);
   display: grid;
   height: 52px;
@@ -3359,7 +3362,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 8px;
@@ -3405,12 +3408,12 @@ button.gyro-account-menu-row:hover {
 .gyro-settings-grid > div {
   align-items: center;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   min-height: 40px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-settings-grid span {
@@ -3432,23 +3435,23 @@ button.gyro-account-menu-row:hover {
   align-self: start;
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 3px;
-  padding: 7px;
+  padding: 8px;
 }
 
 .gyro-settings-nav button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr);
   min-height: 34px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   text-align: left;
 }
 
@@ -3467,7 +3470,7 @@ button.gyro-account-menu-row:hover {
 .gyro-settings-section {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   overflow: hidden;
 }
 
@@ -3500,7 +3503,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-accent);
   display: grid;
   height: 34px;
@@ -3511,19 +3514,19 @@ button.gyro-account-menu-row:hover {
 .gyro-settings-section-body {
   display: grid;
   gap: 24px;
-  padding: 9px;
+  padding: 10px;
 }
 
 .gyro-settings-row,
 .gyro-provider-row {
   align-items: center;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 52px;
-  padding: 10px 11px;
+  padding: 10px 12px;
 }
 
 .gyro-settings-row strong,
@@ -3559,7 +3562,7 @@ button.gyro-account-menu-row:hover {
   border-radius: 999px;
   color: var(--gyro-muted);
   font-size: 12px;
-  padding: 5px 9px;
+  padding: 5px 10px;
 }
 
 .gyro-provider-row small {
@@ -3593,7 +3596,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: flex;
   gap: 9px;
@@ -3763,7 +3766,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: inline-flex;
   flex: 0 0 auto;
   gap: 2px;
@@ -3774,7 +3777,7 @@ button.gyro-account-menu-row:hover {
 .gyro-mode-toggle button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 10px;
   font-weight: 700;
@@ -3803,7 +3806,7 @@ button.gyro-account-menu-row:hover {
   gap: 6px;
   height: 28px;
   max-width: 132px;
-  padding: 0 9px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
@@ -3897,7 +3900,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-onboarding-steps {
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 0;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -3914,7 +3917,7 @@ button.gyro-account-menu-row:hover {
   gap: 7px;
   grid-template-columns: 20px minmax(0, 1fr);
   min-height: 42px;
-  padding: 8px 9px;
+  padding: 8px 10px;
   text-align: left;
 }
 
@@ -3959,7 +3962,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-agent-run-card {
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 10px;
   max-width: 780px;
@@ -3993,8 +3996,8 @@ button.gyro-account-menu-row:hover {
 .gyro-diff-summary-card {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
-  padding: 9px;
+  border-radius: var(--gyro-radius-md);
+  padding: 10px;
 }
 
 .gyro-diff-summary-card > div:last-child {
@@ -4021,7 +4024,7 @@ button.gyro-account-menu-row:hover {
 .gyro-context-metric {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-width: 0;
   padding: 8px;
 }
@@ -4063,7 +4066,7 @@ button.gyro-account-menu-row:hover {
 .gyro-empty-action-row,
 .gyro-session-state-row {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 8px;
   min-height: 32px;
@@ -4112,7 +4115,7 @@ button.gyro-account-menu-row:hover {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  padding: 7px 8px;
+  padding: 8px 8px;
 }
 
 .gyro-session-state-row strong {
@@ -4129,7 +4132,7 @@ button.gyro-account-menu-row:hover {
 .gyro-template-picker button {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   font-size: 12px;
   height: 28px;
@@ -4178,11 +4181,11 @@ button.gyro-account-menu-row:hover {
 .gyro-task-foot button {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   font-size: 12px;
   min-height: 28px;
-  padding: 0 9px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
@@ -4209,7 +4212,7 @@ button.gyro-account-menu-row:hover {
 .gyro-terminal-empty {
   align-content: center;
   border: 1px dashed var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 8px;
@@ -4236,7 +4239,7 @@ button.gyro-account-menu-row:hover {
 .gyro-terminal-pane {
   background: var(--gyro-code-bg);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   grid-template-rows: 32px 28px auto minmax(0, 1fr);
   min-height: 210px;
@@ -4388,7 +4391,7 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-faint);
   font-size: 12px;
   gap: 5px;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-breadcrumb-row strong,
@@ -4485,7 +4488,7 @@ button.gyro-account-menu-row:hover {
   border-bottom: 1px solid var(--gyro-border-soft);
   display: flex;
   justify-content: space-between;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-diff-file-list header strong,
@@ -4525,7 +4528,7 @@ button.gyro-account-menu-row:hover {
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr);
   min-height: 46px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   text-align: left;
 }
 
@@ -4654,7 +4657,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   gap: 5px;
@@ -4677,7 +4680,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: flex;
   gap: 6px;
@@ -4746,7 +4749,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   font-size: 12px;
@@ -4912,7 +4915,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 28px;
@@ -4934,7 +4937,7 @@ button.gyro-account-menu-row:hover {
 .gyro-browser-preview-toolbar select {
   background: var(--gyro-app, #111214);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: 12px;
   height: 28px;
@@ -4947,7 +4950,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-app, #111214);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: inline-flex;
   flex-shrink: 0;
   gap: 0;
@@ -4956,7 +4959,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-browser-device-group > button,
 .gyro-browser-view-group > button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   height: 24px;
   min-width: 26px;
 }
@@ -5018,7 +5021,7 @@ button.gyro-account-menu-row:hover {
   border-radius: 999px;
   color: var(--gyro-text);
   font-size: 11px;
-  padding: 4px 9px;
+  padding: 4px 10px;
 }
 
 .gyro-browser-capture-actions > button:hover {
@@ -5044,12 +5047,12 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   font-size: 12px;
   min-height: 28px;
-  padding: 0 9px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
@@ -5109,7 +5112,7 @@ button.gyro-account-menu-row:hover {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 2px 7px;
+  padding: 2px 8px;
   text-transform: uppercase;
 }
 
@@ -5133,7 +5136,7 @@ button.gyro-account-menu-row:hover {
 .gyro-browser-page {
   background: #fff;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
   height: 100%;
   margin: 0 auto;
@@ -5375,7 +5378,7 @@ button.gyro-account-menu-row:hover {
 .gyro-browser-content-grid > div {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   padding: 12px;
 }
 
@@ -5407,7 +5410,7 @@ button.gyro-account-menu-row:hover {
 .gyro-browser-skeleton span {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   display: block;
   height: 54px;
 }
@@ -5569,7 +5572,7 @@ button.gyro-account-menu-row:hover {
 .gyro-automation-metric {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -5632,14 +5635,14 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 6px;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 72px;
   min-width: 0;
-  padding: 9px;
+  padding: 10px;
   position: relative;
   text-align: left;
 }
@@ -5751,14 +5754,14 @@ button.gyro-account-menu-row:hover {
 .gyro-automation-result {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-automation-fact {
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-automation-fact span,
@@ -5777,7 +5780,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-automation-prompt {
   margin: 0 14px 10px;
-  padding: 11px 12px;
+  padding: 12px 12px;
 }
 
 .gyro-automation-prompt p {
@@ -5804,7 +5807,7 @@ button.gyro-account-menu-row:hover {
   justify-content: space-between;
   margin: 0 14px 10px;
   min-width: 0;
-  padding: 11px 12px;
+  padding: 12px 12px;
 }
 
 .gyro-automation-result > div {
@@ -5842,7 +5845,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 8px;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -5855,7 +5858,7 @@ button.gyro-account-menu-row:hover {
   border-radius: 999px;
   color: var(--gyro-muted);
   font-size: 11px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-automation-run span.is-passed,
@@ -5900,7 +5903,7 @@ button.gyro-account-menu-row:hover {
 .gyro-kanban-column {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);
   min-width: 0;
@@ -5935,7 +5938,7 @@ button.gyro-account-menu-row:hover {
 .gyro-task-card {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -5978,7 +5981,7 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-warn);
   font-size: 11px;
   line-height: 1;
-  padding: 4px 7px;
+  padding: 4px 8px;
   white-space: nowrap;
 }
 
@@ -6025,7 +6028,7 @@ button.gyro-account-menu-row:hover {
   border-radius: 999px;
   color: var(--gyro-muted);
   font-size: 11px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-task-foot button {
@@ -6042,7 +6045,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   display: inline-flex;
   font-size: 10px;
@@ -6085,7 +6088,7 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-boundary {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0 14px;
@@ -6096,7 +6099,7 @@ button.gyro-account-menu-row:hover {
   border-right: 1px solid var(--gyro-border-soft);
   display: grid;
   gap: 4px;
-  padding: 11px;
+  padding: 12px;
 }
 
 .gyro-provider-boundary > div:last-child {
@@ -6123,7 +6126,7 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-card {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-width: 0;
   overflow: hidden;
 }
@@ -6134,14 +6137,14 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 10px;
   grid-template-columns: 34px minmax(0, 1fr) auto;
-  padding: 11px;
+  padding: 12px;
 }
 
 .gyro-provider-icon {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-accent);
   display: grid;
   height: 34px;
@@ -6167,7 +6170,7 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-logo > span {
   align-items: center;
   border: 1px solid currentColor;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   display: inline-flex;
   font-size: 9px;
   font-weight: 700;
@@ -6269,7 +6272,7 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-model-picker button {
   background: color-mix(in srgb, var(--gyro-surface) 78%, transparent);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 2px;
@@ -6304,7 +6307,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-surface) 72%, transparent);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 9px;
   grid-template-columns: 8px minmax(0, 1fr) auto;
@@ -6368,7 +6371,7 @@ button.gyro-account-menu-row:hover {
   font-size: 11px;
   max-width: 100%;
   overflow: hidden;
-  padding: 4px 7px;
+  padding: 4px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6384,7 +6387,7 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-policy {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   margin: 0 14px;
   overflow: hidden;
 }
@@ -6421,7 +6424,7 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 8px;
   grid-template-columns: 150px 150px minmax(220px, 1fr) auto;
-  padding: 9px;
+  padding: 10px;
 }
 
 .gyro-provider-handoff-form label {
@@ -6441,11 +6444,11 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-handoff-form select {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   height: 32px;
   min-width: 0;
-  padding: 0 9px;
+  padding: 0 10px;
   width: 100%;
 }
 
@@ -6453,7 +6456,7 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 9px;
+  padding: 10px;
 }
 
 .gyro-provider-handoff-grid > div {
@@ -6475,12 +6478,12 @@ button.gyro-account-menu-row:hover {
 .gyro-provider-session-row {
   align-items: center;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 9px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 42px;
-  padding: 7px 8px;
+  padding: 8px 8px;
 }
 
 .gyro-provider-session-row span {
@@ -6488,7 +6491,7 @@ button.gyro-account-menu-row:hover {
   border-radius: 999px;
   color: var(--gyro-muted);
   font-size: 11px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-provider-session-row span.is-accepted,
@@ -6538,7 +6541,7 @@ button.gyro-account-menu-row:hover {
   gap: 10px;
   grid-template-columns: 150px minmax(180px, 1fr) 120px 140px;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-profile-table-head {
@@ -6574,7 +6577,7 @@ button.gyro-account-menu-row:hover {
 .gyro-profile-table-row code {
   background: var(--gyro-code-bg);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-code-text);
   padding: 3px 6px;
 }
@@ -6598,7 +6601,7 @@ button.gyro-account-menu-row:hover {
 .gyro-command-palette {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: 0 24px 80px var(--gyro-heavy-shadow);
   max-width: 660px;
   overflow: hidden;
@@ -6611,7 +6614,7 @@ button.gyro-account-menu-row:hover {
   display: grid;
   gap: 9px;
   grid-template-columns: 18px minmax(0, 1fr) 28px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-command-palette input {
@@ -6639,7 +6642,7 @@ button.gyro-account-menu-row:hover {
   gap: 2px;
   max-height: min(520px, calc(100vh - 180px));
   overflow: auto;
-  padding: 7px;
+  padding: 8px;
 }
 
 .gyro-model-standard-overlay {
@@ -6739,13 +6742,13 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 9px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   min-height: 38px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   text-align: left;
 }
 
@@ -6885,7 +6888,7 @@ textarea:focus-visible {
 }
 
 .gyro-surface-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   height: 26px;
 }
 
@@ -6957,7 +6960,7 @@ textarea:focus-visible {
 }
 
 .gyro-account-button {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-topbar {
@@ -7008,7 +7011,7 @@ textarea:focus-visible {
 .gyro-task-foot button,
 .gyro-theme-picker button,
 .gyro-provider-actions .gyro-secondary-button {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-primary-button {
@@ -7063,7 +7066,7 @@ textarea:focus-visible {
     var(--gyro-accent) 6%
   );
   border-color: var(--gyro-border-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 18px 44px var(--gyro-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -7084,7 +7087,7 @@ textarea:focus-visible {
 
 .gyro-composer-chip,
 .gyro-composer-tool {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-composer-chip:hover,
@@ -7096,7 +7099,7 @@ textarea:focus-visible {
 .gyro-thread-shell {
   background: color-mix(in srgb, var(--gyro-pane) 86%, var(--gyro-surface) 14%);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   overflow: hidden;
 }
 
@@ -7111,11 +7114,11 @@ textarea:focus-visible {
 }
 
 .gyro-message-avatar {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-message.is-user > div:last-child {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 8px 18px var(--gyro-shadow);
 }
 
@@ -7208,7 +7211,7 @@ textarea:focus-visible {
 
 .gyro-terminal-pane {
   border-color: color-mix(in srgb, var(--gyro-border) 78%, #000 22%);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-height: 226px;
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.18),
@@ -7249,7 +7252,7 @@ textarea:focus-visible {
 .gyro-provider-handoff-form select {
   background: color-mix(in srgb, var(--gyro-pane) 74%, var(--gyro-surface) 26%);
   border-color: var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-diff-review {
@@ -7303,7 +7306,7 @@ textarea:focus-visible {
 
 .gyro-git-action-strip button {
   background: color-mix(in srgb, var(--gyro-surface) 76%, transparent);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-git-action-strip button.is-done {
@@ -7332,7 +7335,7 @@ textarea:focus-visible {
 
 .gyro-browser-toolbar,
 .gyro-browser-console-pill {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-browser-page {
@@ -7341,7 +7344,7 @@ textarea:focus-visible {
 
 .gyro-browser-content-grid > div,
 .gyro-browser-skeleton span {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-settings-surface {
@@ -7351,7 +7354,7 @@ textarea:focus-visible {
 .gyro-settings-nav,
 .gyro-settings-section,
 .gyro-theme-picker button {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-settings-nav {
@@ -7433,7 +7436,7 @@ textarea:focus-visible {
 }
 
 .gyro-command-palette {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 @media (max-width: 1280px) {
@@ -7515,7 +7518,7 @@ textarea:focus-visible {
 .gyro-session-row,
 .gyro-account-button,
 .gyro-account-menu-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-sidebar-action,
@@ -7558,7 +7561,7 @@ textarea:focus-visible {
 .gyro-command-palette {
   background: color-mix(in srgb, var(--gyro-surface) 96%, transparent);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 18px 42px var(--gyro-heavy-shadow);
 }
 
@@ -7628,7 +7631,7 @@ textarea:focus-visible {
 .gyro-task-foot button,
 .gyro-theme-picker button,
 .gyro-provider-actions .gyro-secondary-button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-primary-button {
@@ -7766,7 +7769,7 @@ textarea:focus-visible {
 
 .gyro-browser-rail .gyro-browser-preview {
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   min-height: 0;
   overflow: hidden;
 }
@@ -7806,7 +7809,7 @@ textarea:focus-visible {
 .gyro-thread-shell {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-workbench-line);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -7841,7 +7844,7 @@ textarea:focus-visible {
 .gyro-composer-shell {
   background: var(--gyro-surface);
   border-color: var(--gyro-border-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   margin: 0;
 }
@@ -7877,7 +7880,7 @@ textarea:focus-visible {
 .gyro-automation-stop,
 .gyro-automation-result,
 .gyro-browser-page {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
 }
 
@@ -7915,7 +7918,7 @@ textarea:focus-visible {
 .gyro-mini-file-list {
   background: var(--gyro-control-bg);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-cli-status-card {
@@ -7942,7 +7945,7 @@ textarea:focus-visible {
 .gyro-session-state-row,
 .gyro-mini-file-row,
 .gyro-empty-action-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 30px;
 }
 
@@ -7970,7 +7973,7 @@ textarea:focus-visible {
 
 .gyro-pane-tabs button,
 .gyro-terminal-tab {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 28px;
 }
 
@@ -8005,7 +8008,7 @@ textarea:focus-visible {
 .gyro-provider-handoff-form select {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-terminal-grid {
@@ -8018,7 +8021,7 @@ textarea:focus-visible {
 .gyro-terminal-pane {
   background: var(--gyro-code-bg);
   border-color: var(--gyro-workbench-line);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   min-height: 210px;
 }
@@ -8047,7 +8050,7 @@ textarea:focus-visible {
 .gyro-terminal-empty {
   background: var(--gyro-surface);
   border-color: var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-ide-surface {
@@ -8077,7 +8080,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 30px;
@@ -8169,7 +8172,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-muted);
   display: inline-flex;
@@ -8216,7 +8219,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-ink);
   display: inline-flex;
   flex: 0 0 auto;
@@ -8374,7 +8377,7 @@ textarea:focus-visible {
 .gyro-provider-hero {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-height: 52px;
   padding: 10px 12px;
 }
@@ -8399,7 +8402,7 @@ textarea:focus-visible {
 .gyro-task-card {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   padding: 10px;
 }
 
@@ -8409,7 +8412,7 @@ textarea:focus-visible {
 
 .gyro-task-transition-row button,
 .gyro-template-picker button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-automations-surface {
@@ -8437,7 +8440,7 @@ textarea:focus-visible {
 }
 
 .gyro-automation-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 48px;
 }
 
@@ -8506,7 +8509,7 @@ textarea:focus-visible {
 }
 
 .gyro-settings-nav button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 30px;
 }
 
@@ -8540,7 +8543,7 @@ textarea:focus-visible {
 .gyro-provider-row {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   justify-items: stretch;
   min-height: 44px;
   padding: 8px 10px;
@@ -8578,7 +8581,7 @@ textarea:focus-visible {
 }
 
 .gyro-command-list button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 38px;
 }
 
@@ -8640,7 +8643,7 @@ textarea:focus-visible {
 .gyro-sidebar-action .gyro-sidebar-shortcut {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-soft);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-faint);
   font-family: inherit;
   font-size: 12px;
@@ -8704,7 +8707,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0.5px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -8738,7 +8741,7 @@ textarea:focus-visible {
 .gyro-global-search-footer kbd {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   font-family: inherit;
   font-size: 10px;
@@ -8777,7 +8780,7 @@ textarea:focus-visible {
   font-weight: 680;
   gap: 7px;
   letter-spacing: 0.04em;
-  padding: 9px 10px 6px;
+  padding: 10px 10px 6px;
   position: sticky;
   text-transform: uppercase;
   top: 0;
@@ -8805,7 +8808,7 @@ textarea:focus-visible {
   gap: 11px;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   min-height: 44px;
-  padding: 5px 9px;
+  padding: 5px 10px;
   transition:
     background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
@@ -8838,7 +8841,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0.5px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -9002,8 +9005,8 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 680;
   gap: 5px;
-  height: 25px;
-  padding: 0 7px 0 4px;
+  height: 26px;
+  padding: 0 8px 0 4px;
   text-transform: capitalize;
   white-space: nowrap;
 }
@@ -9070,7 +9073,7 @@ textarea:focus-visible {
 .gyro-workspace-preparation-popover {
   background: color-mix(in srgb, var(--gyro-pane) 98%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: 0 20px 60px rgb(0 0 0 / 38%);
   display: grid;
   gap: 12px;
@@ -9149,7 +9152,7 @@ textarea:focus-visible {
   font-size: 10px;
   gap: 8px;
   grid-template-columns: 14px minmax(0, 1fr);
-  min-height: 25px;
+  min-height: 26px;
 }
 
 .gyro-workspace-preparation-stages > div[data-state="done"] {
@@ -9428,11 +9431,11 @@ textarea:focus-visible {
 .gyro-workspace-trust-banner button {
   background: var(--gyro-accent);
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-primary-text);
   font: inherit;
   min-height: 26px;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-workspace-settings-editor {
@@ -9479,7 +9482,7 @@ textarea:focus-visible {
   padding: 3px;
   margin-bottom: 18px;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-surface-soft) 82%, transparent);
 }
 
@@ -9487,7 +9490,7 @@ textarea:focus-visible {
   min-width: 90px;
   padding: 6px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   background: transparent;
   font: inherit;
@@ -9518,7 +9521,7 @@ textarea:focus-visible {
   max-width: 760px;
   overflow: hidden;
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   background: color-mix(in srgb, var(--gyro-surface-raised) 90%, transparent);
 }
 
@@ -9556,9 +9559,9 @@ textarea:focus-visible {
   box-sizing: border-box;
   width: 100%;
   min-height: 31px;
-  padding: 6px 9px;
+  padding: 6px 10px;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   outline: none;
   color: var(--gyro-text);
   background: var(--gyro-control-bg);
@@ -9574,9 +9577,9 @@ textarea:focus-visible {
 
 .gyro-workspace-settings-reset {
   margin-top: 16px;
-  padding: 7px 11px;
+  padding: 8px 12px;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   background: var(--gyro-surface-raised);
   font: inherit;
@@ -9614,9 +9617,9 @@ textarea:focus-visible {
 
 .gyro-workspace-keybindings header kbd {
   min-width: 28px;
-  padding: 4px 7px;
+  padding: 4px 8px;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   background: var(--gyro-control-bg);
   text-align: center;
@@ -9625,7 +9628,7 @@ textarea:focus-visible {
 .gyro-workspace-keybindings > div {
   overflow: hidden;
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   background: color-mix(in srgb, var(--gyro-surface-raised) 90%, transparent);
 }
 
@@ -9670,7 +9673,7 @@ textarea:focus-visible {
   color: var(--gyro-text);
   background: var(--gyro-control-bg);
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-workspace-keybindings input.is-conflict {
@@ -9682,10 +9685,10 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   width: 25px;
-  height: 25px;
+  height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   background: transparent;
 }
@@ -9727,9 +9730,9 @@ textarea:focus-visible {
   align-items: center;
   flex: none;
   gap: 6px;
-  padding: 6px 9px;
+  padding: 6px 10px;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   background: var(--gyro-control-bg);
   font: inherit;
@@ -9740,7 +9743,7 @@ textarea:focus-visible {
   padding: 8px 10px;
   border: 1px solid
     color-mix(in srgb, var(--gyro-danger) 35%, var(--gyro-border));
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-danger);
   background: color-mix(in srgb, var(--gyro-danger) 8%, transparent);
   font-size: 11px;
@@ -9757,7 +9760,7 @@ textarea:focus-visible {
   gap: 10px 16px;
   padding: 13px 14px;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-surface-raised) 90%, transparent);
 }
 
@@ -9785,7 +9788,7 @@ textarea:focus-visible {
 
 .gyro-workspace-contribution-title em {
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   background: var(--gyro-surface-soft);
   font-size: 9px;
@@ -9811,7 +9814,7 @@ textarea:focus-visible {
   gap: 3px;
   padding: 2px 5px;
   border: 1px solid var(--gyro-border);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   font-size: 9px;
 }
@@ -9825,9 +9828,9 @@ textarea:focus-visible {
 }
 
 .gyro-workspace-contribution-actions button {
-  padding: 5px 7px;
+  padding: 5px 8px;
   border: 1px solid var(--gyro-border);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-text);
   background: transparent;
   font: inherit;
@@ -9939,7 +9942,7 @@ textarea:focus-visible {
 }
 
 .gyro-workspace-route.is-code .gyro-editor-ai-bar button {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-ide-secondary-foreground);
   font-size: 11px;
   gap: 4px;
@@ -9992,10 +9995,10 @@ textarea:focus-visible {
   .gyro-workspace-tool-panel.is-resizable
   .gyro-pane-tabs
   button {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-ide-secondary-foreground);
-  height: 27px;
-  padding-inline: 7px;
+  height: 28px;
+  padding-inline: 8px;
 }
 
 .gyro-workspace-route.is-code
@@ -10268,7 +10271,7 @@ textarea:focus-visible {
   gap: 10px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   min-height: 40px;
-  padding: 0 11px;
+  padding: 0 12px;
   text-align: left;
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
@@ -10405,9 +10408,9 @@ textarea:focus-visible {
   .gyro-ide-sidebar-activity
   button {
   border: 0;
-  border-radius: 4px;
-  height: 27px;
-  min-height: 27px;
+  border-radius: var(--gyro-radius-xs);
+  height: 28px;
+  min-height: 28px;
   transform: none;
 }
 
@@ -10436,8 +10439,8 @@ textarea:focus-visible {
   display: grid;
   gap: 4px;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 27px;
-  padding: 0 4px 0 7px;
+  min-height: 28px;
+  padding: 0 4px 0 8px;
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
@@ -10459,7 +10462,7 @@ textarea:focus-visible {
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-explorer-toolbar
   button {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   height: 22px;
   width: 22px;
 }
@@ -10471,7 +10474,7 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-project-row {
-  min-height: 25px;
+  min-height: 26px;
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-explorer-tree {
@@ -10491,12 +10494,12 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
-  height: 27px;
+  height: 28px;
   justify-content: center;
-  min-height: 27px;
+  min-height: 28px;
   padding: 0;
 }
 
@@ -10625,7 +10628,7 @@ textarea:focus-visible {
 }
 
 .gyro-ide-sidebar-activity button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   height: 28px;
   min-height: 28px;
   width: 28px;
@@ -10676,7 +10679,7 @@ textarea:focus-visible {
 
 .gyro-editor-tab-close {
   align-items: center;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   display: flex;
   flex: 0 0 20px;
   height: 20px;
@@ -10705,7 +10708,7 @@ textarea:focus-visible {
 
 .gyro-editor-tabs .gyro-editor-tab-actions button {
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   box-shadow: none;
   flex: 0 0 var(--gyro-ide-control-size);
   flex-basis: var(--gyro-ide-control-size);
@@ -10783,12 +10786,12 @@ textarea:focus-visible {
 
 .gyro-editor-ai-bar button {
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   font-size: 11px;
   gap: 5px;
   height: var(--gyro-ide-control-size);
   min-height: var(--gyro-ide-control-size);
-  padding: 0 7px;
+  padding: 0 8px;
   white-space: nowrap;
 }
 
@@ -10801,7 +10804,7 @@ textarea:focus-visible {
   height: var(--gyro-ide-status-height);
   max-height: var(--gyro-ide-status-height);
   min-height: var(--gyro-ide-status-height);
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-editor-statusbar span {
@@ -10843,7 +10846,7 @@ textarea:focus-visible {
 
 .gyro-ide-assistant-composer textarea {
   min-height: 64px;
-  padding: 7px 8px;
+  padding: 8px 8px;
 }
 
 .gyro-workspace-route.is-code .gyro-workspace-tool-panel-head {
@@ -10901,7 +10904,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 24px;
@@ -10927,7 +10930,7 @@ textarea:focus-visible {
 }
 
 .gyro-sidebar-explorer-row {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   gap: 4px;
   grid-template-columns: 14px minmax(0, 1fr) auto;
   min-height: 24px;
@@ -11103,7 +11106,7 @@ textarea:focus-visible {
 .gyro-sidebar-commit-form input {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   min-height: 30px;
@@ -11114,7 +11117,7 @@ textarea:focus-visible {
   align-items: center;
   background: var(--gyro-accent);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-primary-text);
   display: flex;
   font-size: 12px;
@@ -11240,7 +11243,7 @@ textarea:focus-visible {
   background: #151619;
   border-right-color: #292c31;
   gap: 6px;
-  padding: 8px 7px;
+  padding: 8px 8px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-head {
@@ -11250,7 +11253,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-surface-row {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #9a9fa7;
   flex: 1 1 0;
   font-size: 13px;
@@ -11287,12 +11290,12 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #d7d4cf;
   font-size: var(--gyro-font-body);
   gap: 7px;
   min-height: 28px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action svg,
@@ -11362,14 +11365,14 @@ textarea:focus-visible {
   background: #151619;
   border-top-color: #292c31;
   margin: auto -7px -8px;
-  padding: 6px 7px 8px;
+  padding: 6px 8px 8px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-account-button {
   background: transparent;
   border-color: transparent;
   min-height: 36px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-account-button:hover {
@@ -11570,7 +11573,7 @@ textarea:focus-visible {
 /* Mission workers board — goal chat control plane for CLI workers */
 .gyro-mission-workers {
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   display: grid;
   gap: 8px;
   margin: 0 0 12px;
@@ -11654,7 +11657,7 @@ textarea:focus-visible {
   align-items: center;
   background: none;
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   cursor: pointer;
   display: inline-flex;
@@ -11692,7 +11695,7 @@ textarea:focus-visible {
   align-items: baseline;
   background: rgba(255, 255, 255, 0.03);
   border: 0.5px solid var(--gyro-premium-hairline);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -11761,7 +11764,7 @@ textarea:focus-visible {
 .gyro-chat-start .gyro-onboarding-steps {
   background: #191b1f;
   border-color: #2b2f35;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   width: 100%;
 }
 
@@ -11788,14 +11791,14 @@ textarea:focus-visible {
   max-width: 620px;
   min-height: 54px;
   overflow: visible;
-  padding: 0 7px 0 9px;
+  padding: 0 8px 0 10px;
   width: min(620px, 100%);
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
   background: #191a1d;
   border: 1px solid #2b2e34;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   margin: 0;
   overflow: visible;
@@ -11815,7 +11818,7 @@ textarea:focus-visible {
   border-radius: 20px 20px 0 0;
   font-size: var(--gyro-font-body);
   min-height: 60px;
-  padding: 17px 12px 7px;
+  padding: 17px 12px 8px;
   position: relative;
   z-index: 2;
 }
@@ -11887,7 +11890,7 @@ textarea:focus-visible {
   border-top: 0;
   gap: 5px;
   min-height: 36px;
-  padding: 4px 7px;
+  padding: 4px 8px;
 }
 
 .gyro-chat-start .gyro-composer-bar {
@@ -11921,7 +11924,7 @@ textarea:focus-visible {
   border-color: transparent;
   color: #d0d2d6;
   min-height: 30px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-chat-start
@@ -12009,7 +12012,7 @@ textarea:focus-visible {
 .gyro-composer-popover {
   background: #202124;
   border: 1px solid #34363b;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 18px 38px rgba(0, 0, 0, 0.36),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -12027,7 +12030,7 @@ textarea:focus-visible {
 .gyro-context-picker {
   background: var(--gyro-topbar);
   border-color: var(--gyro-topbar-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
   gap: 0;
   min-width: 190px;
@@ -12041,7 +12044,7 @@ textarea:focus-visible {
   font-weight: 550;
   letter-spacing: 0;
   margin: 5px 0 1px;
-  padding: 3px 7px;
+  padding: 3px 8px;
   text-transform: none;
 }
 
@@ -12050,11 +12053,11 @@ textarea:focus-visible {
 }
 
 .gyro-context-picker .gyro-composer-menu-item {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr);
   min-height: 30px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-context-picker .gyro-composer-menu-item > svg {
@@ -12076,7 +12079,7 @@ textarea:focus-visible {
 .gyro-slash-command-menu {
   background: #15171a;
   border: 1px solid #30343a;
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   bottom: calc(100% + 10px);
   box-shadow:
     0 22px 52px rgba(0, 0, 0, 0.52),
@@ -12117,13 +12120,13 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #dfe2e6;
   display: grid;
   gap: 10px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   min-height: 48px;
-  padding: 6px 9px;
+  padding: 6px 10px;
   text-align: left;
   width: 100%;
 }
@@ -12163,7 +12166,7 @@ textarea:focus-visible {
 .gyro-slash-command-list kbd {
   background: #24272c;
   border: 1px solid #30343a;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #969da7;
   font-family: inherit;
   font-size: 10px;
@@ -12338,7 +12341,7 @@ textarea:focus-visible {
 .gyro-composer-menu-item.is-setting.has-no-icon {
   grid-template-columns: minmax(0, 1fr) auto 14px;
   min-height: 30px;
-  padding: 4px 7px 4px 9px;
+  padding: 4px 8px 4px 10px;
 }
 
 .gyro-composer-menu-item.is-setting .gyro-composer-menu-trailing {
@@ -12358,7 +12361,7 @@ textarea:focus-visible {
   grid-template-columns: minmax(0, 1fr) 14px;
   margin-top: 4px;
   min-height: 30px;
-  padding: 6px 7px 4px 9px;
+  padding: 6px 8px 4px 10px;
 }
 
 .gyro-composer-menu-item.is-disclosure:hover {
@@ -12371,7 +12374,7 @@ textarea:focus-visible {
   color: #8f949c;
   grid-template-columns: 14px minmax(0, 1fr);
   min-height: 26px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 .gyro-composer-menu-item.is-back strong {
@@ -12396,14 +12399,14 @@ textarea:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   margin-top: 5px;
-  padding: 9px 7px 4px;
+  padding: 10px 8px 4px;
   text-transform: uppercase;
 }
 
 .gyro-composer-menu-item.is-effort,
 .gyro-composer-menu-item.is-model {
   min-height: 28px;
-  padding: 4px 9px;
+  padding: 4px 10px;
 }
 
 .gyro-composer-popover-title {
@@ -12411,7 +12414,7 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 650;
   line-height: 1.2;
-  padding: 4px 7px 5px;
+  padding: 4px 8px 5px;
 }
 
 .gyro-composer-menu-item {
@@ -12420,13 +12423,13 @@ textarea:focus-visible {
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #d9d6d0;
   display: grid;
   gap: 7px;
   grid-template-columns: 16px minmax(0, 1fr) 14px;
   min-height: 32px;
-  padding: 5px 7px;
+  padding: 5px 8px;
   text-align: left;
   width: 100%;
 }
@@ -12434,7 +12437,7 @@ textarea:focus-visible {
 .gyro-composer-menu-item.is-provider {
   grid-template-columns: 22px minmax(0, 1fr) auto;
   min-height: 32px;
-  padding: 4px 7px;
+  padding: 4px 8px;
 }
 
 /* Not-connected: softer presence, brand marks keep their hue (opacity only). */
@@ -12456,7 +12459,7 @@ textarea:focus-visible {
   color: #cfcac1;
   grid-template-columns: 16px minmax(0, 1fr) 14px;
   min-height: 29px;
-  padding: 3px 6px 3px 9px;
+  padding: 3px 6px 3px 10px;
 }
 
 .gyro-composer-menu-item.has-no-icon {
@@ -12548,7 +12551,7 @@ textarea:focus-visible {
 .gyro-workspace-mode-picker .gyro-composer-menu-item,
 .gyro-workspace-mode-picker .gyro-composer-menu-item.is-workspace-mode {
   align-items: center;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr) 14px;
   min-height: 30px;
@@ -12645,14 +12648,14 @@ textarea:focus-visible {
 .gyro-composer-tool {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #b6bbc3;
   font-size: 13px;
   min-height: 26px;
 }
 
 .gyro-composer-chip {
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-composer-chip svg {
@@ -12675,7 +12678,7 @@ textarea:focus-visible {
   background: transparent;
   background-color: transparent;
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #b8b6b2;
   font-size: 13px;
   min-height: 30px;
@@ -12828,7 +12831,7 @@ textarea:focus-visible {
 
 .gyro-chat-thread-topbar .gyro-thread-diff-pill {
   gap: 6px;
-  padding-right: 9px;
+  padding-right: 10px;
 }
 
 .gyro-thread-diff-pill span {
@@ -12881,7 +12884,7 @@ textarea:focus-visible {
 .gyro-chat-transcript .gyro-agent-run-card {
   background: #17191d;
   border-color: #2b2f35;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-chat-thread-canvas {
@@ -12903,7 +12906,7 @@ textarea:focus-visible {
   align-items: center;
   background: #17191d;
   border: 1px solid #2b2f35;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #d8dce3;
   display: grid;
   gap: 12px;
@@ -13015,7 +13018,7 @@ textarea:focus-visible {
   align-self: start;
   background: #191a1d;
   border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 16px 32px rgba(0, 0, 0, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -13032,7 +13035,7 @@ textarea:focus-visible {
 }
 
 .gyro-chat-surface.has-environment .gyro-rail-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 30px;
 }
 
@@ -13205,7 +13208,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #d8d9dc;
   font-size: var(--gyro-font-body);
   font-weight: 400;
@@ -13280,7 +13283,7 @@ textarea:focus-visible {
   font-size: 13px;
   font-weight: 400;
   letter-spacing: 0;
-  min-height: 27px;
+  min-height: 28px;
   margin-left: 0;
   padding: 6px 8px 4px;
   text-align: left;
@@ -13307,7 +13310,7 @@ textarea:focus-visible {
 }
 
 .gyro-session-row {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-height: 30px;
 }
 
@@ -13344,7 +13347,7 @@ textarea:focus-visible {
   /* Same transparent 1px border the sidebar rows carry, so the gear lands on
      the same icon rail as everything above it. */
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #d8d9dc;
   min-height: 30px;
   padding: 0 8px;
@@ -13385,7 +13388,7 @@ textarea:focus-visible {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 1 auto;
@@ -13393,7 +13396,7 @@ textarea:focus-visible {
   gap: 7px;
   min-height: 30px;
   min-width: 0;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-settings-nav button:hover,
@@ -13477,7 +13480,7 @@ textarea:focus-visible {
     min-height: 38px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 5px 7px;
+    padding: 5px 8px;
     scrollbar-width: none;
   }
 
@@ -13525,7 +13528,7 @@ textarea:focus-visible {
 
   .gyro-composer-context-row {
     min-height: 34px;
-    padding: 0 7px;
+    padding: 0 8px;
   }
 
   .gyro-composer-popover {
@@ -13612,7 +13615,7 @@ body {
 
 .gyro-sidebar-window-actions button,
 .gyro-sidebar-restore-button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-sidebar-window-actions button:hover,
@@ -13821,7 +13824,7 @@ body {
 }
 
 .gyro-chat-transcript .gyro-message {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-chat-transcript .gyro-agent-run-card,
@@ -14074,7 +14077,7 @@ body {
   border-radius: 16px;
   color: #f0eee9;
   max-width: min(100%, 620px);
-  padding: 9px 13px;
+  padding: 10px 13px;
 }
 
 .gyro-chat-transcript .gyro-message-meta {
@@ -14359,7 +14362,7 @@ body {
 .gyro-plan-document code {
   background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 13px;
   padding: 1px 5px;
 }
@@ -14367,7 +14370,7 @@ body {
 .gyro-plan-document .gyro-response-code-block {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-sizing: border-box;
   overflow: auto;
   padding: 12px 14px;
@@ -14405,7 +14408,7 @@ body {
   gap: 11px;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   min-height: 54px;
-  padding: 9px 14px;
+  padding: 10px 14px;
   text-align: left;
   width: 100%;
 }
@@ -14414,7 +14417,7 @@ body {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -14596,7 +14599,7 @@ body {
 .gyro-chat-artifact {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   overflow: hidden;
 }
 
@@ -14673,11 +14676,11 @@ body {
 .gyro-chat-artifact-options > button {
   background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 4px;
-  padding: 9px 10px;
+  padding: 10px 10px;
   text-align: left;
 }
 
@@ -14717,10 +14720,10 @@ body {
     --gyro-code-bg,
     color-mix(in srgb, var(--gyro-text) 5%, transparent)
   );
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: flex;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-chat-artifact-command code {
@@ -14787,10 +14790,10 @@ body {
 .gyro-chat-artifact-footer-actions button {
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   font-size: 10px;
-  padding: 6px 9px;
+  padding: 6px 10px;
 }
 
 .gyro-chat-artifact-footer-actions button:hover {
@@ -14814,7 +14817,7 @@ body {
   align-items: stretch;
   background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -14891,7 +14894,7 @@ body {
 
 .gyro-chat-artifact-table-wrap {
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   max-height: 320px;
   overflow: auto;
 }
@@ -14906,7 +14909,7 @@ body {
 .gyro-chat-artifact-table-wrap td {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   color: var(--gyro-muted);
-  padding: 7px 8px;
+  padding: 8px 8px;
   text-align: left;
   white-space: nowrap;
 }
@@ -14931,7 +14934,7 @@ body {
   display: flex;
   font-size: 10px;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 8px 8px;
 }
 
 .gyro-chat-artifact-diagram strong {
@@ -15467,7 +15470,7 @@ body {
 .gyro-chat-composer-dock .gyro-model-chip {
   color: #d4d0c8;
   gap: 6px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-chat-composer-dock .gyro-model-chip .gyro-provider-logo {
@@ -15539,7 +15542,7 @@ body {
   .gyro-icon-button {
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #8f949d;
   height: 26px;
   min-width: 26px;
@@ -15692,7 +15695,7 @@ body {
     minmax(104px, 156px) minmax(118px, auto) minmax(0, 1fr)
     auto;
   min-height: 38px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-terminal-toolbar.is-empty {
@@ -15710,7 +15713,7 @@ body {
   gap: 7px;
   justify-content: flex-start;
   min-width: 0;
-  padding: 0 9px;
+  padding: 0 10px;
   width: 100%;
 }
 
@@ -15725,7 +15728,7 @@ body {
 .gyro-agent-launcher-menu {
   background: #20242a;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
   display: grid;
   gap: 2px;
@@ -15789,12 +15792,12 @@ body {
 .gyro-terminal-toolbar select {
   background: #101318;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #e3e8ef;
   font: inherit;
   height: 30px;
   min-width: 0;
-  padding: 0 28px 0 9px;
+  padding: 0 28px 0 10px;
 }
 
 .gyro-terminal-toolbar button,
@@ -15802,7 +15805,7 @@ body {
   align-items: center;
   background: #22262d;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #d7dee8;
   display: inline-flex;
   height: 30px;
@@ -15850,7 +15853,7 @@ body {
 .gyro-terminal-actions-menu {
   background: #20242a;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
   display: grid;
   gap: 2px;
@@ -15898,7 +15901,7 @@ body {
 .gyro-terminal-pane {
   background: #030506;
   border: 1px solid rgba(255, 255, 255, 0.068);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   display: grid;
   grid-template-rows: 35px minmax(0, 1fr);
   min-height: 280px;
@@ -15928,7 +15931,7 @@ body {
   gap: 8px;
   grid-template-columns: 28px minmax(0, 1fr) minmax(96px, auto);
   min-width: 0;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
 
 .gyro-terminal-drag-handle {
@@ -16015,7 +16018,7 @@ body {
   align-items: center;
   background: rgba(20, 23, 28, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   bottom: 10px;
   color: #dce3ec;
   display: inline-flex;
@@ -16068,7 +16071,7 @@ body {
 .gyro-cli-launch-preset {
   background: #15181d;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 10px;
   padding: 10px;
@@ -16111,7 +16114,7 @@ body {
 .gyro-cli-launch-preset-row select {
   background: #0d1014;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #dfe5ee;
   flex: 1;
   font: inherit;
@@ -16124,7 +16127,7 @@ body {
 .gyro-cli-launch-focus {
   background: #0d1014;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   overflow: hidden;
 }
 
@@ -16192,7 +16195,7 @@ body {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 30px;
@@ -16211,7 +16214,7 @@ body {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-faint);
   display: grid;
   gap: 7px;
@@ -16225,7 +16228,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-faint);
   display: inline-flex;
   height: 24px;
@@ -16262,12 +16265,12 @@ body {
   background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
   border: 1px solid
     color-mix(in srgb, var(--gyro-accent) 25%, var(--gyro-border));
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   display: flex;
   gap: 8px;
   justify-content: space-between;
   margin-bottom: 7px;
-  padding: 7px;
+  padding: 8px;
 }
 
 .gyro-sidebar-replace-preview > div {
@@ -16286,12 +16289,12 @@ body {
 
 .gyro-sidebar-replace-preview button {
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-text);
   background: var(--gyro-surface-raised);
   font: inherit;
   font-size: 12px;
-  padding: 5px 7px;
+  padding: 5px 8px;
 }
 
 .gyro-sidebar-replace-preview button:disabled {
@@ -16311,9 +16314,9 @@ body {
 
 .gyro-sidebar-search-result > button {
   min-width: 0;
-  padding: 6px 7px;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   background: transparent;
   font: inherit;
@@ -16367,9 +16370,9 @@ body {
 .gyro-sidebar-search-details input {
   background: var(--gyro-app);
   border: 1px solid var(--gyro-border);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   min-height: 26px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-sidebar-search-form input {
@@ -16400,7 +16403,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 2px;
@@ -16422,7 +16425,7 @@ body {
   min-width: 190px;
   padding: 4px;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface-raised);
   box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
 }
@@ -16431,7 +16434,7 @@ body {
   min-height: 28px;
   padding: 5px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-text);
   background: transparent;
   font: inherit;
@@ -16499,7 +16502,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: inherit;
   display: flex;
   height: 24px;
@@ -16542,7 +16545,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: flex;
   height: 22px;
@@ -16558,7 +16561,7 @@ body {
 .gyro-run-command-form {
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 6px;
   margin-bottom: 8px;
@@ -16570,7 +16573,7 @@ body {
 .gyro-run-command-filter {
   background: var(--gyro-surface-deep);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   min-width: 0;
@@ -16596,10 +16599,10 @@ body {
 .gyro-run-command-form-row button {
   background: var(--gyro-surface-deep);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 12px;
-  padding: 5px 9px;
+  padding: 5px 10px;
 }
 
 .gyro-run-command-form-row button[type="submit"] {
@@ -16631,13 +16634,13 @@ body {
   color: var(--gyro-faint);
   font-size: 12px;
   letter-spacing: 0.07em;
-  padding: 4px 7px 3px;
+  padding: 4px 8px 3px;
   text-transform: uppercase;
 }
 
 .gyro-run-task-row {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 2px;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -16651,7 +16654,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-sidebar-text);
   display: grid;
   gap: 8px;
@@ -16712,7 +16715,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   display: flex;
   height: 22px;
@@ -16739,11 +16742,11 @@ body {
 .gyro-sidebar-debug-launch input {
   background: var(--gyro-surface-deep);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 8px 8px;
 }
 
 .gyro-sidebar-debug-launch button,
@@ -16751,7 +16754,7 @@ body {
   align-items: center;
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: flex;
   justify-content: center;
@@ -16759,7 +16762,7 @@ body {
 
 .gyro-sidebar-debug-launch button {
   gap: 5px;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-sidebar-debug-launch button:disabled,
@@ -16771,7 +16774,7 @@ body {
   border-top: 1px solid var(--gyro-border-soft);
   display: grid;
   gap: 6px;
-  padding: 9px 0 5px;
+  padding: 10px 0 5px;
 }
 
 .gyro-sidebar-debug-session > div:first-child {
@@ -16819,7 +16822,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  min-height: 25px;
+  min-height: 26px;
   padding: 0 10px;
 }
 
@@ -16870,7 +16873,7 @@ body {
   min-height: 30px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   background: transparent;
   font: inherit;
@@ -16911,7 +16914,7 @@ body {
 .gyro-problem-row {
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 3px;
@@ -17543,7 +17546,7 @@ textarea,
 .gyro-response-inline-code,
 .gyro-response-command-list code {
   background: rgba(255, 255, 255, 0.105);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.075),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -17587,7 +17590,7 @@ textarea,
 
 .gyro-response-code-block {
   background: #0b0d10;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.085),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -17625,7 +17628,7 @@ textarea,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #90949b;
   display: inline-flex;
   height: 28px;
@@ -17696,7 +17699,7 @@ textarea,
   grid-template-columns: 17px minmax(0, 1fr) auto;
   min-height: 28px;
   min-width: 0;
-  padding: 0 0 0 9px;
+  padding: 0 0 0 10px;
   text-align: left;
 }
 
@@ -17712,7 +17715,7 @@ textarea,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #8f949c;
   display: inline-flex;
   height: 24px;
@@ -17735,7 +17738,7 @@ textarea,
 
 .gyro-composer-menu-item.has-remove {
   grid-template-columns: minmax(0, 1fr) 24px;
-  padding: 3px 4px 3px 7px;
+  padding: 3px 4px 3px 8px;
 }
 
 .gyro-composer-menu-primary {
@@ -17766,7 +17769,7 @@ textarea,
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: #8f949c;
   display: inline-flex;
   height: 24px;
@@ -17802,7 +17805,7 @@ textarea,
 .gyro-project-remove-card {
   background: #202124;
   border: 1px solid #34363b;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 28px 88px rgba(0, 0, 0, 0.48),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -17838,7 +17841,7 @@ textarea,
 
 .gyro-project-remove-card code {
   background: #292a2e;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #aeb3bb;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
@@ -17853,7 +17856,7 @@ textarea,
 }
 
 .gyro-project-remove-actions button {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   font-size: 12px;
   font-weight: 650;
   min-height: 34px;
@@ -18049,7 +18052,7 @@ textarea,
 .gyro-provider-card {
   background: rgba(255, 255, 255, 0.025);
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.085),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -18070,7 +18073,7 @@ textarea,
 .gyro-provider-icon {
   background: rgba(255, 255, 255, 0.035);
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -18190,7 +18193,7 @@ textarea,
 .gyro-provider-actions .gyro-secondary-button {
   background: rgba(255, 255, 255, 0.025);
   border-color: rgba(255, 255, 255, 0.075);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #d8d4cc;
   font-size: 11px;
   min-height: 32px;
@@ -18203,7 +18206,7 @@ textarea,
 
 .gyro-settings-surface .gyro-provider-list {
   background: rgba(255, 255, 255, 0.025);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
   gap: 0;
   overflow: hidden;
@@ -18216,7 +18219,7 @@ textarea,
   border-radius: 0;
   box-shadow: none;
   min-height: 62px;
-  padding: 11px 12px;
+  padding: 12px 12px;
 }
 
 .gyro-settings-surface .gyro-provider-row:last-child {
@@ -18860,14 +18863,14 @@ body,
 .gyro-sidebar-update-tip {
   background: var(--gyro-premium-panel-strong);
   border: 1px solid var(--gyro-premium-line);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.44);
   display: grid;
   gap: 2px;
   left: 0;
   min-width: 132px;
   opacity: 0;
-  padding: 7px 9px;
+  padding: 8px 10px;
   pointer-events: none;
   position: absolute;
   transition:
@@ -18931,7 +18934,7 @@ body,
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr) 8px;
   min-height: 34px;
-  padding: 5px 7px;
+  padding: 5px 8px;
   text-align: left;
   width: 100%;
 }
@@ -18954,13 +18957,13 @@ body,
 .gyro-update-primary {
   background: #668ff5;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #fff;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   min-height: 32px;
-  padding: 7px 10px;
+  padding: 8px 10px;
 }
 
 .gyro-update-primary:disabled {
@@ -19408,8 +19411,8 @@ textarea:focus-visible,
 }
 
 .gyro-editor-workbench-row {
-  height: 25px;
-  min-height: 25px;
+  height: 26px;
+  min-height: 26px;
 }
 
 .gyro-editor-ai-bar {
@@ -19819,7 +19822,7 @@ textarea:focus-visible,
 .gyro-sidebar-terminal-icon {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-premium-control) 76%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft);
   color: var(--gyro-premium-muted);
   display: inline-flex;
@@ -20118,7 +20121,7 @@ textarea:focus-visible,
   gap: 7px;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   min-height: 30px;
-  padding: 0 7px;
+  padding: 0 8px;
   text-align: left;
 }
 
@@ -20140,11 +20143,11 @@ textarea:focus-visible,
 .gyro-terminal-diff-empty {
   color: var(--gyro-premium-muted);
   font-size: 11px;
-  padding: 12px 7px;
+  padding: 12px 8px;
 }
 
 .gyro-terminal-diff-more {
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-terminal-diff-popover footer {
@@ -20259,7 +20262,7 @@ textarea:focus-visible,
 .gyro-terminal-toolbar.is-empty .gyro-terminal-tools > button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   flex-shrink: 0;
   height: 34px;
   line-height: 1;
@@ -20526,7 +20529,7 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   display: grid;
   gap: 3px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-ide-assistant-context span,
@@ -20606,7 +20609,7 @@ textarea:focus-visible,
 .gyro-ide-assistant-composer textarea {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   min-height: 72px;
@@ -20621,7 +20624,7 @@ textarea:focus-visible,
 .gyro-ide-assistant-composer button {
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font-size: 12px;
   gap: 5px;
@@ -20678,7 +20681,7 @@ textarea:focus-visible,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-surface-raised) 92%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 5px 16px var(--gyro-premium-shadow-soft),
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -20734,7 +20737,7 @@ textarea:focus-visible,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   display: flex;
   height: 22px;
@@ -20751,7 +20754,7 @@ textarea:focus-visible,
 .gyro-settings-search-results {
   background: color-mix(in srgb, var(--gyro-surface-raised) 97%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow:
     0 18px 42px color-mix(in srgb, var(--gyro-shadow) 30%, transparent),
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -20768,7 +20771,7 @@ textarea:focus-visible,
 
 .gyro-settings-topbar-search .gyro-settings-search-results > button {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 9px;
@@ -20776,7 +20779,7 @@ textarea:focus-visible,
   height: auto;
   justify-content: initial;
   min-height: 48px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   text-align: left;
   width: 100%;
 }
@@ -20830,7 +20833,7 @@ textarea:focus-visible,
   gap: 9px;
   grid-template-columns: 18px minmax(0, 1fr);
   min-height: 54px;
-  padding: 8px 9px;
+  padding: 8px 10px;
 }
 
 .gyro-settings-search-empty > span {
@@ -20871,7 +20874,7 @@ textarea:focus-visible,
 }
 
 .gyro-sidebar-action.is-settings-page {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: var(--gyro-font-body);
   min-height: 29px;
   padding-inline: 8px;
@@ -20949,7 +20952,7 @@ textarea:focus-visible,
 .gyro-settings-section-body {
   background: color-mix(in srgb, var(--gyro-pane) 74%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   display: grid;
   gap: 24px;
   overflow: hidden;
@@ -20964,7 +20967,7 @@ textarea:focus-visible,
   border-radius: 0;
   box-shadow: none;
   min-height: 62px;
-  padding: 11px 13px;
+  padding: 12px 13px;
 }
 
 .gyro-settings-section-body > .gyro-settings-row:last-child,
@@ -20996,12 +20999,12 @@ textarea:focus-visible,
 .gyro-settings-row em {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: 12px;
   font-weight: 520;
   min-width: 108px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   text-align: left;
 }
 
@@ -21091,7 +21094,7 @@ button.gyro-settings-row em::after {
     var(--gyro-status-experimental) 16%,
     transparent
   );
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-status-experimental);
   display: inline-block;
   font-size: 12px;
@@ -21204,7 +21207,7 @@ button.gyro-settings-row em::after {
 .gyro-settings-segmented {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: inline-flex;
   padding: 2px;
 }
@@ -21212,7 +21215,7 @@ button.gyro-settings-row em::after {
 .gyro-settings-segmented button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 12px;
   min-height: 26px;
@@ -21271,7 +21274,7 @@ button.gyro-settings-row em::after {
 .gyro-usage-provider-select select {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font: inherit;
   min-height: 42px;
@@ -21283,7 +21286,7 @@ button.gyro-settings-row em::after {
 .gyro-settings-select {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font: inherit;
   font-size: 12px;
@@ -21323,7 +21326,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-api-key > input {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font: inherit;
   font-size: 12px;
@@ -21369,7 +21372,7 @@ button.gyro-settings-row em::after {
 /* Local ledger budget/window chrome (reserved; plan cards use gyro-usage-*). */
 .gyro-ledger-panel {
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 14px;
   padding: 16px 17px 18px;
@@ -21400,7 +21403,7 @@ button.gyro-settings-row em::after {
 
 .gyro-ledger-window {
   border: 0.5px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 3px;
   padding: 12px 13px 13px;
@@ -21420,7 +21423,7 @@ button.gyro-settings-row em::after {
 
 .gyro-ledger-window em {
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   font-size: 9px;
   font-style: normal;
@@ -21516,7 +21519,7 @@ button.gyro-settings-row em::after {
 
 .gyro-usage-card {
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 20px;
   min-height: 190px;
@@ -21629,7 +21632,7 @@ button.gyro-settings-row em::after {
 .gyro-usage-empty {
   align-items: center;
   border: 0.5px dashed var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
   gap: 13px;
@@ -21666,7 +21669,7 @@ button.gyro-settings-row em::after {
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.06em;
-  padding: 9px 12px;
+  padding: 10px 12px;
   text-transform: uppercase;
 }
 .gyro-provider-table > .gyro-provider-row {
@@ -21690,7 +21693,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-details > summary {
   align-items: center;
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   cursor: pointer;
   display: flex;
   height: 30px;
@@ -21701,7 +21704,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-details > div {
   background: var(--gyro-pane);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
   display: grid;
   gap: 9px;
@@ -21722,7 +21725,7 @@ button.gyro-settings-row em::after {
   display: grid;
   font-size: 10px;
   grid-template-columns: minmax(0, 1fr) 112px 42px;
-  padding: 7px 0;
+  padding: 8px 0;
   text-transform: uppercase;
 }
 .gyro-cli-launch-focus {
@@ -21767,7 +21770,7 @@ button.gyro-settings-row em::after {
 .gyro-settings-key {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font-family: var(--gyro-mono);
   font-size: 12px;
@@ -21825,7 +21828,7 @@ button.gyro-settings-row em::after {
 .gyro-settings-confirm-overlay > section {
   background: var(--gyro-pane);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: 0 20px 60px rgb(0 0 0 / 35%);
   max-width: 420px;
   padding: 22px;
@@ -21848,7 +21851,7 @@ button.gyro-settings-row em::after {
 .gyro-danger-button {
   background: color-mix(in srgb, #d86464 6%, var(--gyro-premium-control));
   border: 0.5px solid color-mix(in srgb, #d86464 45%, var(--gyro-border));
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-danger);
   min-height: 30px;
   padding: 0 10px;
@@ -22011,9 +22014,9 @@ button.gyro-settings-row em::after {
 .gyro-provider-identity > .gyro-provider-logo {
   background: color-mix(in srgb, currentColor 9%, var(--gyro-pane));
   border: 0.5px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   height: 34px;
-  padding: 7px;
+  padding: 8px;
   width: 34px;
 }
 
@@ -22065,14 +22068,14 @@ button.gyro-settings-row em::after {
       calc(100% - 8px) calc(50% + 1px) / 5px 5px no-repeat,
     var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font: inherit;
   font-size: 12px;
   font-weight: 590;
   max-width: 100%;
   min-height: 30px;
-  padding: 0 26px 0 9px;
+  padding: 0 26px 0 10px;
   text-overflow: ellipsis;
   transition:
     background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
@@ -22261,7 +22264,7 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: flex;
   font-size: 13px;
@@ -22303,7 +22306,7 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-start-suggestion svg {
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   flex: 0 0 auto;
   padding: 0;
   width: 16px;
@@ -22351,7 +22354,7 @@ button.gyro-settings-row em::after {
     min-height: var(--gyro-control-height);
     background: transparent;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--gyro-radius-sm);
     padding: 4px 8px;
     gap: 8px;
     font-size: 13px;
@@ -22385,7 +22388,7 @@ button.gyro-settings-row em::after {
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
   min-height: 42px;
-  padding: 0 10px 9px;
+  padding: 0 10px 10px;
 }
 
 .gyro-chat-start
@@ -22505,7 +22508,7 @@ button.gyro-settings-row em::after {
   box-shadow: none;
   gap: 7px;
   min-height: 42px;
-  padding: 0 10px 9px;
+  padding: 0 10px 10px;
 }
 
 .gyro-chat-composer-dock
@@ -22705,7 +22708,7 @@ button.gyro-settings-row em::after {
 .gyro-mutation-approval {
   background: color-mix(in srgb, var(--gyro-surface) 92%, var(--gyro-text) 8%);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-sizing: border-box;
   display: grid;
   gap: 11px;
@@ -22733,7 +22736,7 @@ button.gyro-settings-row em::after {
 .gyro-mutation-approval-heading > span {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-warn) 14%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-warn);
   display: inline-flex;
   height: 28px;
@@ -22809,7 +22812,7 @@ button.gyro-settings-row em::after {
 
 .gyro-mutation-approval-actions button {
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 12px;
   min-height: 30px;
   padding: 0 10px;
@@ -23006,7 +23009,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-tool-approval {
   background: color-mix(in srgb, var(--gyro-surface) 94%, var(--gyro-text) 6%);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-sizing: border-box;
   display: grid;
   gap: 10px;
@@ -23037,7 +23040,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-tool-approval-heading > span {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-warn) 14%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-warn);
   display: inline-flex;
   height: 28px;
@@ -23069,13 +23072,13 @@ button.gyro-settings-row em::after {
 .gyro-provider-tool-approval-command {
   background: color-mix(in srgb, var(--gyro-app) 78%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   line-height: 1.5;
   overflow-x: auto;
-  padding: 8px 9px;
+  padding: 8px 10px;
   white-space: pre-wrap;
 }
 
@@ -23110,7 +23113,7 @@ button.gyro-settings-row em::after {
 
 .gyro-provider-tool-approval-actions button {
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 12px;
   min-height: 30px;
   padding: 0 10px;
@@ -23139,7 +23142,7 @@ button.gyro-settings-row em::after {
     var(--gyro-accent) 6%
   );
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 9px;
   grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -23158,7 +23161,7 @@ button.gyro-settings-row em::after {
 .gyro-capability-activity-icon {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-accent) 13%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-accent);
   display: inline-flex;
   height: 28px;
@@ -23197,7 +23200,7 @@ button.gyro-settings-row em::after {
 .gyro-capability-activity-actions button {
   background: transparent;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 11px;
   min-height: 26px;
@@ -23247,7 +23250,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-faint);
   font-size: 10px;
   line-height: 1.35;
-  padding: 5px 9px;
+  padding: 5px 10px;
 }
 
 .gyro-chat-run-sequence {
@@ -23379,7 +23382,7 @@ button.gyro-settings-row em::after {
   gap: 10px;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   min-height: 62px;
-  padding: 10px 11px;
+  padding: 10px 12px;
 }
 
 .gyro-chat-run-change-summary > header > div {
@@ -23401,7 +23404,7 @@ button.gyro-settings-row em::after {
 .gyro-change-summary-actions > button {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: 12px;
   min-height: 28px;
@@ -23458,7 +23461,7 @@ button.gyro-settings-row em::after {
   font-size: 11px;
   line-height: 18px;
   min-width: max-content;
-  padding: 9px 0;
+  padding: 10px 0;
 }
 
 .gyro-change-summary-diff-scroll code > span {
@@ -23640,7 +23643,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-run-change-summary.is-complete {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   overflow: hidden;
   width: 100%;
 }
@@ -23653,7 +23656,7 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-run-change-summary.is-complete .gyro-chat-run-change-icon {
   background: var(--gyro-surface-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   height: 32px;
   width: 32px;
@@ -23667,7 +23670,7 @@ button.gyro-settings-row em::after {
 .gyro-keep-alive {
   align-items: center;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   display: grid;
   gap: 10px;
   grid-template-columns: 10px minmax(0, 1fr) auto;
@@ -23735,7 +23738,7 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   cursor: pointer;
   display: inline-flex;
@@ -23822,7 +23825,7 @@ button.gyro-settings-row em::after {
 .gyro-change-summary-details {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 8px 22px color-mix(in srgb, #000 12%, transparent);
   margin-top: 8px;
   overflow: hidden;
@@ -23842,7 +23845,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-run-change-icon {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-text);
   display: inline-flex;
   height: 40px;
@@ -23929,7 +23932,7 @@ button.gyro-settings-row em::after {
   align-items: start;
   border-bottom: 0;
   min-height: 44px;
-  padding: 9px 4px 9px 12px;
+  padding: 10px 4px 10px 12px;
   width: auto;
 }
 
@@ -23975,14 +23978,14 @@ button.gyro-settings-row em::after {
   align-self: start;
   display: inline-flex;
   gap: 6px;
-  padding: 9px 12px 9px 0;
+  padding: 10px 12px 10px 0;
 }
 
 .gyro-change-summary-file-actions > button {
   align-items: center;
   background: transparent;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   font: inherit;
@@ -23990,7 +23993,7 @@ button.gyro-settings-row em::after {
   font-weight: 560;
   gap: 5px;
   min-height: 26px;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-change-summary-file-actions > button:hover {
@@ -24128,7 +24131,7 @@ button.gyro-settings-row em::after {
   font-size: 12px;
   gap: var(--gyro-space-standard);
   grid-template-columns: 13px max-content minmax(0, 1fr) auto;
-  padding: 6px 11px 0;
+  padding: 6px 12px 0;
 }
 
 .gyro-plan-strip-mark {
@@ -24208,7 +24211,7 @@ button.gyro-settings-row em::after {
   grid-template-columns: 14px max-content minmax(0, 1fr) auto auto;
   margin: 4px 0 14px;
   min-height: 43px;
-  padding: 5px 9px;
+  padding: 5px 10px;
   width: 100%;
 }
 
@@ -24272,7 +24275,7 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-faint);
   cursor: pointer;
   display: inline-flex;
@@ -24309,7 +24312,7 @@ button.gyro-settings-row em::after {
   grid-template-columns: 14px minmax(0, 1fr) auto;
   margin: 0;
   min-height: 0;
-  padding: 7px 9px;
+  padding: 8px 10px;
 }
 
 .gyro-session-goal-band[data-density="rail"]
@@ -24361,7 +24364,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   font-size: 11px;
   line-height: 18px;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 .gyro-plan-view-toggle button[aria-pressed="true"] {
@@ -24378,7 +24381,7 @@ button.gyro-settings-row em::after {
     align-items: start;
     grid-template-columns: 14px minmax(0, 1fr) auto;
     grid-template-rows: auto auto auto;
-    padding: 8px 9px;
+    padding: 8px 10px;
   }
 
   .gyro-session-goal-status > strong {
@@ -24498,7 +24501,7 @@ button.gyro-settings-row em::after {
   align-items: flex-start;
   background: color-mix(in srgb, var(--gyro-surface-raised) 82%, transparent);
   border: 1px solid var(--gyro-premium-hairline);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   font: inherit;
@@ -24756,7 +24759,7 @@ button.gyro-response-changed-files:hover {
    surface so the pair reads as a single pill rather than two controls. */
 .gyro-chat-companion-tab {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 0 auto;
@@ -24778,7 +24781,7 @@ button.gyro-response-changed-files:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: inherit;
   display: inline-flex;
   gap: 6px;
@@ -24811,7 +24814,7 @@ button.gyro-response-changed-files:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: inherit;
   display: inline-flex;
   height: 20px;
@@ -24842,7 +24845,7 @@ button.gyro-response-changed-files:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 0 auto;
@@ -24863,7 +24866,7 @@ button.gyro-response-changed-files:hover {
   --gyro-companion-menu-shadow: 0 16px 38px rgb(0 0 0 / 32%);
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: var(--gyro-companion-menu-shadow);
   display: grid;
   gap: 1px;
@@ -24879,7 +24882,7 @@ button.gyro-response-changed-files:hover {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   display: flex;
   font-size: 13px;
@@ -25271,7 +25274,7 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-run-error button {
   background: transparent;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   min-height: 26px;
   padding: 0 8px;
@@ -25503,7 +25506,7 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-run-header .gyro-chat-run-controls button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 12px;
   min-height: 24px;
@@ -25949,7 +25952,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: inherit;
   display: inline-flex;
   height: 22px;
@@ -26077,7 +26080,7 @@ button.gyro-account-menu-row:hover,
 /* Ordered chat activity and queued follow-up messages. */
 .gyro-user-message-bubble > .gyro-transcript-attachments {
   gap: 7px;
-  padding: 0 0 7px;
+  padding: 0 0 8px;
 }
 
 .gyro-user-message-bubble > .gyro-transcript-attachments + p {
@@ -26125,7 +26128,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-message-queue article {
   align-items: center;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 6px;
   grid-template-columns: 15px minmax(0, 1fr) auto;
@@ -26174,7 +26177,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   gap: 4px;
@@ -26206,7 +26209,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-message-queue-menu {
   background: color-mix(in srgb, var(--gyro-surface-raised) 97%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 14px 32px color-mix(in srgb, #000 30%, transparent),
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -26274,7 +26277,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   flex: none;
@@ -26333,7 +26336,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-decision-card li {
   align-items: start;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 10px;
   grid-template-columns: 20px minmax(0, 1fr);
@@ -26368,7 +26371,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
   font: inherit;
@@ -26419,7 +26422,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-decision-card > footer button {
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   font: inherit;
   font-size: 12px;
   font-weight: 620;
@@ -26582,7 +26585,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-session-cost em {
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 12px;
   font-style: normal;
   opacity: 0.85;
@@ -26607,7 +26610,7 @@ button.gyro-account-menu-row:hover,
     var(--gyro-app) 4%
   );
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   bottom: calc(100% + 8px);
   box-shadow: 0 14px 36px rgb(0 0 0 / 30%);
   box-sizing: border-box;
@@ -26645,7 +26648,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: grid;
   font: inherit;
@@ -26724,12 +26727,12 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-slash-hint-bubble {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 10px 26px rgb(0 0 0 / 26%);
   color: var(--gyro-muted);
   font-size: 12px;
   line-height: 1.45;
-  padding: 7px 9px;
+  padding: 8px 10px;
   pointer-events: none;
   position: fixed;
   transform: translateY(-50%);
@@ -26837,7 +26840,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-context-tooltip {
   background: var(--gyro-premium-panel);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   bottom: calc(100% + 12px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   color: var(--gyro-premium-text);
@@ -26864,7 +26867,7 @@ button.gyro-account-menu-row:hover,
   display: flex;
   justify-content: space-between;
   min-height: 34px;
-  padding: 0 11px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
 }
 
@@ -26877,7 +26880,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-context-tooltip > header span {
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-premium-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -26890,7 +26893,7 @@ button.gyro-account-menu-row:hover,
   display: flex;
   gap: 6px;
   margin-top: 9px;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-composer-context-value strong {
@@ -26927,7 +26930,7 @@ button.gyro-account-menu-row:hover,
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 9px 11px 11px;
+  padding: 10px 12px 12px;
 }
 
 .gyro-plan-usage-notice {
@@ -26935,7 +26938,7 @@ button.gyro-account-menu-row:hover,
   background: color-mix(in srgb, var(--gyro-accent) 6%, var(--gyro-surface));
   border: 1px solid
     color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border-soft));
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   display: grid;
   gap: 8px;
@@ -27002,7 +27005,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   cursor: pointer;
   display: inline-flex;
@@ -27275,7 +27278,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-new-session-menu {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft);
   display: grid;
   gap: 12px;
@@ -27751,7 +27754,7 @@ button.gyro-account-menu-row:hover,
 .gyro-capability-policy-details {
   display: grid;
   gap: 7px;
-  padding: 7px 22px 3px 30px;
+  padding: 8px 22px 3px 30px;
 }
 
 .gyro-capability-policy-details > div {
@@ -27773,7 +27776,7 @@ button.gyro-account-menu-row:hover,
 .gyro-plan-harness {
   background: color-mix(in srgb, var(--gyro-app) 28%, transparent);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   grid-template-rows: auto auto minmax(0, 1fr);
   padding: 0;
 }
@@ -27782,7 +27785,7 @@ button.gyro-account-menu-row:hover,
   gap: 10px;
   justify-content: space-between;
   min-height: 48px;
-  padding: 8px 10px 7px;
+  padding: 8px 10px 8px;
 }
 
 .gyro-plan-harness-title {
@@ -27808,7 +27811,7 @@ button.gyro-account-menu-row:hover,
   font-size: 9px !important;
   font-variant-numeric: tabular-nums;
   line-height: 20px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 /* A blocked step is the one state the count alone cannot show: 4/7 looks the
@@ -27840,7 +27843,7 @@ button.gyro-account-menu-row:hover,
 .gyro-plan-harness > .gyro-rail-section {
   border-top: 0;
   gap: 4px;
-  padding: 8px 7px 9px;
+  padding: 8px 8px 10px;
   scrollbar-color: color-mix(in srgb, var(--gyro-text) 18%, transparent)
     transparent;
   scrollbar-width: thin;
@@ -27853,13 +27856,13 @@ button.gyro-account-menu-row:hover,
     var(--gyro-premium-accent) 18%,
     var(--gyro-premium-hairline-soft)
   );
-  border-radius: 8px;
-  padding: 9px;
+  border-radius: var(--gyro-radius-md);
+  padding: 10px;
 }
 
 .gyro-plan-harness .gyro-plan-item {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   grid-template-columns: 22px minmax(0, 1fr) auto;
   padding: 8px 6px;
   position: relative;
@@ -27893,7 +27896,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-harness .gyro-plan-item-actions {
   background: color-mix(in srgb, var(--gyro-pane) 96%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   grid-column: 3;
   grid-row: 1;
   opacity: 0;
@@ -27924,7 +27927,7 @@ button.gyro-account-menu-row:hover,
 
 @media (max-width: 980px) {
   .gyro-chat-surface.has-environment .gyro-chat-tool-rail {
-    border-radius: 12px 12px 0 0;
+    border-radius: var(--gyro-radius-xl) var(--gyro-radius-xl) 0 0;
     margin: 8px 10px 0;
     max-height: calc(100% - 8px);
   }
@@ -27970,7 +27973,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--gyro-accent) 19%, transparent);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: color-mix(in srgb, var(--gyro-accent) 74%, var(--gyro-text));
   display: inline-flex !important;
   height: 36px;
@@ -28015,7 +28018,7 @@ button.gyro-account-menu-row:hover,
   font-size: 10px;
   font-weight: 600;
   line-height: 24px;
-  padding: 0 9px;
+  padding: 0 10px;
 }
 
 /* Tool launcher */
@@ -28045,7 +28048,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: var(--gyro-page-card);
   border-color: var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
   display: grid;
   gap: 12px;
@@ -28079,7 +28082,7 @@ button.gyro-account-menu-row:hover,
   align-self: start;
   background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--gyro-accent) 16%, transparent);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-accent);
   display: inline-flex;
   height: 36px;
@@ -28159,7 +28162,7 @@ button.gyro-account-menu-row:hover,
 .gyro-kanban-column {
   background: color-mix(in srgb, var(--gyro-pane) 88%, transparent);
   border-color: var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
@@ -28167,7 +28170,7 @@ button.gyro-account-menu-row:hover,
   background: color-mix(in srgb, var(--gyro-surface) 76%, transparent);
   border-bottom-color: var(--gyro-premium-hairline-soft);
   min-height: 40px;
-  padding-inline: 11px;
+  padding-inline: 12px;
 }
 
 .gyro-kanban-column > header strong {
@@ -28194,7 +28197,7 @@ button.gyro-account-menu-row:hover,
 .gyro-task-card {
   background: var(--gyro-page-card);
   border-color: var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
@@ -28224,9 +28227,9 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: var(--gyro-page-card);
   border-color: var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   grid-template-columns: auto minmax(0, 1fr);
-  padding: 8px 11px;
+  padding: 8px 12px;
 }
 
 .gyro-automation-metric strong {
@@ -28243,9 +28246,9 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-automation-row {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   min-height: 70px;
-  padding: 9px 10px;
+  padding: 10px 10px;
 }
 
 .gyro-automation-row:hover {
@@ -28281,7 +28284,7 @@ button.gyro-account-menu-row:hover,
 .gyro-provider-policy {
   background: var(--gyro-page-card);
   border-color: var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
@@ -28322,13 +28325,13 @@ button.gyro-account-menu-row:hover,
   border-bottom: 1px solid var(--gyro-ide-region-border-soft);
   gap: 3px;
   margin-inline: 8px;
-  padding: 6px 4px 7px;
+  padding: 6px 4px 8px;
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-ide-sidebar-activity
   button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   height: 28px;
   width: 28px;
 }
@@ -28350,14 +28353,14 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-project-row {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   margin-inline: 4px;
   width: calc(100% - 8px);
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-row.gyro-sidebar-explorer-row {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   margin-inline: 4px;
   width: calc(100% - 8px);
 }
@@ -28408,7 +28411,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-workspace-route.is-code .gyro-editor-tabs > button {
   border-right-color: var(--gyro-ide-region-border-soft);
-  padding-inline: 10px 7px;
+  padding-inline: 10px 8px;
 }
 
 .gyro-workspace-route.is-code .gyro-editor-tabs > button:hover {
@@ -28433,7 +28436,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-workspace-route.is-code .gyro-editor-ai-bar button {
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-workspace-route.is-code .gyro-editor-ai-bar button:hover:not(:disabled) {
@@ -28447,7 +28450,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-editor-statusbar-group > span:hover {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-ide-foreground, var(--gyro-text));
 }
 
@@ -28487,7 +28490,7 @@ button.gyro-account-menu-row:hover,
   }
 
   .gyro-surface-page-icon {
-    border-radius: 8px;
+    border-radius: var(--gyro-radius-md);
     height: 30px;
     width: 30px;
   }
@@ -28661,7 +28664,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-premium-control) 72%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   color: var(--gyro-premium-muted);
   display: flex;
   font-size: 11px;
@@ -28693,7 +28696,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-faint);
   cursor: grab;
   display: inline-flex;
@@ -28745,7 +28748,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-surface.is-tiled .gyro-thread-pill-button {
   background: transparent;
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   gap: 3px;
   min-height: 26px;
   padding: 0 4px;
@@ -29086,7 +29089,7 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-attachment.is-image {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   flex: 0 0 88px;
   height: 68px;
@@ -29203,7 +29206,7 @@ button.gyro-account-menu-row:hover,
   grid-template-columns: 14px minmax(0, 1fr) auto auto;
   letter-spacing: 0.015em;
   min-height: 24px;
-  padding: 0 7px;
+  padding: 0 8px;
   text-transform: uppercase;
 }
 
@@ -29220,7 +29223,7 @@ button.gyro-account-menu-row:hover,
   height: 21px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   background: transparent;
 }
@@ -29250,7 +29253,7 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-muted);
   gap: 5px;
   grid-template-columns: 14px minmax(0, 1fr) auto 24px;
-  min-height: 27px;
+  min-height: 28px;
   padding: 0 5px 0 19px;
 }
 
@@ -29278,7 +29281,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: inherit;
   display: flex;
   height: 22px;
@@ -29302,22 +29305,22 @@ button.gyro-account-menu-row:hover,
   .gyro-sidebar-commit-form
   input {
   background: var(--gyro-control-bg);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   min-height: 28px;
 }
 
 .gyro-sidebar-section:has(.gyro-sidebar-scm-group-label)
   .gyro-sidebar-commit-form
   > button {
-  border-radius: 4px;
-  min-height: 27px;
+  border-radius: var(--gyro-radius-xs);
+  min-height: 28px;
 }
 
 .gyro-sidebar-section:has(.gyro-sidebar-scm-group-label) .gyro-sidebar-scm-row {
   border-radius: 0;
   gap: 2px;
   grid-template-columns: 16px minmax(0, 1fr) 22px 22px 16px;
-  min-height: 25px;
+  min-height: 26px;
   padding: 0 4px 0 15px;
 }
 
@@ -29337,7 +29340,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-section:has(.gyro-sidebar-scm-group-label)
   .gyro-sidebar-scm-identity {
   align-items: center;
-  height: 25px;
+  height: 26px;
   line-height: 25px;
   padding-inline: 2px;
 }
@@ -29372,7 +29375,7 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
   min-height: 38px;
-  padding-bottom: 7px;
+  padding-bottom: 8px;
 }
 
 /* Keep every composer action inside narrow and tiled chat panes.
@@ -29554,11 +29557,11 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-thread-topbar .gyro-thread-workspace-context-button {
   background: transparent;
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   gap: 5px;
   height: 28px;
   max-width: min(420px, 42vw);
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-thread-workspace-context-button:hover,
@@ -29650,7 +29653,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-thread-topbar .gyro-chat-surface-button {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   height: 28px;
   min-width: 28px;
 }
@@ -29685,10 +29688,10 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   gap: 6px;
   min-height: 40px;
-  padding: 5px 7px;
+  padding: 5px 8px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item.is-active {
@@ -29839,7 +29842,7 @@ button.gyro-account-menu-row:hover,
 .gyro-workspace-services > div {
   background: color-mix(in srgb, var(--gyro-surface-raised) 90%, transparent);
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   overflow: hidden;
 }
 
@@ -29850,7 +29853,7 @@ button.gyro-account-menu-row:hover,
   gap: 16px;
   justify-content: space-between;
   min-height: 50px;
-  padding: 7px 14px 7px 18px;
+  padding: 8px 14px 8px 18px;
 }
 
 .gyro-workspace-services article:last-child {
@@ -29930,7 +29933,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 36px;
@@ -30171,7 +30174,7 @@ button.gyro-account-menu-row:hover,
   border-left: 1px solid color-mix(in srgb, currentcolor 22%, transparent);
   color: var(--gyro-muted);
   flex: 0 0 auto;
-  padding-left: 7px;
+  padding-left: 8px;
 }
 
 .gyro-model-menu {
@@ -30188,7 +30191,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-menu-item.is-setting.has-no-icon {
   grid-template-columns: minmax(0, 1fr) auto 14px;
   min-height: 30px;
-  padding: 4px 7px 4px 9px;
+  padding: 4px 8px 4px 10px;
 }
 
 .gyro-composer-menu-item.is-setting .gyro-composer-menu-trailing {
@@ -30208,7 +30211,7 @@ button.gyro-account-menu-row:hover,
   grid-template-columns: minmax(0, 1fr) 14px;
   margin-top: 4px;
   min-height: 30px;
-  padding: 6px 7px 4px 9px;
+  padding: 6px 8px 4px 10px;
 }
 
 .gyro-composer-menu-item.is-disclosure:hover {
@@ -30220,7 +30223,7 @@ button.gyro-account-menu-row:hover,
   color: #8f949c;
   grid-template-columns: 14px minmax(0, 1fr);
   min-height: 26px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 .gyro-composer-menu-item.is-back strong {
@@ -30250,7 +30253,7 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-shell.is-hero.has-provider
   > textarea {
   min-height: 46px;
-  padding: 11px 12px 2px;
+  padding: 12px 12px 2px;
   font-size: var(--gyro-font-body);
 }
 
@@ -30368,7 +30371,7 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-muted);
   flex: 0 0 auto;
   font-size: 10px;
-  padding: 2px 9px;
+  padding: 2px 10px;
 }
 
 .gyro-model-focus-open:hover {
@@ -30463,7 +30466,7 @@ button.gyro-account-menu-row:hover,
   border-top: 1px solid var(--gyro-premium-hairline-soft);
   display: flex;
   justify-content: flex-end;
-  padding: 7px 10px;
+  padding: 8px 10px;
 }
 
 .gyro-model-focus-peek footer button {
@@ -30587,7 +30590,7 @@ button.gyro-account-menu-row:hover,
 .gyro-browser-page {
   background: #fff;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
   height: 100%;
   margin: 0 auto;
@@ -30921,7 +30924,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-window-actions .gyro-sidebar-toggle-button {
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   color: var(--gyro-muted);
   height: 28px;
@@ -31053,7 +31056,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-browser-page.is-tablet {
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
   height: min(100%, 1112px);
   max-width: min(834px, 100%);
@@ -31124,7 +31127,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 20px;
@@ -31153,7 +31156,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-scm-batch-actions button {
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 20px;
@@ -31175,7 +31178,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-scm-repository {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   display: grid;
   gap: 6px;
   grid-template-columns: 14px minmax(0, 1fr) auto 22px;
@@ -31210,7 +31213,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 22px;
@@ -31234,7 +31237,7 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-commit-form input {
   background: var(--gyro-control-bg, var(--gyro-pane));
   border: 1px solid var(--gyro-border-soft, var(--gyro-border));
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   font-size: 12px;
@@ -31247,7 +31250,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-accent) 88%, transparent);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-primary-text, #fff);
   display: flex;
   font-size: 12px;
@@ -31274,7 +31277,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-accent) 88%, transparent);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-primary-text, #fff);
   display: flex;
   font-size: 12px;
@@ -31317,7 +31320,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-scm-panel .gyro-sidebar-scm-row {
   align-items: center;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   display: grid;
   gap: 4px;
   grid-template-columns: 16px minmax(0, 1fr) 28px 24px 12px;
@@ -31371,7 +31374,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 20px;
@@ -31397,7 +31400,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: grid;
   gap: 6px;
@@ -31461,7 +31464,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.08));
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   font-size: 12px;
@@ -31493,7 +31496,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.08));
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   display: grid;
   font-size: 11px;
@@ -31526,7 +31529,7 @@ button.gyro-account-menu-row:hover,
 .gyro-scm-branch-menu {
   background: var(--gyro-surface-raised, var(--gyro-surface, #1a1b1e));
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   display: flex;
   flex-direction: column;
@@ -31543,7 +31546,7 @@ button.gyro-account-menu-row:hover,
   align-items: flex-start;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-text);
   display: grid;
   font-size: 11px;
@@ -31708,7 +31711,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 18px;
@@ -31723,7 +31726,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-scm-panel .gyro-sidebar-scm-count {
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: 12px;
   font-weight: 650;
@@ -32062,7 +32065,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 24px;
@@ -32080,7 +32083,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-switcher-menu {
   background: var(--gyro-surface, #1a1b1e);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   display: flex;
   flex-direction: column;
@@ -32115,7 +32118,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-text);
   display: grid;
   font: inherit;
@@ -32252,7 +32255,7 @@ button.gyro-account-menu-row:hover,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row {
   gap: 9px;
   min-height: 32px;
-  padding: 6px 7px;
+  padding: 6px 8px;
 }
 
 .gyro-sidebar-action,
@@ -32282,7 +32285,7 @@ button.gyro-account-menu-row:hover,
   gap: 9px;
   grid-template-columns: 17px minmax(0, 1fr) auto;
   min-height: 32px;
-  padding: 6px 7px;
+  padding: 6px 8px;
 }
 
 .gyro-sidebar-thread,
@@ -32440,7 +32443,7 @@ button.gyro-account-menu-row:hover,
   font: inherit;
   gap: 12px;
   grid-template-columns: 19px minmax(0, 1fr);
-  padding: 7px 0;
+  padding: 8px 0;
   text-align: left;
   width: 100%;
 }
@@ -32461,7 +32464,7 @@ button.gyro-account-menu-row:hover,
   font: inherit;
   gap: 12px;
   grid-template-columns: 19px minmax(0, 1fr) auto;
-  padding: 7px 0;
+  padding: 8px 0;
   text-align: left;
   width: 100%;
 }
@@ -32672,7 +32675,7 @@ button.gyro-account-menu-row:hover,
   gap: 12px;
   grid-template-columns: 19px minmax(0, 1fr);
   letter-spacing: -0.01em;
-  padding: 7px 0;
+  padding: 8px 0;
 }
 
 .gyro-run-pulse .gyro-run-row-icon {
@@ -32744,7 +32747,7 @@ button.gyro-account-menu-row:hover,
 .gyro-run-problem-actions button {
   background: none;
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   cursor: pointer;
   font: inherit;
@@ -32832,12 +32835,12 @@ button.gyro-account-menu-row:hover,
 .gyro-run-header-actions button {
   background: none;
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  padding: 3px 9px;
+  padding: 3px 10px;
 }
 
 .gyro-run-header-actions button:hover {
@@ -33412,7 +33415,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -33475,7 +33478,7 @@ button.gyro-account-menu-row:hover,
 .gyro-update-release-card-action {
   background: var(--gyro-update-blue);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: #ffffff;
   font: inherit;
   font-size: 12px;
@@ -33483,7 +33486,7 @@ button.gyro-account-menu-row:hover,
   justify-self: start;
   margin-top: 4px;
   min-height: 30px;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-update-release-card-action:hover {
@@ -33508,7 +33511,7 @@ button.gyro-account-menu-row:hover,
   gap: 0;
   grid-template-columns: minmax(0, 1fr);
   min-height: 30px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 .gyro-sidebar-project-row.has-remove,
@@ -33547,7 +33550,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-settings-topbar-search {
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   max-width: 408px;
 }
@@ -33570,10 +33573,10 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-action.is-settings-page {
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   font-size: var(--gyro-font-body);
   min-height: 34px;
-  padding-inline: 9px;
+  padding-inline: 10px;
 }
 
 .gyro-sidebar-action.is-settings-page.is-active {
@@ -33738,13 +33741,13 @@ button.gyro-account-menu-row:hover,
 
 .gyro-theme-picker button {
   align-items: stretch;
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   flex-direction: column;
   font-size: 13px;
   gap: 10px;
   justify-content: flex-start;
   min-height: 148px;
-  padding: 11px;
+  padding: 12px;
   text-align: left;
 }
 
@@ -33768,7 +33771,7 @@ button.gyro-account-menu-row:hover,
 .gyro-theme-picker button::before {
   background: var(--gyro-control-bg);
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   content: "";
   display: block;
   flex: 1 1 auto;
@@ -34358,7 +34361,7 @@ button.gyro-account-menu-row:hover,
 .gyro-model-chip-effort {
   border-left: 1px solid color-mix(in srgb, currentcolor 22%, transparent);
   color: var(--gyro-muted);
-  padding-left: 7px;
+  padding-left: 8px;
 }
 
 /* Room for name plus qualifier before either has to truncate. */
@@ -34419,14 +34422,14 @@ button.gyro-account-menu-row:hover,
 .gyro-plan-decision-card > header > .gyro-plan-decision-open {
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font: inherit;
   font-size: 11.5px;
   font-weight: 600;
   margin-left: auto;
   min-height: 28px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .gyro-plan-decision-card > header > .gyro-plan-decision-open:hover {
@@ -34450,12 +34453,12 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-decision-card > footer > button {
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   font: inherit;
   font-size: 12px;
   font-weight: 620;
   min-height: 31px;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-plan-decision-card > footer > button.is-secondary {
@@ -34482,7 +34485,7 @@ button.gyro-account-menu-row:hover,
 .gyro-transcript-image-preview {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   cursor: zoom-in;
   display: inline-flex;
   flex: 0 0 auto;
@@ -34498,7 +34501,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-transcript-image-preview > img {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   display: block;
   height: 100%;
   object-fit: cover;
@@ -34532,7 +34535,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-image-preview-overlay img {
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 24px 80px rgb(0 0 0 / 48%);
   display: block;
   max-height: calc(100vh - 96px);
@@ -34585,7 +34588,7 @@ button.gyro-account-menu-row:hover,
 .gyro-thread-context-control > .gyro-thread-workspace-menu {
   background: var(--gyro-surface);
   border-color: var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow:
     0 16px 40px rgb(28 39 52 / 16%),
     0 2px 8px rgb(28 39 52 / 8%);
@@ -34629,12 +34632,12 @@ button.gyro-account-menu-row:hover,
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr) 18px;
   min-height: 36px;
-  padding: 5px 7px;
+  padding: 5px 8px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item:hover:not(:disabled),
@@ -34701,7 +34704,7 @@ button.gyro-account-menu-row:hover,
   > .gyro-thread-workspace-context-button {
   background: transparent;
   border-color: transparent;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   box-shadow: none;
   color: var(--gyro-muted);
   font-size: 12px;
@@ -34758,7 +34761,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-environment-popover {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 4px 16px rgba(15, 18, 24, 0.08);
   color: var(--gyro-text);
   max-height: min(380px, calc(100% - 72px));
@@ -34799,7 +34802,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   cursor: pointer;
   display: inline-flex;
@@ -34822,7 +34825,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-environment-popover-rows > button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   cursor: pointer;
   gap: 9px;
@@ -34875,7 +34878,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-environment-popover-sources {
   border-top: 1px solid var(--gyro-border-soft);
   margin-top: 7px;
-  padding: 9px 6px 3px;
+  padding: 10px 6px 3px;
 }
 
 .gyro-chat-environment-popover-sources > header {
@@ -34947,7 +34950,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-muted);
   display: flex;
   flex-wrap: wrap;
@@ -34975,7 +34978,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-blocker > button {
   background: var(--gyro-accent-soft);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-accent);
   cursor: pointer;
   flex: 0 0 auto;
@@ -35002,10 +35005,10 @@ button.gyro-account-menu-row:hover,
   background: color-mix(in srgb, var(--gyro-danger) 8%, var(--gyro-surface));
   border: 1px solid
     color-mix(in srgb, var(--gyro-danger) 28%, var(--gyro-border));
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   gap: 14px;
   margin-top: 10px;
-  padding: 11px 12px;
+  padding: 12px 12px;
 }
 
 .gyro-run-problem-text {
@@ -35357,7 +35360,7 @@ button.gyro-account-menu-row:hover,
   font-weight: 590;
   gap: 7px;
   min-height: 34px;
-  padding: 0 11px;
+  padding: 0 12px;
 }
 
 .gyro-color-reset:hover:not(:disabled) {
@@ -35599,7 +35602,7 @@ textarea:focus-visible,
 .gyro-chat-start-workspace-popup > span {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
   color: var(--gyro-text);
   display: block;
@@ -35620,7 +35623,7 @@ textarea:focus-visible,
 .gyro-chat-start-suggestion {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-muted);
   min-height: var(--gyro-control-height);
@@ -36084,7 +36087,7 @@ textarea:focus-visible,
   appearance: auto;
   background: var(--gyro-control-bg);
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-text);
   font: 13px var(--gyro-font-sans);
@@ -36101,7 +36104,7 @@ textarea:focus-visible,
 .gyro-settings-surface .gyro-color-reset,
 .gyro-settings-surface .gyro-settings-segmented button,
 .gyro-cli-launch-focus button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   font-size: 13px;
   min-height: var(--gyro-control-height);
@@ -36158,7 +36161,7 @@ textarea:focus-visible,
 .gyro-empty-actions > button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font: 13px var(--gyro-font-sans);
   min-height: var(--gyro-control-height);
@@ -36381,7 +36384,7 @@ textarea:focus-visible,
   padding: 4px 8px;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 13px;
   color: var(--gyro-muted);
 }
@@ -36392,7 +36395,7 @@ textarea:focus-visible,
   padding: 4px 8px;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font-size: 13px;
   color: var(--gyro-muted);
 }
@@ -36477,7 +36480,7 @@ textarea:focus-visible,
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-soft);
   border-bottom-color: var(--gyro-surface-raised);
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--gyro-radius-md) var(--gyro-radius-md) 0 0;
   box-shadow: none;
   margin-bottom: -1px;
 }
@@ -36486,7 +36489,7 @@ textarea:focus-visible,
   .gyro-chat-companion-tab.is-active
   > button {
   max-width: 240px;
-  padding-inline: 10px 7px;
+  padding-inline: 10px 8px;
 }
 
 .gyro-chat-companion.is-browser-focus .gyro-chat-companion-content {
@@ -36698,7 +36701,7 @@ textarea:focus-visible,
   align-self: center;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   margin: 0;
   padding-right: 4px;
@@ -36716,7 +36719,7 @@ textarea:focus-visible,
   gap: 8px;
   max-width: 220px;
   min-height: 28px;
-  padding-inline: 9px;
+  padding-inline: 10px;
 }
 
 .gyro-chat-companion .gyro-chat-companion-tab:not(.is-active) > button {
@@ -36741,7 +36744,7 @@ textarea:focus-visible,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: flex;
   height: 28px;
@@ -36765,7 +36768,7 @@ textarea:focus-visible,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   display: grid;
   font-size: 13px;
@@ -36786,7 +36789,7 @@ textarea:focus-visible,
 .gyro-companion-launcher kbd {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   font-family: inherit;
   font-size: 12px;
@@ -36830,7 +36833,7 @@ textarea:focus-visible,
   .gyro-icon-button {
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   color: var(--gyro-muted);
   height: 28px;
@@ -36842,7 +36845,7 @@ textarea:focus-visible,
   .gyro-pane-tabs
   button.is-active {
   background: color-mix(in srgb, var(--gyro-text) 5%, var(--gyro-pane));
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   color: var(--gyro-text);
 }
@@ -36962,7 +36965,7 @@ textarea:focus-visible,
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   display: flex;
   grid-column: auto;
   grid-row: auto;
@@ -37001,7 +37004,7 @@ textarea:focus-visible,
 .gyro-browser-actions.is-overflow-menu.is-open {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 8px 30px rgb(0 0 0 / 12%);
   display: flex;
   flex-wrap: wrap;
@@ -37172,7 +37175,7 @@ textarea:focus-visible,
   .gyro-composer-chip {
   background: transparent;
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-welcome-composer-muted);
 }
 
@@ -37273,7 +37276,7 @@ textarea:focus-visible,
   grid-template-columns: minmax(55px, 0.7fr) minmax(0, 1.6fr);
   gap: 2px;
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-sidebar-scm-head .gyro-sidebar-scm-repository,
 .gyro-sidebar-scm-head .gyro-scm-branch-trigger {
@@ -37291,7 +37294,7 @@ textarea:focus-visible,
   > button:not(.is-secondary) {
   background: var(--gyro-accent);
   color: var(--gyro-accent-contrast, #fff);
-  min-height: 27px;
+  min-height: 28px;
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-group-label {
   min-height: 24px;
@@ -37358,7 +37361,7 @@ textarea:focus-visible,
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-sync {
   border-bottom: 0;
-  min-height: 25px;
+  min-height: 26px;
   padding-bottom: 3px;
 }
 .gyro-scm-history {
@@ -37499,7 +37502,7 @@ textarea:focus-visible,
   margin-block: 2px;
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-form input {
-  min-height: 27px;
+  min-height: 28px;
 }
 .gyro-sidebar-scm-head {
   grid-template-columns: 88px minmax(0, 1fr);
@@ -37543,13 +37546,13 @@ textarea:focus-visible,
   background: var(--gyro-panel, #1b1b1b);
   color: var(--gyro-text, #d7d9de);
   border: 1px solid var(--gyro-border, #444);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: 0 8px 32px #0005;
 }
 .gyro-language-menu input {
   width: 100%;
   box-sizing: border-box;
-  padding: 7px;
+  padding: 8px;
   font: inherit;
   color: inherit;
   background: transparent;
@@ -37849,7 +37852,7 @@ textarea:focus-visible,
   margin: 12px 0;
   overflow: hidden;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-xl);
   background: var(--gyro-surface);
   color: var(--gyro-text);
 }
@@ -37870,7 +37873,7 @@ textarea:focus-visible,
   width: 34px;
   height: 34px;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
 }
 .gyro-inline-approval-heading h3 {
@@ -37891,7 +37894,7 @@ textarea:focus-visible,
   margin: 0;
   padding: 12px;
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-surface));
   color: var(--gyro-text);
   font:
@@ -37967,7 +37970,7 @@ textarea:focus-visible,
 }
 .gyro-inline-approval-actions button {
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   background: var(--gyro-surface);
   color: var(--gyro-text);
   font: inherit;
@@ -38044,7 +38047,7 @@ textarea:focus-visible,
   align-items: center;
   gap: 10px;
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   padding: 0 12px;
   color: var(--gyro-muted);
 }
@@ -38089,7 +38092,7 @@ textarea:focus-visible,
   justify-content: space-between;
   gap: 8px;
   border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   background: transparent;
   padding: 12px;
   color: var(--gyro-text);
@@ -38103,8 +38106,8 @@ textarea:focus-visible,
 }
 .gyro-help-topics button {
   border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 7px 9px;
+  border-radius: var(--gyro-radius-sm);
+  padding: 8px 10px;
   color: var(--gyro-muted);
   background: transparent;
   font-size: 12px;
@@ -38221,7 +38224,7 @@ textarea:focus-visible,
 .gyro-help a:focus-visible {
   outline: 2px solid var(--gyro-accent);
   outline-offset: 3px;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-help-footer {
   display: flex;
@@ -38286,11 +38289,11 @@ textarea:focus-visible,
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-form input {
   height: 30px;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-actions > button {
   min-height: 28px;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-sync {
   margin: 0 8px;
@@ -38442,7 +38445,7 @@ textarea:focus-visible,
     var(--gyro-scm-graph-width, 22px)
     minmax(88px, 1fr)
     auto auto;
-  min-height: 25px;
+  min-height: 26px;
   column-gap: 6px;
   padding-inline: 0 8px;
 }
@@ -38518,7 +38521,7 @@ textarea:focus-visible,
 
 .gyro-run-task-main {
   min-height: 44px;
-  padding: 7px 8px;
+  padding: 8px 8px;
   gap: 10px;
 }
 
@@ -38534,7 +38537,7 @@ textarea:focus-visible,
 }
 
 .gyro-run-task-status {
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   background: var(--gyro-surface-soft);
   padding: 3px 5px;
   font-size: 10px;
@@ -38643,7 +38646,7 @@ textarea:focus-visible,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: flex;
   font: inherit;
@@ -38686,7 +38689,7 @@ textarea:focus-visible,
   background: transparent;
   color: var(--gyro-muted);
   opacity: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-cli-sidebar-item:hover .gyro-cli-sidebar-close,
 .gyro-cli-sidebar-item:focus-within .gyro-cli-sidebar-close {
@@ -38737,7 +38740,7 @@ textarea:focus-visible,
   background: transparent;
   box-shadow: none;
   font-size: 12px;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions > button {
   display: grid;
@@ -38869,9 +38872,9 @@ textarea:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 9px;
+  padding: 6px 10px;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   background: var(--gyro-pane);
   color: var(--gyro-text);
   font: inherit;
@@ -38887,7 +38890,7 @@ textarea:focus-visible,
   padding: 8px 10px;
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font-size: 12px;
 }
@@ -38937,7 +38940,7 @@ textarea:focus-visible,
   max-width: 100%;
   height: 30px;
   padding: 0 8px;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
 }
 :root[data-theme] .gyro-terminal-pane.is-active .gyro-terminal-pane-title {
@@ -39027,7 +39030,7 @@ textarea:focus-visible,
   flex: 0 0 auto;
   height: 34px;
   max-width: 240px;
-  border-radius: 11px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-muted);
 }
 :root[data-theme] .gyro-terminal-tab.is-active {
@@ -39043,7 +39046,7 @@ textarea:focus-visible,
   padding: 0 10px;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   font: inherit;
   font-size: 13px;
   color: inherit;
@@ -39142,7 +39145,7 @@ textarea:focus-visible,
   display: grid;
   place-items: center;
   border: 1px dashed var(--gyro-muted);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   background: color-mix(in srgb, var(--gyro-terminal-canvas) 90%, transparent);
   color: var(--gyro-text);
   font-size: 13px;
@@ -39218,7 +39221,7 @@ textarea:focus-visible,
   padding: 0;
   margin: 0 5px 0 0;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
 }
 :root[data-theme]
@@ -39256,7 +39259,7 @@ textarea:focus-visible,
   height: 40px;
   margin-left: auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-md);
   background: transparent;
   color: var(--gyro-muted);
   opacity: 0;
@@ -39274,7 +39277,7 @@ textarea:focus-visible,
   padding: 5px;
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 6px 20px #00000014;
   pointer-events: auto;
 }
@@ -39291,9 +39294,9 @@ textarea:focus-visible,
   align-items: flex-start;
   gap: 8px;
   width: 100%;
-  padding: 9px 8px;
+  padding: 10px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
   text-align: left;
   font: inherit;
@@ -39331,7 +39334,7 @@ textarea:focus-visible,
   padding: 5px;
   gap: 0;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   background: var(--gyro-pane);
   box-shadow:
     0 8px 28px #00000014,
@@ -39347,9 +39350,9 @@ textarea:focus-visible,
   height: 30px;
   min-height: 30px;
   margin: 0;
-  padding: 0 9px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   background: transparent;
   box-shadow: none;
   font: inherit;
@@ -39468,7 +39471,7 @@ textarea:focus-visible,
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
   color: var(--gyro-text);
   font: inherit;
@@ -39838,7 +39841,7 @@ textarea:focus-visible,
   min-width: 160px;
   padding: 0;
   gap: 0;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
 }
 :root[data-theme] .gyro-terminal-tab > button[role="tab"] {
   flex: 1 1 auto;
@@ -39948,7 +39951,7 @@ textarea:focus-visible,
   aspect-ratio: 1.42;
   object-fit: cover;
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   box-sizing: border-box;
 }
 .gyro-theme-picker button:hover > img {
@@ -39970,7 +39973,7 @@ textarea:focus-visible,
 .gyro-theme-picker button:focus-visible {
   outline: 2px solid var(--gyro-accent);
   outline-offset: 4px;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
 }
 .gyro-settings-group-rows > .gyro-theme-picker:first-child {
   border: 0;
@@ -40004,7 +40007,7 @@ textarea:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 27px;
+  min-height: 28px;
   padding: 3px 0;
 }
 .gyro-project-card-heading strong {
@@ -40039,7 +40042,7 @@ textarea:focus-visible,
 }
 .gyro-project-card-path {
   margin-top: 5px;
-  padding: 7px 0;
+  padding: 8px 0;
   border-block: 1px solid var(--gyro-border);
 }
 .gyro-project-card-path span {
@@ -40324,7 +40327,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-top: 11px;
+  padding-top: 12px;
   padding-bottom: 0;
 }
 
@@ -40379,7 +40382,7 @@ textarea:focus-visible,
 .gyro-browser-agent-stop {
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   cursor: pointer;
   flex: 0 0 auto;
@@ -40502,7 +40505,7 @@ textarea:focus-visible,
 .gyro-chat-companion.is-browser-address .gyro-chat-companion-tabs button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-muted);
   height: 28px;
@@ -40531,7 +40534,7 @@ textarea:focus-visible,
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
   background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-pane));
   border-color: transparent;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   height: 30px;
   min-height: 30px;
@@ -40707,7 +40710,7 @@ textarea:focus-visible,
 .gyro-code-empty button {
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
   font: inherit;
   font-size: 11px;
@@ -40744,7 +40747,7 @@ textarea:focus-visible,
   .gyro-transcript-attachment.is-image:has(.gyro-transcript-image-preview) {
   background: var(--gyro-surface-raised, #202328);
   border: 1px solid var(--gyro-border-soft, rgba(127, 127, 127, 0.18));
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-lg);
   display: block;
   height: 84px;
   max-width: none;
@@ -40893,7 +40896,7 @@ textarea:focus-visible,
    icons from stretching into a banner when the Workspace sidebar is dragged
    wider than its default 224px. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
-  padding-right: 9px;
+  padding-right: 10px;
   position: relative;
 }
 
