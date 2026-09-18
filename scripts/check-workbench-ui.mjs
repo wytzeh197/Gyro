@@ -1081,7 +1081,7 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini,cursor,opencode,ollama",
+    "openai,anthropic,kimi,xai,gemini,cursor,opencode,deepseek,mistral,openrouter,ollama",
   "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
@@ -6064,10 +6064,10 @@ expect(
     appSource.includes('tab: "terminal"') &&
     coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
     coreProviderHealthSource.includes(
-      '"codex",\n            &["login", "status"]',
+      'command: "codex",\n            args: &["login", "status"]',
     ) &&
     coreProviderHealthSource.includes(
-      '"claude",\n                &["auth", "status"]',
+      'command: "claude",\n                    args: &["auth", "status"]',
     ) &&
     coreProviderHealthSource.includes('"xai"') &&
     coreProviderHealthSource.includes('"XAI_API_KEY"') &&

@@ -70,6 +70,13 @@ type ProviderCatalogEntry = ModelProviderConfig & {
   allowedTools: string[];
 };
 
+/** Provider ids starting with this prefix are endpoints the user defined. */
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+
+export function isCustomProviderId(providerId: string) {
+  return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
 /** Providers that can authenticate with a pasted API key stored in Keychain. */
 export function providerSupportsApiKey(providerId: string) {
   return (
@@ -78,7 +85,13 @@ export function providerSupportsApiKey(providerId: string) {
     providerId === "xai" ||
     providerId === "gemini" ||
     providerId === "kimi" ||
-    providerId === "cursor"
+    providerId === "cursor" ||
+    providerId === "deepseek" ||
+    providerId === "mistral" ||
+    providerId === "openrouter" ||
+    // A custom endpoint has no vendor environment variable to name, so its key
+    // lives in the Keychain alone and only the HTTPS runner reads it.
+    isCustomProviderId(providerId)
   );
 }
 
@@ -96,6 +109,12 @@ export function providerApiKeyEnvName(providerId: string) {
       return "MOONSHOT_API_KEY";
     case "cursor":
       return "CURSOR_API_KEY";
+    case "deepseek":
+      return "DEEPSEEK_API_KEY";
+    case "mistral":
+      return "MISTRAL_API_KEY";
+    case "openrouter":
+      return "OPENROUTER_API_KEY";
     default:
       return undefined;
   }
@@ -439,6 +458,140 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     effort: "medium",
     allowedTools: ["files", "terminal", "diff"],
   },
+  // API-key presets. These read over HTTPS rather than through a vendor CLI, so
+  // the only thing that distinguishes them is the endpoint and the model list;
+  // a fourth one would be a table entry, not a new runner.
+  {
+    id: "deepseek",
+    displayName: "DeepSeek",
+    apiKeyRef: "provider:deepseek",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://api.deepseek.com/v1",
+    defaultModelId: "deepseek-chat",
+    selectedModelId: "deepseek-chat",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      // Token spend lands in the local ledger; there is no plan-window API.
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models: [
+      {
+        id: "deepseek-chat",
+        displayName: "DeepSeek Chat",
+        description: "General chat and coding through DeepSeek's own API.",
+        contextWindowTokens: 128_000,
+      },
+      {
+        id: "deepseek-reasoner",
+        displayName: "DeepSeek Reasoner",
+        description:
+          "Reasons before answering, so the first token can take a while.",
+        contextWindowTokens: 128_000,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
+  {
+    id: "mistral",
+    displayName: "Mistral",
+    apiKeyRef: "provider:mistral",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://api.mistral.ai/v1",
+    defaultModelId: "mistral-large-latest",
+    selectedModelId: "mistral-large-latest",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models: [
+      {
+        id: "mistral-large-latest",
+        displayName: "Mistral Large",
+        description: "Mistral's flagship general model.",
+        contextWindowTokens: 128_000,
+      },
+      {
+        id: "codestral-latest",
+        displayName: "Codestral",
+        description: "Tuned for code completion and editing.",
+        contextWindowTokens: 256_000,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
+  {
+    id: "openrouter",
+    displayName: "OpenRouter",
+    apiKeyRef: "provider:openrouter",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://openrouter.ai/api/v1",
+    // A small curated list; OpenRouter serves hundreds, and Settings can fetch
+    // the endpoint's own list. This provider doubles as the worked example of
+    // the custom-provider mechanism.
+    defaultModelId: "anthropic/claude-sonnet-4.5",
+    selectedModelId: "anthropic/claude-sonnet-4.5",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models: [
+      {
+        id: "anthropic/claude-sonnet-4.5",
+        displayName: "Claude Sonnet 4.5",
+        description: "Strong general coding model, routed by OpenRouter.",
+        contextWindowTokens: 200_000,
+      },
+      {
+        id: "openai/gpt-5.1",
+        displayName: "GPT-5.1",
+        description: "OpenAI's general model, routed by OpenRouter.",
+        contextWindowTokens: 400_000,
+      },
+      {
+        id: "google/gemini-3-pro-preview",
+        displayName: "Gemini 3 Pro",
+        description: "Long-context reasoning, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+      },
+      {
+        id: "deepseek/deepseek-chat",
+        displayName: "DeepSeek Chat",
+        description: "Low-cost general model, routed by OpenRouter.",
+        contextWindowTokens: 128_000,
+      },
+      {
+        id: "meta-llama/llama-3.3-70b-instruct",
+        displayName: "Llama 3.3 70B",
+        description: "Open-weights general model, routed by OpenRouter.",
+        contextWindowTokens: 128_000,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
   {
     id: "ollama",
     displayName: "Ollama",
@@ -467,7 +620,11 @@ export const providerCatalog: ProviderCatalogEntry[] = [
 ];
 
 export function isProviderId(value: unknown): value is ProviderId {
-  return providerCatalog.some((provider) => provider.id === value);
+  return (
+    typeof value === "string" &&
+    (isCustomProviderId(value) ||
+      providerCatalog.some((provider) => provider.id === value))
+  );
 }
 
 export function getProviderCatalogEntry(providerId: ProviderId) {
@@ -711,7 +868,7 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
     config.modelProviders.map((provider) => [provider.id, provider]),
   );
 
-  return providerCatalog.map((catalogProvider) => {
+  const catalogProviders = providerCatalog.map((catalogProvider) => {
     const savedProvider = savedProviders.get(catalogProvider.id);
     const savedModels = new Map(
       (savedProvider?.models ?? []).map((model) => [model.id, model]),
@@ -785,6 +942,56 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       })(),
     };
   });
+
+  // A provider the user defined has no catalog entry, so the merge above would
+  // drop it and it would never reach the picker, the API-key section, or the
+  // model list. Append those straight from config.
+  const catalogIds = new Set(providerCatalog.map((provider) => provider.id));
+  const customProviders = config.modelProviders
+    .filter((provider) => !catalogIds.has(provider.id))
+    .map(customProviderForConfig);
+
+  return [...catalogProviders, ...customProviders];
+}
+
+/**
+ * Describe a config-only provider the way the rest of the UI expects.
+ *
+ * A custom provider persists `modelIds`; the `models` objects every surface
+ * reads are derived from it here, mirroring what the catalog supplies for a
+ * shipped provider.
+ */
+function customProviderForConfig(
+  provider: ModelProviderConfig,
+): ModelProviderConfig {
+  const models: ProviderModel[] = (provider.modelIds ?? []).map((id) => ({
+    id,
+    displayName: id,
+    description: "Model served by this endpoint.",
+  }));
+  const defaultModelId =
+    provider.defaultModelId &&
+    models.some((model) => model.id === provider.defaultModelId)
+      ? provider.defaultModelId
+      : (models[0]?.id ?? "");
+  return {
+    ...provider,
+    authMode: provider.authMode ?? "env",
+    authStatus:
+      provider.authStatus ?? (provider.enabled ? "connected" : "not-connected"),
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models,
+    defaultModelId,
+    selectedModelId: provider.selectedModelId ?? defaultModelId,
+  };
 }
 
 export function normalizedConfig(config: GyroConfig): GyroConfig {

@@ -101,7 +101,8 @@ runner, provider-stream parser, provider-health service, and backend-owned
 provider capability manifest. The desktop reads that manifest at startup; its
 checked-in catalog is an offline preview fallback rather than runtime truth.
 Provider credentials stay outside Gyro in provider CLIs, SDKs, environment
-variables, Keychain references, or provider-owned files.
+variables, Keychain references, or provider-owned files; the direct-HTTP runners
+read a key in-process for the duration of a call rather than exporting it.
 
 Ollama is the exception to the CLI/ACP adapter family: Gyro talks directly to
 its loopback HTTP API, streams tokens as they arrive, and keeps conversation
@@ -117,6 +118,22 @@ bridge. Quiet provider processes are not treated as finished: desktop chat
 disables process inactivity, and CLI ACP/Codex inactivity cannot undercut
 the selected run deadline. Transient network errors retry twice with short
 backoff; hard timeouts and cancellations do not.
+
+The OpenAI-compatible API runner is the third adapter family. Gyro ships
+DeepSeek, Mistral, and OpenRouter presets, and a user can add any other endpoint
+as a `custom:<slug>` provider. All of them share one HTTPS client in `gyro-core`
+(`openai_compatible.rs`) that streams SSE deltas, accumulates tool calls which
+arrive as JSON-string fragments, and reads the streamed usage block. The key is
+read in-process from the environment or the Keychain and sent as a Bearer
+header; it is never injected into a child process and never placed in the URL.
+The transport rule differs from Ollama's deliberately: plain HTTP stays legal
+for loopback hosts (LM Studio, vLLM, llama.cpp), every other host must be HTTPS,
+and a redirect is refused so a Bearer token cannot be walked to a host the user
+did not configure. Tool calls made through this runner cross the same capability
+broker, approval policy, and audit path as a local model's, and stream through
+the same events. These providers are experimental in V1, and the standalone CLI
+can configure them while its chat loop still runs only the subprocess adapters.
+See `docs/api-key-providers.md`.
 
 Provider diagnostics are redacted and metadata-only: provider id, model id,
 timing, retry count, resumed/not-resumed state, timeout/failure reason, and

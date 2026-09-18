@@ -13335,12 +13335,12 @@ export function App() {
     },
     [config, connectProvider, notify, recordProviderHealthOutput],
   );
-
   const providerApiKeyProps = useProviderApiKeys(
     config,
     isTauriRuntime(),
     notify,
     testProvider,
+    persistConfig, // lets the hook add or remove a custom provider
   );
 
   const queueProviderHandoff = useCallback(

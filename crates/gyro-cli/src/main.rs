@@ -371,6 +371,31 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Add or update a custom OpenAI-compatible provider.
+    AddProvider {
+        /// Provider id. Must start with `custom:`.
+        provider_id: String,
+        /// Name shown in Gyro. Defaults to the id without its prefix.
+        #[arg(long)]
+        name: Option<String>,
+        /// Base URL of the endpoint, for example https://openrouter.ai/api/v1.
+        #[arg(long)]
+        base_url: String,
+        /// Model id. Repeat for more than one.
+        #[arg(long = "model", required = true)]
+        models: Vec<String>,
+        /// Emit versioned JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a custom provider and its stored API key.
+    RemoveProvider {
+        /// Provider id. Must start with `custom:`.
+        provider_id: String,
+        /// Emit versioned JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -718,6 +743,12 @@ impl Cli {
             }))
             | Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::SetProviderKey { json, .. },
+            }))
+            | Some(Commands::Config(ConfigArgs {
+                command: ConfigCommand::AddProvider { json, .. },
+            }))
+            | Some(Commands::Config(ConfigArgs {
+                command: ConfigCommand::RemoveProvider { json, .. },
             })) => *json,
             _ => false,
         }
@@ -5495,6 +5526,125 @@ fn config_command(args: ConfigArgs) -> Result<()> {
                 action: "set-provider-key",
                 target: provider_id,
                 message: format!("stored {} API key in macOS Keychain", provider.display_name),
+            };
+            if json {
+                print_json(&output)?;
+            } else {
+                println!("{}", output.message);
+            }
+        }
+        ConfigCommand::AddProvider {
+            provider_id,
+            name,
+            base_url,
+            models,
+            json,
+        } => {
+            // The `custom:` prefix is what routes this provider to the HTTPS
+            // runner, so an id without it would be accepted here and then never
+            // run.
+            if !gyro_core::is_custom_provider_id(&provider_id) {
+                return Err(cli_failure(
+                    CliErrorCategory::InvalidInput,
+                    format!(
+                        "provider id `{provider_id}` must start with `{}`",
+                        gyro_core::CUSTOM_PROVIDER_PREFIX
+                    ),
+                ));
+            }
+            // Validate the endpoint now rather than at the first chat, where the
+            // failure would look like a provider problem.
+            gyro_core::openai_compat_endpoint(&base_url).map_err(|error| {
+                cli_failure(
+                    CliErrorCategory::InvalidInput,
+                    format!("invalid --base-url: {error}"),
+                )
+            })?;
+            let display_name = name.unwrap_or_else(|| {
+                provider_id
+                    .trim_start_matches(gyro_core::CUSTOM_PROVIDER_PREFIX)
+                    .to_string()
+            });
+            let default_model_id = models.first().cloned();
+            GyroConfig::update(&paths, |config| {
+                let entry = gyro_core::ModelProviderConfig {
+                    id: provider_id.clone(),
+                    display_name: display_name.clone(),
+                    base_url: Some(base_url.clone()),
+                    api_key_ref: gyro_core::provider_api_key_account(&provider_id),
+                    // Adding a provider is the user saying they want to use it,
+                    // and a run is refused for a provider that is not enabled.
+                    enabled: true,
+                    default_model_id: default_model_id.clone(),
+                    kind: Some(gyro_core::OPENAI_COMPATIBLE_KIND.to_string()),
+                    model_ids: models.clone(),
+                };
+                match config
+                    .model_providers
+                    .iter_mut()
+                    .find(|provider| provider.id == provider_id)
+                {
+                    Some(existing) => *existing = entry,
+                    None => config.model_providers.push(entry),
+                }
+                Ok(())
+            })?;
+            let output = ConfigMutationOutput {
+                status: CliStatus::Done,
+                action: "add-provider",
+                target: provider_id,
+                message: format!(
+                    "configured {display_name} at {base_url} with {} model{}",
+                    models.len(),
+                    if models.len() == 1 { "" } else { "s" }
+                ),
+            };
+            if json {
+                print_json(&output)?;
+            } else {
+                println!("{}", output.message);
+            }
+        }
+        ConfigCommand::RemoveProvider { provider_id, json } => {
+            if !gyro_core::is_custom_provider_id(&provider_id) {
+                return Err(cli_failure(
+                    CliErrorCategory::InvalidInput,
+                    format!(
+                        "`{provider_id}` is a provider Gyro ships; only `{}` providers can be removed",
+                        gyro_core::CUSTOM_PROVIDER_PREFIX
+                    ),
+                ));
+            }
+            let display_name = GyroConfig::update(&paths, |config| {
+                let index = config
+                    .model_providers
+                    .iter()
+                    .position(|provider| provider.id == provider_id)
+                    .ok_or_else(|| {
+                        cli_failure(
+                            CliErrorCategory::InvalidInput,
+                            format!("unknown provider `{provider_id}`"),
+                        )
+                    })?;
+                let removed = config.model_providers.remove(index);
+                // A removed provider cannot stay the default for new chats.
+                if config.selected_provider_id.as_deref() == Some(provider_id.as_str()) {
+                    config.selected_provider_id = None;
+                }
+                Ok(removed.display_name)
+            })?;
+            // The config entry is gone either way; a key that was never stored
+            // is not a failure.
+            let cleared = gyro_core::clear_stored_provider_api_key(&provider_id).is_ok();
+            let output = ConfigMutationOutput {
+                status: CliStatus::Done,
+                action: "remove-provider",
+                target: provider_id,
+                message: if cleared {
+                    format!("removed {display_name} and its stored API key")
+                } else {
+                    format!("removed {display_name}")
+                },
             };
             if json {
                 print_json(&output)?;

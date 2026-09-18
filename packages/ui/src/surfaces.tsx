@@ -316,6 +316,7 @@ import type {
   UpdateState,
   CliUpdateOffer,
   CliUpdatePhase,
+  CustomProviderDraft,
   WorkbenchDensity,
   FileReviewSummary,
   WorkbenchMode,
@@ -368,6 +369,7 @@ import {
 import {
   defaultModelLabel,
   getProviderModel,
+  isCustomProviderId,
   isProviderExecutable,
   isProviderId,
   isProviderRuntimeUsable,
@@ -3958,8 +3960,12 @@ function WorkspaceSidebarContent({
     <>
       <div className="gyro-sidebar-persistent-header">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
-          <div className="gyro-sidebar-window-actions">
-            {canHideSidebar ? (
+          {/* Workspace hides the sidebar from the activity rail instead, so the
+              slot is left out rather than rendered empty: an empty box still
+              costs a flex gap and would push the surface switch away from the
+              traffic lights it belongs beside. */}
+          {canHideSidebar ? (
+            <div className="gyro-sidebar-window-actions">
               <button
                 aria-label="Hide sidebar"
                 className="gyro-sidebar-toggle-button"
@@ -3968,8 +3974,8 @@ function WorkspaceSidebarContent({
               >
                 <PanelLeft size={16} strokeWidth={1.5} />
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           <div
             aria-label="Primary surfaces"
             className="gyro-titlebar-switch"
@@ -19522,6 +19528,12 @@ type SettingsSurfaceProps = {
     value: string,
   ) => Promise<boolean>;
   onClearProviderApiKey?: (providerId: string) => void;
+  onAddCustomProvider?: (draft: CustomProviderDraft) => Promise<boolean>;
+  onRemoveCustomProvider?: (providerId: string) => Promise<boolean>;
+  onFetchCustomProviderModels?: (
+    baseUrl: string,
+    apiKey?: string,
+  ) => Promise<{ id: string; displayName: string }[]>;
   providerStatuses?: ProviderStatus[];
   onSelectProviderDefaultModel?: (
     providerId: ProviderId,
@@ -19681,6 +19693,207 @@ function ProviderApiKeyField({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Add or remove an endpoint the user defines.
+ *
+ * A custom provider is a config entry plus a Keychain key. The form collects
+ * the endpoint and its model ids; the id itself is derived by the desktop layer
+ * so the `custom:` prefix stays an implementation detail the user never types.
+ */
+function CustomProviderSection({
+  config,
+  savingProviderApiKeyId,
+  onAddCustomProvider,
+  onRemoveCustomProvider,
+  onFetchCustomProviderModels,
+}: Pick<
+  SettingsSurfaceProps,
+  | "config"
+  | "savingProviderApiKeyId"
+  | "onAddCustomProvider"
+  | "onRemoveCustomProvider"
+  | "onFetchCustomProviderModels"
+>) {
+  const [displayName, setDisplayName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [modelIds, setModelIds] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const busy = saving || fetching || Boolean(savingProviderApiKeyId);
+  const customProviders = providersForConfig(config).filter((provider) =>
+    isCustomProviderId(provider.id),
+  );
+  const parsedModelIds = modelIds
+    .split(/[\n,]/)
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const canSubmit =
+    Boolean(onAddCustomProvider) &&
+    !busy &&
+    displayName.trim().length > 0 &&
+    baseUrl.trim().length > 0 &&
+    parsedModelIds.length > 0;
+  return (
+    <SettingsGroup label="Custom providers">
+      <div className="gyro-provider-custom-section">
+        {customProviders.length > 0 ? (
+          <ul className="gyro-provider-custom-list">
+            {customProviders.map((provider) => (
+              <li key={provider.id}>
+                <div>
+                  <strong>{provider.displayName}</strong>
+                  <code>{provider.baseUrl}</code>
+                  <span>
+                    {provider.models.length} model
+                    {provider.models.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <button
+                  className="gyro-danger-button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setError(undefined);
+                    setSaving(true);
+                    try {
+                      await onRemoveCustomProvider?.(provider.id);
+                    } catch (failure) {
+                      setError(String(failure));
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  type="button"
+                >
+                  Remove provider
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="gyro-provider-custom-form">
+          <label>
+            <span>Display name</span>
+            <input
+              aria-label="Custom provider display name"
+              disabled={busy}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="My gateway"
+              value={displayName}
+            />
+          </label>
+          <label>
+            <span>Base URL</span>
+            <input
+              aria-label="Custom provider base URL"
+              autoComplete="off"
+              disabled={busy}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://gateway.example.com/v1"
+              spellCheck={false}
+              value={baseUrl}
+            />
+          </label>
+          <label>
+            <span>API key</span>
+            <input
+              aria-label="Custom provider API key"
+              autoComplete="off"
+              disabled={busy}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder="Leave empty for a local server"
+              spellCheck={false}
+              type="password"
+              value={apiKey}
+            />
+          </label>
+          <label className="is-wide">
+            <span>Model ids</span>
+            <textarea
+              aria-label="Custom provider model ids"
+              disabled={busy}
+              onChange={(event) => setModelIds(event.target.value)}
+              placeholder={"llama-3.3-70b\nqwen3-coder"}
+              rows={3}
+              spellCheck={false}
+              value={modelIds}
+            />
+          </label>
+          <div className="gyro-provider-custom-actions">
+            <button
+              className="gyro-secondary-button"
+              disabled={
+                !onFetchCustomProviderModels ||
+                busy ||
+                baseUrl.trim().length === 0
+              }
+              onClick={async () => {
+                setError(undefined);
+                setFetching(true);
+                try {
+                  const models = await onFetchCustomProviderModels?.(
+                    baseUrl.trim(),
+                    apiKey,
+                  );
+                  if (models && models.length > 0) {
+                    setModelIds(models.map((model) => model.id).join("\n"));
+                  } else {
+                    setError("The endpoint reported no models.");
+                  }
+                } catch (failure) {
+                  setError(String(failure));
+                } finally {
+                  setFetching(false);
+                }
+              }}
+              type="button"
+            >
+              <RefreshCw size={14} />
+              {fetching ? "Fetching…" : "Fetch models"}
+            </button>
+            <button
+              className="gyro-primary-button"
+              disabled={!canSubmit}
+              onClick={async () => {
+                setError(undefined);
+                setSaving(true);
+                try {
+                  const added = await onAddCustomProvider?.({
+                    displayName: displayName.trim(),
+                    baseUrl: baseUrl.trim(),
+                    apiKey,
+                    modelIds: parsedModelIds,
+                  });
+                  if (added) {
+                    setDisplayName("");
+                    setBaseUrl("");
+                    setApiKey("");
+                    setModelIds("");
+                  }
+                } catch (failure) {
+                  setError(String(failure));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              type="button"
+            >
+              <Plus size={15} />
+              Add provider
+            </button>
+          </div>
+          {error ? <p className="gyro-provider-custom-error">{error}</p> : null}
+          <p className="gyro-provider-custom-note">
+            Plain HTTP is accepted only for localhost. Tool calls to this
+            endpoint cross the same approvals as any other provider.
+          </p>
+        </div>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -19891,6 +20104,9 @@ export function SettingsSurface({
   savingProviderApiKeyId,
   onSaveProviderApiKey,
   onClearProviderApiKey,
+  onAddCustomProvider,
+  onRemoveCustomProvider,
+  onFetchCustomProviderModels,
   providerStatuses,
   onSelectProviderDefaultModel,
   selectedUsageProviderId,
@@ -20716,6 +20932,13 @@ export function SettingsSurface({
               savingProviderApiKeyId={savingProviderApiKeyId}
               onSaveProviderApiKey={onSaveProviderApiKey}
               onClearProviderApiKey={onClearProviderApiKey}
+            />
+            <CustomProviderSection
+              config={config}
+              savingProviderApiKeyId={savingProviderApiKeyId}
+              onAddCustomProvider={onAddCustomProvider}
+              onRemoveCustomProvider={onRemoveCustomProvider}
+              onFetchCustomProviderModels={onFetchCustomProviderModels}
             />
           </SettingsSection>
         ) : null}

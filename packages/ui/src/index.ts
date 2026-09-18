@@ -118,6 +118,8 @@ export type {
   ModelFocus,
   ModelFollowMode,
   ModelProviderConfig,
+  CustomProviderDraft,
+  CustomProviderId,
   HarnessRunStatus,
   Notification,
   NotificationKind,
@@ -350,9 +352,11 @@ export type {
 } from "./clean-machine-path";
 export {
   applyProviderCapabilityManifest,
+  CUSTOM_PROVIDER_PREFIX,
   defaultModelLabel,
   getProviderCatalogEntry,
   getProviderModel,
+  isCustomProviderId,
   isProviderId,
   isProviderExecutable,
   isProviderRuntimeUsable,
