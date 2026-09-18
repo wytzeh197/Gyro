@@ -76,6 +76,20 @@ pub struct ModelProviderConfig {
     /// schema. A user-chosen default is not derivable, so it persists here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model_id: Option<String>,
+    /// How to run this provider, when its id cannot say.
+    ///
+    /// Providers in the static registry are identified by id alone. A provider
+    /// the user defined points at an arbitrary endpoint and carries
+    /// [`crate::OPENAI_COMPATIBLE_KIND`] here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Model ids for a provider the shipped catalog does not describe.
+    ///
+    /// Catalog providers have their model list derived on every render, so it
+    /// stays out of the on-disk schema; a custom provider has no catalog entry
+    /// to derive from and must persist its own list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -196,6 +210,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider:openai".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "anthropic".into(),
@@ -204,6 +220,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider:anthropic".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "kimi".into(),
@@ -212,6 +230,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:kimi".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "xai".into(),
@@ -220,6 +240,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:grok".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "gemini".into(),
@@ -228,6 +250,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:gemini".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "cursor".into(),
@@ -236,6 +260,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:cursor-agent".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "opencode".into(),
@@ -244,6 +270,8 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:opencode".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "ollama".into(),
@@ -252,6 +280,47 @@ impl Default for GyroConfig {
                     api_key_ref: "local-runtime:ollama".into(),
                     enabled: false,
                     default_model_id: None,
+                    kind: None,
+                    models: Vec::new(),
+                },
+                // API-key providers read over HTTPS rather than through a vendor
+                // CLI. Their `models` list is the shipped default; pointing one
+                // at a different endpoint is a custom provider, not an edit here.
+                ModelProviderConfig {
+                    id: "deepseek".into(),
+                    display_name: "DeepSeek".into(),
+                    base_url: Some("https://api.deepseek.com/v1".into()),
+                    api_key_ref: "provider:deepseek".into(),
+                    enabled: false,
+                    default_model_id: Some("deepseek-chat".into()),
+                    kind: None,
+                    models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                },
+                ModelProviderConfig {
+                    id: "mistral".into(),
+                    display_name: "Mistral".into(),
+                    base_url: Some("https://api.mistral.ai/v1".into()),
+                    api_key_ref: "provider:mistral".into(),
+                    enabled: false,
+                    default_model_id: Some("mistral-large-latest".into()),
+                    kind: None,
+                    models: vec!["mistral-large-latest".into(), "codestral-latest".into()],
+                },
+                ModelProviderConfig {
+                    id: "openrouter".into(),
+                    display_name: "OpenRouter".into(),
+                    base_url: Some("https://openrouter.ai/api/v1".into()),
+                    api_key_ref: "provider:openrouter".into(),
+                    enabled: false,
+                    default_model_id: Some("anthropic/claude-sonnet-4.5".into()),
+                    kind: None,
+                    models: vec![
+                        "anthropic/claude-sonnet-4.5".into(),
+                        "openai/gpt-5.1".into(),
+                        "google/gemini-3-pro-preview".into(),
+                        "deepseek/deepseek-chat".into(),
+                        "meta-llama/llama-3.3-70b-instruct".into(),
+                    ],
                 },
             ],
             command_profiles: vec![
@@ -463,6 +532,8 @@ impl GyroConfig {
                 api_key_ref: "provider-cli:kimi".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
             },
             ModelProviderConfig {
                 id: "xai".into(),
@@ -471,6 +542,8 @@ impl GyroConfig {
                 api_key_ref: "provider-cli:grok".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
             },
             ModelProviderConfig {
                 id: "gemini".into(),
@@ -479,6 +552,8 @@ impl GyroConfig {
                 api_key_ref: "provider-cli:gemini".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
             },
             ModelProviderConfig {
                 id: "cursor".into(),
@@ -487,6 +562,8 @@ impl GyroConfig {
                 api_key_ref: "provider-cli:cursor-agent".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
             },
             ModelProviderConfig {
                 id: "opencode".into(),
@@ -495,6 +572,8 @@ impl GyroConfig {
                 api_key_ref: "provider-cli:opencode".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
             },
             ModelProviderConfig {
                 id: "ollama".into(),
@@ -503,6 +582,47 @@ impl GyroConfig {
                 api_key_ref: "local-runtime:ollama".into(),
                 enabled: false,
                 default_model_id: None,
+                kind: None,
+                models: Vec::new(),
+            },
+            // Presets added after this config format shipped. Existing files
+            // are backfilled here so a new provider appears without the user
+            // hand-editing config.json.
+            ModelProviderConfig {
+                id: "deepseek".into(),
+                display_name: "DeepSeek".into(),
+                base_url: Some("https://api.deepseek.com/v1".into()),
+                api_key_ref: "provider:deepseek".into(),
+                enabled: false,
+                default_model_id: Some("deepseek-chat".into()),
+                kind: None,
+                models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+            },
+            ModelProviderConfig {
+                id: "mistral".into(),
+                display_name: "Mistral".into(),
+                base_url: Some("https://api.mistral.ai/v1".into()),
+                api_key_ref: "provider:mistral".into(),
+                enabled: false,
+                default_model_id: Some("mistral-large-latest".into()),
+                kind: None,
+                models: vec!["mistral-large-latest".into(), "codestral-latest".into()],
+            },
+            ModelProviderConfig {
+                id: "openrouter".into(),
+                display_name: "OpenRouter".into(),
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                api_key_ref: "provider:openrouter".into(),
+                enabled: false,
+                default_model_id: Some("anthropic/claude-sonnet-4.5".into()),
+                kind: None,
+                models: vec![
+                    "anthropic/claude-sonnet-4.5".into(),
+                    "openai/gpt-5.1".into(),
+                    "google/gemini-3-pro-preview".into(),
+                    "deepseek/deepseek-chat".into(),
+                    "meta-llama/llama-3.3-70b-instruct".into(),
+                ],
             },
         ] {
             if !self

@@ -393,9 +393,13 @@ mod tests {
     #[test]
     fn every_executable_provider_declares_a_contract() {
         for descriptor in crate::provider_registry::provider_registry() {
+            // A contract describes how Gyro drives a vendor CLI. Providers that
+            // speak to an endpoint directly have no argument vector to guard.
             if matches!(
                 descriptor.execution_kind,
-                ProviderExecutionKind::ReadinessOnly | ProviderExecutionKind::OllamaApi
+                ProviderExecutionKind::ReadinessOnly
+                    | ProviderExecutionKind::OllamaApi
+                    | ProviderExecutionKind::OpenAiCompatibleApi
             ) {
                 continue;
             }

@@ -2142,6 +2142,16 @@ fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
         Some(gyro_core::ProviderExecutionKind::KimiAcp) => Ok(CliProviderKind::Kimi),
         Some(gyro_core::ProviderExecutionKind::AcpCli) => Ok(CliProviderKind::Acp),
         Some(gyro_core::ProviderExecutionKind::OllamaApi) => Ok(CliProviderKind::Ollama),
+        // The HTTPS runner exists in gyro-core, but wiring it into the CLI chat
+        // loop needs its own approval bridge. Until then, say so rather than
+        // reporting the provider as unconfigured.
+        Some(gyro_core::ProviderExecutionKind::OpenAiCompatibleApi) => Err(cli_failure(
+            CliErrorCategory::ProviderUnavailable,
+            format!(
+                "provider `{}` runs through the Gyro desktop app; the CLI chat runner does not support API-key providers yet",
+                profile.provider_id.as_deref().unwrap_or("unknown")
+            ),
+        )),
         Some(gyro_core::ProviderExecutionKind::ReadinessOnly) => Err(cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!(
@@ -4833,13 +4843,14 @@ fn setup_command(args: SetupArgs) -> Result<()> {
                 provider_id: provider.id.clone(),
                 base_url: provider.base_url.clone(),
                 api_key_ref: Some(provider.api_key_ref.clone()),
+                kind: provider.kind.clone(),
             });
             let (status, message, next) = match health {
                 Ok(health) if health.runtime_status == "ready" => {
                     (CliStatus::Ready, health.output, None)
                 }
                 Ok(health) => {
-                    let executable_provider = gyro_core::provider_is_executable(&provider.id);
+                    let executable_provider = gyro_core::provider_is_executable_for(provider);
                     let status = if executable_provider {
                         CliStatus::Blocked
                     } else {

@@ -11,6 +11,7 @@
 //! key would break the very run being protected. A scrubbed run keeps the keys
 //! the launched provider needs for its own auth and drops every other one.
 
+use crate::provider_registry::is_custom_provider_id;
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -33,6 +34,9 @@ pub fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str
         ],
         "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
         "cursor" => &["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "mistral" => &["MISTRAL_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
         _ => &[],
     }
 }
@@ -47,8 +51,13 @@ pub fn provider_api_key_env_name(provider_id: &str) -> Option<&'static str> {
     provider_credential_env_vars(provider_id).first().copied()
 }
 
+/// Whether Gyro can hold an API key for this provider.
+///
+/// A provider with a known environment variable accepts one, and so does any
+/// user-defined `custom:` provider: there is no vendor env var to name, so its
+/// key lives in the Keychain alone and only the HTTPS runner reads it.
 pub fn provider_supports_api_key(provider_id: &str) -> bool {
-    provider_api_key_env_name(provider_id).is_some()
+    provider_api_key_env_name(provider_id).is_some() || is_custom_provider_id(provider_id)
 }
 
 /// Map a provider program name (`grok`, `codex`, …) to its Gyro provider id.
@@ -75,6 +84,23 @@ pub fn stored_provider_api_key(provider_id: &str) -> Result<Option<String>> {
     }
     let value = crate::keychain::get_api_key(&provider_api_key_account(provider_id))?;
     Ok(value.filter(|item| !item.trim().is_empty()))
+}
+
+/// The API key to use in-process, rather than to hand to a child process.
+///
+/// The process environment wins over the Keychain, matching what
+/// [`stored_provider_api_key_env`] does for CLI injection, so a run uses the
+/// same key the user would expect Gyro to be using.
+pub fn provider_api_key_value(provider_id: &str) -> Option<String> {
+    if let Some(env_name) = provider_api_key_env_name(provider_id) {
+        if let Ok(value) = std::env::var(env_name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    stored_provider_api_key(provider_id).ok().flatten()
 }
 
 pub fn set_stored_provider_api_key(provider_id: &str, value: &str) -> Result<()> {
@@ -365,6 +391,58 @@ fn normalize_for_compare(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_key_support_covers_new_presets_and_custom_providers() {
+        for provider_id in [
+            "openai",
+            "anthropic",
+            "xai",
+            "gemini",
+            "kimi",
+            "cursor",
+            "deepseek",
+            "mistral",
+            "openrouter",
+            "custom:my-gateway",
+        ] {
+            assert!(provider_supports_api_key(provider_id), "{provider_id}");
+        }
+        // Ollama is contacted without credentials, and an unknown id is not a
+        // provider Gyro can store a key for.
+        assert!(!provider_supports_api_key("ollama"));
+        assert!(!provider_supports_api_key("mystery"));
+    }
+
+    #[test]
+    fn presets_name_the_env_var_their_vendor_reads() {
+        assert_eq!(
+            provider_credential_env_vars("deepseek"),
+            ["DEEPSEEK_API_KEY"]
+        );
+        assert_eq!(provider_credential_env_vars("mistral"), ["MISTRAL_API_KEY"]);
+        assert_eq!(
+            provider_credential_env_vars("openrouter"),
+            ["OPENROUTER_API_KEY"]
+        );
+        assert_eq!(
+            provider_api_key_env_name("openrouter"),
+            Some("OPENROUTER_API_KEY")
+        );
+    }
+
+    #[test]
+    fn a_custom_provider_stores_a_key_with_no_env_var_to_name() {
+        // The Keychain account scheme is per-id and needs no table entry, which
+        // is what lets an arbitrary endpoint hold a key at all.
+        assert_eq!(provider_api_key_env_name("custom:my-gateway"), None);
+        assert_eq!(
+            provider_api_key_account("custom:my-gateway"),
+            "provider:custom:my-gateway"
+        );
+        // Nothing to inject into a child process, and nothing to scrub for.
+        assert!(provider_credential_env_vars("custom:my-gateway").is_empty());
+    }
 
     fn names(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()

@@ -2,8 +2,10 @@ use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
 use crate::{
-    check_acp_health, check_kimi_acp_health, discover_ollama_models, provider_descriptor,
-    provider_has_api_key, stored_provider_api_key_env, KimiAcpHealthStatus, ProviderHealthKind,
+    check_acp_health, check_kimi_acp_health, discover_ollama_models, health_kind_for,
+    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
+    provider_api_key_env_name, provider_api_key_value, provider_has_api_key,
+    stored_provider_api_key_env, KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,12 @@ pub struct ProviderHealthRequest {
     pub provider_id: String,
     pub base_url: Option<String>,
     pub api_key_ref: Option<String>,
+    /// Config `kind`, for a provider the static registry does not describe.
+    ///
+    /// A user-defined provider is only identifiable from its config entry, and
+    /// its health probe has to follow the same resolution the runner does.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -64,9 +72,9 @@ pub struct ProviderHealthService;
 
 impl ProviderHealthService {
     pub fn check(&self, request: ProviderHealthRequest) -> Result<ProviderHealthCheck> {
-        let descriptor = provider_descriptor(&request.provider_id)
+        let health_kind = health_kind_for(&request.provider_id, request.kind.as_deref())
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", request.provider_id))?;
-        match descriptor.health_kind {
+        match health_kind {
             ProviderHealthKind::CodexCli => self.check_openai(request),
             ProviderHealthKind::ClaudeCli => self.check_cli_or_stored_key(
                 &CliProbe {
@@ -97,6 +105,10 @@ impl ProviderHealthService {
             ProviderHealthKind::OllamaApi => {
                 Ok(ollama_provider_health(request.base_url.as_deref()))
             }
+            ProviderHealthKind::OpenAiCompatibleApi => Ok(openai_compatible_provider_health(
+                &request.provider_id,
+                request.base_url.as_deref(),
+            )),
         }
     }
 
@@ -227,6 +239,87 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
             privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
             diagnostics_opt_in: false,
         },
+    }
+}
+
+/// Readiness for a provider Gyro reaches over HTTPS with an API key.
+///
+/// Asking for the model list is what proves the key works; a TCP connect would
+/// only prove the host exists. A stored key whose endpoint cannot be reached is
+/// deliberately a warning rather than a failure: an offline laptop must not
+/// make a valid key look rejected, so the message says which half failed.
+fn openai_compatible_provider_health(
+    provider_id: &str,
+    base_url: Option<&str>,
+) -> ProviderHealthCheck {
+    let check = |output: String, runtime_status: &str| ProviderHealthCheck {
+        provider_id: provider_id.into(),
+        output: crate::security::redact_secrets(&output),
+        runtime_status: runtime_status.into(),
+        auth_owner: "provider-sdk".into(),
+        auth_command: None,
+        login_command: None,
+        account_label: None,
+        subscription_label: None,
+        provider_mode: Some("OpenAI-compatible HTTPS".into()),
+        secret_storage: "macOS Keychain, or the provider's environment variable".into(),
+        privacy_note:
+            "Gyro sends prompts straight to the endpoint you configured; no vendor CLI is involved."
+                .into(),
+        diagnostics_opt_in: false,
+    };
+    let Some(raw) = base_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return check(
+            "No base URL is set for this provider. Add one in Settings > Providers, for example https://api.deepseek.com/v1.".into(),
+            "warning",
+        );
+    };
+    let endpoint = match openai_compat_endpoint(raw) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            return check(
+                format!("This provider's base URL cannot be used: {error}"),
+                "warning",
+            )
+        }
+    };
+    let api_key = provider_api_key_value(provider_id);
+    if api_key.is_none() && !openai_compat_host_is_loopback(&endpoint) {
+        let env_hint = provider_api_key_env_name(provider_id)
+            .map(|name| format!(", or set {name}"))
+            .unwrap_or_default();
+        return check(
+            format!(
+                "No API key is stored for this provider. Add one in Settings > Providers{env_hint}."
+            ),
+            "not-logged-in",
+        );
+    }
+    match openai_compat_list_models(endpoint.as_str(), api_key.as_deref().unwrap_or_default()) {
+        Ok(discovery) if discovery.models.is_empty() => check(
+            format!(
+                "{} answered but reported no models; check that the base URL includes the API path.",
+                discovery.base_url
+            ),
+            "no-models",
+        ),
+        Ok(discovery) => check(
+            format!(
+                "Connected to {}; {} model{} available.",
+                discovery.base_url,
+                discovery.models.len(),
+                if discovery.models.len() == 1 { "" } else { "s" }
+            ),
+            "ready",
+        ),
+        Err(error) if api_key.is_some() => check(
+            format!("A key is stored, but the endpoint could not be reached: {error}"),
+            "warning",
+        ),
+        Err(error) => check(
+            format!("{endpoint} is unavailable: {error}"),
+            "not-installed",
+        ),
     }
 }
 

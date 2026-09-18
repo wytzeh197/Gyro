@@ -76,10 +76,10 @@ pub use council::{
 pub use credentials::{
     apply_stored_provider_api_key, clear_stored_provider_api_key, credential_store_paths,
     env_name_is_credential, path_is_credential_store, provider_api_key_account,
-    provider_api_key_env_name, provider_credential_env_vars, provider_has_api_key,
-    provider_id_from_program, provider_supports_api_key, relative_path_is_in_credential_store,
-    set_stored_provider_api_key, stored_provider_api_key, stored_provider_api_key_env,
-    CredentialPolicy,
+    provider_api_key_env_name, provider_api_key_value, provider_credential_env_vars,
+    provider_has_api_key, provider_id_from_program, provider_supports_api_key,
+    relative_path_is_in_credential_store, set_stored_provider_api_key, stored_provider_api_key,
+    stored_provider_api_key_env, CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
@@ -154,8 +154,10 @@ pub use provider_health::{
     ProviderHealthRequest, ProviderHealthService,
 };
 pub use provider_registry::{
-    provider_descriptor, provider_is_executable, provider_registry, ProviderDescriptor,
-    ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
+    execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,
+    provider_descriptor, provider_is_executable, provider_is_executable_for, provider_registry,
+    ProviderDescriptor, ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
+    CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
 };
 pub use provider_stream::{
     extract_codex_agent_message_text, extract_provider_session_id, extract_provider_text_chunk,

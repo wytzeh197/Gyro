@@ -129,7 +129,9 @@ pub fn openai_compat_host_is_loopback(url: &Url) -> bool {
     }
 }
 
-pub fn openai_compat_tool_chat(request: OpenAiCompatChatRequest<'_>) -> Result<OpenAiCompatChatResponse> {
+pub fn openai_compat_tool_chat(
+    request: OpenAiCompatChatRequest<'_>,
+) -> Result<OpenAiCompatChatResponse> {
     openai_compat_tool_chat_with_progress(request, &CancellationToken::default(), |_| {})
 }
 
@@ -278,7 +280,12 @@ pub fn openai_compat_list_models(base_url: &str, api_key: &str) -> Result<OpenAi
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for entry in entries {
-        let id = entry.id.or(entry.name).unwrap_or_default().trim().to_string();
+        let id = entry
+            .id
+            .or(entry.name)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         if id.is_empty() || !seen.insert(id.clone()) {
             continue;
         }
@@ -466,7 +473,10 @@ impl ChatAccumulator {
                     slot.id = Some(id.to_string());
                 }
                 if let Some(function) = &call.function {
-                    if let Some(name) = function.name.as_deref().filter(|name| !name.trim().is_empty())
+                    if let Some(name) = function
+                        .name
+                        .as_deref()
+                        .filter(|name| !name.trim().is_empty())
                     {
                         slot.name = name.to_string();
                     }
@@ -531,8 +541,7 @@ fn parse_tool_arguments(raw: &str) -> serde_json::Value {
     if trimmed.is_empty() {
         return serde_json::json!({});
     }
-    serde_json::from_str(trimmed)
-        .unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()))
+    serde_json::from_str(trimmed).unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()))
 }
 
 #[derive(Default, Deserialize)]
@@ -953,8 +962,7 @@ mod tests {
             "application/json",
             r#"{"models":[{"id":"local-llama"}]}"#,
         );
-        let discovery =
-            openai_compat_list_models(&format!("http://{address}/v1"), "").unwrap();
+        let discovery = openai_compat_list_models(&format!("http://{address}/v1"), "").unwrap();
         let recorded = server.join().unwrap();
         assert!(recorded.header("authorization").is_none());
         assert_eq!(discovery.models[0].id, "local-llama");
