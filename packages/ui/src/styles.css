@@ -173,6 +173,12 @@
   --gyro-provider-gemini: #8bb8ff;
   --gyro-provider-cursor: #f2efe9;
   --gyro-provider-opencode: #f2efe9;
+  --gyro-provider-deepseek: #7ea6ff;
+  --gyro-provider-mistral: #ff7a35;
+  /* OpenRouter's own assets carry a hue: the lime glyph is the one drawn for
+     dark surfaces, so the token keeps the brand ink instead of a flipped
+     monochrome. */
+  --gyro-provider-openrouter: #c8ff00;
   --gyro-hero-heading: #ededed;
   --gyro-hero-brand: #a0a0a0;
   --gyro-hero-composer: #292929;
@@ -973,6 +979,9 @@
   --gyro-theme-preview-light-canvas: #f8f9fb;
   --gyro-theme-preview-light-content: #e9eef5;
   --gyro-provider-opencode: #1c2027;
+  --gyro-provider-deepseek: #2c5bd0;
+  --gyro-provider-mistral: #c2480c;
+  --gyro-provider-openrouter: #7624f4;
   --gyro-hero-heading: #20242a;
   --gyro-hero-brand: #747d88;
   --gyro-hero-composer: #ffffff;
@@ -1491,6 +1500,13 @@ button {
 .gyro-sidebar-model-logo .gyro-provider-logo {
   height: 14px;
   width: 14px;
+}
+
+/* Two letters in 14px need to shed the tracking a larger well can afford. */
+.gyro-sidebar-model-logo .gyro-provider-logo > span {
+  font-size: 7px;
+  letter-spacing: 0;
+  padding-left: 0;
 }
 
 .gyro-session-row:hover .gyro-sidebar-thread-main,
@@ -6167,17 +6183,36 @@ button.gyro-account-menu-row:hover {
   width: 100%;
 }
 
+/* Sized from the mark around it rather than a fixed 19px: the same monogram
+   has to sit in a 14px sidebar row and a 34px settings tile. */
 .gyro-provider-logo > span {
   align-items: center;
-  border: 1px solid currentColor;
+  border: 0.5px solid color-mix(in srgb, currentColor 30%, transparent);
   border-radius: var(--gyro-radius-sm);
   display: inline-flex;
   font-size: 9px;
-  font-weight: 700;
-  height: 19px;
+  font-weight: 620;
+  height: 100%;
   justify-content: center;
+  letter-spacing: 0.04em;
   line-height: 1;
-  width: 19px;
+  /* Tracking adds space after the second letter; pad the other side back so
+     the pair sits optically centred in the well. */
+  padding-left: 0.04em;
+  width: 100%;
+}
+
+/*
+ * A monogram stands in for a mark that does not exist, so it must not borrow
+ * another provider's ink. The well takes the muted tone and the letters keep
+ * full text contrast on top of it.
+ */
+.gyro-provider-logo.is-monogram {
+  color: var(--gyro-muted);
+}
+
+.gyro-provider-logo.is-monogram > span {
+  color: var(--gyro-text);
 }
 
 .gyro-provider-logo.is-openai,
@@ -6194,6 +6229,18 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-logo.is-opencode {
   color: var(--gyro-provider-opencode);
+}
+
+.gyro-provider-logo.is-deepseek {
+  color: var(--gyro-provider-deepseek);
+}
+
+.gyro-provider-logo.is-mistral {
+  color: var(--gyro-provider-mistral);
+}
+
+.gyro-provider-logo.is-openrouter {
+  color: var(--gyro-provider-openrouter);
 }
 
 /* Ollama and Grok are monochrome marks: dark ink on light, light ink on dark. */
@@ -17318,6 +17365,45 @@ textarea,
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
+.gyro-provider-icon:has(.gyro-provider-logo.is-deepseek),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-deepseek) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-deepseek) 12%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-deepseek) 34%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-provider-icon:has(.gyro-provider-logo.is-mistral),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-mistral) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-mistral) 12%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-mistral) 36%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-provider-icon:has(.gyro-provider-logo.is-openrouter),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-openrouter) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-openrouter) 8%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-openrouter) 26%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
 .gyro-provider-model-picker button.is-active,
 .gyro-settings-nav button.is-active,
 .gyro-surface-row.is-active {
@@ -21299,31 +21385,137 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-provider-api-key-section {
-  padding: 16px;
-  max-width: 520px;
+  padding: 16px 18px 18px;
+  max-width: 620px;
 }
-.gyro-provider-api-key-section > label {
+
+/* Picker, key and action read as one sentence, so they share one line and the
+   consequence sits under it rather than between the controls. */
+.gyro-provider-api-key {
   display: grid;
   gap: 8px;
 }
-.gyro-provider-api-key {
-  display: grid;
-  gap: 6px;
-  padding-top: 8px;
+
+.gyro-provider-api-key-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.gyro-provider-api-key > strong {
+.gyro-provider-api-key-row > select {
+  flex: 0 0 auto;
+}
+
+.gyro-provider-api-key-row > input {
+  background: var(--gyro-premium-control);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
+  flex: 1 1 180px;
+  font: inherit;
   font-size: 12px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.gyro-provider-api-key-row > input::placeholder {
+  color: var(--gyro-faint);
 }
 
 .gyro-provider-api-key > span {
   color: var(--gyro-muted);
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
-.gyro-provider-api-key > input {
+/*
+ * Custom endpoints: what is already configured, then the form that adds one.
+ * Both sit inside a settings group, so they follow the group's 18px text rail
+ * instead of inventing their own inset, and reuse the same control surface as
+ * the API-key form directly above them.
+ */
+.gyro-provider-custom-section {
+  display: grid;
+  gap: 16px;
+  padding: 16px 18px 18px;
+}
+
+.gyro-provider-custom-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  /* Same measure as the form below, so the group reads as one column. */
+  max-width: 620px;
+  padding: 0;
+}
+
+.gyro-provider-custom-list > li {
+  align-items: center;
+  background: var(--gyro-pane);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.gyro-provider-custom-list > li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-provider-custom-list strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 590;
+}
+
+.gyro-provider-custom-list code {
+  font-family: var(--gyro-mono);
+}
+
+.gyro-provider-custom-list li > div > span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Name, URL and key are short and related, so they pair up across two columns
+   and the model list takes the full width it needs. */
+.gyro-provider-custom-form {
+  display: grid;
+  gap: 12px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 620px;
+}
+
+.gyro-provider-custom-form > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-provider-custom-form > label.is-wide,
+.gyro-provider-custom-actions,
+.gyro-provider-custom-error,
+.gyro-provider-custom-note {
+  grid-column: 1 / -1;
+}
+
+.gyro-provider-custom-form > label > span {
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.gyro-provider-custom-form :is(input, textarea) {
   background: var(--gyro-premium-control);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-md);
@@ -21331,13 +21523,54 @@ button.gyro-settings-row em::after {
   font: inherit;
   font-size: 12px;
   min-height: 30px;
-  padding: 0 8px;
+  padding: 6px 8px;
+  width: 100%;
 }
 
-.gyro-provider-api-key > div {
+.gyro-provider-custom-form textarea {
+  font-family: var(--gyro-mono);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.gyro-provider-custom-form :is(input, textarea)::placeholder {
+  color: var(--gyro-faint);
+}
+
+.gyro-provider-custom-form :is(input, textarea):disabled {
+  color: var(--gyro-faint);
+}
+
+/*
+ * Fetching needs the base URL and key above it, so the action sits in the grid
+ * cell beside them, bottom-aligned with those inputs. That leaves one primary
+ * action under the form instead of a pair competing for the same moment.
+ */
+.gyro-provider-custom-fetch {
+  align-self: end;
+  display: flex;
+}
+
+.gyro-provider-custom-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.gyro-provider-custom-error {
+  color: var(--gyro-danger);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.gyro-provider-custom-note {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  padding-top: 12px;
 }
 
 .gyro-usage-toolbar {
@@ -21884,6 +22117,9 @@ button.gyro-settings-row em::after {
 }
 
 @media (max-width: 760px) {
+  .gyro-provider-custom-form {
+    grid-template-columns: 1fr;
+  }
   .gyro-settings-row {
     grid-template-columns: 1fr;
     gap: 11px;
@@ -22023,8 +22259,8 @@ button.gyro-settings-row em::after {
 .gyro-provider-identity > .gyro-provider-logo > span {
   border: 0;
   font-size: 11px;
-  height: 19px;
-  width: 19px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .gyro-provider-identity strong,
@@ -27330,26 +27566,27 @@ button.gyro-account-menu-row:hover,
   min-width: 0;
 }
 
-.gyro-sidebar-new-session-menu button strong,
-.gyro-sidebar-new-session-menu button small {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  line-height: 1.4;
-}
-
+/* The popover is only as wide as the sidebar column, so a label that wraps
+   grows the row past its min-height and the second line lands on the row below
+   it. Keep every launcher row one line and truncate instead. */
 .gyro-sidebar-new-session-menu button strong {
+  display: block;
   font-size: 12px;
   font-weight: 500;
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-sidebar-new-session-menu button small {
-  color: var(--gyro-premium-muted);
-  font-size: 12px;
-  white-space: normal;
-  text-overflow: clip;
-  overflow: visible;
+  display: block;
   line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-sidebar-session-group-label {
@@ -32830,6 +33067,39 @@ button.gyro-account-menu-row:hover,
   display: flex;
   gap: 6px;
   margin-left: auto;
+}
+
+/*
+ * The running cost, beside "Working for 21s".
+ *
+ * Tabular figures so a number climbing through a long turn does not jitter the
+ * header, and the faint tone the header already uses: this is a reading the eye
+ * can check, not a thing to look at.
+ */
+.gyro-run-token-count {
+  color: var(--gyro-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * What the finished message cost, under the answer it belongs to.
+ *
+ * Only the providers Gyro meters itself report this, so most turns have no such
+ * line and the transcript keeps its rhythm.
+ */
+/*
+ * Selector carries the element because `.gyro-chat-transcript .gyro-message p`
+ * sets body type on every paragraph in a message and outranks a lone class.
+ * This line is a reading about the message, not a line of it.
+ */
+.gyro-message p.gyro-message-token-count {
+  color: var(--gyro-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  /* Clear of the last line, or the count reads as another sentence of it. */
+  margin: 12px 0 0;
 }
 
 .gyro-run-header-actions button {
@@ -40937,6 +41207,19 @@ textarea:focus-visible,
 .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
 .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
   animation: gyro-native-surface-enter 160ms var(--gyro-premium-ease) both;
+}
+
+/*
+ * The enter animation gives both the actions block and the project list a
+ * stacking context of their own (a filled opacity/transform animation keeps
+ * one for as long as it is applied). That traps the launcher menu's z-index
+ * inside the actions block, and the project list — a later sibling — then
+ * paints over the open New Session menu, leaving its rows crossed by the
+ * session list. Lift the block that owns the menu above the list it covers.
+ */
+.gyro-sidebar-persistent-header ~ .gyro-sidebar-actions {
+  position: relative;
+  z-index: 20;
 }
 
 @media (prefers-reduced-motion: reduce) {

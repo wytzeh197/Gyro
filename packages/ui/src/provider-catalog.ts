@@ -51,6 +51,35 @@ export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
 ];
 
 /**
+ * The levels DeepSeek's `reasoning_effort` accepts with thinking on.
+ *
+ * The API takes `none | low | high | max` and defaults to `high`. `none` turns
+ * thinking off, which Gyro's effort vocabulary has no word for, so it is left
+ * out rather than mislabelled. `medium` and `xhigh` are accepted only as
+ * aliases that map to `high`, so offering them would be three names for one
+ * setting.
+ */
+export const DEEPSEEK_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "high",
+  "max",
+];
+
+/**
+ * The effort levels OpenRouter normalizes across the models it routes to.
+ *
+ * OpenRouter takes `reasoning_effort` on any model whose `supported_parameters`
+ * lists it and translates the value for the upstream vendor, so one ramp covers
+ * every routed model that reasons at all. A routed model that does not reason
+ * gets no effort in the catalog rather than a dial that does nothing.
+ */
+export const OPENROUTER_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+];
+
+/**
  * The thinking effort levels Kimi K3 accepts.
  *
  * The Kimi Code service provisions k3 with `support_efforts` of low, high,
@@ -469,8 +498,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     authMode: "env",
     authStatus: "not-connected",
     baseUrl: "https://api.deepseek.com/v1",
-    defaultModelId: "deepseek-chat",
-    selectedModelId: "deepseek-chat",
+    defaultModelId: "deepseek-flash",
+    selectedModelId: "deepseek-flash",
     capabilities: {
       executionKind: "openai-compatible-api",
       executable: true,
@@ -481,19 +510,25 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsUsage: false,
       visibility: "experimental",
     },
+    // `deepseek-chat` and `deepseek-reasoner` were the V3/R1 era names and no
+    // longer resolve. Both current models think by default and take the same
+    // effort ramp; the id chooses the model, not the mode.
     models: [
       {
-        id: "deepseek-chat",
-        displayName: "DeepSeek Chat",
-        description: "General chat and coding through DeepSeek's own API.",
-        contextWindowTokens: 128_000,
+        id: "deepseek-flash",
+        displayName: "DeepSeek V4.1 Flash",
+        description: "Fast general coding model, and the cheaper of the two.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
       },
       {
-        id: "deepseek-reasoner",
-        displayName: "DeepSeek Reasoner",
-        description:
-          "Reasons before answering, so the first token can take a while.",
-        contextWindowTokens: 128_000,
+        id: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        description: "Deeper reasoning for harder problems, at a higher price.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
       },
     ],
     effort: "medium",
@@ -507,8 +542,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     authMode: "env",
     authStatus: "not-connected",
     baseUrl: "https://api.mistral.ai/v1",
-    defaultModelId: "mistral-large-latest",
-    selectedModelId: "mistral-large-latest",
+    defaultModelId: "mistral-medium-latest",
+    selectedModelId: "mistral-medium-latest",
     capabilities: {
       executionKind: "openai-compatible-api",
       executable: true,
@@ -518,18 +553,35 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsUsage: false,
       visibility: "experimental",
     },
+    // No model here carries `supportedReasoningEfforts`, and that is deliberate:
+    // Mistral's `reasoning_effort` takes only `high` and `none`, which is a
+    // thinking switch rather than the ramp the effort control represents, and
+    // Gyro's vocabulary has no word for `none`. Offering "low" as a synonym for
+    // "off" would put a dial in front of a toggle.
     models: [
       {
+        id: "mistral-medium-latest",
+        displayName: "Mistral Medium 3.5",
+        description: "Frontier-class model tuned for agentic and coding work.",
+        contextWindowTokens: 256_000,
+      },
+      {
         id: "mistral-large-latest",
-        displayName: "Mistral Large",
-        description: "Mistral's flagship general model.",
-        contextWindowTokens: 128_000,
+        displayName: "Mistral Large 3",
+        description: "Open-weight flagship for general multimodal work.",
+        contextWindowTokens: 256_000,
+      },
+      {
+        id: "mistral-small-latest",
+        displayName: "Mistral Small 4",
+        description: "Cheapest of the three, and the fastest to first token.",
+        contextWindowTokens: 256_000,
       },
       {
         id: "codestral-latest",
         displayName: "Codestral",
         description: "Tuned for code completion and editing.",
-        contextWindowTokens: 256_000,
+        contextWindowTokens: 128_000,
       },
     ],
     effort: "medium",
@@ -546,8 +598,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     // A small curated list; OpenRouter serves hundreds, and Settings can fetch
     // the endpoint's own list. This provider doubles as the worked example of
     // the custom-provider mechanism.
-    defaultModelId: "anthropic/claude-sonnet-4.5",
-    selectedModelId: "anthropic/claude-sonnet-4.5",
+    defaultModelId: "anthropic/claude-sonnet-5",
+    selectedModelId: "anthropic/claude-sonnet-5",
     capabilities: {
       executionKind: "openai-compatible-api",
       executable: true,
@@ -559,34 +611,83 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
-        id: "anthropic/claude-sonnet-4.5",
-        displayName: "Claude Sonnet 4.5",
+        id: "anthropic/claude-sonnet-5",
+        displayName: "Claude Sonnet 5",
         description: "Strong general coding model, routed by OpenRouter.",
-        contextWindowTokens: 200_000,
-      },
-      {
-        id: "openai/gpt-5.1",
-        displayName: "GPT-5.1",
-        description: "OpenAI's general model, routed by OpenRouter.",
-        contextWindowTokens: 400_000,
-      },
-      {
-        id: "google/gemini-3-pro-preview",
-        displayName: "Gemini 3 Pro",
-        description: "Long-context reasoning, routed by OpenRouter.",
         contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },
       {
-        id: "deepseek/deepseek-chat",
-        displayName: "DeepSeek Chat",
+        id: "anthropic/claude-opus-5",
+        displayName: "Claude Opus 5",
+        description: "Anthropic's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "openai/gpt-6-astra",
+        displayName: "GPT-6 Astra",
+        description: "OpenAI's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_050_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "google/gemini-3.8-flash",
+        displayName: "Gemini 3.8 Flash",
+        description: "Long-context reasoning, routed by OpenRouter.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "x-ai/grok-4.6",
+        displayName: "Grok 4.6",
+        description: "xAI's coding model, routed by OpenRouter.",
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "deepseek/deepseek-v4.1-flash",
+        displayName: "DeepSeek V4.1 Flash",
         description: "Low-cost general model, routed by OpenRouter.",
-        contextWindowTokens: 128_000,
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "moonshotai/kimi-k3",
+        displayName: "Kimi K3",
+        description: "Open-weights agentic model, routed by OpenRouter.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "z-ai/glm-5.3",
+        displayName: "GLM 5.3",
+        description: "Open-weights coding model, routed by OpenRouter.",
+        contextWindowTokens: 1_310_720,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "qwen/qwen3.8-max-0902",
+        displayName: "Qwen3.8 Max",
+        description: "Qwen's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },
       {
         id: "meta-llama/llama-3.3-70b-instruct",
         displayName: "Llama 3.3 70B",
+        // The one model here that does not reason, so it carries no effort.
         description: "Open-weights general model, routed by OpenRouter.",
-        contextWindowTokens: 128_000,
+        contextWindowTokens: 131_072,
       },
     ],
     effort: "medium",

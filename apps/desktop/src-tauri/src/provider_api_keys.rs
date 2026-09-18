@@ -34,6 +34,9 @@ pub(crate) async fn set_provider_api_key(
 ) -> Result<ProviderApiKeyStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(to_string)?;
+        // A cached probe was taken before this key existed, so it must not keep
+        // answering "not signed in" now that Gyro holds one.
+        gyro_core::invalidate_provider_health_cache();
         Ok(ProviderApiKeyStatus {
             supported: true,
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),
@@ -51,6 +54,9 @@ pub(crate) async fn clear_provider_api_key(
 ) -> Result<ProviderApiKeyStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         gyro_core::clear_stored_provider_api_key(&provider_id).map_err(to_string)?;
+        // The opposite of the save path: a cached "signed in" must not outlive
+        // the key it was taken from.
+        gyro_core::invalidate_provider_health_cache();
         Ok(ProviderApiKeyStatus {
             supported: gyro_core::provider_supports_api_key(&provider_id),
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),

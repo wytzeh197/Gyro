@@ -10,8 +10,9 @@ use crate::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PROVIDER_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_HEALTH_MAX_STDOUT_CHARS: usize = 32 * 1024;
@@ -22,6 +23,22 @@ const PROVIDER_HEALTH_MAX_STDERR_CHARS: usize = 16 * 1024;
 // settings refresh slow or hiding persistent setup failures.
 const PROVIDER_HEALTH_ATTEMPTS: usize = 2;
 const PROVIDER_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(250);
+
+/// How long a probe result may answer for a provider without probing again.
+///
+/// A probe starts a provider CLI (`codex login status`, `claude auth status`)
+/// or calls a local endpoint, so it costs hundreds of milliseconds and a child
+/// process. The desktop legitimately asks for the same answer more than once —
+/// a config save re-runs the readiness sweep, and the sign-in watcher re-asks
+/// while a login settles — and every repeat used to spawn the CLI again. This
+/// window absorbs those repeats while staying well under the time it takes a
+/// person to finish a browser sign-in and press Connect again; every explicit
+/// user action passes `force` and probes for real.
+pub const PROVIDER_HEALTH_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// Cap on distinct providers held, so a session probing many hand-added
+/// endpoints cannot grow the map without bound.
+const PROVIDER_HEALTH_CACHE_CAPACITY: usize = 64;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +52,95 @@ pub struct ProviderHealthRequest {
     /// its health probe has to follow the same resolution the runner does.
     #[serde(default)]
     pub kind: Option<String>,
+    /// Probe now even when a cached result is still fresh.
+    ///
+    /// Set by an explicit user action — Settings' "Test provider" and the check
+    /// that follows a completed sign-in — where a stale answer would misreport
+    /// what the person just did. Background readiness sweeps leave it unset so
+    /// their repeats are served from the cache.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// A cached probe result and when it was taken.
+type ProviderHealthCacheEntry = (Instant, ProviderHealthCheck);
+
+/// Probe results keyed by everything a probe actually reads.
+///
+/// `api_key_ref` and `base_url` are part of the key because a stored-key or
+/// endpoint change must not inherit the previous answer, and an absent ref is
+/// normalized with an empty one so both spellings share a single entry.
+fn provider_health_cache_key(request: &ProviderHealthRequest) -> String {
+    let normalize = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("")
+            .to_string()
+    };
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        request.provider_id.trim(),
+        normalize(&request.api_key_ref),
+        normalize(&request.base_url),
+        normalize(&request.kind),
+    )
+}
+
+static PROVIDER_HEALTH_CACHE: Mutex<Vec<(String, ProviderHealthCacheEntry)>> =
+    Mutex::new(Vec::new());
+
+/// Best-effort cached lookup. A poisoned lock and a miss both mean "probe".
+fn cached_provider_health(request: &ProviderHealthRequest) -> Option<ProviderHealthCheck> {
+    let key = provider_health_cache_key(request);
+    let mut cache = PROVIDER_HEALTH_CACHE.lock().ok()?;
+    cache.retain(|(_, (taken_at, _))| taken_at.elapsed() < PROVIDER_HEALTH_CACHE_TTL);
+    cache
+        .iter()
+        .find(|(entry_key, _)| entry_key == &key)
+        .map(|(_, (_, check))| check.clone())
+}
+
+fn remember_provider_health(request: &ProviderHealthRequest, check: &ProviderHealthCheck) {
+    let Ok(mut cache) = PROVIDER_HEALTH_CACHE.lock() else {
+        return;
+    };
+    let key = provider_health_cache_key(request);
+    cache.retain(|(entry_key, (taken_at, _))| {
+        entry_key != &key && taken_at.elapsed() < PROVIDER_HEALTH_CACHE_TTL
+    });
+    if cache.len() >= PROVIDER_HEALTH_CACHE_CAPACITY {
+        cache.remove(0);
+    }
+    cache.push((key, (Instant::now(), check.clone())));
+}
+
+/// Drop every cached probe result.
+///
+/// Called when Gyro itself changes what a probe would see — a stored API key
+/// was written or cleared — so the next readiness sweep reports the new state
+/// instead of waiting out the TTL.
+pub fn invalidate_provider_health_cache() {
+    if let Ok(mut cache) = PROVIDER_HEALTH_CACHE.lock() {
+        cache.clear();
+    }
+}
+
+/// One provider's readiness, reusing a recent probe unless `force` is set.
+///
+/// This is the entry point the desktop command uses; it exists so the cache is
+/// consulted for readiness sweeps without making an explicit user action serve
+/// a stale answer.
+pub fn provider_health(request: ProviderHealthRequest) -> Result<ProviderHealthCheck> {
+    if !request.force {
+        if let Some(check) = cached_provider_health(&request) {
+            return Ok(check);
+        }
+    }
+    let check = ProviderHealthService.check(request.clone())?;
+    remember_provider_health(&request, &check);
+    Ok(check)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -902,5 +1008,81 @@ mod tests {
 
         assert_eq!(health.runtime_status, "no-models");
         assert!(health.output.contains("no models are installed"));
+    }
+
+    fn cache_probe_request(provider_id: &str, base_url: Option<&str>) -> ProviderHealthRequest {
+        ProviderHealthRequest {
+            provider_id: provider_id.to_string(),
+            base_url: base_url.map(str::to_string),
+            api_key_ref: None,
+            kind: None,
+            force: false,
+        }
+    }
+
+    /// A readiness sweep asks the same question repeatedly. Each repeat used to
+    /// start a provider CLI again; the repeat must now be answered from the
+    /// probe already taken, while an explicit user action still probes for real.
+    #[test]
+    fn repeat_readiness_probes_reuse_the_recent_result() {
+        invalidate_provider_health_cache();
+        let request = cache_probe_request("cursor", None);
+
+        let first = provider_health(request.clone()).unwrap();
+        // Reads whatever this machine actually has; the value only has to be
+        // reproducible for the cache assertions below.
+        let probed_status = first.runtime_status.clone();
+        assert!(
+            cached_provider_health(&request).is_some(),
+            "a completed probe should be remembered for the readiness sweep"
+        );
+
+        // What the desktop would show if a cached answer were ever stale.
+        let mut poisoned = first.clone();
+        poisoned.runtime_status = "ready".into();
+        remember_provider_health(&request, &poisoned);
+        assert_eq!(
+            provider_health(request.clone()).unwrap().runtime_status,
+            "ready",
+            "an unforced repeat is served from the cache"
+        );
+
+        let forced = ProviderHealthRequest {
+            force: true,
+            ..request.clone()
+        };
+        assert_eq!(
+            provider_health(forced).unwrap().runtime_status,
+            probed_status,
+            "a forced probe ignores the cached answer"
+        );
+        invalidate_provider_health_cache();
+        assert_eq!(
+            provider_health(request).unwrap().runtime_status,
+            probed_status,
+            "an invalidated cache re-probes instead of answering stale"
+        );
+    }
+
+    /// The probe reads the endpoint it is pointed at, so a different endpoint
+    /// must not inherit the previous one's answer.
+    #[test]
+    fn probe_cache_is_keyed_by_the_endpoint_it_probed() {
+        invalidate_provider_health_cache();
+        let request = cache_probe_request("ollama", Some("http://127.0.0.1:9/api"));
+        let mut poisoned = ProviderHealthService
+            .check(cache_probe_request("ollama", Some("http://127.0.0.1:9/api")))
+            .unwrap();
+        poisoned.output = "cached for the first endpoint".into();
+        poisoned.runtime_status = "ready".into();
+        remember_provider_health(&request, &poisoned);
+
+        let other = cache_probe_request("ollama", Some("http://127.0.0.1:10/api"));
+        let answered = provider_health(other).unwrap();
+        assert_ne!(
+            answered.output, "cached for the first endpoint",
+            "a different base URL must probe instead of reusing another endpoint's answer"
+        );
+        invalidate_provider_health_cache();
     }
 }

@@ -53,7 +53,7 @@ use gyro_core::{
     OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
     ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
     ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderHealthRequest, ProviderMutationJournalContext,
     ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
     SessionOrigin, SessionStore, SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin,
     UsageOutcome, UsageTokens, UsageTotals, WorkspaceCheckReport, WorkspaceContextSnapshot,
@@ -74,7 +74,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering},
     mpsc, Arc, Condvar, Mutex, OnceLock, Weak,
 };
 use std::time::{Duration, Instant, SystemTime};
@@ -91,8 +91,10 @@ mod menu_bar;
 mod reply_segments;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod provider_context;
+mod provider_identity;
 mod session_browser;
 use provider_context::*;
+use provider_identity::provider_model_identity;
 mod source_control_review;
 mod system_access;
 mod terminal_capability;
@@ -178,6 +180,9 @@ const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
 const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
+/// Recent sessions read during shell warm-up, mirroring the page the sidebar
+/// opens with so the warm read covers the rows the first list reuses.
+const DESKTOP_SHELL_SESSION_PAGE: usize = 200;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
@@ -5239,6 +5244,8 @@ fn run_provider_chat_blocking(
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
         }
+        let billed = runner_output.billed_usage.as_ref();
+        openai_compatible_runner::insert_turn_tokens(object, &adapter, billed);
         if let Some(context_usage) = provider_context_usage_with_window(
             runner_output.context_usage.clone(),
             &request.provider_id,
@@ -7010,20 +7017,24 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
     // Config first so provider count is available even if store warm fails later.
     let config = GyroConfig::load(&paths).map_err(to_string)?;
 
-    // Integrity + index maintenance on a dedicated handle, then prefill pools so
-    // the first interactive list_sessions / create_session is already hot.
+    // Index maintenance and pool prefill run here so the first interactive
+    // list_sessions / create_session is already hot.
+    //
+    // `pragma quick_check` deliberately does not. It is a full integrity scan
+    // whose cost grows with the whole database — including the WAL — and the
+    // shell gate below cannot act on the answer anyway: corruption is already
+    // reported as a non-fatal field so the user is never trapped on the
+    // optimizing screen. Paying a whole-database scan on the launch path to
+    // decorate a screen that is about to be dismissed is the wrong trade, so it
+    // moves to the same background probe that serves doctor.
     let store = SessionStore::open(paths.clone()).map_err(to_string)?;
-    let integrity = match store.quick_check() {
-        Ok(()) => "ok".to_string(),
-        Err(error) => {
-            // Surface corruption without hard-failing warm-up: the UI can still
-            // open, and doctor/repair paths can dig deeper.
-            eprintln!("gyro desktop shell: sqlite quick_check reported: {error}");
-            error.to_string()
-        }
-    };
     store.maintain().map_err(to_string)?;
-    let sessions = store.list_sessions_limited(Some(200)).map_err(to_string)?;
+    // The recent page is what the sidebar opens with, so reading it here is
+    // real warm-up rather than a second copy of a query the UI runs anyway.
+    let session_count = store
+        .list_sessions_limited(Some(DESKTOP_SHELL_SESSION_PAGE))
+        .map_err(to_string)?
+        .len();
     // Return this handle into the pool via Drop semantics by wrapping lease.
     {
         let _lease = SessionStoreLease { store: Some(store) };
@@ -7031,12 +7042,17 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
 
     let (session_pool_warmed, automation_pool_warmed) = warm_store_pools(&paths)?;
 
+    // Integrity stays available to the report, but is no longer something the
+    // shell waits for. The scan starts here and publishes into this static.
+    defer_desktop_integrity_check(paths.clone());
+    let integrity = desktop_integrity_status();
+
     Ok(WarmDesktopShellReport {
         // Warm-up completed far enough for the shell to unlock. Integrity is
         // reported separately so corruption can be diagnosed without trapping
         // the user on the optimizing gate forever.
         ready: true,
-        session_count: sessions.len(),
+        session_count,
         provider_count: config.model_providers.len(),
         session_pool_warmed,
         automation_pool_warmed,
@@ -7044,6 +7060,45 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
         integrity,
     })
 }
+
+/// 0 = scan still running, 1 = ok, 2 = the scan reported a problem.
+static DESKTOP_INTEGRITY_STATUS: AtomicU8 = AtomicU8::new(0);
+
+const DESKTOP_INTEGRITY_RUNNING: u8 = 0;
+const DESKTOP_INTEGRITY_OK: u8 = 1;
+const DESKTOP_INTEGRITY_FAILED: u8 = 2;
+
+fn desktop_integrity_status() -> String {
+    match DESKTOP_INTEGRITY_STATUS.load(Ordering::Relaxed) {
+        DESKTOP_INTEGRITY_RUNNING => "checking".to_string(),
+        DESKTOP_INTEGRITY_OK => "ok".to_string(),
+        _ => "failed (see logs)".to_string(),
+    }
+}
+
+/// Run `pragma quick_check` off the launch path, once per process.
+///
+/// The result is published into [`DESKTOP_INTEGRITY_STATUS`] so a later report
+/// can read it without ever making the user wait for a full database scan.
+fn defer_desktop_integrity_check(paths: GyroPaths) {
+    if DESKTOP_INTEGRITY_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let outcome = SessionStore::open(paths).and_then(|store| store.quick_check());
+        match outcome {
+            Ok(()) => DESKTOP_INTEGRITY_STATUS.store(DESKTOP_INTEGRITY_OK, Ordering::Relaxed),
+            Err(error) => {
+                // Surface corruption without failing anything: the shell is
+                // already open, and doctor/repair paths dig deeper from here.
+                eprintln!("gyro desktop shell: deferred sqlite quick_check reported: {error}");
+                DESKTOP_INTEGRITY_STATUS.store(DESKTOP_INTEGRITY_FAILED, Ordering::Relaxed);
+            }
+        }
+    });
+}
+
+static DESKTOP_INTEGRITY_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 async fn get_account_session() -> Result<AccountSessionState, String> {
@@ -12555,7 +12610,7 @@ fn prune_browser_preview_captures(directory: &Path) -> Result<(), String> {
 fn check_provider_health_blocking(
     request: ProviderHealthRequest,
 ) -> Result<ProviderHealthCheck, String> {
-    ProviderHealthService.check(request).map_err(to_string)
+    gyro_core::provider_health(request).map_err(to_string)
 }
 
 #[tauri::command]
@@ -12566,6 +12621,9 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
             api_key_ref: None,
             base_url: None,
             kind: None,
+            // Standing readiness question, not a user action: a recent answer
+            // is the same answer.
+            force: false,
         })
     })
     .await
@@ -13859,19 +13917,21 @@ fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
 }
 
 fn collect_provider_health_for_diagnostics(config: &GyroConfig) -> Vec<ProviderHealthCheck> {
-    let service = ProviderHealthService;
     config
         .model_providers
         .iter()
         .filter_map(|provider| {
-            service
-                .check(ProviderHealthRequest {
-                    provider_id: provider.id.clone(),
-                    base_url: provider.base_url.clone(),
-                    api_key_ref: Some(provider.api_key_ref.clone()),
-                    kind: provider.kind.clone(),
-                })
-                .ok()
+            // The shared entry point, so a report written just after a readiness
+            // sweep reuses those probes instead of starting a second round of
+            // provider CLIs behind it.
+            gyro_core::provider_health(ProviderHealthRequest {
+                provider_id: provider.id.clone(),
+                base_url: provider.base_url.clone(),
+                api_key_ref: Some(provider.api_key_ref.clone()),
+                kind: provider.kind.clone(),
+                force: false,
+            })
+            .ok()
         })
         .collect()
 }
@@ -14670,12 +14730,13 @@ fn run_ollama_chat(
     let expanded = with_browser_attachment_images(request, discovered.supports_images)?;
     let request = &expanded;
     let run_mode = capability_run_mode_for_chat(request.mode);
+    let identity = provider_model_identity(request, "and run locally through Ollama");
     let system = if request.mode == ChatMode::Council {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits."
+        format!("{identity} Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits.")
     } else if discovered.supports_tools {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it."
+        format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     } else {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits."
+        format!("{identity} Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits.")
     };
     let mut user = provider_context_message_with_capabilities(
         request,

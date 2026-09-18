@@ -149,9 +149,10 @@ pub use provider_contract::{
     PROVIDER_ARG_PROBE_TIMEOUT, STREAM_CONTRACT_MARKER,
 };
 pub use provider_health::{
-    provider_account_label, provider_mode_label, provider_runtime_status_from_output,
-    provider_subscription_label, should_skip_codex_login_for_external_env, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderHealthService,
+    invalidate_provider_health_cache, provider_account_label, provider_health,
+    provider_mode_label, provider_runtime_status_from_output, provider_subscription_label,
+    should_skip_codex_login_for_external_env, ProviderHealthCheck, ProviderHealthRequest,
+    ProviderHealthService, PROVIDER_HEALTH_CACHE_TTL,
 };
 pub use provider_registry::{
     execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,

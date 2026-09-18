@@ -658,12 +658,36 @@ function providerLoginCommandText(profile: CommandProfile) {
 function providerHealthRequest(
   provider: ModelProviderConfig | undefined,
   providerId?: string,
+  options?: { force?: boolean },
 ) {
   return {
     apiKeyRef: provider?.apiKeyRef,
     baseUrl: provider?.baseUrl,
+    // A person waiting on Connect, or a sign-in that just finished, must never
+    // be told the previous probe's answer. Readiness sweeps leave this unset.
+    force: options?.force ? true : undefined,
     providerId: provider?.id ?? providerId,
   };
+}
+
+/**
+ * A value that changes only when a probe would read something different.
+ *
+ * The readiness sweep below keys on this rather than on the provider array,
+ * because `providersForConfig` returns a fresh array on every config write —
+ * including the background Ollama model discovery that changes only the local
+ * model list. Keys here mean an unrelated update cannot start a second round of
+ * provider CLI probes.
+ */
+function providerProbeKey(provider: ModelProviderConfig) {
+  return [
+    provider.id,
+    provider.enabled ? "on" : "off",
+    provider.authStatus,
+    provider.authMode,
+    provider.apiKeyRef ?? "",
+    provider.baseUrl ?? "",
+  ].join("\u001f");
 }
 
 function providerHealthDetailsFromCheck(
@@ -7707,7 +7731,13 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
-              request: providerHealthRequest(provider, providerId),
+              // Pressing Connect is an explicit action taken because the
+              // previous state was not good enough, so it probes for real. A
+              // cached answer here could send someone straight back into the
+              // failure they pressed Connect to fix.
+              request: providerHealthRequest(provider, providerId, {
+                force: true,
+              }),
             },
           );
           const result = recordProviderHealthOutput(
@@ -7899,9 +7929,15 @@ export function App() {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
           if (source === "login-exit") {
+            // The sign-in just wrote credentials, so any cached "not signed in"
+            // is known to be stale — probe for real instead of serving it.
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
-              { request: providerHealthRequest(provider, providerId) },
+              {
+                request: providerHealthRequest(provider, providerId, {
+                  force: true,
+                }),
+              },
             ).catch(() => undefined);
             if (verified) {
               recordProviderHealthOutput(providerId, verified.output, verified);
@@ -7968,6 +8004,10 @@ export function App() {
             continue;
           }
 
+          // A polled repeat of the same question. This is served from the probe
+          // cache for a window shorter than a sign-in, and the login-exit path
+          // above forces a fresh probe — so the watcher no longer spawns a
+          // provider CLI on every tick just to ask again.
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
@@ -13300,7 +13340,11 @@ export function App() {
       if (isProviderId(providerId) && isTauriRuntime()) {
         try {
           check = await invoke<ProviderHealthCheck>("check_provider_health", {
-            request: providerHealthRequest(provider, providerId),
+            // An explicit "Test provider" is a person asking for the truth now,
+            // so it never answers from the readiness-sweep probe cache.
+            request: providerHealthRequest(provider, providerId, {
+              force: true,
+            }),
           });
           output = check.output;
         } catch (error) {
@@ -13645,7 +13689,15 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [config.modelProviders, isShellOptimizing, recordProviderHealthOutput]);
+    // Keyed on what a probe reads rather than on the provider array identity: a
+    // config write that leaves readiness alone — the background Ollama model
+    // discovery, a preference change — must not restart the sweep and re-spawn
+    // every provider CLI behind it.
+  }, [
+    config.modelProviders.map(providerProbeKey).join("\u001e"),
+    isShellOptimizing,
+    recordProviderHealthOutput,
+  ]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {

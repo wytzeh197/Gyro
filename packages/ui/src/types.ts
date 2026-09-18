@@ -842,6 +842,8 @@ export type ProviderResumeCursor = {
 
 export type ProviderChatStreamPhase =
   | "context-usage"
+  /** Running cost of the turn so far, for the providers Gyro meters itself. */
+  | "turn-tokens"
   | "started"
   | "activity"
   | "delta"
@@ -865,6 +867,18 @@ export type ProviderChatStreamEvent = {
     outputTokens?: number;
     totalTokens?: number;
     modelContextWindow?: number;
+  } | null;
+  /**
+   * Every request this turn has billed, added together.
+   *
+   * Deliberately not `contextUsage`: that reading is the last request's input,
+   * which is what sizes the context meter, while this one accumulates across
+   * the tool loop, which is what the turn actually costs.
+   */
+  turnTokens?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
   } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;

@@ -45,6 +45,59 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
         .and_then(|provider| provider.kind.clone())
 }
 
+/// What one message cost, as opposed to how full the context window is.
+///
+/// A turn that runs tools makes several requests and bills every one of them,
+/// so the running total and `ProviderContextUsage` answer different questions:
+/// the context reading is the last request's input, which is what sizes the
+/// window meter, while this is every request added together, which is what the
+/// user pays. Keeping them apart is why a turn that ran ten tools does not read
+/// as having overrun a window it never approached.
+///
+/// Only this runner reports it. The API-key presets and custom endpoints reach
+/// their model over Gyro's own HTTPS with no vendor dashboard behind them, so
+/// Gyro is the only thing counting; the CLI providers meter their own plans and
+/// surface that in Usage instead.
+pub(super) fn insert_turn_tokens(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    adapter: &ProviderAdapterDescriptor,
+    billed: Option<&ProviderContextUsage>,
+) {
+    if adapter.kind != ProviderAdapterKind::OpenAiCompatible {
+        return;
+    }
+    let Some(value) = billed.and_then(|usage| serde_json::to_value(usage).ok()) else {
+        return;
+    };
+    payload.insert("turnTokens".into(), value);
+}
+
+/// Publish the running total mid-turn, so the working header can count up.
+///
+/// Emitted after each round of the tool loop rather than once at the end: a
+/// turn that runs tools for a minute is exactly the turn whose cost the user
+/// wants to watch, and a total that only lands when the turn finishes tells
+/// them nothing while it is running.
+fn emit_provider_turn_tokens(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    usage: &ProviderContextUsage,
+) {
+    let _ = app.emit(
+        PROVIDER_CHAT_EVENT,
+        serde_json::json!({
+            "sessionId": request.session_id,
+            "turnId": request.turn_id,
+            "providerId": request.provider_id,
+            "modelId": request.model_id,
+            "eventId": Uuid::new_v4().to_string(),
+            "sequence": next_provider_event_sequence(app, &request.session_id),
+            "phase": "turn-tokens",
+            "turnTokens": usage,
+        }),
+    );
+}
+
 /// One chat turn against an OpenAI-compatible endpoint.
 pub(super) fn run_openai_compatible_chat(
     app: &tauri::AppHandle,
@@ -106,11 +159,21 @@ pub(super) fn run_openai_compatible_chat(
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .ok_or_else(|| anyhow::anyhow!("select a model for {label} before sending"))?;
+    // Only a model that publishes an effort ramp gets one selected in the UI, so
+    // an absent effort here means "this endpoint has no such dial", not "the
+    // user chose the default".
+    let reasoning_effort = request
+        .reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+        .map(str::to_string);
     let run_mode = capability_run_mode_for_chat(request.mode);
+    let identity = provider_model_identity(request, "over an OpenAI-compatible API");
     let system = if request.mode == ChatMode::Council {
-        "You are a model reached through an OpenAI-compatible API in Gyro. Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits."
+        format!("{identity} Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits.")
     } else {
-        "You are a model reached through an OpenAI-compatible API in Gyro. Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it."
+        format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     };
     let user = provider_context_message_with_capabilities(
         request,
@@ -155,6 +218,7 @@ pub(super) fn run_openai_compatible_chat(
                     model,
                     messages: messages.clone(),
                     tools: tools.clone(),
+                    reasoning_effort: reasoning_effort.as_deref(),
                 },
                 &cancellation,
                 |delta| {
@@ -179,6 +243,9 @@ pub(super) fn run_openai_compatible_chat(
                 }
             })?;
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
+            if let Some(measured) = turn_usage.measured() {
+                emit_provider_turn_tokens(app, request, &measured);
+            }
             anyhow::ensure!(
                 !tools.is_empty() || turn.tool_calls.is_empty(),
                 "{label} returned tool calls although no tools were offered"

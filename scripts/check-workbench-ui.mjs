@@ -4993,6 +4993,20 @@ expect(
   "The Create menu should keep a compact, grouped surface without a project picker.",
 );
 expect(
+  [
+    ".gyro-sidebar-new-session-menu button strong",
+    ".gyro-sidebar-new-session-menu button small",
+  ].every((selector) =>
+    cssRules(styleSource, selector).some(
+      (rule) =>
+        /white-space:\s*nowrap/.test(rule) &&
+        /overflow:\s*hidden/.test(rule) &&
+        /text-overflow:\s*ellipsis/.test(rule),
+    ),
+  ),
+  "Launcher rows in the Create menu must stay single-line with ellipsis: a wrapped label grows past the row height and collides with the row below it.",
+);
+expect(
   chatSidebarSource.includes("New Chat") &&
     chatSidebarSource.includes(
       '<span className="gyro-sidebar-session-group-label">',
@@ -6093,7 +6107,7 @@ expect(
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
     surfaceSource.includes("function ProviderApiKeyField") &&
     surfaceSource.includes("Paste API key") &&
-    surfaceSource.includes("Stored securely in macOS Keychain") &&
+    surfaceSource.includes("Kept in the macOS Keychain") &&
     providerApiKeysSource.includes("set_provider_api_key") &&
     providerApiKeysSource.includes("clear_provider_api_key") &&
     providerApiKeysSource.includes("provider_api_key_status") &&

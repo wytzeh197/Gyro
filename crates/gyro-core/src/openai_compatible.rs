@@ -41,6 +41,10 @@ pub struct OpenAiCompatChatRequest<'a> {
     pub model: &'a str,
     pub messages: Vec<serde_json::Value>,
     pub tools: Vec<serde_json::Value>,
+    /// Thinking budget, sent as `reasoning_effort` when the selected model
+    /// publishes an effort ramp. Endpoints that do not take the field are why
+    /// the 400 retry below drops it.
+    pub reasoning_effort: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,21 +165,29 @@ where
     let agent = chat_agent();
 
     // `stream_options.include_usage` is the only way to get token counts from a
-    // streamed OpenAI response, but it is a newer field and strict gateways
-    // reject the whole request over it. Retrying once without it keeps usage
-    // display on capable servers and keeps the run working on the others.
+    // streamed OpenAI response, and `reasoning_effort` the only way to ask for a
+    // thinking budget, but both are newer fields and strict gateways reject the
+    // whole request over either. Retrying once without them keeps usage display
+    // and effort on capable servers and keeps the run working on the others: a
+    // turn that answers without the requested effort beats a turn that 400s.
     let response = match post_chat(
         &agent,
         &url,
         api_key,
-        &chat_payload(model, &request.messages, &request.tools, true),
+        &chat_payload(
+            model,
+            &request.messages,
+            &request.tools,
+            request.reasoning_effort,
+            true,
+        ),
     ) {
         Ok(response) => response,
         Err(ureq::Error::Status(400, _)) => post_chat(
             &agent,
             &url,
             api_key,
-            &chat_payload(model, &request.messages, &request.tools, false),
+            &chat_payload(model, &request.messages, &request.tools, None, false),
         )
         .map_err(openai_compat_http_error)?,
         Err(error) => return Err(openai_compat_http_error(error)),
@@ -310,7 +322,8 @@ fn chat_payload(
     model: &str,
     messages: &[serde_json::Value],
     tools: &[serde_json::Value],
-    include_usage: bool,
+    reasoning_effort: Option<&str>,
+    include_optional_fields: bool,
 ) -> serde_json::Value {
     let mut payload = serde_json::json!({
         "model": model,
@@ -320,8 +333,14 @@ fn chat_payload(
     if !tools.is_empty() {
         payload["tools"] = serde_json::Value::Array(tools.to_vec());
     }
-    if include_usage {
+    if include_optional_fields {
         payload["stream_options"] = serde_json::json!({ "include_usage": true });
+        if let Some(effort) = reasoning_effort
+            .map(str::trim)
+            .filter(|effort| !effort.is_empty())
+        {
+            payload["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+        }
     }
     payload
 }
@@ -463,9 +482,9 @@ impl ChatAccumulator {
         }
         for choice in frame.choices {
             let message = choice.effective_message();
-            if let Some(content) = message.content.as_deref().filter(|text| !text.is_empty()) {
-                on_delta(content);
-                self.content.push_str(content);
+            if let Some(content) = message.text().filter(|text| !text.is_empty()) {
+                on_delta(&content);
+                self.content.push_str(&content);
             }
             for call in &message.tool_calls {
                 let slot = self.slot_for(call);
@@ -575,7 +594,7 @@ impl WireChoice {
 #[derive(Default, Deserialize)]
 struct WireMessage {
     #[serde(default)]
-    content: Option<String>,
+    content: Option<WireContent>,
     #[serde(default)]
     tool_calls: Vec<WireToolCall>,
 }
@@ -584,6 +603,47 @@ impl WireMessage {
     fn is_empty(&self) -> bool {
         self.content.is_none() && self.tool_calls.is_empty()
     }
+
+    /// The answer text, with any thinking trace left out.
+    fn text(&self) -> Option<String> {
+        self.content.as_ref().map(WireContent::text)
+    }
+}
+
+/// What a completion puts in `content`.
+///
+/// Plain endpoints send a string. A model answering with a thinking budget
+/// sends an array of typed chunks instead — Mistral switches shape the moment
+/// `reasoning_effort` is `high` — and a `content: Option<String>` field failed
+/// to deserialize the whole frame, so the answer silently vanished. Accept both
+/// and keep only the text: the thinking trace is the model's scratch space, not
+/// part of the reply Gyro renders or feeds back as history.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WireContent {
+    Text(String),
+    Chunks(Vec<WireContentChunk>),
+}
+
+impl WireContent {
+    fn text(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Chunks(chunks) => chunks
+                .iter()
+                .filter_map(|chunk| chunk.text.as_deref())
+                .collect(),
+        }
+    }
+}
+
+/// One entry of a chunked `content` array. A thinking chunk carries its trace
+/// under another key, so ignoring everything but `text` drops it by shape
+/// rather than by naming each vendor's spelling of "thinking".
+#[derive(Deserialize)]
+struct WireContentChunk {
+    #[serde(default)]
+    text: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -789,6 +849,7 @@ mod tests {
                 model: "deepseek-chat",
                 messages: vec![serde_json::json!({ "role": "user", "content": "Hi" })],
                 tools: vec![serde_json::json!({ "type": "function" })],
+                reasoning_effort: None,
             },
             &CancellationToken::default(),
             |delta| deltas.push(delta.to_string()),
@@ -853,6 +914,7 @@ mod tests {
             model: "local-model",
             messages: Vec::new(),
             tools: Vec::new(),
+            reasoning_effort: None,
         })
         .unwrap();
         let bodies = server.join().unwrap();
@@ -880,6 +942,7 @@ mod tests {
                 model: "m",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                reasoning_effort: None,
             },
             &CancellationToken::default(),
             |delta| deltas.push(delta.to_string()),
@@ -890,6 +953,82 @@ mod tests {
         assert_eq!(response.content, "plain answer");
         assert_eq!(response.input_tokens, Some(3));
         assert_eq!(response.output_tokens, Some(2));
+    }
+
+    /// A thinking budget only means something if it reaches the endpoint, and
+    /// only the request body can prove it did.
+    #[test]
+    fn sends_the_requested_reasoning_effort() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "text/event-stream",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n",
+        );
+        let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "k",
+            model: "deepseek-flash",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: Some("max"),
+        })
+        .unwrap();
+        let body = server.join().unwrap().body;
+        assert_eq!(response.content, "ok");
+        let sent: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent["reasoning_effort"], "max");
+    }
+
+    /// An effort a model does not publish must not travel as an empty string,
+    /// which some gateways reject outright rather than ignore.
+    #[test]
+    fn omits_reasoning_effort_when_none_is_selected() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "text/event-stream",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n",
+        );
+        openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "k",
+            model: "m",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: Some("   "),
+        })
+        .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
+        assert!(sent.get("reasoning_effort").is_none());
+    }
+
+    /// Mistral answers a `reasoning_effort: high` turn with an array of typed
+    /// chunks instead of a string. Before `WireContent` that frame failed to
+    /// deserialize and the answer was dropped on the floor, so the turn came
+    /// back empty with no error to explain it.
+    #[test]
+    fn reads_a_chunked_content_answer_and_drops_the_thinking_trace() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"choices":[{"message":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"let me count"}]},{"type":"text","text":"391"}]}}]}"#,
+        );
+        let mut deltas = Vec::new();
+        let response = openai_compat_tool_chat_with_progress(
+            OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "k",
+                model: "mistral-medium-latest",
+                messages: Vec::new(),
+                tools: Vec::new(),
+                reasoning_effort: Some("high"),
+            },
+            &CancellationToken::default(),
+            |delta| deltas.push(delta.to_string()),
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(response.content, "391");
+        assert_eq!(deltas, ["391"]);
     }
 
     #[test]
@@ -905,6 +1044,7 @@ mod tests {
             model: "m",
             messages: Vec::new(),
             tools: Vec::new(),
+            reasoning_effort: None,
         })
         .unwrap_err()
         .to_string();
@@ -925,6 +1065,7 @@ mod tests {
             model: "m",
             messages: Vec::new(),
             tools: Vec::new(),
+            reasoning_effort: None,
         })
         .unwrap_err()
         .to_string();
@@ -979,6 +1120,7 @@ mod tests {
                 model: "deepseek-chat",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                reasoning_effort: None,
             },
             &cancellation,
             |_| {},
@@ -996,6 +1138,7 @@ mod tests {
             model: "  ",
             messages: Vec::new(),
             tools: Vec::new(),
+            reasoning_effort: None,
         })
         .unwrap_err()
         .to_string();
