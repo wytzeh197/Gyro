@@ -341,10 +341,7 @@ export type TerminalPaneStatus =
   "restored" | "running" | "waiting" | "done" | "failed";
 export type TerminalPaneAttention = "waiting" | "failed";
 export type TerminalKeepAlivePhase =
-  | "watching"
-  | "relaunching"
-  | "stopped"
-  | "exited";
+  "watching" | "relaunching" | "stopped" | "exited";
 export type TerminalKeepAlive = {
   turnId: string;
   restartCount: number;
@@ -692,6 +689,14 @@ export type SystemAccessScope = {
 export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
 
+/**
+ * An id for an endpoint the user defined, chosen at runtime.
+ *
+ * Kept as a template-literal type rather than widening `ProviderId` to
+ * `string`, so the shipped ids still exhaustively narrow.
+ */
+export type CustomProviderId = `custom:${string}`;
+
 export type ProviderId =
   | "openai"
   | "anthropic"
@@ -700,7 +705,11 @@ export type ProviderId =
   | "cursor"
   | "gemini"
   | "opencode"
-  | "ollama";
+  | "ollama"
+  | "deepseek"
+  | "mistral"
+  | "openrouter"
+  | CustomProviderId;
 
 export type ProviderExecutionKind =
   | "codex-cli"
@@ -708,6 +717,7 @@ export type ProviderExecutionKind =
   | "kimi-acp"
   | "acp-cli"
   | "ollama-api"
+  | "openai-compatible-api"
   | "readiness-only";
 
 export type ProviderCapabilities = {
@@ -832,6 +842,8 @@ export type ProviderResumeCursor = {
 
 export type ProviderChatStreamPhase =
   | "context-usage"
+  /** Running cost of the turn so far, for the providers Gyro meters itself. */
+  | "turn-tokens"
   | "started"
   | "activity"
   | "delta"
@@ -855,6 +867,18 @@ export type ProviderChatStreamEvent = {
     outputTokens?: number;
     totalTokens?: number;
     modelContextWindow?: number;
+  } | null;
+  /**
+   * Every request this turn has billed, added together.
+   *
+   * Deliberately not `contextUsage`: that reading is the last request's input,
+   * which is what sizes the context meter, while this one accumulates across
+   * the tool loop, which is what the turn actually costs.
+   */
+  turnTokens?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
   } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;
@@ -1112,7 +1136,10 @@ export type WorkbenchPreferences = {
    */
   defaultWorkspaceMode: WorkbenchMode;
   workspaceTrust: Record<string, WorkspaceTrustDecision>;
-  projectDetails?: Record<string, { name: string; pinned: boolean; primaryFolder?: string }>;
+  projectDetails?: Record<
+    string,
+    { name: string; pinned: boolean; primaryFolder?: string }
+  >;
   workspaceFolders: Record<string, string[]>;
   workspaceUserSettings: WorkspaceScopedSettings;
   workspaceSettingsByWorkspace: Record<string, WorkspaceScopedSettings>;
@@ -2068,6 +2095,34 @@ export type ModelProviderConfig = {
   selectedModelId?: string;
   selectedReasoningEffort?: ReasoningEffort;
   capabilities?: ProviderCapabilities;
+  /**
+   * Model ids for a provider the shipped catalog does not describe.
+   *
+   * The renderer derives `models` from the catalog on every load, so that array
+   * never reaches disk. A custom provider has no catalog entry to derive from,
+   * which is why its ids persist separately as `modelIds`.
+   */
+  modelIds?: string[];
+  /**
+   * Which execution path this provider uses, when its id cannot say.
+   *
+   * `"openai-compatible"` routes a provider through the direct HTTPS runner.
+   */
+  kind?: string;
+};
+
+/**
+ * What the Settings "Add custom provider" form collects.
+ *
+ * The id is not part of this: it is derived from the display name so the user
+ * never has to think about the `custom:` prefix.
+ */
+export type CustomProviderDraft = {
+  displayName: string;
+  baseUrl: string;
+  /** Sent only to the Keychain; it is never written into the config file. */
+  apiKey?: string;
+  modelIds: string[];
 };
 
 export type GyroAccountStatus =

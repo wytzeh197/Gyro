@@ -1,4 +1,10 @@
 import { useProviderApiKeys } from "./provider-api-keys";
+import {
+  providerHealthDetailsFromCheck,
+  providerHealthRequest,
+  providerProbeKeyFor,
+  type ProviderHealthCheck,
+} from "./provider-health-probes";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
@@ -314,21 +320,6 @@ type LspBridgeResponse = {
   result?: unknown;
   error?: unknown;
   messages?: unknown[];
-};
-
-type ProviderHealthCheck = {
-  providerId: string;
-  output: string;
-  runtimeStatus: string;
-  authOwner: string;
-  authCommand?: string | null;
-  loginCommand?: string | null;
-  accountLabel?: string | null;
-  subscriptionLabel?: string | null;
-  providerMode?: string | null;
-  secretStorage: string;
-  privacyNote: string;
-  diagnosticsOptIn: boolean;
 };
 
 type ProviderChatResponse = {
@@ -653,37 +644,6 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
 
 function providerLoginCommandText(profile: CommandProfile) {
   return [profile.command, ...profile.args].join(" ");
-}
-
-function providerHealthRequest(
-  provider: ModelProviderConfig | undefined,
-  providerId?: string,
-) {
-  return {
-    apiKeyRef: provider?.apiKeyRef,
-    baseUrl: provider?.baseUrl,
-    providerId: provider?.id ?? providerId,
-  };
-}
-
-function providerHealthDetailsFromCheck(
-  check: ProviderHealthCheck,
-  fallback: ProviderHealthDetails,
-): ProviderHealthDetails {
-  return {
-    ...fallback,
-    accountLabel: check.accountLabel ?? fallback.accountLabel,
-    authCommand: check.authCommand ?? fallback.authCommand,
-    authOwner: check.authOwner as ProviderHealthDetails["authOwner"],
-    diagnosticsOptIn: check.diagnosticsOptIn,
-    loginCommand: check.loginCommand ?? fallback.loginCommand,
-    privacyNote: check.privacyNote,
-    providerMode: check.providerMode ?? fallback.providerMode,
-    runtimeStatus:
-      check.runtimeStatus as ProviderHealthDetails["runtimeStatus"],
-    secretStorage: check.secretStorage,
-    subscriptionLabel: check.subscriptionLabel ?? fallback.subscriptionLabel,
-  };
 }
 
 /**
@@ -7707,7 +7667,10 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
-              request: providerHealthRequest(provider, providerId),
+              // Connect is a user action, so it probes for real.
+              request: providerHealthRequest(provider, providerId, {
+                force: true,
+              }),
             },
           );
           const result = recordProviderHealthOutput(
@@ -7899,9 +7862,14 @@ export function App() {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
           if (source === "login-exit") {
+            // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
-              { request: providerHealthRequest(provider, providerId) },
+              {
+                request: providerHealthRequest(provider, providerId, {
+                  force: true,
+                }),
+              },
             ).catch(() => undefined);
             if (verified) {
               recordProviderHealthOutput(providerId, verified.output, verified);
@@ -7968,6 +7936,8 @@ export function App() {
             continue;
           }
 
+          // A polled repeat; the probe cache answers it, and the login-exit
+          // path above forces the fresh probe that matters.
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
@@ -13300,7 +13270,10 @@ export function App() {
       if (isProviderId(providerId) && isTauriRuntime()) {
         try {
           check = await invoke<ProviderHealthCheck>("check_provider_health", {
-            request: providerHealthRequest(provider, providerId),
+            // "Test provider" means now, not a cached answer.
+            request: providerHealthRequest(provider, providerId, {
+              force: true,
+            }),
           });
           output = check.output;
         } catch (error) {
@@ -13335,12 +13308,12 @@ export function App() {
     },
     [config, connectProvider, notify, recordProviderHealthOutput],
   );
-
   const providerApiKeyProps = useProviderApiKeys(
     config,
     isTauriRuntime(),
     notify,
     testProvider,
+    persistConfig, // lets the hook add or remove a custom provider
   );
 
   const queueProviderHandoff = useCallback(
@@ -13645,7 +13618,15 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [config.modelProviders, isShellOptimizing, recordProviderHealthOutput]);
+    // Keyed on what a probe reads rather than on the provider array identity: a
+    // config write that leaves readiness alone — the background Ollama model
+    // discovery, a preference change — must not restart the sweep and re-spawn
+    // every provider CLI behind it.
+  }, [
+    providerProbeKeyFor(config.modelProviders),
+    isShellOptimizing,
+    recordProviderHealthOutput,
+  ]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {

@@ -1069,6 +1069,47 @@ export function applyProviderChatStreamContextUsage(
   setEvents((current) => limitSessionEventsForUi(update(current)));
 }
 
+/**
+ * Keep the turn's running cost as one replaceable row.
+ *
+ * Same single-row shape as the context checkpoint above: each frame supersedes
+ * the last rather than appending, so a turn that ran twenty tool rounds leaves
+ * one number behind instead of twenty.
+ */
+export function applyProviderChatStreamTurnTokens(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: SessionEventsSetter,
+  streamEvent: ProviderChatStreamEvent,
+) {
+  const turnId = streamEvent.turnId;
+  if (!turnId || !streamEvent.turnTokens) return;
+  const id = `${streamEvent.sessionId}-turn-tokens-${turnId}`;
+  const update = (items: SessionEvent[]): SessionEvent[] => [
+    ...items.filter((event) => event.id !== id),
+    {
+      id,
+      sessionId: streamEvent.sessionId,
+      turnId,
+      createdAt: new Date().toISOString(),
+      kind: "system-event",
+      message: "",
+      payload: {
+        kind: "provider-turn-tokens",
+        providerId: streamEvent.providerId,
+        modelId: streamEvent.modelId,
+        turnTokens: streamEvent.turnTokens,
+      },
+    },
+  ];
+  optimisticEventsRef.current.set(
+    streamEvent.sessionId,
+    limitSessionEventsForUi(
+      update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+    ),
+  );
+  setEvents((current) => limitSessionEventsForUi(update(current)));
+}
+
 /** Apply UI-only provider stream frames that must render without batching text. */
 export function applyProviderChatStreamPresentation(
   optimisticEventsRef: { current: Map<string, SessionEvent[]> },
@@ -1076,7 +1117,19 @@ export function applyProviderChatStreamPresentation(
   streamEvent: ProviderChatStreamEvent,
 ) {
   if (streamEvent.phase === "activity") {
-    applyProviderChatStreamActivity(optimisticEventsRef, setEvents, streamEvent);
+    applyProviderChatStreamActivity(
+      optimisticEventsRef,
+      setEvents,
+      streamEvent,
+    );
+    return;
+  }
+  if (streamEvent.phase === "turn-tokens") {
+    applyProviderChatStreamTurnTokens(
+      optimisticEventsRef,
+      setEvents,
+      streamEvent,
+    );
     return;
   }
   if (streamEvent.phase === "context-usage") {

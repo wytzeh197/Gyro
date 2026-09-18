@@ -27,9 +27,12 @@
   --menu-gap: 12px;
   --menu-tile: 28px;
   --menu-stop: 40px;
-  --menu-radius: 12px;
-  --menu-radius-sm: 8px;
-  --menu-radius-xs: 6px;
+  /* Corners track the app's xl/md/sm ladder in packages/ui/src/styles.css.
+     Kept as literals because this popover is its own window surface; retune
+     them with the ladder so the menu bar never drifts from the app. */
+  --menu-radius: 14px;
+  --menu-radius-sm: 9px;
+  --menu-radius-xs: 7px;
 
   /* Type — three sizes, three weights, nothing else. */
   --menu-text-lg: 13px;

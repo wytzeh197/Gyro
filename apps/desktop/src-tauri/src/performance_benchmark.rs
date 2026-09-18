@@ -237,7 +237,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             let class = failure_class(error);
                             record["outcome"] = "setup-failed".into();
                             record["failureClass"] = class.into();
-                            record["failureDetail"] = gyro_core::security::redact_secrets(&error)
+                            record["failureDetail"] = gyro_core::security::redact_secrets(error)
                                 .chars()
                                 .take(1200)
                                 .collect::<String>()

@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn create_file_mutation_proposal_impl(
     request: FileMutationProposalRequest,
 ) -> anyhow::Result<MutationProposal> {
-    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
+    let store = open_store().map_err(|error| anyhow::anyhow!(error))?;
     create_file_mutation_proposal_in_store(&store, request, false)
 }
 
@@ -94,7 +94,7 @@ pub(super) fn create_file_mutation_proposal_in_store(
 pub(super) fn resolve_file_mutation_proposal_impl(
     request: FileMutationDecisionRequest,
 ) -> anyhow::Result<FileMutationDecisionResult> {
-    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
+    let store = open_store().map_err(|error| anyhow::anyhow!(error))?;
     let proposal_id = Uuid::parse_str(&request.proposal_id)?;
     let decision = match request.decision.as_str() {
         "approve" => MutationDecision::Approve,

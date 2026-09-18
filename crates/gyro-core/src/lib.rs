@@ -17,6 +17,7 @@ pub mod keychain;
 pub mod kimi_acp;
 pub mod mutations;
 pub mod ollama;
+pub mod openai_compatible;
 pub mod paths;
 pub mod policy;
 pub mod provider_contract;
@@ -75,10 +76,10 @@ pub use council::{
 pub use credentials::{
     apply_stored_provider_api_key, clear_stored_provider_api_key, credential_store_paths,
     env_name_is_credential, path_is_credential_store, provider_api_key_account,
-    provider_api_key_env_name, provider_credential_env_vars, provider_has_api_key,
-    provider_id_from_program, provider_supports_api_key, relative_path_is_in_credential_store,
-    set_stored_provider_api_key, stored_provider_api_key, stored_provider_api_key_env,
-    CredentialPolicy,
+    provider_api_key_env_name, provider_api_key_value, provider_credential_env_vars,
+    provider_has_api_key, provider_id_from_program, provider_supports_api_key,
+    relative_path_is_in_credential_store, set_stored_provider_api_key, stored_provider_api_key,
+    stored_provider_api_key_env, CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
@@ -133,6 +134,12 @@ pub use ollama::{
     OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,
 };
+pub use openai_compatible::{
+    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
+    openai_compat_tool_chat, openai_compat_tool_chat_with_progress, OpenAiCompatChatRequest,
+    OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel, OpenAiCompatToolCall,
+    OPENAI_COMPAT_CANCELLED_MESSAGE,
+};
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
 pub use provider_contract::{
@@ -142,13 +149,16 @@ pub use provider_contract::{
     PROVIDER_ARG_PROBE_TIMEOUT, STREAM_CONTRACT_MARKER,
 };
 pub use provider_health::{
-    provider_account_label, provider_mode_label, provider_runtime_status_from_output,
-    provider_subscription_label, should_skip_codex_login_for_external_env, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderHealthService,
+    invalidate_provider_health_cache, provider_account_label, provider_health, provider_mode_label,
+    provider_runtime_status_from_output, provider_subscription_label,
+    should_skip_codex_login_for_external_env, ProviderHealthCheck, ProviderHealthRequest,
+    ProviderHealthService, PROVIDER_HEALTH_CACHE_TTL,
 };
 pub use provider_registry::{
-    provider_descriptor, provider_is_executable, provider_registry, ProviderDescriptor,
-    ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
+    execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,
+    provider_descriptor, provider_is_executable, provider_is_executable_for, provider_registry,
+    ProviderDescriptor, ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
+    CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
 };
 pub use provider_stream::{
     extract_codex_agent_message_text, extract_provider_session_id, extract_provider_text_chunk,

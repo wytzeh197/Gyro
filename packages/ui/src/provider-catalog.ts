@@ -51,6 +51,35 @@ export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
 ];
 
 /**
+ * The levels DeepSeek's `reasoning_effort` accepts with thinking on.
+ *
+ * The API takes `none | low | high | max` and defaults to `high`. `none` turns
+ * thinking off, which Gyro's effort vocabulary has no word for, so it is left
+ * out rather than mislabelled. `medium` and `xhigh` are accepted only as
+ * aliases that map to `high`, so offering them would be three names for one
+ * setting.
+ */
+export const DEEPSEEK_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "high",
+  "max",
+];
+
+/**
+ * The effort levels OpenRouter normalizes across the models it routes to.
+ *
+ * OpenRouter takes `reasoning_effort` on any model whose `supported_parameters`
+ * lists it and translates the value for the upstream vendor, so one ramp covers
+ * every routed model that reasons at all. A routed model that does not reason
+ * gets no effort in the catalog rather than a dial that does nothing.
+ */
+export const OPENROUTER_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+];
+
+/**
  * The thinking effort levels Kimi K3 accepts.
  *
  * The Kimi Code service provisions k3 with `support_efforts` of low, high,
@@ -70,6 +99,13 @@ type ProviderCatalogEntry = ModelProviderConfig & {
   allowedTools: string[];
 };
 
+/** Provider ids starting with this prefix are endpoints the user defined. */
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+
+export function isCustomProviderId(providerId: string) {
+  return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
 /** Providers that can authenticate with a pasted API key stored in Keychain. */
 export function providerSupportsApiKey(providerId: string) {
   return (
@@ -78,7 +114,13 @@ export function providerSupportsApiKey(providerId: string) {
     providerId === "xai" ||
     providerId === "gemini" ||
     providerId === "kimi" ||
-    providerId === "cursor"
+    providerId === "cursor" ||
+    providerId === "deepseek" ||
+    providerId === "mistral" ||
+    providerId === "openrouter" ||
+    // A custom endpoint has no vendor environment variable to name, so its key
+    // lives in the Keychain alone and only the HTTPS runner reads it.
+    isCustomProviderId(providerId)
   );
 }
 
@@ -96,6 +138,12 @@ export function providerApiKeyEnvName(providerId: string) {
       return "MOONSHOT_API_KEY";
     case "cursor":
       return "CURSOR_API_KEY";
+    case "deepseek":
+      return "DEEPSEEK_API_KEY";
+    case "mistral":
+      return "MISTRAL_API_KEY";
+    case "openrouter":
+      return "OPENROUTER_API_KEY";
     default:
       return undefined;
   }
@@ -439,6 +487,212 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     effort: "medium",
     allowedTools: ["files", "terminal", "diff"],
   },
+  // API-key presets. These read over HTTPS rather than through a vendor CLI, so
+  // the only thing that distinguishes them is the endpoint and the model list;
+  // a fourth one would be a table entry, not a new runner.
+  {
+    id: "deepseek",
+    displayName: "DeepSeek",
+    apiKeyRef: "provider:deepseek",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://api.deepseek.com/v1",
+    defaultModelId: "deepseek-flash",
+    selectedModelId: "deepseek-flash",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      // Token spend lands in the local ledger; there is no plan-window API.
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    // `deepseek-chat` and `deepseek-reasoner` were the V3/R1 era names and no
+    // longer resolve. Both current models think by default and take the same
+    // effort ramp; the id chooses the model, not the mode.
+    models: [
+      {
+        id: "deepseek-flash",
+        displayName: "DeepSeek V4.1 Flash",
+        description: "Fast general coding model, and the cheaper of the two.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
+      },
+      {
+        id: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        description: "Deeper reasoning for harder problems, at a higher price.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
+  {
+    id: "mistral",
+    displayName: "Mistral",
+    apiKeyRef: "provider:mistral",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://api.mistral.ai/v1",
+    defaultModelId: "mistral-medium-latest",
+    selectedModelId: "mistral-medium-latest",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    // No model here carries `supportedReasoningEfforts`, and that is deliberate:
+    // Mistral's `reasoning_effort` takes only `high` and `none`, which is a
+    // thinking switch rather than the ramp the effort control represents, and
+    // Gyro's vocabulary has no word for `none`. Offering "low" as a synonym for
+    // "off" would put a dial in front of a toggle.
+    models: [
+      {
+        id: "mistral-medium-latest",
+        displayName: "Mistral Medium 3.5",
+        description: "Frontier-class model tuned for agentic and coding work.",
+        contextWindowTokens: 256_000,
+      },
+      {
+        id: "mistral-large-latest",
+        displayName: "Mistral Large 3",
+        description: "Open-weight flagship for general multimodal work.",
+        contextWindowTokens: 256_000,
+      },
+      {
+        id: "mistral-small-latest",
+        displayName: "Mistral Small 4",
+        description: "Cheapest of the three, and the fastest to first token.",
+        contextWindowTokens: 256_000,
+      },
+      {
+        id: "codestral-latest",
+        displayName: "Codestral",
+        description: "Tuned for code completion and editing.",
+        contextWindowTokens: 128_000,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
+  {
+    id: "openrouter",
+    displayName: "OpenRouter",
+    apiKeyRef: "provider:openrouter",
+    enabled: false,
+    authMode: "env",
+    authStatus: "not-connected",
+    baseUrl: "https://openrouter.ai/api/v1",
+    // A small curated list; OpenRouter serves hundreds, and Settings can fetch
+    // the endpoint's own list. This provider doubles as the worked example of
+    // the custom-provider mechanism.
+    defaultModelId: "anthropic/claude-sonnet-5",
+    selectedModelId: "anthropic/claude-sonnet-5",
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models: [
+      {
+        id: "anthropic/claude-sonnet-5",
+        displayName: "Claude Sonnet 5",
+        description: "Strong general coding model, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "anthropic/claude-opus-5",
+        displayName: "Claude Opus 5",
+        description: "Anthropic's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "openai/gpt-6-astra",
+        displayName: "GPT-6 Astra",
+        description: "OpenAI's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_050_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "google/gemini-3.8-flash",
+        displayName: "Gemini 3.8 Flash",
+        description: "Long-context reasoning, routed by OpenRouter.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "x-ai/grok-4.6",
+        displayName: "Grok 4.6",
+        description: "xAI's coding model, routed by OpenRouter.",
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "deepseek/deepseek-v4.1-flash",
+        displayName: "DeepSeek V4.1 Flash",
+        description: "Low-cost general model, routed by OpenRouter.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "moonshotai/kimi-k3",
+        displayName: "Kimi K3",
+        description: "Open-weights agentic model, routed by OpenRouter.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "z-ai/glm-5.3",
+        displayName: "GLM 5.3",
+        description: "Open-weights coding model, routed by OpenRouter.",
+        contextWindowTokens: 1_310_720,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "qwen/qwen3.8-max-0902",
+        displayName: "Qwen3.8 Max",
+        description: "Qwen's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "meta-llama/llama-3.3-70b-instruct",
+        displayName: "Llama 3.3 70B",
+        // The one model here that does not reason, so it carries no effort.
+        description: "Open-weights general model, routed by OpenRouter.",
+        contextWindowTokens: 131_072,
+      },
+    ],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
   {
     id: "ollama",
     displayName: "Ollama",
@@ -467,7 +721,11 @@ export const providerCatalog: ProviderCatalogEntry[] = [
 ];
 
 export function isProviderId(value: unknown): value is ProviderId {
-  return providerCatalog.some((provider) => provider.id === value);
+  return (
+    typeof value === "string" &&
+    (isCustomProviderId(value) ||
+      providerCatalog.some((provider) => provider.id === value))
+  );
 }
 
 export function getProviderCatalogEntry(providerId: ProviderId) {
@@ -711,7 +969,7 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
     config.modelProviders.map((provider) => [provider.id, provider]),
   );
 
-  return providerCatalog.map((catalogProvider) => {
+  const catalogProviders = providerCatalog.map((catalogProvider) => {
     const savedProvider = savedProviders.get(catalogProvider.id);
     const savedModels = new Map(
       (savedProvider?.models ?? []).map((model) => [model.id, model]),
@@ -785,6 +1043,56 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       })(),
     };
   });
+
+  // A provider the user defined has no catalog entry, so the merge above would
+  // drop it and it would never reach the picker, the API-key section, or the
+  // model list. Append those straight from config.
+  const catalogIds = new Set(providerCatalog.map((provider) => provider.id));
+  const customProviders = config.modelProviders
+    .filter((provider) => !catalogIds.has(provider.id))
+    .map(customProviderForConfig);
+
+  return [...catalogProviders, ...customProviders];
+}
+
+/**
+ * Describe a config-only provider the way the rest of the UI expects.
+ *
+ * A custom provider persists `modelIds`; the `models` objects every surface
+ * reads are derived from it here, mirroring what the catalog supplies for a
+ * shipped provider.
+ */
+function customProviderForConfig(
+  provider: ModelProviderConfig,
+): ModelProviderConfig {
+  const models: ProviderModel[] = (provider.modelIds ?? []).map((id) => ({
+    id,
+    displayName: id,
+    description: "Model served by this endpoint.",
+  }));
+  const defaultModelId =
+    provider.defaultModelId &&
+    models.some((model) => model.id === provider.defaultModelId)
+      ? provider.defaultModelId
+      : (models[0]?.id ?? "");
+  return {
+    ...provider,
+    authMode: provider.authMode ?? "env",
+    authStatus:
+      provider.authStatus ?? (provider.enabled ? "connected" : "not-connected"),
+    capabilities: {
+      executionKind: "openai-compatible-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "experimental",
+    },
+    models,
+    defaultModelId,
+    selectedModelId: provider.selectedModelId ?? defaultModelId,
+  };
 }
 
 export function normalizedConfig(config: GyroConfig): GyroConfig {

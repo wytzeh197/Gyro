@@ -1,3 +1,4 @@
+mod openai_compatible_runner;
 mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
@@ -28,9 +29,11 @@ use gyro_core::{
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
-    logout_account as account_logout, mutation_approval_payload, ollama_tool_chat_with_progress,
-    parse_council_synthesis, parse_summary_response, prepare_claude_provider_mutation_transaction,
-    prepare_provider_mutation_transaction, provider_descriptor,
+    is_openai_compatible_provider, logout_account as account_logout, mutation_approval_payload,
+    ollama_tool_chat_with_progress, openai_compat_endpoint, openai_compat_host_is_loopback,
+    openai_compat_tool_chat_with_progress, parse_council_synthesis, parse_summary_response,
+    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    provider_api_key_env_name, provider_api_key_value, provider_descriptor,
     recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
     run_kimi_acp, seat_label_map, start_account_login as account_start_login,
     stored_account_session as account_stored_session, successful_seat_answers,
@@ -47,16 +50,17 @@ use gyro_core::{
     ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision, GyroConfig,
     GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
     KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
-    PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
-    ProjectCapabilityPolicy, ProviderCapabilitySupport, ProviderDiagnosticsPayload,
-    ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
-    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload,
+    OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
+    ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
+    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
+    ProviderHealthRequest, ProviderMutationJournalContext, ProviderRunPayload,
     ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
     SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens,
     UsageTotals, WorkspaceCheckReport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
     CAPABILITY_SCHEMA_V1, CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
     FILE_REVIEW_SCHEMA, MAX_SUMMARY_FILES, OLLAMA_CANCELLED_MESSAGE,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT, WORKSPACE_UNAVAILABLE_MESSAGE,
+    OPENAI_COMPAT_CANCELLED_MESSAGE, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
+    WORKSPACE_UNAVAILABLE_MESSAGE,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -83,12 +87,15 @@ use walkdir::WalkDir;
 mod browser_smoke;
 mod git_line_counts;
 mod git_main_comparison;
+mod launch_integrity;
 mod menu_bar;
 mod reply_segments;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod provider_context;
+mod provider_identity;
 mod session_browser;
 use provider_context::*;
+use provider_identity::provider_model_identity;
 mod source_control_review;
 mod system_access;
 mod terminal_capability;
@@ -174,6 +181,9 @@ const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
 const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
+/// Recent sessions read during shell warm-up, mirroring the page the sidebar
+/// opens with so the warm read covers the rows the first list reuses.
+const DESKTOP_SHELL_SESSION_PAGE: usize = 200;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
@@ -1899,6 +1909,9 @@ enum ProviderAdapterKind {
     AnthropicClaude,
     KimiAcp,
     Ollama,
+    /// Straight HTTPS to an OpenAI-compatible endpoint: the providers Gyro
+    /// ships API-key presets for, and any endpoint the user defines.
+    OpenAiCompatible,
     ReadinessOnly,
 }
 
@@ -2330,7 +2343,7 @@ fn create_worktree_session_blocking(
     reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let plan = create_worktree(&paths, PathBuf::from(workspace_path), branch, worktree_name)
         .map_err(to_string)?;
 
@@ -3164,7 +3177,7 @@ fn execute_claimed_automation(
         .provider_label
         .clone()
         .or_else(|| Some(automation.provider.clone()));
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let session = store
         .create_session_with_context(
             &workspace_path,
@@ -5232,6 +5245,8 @@ fn run_provider_chat_blocking(
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
         }
+        let billed = runner_output.billed_usage.as_ref();
+        openai_compatible_runner::insert_turn_tokens(object, &adapter, billed);
         if let Some(context_usage) = provider_context_usage_with_window(
             runner_output.context_usage.clone(),
             &request.provider_id,
@@ -6970,9 +6985,7 @@ fn load_config_blocking() -> Result<GyroConfig, String> {
     GyroConfig::load(&paths).map_err(to_string)
 }
 
-/// Warm local storage so the desktop shell can open the chat UI immediately
-/// while this work finishes. The frontend keeps non-essential actions gated
-/// until this returns successfully.
+/// Warm local storage so the shell can open the chat UI while this finishes.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WarmDesktopShellReport {
@@ -7003,20 +7016,15 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
     // Config first so provider count is available even if store warm fails later.
     let config = GyroConfig::load(&paths).map_err(to_string)?;
 
-    // Integrity + index maintenance on a dedicated handle, then prefill pools so
-    // the first interactive list_sessions / create_session is already hot.
+    // Index maintenance and pool prefill run here so the first interactive
+    // list_sessions / create_session is already hot. The integrity scan does
+    // not: see `launch_integrity`.
     let store = SessionStore::open(paths.clone()).map_err(to_string)?;
-    let integrity = match store.quick_check() {
-        Ok(()) => "ok".to_string(),
-        Err(error) => {
-            // Surface corruption without hard-failing warm-up: the UI can still
-            // open, and doctor/repair paths can dig deeper.
-            eprintln!("gyro desktop shell: sqlite quick_check reported: {error}");
-            error.to_string()
-        }
-    };
     store.maintain().map_err(to_string)?;
-    let sessions = store.list_sessions_limited(Some(200)).map_err(to_string)?;
+    let session_count = store
+        .list_sessions_limited(Some(DESKTOP_SHELL_SESSION_PAGE))
+        .map_err(to_string)?
+        .len();
     // Return this handle into the pool via Drop semantics by wrapping lease.
     {
         let _lease = SessionStoreLease { store: Some(store) };
@@ -7024,12 +7032,13 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
 
     let (session_pool_warmed, automation_pool_warmed) = warm_store_pools(&paths)?;
 
+    // The scan runs beside the launch, so nothing below waits on it.
+    launch_integrity::defer_launch_integrity_check(paths.clone());
+    let integrity = launch_integrity::launch_integrity_status();
+
     Ok(WarmDesktopShellReport {
-        // Warm-up completed far enough for the shell to unlock. Integrity is
-        // reported separately so corruption can be diagnosed without trapping
-        // the user on the optimizing gate forever.
         ready: true,
-        session_count: sessions.len(),
+        session_count,
         provider_count: config.model_providers.len(),
         session_pool_warmed,
         automation_pool_warmed,
@@ -8074,6 +8083,21 @@ async fn resolve_provider_approval(
     app: tauri::AppHandle,
     request: ProviderApprovalDecisionRequest,
 ) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || resolve_provider_approval_blocking(app, request))
+        .await
+        .map_err(|error| format!("provider approval worker failed: {error}"))?
+}
+
+/// Approving a reviewed file set opens the session store, writes a durable
+/// mutation journal, fsyncs every changed file and appends a session event.
+/// That is seconds of disk work for a large edit set, so it runs on a blocking
+/// worker; left on the async runtime it starved the IPC thread pool and every
+/// other command — session lists, event reads, terminal reads — stalled behind
+/// one approval.
+fn resolve_provider_approval_blocking(
+    app: tauri::AppHandle,
+    request: ProviderApprovalDecisionRequest,
+) -> Result<SessionEvent, String> {
     let decision = match request.decision.as_str() {
         "approve" => ProviderApprovalDecision::Approve,
         "reject" => ProviderApprovalDecision::Reject,
@@ -8087,7 +8111,7 @@ async fn resolve_provider_approval(
         .remove(&request.approval_id)
         .ok_or_else(|| "this provider approval is no longer pending".to_string())?;
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let mut payload = pending.payload;
     let mut provider_decision = decision;
     let mut pending_mutation: Option<PendingProviderMutationCommit> = None;
@@ -12533,7 +12557,7 @@ fn prune_browser_preview_captures(directory: &Path) -> Result<(), String> {
 fn check_provider_health_blocking(
     request: ProviderHealthRequest,
 ) -> Result<ProviderHealthCheck, String> {
-    ProviderHealthService.check(request).map_err(to_string)
+    gyro_core::provider_health(request).map_err(to_string)
 }
 
 #[tauri::command]
@@ -12543,6 +12567,10 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
             provider_id,
             api_key_ref: None,
             base_url: None,
+            kind: None,
+            // Standing readiness question, not a user action: a recent answer
+            // is the same answer.
+            force: false,
         })
     })
     .await
@@ -13750,7 +13778,7 @@ fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     paths.ensure().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
-    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let store = open_store()?;
     let sessions = store.list_sessions().map_err(to_string)?;
     let provider_health = collect_provider_health_for_diagnostics(&config);
     let mut recent_run_diagnostics = Vec::new();
@@ -13836,18 +13864,21 @@ fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
 }
 
 fn collect_provider_health_for_diagnostics(config: &GyroConfig) -> Vec<ProviderHealthCheck> {
-    let service = ProviderHealthService;
     config
         .model_providers
         .iter()
         .filter_map(|provider| {
-            service
-                .check(ProviderHealthRequest {
-                    provider_id: provider.id.clone(),
-                    base_url: provider.base_url.clone(),
-                    api_key_ref: Some(provider.api_key_ref.clone()),
-                })
-                .ok()
+            // The shared entry point, so a report written just after a readiness
+            // sweep reuses those probes instead of starting a second round of
+            // provider CLIs behind it.
+            gyro_core::provider_health(ProviderHealthRequest {
+                provider_id: provider.id.clone(),
+                base_url: provider.base_url.clone(),
+                api_key_ref: Some(provider.api_key_ref.clone()),
+                kind: provider.kind.clone(),
+                force: false,
+            })
+            .ok()
         })
         .collect()
 }
@@ -14556,6 +14587,9 @@ fn run_provider_chat_once(
         // so there is nothing to record before one finishes.
         ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
         ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
+        ProviderAdapterKind::OpenAiCompatible => {
+            openai_compatible_runner::run_openai_compatible_chat(app, request)
+        }
         ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
             "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
             request.provider_label.as_deref().unwrap_or("Provider")
@@ -14643,12 +14677,13 @@ fn run_ollama_chat(
     let expanded = with_browser_attachment_images(request, discovered.supports_images)?;
     let request = &expanded;
     let run_mode = capability_run_mode_for_chat(request.mode);
+    let identity = provider_model_identity(request, "and run locally through Ollama");
     let system = if request.mode == ChatMode::Council {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits."
+        format!("{identity} Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits.")
     } else if discovered.supports_tools {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it."
+        format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     } else {
-        "You are a local Ollama model in Gyro. Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits."
+        format!("{identity} Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits.")
     };
     let mut user = provider_context_message_with_capabilities(
         request,
@@ -19955,7 +19990,7 @@ fn handle_provider_stdout_value(
     }
     let activities = extract_provider_activities(value);
     let observed_files = stream_state.observe_command_file_changes(
-        &value,
+        value,
         &activities,
         request.workspace_path.as_deref(),
     );
@@ -20817,6 +20852,14 @@ fn extract_codex_agent_message_text(value: &serde_json::Value) -> Option<String>
 
 fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
     let Some(descriptor) = provider_descriptor(provider_id) else {
+        // A provider Gyro does not ship. An endpoint the user defined runs over
+        // HTTPS; anything else stays readiness-only.
+        if is_openai_compatible_provider(
+            provider_id,
+            openai_compatible_runner::declared_provider_kind(provider_id).as_deref(),
+        ) {
+            return openai_compatible_runner::openai_compatible_adapter();
+        }
         return ProviderAdapterDescriptor {
             kind: ProviderAdapterKind::ReadinessOnly,
             runner: "readiness-only",
@@ -20830,6 +20873,7 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
         ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::OllamaApi => ProviderAdapterKind::Ollama,
+        ProviderExecutionKind::OpenAiCompatibleApi => ProviderAdapterKind::OpenAiCompatible,
         ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
     };
     ProviderAdapterDescriptor {
@@ -24023,6 +24067,7 @@ pub fn run() {
             provider_api_keys::provider_api_key_status,
             provider_api_keys::set_provider_api_key,
             provider_api_keys::clear_provider_api_key,
+            provider_api_keys::list_custom_provider_models,
             check_cli_updates_command,
             apply_cli_updates_command,
             system_access::check_system_access,

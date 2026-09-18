@@ -1081,7 +1081,7 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini,cursor,opencode,ollama",
+    "openai,anthropic,kimi,xai,gemini,cursor,opencode,deepseek,mistral,openrouter,ollama",
   "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
@@ -4993,6 +4993,20 @@ expect(
   "The Create menu should keep a compact, grouped surface without a project picker.",
 );
 expect(
+  [
+    ".gyro-sidebar-new-session-menu button strong",
+    ".gyro-sidebar-new-session-menu button small",
+  ].every((selector) =>
+    cssRules(styleSource, selector).some(
+      (rule) =>
+        /white-space:\s*nowrap/.test(rule) &&
+        /overflow:\s*hidden/.test(rule) &&
+        /text-overflow:\s*ellipsis/.test(rule),
+    ),
+  ),
+  "Launcher rows in the Create menu must stay single-line with ellipsis: a wrapped label grows past the row height and collides with the row below it.",
+);
+expect(
   chatSidebarSource.includes("New Chat") &&
     chatSidebarSource.includes(
       '<span className="gyro-sidebar-session-group-label">',
@@ -6064,10 +6078,10 @@ expect(
     appSource.includes('tab: "terminal"') &&
     coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
     coreProviderHealthSource.includes(
-      '"codex",\n            &["login", "status"]',
+      'command: "codex",\n            args: &["login", "status"]',
     ) &&
     coreProviderHealthSource.includes(
-      '"claude",\n                &["auth", "status"]',
+      'command: "claude",\n                    args: &["auth", "status"]',
     ) &&
     coreProviderHealthSource.includes('"xai"') &&
     coreProviderHealthSource.includes('"XAI_API_KEY"') &&
@@ -6093,7 +6107,7 @@ expect(
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
     surfaceSource.includes("function ProviderApiKeyField") &&
     surfaceSource.includes("Paste API key") &&
-    surfaceSource.includes("Stored securely in macOS Keychain") &&
+    surfaceSource.includes("Kept in the macOS Keychain") &&
     providerApiKeysSource.includes("set_provider_api_key") &&
     providerApiKeysSource.includes("clear_provider_api_key") &&
     providerApiKeysSource.includes("provider_api_key_status") &&
@@ -7107,7 +7121,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 8px") &&
+    styleSource.includes("--gyro-premium-radius-md: 9px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
     styleSource.includes("--gyro-app: #181818") &&
     styleSource.includes("--gyro-pane: #1e1e1e") &&
