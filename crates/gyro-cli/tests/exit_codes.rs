@@ -51,7 +51,7 @@ fn write_provider_config(home: &Path, command: &Path, approvals_required: bool, 
             enabled: true,
             default_model_id: None,
             kind: None,
-            models: Vec::new(),
+            model_ids: Vec::new(),
         }],
         command_profiles: vec![CommandProfile {
             id: "test-provider".into(),
@@ -398,7 +398,7 @@ fn real_binary_does_not_launch_a_profile_with_a_disabled_provider() {
             enabled: false,
             default_model_id: None,
             kind: None,
-            models: Vec::new(),
+            model_ids: Vec::new(),
         }],
         command_profiles: vec![CommandProfile {
             id: "test-provider".into(),

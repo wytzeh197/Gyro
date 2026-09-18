@@ -89,7 +89,7 @@ pub struct ModelProviderConfig {
     /// stays out of the on-disk schema; a custom provider has no catalog entry
     /// to derive from and must persist its own list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub models: Vec<String>,
+    pub model_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -211,7 +211,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "anthropic".into(),
@@ -221,7 +221,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "kimi".into(),
@@ -231,7 +231,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "xai".into(),
@@ -241,7 +241,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "gemini".into(),
@@ -251,7 +251,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "cursor".into(),
@@ -261,7 +261,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "opencode".into(),
@@ -271,7 +271,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
                     id: "ollama".into(),
@@ -281,7 +281,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                     kind: None,
-                    models: Vec::new(),
+                    model_ids: Vec::new(),
                 },
                 // API-key providers read over HTTPS rather than through a vendor
                 // CLI. Their `models` list is the shipped default; pointing one
@@ -294,7 +294,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: Some("deepseek-chat".into()),
                     kind: None,
-                    models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                    model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
                 },
                 ModelProviderConfig {
                     id: "mistral".into(),
@@ -304,7 +304,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: Some("mistral-large-latest".into()),
                     kind: None,
-                    models: vec!["mistral-large-latest".into(), "codestral-latest".into()],
+                    model_ids: vec!["mistral-large-latest".into(), "codestral-latest".into()],
                 },
                 ModelProviderConfig {
                     id: "openrouter".into(),
@@ -314,7 +314,7 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: Some("anthropic/claude-sonnet-4.5".into()),
                     kind: None,
-                    models: vec![
+                    model_ids: vec![
                         "anthropic/claude-sonnet-4.5".into(),
                         "openai/gpt-5.1".into(),
                         "google/gemini-3-pro-preview".into(),
@@ -533,7 +533,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             ModelProviderConfig {
                 id: "xai".into(),
@@ -543,7 +543,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             ModelProviderConfig {
                 id: "gemini".into(),
@@ -553,7 +553,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             ModelProviderConfig {
                 id: "cursor".into(),
@@ -563,7 +563,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             ModelProviderConfig {
                 id: "opencode".into(),
@@ -573,7 +573,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             ModelProviderConfig {
                 id: "ollama".into(),
@@ -583,7 +583,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: None,
                 kind: None,
-                models: Vec::new(),
+                model_ids: Vec::new(),
             },
             // Presets added after this config format shipped. Existing files
             // are backfilled here so a new provider appears without the user
@@ -596,7 +596,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: Some("deepseek-chat".into()),
                 kind: None,
-                models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
             },
             ModelProviderConfig {
                 id: "mistral".into(),
@@ -606,7 +606,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: Some("mistral-large-latest".into()),
                 kind: None,
-                models: vec!["mistral-large-latest".into(), "codestral-latest".into()],
+                model_ids: vec!["mistral-large-latest".into(), "codestral-latest".into()],
             },
             ModelProviderConfig {
                 id: "openrouter".into(),
@@ -616,7 +616,7 @@ impl GyroConfig {
                 enabled: false,
                 default_model_id: Some("anthropic/claude-sonnet-4.5".into()),
                 kind: None,
-                models: vec![
+                model_ids: vec![
                     "anthropic/claude-sonnet-4.5".into(),
                     "openai/gpt-5.1".into(),
                     "google/gemini-3-pro-preview".into(),
@@ -892,6 +892,56 @@ fn atomic_write_private_config(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renderer_derived_model_lists_do_not_break_config_deserialization() {
+        // The renderer sends `models` as objects (id, displayName, …) on every
+        // save because it derives them from the catalog. That is not the id
+        // list a custom provider stores, and reading it as one would reject the
+        // whole payload — so the on-disk schema must not claim the name.
+        let payload = serde_json::json!({
+            "telemetryEnabled": false,
+            "requireCommandApproval": true,
+            "requireFileEditApproval": true,
+            "modelProviders": [{
+                "id": "custom:my-gateway",
+                "displayName": "My Gateway",
+                "baseUrl": "https://gateway.example.com/v1",
+                "apiKeyRef": "provider:custom:my-gateway",
+                "enabled": true,
+                "models": [{ "id": "llama-3.3-70b", "displayName": "Llama 3.3 70B" }],
+                "modelIds": ["llama-3.3-70b"]
+            }],
+            "commandProfiles": []
+        });
+        let config: GyroConfig = serde_json::from_value(payload).unwrap();
+        assert_eq!(config.model_providers[0].model_ids, ["llama-3.3-70b"]);
+    }
+
+    #[test]
+    fn a_custom_provider_round_trips_its_endpoint_and_models() {
+        let config = GyroConfig {
+            model_providers: vec![ModelProviderConfig {
+                id: "custom:my-gateway".into(),
+                display_name: "My Gateway".into(),
+                base_url: Some("https://gateway.example.com/v1".into()),
+                api_key_ref: "provider:custom:my-gateway".into(),
+                enabled: true,
+                default_model_id: Some("llama-3.3-70b".into()),
+                kind: None,
+                model_ids: vec!["llama-3.3-70b".into()],
+            }],
+            ..GyroConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        let provider = &json["modelProviders"][0];
+        assert_eq!(provider["baseUrl"], "https://gateway.example.com/v1");
+        assert_eq!(provider["modelIds"][0], "llama-3.3-70b");
+        // The renderer's derived `models` array stays out of the file entirely.
+        assert!(provider.get("models").is_none());
+        let restored: GyroConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.model_providers[0].model_ids, ["llama-3.3-70b"]);
+    }
 
     #[test]
     fn defaults_are_local_first() {

@@ -269,7 +269,7 @@ mod tests {
             enabled: true,
             default_model_id: None,
             kind: kind.map(str::to_string),
-            models: Vec::new(),
+            model_ids: Vec::new(),
         }
     }
 
