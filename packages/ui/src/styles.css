@@ -18447,18 +18447,15 @@ textarea,
   color: #555b64;
 }
 
-:root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool {
-  background: #f3f4f6;
-  border-color: #e1e4e8;
-}
-
+/* The docked composer's tools carry no resting fill, matching the hero
+   composer: the icon reads on the composer surface and only the hover wash
+   marks the hit target. */
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-chip:hover,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool:hover,
 :root[data-theme="light"]
   .gyro-chat-composer-dock
   .gyro-composer-tool[aria-expanded="true"] {
   background: rgba(31, 41, 55, 0.06);
-  border-color: #d6dae0;
   color: #151a21;
 }
 
@@ -40642,6 +40639,24 @@ textarea:focus-visible,
 }
 .gyro-project-edit-dialog footer .gyro-project-save:hover:not(:disabled) {
   opacity: 0.85;
+}
+
+/* Light mode: these two panels floated on pure #ffffff over cool-slate text,
+   which reads as a generic assistant surface rather than a Gyro one. Repoint
+   the surface tokens to the warm stone neutrals the brand palette uses, so the
+   card, dialog, hairlines, hover states and the Save button all follow without
+   any per-element colour. */
+:root[data-theme="light"]
+  :is(.gyro-project-hover-card, .gyro-project-edit-dialog) {
+  --gyro-surface: #fafaf8;
+  --gyro-surface-soft: #f1f1ee;
+  --gyro-text: #171714;
+  --gyro-muted: #626560;
+  --gyro-faint: #858883;
+  --gyro-border: rgba(23, 23, 20, 0.11);
+  --gyro-border-soft: rgba(23, 23, 20, 0.07);
+  --gyro-premium-shadow: rgba(23, 23, 20, 0.12);
+  --gyro-premium-shadow-soft: rgba(23, 23, 20, 0.07);
 }
 
 /* Changed-file actions are anchored to their trigger, outside scroll clipping. */
