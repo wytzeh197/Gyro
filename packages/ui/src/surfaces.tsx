@@ -175,6 +175,8 @@ import {
   sourceControlTotalsLabel,
   sourceControlTotalsScope,
 } from "./source-control-stats";
+import { environmentActions } from "./environment-actions";
+import type { EnvironmentActionIntent } from "./environment-actions";
 import { GitComparisonReview } from "./git-comparison-review";
 import type { ComparisonDiffResult } from "./git-comparison-review";
 import {
@@ -7880,8 +7882,9 @@ export function ChatSurface({
   onPlanEditorRequestHandled,
 }: ChatSurfaceProps) {
   const [localDraft, setLocalDraft] = useState(draft);
-  const [goalDraft, setGoalDraft] = useState("");
-  const wasGoalComposerActiveRef = useRef(false);
+  const [goalDraft, setGoalDraft] = useState<string>();
+  const [goalSaveNotice, setGoalSaveNotice] = useState("");
+  const goalSavePendingRef = useRef(false);
   const [dismissedPlanDecisionKey, setDismissedPlanDecisionKey] = useState<
     string | undefined
   >();
@@ -7908,19 +7911,13 @@ export function ChatSurface({
   const isFollowingTranscriptBottomRef = useRef(true);
   /** Previous offset, so a scroll up can be told from content growing below. */
   const lastTranscriptScrollTopRef = useRef(0);
+  const transcriptPointerDownRef = useRef(false);
+  const transcriptTouchYRef = useRef<number>();
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
   useEffect(() => {
     setLocalDraft(draft);
   }, [draft, draftResetToken]);
-  useEffect(() => {
-    if (isGoalComposerActive && !wasGoalComposerActiveRef.current) {
-      setGoalDraft(sessionGoal?.text ?? "");
-    } else if (!isGoalComposerActive) {
-      setGoalDraft("");
-    }
-    wasGoalComposerActiveRef.current = isGoalComposerActive;
-  }, [isGoalComposerActive, sessionGoal?.text]);
   const handleDraftChange = useCallback(
     (value: string) => {
       setLocalDraft(value);
@@ -7932,6 +7929,7 @@ export function ChatSurface({
     (value: string) => {
       if (isGoalComposerActive) {
         setGoalDraft(value);
+        setGoalSaveNotice("");
         return;
       }
       handleDraftChange(value);
@@ -7960,24 +7958,35 @@ export function ChatSurface({
     [handleComposerDraftChange],
   );
   const cancelGoalComposer = useCallback(() => {
-    setGoalDraft("");
     onCancelGoalComposer?.();
   }, [onCancelGoalComposer]);
   const handleSend = useCallback(async () => {
     if (isGoalComposerActive) {
-      const goal = goalDraft.trim();
+      const goal = (goalDraft ?? sessionGoal?.text ?? "").trim();
       if (!goal) return;
       if (onStartGoalChat) {
         onStartGoalChat(goal);
         cancelGoalComposer();
         return;
       }
-      const result = await onGoalAction?.(
-        sessionGoal?.text ? "edit" : "set",
-        goal,
-      );
-      if (result === false) return;
-      cancelGoalComposer();
+      if (goalSavePendingRef.current) return;
+      goalSavePendingRef.current = true;
+      setGoalSaveNotice("Saving goal…");
+      try {
+        if (!onGoalAction) throw new Error("Goal saving unavailable");
+        const result = await onGoalAction(
+          sessionGoal?.text ? "edit" : "set",
+          goal,
+        );
+        if (result === false) throw new Error("Goal was not saved");
+        setGoalDraft(undefined);
+        setGoalSaveNotice(`Goal saved: ${goal}. Send a message to start work.`);
+        cancelGoalComposer();
+      } catch {
+        setGoalSaveNotice("Could not save the goal. Your draft is preserved; try again.");
+      } finally {
+        goalSavePendingRef.current = false;
+      }
       return;
     }
     onSend(localDraft);
@@ -8085,7 +8094,10 @@ export function ChatSurface({
     // leaving. Only moving up and away from the bottom hands control over.
     if (isAtBottom) {
       isFollowingTranscriptBottomRef.current = true;
-    } else if (transcript.scrollTop < lastTranscriptScrollTopRef.current) {
+    } else if (
+      transcriptPointerDownRef.current &&
+      transcript.scrollTop < lastTranscriptScrollTopRef.current
+    ) {
       isFollowingTranscriptBottomRef.current = false;
     }
     lastTranscriptScrollTopRef.current = transcript.scrollTop;
@@ -8110,12 +8122,14 @@ export function ChatSurface({
     }
     isFollowingTranscriptBottomRef.current = true;
     lastTranscriptScrollTopRef.current = transcript.scrollTop;
-    transcript.scrollTo({
-      behavior: "smooth",
-      top: transcript.scrollHeight,
-    });
-  }, []);
+    pinTranscriptToBottom();
+    updateTranscriptScrollPosition();
+  }, [pinTranscriptToBottom, updateTranscriptScrollPosition]);
   const transcriptSessionId = transcriptEvents[0]?.sessionId;
+  useEffect(() => {
+    setGoalDraft(undefined);
+    setGoalSaveNotice("");
+  }, [transcriptSessionId]);
   const canvasArtifacts = useMemo(
     () =>
       latestCanvasArtifacts(transcriptEvents.flatMap(chatArtifactsFromEvent)),
@@ -8215,8 +8229,28 @@ export function ChatSurface({
       });
     });
     observer.observe(transcript);
+    // The scroll viewport stays the same size when replies, images, or tool
+    // cards grow. Observe its content as well, including newly added turns.
+    for (const child of transcript.children) observer.observe(child);
+    const mutations = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          if (node instanceof Element) observer.unobserve(node);
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) observer.observe(node);
+        }
+      }
+    });
+    mutations.observe(transcript, { childList: true });
+    const releasePointer = () => { transcriptPointerDownRef.current = false; };
+    window.addEventListener("pointerup", releasePointer);
+    window.addEventListener("pointercancel", releasePointer);
     if (dock) observer.observe(dock);
     return () => {
+      mutations.disconnect();
+      window.removeEventListener("pointerup", releasePointer);
+      window.removeEventListener("pointercancel", releasePointer);
       observer.disconnect();
       if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
     };
@@ -8726,6 +8760,7 @@ export function ChatSurface({
         if (onOpenCompanionTab) onOpenCompanionTab("review");
         else onSelectChatPanel?.("review");
       }}
+      onRunGitAction={railDiffTools?.onRunGitAction}
       onSelectBranch={() => onComposerAction?.("select-branch")}
       sourceControl={sourceControl}
       terminalPanes={terminalPanes}
@@ -8811,6 +8846,7 @@ export function ChatSurface({
               onClear={() => onGoalAction?.("clear")}
             />
           ) : null}
+          {goalSaveNotice ? <p role="status" className="gyro-goal-save-notice">{goalSaveNotice}</p> : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -8818,7 +8854,7 @@ export function ChatSurface({
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={isGoalComposerActive ? goalDraft : localDraft}
+            draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}
             branchName={branchName}
             branchCatalog={branchCatalog}
             onDraftChange={handleComposerDraftChange}
@@ -8976,6 +9012,25 @@ export function ChatSurface({
           aria-relevant="additions text"
           className="gyro-thread-body gyro-chat-transcript"
           onScroll={updateTranscriptScrollPosition}
+          onWheel={(event) => {
+            if (event.deltaY < 0) isFollowingTranscriptBottomRef.current = false;
+          }}
+          onPointerDown={() => { transcriptPointerDownRef.current = true; }}
+          onTouchStart={(event) => {
+            transcriptTouchYRef.current = event.touches[0]?.clientY;
+          }}
+          onTouchMove={(event) => {
+            const y = event.touches[0]?.clientY;
+            if (y !== undefined && transcriptTouchYRef.current !== undefined && y > transcriptTouchYRef.current) {
+              isFollowingTranscriptBottomRef.current = false;
+            }
+            transcriptTouchYRef.current = y;
+          }}
+          onKeyDown={(event) => {
+            if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) {
+              isFollowingTranscriptBottomRef.current = false;
+            }
+          }}
           ref={transcriptRef}
           role="log"
         >
@@ -9034,6 +9089,7 @@ export function ChatSurface({
               plan={sessionPlan}
             />
           ) : null}
+          {goalSaveNotice ? <p role="status" className="gyro-goal-save-notice">{goalSaveNotice}</p> : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -9041,7 +9097,7 @@ export function ChatSurface({
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={isGoalComposerActive ? goalDraft : localDraft}
+            draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}
             branchName={branchName}
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
@@ -11433,6 +11489,7 @@ function ChatEnvironmentPopover({
   onClose,
   onOpenTab,
   onOpenReview,
+  onRunGitAction,
   onSelectBranch,
   sourceControl,
   terminalPanes,
@@ -11445,6 +11502,7 @@ function ChatEnvironmentPopover({
   onClose?: () => void;
   onOpenTab?: (tab: ChatCompanionTabId) => void;
   onOpenReview?: (scope: ReviewScope) => void;
+  onRunGitAction?: (actionId: GitReviewActionId) => void;
   onSelectBranch?: () => void;
   sourceControl?: SourceControlState;
   terminalPanes?: TerminalPane[];
@@ -11461,6 +11519,23 @@ function ChatEnvironmentPopover({
   const openCompanionTab = (tab: ChatCompanionTabId) => {
     onClose?.();
     onOpenTab?.(tab);
+  };
+  const openReview = () => {
+    const scope = reviewScopeFromSourceControl(sourceControl);
+    if (onOpenReview) {
+      onClose?.();
+      onOpenReview(scope);
+      return;
+    }
+    openCompanionTab("review");
+  };
+  const runEnvironmentAction = (intent: EnvironmentActionIntent) => {
+    if (intent.kind === "review") {
+      openReview();
+      return;
+    }
+    onClose?.();
+    onRunGitAction?.(intent.actionId);
   };
   // Same resolver as the Workspace sidebar's Source control heading: this row
   // used to print the working tree while that heading printed the branch, so
@@ -11525,15 +11600,7 @@ function ChatEnvironmentPopover({
         </button>
         <button
           aria-label={`Open changes, ${changesDetail}, ${sourceControlTotalsScope(changeTotals)}`}
-          onClick={() => {
-            const scope = reviewScopeFromSourceControl(sourceControl);
-            if (onOpenReview) {
-              onClose?.();
-              onOpenReview(scope);
-              return;
-            }
-            openCompanionTab("review");
-          }}
+          onClick={openReview}
           title={sourceControlTotalsScope(changeTotals)}
           type="button"
         >
@@ -11563,6 +11630,35 @@ function ChatEnvironmentPopover({
           </strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
+      </div>
+      <div className="gyro-chat-environment-popover-actions">
+        {environmentActions(sourceControl).map((action) => {
+          const Icon =
+            action.id === "commit-or-push"
+              ? GitCommitHorizontal
+              : GitPullRequest;
+          // A git-backed row without a handler behind it would look live and do
+          // nothing, so it reads as unavailable instead.
+          const isRunnable =
+            action.intent?.kind === "review" || Boolean(onRunGitAction);
+          const isEnabled = action.enabled && isRunnable;
+          return (
+            <button
+              aria-label={`${action.label}. ${action.detail}`}
+              disabled={!isEnabled}
+              key={action.id}
+              onClick={() => {
+                if (action.intent) runEnvironmentAction(action.intent);
+              }}
+              title={action.detail}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={14} />
+              <span>{action.label}</span>
+              <small>{action.detail}</small>
+            </button>
+          );
+        })}
       </div>
       <section className="gyro-chat-environment-popover-sources">
         <header>
@@ -23653,7 +23749,7 @@ function Composer({
         : "Set a goal for this chat",
       hint: "Say what a good result looks like, and Gyro keeps it in mind for the whole chat.",
       icon: Goal,
-      label: sessionGoal?.text ? "Edit goal" : "Set goal",
+      label: sessionGoal?.text ? "Edit goal" : "Save goal",
     },
     chatMode === "plan" || chatMode === "council"
       ? {
@@ -24228,8 +24324,12 @@ function Composer({
           />
         </div>
       ) : null}
-      {effectiveProviderId ? (
+      {effectiveProviderId &&
+      selectedProvider?.capabilities?.supportsUsage === true &&
+      selectedProvider.capabilities.executionKind !== "openai-compatible-api" &&
+      selectedProvider.authMode !== "env" ? (
         <PlanUsageNotification
+          key={effectiveProviderId}
           dailyPaceWarning={dailyPaceWarning}
           onHandoff={(providerId) =>
             onComposerAction?.(`handoff-provider:${providerId}`)
@@ -24374,7 +24474,7 @@ function Composer({
             : isGoalComposerActive
               ? startsGoalSession
                 ? "Describe the outcome and press Send to start"
-                : "Define the outcome for this chat"
+                : "Define the outcome, then save the goal"
               : chatMode === "council"
                 ? "Ask for architecture, review, or alternatives — models answer in parallel"
                 : !canSubmitChat
@@ -24536,11 +24636,11 @@ function Composer({
         ) : null}
         {isGoalComposerActive ? (
           <button
-            aria-label="Cancel setting goal"
+            aria-label="Close goal editor"
             aria-pressed="true"
             className="gyro-composer-chip is-goal"
             onClick={onCancelGoalComposer}
-            title="Cancel setting goal"
+            title="Close goal editor — draft is kept"
             type="button"
           >
             <Goal size={13} />
@@ -24756,7 +24856,7 @@ function Composer({
               : isGoalComposerActive
                 ? startsGoalSession
                   ? "Start goal session"
-                  : "Set goal"
+                  : "Save goal"
                 : isSending
                   ? "Queue message"
                   : "Send message"
@@ -24829,7 +24929,7 @@ function Composer({
               : isGoalComposerActive
                 ? startsGoalSession
                   ? "Start goal session"
-                  : "Set goal"
+                  : "Save goal"
                 : isCliUpdating
                   ? "Wait for the CLI update to finish"
                   : !hasReadyProvider
@@ -24846,6 +24946,8 @@ function Composer({
         >
           {isStopAction ? (
             <Square fill="currentColor" size={10} strokeWidth={0} />
+          ) : isGoalComposerActive && !startsGoalSession ? (
+            <Check size={17} />
           ) : (
             <ArrowUp size={17} />
           )}
@@ -26142,7 +26244,7 @@ function LiveFileChanges({
       <strong>
         {files.length} {files.length === 1 ? "file" : "files"} changed
       </strong>
-      <FileChangeCountBadges counts={totals} />
+      <FileChangeCountBadges counts={totals} showUnknown={false} />
     </button>
   );
 }

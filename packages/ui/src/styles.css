@@ -29969,6 +29969,14 @@ button.gyro-account-menu-row:hover,
 .gyro-app-shell.is-chat-shell.is-workspace-shell {
   --gyro-workspace-activity-rail-width: 0px;
   --gyro-workspace-sidebar-column-width: 240px;
+  /* Resolved once here so the rail, the titlebar band and the panel corner are
+     provably the same tone rather than three separate color-mix calls. */
+  --gyro-workspace-chrome: color-mix(
+    in srgb,
+    var(--gyro-sidebar) 92%,
+    black 8%
+  );
+  --gyro-workspace-panel-radius: 10px;
   grid-template-columns:
     var(--gyro-workspace-activity-rail-width)
     var(--gyro-workspace-sidebar-column-width) minmax(0, 1fr);
@@ -30000,7 +30008,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-workspace-activity-rail {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-sidebar) 92%, black 8%);
+  background: var(--gyro-workspace-chrome);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -30018,11 +30026,53 @@ button.gyro-account-menu-row:hover,
   z-index: 30;
 }
 
-/* Match the Light workspace titlebar to the activity rail beneath it. */
-:root[data-theme="light"]
-  .gyro-app-shell.is-workspace-chrome-active
-  .gyro-sidebar-windowbar {
-  background: color-mix(in srgb, var(--gyro-sidebar) 92%, black 8%);
+/* Workspace chrome: the 48px titlebar band and the activity rail carry one
+   tone so the sidebar body below reads as a panel tucked under them instead of
+   the same slab running to the window edge. Both are painted from the sidebar
+   column itself rather than from the windowbar, because the windowbar sits
+   inside the column's 8px gutter and so cannot reach the rail seam the corner
+   has to meet. Theme tokens carry Light and Dark; neither is special-cased. */
+.gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
+  background: var(--gyro-workspace-chrome);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  box-sizing: border-box;
+  content: "";
+  height: 48px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 0;
+}
+
+/* The windowbar paints its own sidebar-toned background and sits above the
+   band on z-index 12, so it has to clear out for the band to read at all. */
+.gyro-app-shell.is-workspace-chrome-active .gyro-sidebar-windowbar {
+  background: transparent;
+}
+
+/* The corner: outside the arc stays chrome, the arc carries the same hairline
+   as the band above it and the rail divider below it, and the inside stays
+   transparent so the sidebar surface reads through as the panel. */
+.gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after {
+  background: radial-gradient(
+    circle at var(--gyro-workspace-panel-radius)
+      var(--gyro-workspace-panel-radius),
+    transparent 0 calc(var(--gyro-workspace-panel-radius) - 0.5px),
+    var(--gyro-border-soft) calc(var(--gyro-workspace-panel-radius) - 0.5px)
+      calc(var(--gyro-workspace-panel-radius) + 0.5px),
+    var(--gyro-workspace-chrome)
+      calc(var(--gyro-workspace-panel-radius) + 0.5px)
+  );
+  content: "";
+  height: var(--gyro-workspace-panel-radius);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 48px;
+  width: var(--gyro-workspace-panel-radius);
+  z-index: 0;
 }
 
 /* Unified Settings keeps one sidebar and embeds project-scoped controls. */
@@ -30129,6 +30179,8 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-success);
 }
 
+/* Starts below the panel's rounded corner: the arc already carries the seam
+   across those pixels, so squaring the divider off at 48px would cross it. */
 .gyro-workspace-activity-rail::after {
   background: var(--gyro-border-soft);
   bottom: 0;
@@ -30136,7 +30188,7 @@ button.gyro-account-menu-row:hover,
   pointer-events: none;
   position: absolute;
   right: 0;
-  top: 48px;
+  top: calc(48px + var(--gyro-workspace-panel-radius));
   width: 1px;
 }
 
@@ -30285,6 +30337,12 @@ button.gyro-account-menu-row:hover,
   .gyro-app-shell.is-workspace-shell > .gyro-sidebar-restore-cluster,
   .gyro-app-shell.is-workspace-shell > .gyro-main {
     grid-column: 1;
+  }
+
+  /* No rail to round into at this width; the sidebar sits against the window
+     edge, so keep the band and drop the corner. */
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after {
+    content: none;
   }
 }
 
@@ -35143,6 +35201,68 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-environment-popover-rows > button > svg:last-child {
   color: var(--gyro-faint);
   flex: 0 0 auto;
+}
+
+/* The two rows that act rather than report. They sit under the status rows and
+   above Sources, so the card reads state first, then what can be done with it. */
+.gyro-chat-environment-popover-actions {
+  border-top: 1px solid var(--gyro-border-soft);
+  display: grid;
+  gap: 1px;
+  margin-top: 7px;
+  padding-top: 6px;
+}
+
+.gyro-chat-environment-popover-actions > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-chat-environment-popover-actions > button:not(:disabled):hover,
+.gyro-chat-environment-popover-actions > button:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+/* A blocked row still names its reason rather than going silent, so it dims
+   without disappearing. */
+.gyro-chat-environment-popover-actions > button:disabled {
+  color: var(--gyro-faint);
+  cursor: default;
+}
+
+.gyro-chat-environment-popover-actions > button > svg {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-environment-popover-actions > button:disabled > svg {
+  color: var(--gyro-faint);
+}
+
+.gyro-chat-environment-popover-actions > button > span {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.gyro-chat-environment-popover-actions > button > small {
+  color: var(--gyro-faint);
+  flex: 1 1 auto;
+  font-size: 11px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-chat-environment-popover-sources {
@@ -41238,4 +41358,35 @@ textarea:focus-visible,
    moves between the two surfaces, and it must not jump sideways as it does. */
 .gyro-sidebar-windowbar > .gyro-sidebar-window-actions {
   min-width: 28px;
+}
+
+/* Plan documents overlay their owning chat without reserving a rail or row. */
+.gyro-goal-save-notice {
+  margin: 0;
+  padding: 6px 16px;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.gyro-chat-surface.is-thread.has-environment.has-plan {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
+}
+
+.gyro-chat-surface.is-thread.has-environment.has-plan > .gyro-plan-rail {
+  position: absolute;
+  inset: 48px 0 0 auto;
+  grid-column: auto;
+  grid-row: auto;
+  box-sizing: border-box;
+  width: min(520px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  z-index: 75;
+  box-shadow: -12px 0 32px rgb(0 0 0 / 18%);
 }

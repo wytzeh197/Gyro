@@ -23,12 +23,14 @@ pub mod policy;
 pub mod provider_contract;
 pub mod provider_health;
 pub mod provider_registry;
+mod provider_retry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;
 pub mod sqlite;
 pub mod timing;
 pub mod usage;
+pub mod web_fetch;
 pub mod workspace_check;
 pub mod worktrees;
 
@@ -182,6 +184,7 @@ pub use usage::{
     PauseScope, PauseState, ProviderRateLimitRecord, RecentUsage, UsageBudget, UsageEntry,
     UsageGuardConfig, UsageOrigin, UsageOriginTotals, UsageOutcome, UsageTokens, UsageTotals,
 };
+pub use web_fetch::{fetch_text, WebFetchPage, MAX_WEB_FETCH_BYTES};
 pub use workspace_check::{
     check_workspace, check_workspace_with_timeout, is_workspace_unavailable_error,
     WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief, WORKSPACE_CHECK_SCHEMA_V1,

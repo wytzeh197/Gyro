@@ -6,6 +6,7 @@ import {
   type ProviderHealthCheck,
 } from "./provider-health-probes";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
+import { useModelBrowserReveal } from "./model-browser-reveal";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { useProviderUsage } from "./use-provider-usage";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
@@ -1228,6 +1229,16 @@ export function App() {
   useEffect(() => {
     dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
   }, [companionFocusPaneId]);
+  useModelBrowserReveal({
+    activeSessionId,
+    dispatch: dispatchWorkbench,
+    hasMaximizedPane: Boolean(chatGrid.maximizedPaneId),
+    isBrowserVisible:
+      activeChatPanel === "browser" ||
+      activeChatCompanionPanel(companion, companionFocusPaneId) === "browser",
+    isTauriRuntime: isTauriRuntime(),
+    occupiedPaneCount: (activeChatLayout?.slots ?? []).filter(Boolean).length,
+  });
   // Anything that still asks for a companion tool the old way — the browser
   // opening itself mid-run, a panel restored from preferences — lands here and
   // becomes a tab in the focused pane's strip.
@@ -9153,7 +9164,7 @@ export function App() {
             );
             break;
           }
-          if (sendingSessionIds.includes(activeSessionId)) {
+          if (sendingSessionIdsRef.current.has(activeSessionId)) {
             notify(
               "command-failed",
               "Wait for the current response",
@@ -9165,6 +9176,39 @@ export function App() {
             break;
           }
           const compactionTurnId = crypto.randomUUID();
+          // Compaction owns the same session slot as a normal send. Claim it
+          // synchronously so subsequent messages use the existing send queue.
+          setSessionSending(activeSessionId, true);
+          const compactEvents = createOptimisticTurnEvents(
+            activeSessionId,
+            "/compact",
+            compactionTurnId,
+            providersForConfig(config).find(
+              (provider) => provider.id === "openai",
+            ),
+          );
+          optimisticEventsRef.current.set(
+            activeSessionId,
+            mergePersistedAndOptimisticEvents(
+              optimisticEventsRef.current.get(activeSessionId) ?? [],
+              compactEvents,
+            ),
+          );
+          setEventsForSession(activeSessionId, (current) =>
+            mergePersistedAndOptimisticEvents(current, compactEvents),
+          );
+          const settleCompaction = (
+            status: OptimisticProviderStatus,
+            error?: string,
+          ) =>
+            updateOptimisticProviderStatus(
+              optimisticEventsRef,
+              (value) => setEventsForSession(activeSessionId, value),
+              activeSessionId,
+              compactionTurnId,
+              status,
+              error,
+            );
           void invoke<SessionEvent>("append_user_message", {
             sessionId: activeSessionId,
             message: "/compact",
@@ -9177,14 +9221,25 @@ export function App() {
                 { sessionId: activeSessionId, turnId: compactionTurnId },
               );
             })
-            .finally(() => refreshEvents(activeSessionId))
-            .catch((error) =>
+            .then(() => settleCompaction("done"))
+            .catch((error) => {
+              settleCompaction(
+                isProviderStop(String(error)) ? "cancelled" : "failed",
+                String(error),
+              );
               notify(
                 "command-failed",
                 "Context compaction failed",
                 String(error),
-              ),
-            );
+              );
+            })
+            .finally(async () => {
+              try {
+                await refreshEvents(activeSessionId);
+              } finally {
+                setSessionSending(activeSessionId, false);
+              }
+            });
           break;
         }
         case "open-terminal-panel":
@@ -9236,6 +9291,9 @@ export function App() {
       startNewChat,
       selectChatAttachment,
       sendingSessionIds,
+      setSessionSending,
+      setEventsForSession,
+      activeSession?.providerId,
       sessions,
       workbench.ide.taskDefinitions,
       workbench.workspaceMode,
@@ -12569,47 +12627,6 @@ export function App() {
       paneId: SOLO_CHAT_PANE_ID,
     });
   }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> =
-      Promise.resolve(undefined);
-    try {
-      unlisten = listen<{ sessionId: string; url: string }>(
-        "session-browser-opened",
-        (event) => {
-          if (event.payload.sessionId !== activeSessionId) return;
-          dispatchWorkbench({
-            type: "browser-navigate",
-            url: event.payload.url,
-          });
-          dispatchWorkbench({ type: "set-chat-panel", panel: "browser" });
-          dispatchWorkbench({
-            type: "browser-status",
-            status: "ready",
-            message: `Native · ${event.payload.url}`,
-            nativeHost: true,
-          });
-          void invoke<{ title: string } | null>("session_browser_snapshot", {
-            sessionId: event.payload.sessionId,
-          })
-            .then((snapshot) => {
-              if (snapshot?.title)
-                dispatchWorkbench({
-                  type: "browser-title",
-                  title: snapshot.title,
-                });
-            })
-            .catch(() => {});
-        },
-      );
-    } catch {
-      unlisten = Promise.resolve(undefined);
-    }
-    return () => {
-      void unlisten.then((dispose) => dispose?.());
-    };
-  }, [activeSessionId]);
 
   // The native child webview reports its document title asynchronously. Keep
   // that small piece of browser state in the React shell so its selected tab

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// The same budget as the local runner: one turn's tool loop, not a whole task.
-const OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS: usize = 24;
+const OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS: usize = 128;
 
 /// What an endpoint speaking the OpenAI wire format runs as.
 ///
@@ -207,17 +207,24 @@ pub(super) fn run_openai_compatible_chat(
     let mut response = None;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
-        for _ in 0..OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS {
+        for round in 0..=OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS {
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
             }
+            let round_tools = provider_reliability::tools_for_round(
+                &mut messages,
+                &tools,
+                round,
+                OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS,
+            );
+            let tools_offered = !round_tools.is_empty();
             let turn = openai_compat_tool_chat_with_progress(
                 OpenAiCompatChatRequest {
                     base_url,
                     api_key: api_key.as_str(),
                     model,
                     messages: messages.clone(),
-                    tools: tools.clone(),
+                    tools: round_tools,
                     reasoning_effort: reasoning_effort.as_deref(),
                 },
                 &cancellation,
@@ -247,7 +254,7 @@ pub(super) fn run_openai_compatible_chat(
                 emit_provider_turn_tokens(app, request, &measured);
             }
             anyhow::ensure!(
-                !tools.is_empty() || turn.tool_calls.is_empty(),
+                tools_offered || turn.tool_calls.is_empty(),
                 "{label} returned tool calls although no tools were offered"
             );
             if turn.tool_calls.is_empty() {
@@ -288,10 +295,14 @@ pub(super) fn run_openai_compatible_chat(
                 "tool_calls": tool_calls,
             }));
             for (tool_call_id, name, _arguments, parsed) in calls {
-                let capability_id =
-                    CapabilityId::from_provider_tool_name(&name).ok_or_else(|| {
-                        anyhow::anyhow!("{label} requested an unknown Gyro tool `{name}`")
-                    })?;
+                let Some(capability_id) = provider_reliability::prepare_tool_call(
+                    &mut messages,
+                    &name,
+                    &parsed,
+                    Some(&tool_call_id),
+                ) else {
+                    continue;
+                };
                 let capability_response =
                     invoke_run_capability(app, &request.session_id, capability_id, parsed)?;
                 messages.push(serde_json::json!({

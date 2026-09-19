@@ -947,7 +947,7 @@ function runPhase(
       name: "failed",
       message: cancelled
         ? status.message?.trim() || "Stopped"
-        : (status.message ?? status.error ?? "The run stopped early"),
+        : (status.error?.trim() || status.message || "The run stopped early"),
       // Normalize so the header and problem tone can tell user-stop from crash.
       recoveryKind: cancelled ? "cancelled" : status.recoveryKind,
       recoveryMessage: status.recoveryMessage,
@@ -1268,14 +1268,25 @@ function workItemFromCapabilityCall(
     };
   }
 
-  // Gyro's own edit tool changes a file just like a provider edit does. The
-  // path only arrives on the completed call; a failed proposal changed nothing.
+  // Gyro's own edit and lifecycle tools change a file just like a provider edit
+  // does. The path only arrives on the completed call; a failed call changed
+  // nothing.
   if (
-    capabilityId === "workspace-propose-edit" &&
+    (capabilityId === "workspace-propose-edit" ||
+      capabilityId === "workspace-edit" ||
+      capabilityId === "workspace-create" ||
+      capabilityId === "workspace-rename" ||
+      capabilityId === "workspace-delete") &&
     resourceLabel &&
     status !== "failed"
   ) {
     return { kind: "file", id, status, path: resourceLabel };
+  }
+
+  // Semantic navigation is a read beat: the answer is source locations.
+  if (capabilityId.startsWith("code-")) {
+    const path = resourceLabel ?? summary;
+    return { kind: "read", id, status, path, media: "file" };
   }
 
   if (capabilityId.startsWith("browser-")) {
@@ -1322,10 +1333,25 @@ function humanizeCapabilityId(capabilityId: string): string {
     "workspace-diagnostics": "Workspace diagnostics",
     "workspace-git-status": "Git status",
     "workspace-diff": "Workspace diff",
+    "workspace-git-log": "Git log",
+    "workspace-git-show": "Git show",
+    "workspace-git-blame": "Git blame",
     "workspace-propose-edit": "Propose edit",
+    "workspace-edit": "Edit file",
+    "workspace-create": "Create path",
+    "workspace-rename": "Rename path",
+    "workspace-delete": "Delete path",
     "workspace-run-task": "Run task",
     "workspace-run-test": "Run tests",
     "workspace-read-output": "Read output",
+    "web-fetch": "Fetch page",
+    "memory-read": "Read memory",
+    "memory-write": "Remember",
+    "research-run": "Research sub-agent",
+    "code-definition": "Go to definition",
+    "code-references": "Find references",
+    "code-hover": "Hover info",
+    "code-symbols": "File symbols",
     "ide-reveal": "Reveal in editor",
     "ide-open-panel": "Open panel",
     "terminal-open": "Open terminal",

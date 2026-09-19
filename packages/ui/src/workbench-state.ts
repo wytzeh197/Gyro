@@ -1317,7 +1317,13 @@ export type WorkbenchAction =
       decision: "trusted" | "restricted";
     }
   | { type: "add-workspace-folder"; workspacePath: string; path: string }
-  | { type: "set-project-details"; path: string; name: string; pinned: boolean; primaryFolder?: string }
+  | {
+      type: "set-project-details";
+      path: string;
+      name: string;
+      pinned: boolean;
+      primaryFolder?: string;
+    }
   | { type: "set-workspace-folders"; workspacePath: string; paths: string[] }
   | { type: "remove-workspace-folder"; workspacePath: string; path: string }
   | {
@@ -1538,7 +1544,17 @@ export type WorkbenchAction =
   | { type: "add-diff-comment"; path: string }
   | { type: "browser-close" }
   | { type: "set-browser-url"; url: string }
-  | { type: "browser-navigate"; url: string; status?: BrowserPreviewStatus }
+  /**
+   * `background` records the navigation without taking a surface for it: the
+   * page, history and status update, but no panel opens. Model-driven browsing
+   * in a split layout uses it; anything the user asked for does not.
+   */
+  | {
+      type: "browser-navigate";
+      url: string;
+      status?: BrowserPreviewStatus;
+      background?: boolean;
+    }
   | { type: "browser-back" }
   | { type: "browser-forward" }
   | { type: "browser-reload" }
@@ -3820,7 +3836,7 @@ export function workbenchReducer(
       ];
       return {
         ...state,
-        ...browserRevealState(state),
+        ...(action.background ? undefined : browserRevealState(state)),
         browserPreview: {
           ...state.browserPreview,
           history: nextHistory,
@@ -4490,7 +4506,14 @@ function normalizeWorkbenchPreferences(
         )
         .map(([path, detail]) => [
           path,
-          { name: detail.name.slice(0, 120), pinned: detail.pinned, primaryFolder: typeof detail.primaryFolder === "string" ? detail.primaryFolder : undefined },
+          {
+            name: detail.name.slice(0, 120),
+            pinned: detail.pinned,
+            primaryFolder:
+              typeof detail.primaryFolder === "string"
+                ? detail.primaryFolder
+                : undefined,
+          },
         ]),
     ),
     workspaceFolders:

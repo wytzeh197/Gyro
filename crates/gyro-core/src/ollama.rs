@@ -172,6 +172,21 @@ pub fn ollama_tool_chat(request: OllamaToolChatRequest<'_>) -> Result<OllamaChat
 pub fn ollama_tool_chat_with_progress<F>(
     request: OllamaToolChatRequest<'_>,
     cancellation: &CancellationToken,
+    on_delta: F,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+{
+    crate::provider_retry::stream_response(
+        cancellation,
+        |emit| ollama_tool_chat_once(request.clone(), cancellation, emit),
+        on_delta,
+    )
+}
+
+fn ollama_tool_chat_once<F>(
+    request: OllamaToolChatRequest<'_>,
+    cancellation: &CancellationToken,
     mut on_delta: F,
 ) -> Result<OllamaChatResponse>
 where
@@ -186,22 +201,24 @@ where
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
-    let response = chat_agent()
-        .post(url.as_str())
-        .send_json(ureq::json!({
+    let response = crate::provider_retry::http_response(cancellation, || {
+        chat_agent().post(url.as_str()).send_json(ureq::json!({
             "model": model,
             "stream": true,
             "messages": request.messages,
             "tools": request.tools
         }))
-        .map_err(ollama_http_error)?;
+    })
+    .map_err(ollama_http_error)?;
     ensure_loopback_response(&response, &endpoint)?;
+    let is_stream = response.content_type().contains("ndjson");
     let mut reader = BufReader::new(response.into_reader());
     let mut content = String::new();
     let mut tool_calls = Vec::new();
     let mut input_tokens = None;
     let mut output_tokens = None;
     let mut line = String::new();
+    let mut completed = false;
     loop {
         if cancellation.is_cancelled() {
             return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
@@ -239,9 +256,14 @@ where
             output_tokens = frame.eval_count;
         }
         if frame.done {
+            completed = true;
             break;
         }
     }
+    anyhow::ensure!(
+        completed || !is_stream,
+        "Ollama stream ended before completion; partial tool calls were not executed"
+    );
     let content = content.trim().to_string();
     if content.is_empty() && tool_calls.is_empty() {
         return Err(anyhow!("Ollama finished without a text response"));

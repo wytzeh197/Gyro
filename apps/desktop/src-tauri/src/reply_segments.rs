@@ -94,6 +94,7 @@ mod tests {
             kind: "command".into(),
             label: "Ran command".into(),
             detail: None,
+            file_counts: None,
             note: None,
             status: "done".into(),
         };

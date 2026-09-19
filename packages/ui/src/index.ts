@@ -338,6 +338,18 @@ export {
   sourceControlTotalsScope,
 } from "./source-control-stats";
 export type { SourceControlTotals } from "./source-control-stats";
+export { isSplitChatLayout, resolveBrowserReveal } from "./browser-reveal";
+export type {
+  BrowserRevealDecision,
+  BrowserRevealReason,
+  BrowserRevealRequest,
+} from "./browser-reveal";
+export { environmentActions } from "./environment-actions";
+export type {
+  EnvironmentAction,
+  EnvironmentActionId,
+  EnvironmentActionIntent,
+} from "./environment-actions";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
   preferredCleanMachineConnectProvider,

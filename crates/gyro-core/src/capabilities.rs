@@ -25,10 +25,21 @@ pub enum CapabilityId {
     WorkspaceDiagnostics,
     WorkspaceGitStatus,
     WorkspaceDiff,
+    WorkspaceGitLog,
+    WorkspaceGitShow,
+    WorkspaceGitBlame,
     WorkspaceProposeEdit,
+    WorkspaceEdit,
+    WorkspaceCreatePath,
+    WorkspaceRenamePath,
+    WorkspaceDeletePath,
     WorkspaceRunTask,
     WorkspaceRunTest,
     WorkspaceReadOutput,
+    CodeDefinition,
+    CodeReferences,
+    CodeHover,
+    CodeSymbols,
     IdeReveal,
     IdeOpenPanel,
     TerminalOpen,
@@ -51,6 +62,10 @@ pub enum CapabilityId {
     BrowserConsole,
     BrowserNetwork,
     GithubStatus,
+    WebFetch,
+    MemoryRead,
+    MemoryWrite,
+    ResearchRun,
     GithubPullRequests,
     GithubWorkflowRuns,
     GithubWorkflowLogs,
@@ -71,10 +86,21 @@ impl CapabilityId {
             Self::WorkspaceDiagnostics => "workspace.diagnostics",
             Self::WorkspaceGitStatus => "workspace.git_status",
             Self::WorkspaceDiff => "workspace.diff",
+            Self::WorkspaceGitLog => "workspace.git_log",
+            Self::WorkspaceGitShow => "workspace.git_show",
+            Self::WorkspaceGitBlame => "workspace.git_blame",
             Self::WorkspaceProposeEdit => "workspace.propose_edit",
+            Self::WorkspaceEdit => "workspace.edit",
+            Self::WorkspaceCreatePath => "workspace.create",
+            Self::WorkspaceRenamePath => "workspace.rename",
+            Self::WorkspaceDeletePath => "workspace.delete",
             Self::WorkspaceRunTask => "workspace.run_task",
             Self::WorkspaceRunTest => "workspace.run_test",
             Self::WorkspaceReadOutput => "workspace.read_output",
+            Self::CodeDefinition => "code.definition",
+            Self::CodeReferences => "code.references",
+            Self::CodeHover => "code.hover",
+            Self::CodeSymbols => "code.symbols",
             Self::IdeReveal => "ide.reveal",
             Self::IdeOpenPanel => "ide.open_panel",
             Self::TerminalOpen => "terminal.open",
@@ -97,6 +123,10 @@ impl CapabilityId {
             Self::BrowserConsole => "browser.console",
             Self::BrowserNetwork => "browser.network",
             Self::GithubStatus => "github.status",
+            Self::WebFetch => "web.fetch",
+            Self::MemoryRead => "memory.read",
+            Self::MemoryWrite => "memory.write",
+            Self::ResearchRun => "research.run",
             Self::GithubPullRequests => "github.pull_requests",
             Self::GithubWorkflowRuns => "github.workflow_runs",
             Self::GithubWorkflowLogs => "github.workflow_logs",
@@ -117,10 +147,21 @@ impl CapabilityId {
             Self::WorkspaceDiagnostics => "gyro_workspace_diagnostics",
             Self::WorkspaceGitStatus => "gyro_workspace_git_status",
             Self::WorkspaceDiff => "gyro_workspace_diff",
+            Self::WorkspaceGitLog => "gyro_git_log",
+            Self::WorkspaceGitShow => "gyro_git_show",
+            Self::WorkspaceGitBlame => "gyro_git_blame",
             Self::WorkspaceProposeEdit => "gyro_workspace_propose_edit",
+            Self::WorkspaceEdit => "gyro_workspace_edit",
+            Self::WorkspaceCreatePath => "gyro_workspace_create",
+            Self::WorkspaceRenamePath => "gyro_workspace_rename",
+            Self::WorkspaceDeletePath => "gyro_workspace_delete",
             Self::WorkspaceRunTask => "gyro_workspace_run_task",
             Self::WorkspaceRunTest => "gyro_workspace_run_test",
             Self::WorkspaceReadOutput => "gyro_workspace_read_output",
+            Self::CodeDefinition => "gyro_code_definition",
+            Self::CodeReferences => "gyro_code_references",
+            Self::CodeHover => "gyro_code_hover",
+            Self::CodeSymbols => "gyro_code_symbols",
             Self::IdeReveal => "gyro_ide_reveal",
             Self::IdeOpenPanel => "gyro_ide_open_panel",
             Self::TerminalOpen => "gyro_terminal_open",
@@ -143,6 +184,10 @@ impl CapabilityId {
             Self::BrowserConsole => "gyro_browser_console",
             Self::BrowserNetwork => "gyro_browser_network",
             Self::GithubStatus => "gyro_github_status",
+            Self::WebFetch => "gyro_web_fetch",
+            Self::MemoryRead => "gyro_memory_read",
+            Self::MemoryWrite => "gyro_memory_write",
+            Self::ResearchRun => "gyro_research",
             Self::GithubPullRequests => "gyro_github_pull_requests",
             Self::GithubWorkflowRuns => "gyro_github_workflow_runs",
             Self::GithubWorkflowLogs => "gyro_github_workflow_logs",
@@ -171,6 +216,10 @@ impl std::fmt::Display for CapabilityId {
 pub enum CapabilityClass {
     WorkspaceInspect,
     WorkspaceSensitiveRead,
+    /// Lifecycle changes inside the workspace: create, rename or move, delete.
+    WorkspaceWrite,
+    /// Starting another model run: a research sub-agent, which spends tokens.
+    AgentRun,
     IdeReveal,
     TerminalExecute,
     TerminalObserve,
@@ -249,6 +298,13 @@ impl ProjectCapabilityPolicy {
             CapabilityClass::WorkspaceSensitiveRead,
             CapabilityAccess::Ask,
         );
+        // Creating, renaming, and deleting workspace entries change the user's
+        // files, so the default is a decision rather than a silent write. Full
+        // Access in a normal run still skips the prompt.
+        classes.insert(CapabilityClass::WorkspaceWrite, CapabilityAccess::Ask);
+        // A sub-agent spends the user's provider budget, so it is a decision
+        // rather than a silent call. Full Access still skips the prompt.
+        classes.insert(CapabilityClass::AgentRun, CapabilityAccess::Ask);
         classes.insert(CapabilityClass::IdeReveal, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::TerminalExecute, CapabilityAccess::Ask);
         classes.insert(CapabilityClass::TerminalObserve, CapabilityAccess::Allow);
@@ -640,9 +696,44 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Inspect a bounded Git diff for the Gyro project.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::WorkspaceGitLog,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read bounded Git history: recent commits with their sha, date, author, and subject, optionally narrowed to one revision, range, or path. Use this instead of shelling out to git log.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceGitShow,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read one commit or revision as a patch, or pass stat to get only its changed-file summary. Output is bounded and secret-redacted; read the file itself for the current content.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceGitBlame,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read which commit last touched each line of a workspace file, with the author. A call covers at most 400 lines, so pass lineStart and lineEnd for a large file.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceProposeEdit,
         class: CapabilityClass::WorkspaceInspect,
         description: "Submit a hash-guarded file edit in Gyro Workspace. Full access applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceEdit,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Change part of a file by replacing exact text, without re-emitting the whole file. Read the file first, copy oldString verbatim including indentation, and pass the replacement as newString (empty deletes it). oldString must match exactly once unless replaceAll is true; an absent or ambiguous match is refused, so nothing is written and you can re-read and retry. The edit goes through the same hash guard and review proposal as gyro_workspace_propose_edit. Check the returned status before claiming the edit was applied.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceCreatePath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Create an empty file or a directory inside the Gyro project, including missing parent directories. Give a new file its content with gyro_workspace_propose_edit; this tool only makes the path.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceRenamePath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Rename or move one file or directory inside the Gyro project, creating missing parent directories. An existing destination is refused, so nothing is overwritten.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceDeletePath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Delete one file or one empty directory inside the Gyro project. A file must be deleted against the hash it was read at, and a directory must already be empty, so a bulk delete is never one call.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
@@ -658,6 +749,26 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WorkspaceReadOutput,
         class: CapabilityClass::TerminalObserve,
         description: "Read bounded task, test, or terminal output currently recorded by Gyro Workspace.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeDefinition,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Jump to where the symbol at a 1-based line and column in a workspace file is defined, using the workspace language server. Each location carries a source preview line. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding the symbol is missing.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeReferences,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Find every reference to the symbol at a 1-based line and column in a workspace file, using the workspace language server. Pass includeDeclaration to include the declaration itself. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding there are no references.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeHover,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read the language server hover card (type signature and docs) for the symbol at a 1-based line and column in a workspace file. Returns status indexing with retryAfterMs while a cold language server is still warming up.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeSymbols,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "List the symbols a workspace source file declares, using the workspace language server. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding the file is empty.",
     },
     CapabilityDescriptor {
         id: CapabilityId::IdeReveal,
@@ -765,6 +876,26 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Read recent redacted network request summaries captured from this chat's open browser.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::ResearchRun,
+        class: CapabilityClass::AgentRun,
+        description: "Start one read-only research sub-agent in a fresh context and return only its final report. Use it to investigate a self-contained question whose answer needs many reads, so the searching stays out of this chat. The sub-agent can search, read, navigate code, and read git history; it cannot write, run commands, browse, or fetch the web, and it cannot start another sub-agent. It costs provider tokens, so ask a question you actually need answered, and it does not know anything this chat has not written into the question.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::MemoryRead,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read this project's durable memory: notes an earlier chat chose to keep. Memory lives in .gyro/memory.md inside the workspace, so the user can read and edit it directly. Read it before assuming a preference is unknown.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::MemoryWrite,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Remember something for later chats, or forget one remembered entry. Writes go through the same reviewable proposal as an edit, so Full Access applies it immediately and anything else asks first. Keep entries short, factual, and useful beyond this chat.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WebFetch,
+        class: CapabilityClass::BrowserNavigate,
+        description: "Read one http(s) URL as text without opening the browser rail. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::GithubStatus,
         class: CapabilityClass::GithubInspect,
         description: "Check whether GitHub is reachable for this project and which repository and account it resolves to.",
@@ -801,9 +932,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     },
 ];
 
-pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 9] = [
+pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 11] = [
     CapabilityClass::WorkspaceInspect,
     CapabilityClass::WorkspaceSensitiveRead,
+    CapabilityClass::WorkspaceWrite,
+    CapabilityClass::AgentRun,
     CapabilityClass::IdeReveal,
     CapabilityClass::TerminalExecute,
     CapabilityClass::TerminalObserve,
@@ -870,15 +1003,21 @@ pub fn capability_advertised_for_mode(id: CapabilityId, mode: CapabilityRunMode)
     match mode {
         CapabilityRunMode::Council => false,
         CapabilityRunMode::Plan => {
-            id != CapabilityId::WorkspaceProposeEdit
-                && matches!(
-                    capability_descriptor(id).class,
-                    CapabilityClass::WorkspaceInspect
-                        | CapabilityClass::WorkspaceSensitiveRead
-                        | CapabilityClass::IdeReveal
-                        | CapabilityClass::BrowserInspect
-                        | CapabilityClass::GithubInspect
-                )
+            // Both edit tools are classified as workspace inspection, so the
+            // class alone would advertise them in Plan mode.
+            !matches!(
+                id,
+                CapabilityId::WorkspaceProposeEdit
+                    | CapabilityId::WorkspaceEdit
+                    | CapabilityId::MemoryWrite
+            ) && matches!(
+                capability_descriptor(id).class,
+                CapabilityClass::WorkspaceInspect
+                    | CapabilityClass::WorkspaceSensitiveRead
+                    | CapabilityClass::IdeReveal
+                    | CapabilityClass::BrowserInspect
+                    | CapabilityClass::GithubInspect
+            )
         }
         CapabilityRunMode::Normal => true,
     }
@@ -1132,14 +1271,61 @@ mod tests {
         assert!(plan.contains(&CapabilityId::WorkspaceRead));
         assert!(plan.contains(&CapabilityId::BrowserReadPage));
         assert!(plan.contains(&CapabilityId::GithubStatus));
+        // Code intelligence is read-only inspection, so Plan mode keeps it.
+        assert!(plan.contains(&CapabilityId::CodeDefinition));
+        assert!(plan.contains(&CapabilityId::CodeReferences));
+        assert!(plan.contains(&CapabilityId::CodeHover));
+        assert!(plan.contains(&CapabilityId::CodeSymbols));
+        // Git history is read-only inspection too, so Plan keeps it.
+        assert!(plan.contains(&CapabilityId::WorkspaceGitLog));
+        assert!(plan.contains(&CapabilityId::WorkspaceGitShow));
+        assert!(plan.contains(&CapabilityId::WorkspaceGitBlame));
         assert!(!plan.contains(&CapabilityId::WorkspaceProposeEdit));
+        // The string-edit tool writes, so Plan never advertises it either.
+        assert!(!plan.contains(&CapabilityId::WorkspaceEdit));
         assert!(!plan.contains(&CapabilityId::TerminalOpen));
         assert!(!plan.contains(&CapabilityId::BrowserClick));
+        // Web fetch leaves the machine, so Plan mode never advertises it.
+        assert!(!plan.contains(&CapabilityId::WebFetch));
+        // Reading memory is inspection; writing it is writing.
+        assert!(plan.contains(&CapabilityId::MemoryRead));
+        assert!(!plan.contains(&CapabilityId::MemoryWrite));
+        // A sub-agent spends tokens and needs tools, so Plan never offers it.
+        assert!(!plan.contains(&CapabilityId::ResearchRun));
         assert!(!plan.contains(&CapabilityId::GithubPush));
         assert_eq!(
             advertised_capability_descriptors(CapabilityRunMode::Normal).count(),
             CAPABILITY_DESCRIPTORS.len()
         );
+    }
+
+    #[test]
+    fn workspace_lifecycle_writes_are_a_decision_and_never_a_plan_tool() {
+        let policy = ProjectCapabilityPolicy::defaults("/tmp/project");
+        assert_eq!(
+            policy.access_for(CapabilityClass::WorkspaceWrite),
+            CapabilityAccess::Ask
+        );
+        assert_eq!(
+            policy.access_for(CapabilityClass::AgentRun),
+            CapabilityAccess::Ask
+        );
+        // Plan mode is an allowlist of classes, so a later write class stays
+        // out of it without another edit here.
+        for id in [
+            CapabilityId::WorkspaceCreatePath,
+            CapabilityId::WorkspaceRenamePath,
+            CapabilityId::WorkspaceDeletePath,
+        ] {
+            assert!(
+                !capability_advertised_for_mode(id, CapabilityRunMode::Plan),
+                "{id} must not be advertised in Plan mode"
+            );
+            assert!(capability_advertised_for_mode(
+                id,
+                CapabilityRunMode::Normal
+            ));
+        }
     }
 
     #[test]
