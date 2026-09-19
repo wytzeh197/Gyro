@@ -87,6 +87,28 @@ the Browser context attachment UX, and complete the acceptance matrix below.
   [product knowledge](product-knowledge/README.md) for the guide, drift checks,
   and adapter-level verification policy.
 
+### Background browsing in split view — 2026-09-19
+
+A model navigating used to reveal the Browser panel every time. In a split
+layout that put one chat's page over the transcript of the pane beside it, for
+work the user had not asked to watch. Revealing is now a decision
+(`packages/ui/src/browser-reveal.ts`): the user's own action always reveals, a
+solo chat still reveals, and a tiled layout leaves the page on the backend.
+`browser-navigate` takes a `background` flag so recording the page no longer
+implies taking a surface.
+
+That only works because an unrevealed browser is a real browser. A child webview
+opened without bounds used to be 1x1, so `window.innerWidth` was 1, every layout
+collapsed, every element fell outside the viewport, and a capture returned a 1x1
+PNG — the reveal was hiding that. It now gets a 1280x800 background viewport and
+stays hidden until a host mounts.
+
+Verification: the native smoke covers a second browser opened with no bounds and
+no visibility. It stays hidden, reports a 1280x800 viewport, reads the page,
+finds and clicks a control, observes the resulting change, and captures a real
+1280x800 PNG of the rendered page. Run it the same way as the check above; it
+writes `browser-smoke-background.png`.
+
 ### Browser reliability regression — 2026-09-09
 
 Native DOM tool results now return through Tauri's evaluation callback, so a
@@ -140,15 +162,15 @@ Models on an unchanged adapter inherit its contract checks. Repeat live smoke
 checks for protocol changes, new capability classes, or reported regressions.
 Knowledge does not replace transport or authorization checks.
 
-| Adapter/class | Structured page and approved interaction | Screenshot delivered to model | Immutable Browser attachment |
-| --- | --- | --- | --- |
-| Codex | Pass: full open/read/screenshot/click/read loop in one run | Pass: 106,666 PNG bytes in Codex input_image exactly match native capture | Pass: UI capture + 108,060 image bytes delivered as user input; model reports captured state and button colour without tools |
-| Claude Code | Pass: navigate/read/screenshot/click/read, Sonnet 5 | Pass: trace contains 106,666-byte image matching native PNG | Live test exposed missing image input; structured stdin and argument-contract fixes pass checks; live retest pending |
-| ACP (representative client, plus protocol exceptions) | Pending: Kimi returned an internal error; diagnostic details added | Pending representative image-capable client | Pending representative client; text-only declarations must not claim pixels |
-| Ollama with tools, text-only | Pending local model | Not applicable; must not claim visual evidence | Pending local model |
-| Ollama with tools and vision | Pending local model | Pending local model | Pending local model |
-| Ollama without tools, text-only | Pending read-only observation; actions unavailable by design | Not applicable | Pending local model |
-| Ollama without tools, vision | Pending read-only observation; actions unavailable by design | Pending local model | Pending local model |
+| Adapter/class                                         | Structured page and approved interaction                           | Screenshot delivered to model                                             | Immutable Browser attachment                                                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Codex                                                 | Pass: full open/read/screenshot/click/read loop in one run         | Pass: 106,666 PNG bytes in Codex input_image exactly match native capture | Pass: UI capture + 108,060 image bytes delivered as user input; model reports captured state and button colour without tools |
+| Claude Code                                           | Pass: navigate/read/screenshot/click/read, Sonnet 5                | Pass: trace contains 106,666-byte image matching native PNG               | Live test exposed missing image input; structured stdin and argument-contract fixes pass checks; live retest pending         |
+| ACP (representative client, plus protocol exceptions) | Pending: Kimi returned an internal error; diagnostic details added | Pending representative image-capable client                               | Pending representative client; text-only declarations must not claim pixels                                                  |
+| Ollama with tools, text-only                          | Pending local model                                                | Not applicable; must not claim visual evidence                            | Pending local model                                                                                                          |
+| Ollama with tools and vision                          | Pending local model                                                | Pending local model                                                       | Pending local model                                                                                                          |
+| Ollama without tools, text-only                       | Pending read-only observation; actions unavailable by design       | Not applicable                                                            | Pending local model                                                                                                          |
+| Ollama without tools, vision                          | Pending read-only observation; actions unavailable by design       | Pending local model                                                       | Pending local model                                                                                                          |
 
 Live verification is in progress with the isolated acceptance app. Retry its
 projectless chat against

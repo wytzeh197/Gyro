@@ -542,8 +542,11 @@ mod tests {
             assert_eq!(attempts, failures + 1);
             assert_eq!(output.retry_count, failures as u32);
             assert_eq!(effects, if after_edit { failures + 1 } else { 1 });
-            assert_eq!(received_cursors, vec![None; failures + 1]);
-            results.push(json!({"scenario":if !after_edit {"disconnect-before-edit"} else if failures == 1 {"disconnect-after-edit"} else {"repeated-disconnect-after-edit"},"attempts":attempts,"mutationCount":effects,"duplicateMutation":effects>1,"retries":output.retry_count,"observedCursorReused":false}));
+            let mut expected_cursors = vec![None];
+            expected_cursors
+                .extend((0..failures).map(|_| Some("observed-first-attempt".to_string())));
+            assert_eq!(received_cursors, expected_cursors);
+            results.push(json!({"scenario":if !after_edit {"disconnect-before-edit"} else if failures == 1 {"disconnect-after-edit"} else {"repeated-disconnect-after-edit"},"attempts":attempts,"mutationCount":effects,"duplicateMutation":effects>1,"retries":output.retry_count,"observedCursorReused":true}));
         }
         // Verify the evidence collection, not the correctness of unsafe behavior.
         assert_eq!(results.len(), 3);

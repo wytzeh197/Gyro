@@ -5,8 +5,10 @@ import {
 
 export function FileChangeCountBadges({
   counts,
+  showUnknown = true,
 }: {
   counts?: FileChangeCounts;
+  showUnknown?: boolean;
 }) {
   const measured = counts && measuredFileCounts(counts);
   return measured ? (
@@ -15,7 +17,7 @@ export function FileChangeCountBadges({
       {" "}
       <em className="is-removed">−{measured.deletions}</em>
     </>
-  ) : (
+  ) : showUnknown ? (
     <span>Line counts unavailable</span>
-  );
+  ) : null;
 }

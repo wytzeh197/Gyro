@@ -33,6 +33,18 @@ pub struct SessionBrowserBounds {
     pub height: f64,
 }
 
+/// The viewport a browser gets when nobody is looking at it.
+///
+/// An ordinary desktop size, so a background page lays out the way the site
+/// intends and the model reads the same document a person would. It is never
+/// shown at these bounds: the UI host overwrites them the moment it mounts.
+pub const BACKGROUND_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds {
+    x: 0.0,
+    y: 0.0,
+    width: 1280.0,
+    height: 800.0,
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionBrowserOpenRequest {
@@ -1021,15 +1033,19 @@ pub fn open_session_browser<R: Runtime>(
     let app_for_title = app.clone();
     let session_for_load = session_id.clone();
     let app_for_load = app.clone();
-    let bounds = request.bounds.clone().unwrap_or(SessionBrowserBounds {
-        x: 0.0,
-        y: 0.0,
-        width: 1.0,
-        height: 1.0,
-    });
-    let visible = request
-        .visible
-        .unwrap_or(bounds.width >= 2.0 && bounds.height >= 2.0);
+    // A model opens the browser with no bounds, because nothing is on screen
+    // for it. It still needs a real viewport: the page runs at the child's
+    // size, so a 1x1 child reported window.innerWidth 1, collapsed every
+    // layout the model then read, put every element outside the viewport, and
+    // captured a 1x1 screenshot. Size it like a desktop window and leave it
+    // hidden — the mounted UI host replaces these bounds if it ever opens.
+    let requested_bounds = request.bounds.clone();
+    let bounds = requested_bounds
+        .clone()
+        .unwrap_or(BACKGROUND_BROWSER_BOUNDS);
+    let visible = request.visible.unwrap_or(
+        requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
+    );
 
     let builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)

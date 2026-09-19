@@ -40,6 +40,8 @@ pub enum UsageOrigin {
     /// so a user can see what the review card costs rather than finding it
     /// folded into their chat total.
     ChangeSummary,
+    /// A read-only research sub-agent started by a chat turn.
+    SubAgent,
 }
 
 impl UsageOrigin {
@@ -51,6 +53,7 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
+            Self::SubAgent => "sub-agent",
         }
     }
 
@@ -61,6 +64,7 @@ impl UsageOrigin {
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
+            "sub-agent" => Self::SubAgent,
             _ => Self::Chat,
         }
     }
@@ -74,6 +78,7 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
+            Self::SubAgent => "Research sub-agents",
         }
     }
 }

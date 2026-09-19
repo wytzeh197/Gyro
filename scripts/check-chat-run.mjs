@@ -1356,3 +1356,27 @@ assert.deepEqual(
   ["src/app.ts"],
   "a completed propose-edit call should count as a changed file",
 );
+
+// The string-replacement edit tool lands in the same lane, so the same rule
+// holds: only the completed call changed a file.
+const stringEdit = buildRunModel([
+  capabilityCall("workspace-edit", { status: "running" }),
+  capabilityCall("workspace-edit", {
+    resource: { id: "p3", kind: "proposal", label: "src/lib.rs" },
+  }),
+  capabilityCall("workspace-edit", {
+    status: "failed",
+    resource: { id: "p4", kind: "proposal", label: "src/old.rs" },
+  }),
+]);
+assert.deepEqual(
+  stringEdit.files.map((file) => file.path),
+  ["src/lib.rs"],
+  "a completed string-replacement edit should count as a changed file",
+);
+
+assert.equal(
+  buildRunModel([], { status: { status: "failed", message: "DeepSeek send needs attention", error: "DeepSeek exceeded Gyro's tool-call limit for one turn" } }).phase.message,
+  "DeepSeek exceeded Gyro's tool-call limit for one turn",
+  "failure banners expose the actual cause instead of a generic heading",
+);

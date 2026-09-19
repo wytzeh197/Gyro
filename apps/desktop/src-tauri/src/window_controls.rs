@@ -57,12 +57,17 @@ unsafe fn inset_macos_traffic_lights(ns_window: *mut std::ffi::c_void, x: f64, y
         window_buttons.push(zoom);
     }
     for (index, button) in window_buttons.into_iter().enumerate() {
+        let Some(parent) = button.superview() else {
+            continue;
+        };
         let mut rect = NSView::frame(&button);
+        // The button container can itself be offset inside the titlebar.
+        // Define the target in window coordinates, then convert into that
+        // container rather than treating its origin as the window origin.
         rect.origin.x = x + (index as f64 * space_between);
-        // AppKit preserves its default bottom inset when the container grows.
-        // Clear it so the button's top edge uses the requested y inset.
-        rect.origin.y = 0.0;
-        button.setFrameOrigin(rect.origin);
+        rect.origin.y = window.frame().size.height - y - rect.size.height;
+        let local_rect = parent.convertRect_fromView(rect, None);
+        button.setFrameOrigin(local_rect.origin);
     }
 }
 

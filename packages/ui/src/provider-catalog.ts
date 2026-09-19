@@ -745,7 +745,8 @@ function allowedToolsFromCapabilityIds(
     if (capabilityId.startsWith("terminal-")) tools.add("terminal");
     if (
       capabilityId.startsWith("workspace-") ||
-      capabilityId.startsWith("ide-")
+      capabilityId.startsWith("ide-") ||
+      capabilityId.startsWith("code-")
     ) {
       tools.add("files");
     }

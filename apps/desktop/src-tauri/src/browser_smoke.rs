@@ -214,5 +214,84 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("browser did not close".into());
     }
     steps.push("close".into());
+    steps.push(run_background(app, url, output)?);
     Ok(steps)
+}
+
+/// A browser the user never opened: no bounds, no visibility, driven entirely
+/// through the agent bridge. This is how a model browses while the chat is in
+/// split view, so the whole observe/act/capture loop has to work with nothing
+/// on screen — a 1x1 child webview used to make every one of these steps lie.
+fn run_background(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<String, String> {
+    let session = "native-browser-smoke-background";
+    let snapshot = open_session_browser(
+        app,
+        SessionBrowserOpenRequest {
+            session_id: session.into(),
+            workspace_key: output.display().to_string(),
+            url: url.into(),
+            bounds: None,
+            visible: None,
+        },
+    )?;
+    if snapshot.visible {
+        return Err("a browser opened without bounds must stay hidden".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let page = loop {
+        if let Ok(page) = call_agent(app, session, "readPage", json!({"maxDepth":8})) {
+            if page.to_string().contains("Browser observation ready") {
+                break page;
+            }
+        }
+        if Instant::now() > deadline {
+            return Err("hidden page never became readable".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let _ = page;
+    let status = call_agent(app, session, "status", json!({}))?;
+    let width = status["viewport"]["width"].as_f64().unwrap_or_default();
+    let height = status["viewport"]["height"].as_f64().unwrap_or_default();
+    if width < 1000. || height < 600. {
+        return Err(format!(
+            "hidden browser reported a {width}x{height} viewport; pages need a real one"
+        ));
+    }
+    let found = call_agent(app, session, "find", json!({"selector":"#change-state"}))?;
+    let reference = found["results"][0]["ref"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| format!("hidden page could not locate its button: {found}"))?;
+    let clicked = call_agent(app, session, "click", json!({"ref": reference}))?;
+    if clicked["ok"] != true {
+        return Err(format!("hidden click failed: {clicked}"));
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Ok(page) = call_agent(app, session, "readPage", json!({"maxDepth":8})) {
+            if page.to_string().contains("State: changed") {
+                break;
+            }
+        }
+        if Instant::now() > deadline {
+            return Err("hidden click never changed the page".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = call_agent(app, session, "clearHighlight", json!({}));
+    let capture = capture_session_browser_png(app, session)?;
+    if capture.width < 100 || capture.height < 100 || !capture.png.starts_with(b"\x89PNG") {
+        return Err(format!(
+            "hidden browser captured {}x{}; a background screenshot must be real",
+            capture.width, capture.height
+        ));
+    }
+    let capture_size = format!("{}x{}", capture.width, capture.height);
+    std::fs::write(output.join("browser-smoke-background.png"), capture.png)
+        .map_err(|e| e.to_string())?;
+    close_session_browser(app, session)?;
+    Ok(format!(
+        "background open/read/find/click/read/capture at {width}x{height}, screenshot {capture_size}"
+    ))
 }

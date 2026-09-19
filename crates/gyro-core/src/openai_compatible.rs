@@ -147,6 +147,21 @@ pub fn openai_compat_tool_chat(
 pub fn openai_compat_tool_chat_with_progress<F>(
     request: OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
+    on_delta: F,
+) -> Result<OpenAiCompatChatResponse>
+where
+    F: FnMut(&str),
+{
+    crate::provider_retry::stream_response(
+        cancellation,
+        |emit| openai_compat_tool_chat_once(request.clone(), cancellation, emit),
+        on_delta,
+    )
+}
+
+fn openai_compat_tool_chat_once<F>(
+    request: OpenAiCompatChatRequest<'_>,
+    cancellation: &CancellationToken,
     mut on_delta: F,
 ) -> Result<OpenAiCompatChatResponse>
 where
@@ -170,34 +185,37 @@ where
     // whole request over either. Retrying once without them keeps usage display
     // and effort on capable servers and keeps the run working on the others: a
     // turn that answers without the requested effort beats a turn that 400s.
-    let response = match post_chat(
-        &agent,
-        &url,
-        api_key,
-        &chat_payload(
-            model,
-            &request.messages,
-            &request.tools,
-            request.reasoning_effort,
-            true,
-        ),
-    ) {
-        Ok(response) => response,
-        Err(ureq::Error::Status(400, _)) => post_chat(
+    let response = crate::provider_retry::http_response(cancellation, || {
+        match post_chat(
             &agent,
             &url,
             api_key,
-            &chat_payload(model, &request.messages, &request.tools, None, false),
-        )
-        .map_err(openai_compat_http_error)?,
-        Err(error) => return Err(openai_compat_http_error(error)),
-    };
+            &chat_payload(
+                model,
+                &request.messages,
+                &request.tools,
+                request.reasoning_effort,
+                true,
+            ),
+        ) {
+            Ok(response) => Ok(response),
+            Err(ureq::Error::Status(400, _)) => post_chat(
+                &agent,
+                &url,
+                api_key,
+                &chat_payload(model, &request.messages, &request.tools, None, false),
+            ),
+            Err(error) => Err(error),
+        }
+    })
+    .map_err(openai_compat_http_error)?;
     refuse_redirect(&response, &url)?;
 
     let mut state = ChatAccumulator::default();
     let mut reader = BufReader::new(response.into_reader());
     let mut line = String::new();
     let mut saw_stream_frames = false;
+    let mut completed = false;
     // Gateways that ignore `stream: true` answer with one JSON object, which may
     // be pretty-printed across lines; collect it until EOF.
     let mut buffered_body = String::new();
@@ -220,6 +238,7 @@ where
             saw_stream_frames = true;
             let payload = payload.trim();
             if payload == "[DONE]" {
+                completed = true;
                 break;
             }
             if payload.is_empty() {
@@ -227,6 +246,10 @@ where
             }
             let frame: WireCompletion =
                 serde_json::from_str(payload).context("invalid provider chat response")?;
+            completed |= frame
+                .choices
+                .iter()
+                .any(|choice| choice.finish_reason.is_some());
             state.apply(frame, &mut on_delta);
         } else if trimmed.starts_with(':') {
             // SSE comment; gateways send these as keep-alives.
@@ -239,6 +262,11 @@ where
         // Anything else is an SSE field Gyro has no use for (`event:`, `id:`).
     }
 
+    if saw_stream_frames && !completed {
+        return Err(anyhow!(
+            "provider stream ended before completion; partial tool calls were not executed"
+        ));
+    }
     if !saw_stream_frames {
         let body = buffered_body.trim();
         if body.is_empty() {
@@ -573,6 +601,8 @@ struct WireCompletion {
 
 #[derive(Default, Deserialize)]
 struct WireChoice {
+    #[serde(default)]
+    finish_reason: Option<String>,
     /// Streaming frames carry the text under `delta`.
     #[serde(default)]
     delta: WireMessage,
@@ -957,6 +987,99 @@ mod tests {
 
     /// A thinking budget only means something if it reaches the endpoint, and
     /// only the request body can prove it did.
+    #[test]
+    fn retries_http_failure_with_completed_tool_results_intact() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                requests.push(read_request(&mut stream).body);
+                let response = if index == 0 {
+                    "HTTP/1.1 503 Busy\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                } else {
+                    http_response(
+                        "200 OK",
+                        "application/json",
+                        r#"{"choices":[{"message":{"content":"Recovered"}}]}"#,
+                    )
+                };
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+            requests
+        });
+        let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
+            messages: vec![serde_json::json!({"role":"tool","tool_call_id":"already-applied","content":"edit complete"})],
+            tools: vec![], reasoning_effort: None,
+        }).unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(response.content, "Recovered");
+        assert_eq!(requests[0], requests[1]);
+        assert!(requests[1].contains("already-applied"));
+    }
+
+    #[test]
+    fn recovers_silent_stream_disconnect_with_tool_results_intact() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                requests.push(read_request(&mut stream).body);
+                let response = if index == 0 {
+                    http_response(
+                        "200 OK",
+                        "text/event-stream",
+                        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n",
+                    )
+                } else {
+                    http_response(
+                        "200 OK",
+                        "application/json",
+                        r#"{"choices":[{"message":{"content":"Recovered"}}]}"#,
+                    )
+                };
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+            requests
+        });
+        let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
+            messages: vec![serde_json::json!({"role":"tool","tool_call_id":"already-applied","content":"edit complete"})],
+            tools: vec![], reasoning_effort: None,
+        }).unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(response.content, "Recovered");
+        assert_eq!(requests[0], requests[1]);
+        assert!(requests[1].contains("already-applied"));
+    }
+
+    #[test]
+    fn rejects_truncated_tool_stream_and_accepts_finish_reason() {
+        for (body, succeeds) in [
+            ("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n", false),
+            ("data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n", true),
+        ] {
+            let (address, server) = serve_once("200 OK", "text/event-stream", body);
+            let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
+                messages: vec![], tools: vec![], reasoning_effort: None,
+            });
+            server.join().unwrap();
+            assert_eq!(response.is_ok(), succeeds);
+            if let Err(error) = response { assert!(error.to_string().contains("before completion")); }
+        }
+    }
+
     #[test]
     fn sends_the_requested_reasoning_effort() {
         let (address, server) = serve_once(

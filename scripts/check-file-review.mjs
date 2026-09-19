@@ -270,10 +270,13 @@ new Function("require", "module", "exports", compiled)(
   badgeModule,
   badgeModule.exports,
 );
-const renderCounts = (counts) =>
+const renderCounts = (counts, showUnknown = true) =>
   renderToStaticMarkup(
-    createElement(badgeModule.exports.FileChangeCountBadges, { counts }),
+    createElement(badgeModule.exports.FileChangeCountBadges, { counts, showUnknown }),
   );
+assert.equal(renderCounts(undefined, false), "");
+assert.equal(renderCounts({ additions: 3 }, false), "");
+assert.match(renderCounts({ additions: 9, deletions: 2 }, false), />\+9<.*>−2</);
 assert.equal(renderCounts(undefined), "<span>Line counts unavailable</span>");
 assert.equal(
   renderCounts({ additions: 3 }),

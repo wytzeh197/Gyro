@@ -967,6 +967,9 @@ const coreCapabilitiesSource = readRepoFile(
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const languageServerRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/language_server.rs",
+);
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
 );
@@ -986,6 +989,17 @@ expect(
     coreCapabilitiesSource.includes('"gyro_workspace_check"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_read_range"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_propose_edit"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_edit"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_create"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_rename"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_delete"') &&
+    coreCapabilitiesSource.includes('"gyro_git_log"') &&
+    coreCapabilitiesSource.includes('"gyro_git_show"') &&
+    coreCapabilitiesSource.includes('"gyro_git_blame"') &&
+    coreCapabilitiesSource.includes('"gyro_web_fetch"') &&
+    coreCapabilitiesSource.includes('"gyro_memory_read"') &&
+    coreCapabilitiesSource.includes('"gyro_memory_write"') &&
+    coreCapabilitiesSource.includes('"gyro_research"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_run_task"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_run_test"') &&
     tauriSource.includes("Workspace context attached") &&
@@ -4237,10 +4251,10 @@ expect(
     tauriSource.includes("async fn git_commit") &&
     tauriSource.includes("git_commit_blocking") &&
     tauriSource.includes("git commit worker failed") &&
-    tauriSource.includes("async fn lsp_start") &&
-    tauriSource.includes("struct LanguageServerManager") &&
-    tauriSource.includes("receive_lsp_response") &&
-    tauriSource.includes("write_lsp_message") &&
+    languageServerRustSource.includes("async fn lsp_start") &&
+    languageServerRustSource.includes("struct LanguageServerManager") &&
+    languageServerRustSource.includes("receive_lsp_response") &&
+    languageServerRustSource.includes("write_lsp_message") &&
     tauriSource.includes("async fn task_discover") &&
     tauriSource.includes("task discover worker failed") &&
     tauriSource.includes("async fn task_run") &&
@@ -5286,10 +5300,10 @@ expect(
     appSource.includes("setIsGoalComposerActive(true)") &&
     surfaceSource.includes("isGoalComposerActive ?") &&
     chatSurfaceSource.includes(
-      'const [goalDraft, setGoalDraft] = useState("")',
+      "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
     chatSurfaceSource.includes(
-      "draft={isGoalComposerActive ? goalDraft : localDraft}",
+      'draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}',
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
@@ -5297,8 +5311,13 @@ expect(
     chatSurfaceSource.includes(
       "startsGoalSession={Boolean(onStartGoalChat)}",
     ) &&
-    chatSurfaceSource.includes("const result = await onGoalAction?.(") &&
-    chatSurfaceSource.includes("if (result === false) return") &&
+    chatSurfaceSource.includes(
+      'if (!onGoalAction) throw new Error("Goal saving unavailable")',
+    ) &&
+    chatSurfaceSource.includes("const result = await onGoalAction(") &&
+    chatSurfaceSource.includes(
+      'if (result === false) throw new Error("Goal was not saved")',
+    ) &&
     !chatSurfaceSource.includes('onDraftChange?.("");') &&
     surfaceSource.includes('sessionGoal?.text ? "edit" : "set"') &&
     appSource.includes("const changeGoal = useCallback(\n    async (") &&
@@ -6540,6 +6559,15 @@ expect(
   "Standalone compaction should persist a user message before running and associate compaction activity with that same turn.",
 );
 expect(
+  compactAction.includes("sendingSessionIdsRef.current.has(activeSessionId)") &&
+    compactAction.indexOf("setSessionSending(activeSessionId, true)") <
+      compactAction.indexOf('invoke<SessionEvent>("append_user_message"') &&
+    compactAction.includes('settleCompaction("done")') &&
+    compactAction.includes('"cancelled" : "failed"') &&
+    compactAction.includes("setSessionSending(activeSessionId, false)"),
+  "Compaction must claim the send slot synchronously, show its outcome, and release the slot on every outcome so later messages queue instead of colliding.",
+);
+expect(
   styleSource.includes(".gyro-composer-context-wheel") &&
     /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
@@ -6890,8 +6918,8 @@ expect(
     surfaceSource.includes('"application/x-gyro-editor-group"') &&
     surfaceSource.includes("onMoveEditorTab?.(path, group.id, fromGroupId)") &&
     appSource.includes("onMoveEditorTab={(path, toGroupId, fromGroupId)") &&
-    tauriSource.includes("impl LanguageServerManager") &&
-    tauriSource.includes("spawn_lsp_message_reader") &&
+    languageServerRustSource.includes("impl LanguageServerManager") &&
+    languageServerRustSource.includes("spawn_lsp_message_reader") &&
     styleSource.includes(".gyro-editor-groups.is-split-right") &&
     styleSource.includes(".gyro-sidebar-ai-chat") &&
     surfaceSource.includes('role="tree"') &&
@@ -7235,8 +7263,39 @@ expect(
       'activeDestination !== "settings" && !isIdeSurface',
     ) &&
     workspaceRailFoundation.includes(".gyro-workspace-activity-rail::after") &&
+    // The divider still clears the native controls, but now starts below the
+    // sidebar panel's rounded corner instead of squaring off against it.
     cssRules(styleSource, ".gyro-workspace-activity-rail::after").some(
-      (rule) => rule.includes("top: 48px") && rule.includes("right: 0"),
+      (rule) =>
+        rule.includes("top: calc(48px + var(--gyro-workspace-panel-radius))") &&
+        rule.includes("right: 0"),
+    ) &&
+    workspaceRailFoundation.includes("--gyro-workspace-panel-radius: 10px") &&
+    // The rail, the titlebar band and the corner must resolve one shared tone.
+    workspaceRailFoundation.includes(
+      "--gyro-workspace-chrome: color-mix(\n    in srgb,\n    var(--gyro-sidebar) 92%,\n    black 8%\n  )",
+    ) &&
+    cssRules(styleSource, ".gyro-workspace-activity-rail").some((rule) =>
+      rule.includes("background: var(--gyro-workspace-chrome)"),
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before",
+    ).some(
+      (rule) =>
+        rule.includes("background: var(--gyro-workspace-chrome)") &&
+        rule.includes("border-bottom: 1px solid var(--gyro-border-soft)") &&
+        rule.includes("height: 48px"),
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after",
+    ).some(
+      (rule) =>
+        rule.includes("radial-gradient") &&
+        rule.includes("var(--gyro-border-soft)") &&
+        rule.includes("top: 48px") &&
+        rule.includes("width: var(--gyro-workspace-panel-radius)"),
     ) &&
     workspaceRailFoundation.includes("pointer-events: none") &&
     workspaceRailFoundation.includes(

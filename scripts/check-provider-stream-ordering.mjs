@@ -971,3 +971,39 @@ for (const merge of [
   );
   assert.equal(response.createdAt, finalText.createdAt);
 }
+
+// Measured patch counts survive the live stream adapter and reach the badge model.
+{
+  const ref = { current: new Map([["counts-session", []]]) };
+  applyProviderChatStreamActivity(ref, () => {}, {
+    sessionId: "counts-session", turnId: "counts-turn", providerId: "openai",
+    eventId: "counts-frame", sequence: 1, phase: "activity",
+    activityId: "counts-file", activityKind: "file",
+    activityLabel: "Updated src/a.ts", activityDetail: "src/a.ts",
+    activityStatus: "done", additions: 7, deletions: 2,
+  });
+  const model = buildRunModel(ref.current.get("counts-session"));
+  assert.equal(model.files[0].additions, 7);
+  assert.equal(model.files[0].deletions, 2);
+}
+
+// Concurrent chats can report the same path and activity id without sharing totals.
+{
+  const ref = { current: new Map([["chat-a", []], ["chat-b", []]]) };
+  let foreground = [{ id: "user-a", sessionId: "chat-a", kind: "user-message", message: "edit", createdAt: "2026-09-19T10:00:00Z" }];
+  const apply = (sessionId, additions, sequence) => applyProviderChatStreamActivity(
+    ref, (update) => { foreground = update(foreground); }, {
+      sessionId, turnId: "turn", providerId: "openai", eventId: `frame-${sequence}`,
+      sequence, phase: "activity", activityId: "same-tool-id", activityKind: "file",
+      activityLabel: "Updated shared.css", activityDetail: "shared.css",
+      activityStatus: "done", additions, deletions: 1,
+    },
+  );
+  apply("chat-a", 3, 1);
+  apply("chat-b", 8, 2);
+  apply("chat-b", 12, 3);
+  assert.equal(buildRunModel(ref.current.get("chat-a")).files[0].additions, 3);
+  assert.equal(buildRunModel(ref.current.get("chat-b")).files[0].additions, 12);
+  assert.equal(buildRunModel(foreground).files[0].additions, 3);
+  assert.ok(foreground.every((event) => event.sessionId === "chat-a"));
+}

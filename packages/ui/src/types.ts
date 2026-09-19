@@ -97,10 +97,25 @@ export type CapabilityId =
   | "workspace-diagnostics"
   | "workspace-git-status"
   | "workspace-diff"
+  | "workspace-git-log"
+  | "workspace-git-show"
+  | "workspace-git-blame"
   | "workspace-propose-edit"
+  | "workspace-edit"
+  | "workspace-create"
+  | "workspace-rename"
+  | "workspace-delete"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
+  | "web-fetch"
+  | "memory-read"
+  | "memory-write"
+  | "research-run"
+  | "code-definition"
+  | "code-references"
+  | "code-hover"
+  | "code-symbols"
   | "ide-reveal"
   | "ide-open-panel"
   | "terminal-open"
@@ -888,6 +903,8 @@ export type ProviderChatStreamEvent = {
   activityDetail?: string | null;
   /** Specifics behind a machine tool id — command, path, skill name, … */
   activityNote?: string | null;
+  additions?: number | null;
+  deletions?: number | null;
   activityStatus?: "running" | "done" | "failed" | null;
   message?: string | null;
   error?: string | null;

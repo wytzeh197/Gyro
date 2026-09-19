@@ -1,3 +1,5 @@
+mod provider_reliability;
+use provider_reliability::{is_transient_provider_error, provider_failure_recovery};
 mod openai_compatible_runner;
 mod provider_api_keys;
 mod window_controls;
@@ -9,8 +11,7 @@ mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 mod browser_knowledge;
-mod command_file_changes;
-use command_file_changes::observed_command_file_activities;
+mod file_patch_counts;
 
 use anyhow::Context;
 use base64::Engine as _;
@@ -85,11 +86,19 @@ use walkdir::WalkDir;
 
 #[cfg(debug_assertions)]
 mod browser_smoke;
+mod git_history_capability;
 mod git_line_counts;
 mod git_main_comparison;
+mod language_server;
 mod launch_integrity;
+mod lsp_capability;
+#[cfg(debug_assertions)]
+mod lsp_smoke;
+mod memory_capability;
 mod menu_bar;
 mod reply_segments;
+mod subagent_capability;
+mod web_fetch_capability;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod provider_context;
 mod provider_identity;
@@ -101,7 +110,9 @@ mod system_access;
 mod terminal_capability;
 mod terminal_wait;
 mod workspace_capability_read;
+mod workspace_edit_capability;
 mod workspace_mutations;
+mod workspace_path_capability;
 use workspace_mutations::{
     create_file_mutation_proposal_impl, create_file_mutation_proposal_in_store,
     resolve_file_mutation_proposal_impl,
@@ -117,7 +128,6 @@ const MAX_WORKSPACE_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_TERMINAL_PROCESSES: usize = 32;
-const MAX_LANGUAGE_SERVER_PROCESSES: usize = 16;
 const MAX_DEBUG_ADAPTER_PROCESSES: usize = 8;
 const MAX_CONCURRENT_IDE_COMMANDS: usize = 4;
 const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
@@ -144,19 +154,16 @@ const BROWSER_PREVIEW_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BROWSER_PREVIEW_CAPTURE_BYTES: usize = 25 * 1024 * 1024;
 const MAX_BROWSER_PREVIEW_CAPTURES: usize = 20;
 const MAX_CONCURRENT_BROWSER_PREVIEWS: usize = 2;
-const MAX_LSP_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_LSP_HEADER_BYTES: usize = 16 * 1024;
-const IDE_PROTOCOL_CHANNEL_CAPACITY: usize = 8;
 const MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE: usize = 32;
 const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 // Codex app-server can legitimately return a multi-megabyte JSONL frame (for
 // example, a completed item with rich tool output). Keep this aligned with the
-// desktop IPC frame limit: the aggregate protocol budget below still bounds a
+// bounded queue budget: the aggregate protocol budget below still bounds a
 // noisy or malicious child process.
-const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 // Preserve the former 64 MiB maximum of queued protocol frames even though an
-// individual frame can now be four times larger.
-const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 16;
+// individual frame can now hold a large resumed thread or tool result.
+const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 4;
 const MAX_CODEX_APP_SERVER_ACTIVITIES: usize = 256;
 const MAX_CODEX_APP_SERVER_PATCHES: usize = 64;
 const MAX_CODEX_APP_SERVER_PATCH_BYTES: usize = 256 * 1024;
@@ -201,7 +208,7 @@ const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const TRANSIENT_PROVIDER_RETRY_DELAYS: &[Duration] =
     &[Duration::from_millis(400), Duration::from_millis(1_200)];
-const OLLAMA_MAX_TOOL_ROUNDS: usize = 24;
+const OLLAMA_MAX_TOOL_ROUNDS: usize = 128;
 const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
@@ -1231,32 +1238,6 @@ struct TestRunRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LspStartRequest {
-    workspace_path: String,
-    language_id: String,
-    command: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LspRequestPayload {
-    server_id: String,
-    method: String,
-    params: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LspSessionResult {
-    server_id: String,
-    language_id: String,
-    command: String,
-    status: String,
-    message: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct DebugStartRequest {
     workspace_path: Option<String>,
     name: String,
@@ -1289,21 +1270,6 @@ struct TerminalProcessManager {
 }
 
 #[derive(Clone, Default)]
-struct LanguageServerManager {
-    processes: Arc<Mutex<HashMap<String, Arc<Mutex<LanguageServerProcess>>>>>,
-}
-
-struct LanguageServerProcess {
-    child: Child,
-    stdin: ChildStdin,
-    messages: mpsc::Receiver<Result<serde_json::Value, String>>,
-    next_request_id: u64,
-    semantic_tokens: serde_json::Value,
-    language_id: String,
-    command: String,
-}
-
-#[derive(Clone, Default)]
 struct DebugAdapterManager {
     processes: Arc<Mutex<HashMap<String, Arc<Mutex<DebugAdapterProcess>>>>>,
 }
@@ -1315,13 +1281,6 @@ struct DebugAdapterProcess {
     next_sequence: u64,
     name: String,
     adapter: String,
-}
-
-impl Drop for LanguageServerProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 impl Drop for DebugAdapterProcess {
@@ -1856,6 +1815,8 @@ struct ProviderChatStreamEvent {
     activity_detail: Option<String>,
     /// The specifics behind a machine identity — see [`ProviderActivity::note`].
     activity_note: Option<String>,
+    additions: Option<usize>,
+    deletions: Option<usize>,
     activity_status: Option<String>,
     message: Option<String>,
     error: Option<String>,
@@ -1900,6 +1861,7 @@ struct ProviderActivity {
     /// Without the second slot the row can only show one of them, which is how
     /// a rail of real work came to read "Bash", "Bash", "Bash".
     note: Option<String>,
+    file_counts: Option<(usize, usize)>,
     status: String,
 }
 
@@ -5537,6 +5499,7 @@ fn compact_provider_chat_blocking(
                 kind: "context".into(),
                 label: "Context compaction failed".into(),
                 detail: Some(error.clone()),
+                file_counts: None,
                 note: None,
                 status: "failed".into(),
             };
@@ -8995,511 +8958,6 @@ async fn github_create_pull_request(
 }
 
 #[tauri::command]
-async fn lsp_start(
-    request: LspStartRequest,
-    manager: tauri::State<'_, LanguageServerManager>,
-) -> Result<LspSessionResult, String> {
-    let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.start(request).map_err(to_string))
-        .await
-        .map_err(|error| format!("language server start worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn lsp_request(
-    request: LspRequestPayload,
-    manager: tauri::State<'_, LanguageServerManager>,
-) -> Result<serde_json::Value, String> {
-    let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.request(request).map_err(to_string))
-        .await
-        .map_err(|error| format!("language server request worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn lsp_stop(
-    server_id: String,
-    manager: tauri::State<'_, LanguageServerManager>,
-) -> Result<serde_json::Value, String> {
-    let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.stop(&server_id).map_err(to_string))
-        .await
-        .map_err(|error| format!("language server stop worker failed: {error}"))?
-}
-
-impl LanguageServerManager {
-    fn start(&self, request: LspStartRequest) -> anyhow::Result<LspSessionResult> {
-        let root = workspace_root(&request.workspace_path)?;
-        let command_text = request.command.trim().to_string();
-        if !language_server_command_is_allowed(&request.language_id, &command_text) {
-            anyhow::bail!("language server command is not allowed for this language");
-        }
-        let mut parts = command_text.split_whitespace();
-        let command_name = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("language server command is required"))?;
-        let mut args = parts.map(ToOwned::to_owned).collect::<Vec<_>>();
-        if language_server_needs_stdio_arg(command_name) && !args.iter().any(|arg| arg == "--stdio")
-        {
-            args.push("--stdio".into());
-        }
-
-        let existing_processes = {
-            let processes = self
-                .processes
-                .lock()
-                .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-            processes
-                .iter()
-                .map(|(server_id, process)| (server_id.clone(), process.clone()))
-                .collect::<Vec<_>>()
-        };
-        let mut stale_processes = Vec::new();
-        let mut live_processes = 0usize;
-        for (server_id, process) in existing_processes {
-            let mut process = process
-                .lock()
-                .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
-            if process.child.try_wait()?.is_some() {
-                stale_processes.push(server_id);
-                continue;
-            }
-            live_processes += 1;
-            if process.language_id == request.language_id && process.command == command_text {
-                return Ok(LspSessionResult {
-                    server_id,
-                    language_id: request.language_id,
-                    command: command_text,
-                    status: "ready".into(),
-                    message: "Language server is already running".into(),
-                });
-            }
-        }
-        if !stale_processes.is_empty() {
-            let mut processes = self
-                .processes
-                .lock()
-                .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-            for server_id in stale_processes {
-                processes.remove(&server_id);
-            }
-        }
-        if live_processes >= MAX_LANGUAGE_SERVER_PROCESSES {
-            anyhow::bail!("language server process limit reached; stop a server first");
-        }
-
-        let mut command = command_with_gui_path(command_name);
-        command
-            .args(args)
-            .current_dir(&root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        let mut child = command.spawn().map_err(|error| {
-            anyhow::anyhow!("failed to start language server {command_name}: {error}")
-        })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("language server stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("language server stdout unavailable"))?;
-        let mut process = LanguageServerProcess {
-            child,
-            stdin,
-            messages: spawn_lsp_message_reader(stdout),
-            next_request_id: 2,
-            semantic_tokens: serde_json::Value::Null,
-            language_id: request.language_id.clone(),
-            command: command_text.clone(),
-        };
-        let root_uri = workspace_file_uri(&root);
-        write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "processId": std::process::id(),
-                    "clientInfo": { "name": "Gyro", "version": env!("CARGO_PKG_VERSION") },
-                    "rootUri": root_uri,
-                    "workspaceFolders": [{ "uri": root_uri, "name": root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace") }],
-                    "capabilities": {
-                        "workspace": { "workspaceFolders": true, "configuration": true },
-                        "textDocument": {
-                            "publishDiagnostics": { "relatedInformation": true },
-                            "completion": { "completionItem": { "snippetSupport": true } },
-                            "hover": { "contentFormat": ["markdown", "plaintext"] },
-                            "definition": { "linkSupport": true },
-                            "semanticTokens": {
-                                "requests": { "full": true },
-                                "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
-                                "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
-                                "formats": ["relative"], "overlappingTokenSupport": false, "multilineTokenSupport": false
-                            }
-                        }
-                    }
-                }
-            }),
-        )?;
-        let (initialize_response, startup_messages) =
-            receive_lsp_response(&mut process, 1, Duration::from_secs(12))?;
-        if let Some(error) = initialize_response.get("error") {
-            anyhow::bail!("language server initialize failed: {error}");
-        }
-        write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "initialized",
-                "params": {}
-            }),
-        )?;
-        process.semantic_tokens = initialize_response
-            .pointer("/result/capabilities/semanticTokensProvider")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        let capability_count = initialize_response
-            .pointer("/result/capabilities")
-            .and_then(|value| value.as_object())
-            .map(|value| value.len())
-            .unwrap_or(0);
-        let server_id = format!("{}:{}", request.language_id, Uuid::new_v4());
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-        if processes.len() >= MAX_LANGUAGE_SERVER_PROCESSES {
-            let _ = process.child.kill();
-            let _ = process.child.wait();
-            anyhow::bail!("language server process limit reached; stop a server first");
-        }
-        processes.insert(server_id.clone(), Arc::new(Mutex::new(process)));
-        Ok(LspSessionResult {
-            server_id,
-            language_id: request.language_id,
-            command: command_text,
-            status: "ready".into(),
-            message: format!(
-                "Initialized with {capability_count} capabilities and {} startup messages",
-                startup_messages.len()
-            ),
-        })
-    }
-
-    fn request(&self, request: LspRequestPayload) -> anyhow::Result<serde_json::Value> {
-        let process = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
-            .get(&request.server_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("language server is not running"))?;
-        let mut process = process
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
-        if let Some(status) = process.child.try_wait()? {
-            anyhow::bail!("language server exited with {status}");
-        }
-
-        if request.method == "$/gyro/semanticTokensLegend" {
-            let full = process.semantic_tokens.get("full");
-            let supported = full
-                .is_some_and(|value| value == &serde_json::Value::Bool(true) || value.is_object());
-            return Ok(
-                serde_json::json!({ "serverId": request.server_id, "status": "ok", "result": if supported { process.semantic_tokens.get("legend").cloned().unwrap_or(serde_json::Value::Null) } else { serde_json::Value::Null } }),
-            );
-        }
-        if request.method == "$/gyro/poll" {
-            let messages = drain_lsp_messages(&mut process)?;
-            return Ok(serde_json::json!({
-                "serverId": request.server_id,
-                "status": "ok",
-                "messages": messages,
-            }));
-        }
-
-        if lsp_method_is_notification(&request.method) {
-            write_lsp_message(
-                &mut process.stdin,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": request.method,
-                    "params": request.params,
-                }),
-            )?;
-            let messages = drain_lsp_messages(&mut process)?;
-            return Ok(serde_json::json!({
-                "serverId": request.server_id,
-                "status": "sent",
-                "messages": messages,
-            }));
-        }
-
-        let request_id = process.next_request_id;
-        process.next_request_id += 1;
-        write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": request.method,
-                "params": request.params,
-            }),
-        )?;
-        let (response, messages) =
-            receive_lsp_response(&mut process, request_id, Duration::from_secs(15))?;
-        Ok(serde_json::json!({
-            "serverId": request.server_id,
-            "status": if response.get("error").is_some() { "error" } else { "ok" },
-            "result": response.get("result").cloned(),
-            "error": response.get("error").cloned(),
-            "messages": messages,
-        }))
-    }
-
-    fn stop(&self, server_id: &str) -> anyhow::Result<serde_json::Value> {
-        let process = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
-            .remove(server_id);
-        let Some(process) = process else {
-            return Ok(serde_json::json!({
-                "serverId": server_id,
-                "status": "stopped",
-            }));
-        };
-        let mut process = process
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
-        let request_id = process.next_request_id;
-        process.next_request_id += 1;
-        let _ = write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "shutdown",
-                "params": null,
-            }),
-        );
-        let _ = receive_lsp_response(&mut process, request_id, Duration::from_secs(2));
-        let _ = write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({ "jsonrpc": "2.0", "method": "exit", "params": null }),
-        );
-        let _ = process.child.kill();
-        let _ = process.child.wait();
-        Ok(serde_json::json!({
-            "serverId": server_id,
-            "status": "stopped",
-        }))
-    }
-}
-
-fn language_server_command_is_allowed(language_id: &str, command: &str) -> bool {
-    let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
-    match language_id {
-        "typescript" | "typescriptreact" | "javascript" | "javascriptreact" => {
-            normalized == "typescript-language-server --stdio"
-        }
-        "rust" => normalized == "rust-analyzer",
-        "json" => normalized == "vscode-json-language-server --stdio",
-        "css" | "scss" | "less" => normalized == "vscode-css-language-server --stdio",
-        "html" => normalized == "vscode-html-language-server --stdio",
-        _ => false,
-    }
-}
-
-fn language_server_needs_stdio_arg(command: &str) -> bool {
-    let name = Path::new(command)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(command);
-    matches!(
-        name,
-        "typescript-language-server"
-            | "vscode-json-language-server"
-            | "vscode-css-language-server"
-            | "vscode-html-language-server"
-    )
-}
-
-fn lsp_method_is_notification(method: &str) -> bool {
-    method == "initialized"
-        || method == "exit"
-        || method == "workspace/didChangeConfiguration"
-        || method == "workspace/didChangeWatchedFiles"
-        || method.starts_with("textDocument/did")
-        || method.starts_with("$/")
-}
-
-fn spawn_lsp_message_reader(
-    stdout: ChildStdout,
-) -> mpsc::Receiver<Result<serde_json::Value, String>> {
-    let (sender, receiver) = mpsc::sync_channel(IDE_PROTOCOL_CHANNEL_CAPACITY);
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            match read_lsp_message(&mut reader) {
-                Ok(message) => {
-                    if sender.send(Ok(message)).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(Err(error.to_string()));
-                    break;
-                }
-            }
-        }
-    });
-    receiver
-}
-
-fn write_lsp_message(writer: &mut impl Write, value: &serde_json::Value) -> anyhow::Result<()> {
-    let body = serde_json::to_vec(value)?;
-    if body.len() > MAX_LSP_MESSAGE_BYTES {
-        anyhow::bail!("language server message exceeds size limit");
-    }
-    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-    writer.write_all(&body)?;
-    writer.flush()?;
-    Ok(())
-}
-
-fn read_lsp_message(reader: &mut impl BufRead) -> anyhow::Result<serde_json::Value> {
-    let mut content_length = None;
-    let mut header_bytes = 0usize;
-    loop {
-        let mut header = String::new();
-        let remaining = MAX_LSP_HEADER_BYTES.saturating_sub(header_bytes);
-        if remaining == 0 {
-            anyhow::bail!("language server headers exceed size limit");
-        }
-        let read = Read::by_ref(reader)
-            .take((remaining + 1) as u64)
-            .read_line(&mut header)?;
-        if read == 0 {
-            anyhow::bail!("language server output closed");
-        }
-        header_bytes = header_bytes.saturating_add(read);
-        if header_bytes > MAX_LSP_HEADER_BYTES {
-            anyhow::bail!("language server headers exceed size limit");
-        }
-        if header == "\r\n" || header == "\n" {
-            break;
-        }
-        if let Some((name, value)) = header.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                content_length = Some(value.trim().parse::<usize>()?);
-            }
-        }
-    }
-    let content_length =
-        content_length.ok_or_else(|| anyhow::anyhow!("missing LSP Content-Length header"))?;
-    if content_length > MAX_LSP_MESSAGE_BYTES {
-        anyhow::bail!("language server message exceeds size limit");
-    }
-    let mut body = vec![0; content_length];
-    reader.read_exact(&mut body)?;
-    Ok(serde_json::from_slice(&body)?)
-}
-
-fn receive_lsp_response(
-    process: &mut LanguageServerProcess,
-    request_id: u64,
-    timeout: Duration,
-) -> anyhow::Result<(serde_json::Value, Vec<serde_json::Value>)> {
-    let deadline = Instant::now() + timeout;
-    let mut messages = Vec::new();
-    let mut message_bytes = 0usize;
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            anyhow::bail!("language server request timed out");
-        }
-        let message = process
-            .messages
-            .recv_timeout(remaining)
-            .map_err(|error| anyhow::anyhow!("language server response failed: {error}"))?
-            .map_err(anyhow::Error::msg)?;
-        if message.get("id").and_then(|value| value.as_u64()) == Some(request_id) {
-            return Ok((message, messages));
-        }
-        handle_lsp_server_message(process, &message)?;
-        if messages.len() >= MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
-            anyhow::bail!("language server produced too many messages before its response");
-        }
-        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
-        messages.push(message);
-    }
-}
-
-fn drain_lsp_messages(
-    process: &mut LanguageServerProcess,
-) -> anyhow::Result<Vec<serde_json::Value>> {
-    let mut messages = Vec::new();
-    let mut message_bytes = 0usize;
-    for _ in 0..MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
-        let message = match process.messages.try_recv() {
-            Ok(message) => message.map_err(anyhow::Error::msg)?,
-            Err(mpsc::TryRecvError::Empty) => break,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                anyhow::bail!("language server output disconnected")
-            }
-        };
-        handle_lsp_server_message(process, &message)?;
-        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
-        messages.push(message);
-    }
-    Ok(messages)
-}
-
-fn handle_lsp_server_message(
-    process: &mut LanguageServerProcess,
-    message: &serde_json::Value,
-) -> anyhow::Result<()> {
-    let Some(id) = message.get("id") else {
-        return Ok(());
-    };
-    let Some(method) = message.get("method").and_then(|value| value.as_str()) else {
-        return Ok(());
-    };
-    let result = if method == "workspace/configuration" {
-        let count = message
-            .pointer("/params/items")
-            .and_then(|value| value.as_array())
-            .map(|items| items.len())
-            .unwrap_or(0);
-        serde_json::Value::Array(vec![serde_json::Value::Null; count])
-    } else {
-        serde_json::Value::Null
-    };
-    write_lsp_message(
-        &mut process.stdin,
-        &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-    )
-}
-
-fn workspace_file_uri(path: &Path) -> String {
-    let value = path.to_string_lossy();
-    let mut encoded = String::with_capacity(value.len() + 8);
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b':' | b'.' | b'-' | b'_' | b'~') {
-            encoded.push(byte as char);
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    format!("file://{encoded}")
-}
-
-#[tauri::command]
 async fn task_discover(workspace_path: String) -> Result<Vec<TaskDefinitionResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         task_discover_impl(&workspace_path).map_err(to_string)
@@ -9759,12 +9217,12 @@ impl DebugAdapterManager {
         let mut process = DebugAdapterProcess {
             child,
             stdin,
-            messages: spawn_lsp_message_reader(stdout),
+            messages: language_server::spawn_lsp_message_reader(stdout),
             next_sequence: 2,
             name: request.name.clone(),
             adapter: request.adapter.clone(),
         };
-        write_lsp_message(
+        language_server::write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
                 "seq": 1,
@@ -9866,7 +9324,7 @@ impl DebugAdapterManager {
         }
         let sequence = process.next_sequence;
         process.next_sequence += 1;
-        write_lsp_message(
+        language_server::write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
                 "seq": sequence,
@@ -9898,7 +9356,7 @@ impl DebugAdapterManager {
             .lock()
             .map_err(|_| anyhow::anyhow!("debug adapter process lock poisoned"))?;
         let sequence = process.next_sequence;
-        let _ = write_lsp_message(
+        let _ = language_server::write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
                 "seq": sequence,
@@ -10019,7 +9477,7 @@ fn handle_dap_adapter_request(
         .unwrap_or("adapterRequest");
     let sequence = process.next_sequence;
     process.next_sequence += 1;
-    write_lsp_message(
+    language_server::write_lsp_message(
         &mut process.stdin,
         &serde_json::json!({
             "seq": sequence,
@@ -14314,7 +13772,8 @@ fn run_provider_chat_with_retry(
     let result =
         run_provider_chat_with_retry_using(store, request, binding, |resume_cursor, attempt| {
             run_provider_chat_once(app, request, resume_cursor, attempt)
-        });
+        })
+        .map_err(|error| anyhow::anyhow!("{error:#}"));
     timing::mark(TimingStage::ProviderComplete);
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     match result.as_ref() {
@@ -14372,7 +13831,7 @@ where
         // A dead provider cursor is not a user-visible failure: clear it and
         // immediately retry once without resume. Local history is injected by
         // the runners when resume is absent, so continuity stays in Gyro.
-        Err(error) if binding.is_some() && is_stale_resume_error(&error.to_string()) => {
+        Err(error) if binding.is_some() && is_stale_resume_error(&format!("{error:#}")) => {
             let session_id =
                 parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
@@ -14399,20 +13858,32 @@ where
         }
         // Brief network blips should not surface as "xAI send needs attention"
         // when a short backoff retry succeeds.
-        Err(error) if is_transient_provider_error(&error.to_string()) => {
+        Err(error)
+            if is_transient_provider_error(&format!("{error:#}"))
+                && !matches!(
+                    provider_adapter_for(&request.provider_id).kind,
+                    ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
+                ) =>
+        {
             let mut last_error = error;
-            let mut last_attempt = ProviderRunAttempt::default();
+            let mut last_attempt = attempt;
             for (retry_index, delay) in TRANSIENT_PROVIDER_RETRY_DELAYS.iter().enumerate() {
                 std::thread::sleep(*delay);
-                last_attempt = ProviderRunAttempt::default();
-                match run_once(binding_cursor.as_ref(), &mut last_attempt) {
+                let cursor = last_attempt
+                    .resume_cursor
+                    .clone()
+                    .or_else(|| binding_cursor.clone());
+                last_attempt = ProviderRunAttempt {
+                    resume_cursor: cursor.clone(),
+                };
+                match run_once(cursor.as_ref(), &mut last_attempt) {
                     Ok(mut output) => {
-                        output.resumed = binding_cursor.is_some();
+                        output.resumed = cursor.is_some();
                         output.retry_count = (retry_index as u32).saturating_add(1);
                         return Ok(output);
                     }
                     Err(retry_error)
-                        if is_transient_provider_error(&retry_error.to_string())
+                        if is_transient_provider_error(&format!("{retry_error:#}"))
                             && retry_index + 1 < TRANSIENT_PROVIDER_RETRY_DELAYS.len() =>
                     {
                         last_error = retry_error;
@@ -14491,37 +13962,6 @@ fn persist_failed_provider_attempt(
             }
         }
     }
-}
-
-fn is_transient_provider_error(error: &str) -> bool {
-    let normalized = error.to_ascii_lowercase();
-    if is_provider_cancellation(error)
-        || is_stale_resume_error(error)
-        || gyro_core::is_workspace_unavailable_error(error)
-        || is_hopeless_provider_timeout(error)
-    {
-        return false;
-    }
-    normalized.contains("connection reset")
-        || normalized.contains("connection refused")
-        || normalized.contains("broken pipe")
-        || normalized.contains("timed out")
-        || normalized.contains("timeout")
-        || normalized.contains("temporarily unavailable")
-        || normalized.contains("try again")
-        || normalized.contains("network is unreachable")
-        || normalized.contains("could not resolve host")
-        || normalized.contains("dns")
-        || normalized.contains("eof while")
-        || normalized.contains("unexpected eof")
-}
-
-fn is_hopeless_provider_timeout(error: &str) -> bool {
-    let normalized = error.to_ascii_lowercase();
-    normalized.contains("acp run timed out")
-        || normalized.contains("acp run became inactive")
-        || normalized.contains("exceeded gyro's tool-call limit")
-        || normalized.contains("output exceeded")
 }
 
 fn with_browser_attachment_images(
@@ -14770,16 +14210,23 @@ fn run_ollama_chat(
     let mut response = None;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
-        for _ in 0..OLLAMA_MAX_TOOL_ROUNDS {
+        for round in 0..=OLLAMA_MAX_TOOL_ROUNDS {
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
             }
+            let round_tools = provider_reliability::tools_for_round(
+                &mut messages,
+                &tools,
+                round,
+                OLLAMA_MAX_TOOL_ROUNDS,
+            );
+            let tools_offered = !round_tools.is_empty();
             let turn = ollama_tool_chat_with_progress(
                 OllamaToolChatRequest {
                     base_url: provider.base_url.as_deref(),
                     model,
                     messages: messages.clone(),
-                    tools: tools.clone(),
+                    tools: round_tools,
                 },
                 &cancellation,
                 |delta| {
@@ -14805,7 +14252,7 @@ fn run_ollama_chat(
             })?;
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
             anyhow::ensure!(
-                !tools.is_empty() || turn.tool_calls.is_empty(),
+                tools_offered || turn.tool_calls.is_empty(),
                 "Ollama returned tool calls although no tools were offered"
             );
             if turn.tool_calls.is_empty() {
@@ -14827,10 +14274,14 @@ fn run_ollama_chat(
                 "tool_calls": tool_calls,
             }));
             for call in turn.tool_calls {
-                let capability_id =
-                    CapabilityId::from_provider_tool_name(&call.name).ok_or_else(|| {
-                        anyhow::anyhow!("Ollama requested an unknown Gyro tool `{}`", call.name)
-                    })?;
+                let Some(capability_id) = provider_reliability::prepare_tool_call(
+                    &mut messages,
+                    &call.name,
+                    &call.arguments,
+                    None,
+                ) else {
+                    continue;
+                };
                 let mut response =
                     invoke_run_capability(app, &request.session_id, capability_id, call.arguments)?;
                 let image = if discovered.supports_images {
@@ -15178,6 +14629,7 @@ fn run_kimi_acp_chat(
                 kind: activity.kind.clone(),
                 label: activity.label.clone(),
                 detail: activity.detail.clone(),
+                file_counts: None,
                 note: None,
                 status: activity.status.clone(),
             };
@@ -15721,7 +15173,6 @@ fn run_openai_codex_app_server_chat(
         let mut activities = Vec::new();
         let mut completed_activity_ids = HashSet::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
-        let mut command_file_snapshots = HashMap::new();
         let mut context_usage = None;
         let mut turn_started = false;
         let mut completed_artifact_response_at: Option<Instant> = None;
@@ -15845,27 +15296,6 @@ fn run_openai_codex_app_server_chat(
                     if let Some(item) = params.get("item") {
                         turn_timing::protocol_item(item, "running");
                         match item.get("type").and_then(serde_json::Value::as_str) {
-                            Some("commandExecution") => {
-                                if let (Some(id), Some(command)) = (
-                                    item.get("id").and_then(serde_json::Value::as_str),
-                                    item.get("command").and_then(serde_json::Value::as_str),
-                                ) {
-                                    if command_file_snapshots.len() < 32 {
-                                        let command_cwd = item
-                                            .get("cwd")
-                                            .and_then(serde_json::Value::as_str)
-                                            .map(PathBuf::from)
-                                            .unwrap_or_else(|| PathBuf::from(&cwd));
-                                        command_file_snapshots.insert(
-                                            id.to_string(),
-                                            command_file_changes::CommandFileSnapshot::capture(
-                                                &command_cwd,
-                                                command,
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
                             Some("fileChange") => {
                                 if let Some(item_id) =
                                     item.get("id").and_then(serde_json::Value::as_str)
@@ -15930,22 +15360,6 @@ fn run_openai_codex_app_server_chat(
                                     &mut completed_activity_ids,
                                     activity,
                                 );
-                                if let Some(id) = item.get("id").and_then(serde_json::Value::as_str)
-                                {
-                                    if let Some(snapshot) = command_file_snapshots.remove(id) {
-                                        for activity in
-                                            observed_command_file_activities(id, snapshot)
-                                        {
-                                            record_codex_app_server_activity(
-                                                app,
-                                                request,
-                                                &mut activities,
-                                                &mut completed_activity_ids,
-                                                activity,
-                                            );
-                                        }
-                                    }
-                                }
                             }
                             Some("fileChange") => {
                                 completed_artifact_response_at = None;
@@ -16414,6 +15828,7 @@ impl CodexAppServerCommentaryStream {
                 kind: "commentary".into(),
                 label: String::new(),
                 detail: None,
+                file_counts: None,
                 note: None,
                 status: "running".into(),
             });
@@ -16485,6 +15900,7 @@ fn codex_item_activity(
         kind: kind.into(),
         label,
         detail: None,
+        file_counts: None,
         note: None,
         status,
     }
@@ -16516,17 +15932,22 @@ fn codex_file_change_activities(
     changes
         .into_iter()
         .flatten()
-        .filter_map(|change| change.get("path").and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
+        .filter_map(|change| {
+            let path = change.get("path")?.as_str()?.trim();
+            (!path.is_empty()).then_some((path, change))
+        })
         .enumerate()
-        .map(|(index, path)| {
+        .map(|(index, (path, change))| {
             let path = truncate_chars(path, 1_024);
             ProviderActivity {
                 id: format!("{id}-file-{index}"),
                 kind: "file".into(),
                 label: format!("Updated {path}"),
                 detail: Some(path),
+                file_counts: change
+                    .get("diff")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(file_patch_counts::from_unified_diff),
                 note: None,
                 status: status.into(),
             }
@@ -16552,6 +15973,7 @@ fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -
             "Summarized earlier conversation to keep the thread within the model context window."
                 .into(),
         ),
+        file_counts: None,
         note: None,
         status: status.into(),
     }
@@ -16580,6 +16002,7 @@ fn codex_reasoning_activity(item: &serde_json::Value) -> Option<ProviderActivity
         kind: "reasoning".into(),
         label,
         detail: None,
+        file_counts: None,
         note: None,
         status: "done".into(),
     })
@@ -18935,88 +18358,6 @@ fn interrupted_provider_status_payload(
     payload
 }
 
-fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
-    let normalized = error.to_ascii_lowercase();
-    // Checked first: a stop is not a failure, and every branch below reads it
-    // as one. The ceiling case in particular must not be offered a plain retry,
-    // which would run into the same ceiling and stop in the same place.
-    if error.contains(PROVIDER_STOP_MARKER) {
-        return if normalized.contains("per-call ceiling") {
-            (
-                "spend-ceiling",
-                "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
-            )
-        } else {
-            ("stopped", "You stopped this turn. Send again to continue.")
-        };
-    }
-    // An interrupted turn never reached the provider's own error handling, so
-    // none of the keyword branches below can say anything true about it. It is
-    // also the one failure that is always worth sending again.
-    if error.contains(PROVIDER_INTERRUPTED_MARKER) {
-        return (
-            "interrupted",
-            "Gyro closed while this turn was running. Send it again to continue the conversation.",
-        );
-    }
-    // Checked first: an argument failure is definitive, and it is the one class
-    // where retrying cannot possibly help. Reporting it as a generic retry is
-    // what left an unusable provider looking like a flaky one.
-    if gyro_core::is_cli_argument_error(error) {
-        return (
-            "cli-contract",
-            "This provider's CLI does not accept the command Gyro built, which usually means its version changed. Update Gyro and the provider CLI; retrying will not help.",
-        );
-    }
-    if normalized.contains("offline")
-        || normalized.contains("network is unreachable")
-        || normalized.contains("connection refused")
-        || normalized.contains("could not resolve host")
-        || normalized.contains("dns")
-    {
-        return (
-            "offline",
-            "Check your internet connection, then retry this message.",
-        );
-    }
-    // Checked before the generic authentication branch: an expired sign-in is
-    // the one auth failure Gyro can walk someone out of, so it needs a kind of
-    // its own. The surface offers sign-in for it instead of a health re-check,
-    // which a stale token still passes.
-    if normalized.contains("authentication_failed")
-        || normalized.contains("oauth access token has expired")
-        || normalized.contains("failed to authenticate")
-        || normalized.contains("\"error_status\":401")
-        || normalized.contains("401 unauthorized")
-    {
-        return (
-            "login-expired",
-            "This provider's sign-in expired. Sign in again and Gyro will resend your message.",
-        );
-    }
-    if normalized.contains("unauthorized")
-        || normalized.contains("authentication")
-        || normalized.contains("not logged in")
-        || normalized.contains("login required")
-        || normalized.contains("credential")
-    {
-        return (
-            "authentication",
-            "Reconnect this provider, then retry the message.",
-        );
-    }
-    if normalized.contains("rate limit") || normalized.contains("too many requests") {
-        return (
-            "rate-limit",
-            "Wait for the provider limit to reset, then retry.",
-        );
-    }
-    (
-        "retry",
-        "Retry the message. Gyro will preserve the conversation context.",
-    )
-}
-
 fn provider_activity_event_entry(
     request: &ProviderChatRequest,
     turn_id: Uuid,
@@ -19042,6 +18383,8 @@ fn provider_activity_event_entry(
         "kind": "provider-activity",
         "activityId": activity.id,
         "activityKind": activity.kind,
+        "additions": activity.file_counts.map(|counts| counts.0),
+        "deletions": activity.file_counts.map(|counts| counts.1),
         "label": activity.label,
         "detail": activity.detail,
         // Specifics behind a machine tool id (Bash command, skill name, path).
@@ -19326,10 +18669,6 @@ struct StreamingCommandState {
     /// "this CLI printed plain text", which decide different fallbacks.
     parsed_stream_json: bool,
     last_emit_at: Option<Instant>,
-    /// Explicit file operands of each shell command still waiting for its
-    /// result. Claude Code runs shell edits itself, so this is the only way
-    /// those edits reach the turn's changed files.
-    command_file_snapshots: HashMap<String, command_file_changes::CommandFileSnapshot>,
 }
 
 impl StreamingCommandState {
@@ -19356,7 +18695,6 @@ impl StreamingCommandState {
             stdout_line_buffer: String::new(),
             parsed_stream_json: false,
             last_emit_at: None,
-            command_file_snapshots: HashMap::new(),
         }
     }
 
@@ -19732,12 +19070,6 @@ fn run_streaming_command(
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
     stream_state.flush_pending_delta(app, request, true);
-    for activity in stream_state.finish_command_file_changes() {
-        if let Some(activity) = stream_state.push_activity(activity) {
-            let activity_sequence = stream_state.activity_sequence(&activity);
-            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
-        }
-    }
     // Published before the termination checks below, so a stopped or timed-out
     // run reports the session it started rather than losing it to the bail.
     observed_session_id.clone_from(&stream_state.provider_session_id);
@@ -19989,11 +19321,8 @@ fn handle_provider_stdout_value(
         return;
     }
     let activities = extract_provider_activities(value);
-    let observed_files = stream_state.observe_command_file_changes(
-        value,
-        &activities,
-        request.workspace_path.as_deref(),
-    );
+    // Only provider-reported edits belong to this chat. A shared file changing
+    // while a command runs is not evidence that this command wrote it.
     if !activities.is_empty() {
         // Tools only start after the text block before them closed. Without
         // this, a marker line followed straight by a tool call left the
@@ -20006,12 +19335,6 @@ fn handle_provider_stdout_value(
             }
         }
         stream_state.note_intervening_work();
-    }
-    for activity in observed_files {
-        if let Some(activity) = stream_state.push_activity(activity) {
-            let activity_sequence = stream_state.activity_sequence(&activity);
-            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
-        }
     }
     if let Some(chunk) = extract_provider_text_chunk(value) {
         match chunk {
@@ -20228,6 +19551,7 @@ fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<Pro
         kind: "commentary".into(),
         label: sanitize_provider_text_delta(&text),
         detail: None,
+        file_counts: None,
         note: None,
         status: "done".into(),
     })
@@ -20281,6 +19605,7 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
                 kind: "command".into(),
                 label: command_activity_label(&command),
                 detail: Some(command),
+                file_counts: None,
                 note: None,
                 status: status.into(),
             })
@@ -20292,6 +19617,7 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
                 kind: "file".into(),
                 label: format!("Updated {path}"),
                 detail: Some(path),
+                file_counts: None,
                 note: None,
                 status: status.into(),
             })
@@ -20315,6 +19641,7 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
                 kind: "search".into(),
                 label: "Searched the web".into(),
                 detail: query,
+                file_counts: None,
                 note: None,
                 status: status.into(),
             })
@@ -20331,6 +19658,7 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
                 "Summarized earlier conversation to keep the thread within the model context window."
                     .into(),
             ),
+            file_counts: None,
             note: None,
             status: status.into(),
         }),
@@ -20428,6 +19756,7 @@ fn tool_use_activity(
                     kind: "command".into(),
                     label: command_activity_label(&command),
                     detail: Some(command),
+                    file_counts: None,
                     note: description,
                     status: status.into(),
                 };
@@ -20457,6 +19786,7 @@ fn tool_use_activity(
                         kind: "read".into(),
                         label: format!("Read {file_name}"),
                         detail: Some(path),
+                        file_counts: None,
                         note: None,
                         status: status.into(),
                     };
@@ -20466,6 +19796,7 @@ fn tool_use_activity(
                     kind: "file".into(),
                     label: format!("Updated {path}"),
                     detail: Some(path),
+                    file_counts: None,
                     note: None,
                     status: status.into(),
                 };
@@ -20480,6 +19811,7 @@ fn tool_use_activity(
                     kind: "search".into(),
                     label: "Searched project".into(),
                     detail: Some(query),
+                    file_counts: None,
                     note: json_object_string(input, &["path", "file_path", "filePath"]),
                     status: status.into(),
                 };
@@ -20492,6 +19824,7 @@ fn tool_use_activity(
                     kind: "search".into(),
                     label: "Searched the web".into(),
                     detail: Some(query),
+                    file_counts: None,
                     note: None,
                     status: status.into(),
                 };
@@ -20505,6 +19838,7 @@ fn tool_use_activity(
         kind: "tool".into(),
         label: format!("Used {}", humanize_activity_name(name)),
         detail: Some(name.to_string()),
+        file_counts: None,
         note,
         status: status.into(),
     }
@@ -20710,6 +20044,8 @@ fn emit_provider_chat_event(
         activity_label: None,
         activity_detail: None,
         activity_note: None,
+        additions: None,
+        deletions: None,
         activity_status: None,
         recovery_kind: error
             .as_deref()
@@ -20771,6 +20107,8 @@ fn emit_provider_activity_event(
         activity_label: Some(activity.label.clone()),
         activity_detail: activity.detail.clone(),
         activity_note: activity.note.clone(),
+        additions: activity.file_counts.map(|counts| counts.0),
+        deletions: activity.file_counts.map(|counts| counts.1),
         activity_status: Some(activity.status.clone()),
         message: None,
         error: None,
@@ -21423,7 +20761,15 @@ fn effective_capability_class(
 ) -> anyhow::Result<CapabilityClass> {
     if matches!(
         capability_id,
-        CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange
+        CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::CodeDefinition
+            | CapabilityId::CodeReferences
+            | CapabilityId::CodeHover
+            | CapabilityId::CodeSymbols
+            | CapabilityId::WorkspaceGitBlame
+            | CapabilityId::WorkspaceGitShow
+            | CapabilityId::WorkspaceGitLog
     ) {
         let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
             arguments, "path",
@@ -21627,13 +20973,21 @@ fn capability_grant_scope(
     arguments: &serde_json::Value,
 ) -> anyhow::Result<(String, String)> {
     match capability_id {
-        CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => Ok((
+        CapabilityId::WorkspaceRead
+        | CapabilityId::WorkspaceReadRange
+        | CapabilityId::CodeDefinition
+        | CapabilityId::CodeReferences
+        | CapabilityId::CodeHover
+        | CapabilityId::CodeSymbols
+        | CapabilityId::WorkspaceGitBlame
+        | CapabilityId::WorkspaceGitShow
+        | CapabilityId::WorkspaceGitLog => Ok((
             "path".into(),
             gyro_core::normalize_capability_relative_path(capability_argument_string(
                 arguments, "path",
             )?)?,
         )),
-        CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => {
+        CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate | CapabilityId::WebFetch => {
             let url =
                 session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
                     .map_err(anyhow::Error::msg)?;
@@ -22089,6 +21443,10 @@ fn execute_provider_capability(
         CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => {
             workspace_capability_read::execute(app, bound, request)?
         }
+        CapabilityId::CodeDefinition
+        | CapabilityId::CodeReferences
+        | CapabilityId::CodeHover
+        | CapabilityId::CodeSymbols => lsp_capability::execute(app, bound, request)?,
         CapabilityId::WorkspaceDiagnostics => {
             let context = app
                 .state::<CapabilityIdeEvidenceManager>()
@@ -22131,93 +21489,22 @@ fn execute_provider_capability(
                 None,
             )
         }
-        CapabilityId::WorkspaceProposeEdit => {
-            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
-                arguments, "path",
-            )?)?;
-            let content = arguments
-                .get("content")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| anyhow::anyhow!("capability argument `content` is required"))?
-                .to_string();
-            let expected_hash = arguments
-                .get("expectedHash")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            let latest_context = app
-                .state::<CapabilityIdeEvidenceManager>()
-                .by_workspace
-                .lock()
-                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-                .get(&bound.workspace_key)
-                .cloned()
-                .unwrap_or_else(|| bound.workspace_context.clone());
-            if latest_context.buffers.iter().any(|buffer| {
-                buffer.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
-                    && buffer
-                        .get("dirty")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-            }) {
-                anyhow::bail!(
-                    "the target has unsaved editor changes; save or revert it before proposing an edit"
-                );
-            }
-            let candidate = gyro_core::security::assert_path_inside_workspace(
-                &bound.workspace,
-                Path::new(&path),
-            )?;
-            if candidate.exists() && expected_hash.is_none() {
-                anyhow::bail!(
-                    "expectedHash is required when proposing changes to an existing file"
-                );
-            }
-            let config = load_config_blocking().map_err(anyhow::Error::msg)?;
-            let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
-                && capability_full_access_enabled(&config);
-            let store = open_store().map_err(anyhow::Error::msg)?;
-            let proposal = create_file_mutation_proposal_in_store(
-                &store,
-                FileMutationProposalRequest {
-                    session_id: bound.session_id.clone(),
-                    turn_id: bound.turn_id.clone(),
-                    path: path.clone(),
-                    content,
-                    expected_hash,
-                },
-                apply_immediately,
-            )?;
-            let proposal_id = proposal.id.to_string();
-            if let Ok(store) = open_store() {
-                if let Ok(session_id) = Uuid::parse_str(&bound.session_id) {
-                    if let Ok(events) = store.read_recent_events(session_id, 16) {
-                        for event in events.into_iter().filter(|event| {
-                            event
-                                .payload
-                                .get("proposalId")
-                                .and_then(serde_json::Value::as_str)
-                                == Some(proposal_id.as_str())
-                        }) {
-                            let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
-                        }
-                    }
-                }
-            }
-            let resource = CapabilityResourceRef {
-                id: proposal_id,
-                kind: "proposal".into(),
-                label: path.clone(),
-            };
-            (
-                if apply_immediately {
-                    format!("Applied changes to {path}")
-                } else {
-                    format!("Proposed changes to {path} for Workspace review")
-                },
-                serde_json::to_value(proposal)?,
-                Some(resource),
-            )
+        CapabilityId::WorkspaceProposeEdit | CapabilityId::WorkspaceEdit => {
+            workspace_edit_capability::execute(app, bound, request)?
         }
+        CapabilityId::WorkspaceCreatePath
+        | CapabilityId::WorkspaceRenamePath
+        | CapabilityId::WorkspaceDeletePath => {
+            workspace_path_capability::execute(app, bound, request)?
+        }
+        CapabilityId::WorkspaceGitLog
+        | CapabilityId::WorkspaceGitShow
+        | CapabilityId::WorkspaceGitBlame => git_history_capability::execute(app, bound, request)?,
+        CapabilityId::WebFetch => web_fetch_capability::execute(app, bound, request)?,
+        CapabilityId::MemoryRead | CapabilityId::MemoryWrite => {
+            memory_capability::execute(app, bound, request)?
+        }
+        CapabilityId::ResearchRun => subagent_capability::execute(app, bound, request)?,
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => {
             let task_id = capability_argument_string(arguments, "taskId")?.to_string();
             let tasks = task_discover_impl(&workspace)?;
@@ -23100,7 +22387,12 @@ fn handle_desktop_provider_capability_request(
         );
     }
     if bound.policy.mode == CapabilityRunMode::Plan
-        && request.capability_id == CapabilityId::WorkspaceProposeEdit
+        && matches!(
+            request.capability_id,
+            CapabilityId::WorkspaceProposeEdit
+                | CapabilityId::WorkspaceEdit
+                | CapabilityId::MemoryWrite
+        )
     {
         return fail(
             "plan-mode-read-only",
@@ -23503,6 +22795,23 @@ fn desktop_permission_tool_call(
 }
 
 fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
+    // Domain modules own their schemas so this function keeps one delegation
+    // guard per module instead of one match arm per capability.
+    if let Some((properties, required)) = lsp_capability::schema(id)
+        .or_else(|| workspace_edit_capability::schema(id))
+        .or_else(|| workspace_path_capability::schema(id))
+        .or_else(|| git_history_capability::schema(id))
+        .or_else(|| web_fetch_capability::schema(id))
+        .or_else(|| memory_capability::schema(id))
+        .or_else(|| subagent_capability::schema(id))
+    {
+        return serde_json::json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false,
+        });
+    }
     let properties = match id {
         CapabilityId::WorkspaceList => serde_json::json!({
             "depth": { "type": "integer", "minimum": 1, "maximum": 8 }
@@ -23527,11 +22836,6 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         CapabilityId::WorkspaceDiff => serde_json::json!({
             "path": { "type": "string" },
             "staged": { "type": "boolean" }
-        }),
-        CapabilityId::WorkspaceProposeEdit => serde_json::json!({
-            "path": { "type": "string" },
-            "content": { "type": "string" },
-            "expectedHash": { "type": "string" }
         }),
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => serde_json::json!({
             "taskId": { "type": "string" },
@@ -23616,7 +22920,6 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         CapabilityId::WorkspaceRead
         | CapabilityId::WorkspaceReadRange
         | CapabilityId::IdeReveal => vec!["path"],
-        CapabilityId::WorkspaceProposeEdit => vec!["path", "content"],
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
         CapabilityId::IdeOpenPanel => vec!["panel"],
         CapabilityId::TerminalOpen => vec!["program"],
@@ -23984,7 +23287,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalProcessManager::default())
-        .manage(LanguageServerManager::default())
+        .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
         .manage(ProviderApprovalManager::default())
@@ -24004,6 +23307,10 @@ pub fn run() {
             }
             #[cfg(debug_assertions)]
             if browser_smoke::start(app.handle())? {
+                return Ok(());
+            }
+            #[cfg(debug_assertions)]
+            if lsp_smoke::start(app.handle())? {
                 return Ok(());
             }
             menu_bar::setup(app)?;
@@ -24139,9 +23446,9 @@ pub fn run() {
             load_config,
             warm_desktop_shell,
             logout_account,
-            lsp_request,
-            lsp_start,
-            lsp_stop,
+            language_server::lsp_request,
+            language_server::lsp_start,
+            language_server::lsp_stop,
             read_workspace_file,
             read_workspace_file_full,
             read_terminal_output,
@@ -24252,14 +23559,12 @@ fn drain_backend_resources_on_quit(app: &tauri::AppHandle) {
         let _ = app.state::<TerminalProcessManager>().close(&pane_id);
     }
     let language_server_ids = app
-        .state::<LanguageServerManager>()
-        .processes
-        .lock()
-        .ok()
-        .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+        .state::<language_server::LanguageServerManager>()
+        .server_ids();
     for server_id in language_server_ids {
-        let _ = app.state::<LanguageServerManager>().stop(&server_id);
+        let _ = app
+            .state::<language_server::LanguageServerManager>()
+            .stop(&server_id);
     }
     let debug_adapter_ids = app
         .state::<DebugAdapterManager>()
@@ -25136,6 +24441,31 @@ mod tests {
         assert!(context_schema["properties"].as_object().unwrap().is_empty());
         let range_schema = desktop_capability_tool_schema(CapabilityId::WorkspaceReadRange);
         assert_eq!(range_schema["required"], serde_json::json!(["path"]));
+        // Code intelligence reads a file, so a sensitive path upgrades it the
+        // same way a workspace read does, and its schemas require positions.
+        assert_eq!(
+            effective_capability_class(
+                CapabilityId::CodeDefinition,
+                &serde_json::json!({ "path": ".env", "line": 1, "column": 1 }),
+            )
+            .unwrap(),
+            CapabilityClass::WorkspaceSensitiveRead
+        );
+        assert_eq!(
+            capability_grant_scope(
+                CapabilityId::CodeSymbols,
+                &serde_json::json!({ "path": "src/main.rs" }),
+            )
+            .unwrap(),
+            ("path".to_string(), "src/main.rs".to_string())
+        );
+        let definition_schema = desktop_capability_tool_schema(CapabilityId::CodeDefinition);
+        assert_eq!(
+            definition_schema["required"],
+            serde_json::json!(["path", "line", "column"])
+        );
+        let symbols_schema = desktop_capability_tool_schema(CapabilityId::CodeSymbols);
+        assert_eq!(symbols_schema["required"], serde_json::json!(["path"]));
         let proposal_schema = desktop_capability_tool_schema(CapabilityId::WorkspaceProposeEdit);
         assert_eq!(
             proposal_schema["required"],
@@ -25249,6 +24579,25 @@ mod tests {
     }
 
     #[test]
+    fn api_failures_do_not_replay_the_entire_tool_loop() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "retry")
+            .unwrap();
+        for provider in ["deepseek", "ollama"] {
+            let request = provider_chat_request_for(&session, temp.path(), provider);
+            let mut attempts = 0;
+            let result = run_provider_chat_with_retry_using(&store, &request, None, |_, _| {
+                attempts += 1;
+                anyhow::bail!("connection reset by peer");
+            });
+            assert!(result.is_err());
+            assert_eq!(attempts, 1, "must not replay {provider} tools");
+        }
+    }
+
+    #[test]
     fn transient_provider_errors_retry_with_backoff_then_succeed() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -25257,25 +24606,32 @@ mod tests {
             .unwrap();
         let request = provider_chat_request_for(&session, temp.path(), "xai");
         let mut attempts = 0u32;
-        let output = run_provider_chat_with_retry_using(&store, &request, None, |_, _| {
-            attempts += 1;
-            if attempts < 2 {
-                anyhow::bail!("connection reset by peer");
-            }
-            Ok(ProviderRunnerOutput {
-                activities: Vec::new(),
-                context_usage: None,
-                billed_usage: None,
-                rate_limits: Vec::new(),
-                response: "recovered".into(),
-                resume_cursor: None,
-                retry_count: 0,
-                resumed: false,
-                streamed_text: None,
-                output_summary: None,
+        let output =
+            run_provider_chat_with_retry_using(&store, &request, None, |cursor, attempt| {
+                attempts += 1;
+                if attempts < 2 {
+                    attempt.resume_cursor = Some(ProviderResumeCursor {
+                        kind: "xai-acp-session".into(),
+                        session_id: "acknowledged-session".into(),
+                    });
+                    return Err(anyhow::anyhow!("connection reset by peer")
+                        .context("provider transport failed"));
+                }
+                assert_eq!(cursor.unwrap().session_id, "acknowledged-session");
+                Ok(ProviderRunnerOutput {
+                    activities: Vec::new(),
+                    context_usage: None,
+                    billed_usage: None,
+                    rate_limits: Vec::new(),
+                    response: "recovered".into(),
+                    resume_cursor: None,
+                    retry_count: 0,
+                    resumed: false,
+                    streamed_text: None,
+                    output_summary: None,
+                })
             })
-        })
-        .unwrap();
+            .unwrap();
         assert_eq!(attempts, 2);
         assert_eq!(output.retry_count, 1);
         assert_eq!(output.response, "recovered");
@@ -26196,59 +25552,6 @@ mod tests {
     }
 
     #[test]
-    fn lsp_json_rpc_framing_round_trips() {
-        let value = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "textDocument/hover",
-            "params": { "line": 4 }
-        });
-        let mut framed = Vec::new();
-        write_lsp_message(&mut framed, &value).unwrap();
-
-        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
-
-        assert_eq!(decoded, value);
-        assert!(String::from_utf8_lossy(&framed).starts_with("Content-Length: "));
-    }
-
-    #[test]
-    fn lsp_json_rpc_framing_accepts_case_insensitive_header() {
-        let body = br#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
-        let framed = format!("content-length: {}\r\n\r\n", body.len())
-            .into_bytes()
-            .into_iter()
-            .chain(body.iter().copied())
-            .collect::<Vec<_>>();
-
-        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
-
-        assert_eq!(decoded["method"], "initialized");
-    }
-
-    #[test]
-    fn lsp_json_rpc_framing_rejects_oversized_headers() {
-        let framed = format!("X-Fill: {}", "x".repeat(MAX_LSP_HEADER_BYTES + 1));
-        let error = read_lsp_message(&mut BufReader::new(framed.as_bytes())).unwrap_err();
-        assert!(error.to_string().contains("headers exceed size limit"));
-    }
-
-    #[test]
-    fn workspace_file_uri_encodes_spaces_without_losing_path_shape() {
-        let uri = workspace_file_uri(Path::new("/tmp/Gyro Workspace/src/main.ts"));
-
-        assert_eq!(uri, "file:///tmp/Gyro%20Workspace/src/main.ts");
-    }
-
-    #[test]
-    fn lsp_notification_detection_covers_document_lifecycle() {
-        assert!(lsp_method_is_notification("textDocument/didOpen"));
-        assert!(lsp_method_is_notification("textDocument/didChange"));
-        assert!(lsp_method_is_notification("$/cancelRequest"));
-        assert!(!lsp_method_is_notification("textDocument/hover"));
-    }
-
-    #[test]
     fn dap_json_rpc_framing_round_trips() {
         let value = serde_json::json!({
             "seq": 4,
@@ -26257,9 +25560,10 @@ mod tests {
             "arguments": {}
         });
         let mut framed = Vec::new();
-        write_lsp_message(&mut framed, &value).unwrap();
+        language_server::write_lsp_message(&mut framed, &value).unwrap();
 
-        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
+        let decoded =
+            language_server::read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
 
         assert_eq!(decoded, value);
     }
@@ -26569,42 +25873,6 @@ while True:
         .unwrap();
 
         assert_eq!(output.status, "done", "{}{}", output.stdout, output.stderr);
-    }
-
-    #[test]
-    fn language_server_manager_initializes_rust_analyzer_when_available() {
-        if command_with_gui_path("rust-analyzer")
-            .arg("--version")
-            .output()
-            .map(|output| !output.status.success())
-            .unwrap_or(true)
-        {
-            return;
-        }
-        let workspace = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(workspace.path().join("src")).unwrap();
-        std::fs::write(
-            workspace.path().join("Cargo.toml"),
-            "[package]\nname = \"lsp-check\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
-        std::fs::write(workspace.path().join("src/lib.rs"), "pub fn ready() {}\n").unwrap();
-        let manager = LanguageServerManager::default();
-
-        let session = manager
-            .start(LspStartRequest {
-                workspace_path: workspace.path().to_string_lossy().to_string(),
-                language_id: "rust".into(),
-                command: "rust-analyzer".into(),
-            })
-            .unwrap();
-
-        assert_eq!(session.status, "ready");
-        assert!(session.message.contains("capabilities"));
-        assert_eq!(
-            manager.stop(&session.server_id).unwrap()["status"],
-            "stopped"
-        );
     }
 
     #[test]
@@ -27699,6 +26967,7 @@ while True:
                 ])
                 .to_string(),
             ),
+            file_counts: None,
             note: None,
             status: "done".into(),
         })
@@ -28078,6 +27347,7 @@ while True:
             kind: "command".into(),
             label: "Searched project".into(),
             detail: None,
+            file_counts: None,
             note: None,
             status: "done".into(),
         });
@@ -28092,6 +27362,7 @@ while True:
             kind: "command".into(),
             label: "Ran tests".into(),
             detail: None,
+            file_counts: None,
             note: None,
             status: "done".into(),
         });
@@ -28137,6 +27408,7 @@ while True:
                 kind: "tool".into(),
                 label: "Search codebase".into(),
                 detail: Some("stop|abort".into()),
+                file_counts: None,
                 note: None,
                 status: "running".into(),
             },
@@ -28145,6 +27417,7 @@ while True:
                 kind: "tool".into(),
                 label: "Search codebase".into(),
                 detail: Some("stop|abort".into()),
+                file_counts: None,
                 note: None,
                 status: "running".into(),
             },
@@ -28153,6 +27426,7 @@ while True:
                 kind: "command".into(),
                 label: "Run rg".into(),
                 detail: Some("rg stop".into()),
+                file_counts: None,
                 note: None,
                 status: "done".into(),
             },
@@ -28161,6 +27435,7 @@ while True:
                 kind: "read".into(),
                 label: "Read App.tsx".into(),
                 detail: Some("apps/desktop/src/App.tsx".into()),
+                file_counts: None,
                 note: None,
                 status: "running".into(),
             },
@@ -28233,6 +27508,7 @@ while True:
                 kind: "command".into(),
                 label: "Ran command".into(),
                 detail: None,
+                file_counts: None,
                 note: None,
                 status: "done".into(),
             });
@@ -28247,6 +27523,7 @@ while True:
             kind: "commentary".into(),
             label: label.into(),
             detail: None,
+            file_counts: None,
             note: None,
             status: "done".into(),
         };
@@ -28258,6 +27535,7 @@ while True:
             kind: "command".into(),
             label: "Ran command".into(),
             detail: None,
+            file_counts: None,
             note: None,
             status: "done".into(),
         });
@@ -29998,11 +29276,11 @@ while True:
     }
 
     #[test]
-    fn codex_protocol_reader_accepts_frames_larger_than_one_megabyte() {
-        // Codex 0.152 emits some valid app-server frames just above the former
-        // 1 MiB cap. Such a frame must reach the JSON decoder rather than
+    fn codex_protocol_reader_accepts_frames_larger_than_four_megabytes() {
+        // Rich tool results and resumed histories can exceed the former
+        // 4 MiB cap. Such a frame must reach the JSON decoder rather than
         // turning a normal chat send into a generic retry failure.
-        let payload_len = 1024 * 1024 + 1;
+        let payload_len = 4 * 1024 * 1024 + 1;
         let mut frame = vec![b'x'; payload_len];
         frame.push(b'\n');
         let mut reader = BufReader::new(std::io::Cursor::new(frame));
@@ -30177,23 +29455,39 @@ while True:
     }
 
     #[test]
-    fn queued_command_file_changes_are_persisted_under_their_own_turn() {
+    fn file_changes_stay_with_the_reporting_chat_in_a_shared_workspace() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
-        let session = store
-            .create_session(temp.path(), SessionOrigin::Desktop, "queued edits")
+        let reader = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "reader")
             .unwrap();
-        let request = provider_chat_request_for(&session, temp.path(), "openai");
-        let path = temp.path().join("file.css");
-        std::fs::write(&path, "original").unwrap();
-        let mut turns = Vec::new();
-        for content in ["first turn edit", "queued turn edit"] {
-            let turn = Uuid::new_v4();
-            turns.push(turn);
-            let snapshot =
-                command_file_changes::CommandFileSnapshot::capture(temp.path(), "file.css");
-            std::fs::write(&path, content).unwrap();
-            let entries = observed_command_file_activities("command", snapshot)
+        let writer = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "writer")
+            .unwrap();
+        let reader_turn = Uuid::new_v4();
+        let writer_turn = Uuid::new_v4();
+        let path = temp.path().join("shared.css");
+        std::fs::write(&path, "before").unwrap();
+        let command = serde_json::json!({
+            "id": "read", "type": "commandExecution", "status": "completed",
+            "command": "cat shared.css"
+        });
+        // Another chat writes the exact file the reader inspected.
+        std::fs::write(&path, "after").unwrap();
+        let read_activity = codex_item_activity(&command, "command", "Ran command");
+        let write_activities = codex_file_change_activities(
+            &serde_json::json!({
+                "id": "edit", "status": "completed",
+                "changes": [{ "path": "shared.css", "diff": "@@ -1 +1 @@\n-before\n+after\n" }]
+            }),
+            None,
+        );
+        for (session, turn, activities) in [
+            (&reader, reader_turn, vec![read_activity]),
+            (&writer, writer_turn, write_activities),
+        ] {
+            let request = provider_chat_request_for(session, temp.path(), "openai");
+            let entries = activities
                 .iter()
                 .map(|activity| provider_activity_event_entry(&request, turn, 0, activity))
                 .collect();
@@ -30201,18 +29495,20 @@ while True:
                 .append_system_events_with_turn_id(session.id, entries)
                 .unwrap();
         }
-        let restored = store.read_recent_events(session.id, 20).unwrap();
-        for turn in turns {
-            let event = restored
-                .iter()
-                .find(|event| event.turn_id == Some(turn))
-                .unwrap();
-            assert_eq!(event.payload["activityKind"], "file");
-            assert_eq!(
-                event.payload["path"],
-                path.canonicalize().unwrap().to_string_lossy().as_ref()
-            );
-        }
+        let reader_events = store.read_recent_events(reader.id, 20).unwrap();
+        assert!(!reader_events
+            .iter()
+            .any(|event| event.payload["activityKind"] == "file"));
+        let writer_events = store.read_recent_events(writer.id, 20).unwrap();
+        let file = writer_events
+            .iter()
+            .find(|event| event.payload["activityKind"] == "file")
+            .unwrap();
+        assert_eq!(file.session_id, writer.id);
+        assert_eq!(file.turn_id, Some(writer_turn));
+        assert_eq!(file.payload["path"], "shared.css");
+        assert_eq!(file.payload["additions"], 1);
+        assert_eq!(file.payload["deletions"], 1);
     }
 
     #[test]
@@ -30224,7 +29520,7 @@ while True:
         });
         let patch = serde_json::json!({
             "changes": [
-                { "path": "packages/ui/src/chat-run.ts" },
+                { "path": "packages/ui/src/chat-run.ts", "diff": "@@ -1 +1,2 @@\n-old\n+new\n+added\n" },
                 { "path": "packages/ui/src/surfaces.tsx" },
             ],
         });
@@ -30241,6 +29537,18 @@ while True:
                 "packages/ui/src/surfaces.tsx",
             ],
         );
+        assert_eq!(activities[0].file_counts, Some((2, 1)));
+        assert_eq!(activities[1].file_counts, None);
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "counts")
+            .unwrap();
+        let request = provider_chat_request_for(&session, temp.path(), "openai");
+        let (_, payload, _) =
+            provider_activity_event_entry(&request, Uuid::new_v4(), 0, &activities[0]);
+        assert_eq!(payload["additions"], 2);
+        assert_eq!(payload["deletions"], 1);
         assert!(codex_file_change_activities(&item, None).is_empty());
     }
 
@@ -31805,8 +31113,14 @@ while True:
 
     #[test]
     fn native_process_allowlists_reject_renderer_command_substitution() {
-        assert!(language_server_command_is_allowed("rust", "rust-analyzer"));
-        assert!(!language_server_command_is_allowed("rust", "sh -c whoami"));
+        assert!(language_server::language_server_command_is_allowed(
+            "rust",
+            "rust-analyzer"
+        ));
+        assert!(!language_server::language_server_command_is_allowed(
+            "rust",
+            "sh -c whoami"
+        ));
         assert!(debug_adapter_command_is_allowed(
             "lldb-dap",
             "lldb-dap",
