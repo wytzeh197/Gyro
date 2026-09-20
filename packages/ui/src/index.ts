@@ -539,6 +539,9 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
+export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
+export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
+export { ChatQuestionPopup } from "./chat-question-popup";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
