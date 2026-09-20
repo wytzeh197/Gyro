@@ -398,6 +398,7 @@ const menuBarRustSource = readRepoFile(
 );
 const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
 ].join("\n");
 expect(
@@ -976,7 +977,10 @@ const coreCapabilitiesSource = readRepoFile(
 );
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
-const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const tauriSource = [
+  readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
 );
@@ -5309,7 +5313,7 @@ expect(
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
     chatSurfaceSource.includes(
-      'draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}',
+      "draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? \"\")\n                : localDraft\n            }",
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
@@ -6428,7 +6432,10 @@ expect(
         `activePopover === "${popover}" ? popoverScopeRef : undefined`,
       ),
     ) &&
-    surfaceSource.includes("ref={slashMenuScopeRef}") &&
+    // The slash menu scope is attached through a callback ref because the same
+    // node is also the composer shell the goal editor measures.
+    surfaceSource.includes("slashMenuScopeRef.current = node;") &&
+    surfaceSource.includes("composerShellRef.current = node;") &&
     surfaceSource.includes(
       "const slashMenuScopeRef = useOutsidePointerDismiss",
     ) &&
