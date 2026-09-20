@@ -6,8 +6,14 @@ import {
   type ProviderHealthCheck,
 } from "./provider-health-probes";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
+import {
+  browserLiveStatusMessage,
+  browserUnreachableMessage,
+  normalizedPreviewUrl,
+} from "./browser-preview-text";
 import { useModelBrowserReveal } from "./model-browser-reveal";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
+import { createGithubRefreshController } from "./github-refresh";
 import { useProviderUsage } from "./use-provider-usage";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import * as turnTiming from "./turn-timing";
@@ -42,6 +48,7 @@ import {
   ChatCloseConfirmOverlay,
   ChatGridSurface,
   ChatSurface,
+  NEW_CHAT_DRAFT_KEY,
   CommandPaletteOverlay,
   IdeStatusBar,
   IdeSurface,
@@ -225,6 +232,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -240,6 +248,7 @@ import {
   MAX_CHAT_EVENT_HOLD_COUNT,
   MAX_CHAT_EVENT_RENDER_COUNT,
   mergePersistedAndOptimisticEvents,
+  mergeLiveCapabilityEvent,
   mergeProviderResponseEvents,
   resetStreamingAssistantForRetry,
   type ProviderStreamOrderState,
@@ -525,7 +534,8 @@ const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_CHAT_VIDEO_BYTES = 200 * 1024 * 1024;
 const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
-const NEW_CHAT_DRAFT_KEY = "new";
+// The draft key for a chat with no session yet. Shared with the UI package so
+// a drop and the composer holding it always name the same draft.
 const PROVIDER_STREAM_FLUSH_MS = 80;
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
@@ -906,7 +916,11 @@ export function App() {
   const terminalReadInFlightRef = useRef(new Set<string>());
   const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
   const branchCatalogRequestRef = useRef(0);
-  const ideSourceControlRequestRef = useRef(0);
+  // Source Control shows the status of the root the workspace surface asked for
+  // last. A read that finishes after the user moved on must not publish, while a
+  // read for the root still on screen always must: a dropped result used to
+  // leave the panel on a stale change list with nothing left to correct it.
+  const ideSourceControlRootRef = useRef<string | undefined>(undefined);
   const ideSourceControlInFlightRef = useRef(new Set<string>());
   const ideSourceControlQueuedRef = useRef(new Set<string>());
   const ideServicesRequestRef = useRef(0);
@@ -2694,10 +2708,13 @@ export function App() {
     let unlistenResource: (() => void) | undefined;
     void listen<SessionEvent>("gyro://provider-capability-event", (event) => {
       if (!isMounted) return;
+      // Paint earlier narration before placing a call from the separate
+      // capability channel, just as we do for provider activity frames.
+      flushProviderStreamBatches();
       const capabilityEvent = event.payload;
       const mergeEvent = (items: SessionEvent[]) =>
         limitSessionEventsForUi(
-          mergePersistedAndOptimisticEvents(items, [capabilityEvent]),
+          mergeLiveCapabilityEvent(items, capabilityEvent),
         );
       optimisticEventsRef.current.set(
         capabilityEvent.sessionId,
@@ -2969,7 +2986,7 @@ export function App() {
       unlistenCapability?.();
       unlistenResource?.();
     };
-  }, [sessions, setEventsForSession]);
+  }, [flushProviderStreamBatches, sessions, setEventsForSession]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -3095,9 +3112,16 @@ export function App() {
         return;
       }
       const batchKey = providerStreamBatchKey(streamEvent.sessionId, turnId);
-      const existing = providerStreamBatchRef.current.get(batchKey);
+      let existing = providerStreamBatchRef.current.get(batchKey);
+      // A broker call can split text while delivery is buffered. Keep both
+      // blocks' canonical positions even if their frames share a UI flush.
+      if (existing && streamEvent.timelineOrder != null &&
+          existing.streamEvent.timelineOrder !== streamEvent.timelineOrder) {
+        flushProviderStreamBatches();
+        existing = undefined;
+      }
       providerStreamBatchRef.current.set(batchKey, {
-        streamEvent,
+        streamEvent: existing?.streamEvent ?? streamEvent,
         textDelta: `${existing?.textDelta ?? ""}${textDelta}`,
       });
       scheduleProviderStreamFlush();
@@ -3501,13 +3525,12 @@ export function App() {
   );
 
   const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
-    if (root && ideSourceControlInFlightRef.current.has(root)) {
-      ideSourceControlQueuedRef.current.add(root);
+    if (!root) {
       return;
     }
-    const requestId = ideSourceControlRequestRef.current + 1;
-    ideSourceControlRequestRef.current = requestId;
-    if (!root) {
+    ideSourceControlRootRef.current = root;
+    if (ideSourceControlInFlightRef.current.has(root)) {
+      ideSourceControlQueuedRef.current.add(root);
       return;
     }
     if (!isTauriRuntime()) {
@@ -3531,7 +3554,7 @@ export function App() {
     ideSourceControlInFlightRef.current.add(root);
     void invoke<SourceControlState>("git_status", { workspacePath: root })
       .then((sourceControl) => {
-        if (ideSourceControlRequestRef.current !== requestId) {
+        if (ideSourceControlRootRef.current !== root) {
           return;
         }
         dispatchWorkbench({
@@ -3540,7 +3563,7 @@ export function App() {
         });
       })
       .catch((error) => {
-        if (ideSourceControlRequestRef.current !== requestId) {
+        if (ideSourceControlRootRef.current !== root) {
           return;
         }
         dispatchWorkbench({
@@ -3561,10 +3584,11 @@ export function App() {
       .finally(() => {
         ideSourceControlInFlightRef.current.delete(root);
         // Collapse refresh bursts into one follow-up. Mutations during a read
-        // still get fresh status without spawning overlapping Git processes.
+        // still get fresh status without spawning overlapping Git processes, so
+        // a queued refresh always re-runs while this root is the one on screen.
         if (
           ideSourceControlQueuedRef.current.delete(root) &&
-          ideSourceControlRequestRef.current === requestId
+          ideSourceControlRootRef.current === root
         ) {
           refresh(root);
         }
@@ -5726,42 +5750,21 @@ export function App() {
     workspaceActionRoot,
   ]);
 
-  /**
-   * Refresh GitHub availability, workflow runs, and pull requests for a
-   * workspace. Availability is probed first so a machine without `gh` — or a
-   * repository that is not on GitHub — costs one call instead of three.
-   */
-  const refreshGithub = useCallback(
-    async (root: string) => {
-      if (!root || !isTauriRuntime()) {
-        return;
-      }
-      dispatchWorkbench({ type: "github-loading", loading: true });
-      try {
-        const availability = await invoke<GithubAvailability>("github_status", {
-          request: { workspacePath: root },
-        });
-        dispatchWorkbench({ type: "github-set-availability", availability });
-        if (!availability.available) {
-          return;
-        }
-        const [runs, pullRequests] = await Promise.all([
-          invoke<GithubWorkflowRun[]>("github_workflow_runs", {
-            request: { workspacePath: root, limit: 20 },
-          }),
-          invoke<GithubPullRequest[]>("github_pull_requests", {
-            request: { workspacePath: root, limit: 20 },
-          }),
-        ]);
-        dispatchWorkbench({ type: "github-set-runs", runs });
-        dispatchWorkbench({ type: "github-set-pull-requests", pullRequests });
-      } catch (error) {
-        dispatchWorkbench({ type: "github-error", error: String(error) });
-      } finally {
-        dispatchWorkbench({ type: "github-loading", loading: false });
-      }
-    },
+  const githubRequests = useMemo(
+    () => createGithubRefreshController({ invoke, dispatch: dispatchWorkbench }),
     [dispatchWorkbench],
+  );
+  const githubRerunsRef = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    githubRequests.setWorkspace(workspaceActionRoot);
+    dispatchWorkbench({ type: "github-reset" });
+    return () => githubRequests.setWorkspace(undefined);
+  }, [githubRequests, workspaceActionRoot]);
+
+  const refreshGithub = useCallback(
+    (root: string, options?: { force?: boolean }) => isTauriRuntime()
+      ? githubRequests.refresh(root, options) : Promise.resolve(),
+    [githubRequests],
   );
 
   // Probe GitHub once per workspace rather than on every IDE refresh: each
@@ -5806,16 +5809,13 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [refreshIdeSourceControl, isSourceControlVisible, workspaceActionRoot]);
   useEffect(() => {
-    if (
-      !workspaceActionRoot ||
-      !hasActiveGithubRun ||
-      !isSourceControlVisible
-    ) {
-      return;
-    }
+    if (!workspaceActionRoot || !isSourceControlVisible) return;
+    // Pick up newly pushed workflows and recover from transient failures even
+    // when the last snapshot contained no active run.
+    void refreshGithub(workspaceActionRoot);
     const timer = window.setInterval(() => {
       void refreshGithub(workspaceActionRoot);
-    }, 15_000);
+    }, hasActiveGithubRun ? 15_000 : 60_000);
     return () => window.clearInterval(timer);
   }, [
     hasActiveGithubRun,
@@ -5824,31 +5824,37 @@ export function App() {
     workspaceActionRoot,
   ]);
 
-  /** Select a workflow run and load its jobs. */
   const selectGithubRun = useCallback(
-    async (runId: number) => {
+    (runId: number) => {
       const root = workspaceActionRoot;
-      if (!root || !isTauriRuntime()) {
-        return;
-      }
-      // Collapse a second click on the open run.
-      if (workbench.ide.github.selectedRunId === runId) {
-        dispatchWorkbench({ type: "github-select-run", runId: undefined });
-        return;
-      }
-      dispatchWorkbench({ type: "github-select-run", runId });
-      try {
-        const detail = await invoke<GithubWorkflowRunDetail>(
-          "github_workflow_run_detail",
-          { request: { workspacePath: root, runId } },
-        );
-        dispatchWorkbench({ type: "github-set-run-detail", detail });
-      } catch (error) {
-        dispatchWorkbench({ type: "github-error", error: String(error) });
-      }
+      if (!root || !isTauriRuntime()) return;
+      githubRequests.beginRequest(root, "detail");
+      githubRequests.beginRequest(root, "logs");
+      dispatchWorkbench({
+        type: "github-select-run",
+        runId: workbench.ide.github.selectedRunId === runId ? undefined : runId,
+      });
     },
-    [workbench.ide.github.selectedRunId, workspaceActionRoot],
+    [githubRequests, workbench.ide.github.selectedRunId, workspaceActionRoot],
   );
+
+  // Refresh the selected run's jobs together with the run list. Responses
+  // from a collapsed run or a different repository must never reopen it.
+  useEffect(() => {
+    const root = workspaceActionRoot;
+    const runId = workbench.ide.github.selectedRunId;
+    if (!root || runId === undefined || !isTauriRuntime()) return;
+    const isCurrent = githubRequests.beginRequest(root, "detail");
+    let cancelled = false;
+    void invoke<GithubWorkflowRunDetail>("github_workflow_run_detail", {
+      request: { workspacePath: root, runId },
+    }).then((detail) => {
+      if (!cancelled && isCurrent()) dispatchWorkbench({ type: "github-set-run-detail", detail });
+    }).catch((error) => {
+      if (!cancelled && isCurrent()) dispatchWorkbench({ type: "github-error", error: String(error) });
+    });
+    return () => { cancelled = true; };
+  }, [githubRequests, workbench.ide.github.selectedRunId, workbench.ide.github.runs, workspaceActionRoot]);
 
   /**
    * Load a run's failed-step logs into the Output panel, which is already the
@@ -5860,14 +5866,16 @@ export function App() {
       if (!root || !isTauriRuntime()) {
         return;
       }
+      const isCurrent = githubRequests.beginRequest(root, "logs");
       try {
         const logs = await invoke<string>("github_workflow_logs", {
           request: { workspacePath: root, runId, failedOnly: true },
         });
+        if (!isCurrent()) return;
         const lines = logs.trim()
           ? logs.split("\n")
           : ["No failed-step logs for this run."];
-        dispatchWorkbench({ type: "github-set-run-logs", logs });
+        dispatchWorkbench({ type: "github-set-run-logs", runId, logs });
         dispatchWorkbench({
           type: "ide-upsert-output-channel",
           channel: {
@@ -5884,10 +5892,10 @@ export function App() {
         });
         dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
       } catch (error) {
-        notify("command-failed", "Could not read workflow logs", String(error));
+        if (isCurrent()) notify("command-failed", "Could not read workflow logs", String(error));
       }
     },
-    [notify, workspaceActionRoot],
+    [githubRequests, notify, workspaceActionRoot],
   );
 
   const rerunGithubRun = useCallback(
@@ -5896,22 +5904,27 @@ export function App() {
       if (!root || !isTauriRuntime()) {
         return;
       }
+      const key = JSON.stringify([root, runId]);
+      if (githubRerunsRef.current.has(key)) return;
+      githubRerunsRef.current.add(key);
       try {
-        const runs = await invoke<GithubWorkflowRun[]>(
-          "github_rerun_workflow",
-          { request: { workspacePath: root, runId, failedOnly } },
-        );
-        dispatchWorkbench({ type: "github-set-runs", runs });
+        await invoke<void>("github_rerun_workflow", {
+          request: { workspacePath: root, runId, failedOnly },
+        });
         notify(
           "tests-passed",
           failedOnly ? "Re-running failed jobs" : "Re-running workflow",
           `Run ${runId}`,
         );
+        // Refresh failure must not reclassify an accepted mutation as failed.
+        void refreshGithub(root, { force: true });
       } catch (error) {
         notify("command-failed", "Re-run failed", String(error));
+      } finally {
+        githubRerunsRef.current.delete(key);
       }
     },
-    [notify, workspaceActionRoot],
+    [notify, refreshGithub, workspaceActionRoot],
   );
 
   const openGithubUrl = useCallback(
@@ -6050,7 +6063,7 @@ export function App() {
                 },
               },
             );
-            void refreshGithub(root);
+            void refreshGithub(root, { force: true });
             settle("done", `Opened pull request #${pullRequest.number}`);
             return;
           }
@@ -12490,7 +12503,10 @@ export function App() {
   const browserOverlayOccluded =
     isCommandPaletteOpen ||
     Boolean(modelStandardPrompt) ||
-    Boolean(branchNameRequest);
+    Boolean(branchNameRequest) ||
+    Boolean(projectRemoveCandidate) ||
+    Boolean(terminalTerminateCandidate) ||
+    Boolean(chatCloseCandidate);
 
   const ensureSessionBrowser = useCallback(
     async (
@@ -15390,19 +15406,22 @@ export function App() {
     return (
       <ChatSurface
         activeChatPanel={panePanel}
+        paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
         {...paneCompanionProps}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
         browserPreview={workbench.browserPreview}
         browserNativeHost={browserNativeHost}
-        browserOverlayOccluded={browserOverlayOccluded}
+        browserOverlayOccluded={browserOverlayOccluded || !isFocused}
         onBrowserBack={handleBrowserBack}
         onBrowserDeviceChange={(device) =>
           dispatchWorkbench({ type: "browser-device", device })
         }
         onBrowserForward={handleBrowserForward}
-        onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+        onBrowserHostBoundsChange={
+          isFocused ? handleBrowserHostBoundsChange : undefined
+        }
         onBrowserNavigate={handleBrowserNavigate}
         onBrowserOpenExternal={openBrowserPreviewExternal}
         onBrowserReload={handleBrowserReload}
@@ -15655,6 +15674,7 @@ export function App() {
   const renderWorkspaceChat = () => (
     <ChatSurface
       chatSwitcher={workspaceChatSwitcher}
+      paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
       onSelectChatPanel={selectSoloChatPanel}
       {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
@@ -16032,6 +16052,7 @@ export function App() {
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
                     activeChatPanel={activeChatPanel}
+                    paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
                     {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
                     railDiffTools={railDiffTools}
@@ -16716,6 +16737,7 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           activeChatPanel={activeChatPanel}
+          paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}
           {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
           railDiffTools={railDiffTools}
@@ -17967,54 +17989,6 @@ function chatMessagePreview(value: string) {
     return normalized;
   }
   return `${chars.slice(0, 160).join("")}...`;
-}
-
-function normalizedPreviewUrl(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) throw new Error("Enter a URL or search term");
-  const isHostWithPort = /^[^/\s:]+:\d+(?:[/?#]|$)/.test(trimmed);
-  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(trimmed) && !isHostWithPort;
-  const isAddress =
-    isHostWithPort ||
-    /^(?:localhost|\[[\da-f:]+\]|[^\s/]+\.[^\s/]+)(?:[/?#]|$)/i.test(trimmed);
-  const candidate = hasScheme
-    ? trimmed
-    : isAddress
-      ? `http://${trimmed}`
-      : `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
-  const url = new URL(candidate);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Preview URLs must use http or https");
-  }
-  return url.toString();
-}
-
-function browserPreviewHostLabel(url: string) {
-  try {
-    const parsed = new URL(normalizedPreviewUrl(url));
-    return parsed.host || parsed.hostname || "local preview";
-  } catch {
-    return "local preview";
-  }
-}
-
-function browserLiveStatusMessage(url: string, issueCount: number) {
-  const host = browserPreviewHostLabel(url);
-  if (issueCount > 0) {
-    return `Live · ${issueCount} issue${issueCount === 1 ? "" : "s"} · ${host}`;
-  }
-  return `Live · ${host}`;
-}
-
-function browserUnreachableMessage(detail: string) {
-  const trimmed = detail.trim();
-  if (!trimmed) {
-    return "Unreachable";
-  }
-  if (/^unreachable/i.test(trimmed) || /^preview unavailable/i.test(trimmed)) {
-    return trimmed.replace(/^preview unavailable:\s*/i, "Unreachable · ");
-  }
-  return `Unreachable · ${trimmed}`;
 }
 
 function languageServerDescriptorForPath(path: string, override?: string) {

@@ -18,38 +18,46 @@ export type InterleavedChatTimelineItem =
     };
 
 /**
- * Sorts a turn into the order the provider produced it.
- *
- * Only some events carry a provider sequence; approvals and capability calls
- * do not. Sorting just the sequenced ones and dealing them back into the slots
- * they used to occupy shuffled the unsequenced events into other events' time
- * positions, which is why the run gutter used to count backwards. Instead an
- * unsequenced event inherits the sequence of the event it followed, so it stays
- * pinned behind its cause while everything sorts as one list.
+ * Provider frames and broker calls share a durable first-observation order.
+ * Legacy provider sequence numbers belong to a different clock: never compare
+ * them with the shared order. Unmarked events stay behind their preceding
+ * event, and neither clock nor inheritance crosses a chat/turn boundary.
  */
 export function orderedChatTimelineEvents(events: SessionEvent[]) {
-  let inheritedSequence: number | undefined;
+  const turns = new Map<string, { index: number; canonical: boolean; inherited?: number }>();
+  for (const event of events) {
+    const key = timelineTurnKey(event);
+    const turn = turns.get(key) ?? { index: turns.size, canonical: false };
+    turn.canonical ||= canonicalTimelineOrder(eventPayload(event)?.timelineOrder) !== undefined;
+    turns.set(key, turn);
+  }
   return events
     .map((event, index) => {
-      const sequence = timelineSequence(event);
-      if (sequence !== undefined) {
-        inheritedSequence = sequence;
-      }
-      return { event, index, sequence: sequence ?? inheritedSequence };
+      const turn = turns.get(timelineTurnKey(event))!;
+      const sequence = turn.canonical
+        ? canonicalTimelineOrder(eventPayload(event)?.timelineOrder)
+        : timelineSequence(event);
+      if (sequence !== undefined) turn.inherited = sequence;
+      return { event, index, turn: turn.index, sequence: sequence ?? turn.inherited };
     })
     .sort((first, second) => {
-      if (first.sequence === second.sequence) {
-        return first.index - second.index;
-      }
-      if (first.sequence === undefined) {
-        return -1;
-      }
-      if (second.sequence === undefined) {
-        return 1;
-      }
+      if (first.turn !== second.turn) return first.turn - second.turn;
+      if (first.sequence === second.sequence) return first.index - second.index;
+      if (first.sequence === undefined) return -1;
+      if (second.sequence === undefined) return 1;
       return first.sequence - second.sequence;
     })
     .map((item) => item.event);
+}
+
+function timelineTurnKey(event: SessionEvent) {
+  return JSON.stringify([event.sessionId, event.turnId ?? ""]);
+}
+
+function canonicalTimelineOrder(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 export type ChatTurnTimelineSections = {
@@ -63,6 +71,7 @@ export type ChatTurnTimelineSections = {
 export type AssistantMessageSegment = {
   start: number;
   sequence?: number;
+  timelineOrder?: number;
   createdAt?: string;
   /**
    * The tool this block followed, or `null` when it was spoken before any tool.
@@ -105,7 +114,7 @@ function assistantMessageSegments(
         // list that would slice at the wrong characters.
         break;
       }
-      const { start, sequence, createdAt, afterActivityId } = entry as Record<
+      const { start, sequence, timelineOrder, createdAt, afterActivityId } = entry as Record<
         string,
         unknown
       >;
@@ -121,6 +130,7 @@ function assistantMessageSegments(
       }
       segments.push({
         start,
+        timelineOrder: canonicalTimelineOrder(timelineOrder),
         sequence:
           typeof sequence === "number" && Number.isSafeInteger(sequence)
             ? sequence
@@ -161,6 +171,28 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
   const activitySequences = providerActivitySequencesByTurn(events);
   return events.flatMap((event) => {
     if (event.kind !== "assistant-message") {
+      const payload = eventPayload(event);
+      if (payload?.kind === "provider-activity" && payload.activityKind === "commentary" &&
+          Array.isArray(payload.timelineSegments) && payload.timelineSegments.length > 1) {
+        const label = typeof payload.label === "string" ? payload.label : event.message;
+        const segments = assistantMessageSegments({
+          ...event, message: label, payload: { segments: payload.timelineSegments },
+        });
+        if (segments?.every((segment) => segment.timelineOrder !== undefined)) {
+          return segments.map((segment, index) => {
+            const text = label.slice(segment.start, segments[index + 1]?.start).trim();
+            return {
+              ...event,
+              id: `${event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
+              createdAt: segment.createdAt ?? event.createdAt,
+              message: text,
+              payload: { ...payload, label: text, timelineSegments: undefined,
+                activityId: `${payload.activityId ?? event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
+                timelineOrder: segment.timelineOrder },
+            };
+          }).filter((segment) => segment.message);
+        }
+      }
       return [event];
     }
     const segments = assistantMessageSegments(event);
@@ -189,9 +221,12 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
             event.message.slice(segment.start, end),
           ),
           payload: (() => {
+            if (segment.timelineOrder !== undefined) {
+              return { ...rest, timelineOrder: segment.timelineOrder };
+            }
             const placed = placeSegment(
               segment,
-              activitySequences.get(event.turnId ?? ""),
+              activitySequences.get(timelineTurnKey(event)),
             );
             return placed === undefined
               ? rest
@@ -402,7 +437,7 @@ function providerActivitySequencesByTurn(events: SessionEvent[]) {
     const activityId = payload.activityId;
     const sequence = timelineSequence(event);
     if (typeof activityId !== "string" || sequence === undefined) continue;
-    const turn = event.turnId ?? "";
+    const turn = timelineTurnKey(event);
     let activities = byTurn.get(turn);
     if (!activities) {
       activities = new Map();

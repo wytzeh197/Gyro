@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import {
+  applyProviderChatStreamActivity,
+  applyProviderChatStreamDeltas,
   buildTimelineIndex,
   findTimelineMatch,
+  mergeLiveCapabilityEvent,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   sameTimelineEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
-import { buildRunModel } from "../packages/ui/src/chat-run.ts";
-import { expandAssistantMessageSegments } from "../packages/ui/src/chat-timeline.ts";
+import { buildRunModel, segmentRunSteps } from "../packages/ui/src/chat-run.ts";
+import {
+  expandAssistantMessageSegments,
+  orderedChatTimelineEvents,
+} from "../packages/ui/src/chat-timeline.ts";
 import {
   finalAssistantResponseText,
   stripHiddenControlMarkers,
@@ -259,9 +265,14 @@ for (const [label, prefix] of [
       `${label}: the final reply is only the closing block`,
     );
     const notes = run.steps.filter(
-      (step) => step.kind === "say" && step.text.includes("clipped on its left"),
+      (step) =>
+        step.kind === "say" && step.text.includes("clipped on its left"),
     );
-    assert.equal(notes.length, 1, `${label}: the mid-run note stays on the rail once`);
+    assert.equal(
+      notes.length,
+      1,
+      `${label}: the mid-run note stays on the rail once`,
+    );
     assert.ok(
       !notes[0].text.includes("GYRO_SESSION_TITLE"),
       `${label}: the rail note never shows the control marker`,
@@ -271,11 +282,16 @@ for (const [label, prefix] of [
 // Without block marks the wording backstop still keeps the note out.
 const unmarked = buildRunModel([
   readActivity("read-1", 0),
-  event("unmarked-reply", "assistant-message", `${midRunNote}\n\n${closingAnswer}`, {
-    kind: "provider-response",
-    status: "done",
-    timelineSequence: 1,
-  }),
+  event(
+    "unmarked-reply",
+    "assistant-message",
+    `${midRunNote}\n\n${closingAnswer}`,
+    {
+      kind: "provider-response",
+      status: "done",
+      timelineSequence: 1,
+    },
+  ),
 ]);
 assert.ok(
   !unmarked.response?.message.includes("clipped on its left"),
@@ -305,7 +321,9 @@ const titledNote = buildRunModel(
   { isRunning: true },
 );
 assert.deepEqual(
-  titledNote.steps.filter((step) => step.kind === "say").map((step) => step.text),
+  titledNote.steps
+    .filter((step) => step.kind === "say")
+    .map((step) => step.text),
   ["I'm checking the popover styles."],
   "a stray title line must not hide the note it sits above",
 );
@@ -322,3 +340,339 @@ assert.equal(
   "a note that is only a title marker stays hidden",
 );
 console.log("stray title marker regressions passed");
+
+// Tool calls are written immediately while provider commentary can be batched
+// until completion. Disk order and provider-only counters are not chronology.
+{
+  const opening = "I'll check every model's event path.";
+  const progress = "The saved events reveal the ordering gap.";
+  const finalText = "Chronology is preserved after reopening the chat.";
+  const at = (second) =>
+    `2026-09-20T10:00:${String(second).padStart(2, "0")}.000Z`;
+  const activity = (id, activityKind, label, timelineOrder, timelineSequence) =>
+    event(id, "system-event", label, {
+      kind: "provider-activity",
+      activityId: id,
+      activityKind,
+      label,
+      status: "done",
+      timelineOrder,
+      timelineCreatedAt: at(timelineOrder),
+      timelineSequence,
+    });
+  const capability = (id, capabilityId, timelineOrder) =>
+    event(id, "system-event", id, {
+      kind: "capability-call",
+      callId: id,
+      capabilityId,
+      status: "done",
+      timelineOrder,
+      timelineCreatedAt: at(timelineOrder),
+    });
+  const firstNote = activity("opening-note", "commentary", opening, 0, 0);
+  const firstCall = capability("search-call", "workspace-search", 1);
+  const secondNote = activity("progress-note", "commentary", progress, 2, 1);
+  const secondCall = capability("read-call", "workspace-read", 3);
+  const thinking = activity(
+    "thinking",
+    "reasoning",
+    "Checking chronology",
+    4,
+    2,
+  );
+  const conclusion = event("canonical-final", "assistant-message", finalText, {
+    kind: "provider-response",
+    status: "done",
+    timelineOrder: 5,
+    timelineCreatedAt: at(5),
+    timelineSequence: 3,
+  });
+  const chronological = [
+    firstNote,
+    firstCall,
+    secondNote,
+    secondCall,
+    thinking,
+    conclusion,
+  ];
+  const persisted = [
+    firstCall,
+    secondCall,
+    conclusion,
+    firstNote,
+    secondNote,
+    thinking,
+  ];
+  const assertChronology = (events, label) => {
+    assert.deepEqual(
+      orderedChatTimelineEvents(events).map((item) => item.id),
+      chronological.map((item) => item.id),
+      `${label}: all event channels must share their original chronology`,
+    );
+    const run = buildRunModel(events, { isRunning: true });
+    assert.equal(
+      run.response?.message,
+      finalText,
+      `${label}: final answer closes`,
+    );
+    assert.deepEqual(
+      segmentRunSteps(run.steps).map((segment) =>
+        segment.kind === "say" ? segment.step.text : segment.kind,
+      ),
+      [opening, "work", progress, "work"],
+      `${label}: each work summary stays below the commentary preceding it`,
+    );
+  };
+  assertChronology(
+    JSON.parse(JSON.stringify(persisted)),
+    "cold reload without optimistic state",
+  );
+
+  // A frontend-only sequence from before the refresh may be much larger than
+  // a durable activity index. Neither may override the shared canonical clock.
+  const staleOptimistic = chronological.map((item, index) => {
+    const { timelineOrder, timelineCreatedAt, ...payload } = item.payload;
+    return {
+      ...item,
+      payload: { ...payload, timelineSequence: 100 - index * 10 },
+    };
+  });
+  const refreshed = mergePersistedAndOptimisticEvents(
+    persisted,
+    staleOptimistic,
+  );
+  assertChronology(refreshed, "persisted-first refresh");
+  const refreshedAgain = mergePersistedAndOptimisticEvents(
+    persisted,
+    refreshed,
+  );
+  assertChronology(refreshedAgain, "repeated persisted-first refresh");
+  assert.deepEqual(
+    refreshedAgain,
+    refreshed,
+    "canonical refresh is idempotent",
+  );
+
+  // The broker emits several records for one call. Its completion belongs at
+  // the call's starting position even if a later frame carries a newer clock.
+  const started = {
+    ...firstCall,
+    id: "search-start",
+    payload: { ...firstCall.payload, status: "running" },
+  };
+  let live = mergeLiveCapabilityEvent([firstNote], started);
+  live.push(secondNote);
+  live = mergeLiveCapabilityEvent(live, {
+    ...firstCall,
+    id: "search-done",
+    payload: {
+      ...firstCall.payload,
+      timelineOrder: 8,
+      timelineCreatedAt: at(8),
+    },
+  });
+  const completion = live.find((item) => item.id === "search-done");
+  assert.equal(
+    completion.payload.timelineOrder,
+    1,
+    "call completion keeps its start order",
+  );
+  assert.equal(
+    completion.payload.timelineCreatedAt,
+    at(1),
+    "call completion keeps its start timestamp",
+  );
+  assert.deepEqual(
+    orderedChatTimelineEvents(live).map((item) => item.id),
+    [firstNote.id, "search-start", "search-done", secondNote.id],
+    "late call updates never jump across newer commentary",
+  );
+
+  // Ordering counters reset at turn boundaries and are scoped to each chat.
+  const earlierTurn = [
+    event(
+      "old-last",
+      "system-event",
+      "Old last",
+      { timelineOrder: 81 },
+      "turn-0",
+    ),
+    event(
+      "old-first",
+      "system-event",
+      "Old first",
+      { timelineOrder: 80 },
+      "turn-0",
+    ),
+  ];
+  const otherSession = {
+    ...event("other-session", "system-event", "Other session", {
+      timelineOrder: 0,
+    }),
+    sessionId: "session-2",
+  };
+  assert.deepEqual(
+    orderedChatTimelineEvents([...earlierTurn, ...persisted, otherSession]).map(
+      (item) => item.id,
+    ),
+    [
+      "old-first",
+      "old-last",
+      ...chronological.map((item) => item.id),
+      otherSession.id,
+    ],
+    "sorting a new turn or chat must not move it above an older one",
+  );
+}
+
+// Stream frames have a transport sequence and an independent shared order.
+// Segmented assistant text must keep that shared order and its emission time.
+{
+  const ref = { current: new Map() };
+  const sessionId = "canonical-stream";
+  const turnId = "canonical-turn";
+  const frame = (sequence, timelineOrder, timelineCreatedAt, extra) => ({
+    providerId: "openai",
+    sessionId,
+    turnId,
+    sequence,
+    eventId: `canonical-frame-${sequence}`,
+    timelineOrder,
+    timelineCreatedAt,
+    ...extra,
+  });
+  const firstAt = "2026-09-20T11:00:01.000Z";
+  const callAt = "2026-09-20T11:00:02.000Z";
+  const secondAt = "2026-09-20T11:00:03.000Z";
+  applyProviderChatStreamDeltas(ref, () => {}, [
+    frame(100, 0, firstAt, {
+      phase: "delta",
+      textDelta: "I'll inspect the files.",
+    }),
+  ]);
+  const call = {
+    ...event("canonical-stream-read", "system-event", "Read source", {
+      kind: "capability-call",
+      capabilityId: "workspace-read",
+      callId: "canonical-stream-read",
+      status: "done",
+      timelineOrder: 1,
+      timelineCreatedAt: callAt,
+    }),
+    sessionId,
+    turnId,
+  };
+  ref.current.set(
+    sessionId,
+    mergeLiveCapabilityEvent(ref.current.get(sessionId), call),
+  );
+  applyProviderChatStreamDeltas(ref, () => {}, [
+    frame(101, 2, secondAt, {
+      phase: "delta",
+      textDelta: "\n\nThe files confirm the issue.",
+    }),
+  ]);
+  const events = ref.current.get(sessionId);
+  const ordered = orderedChatTimelineEvents(
+    expandAssistantMessageSegments(events),
+  );
+  assert.deepEqual(
+    ordered.map((item) => item.message.trim()),
+    ["I'll inspect the files.", "Read source", "The files confirm the issue."],
+    "text blocks preserve capability calls between provider frames",
+  );
+  const textBlocks = ordered.filter(
+    (item) => item.kind === "assistant-message",
+  );
+  assert.deepEqual(
+    textBlocks.map((item) => item.payload.timelineOrder),
+    [0, 2],
+    "each text block retains its own canonical order",
+  );
+  assert.deepEqual(
+    textBlocks.map((item) => item.createdAt),
+    [firstAt, secondAt],
+    "each text block displays its emission timestamp instead of flush time",
+  );
+
+  applyProviderChatStreamActivity(
+    ref,
+    () => {},
+    frame(102, 3, secondAt, {
+      phase: "activity",
+      activityId: "canonical-status",
+      activityKind: "command",
+      activityLabel: "Run regression checks",
+      activityStatus: "running",
+    }),
+  );
+  applyProviderChatStreamActivity(
+    ref,
+    () => {},
+    frame(103, 9, "2026-09-20T11:00:09.000Z", {
+      phase: "activity",
+      activityId: "canonical-status",
+      activityKind: "command",
+      activityLabel: "Run regression checks",
+      activityStatus: "done",
+    }),
+  );
+  const status = ref.current
+    .get(sessionId)
+    .find((item) => item.payload?.activityId === "canonical-status");
+  assert.equal(
+    status.payload.timelineOrder,
+    3,
+    "activity updates retain first emission order",
+  );
+  assert.equal(
+    status.createdAt,
+    secondAt,
+    "activity updates retain first emission timestamp",
+  );
+
+  // Durable segment marks are sufficient on their own after optimistic state
+  // is discarded. Legacy sequence marks must not override the shared order.
+  const prefix = "I'll inspect the files.\n\n";
+  const durable = {
+    ...event(
+      "canonical-saved-segments",
+      "assistant-message",
+      prefix + "The files confirm the issue.",
+      {
+        kind: "provider-response",
+        status: "done",
+        timelineOrder: 3,
+        timelineSequence: 2,
+        segments: [
+          { start: 0, sequence: 100, timelineOrder: 0, createdAt: firstAt },
+          {
+            start: prefix.length,
+            sequence: 101,
+            timelineOrder: 2,
+            createdAt: secondAt,
+          },
+        ],
+      },
+    ),
+    sessionId,
+    turnId,
+  };
+  const coldBlocks = orderedChatTimelineEvents(
+    expandAssistantMessageSegments([call, durable]),
+  );
+  assert.deepEqual(
+    coldBlocks.map((item) => item.message.trim()),
+    ordered.map((item) => item.message.trim()),
+  );
+  assert.deepEqual(
+    coldBlocks
+      .filter((item) => item.kind === "assistant-message")
+      .map((item) => item.createdAt),
+    [firstAt, secondAt],
+    "saved segment timestamps survive a cold replay",
+  );
+}
+console.log(
+  "Canonical chronology checks passed: cold replay, refresh, lifecycle updates, segments, turn isolation.",
+);

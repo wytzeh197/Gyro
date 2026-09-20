@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { providerCatalog } from "../packages/ui/src/provider-catalog.ts";
 import { buildRunModel, groupRunSteps } from "../packages/ui/src/chat-run.ts";
 
 import {
@@ -7,6 +8,7 @@ import {
   buildTimelineIndex,
   findTimelineMatch,
   mergePersistedAndOptimisticEvents,
+  mergeLiveCapabilityEvent,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
   sameTimelineEvent,
@@ -18,6 +20,144 @@ import {
   interleavedChatTimelineItems,
   orderedChatTimelineEvents,
 } from "../packages/ui/src/chat-timeline.ts";
+
+// Every catalog model (plus dynamically configured models) gets the same
+// ordering contract. This exercises normalized stream formats, not remote APIs.
+const timelineModels = [
+  ...providerCatalog.flatMap((provider) =>
+    (provider.models.length ? provider.models : [{ id: "dynamic-model" }]).map(
+      (model) => ({ providerId: provider.id, modelId: model.id }),
+    ),
+  ),
+  { providerId: "custom:timeline-test", modelId: "user-defined-model" },
+];
+for (const identity of timelineModels) {
+  const ref = { current: new Map() };
+  const sessionId = "model-ordering";
+  const turnId = "model-turn";
+  const frame = (sequence, extra) => ({
+    ...identity,
+    sessionId,
+    turnId,
+    sequence,
+    eventId: `frame-${sequence}`,
+    ...extra,
+  });
+  const activity = (sequence, id, kind, label, status = "running") =>
+    applyProviderChatStreamActivity(
+      ref,
+      () => {},
+      frame(sequence, {
+        phase: "activity",
+        activityId: id,
+        activityKind: kind,
+        activitySequence: 0,
+        activityLabel: label,
+        activityStatus: status,
+      }),
+    );
+  const delta = (sequence, textDelta) =>
+    applyProviderChatStreamDeltas(ref, () => {}, [
+      frame(sequence, { phase: "delta", textDelta }),
+    ]);
+  const messages = () =>
+    interleavedChatTimelineItems(ref.current.get(sessionId)).flatMap((item) =>
+      item.kind === "event"
+        ? [item.event.message.trim()]
+        : item.events.map((event) => event.message.trim()),
+    );
+  const check = (expected, reason) =>
+    assert.deepEqual(
+      messages(),
+      expected,
+      `${identity.providerId}/${identity.modelId}: ${reason}`,
+    );
+
+  // Snapshot-style commentary reuses an id and includes all previous words.
+  activity(10, "narration", "commentary", "I'll inspect.");
+  activity(20, "command", "command", "Inspect files");
+  activity(30, "narration", "commentary", "I'll inspect.I'll verify");
+  activity(31, "narration", "commentary", "I'll inspect.I'll verify now.");
+  activity(
+    32,
+    "narration",
+    "commentary",
+    "I'll inspect.I'll verify now.",
+    "done",
+  );
+  check(
+    ["I'll inspect.", "Inspect files", "I'll verify now."],
+    "cumulative commentary must grow after the command without duplication",
+  );
+  activity(40, "command", "command", "Inspect files", "done");
+  check(
+    ["I'll inspect.", "Inspect files", "I'll verify now."],
+    "command completion must keep its starting position",
+  );
+  const run = buildRunModel(ref.current.get(sessionId), { isRunning: true });
+  assert.deepEqual(
+    run.steps
+      .filter((step) => step.kind === "say" || step.kind === "work")
+      .map((step) => step.kind),
+    ["say", "work", "say"],
+    "visible work groups must not cross narration",
+  );
+
+  // Delta-style providers can explicitly open a new paragraph without ending
+  // the preceding block in punctuation. A word split remains a continuation.
+  ref.current.set(sessionId, []);
+  delta(10, "Inspecting files");
+  activity(20, "reasoning", "reasoning", "Checking the result");
+  activity(21, "command", "command", "Run checks");
+  delta(30, "\n\nChecks complete.");
+  check(
+    [
+      "Inspecting files",
+      "Checking the result",
+      "Run checks",
+      "Checks complete.",
+    ],
+    "explicit text boundaries preserve reasoning and command order",
+  );
+
+  // Capability-channel calls have no provider sequence and can arrive between
+  // deltas; updates and refreshes must retain their first-seen placement.
+  ref.current.set(sessionId, []);
+  delta(10, "I'll inspect.");
+  const capability = {
+    id: "capability-start",
+    sessionId,
+    turnId,
+    kind: "system-event",
+    createdAt: "2026-09-20T10:00:00.000Z",
+    message: "Read workspace",
+    payload: {
+      kind: "capability-call",
+      callId: "call-1",
+      capabilityId: "workspace-read",
+      status: "running",
+    },
+  };
+  ref.current.set(
+    sessionId,
+    mergeLiveCapabilityEvent(ref.current.get(sessionId), capability),
+  );
+  delta(20, "I'll verify.");
+  activity(30, "verify", "command", "Run checks");
+  const expected = [
+    "I'll inspect.",
+    "Read workspace",
+    "I'll verify.",
+    "Run checks",
+  ];
+  check(expected, "capability and provider tools must share chronology");
+  const live = ref.current.get(sessionId);
+  ref.current.set(sessionId, mergePersistedAndOptimisticEvents(live, live));
+  check(expected, "refresh must be idempotent");
+}
+console.log(
+  `Shared chronology contract passed for ${timelineModels.length} catalog/custom model entries.`,
+);
 
 // Compaction starts without an activity ordinal, while commentary and commands
 // carry small durable ordinals. They must all use the same live stream clock.
@@ -242,6 +382,87 @@ assert.equal(
   optimisticEventsRef.current.get("session-1")[0]?.message,
   "hello world",
 );
+
+assert.equal(
+  optimisticEventsRef.current.get("session-1")[0].payload.timelineSequence,
+  1,
+  "a buffered text block keeps its first token's position",
+);
+
+// Capability-only tools must separate streamed narration too, and keep their
+// positions when the aggregate assistant event moves or call statuses update.
+{
+  const ref = { current: new Map() };
+  const delta = (sequence, text) =>
+    applyProviderChatStreamDeltas(ref, () => {}, [
+      streamEvent(sequence, "delta", text),
+    ]);
+  const call = (id, status = "running") => {
+    const events = ref.current.get("session-1");
+    ref.current.set(
+      "session-1",
+      mergeLiveCapabilityEvent(events, {
+        id,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        createdAt: "2026-09-20T10:00:00.000Z",
+        kind: "system-event",
+        message: id,
+        payload: {
+          kind: "capability-call",
+          callId: id,
+          capabilityId: "terminal-open",
+          status,
+        },
+      }),
+    );
+  };
+  const order = () =>
+    interleavedChatTimelineItems(ref.current.get("session-1")).map((item) =>
+      item.kind === "event" ? item.event.message : item.kind,
+    );
+  delta(10, "I'll inspect the files.");
+  call("first-command");
+  delta(20, "I'll run the checks.");
+  call("second-command");
+  delta(30, "The checks passed.");
+  const expected = [
+    "I'll inspect the files.",
+    "first-command",
+    "\n\nI'll run the checks.",
+    "second-command",
+    "\n\nThe checks passed.",
+  ];
+  assert.deepEqual(
+    order(),
+    expected,
+    "capability commands stay between text blocks",
+  );
+  call("first-command", "done");
+  assert.deepEqual(order(), expected, "late completion cannot reorder a call");
+  const live = ref.current.get("session-1");
+  const firstCall = live.find((event) => event.id === "first-command");
+  const completed = mergeLiveCapabilityEvent(live, {
+    ...firstCall,
+    id: "first-command-completed",
+    payload: {
+      ...firstCall.payload,
+      timelineSequence: undefined,
+      status: "done",
+    },
+  }).at(-1);
+  assert.equal(
+    completed.payload.timelineSequence,
+    firstCall.payload.timelineSequence,
+    "distinct lifecycle records for one call retain its first position",
+  );
+  const saved = live.map((event) => ({
+    ...event,
+    payload: { ...event.payload, timelineSequence: undefined },
+  }));
+  ref.current.set("session-1", mergePersistedAndOptimisticEvents(saved, live));
+  assert.deepEqual(order(), expected, "refresh retains capability positions");
+}
 
 const otherSessionEvent = {
   id: "other-user-message",
@@ -976,11 +1197,19 @@ for (const merge of [
 {
   const ref = { current: new Map([["counts-session", []]]) };
   applyProviderChatStreamActivity(ref, () => {}, {
-    sessionId: "counts-session", turnId: "counts-turn", providerId: "openai",
-    eventId: "counts-frame", sequence: 1, phase: "activity",
-    activityId: "counts-file", activityKind: "file",
-    activityLabel: "Updated src/a.ts", activityDetail: "src/a.ts",
-    activityStatus: "done", additions: 7, deletions: 2,
+    sessionId: "counts-session",
+    turnId: "counts-turn",
+    providerId: "openai",
+    eventId: "counts-frame",
+    sequence: 1,
+    phase: "activity",
+    activityId: "counts-file",
+    activityKind: "file",
+    activityLabel: "Updated src/a.ts",
+    activityDetail: "src/a.ts",
+    activityStatus: "done",
+    additions: 7,
+    deletions: 2,
   });
   const model = buildRunModel(ref.current.get("counts-session"));
   assert.equal(model.files[0].additions, 7);
@@ -989,16 +1218,43 @@ for (const merge of [
 
 // Concurrent chats can report the same path and activity id without sharing totals.
 {
-  const ref = { current: new Map([["chat-a", []], ["chat-b", []]]) };
-  let foreground = [{ id: "user-a", sessionId: "chat-a", kind: "user-message", message: "edit", createdAt: "2026-09-19T10:00:00Z" }];
-  const apply = (sessionId, additions, sequence) => applyProviderChatStreamActivity(
-    ref, (update) => { foreground = update(foreground); }, {
-      sessionId, turnId: "turn", providerId: "openai", eventId: `frame-${sequence}`,
-      sequence, phase: "activity", activityId: "same-tool-id", activityKind: "file",
-      activityLabel: "Updated shared.css", activityDetail: "shared.css",
-      activityStatus: "done", additions, deletions: 1,
+  const ref = {
+    current: new Map([
+      ["chat-a", []],
+      ["chat-b", []],
+    ]),
+  };
+  let foreground = [
+    {
+      id: "user-a",
+      sessionId: "chat-a",
+      kind: "user-message",
+      message: "edit",
+      createdAt: "2026-09-19T10:00:00Z",
     },
-  );
+  ];
+  const apply = (sessionId, additions, sequence) =>
+    applyProviderChatStreamActivity(
+      ref,
+      (update) => {
+        foreground = update(foreground);
+      },
+      {
+        sessionId,
+        turnId: "turn",
+        providerId: "openai",
+        eventId: `frame-${sequence}`,
+        sequence,
+        phase: "activity",
+        activityId: "same-tool-id",
+        activityKind: "file",
+        activityLabel: "Updated shared.css",
+        activityDetail: "shared.css",
+        activityStatus: "done",
+        additions,
+        deletions: 1,
+      },
+    );
   apply("chat-a", 3, 1);
   apply("chat-b", 8, 2);
   apply("chat-b", 12, 3);

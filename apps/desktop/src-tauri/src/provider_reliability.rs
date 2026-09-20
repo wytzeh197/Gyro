@@ -46,20 +46,39 @@ fn is_hopeless_provider_timeout(error: &str) -> bool {
         || normalized.contains("output exceeded")
 }
 
+/// Tool rounds one turn may run, as `usageGuard.maxToolRounds` configures it.
+///
+/// `None` means the user switched the budget off, so the turn keeps working
+/// until the model stops asking for tools or the user stops it. An unreadable
+/// config is treated the same way: a config-file problem must not silently
+/// impose a ceiling, and the spend guards read the same file on their own.
+pub(super) fn configured_tool_rounds() -> Option<usize> {
+    let config = GyroPaths::for_current_user()
+        .ok()
+        .and_then(|paths| GyroConfig::load(&paths).ok())?;
+    (config.usage_guard.max_tool_rounds > 0).then_some(config.usage_guard.max_tool_rounds)
+}
+
 /// Reserve one final response after the work budget so users retain a useful
 /// checkpoint instead of a failed turn that invites replaying completed edits.
+///
+/// The checkpoint is prose the model writes, so it is asked for the user-facing
+/// half only -- what is done, what is left. Saying *why* the turn stopped is
+/// Gyro's to report: a model told to name the internal budget paraphrases it
+/// into a heading like "paused at the tool-round limit", which reads as a
+/// product limit the user cannot lift and buries the way out.
 pub(super) fn tools_for_round(
     messages: &mut Vec<serde_json::Value>,
     tools: &[serde_json::Value],
     round: usize,
-    limit: usize,
+    limit: Option<usize>,
 ) -> Vec<serde_json::Value> {
-    if round < limit {
+    if limit.is_none_or(|limit| round < limit) {
         return tools.to_vec();
     }
     messages.push(serde_json::json!({
         "role": "user",
-        "content": "Gyro has reached this turn's tool-round budget. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Explicitly say the turn paused at the tool limit; do not claim the whole task is complete."
+        "content": "Gyro has stopped offering tools for this turn. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Do not claim the whole task is complete."
     }));
     Vec::new()
 }
@@ -71,20 +90,65 @@ mod tests {
     fn tool_budget_reserves_checkpoint_without_replaying_tools() {
         let mut messages = vec![serde_json::json!({"role":"tool","content":"edit applied"})];
         let tools = vec![serde_json::json!({"type":"function"})];
-        assert_eq!(tools_for_round(&mut messages, &tools, 127, 128), tools);
+        assert_eq!(
+            tools_for_round(&mut messages, &tools, 127, Some(128)),
+            tools
+        );
         assert_eq!(messages.len(), 1);
-        assert!(tools_for_round(&mut messages, &tools, 128, 128).is_empty());
+        assert!(tools_for_round(&mut messages, &tools, 128, Some(128)).is_empty());
         assert_eq!(messages[0]["content"], "edit applied");
         assert!(messages[1]["content"]
             .as_str()
             .unwrap()
             .contains("unfinished"));
+        // The model is no longer told to name the internal budget, so it cannot
+        // paraphrase it into a product limit the user cannot lift.
+        assert!(!messages[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("round"));
     }
+
+    #[test]
+    fn a_raised_budget_keeps_offering_tools_past_the_old_ceiling() {
+        let mut messages = Vec::new();
+        let tools = vec![serde_json::json!({"type":"function"})];
+        assert_eq!(tools_for_round(&mut messages, &tools, 128, Some(512)), tools);
+        assert!(messages.is_empty());
+        assert!(tools_for_round(&mut messages, &tools, 512, Some(512)).is_empty());
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn no_budget_never_stops_the_loop() {
+        let mut messages = Vec::new();
+        let tools = vec![serde_json::json!({"type":"function"})];
+        for round in [0, 128, 100_000, usize::MAX - 1] {
+            assert_eq!(tools_for_round(&mut messages, &tools, round, None), tools);
+        }
+        assert!(messages.is_empty());
+    }
+}
+
+/// Whether this text is the round-budget notice rather than a provider fault.
+///
+/// Matched by its stable phrase, not by keyword: the notice is produced by Gyro
+/// and the words in it are ordinary enough to appear in a provider's own text.
+pub(super) fn is_tool_budget_notice(error: &str) -> bool {
+    error.contains("round budget")
 }
 
 pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     let normalized = error.to_ascii_lowercase();
-    // Checked first: a stop is not a failure, and every branch below reads it
+    // Checked first: the turn completed, so nothing below -- least of all the
+    // retry fallback -- describes it.
+    if is_tool_budget_notice(error) {
+        return (
+            "tool-budget",
+            "Send the next step, or raise `usageGuard.maxToolRounds` in config.json.",
+        );
+    }
+    // Checked next: a stop is not a failure, and every branch below reads it
     // as one. The ceiling case in particular must not be offered a plain retry,
     // which would run into the same ceiling and stop in the same place.
     if error.contains(PROVIDER_STOP_MARKER) {
@@ -100,6 +164,9 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
     // An interrupted turn never reached the provider's own error handling, so
     // none of the keyword branches below can say anything true about it. It is
     // also the one failure that is always worth sending again.
+    // A budget checkpoint is not a failure -- the turn completed and its reply
+    // is saved -- so it is classified by its own stable phrase rather than by
+    // the retry keywords below, which would offer a plain resend.
     if error.contains(PROVIDER_INTERRUPTED_MARKER) {
         return (
             "interrupted",

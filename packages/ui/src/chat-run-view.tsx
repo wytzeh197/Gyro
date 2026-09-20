@@ -11,6 +11,7 @@ import {
   type LucideIcon,
   Lightbulb,
   Minimize2,
+  Pause,
   Pencil,
   RotateCw,
   Search,
@@ -105,6 +106,18 @@ export type ChatRunProps = {
   /** How to draw narration, so inline code and links survive the rail. */
   renderSay?: (text: string) => ReactNode;
   /**
+   * Set when the turn ended because its tool-round budget ran out, with the
+   * backend's explanation. The reply above is the checkpoint the model wrote,
+   * so this is a notice rather than a failure: it says why the tool loop
+   * stopped and offers the way on.
+   */
+  toolBudgetNotice?: string;
+  /**
+   * What the notice's button does. Continuing is a new send rather than a
+   * retry: the checkpoint already answered this turn.
+   */
+  onContinueAfterToolBudget?: () => void;
+  /**
    * `segments` (default) reads as narration with each stretch of work under it,
    * folded to a one-line summary once the agent moves on. `groups` is the older
    * phase view ("Reviewed workspace") for surfaces that want the coarser story.
@@ -130,6 +143,8 @@ export function ChatRun({
   headerActions,
   renderAsk,
   renderSay,
+  toolBudgetNotice,
+  onContinueAfterToolBudget,
   layout = "segments",
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
@@ -348,6 +363,12 @@ export function ChatRun({
           onRetry={onRetry}
           phase={model.phase}
           reconnectLabel={reconnectLabel}
+        />
+      ) : null}
+      {toolBudgetNotice && model.phase.name === "done" ? (
+        <RunBudgetNotice
+          notice={toolBudgetNotice}
+          onContinue={onContinueAfterToolBudget}
         />
       ) : null}
     </div>
@@ -838,6 +859,41 @@ function RunPulse({ label }: { label: string }) {
         <Lightbulb size={15} />
       </span>
       <span className="gyro-run-pulse-label">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Why a finished turn stopped asking for tools.
+ *
+ * Deliberately shaped like {@link RunProblem} and deliberately not part of it:
+ * the turn succeeded and its checkpoint is saved above, so this carries no
+ * danger tone and its button continues rather than resends. Without it the only
+ * sign that a budget ended the tool loop is the model's own prose.
+ */
+function RunBudgetNotice({
+  notice,
+  onContinue,
+}: {
+  notice: string;
+  onContinue?: () => void;
+}) {
+  return (
+    <div className="gyro-run-budget" role="status">
+      <span aria-hidden="true" className="gyro-run-budget-icon">
+        <Pause size={14} />
+      </span>
+      <span className="gyro-run-budget-text">
+        <strong>Tool-round budget reached</strong>
+        <span>{notice}</span>
+      </span>
+      {onContinue ? (
+        <span className="gyro-run-budget-actions">
+          <button onClick={onContinue} type="button">
+            Continue
+          </button>
+        </span>
+      ) : null}
     </div>
   );
 }

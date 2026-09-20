@@ -31,7 +31,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 let pending = [];
 const events = [];
 const refresh = hook("refreshIdeSourceControl", "refreshWorkspaceBranches", {
-  ideSourceControlRequestRef: { current: 0 },
+  ideSourceControlRootRef: { current: undefined },
   ideSourceControlInFlightRef: { current: new Set() },
   ideSourceControlQueuedRef: { current: new Set() },
   dispatchWorkbench: (event) => events.push(event),

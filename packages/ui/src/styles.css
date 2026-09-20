@@ -18067,6 +18067,24 @@ textarea,
   flex-wrap: wrap;
 }
 
+.gyro-chat-delete-card {
+  width: min(380px, calc(100vw - 40px));
+}
+
+/* Deletion language is red, so the trash mark leads the confirm. */
+.gyro-chat-delete-card .gyro-terminal-terminate-heading svg {
+  color: var(--gyro-danger);
+}
+
+.gyro-chat-delete-card .gyro-terminal-terminate-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.gyro-chat-delete-note {
+  color: var(--gyro-warn);
+}
+
 .gyro-chat-load-earlier {
   display: flex;
   justify-content: center;
@@ -27016,7 +27034,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
   .gyro-chat-grid.has-multiple-panes
-  .gyro-chat-grid-slot:first-child
+  .gyro-chat-grid-slot.is-window-origin
   .gyro-chat-surface.is-thread
   > .gyro-chat-thread-topbar {
   padding-left: max(212px, calc((100% - var(--gyro-chat-content-width)) / 2));
@@ -27031,7 +27049,7 @@ button.gyro-account-menu-row:hover,
 
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
     .gyro-chat-grid.has-multiple-panes
-    .gyro-chat-grid-slot:first-child
+    .gyro-chat-grid-slot.is-window-origin
     .gyro-chat-surface.is-thread
     > .gyro-chat-thread-topbar {
     padding-left: 200px;
@@ -30031,7 +30049,6 @@ button.gyro-account-menu-row:hover,
    has to meet. Theme tokens carry Light and Dark; neither is special-cased. */
 .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
   background: var(--gyro-workspace-chrome);
-  border-bottom: 1px solid var(--gyro-border-soft);
   box-sizing: border-box;
   content: "";
   height: 48px;
@@ -30050,8 +30067,8 @@ button.gyro-account-menu-row:hover,
 }
 
 /* The corner: outside the arc stays chrome, the arc carries the same hairline
-   as the band above it and the rail divider below it, and the inside stays
-   transparent so the sidebar surface reads through as the panel. */
+   as the rail divider below it, and the inside stays transparent so the sidebar
+   surface reads through as the panel. The band above has no horizontal border. */
 .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after {
   background: radial-gradient(
     circle at var(--gyro-workspace-panel-radius)
@@ -32995,6 +33012,64 @@ button.gyro-account-menu-row:hover,
 
 .gyro-run-retry .gyro-run-row-detail {
   animation: gyro-run-breathe 2.4s ease-in-out infinite;
+}
+
+/* A finished turn that stopped at its tool-round budget. Same shape as the
+   failure block so it reads as the same kind of news, but neutral-toned and
+   with a way on rather than a resend. */
+.gyro-run-budget {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 0 4px 31px;
+}
+
+.gyro-run-budget-icon {
+  color: var(--gyro-faint);
+  display: inline-flex;
+  flex: none;
+  transform: translateY(2px);
+}
+
+.gyro-run-budget-text {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-run-budget-text strong {
+  color: var(--gyro-text);
+  font-size: 13px;
+  font-weight: 520;
+}
+
+.gyro-run-budget-text span {
+  color: var(--gyro-faint);
+  font-size: 13px;
+}
+
+.gyro-run-budget-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.gyro-run-budget-actions button {
+  background: none;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.gyro-run-budget-actions button:hover {
+  border-color: var(--gyro-premium-hairline-strong);
+  color: var(--gyro-text);
 }
 
 .gyro-run-problem {
@@ -36268,9 +36343,101 @@ textarea:focus-visible,
 
 /* Settings --------------------------------------------------------------- */
 
+.gyro-app-shell.is-workspace-shell:has(.gyro-settings-sidebar-search) {
+  --gyro-workspace-sidebar-column-width: 280px;
+}
+
+.gyro-sidebar:has(.gyro-settings-sidebar-search) {
+  border-right: 1px solid var(--gyro-border-soft);
+}
+
+.gyro-sidebar-persistent-header.is-settings {
+  position: relative;
+  min-height: 94px;
+  flex-shrink: 0;
+}
+
+.gyro-sidebar-persistent-header.is-settings
+  > .gyro-settings-back-button.has-label {
+  display: flex;
+  align-items: center;
+  color: var(--gyro-text);
+  margin: 0 8px 8px;
+  padding: 0 8px;
+  min-height: 34px;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.gyro-sidebar-windowbar.is-settings {
+  border-bottom: 0;
+  margin-bottom: 4px;
+}
+
+.gyro-settings-sidebar-search {
+  padding: 0 8px 8px;
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.gyro-settings-sidebar-search .gyro-settings-topbar-search {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border: 1px solid transparent;
+  border-radius: 24px;
+  height: 38px;
+  min-height: 38px;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+}
+
+.gyro-settings-sidebar-search .gyro-settings-topbar-search:focus-within {
+  border-color: var(--gyro-accent);
+}
+
+.gyro-settings-sidebar-search .gyro-settings-search-results {
+  left: 0;
+  right: 0;
+  width: 100%;
+  min-width: 0;
+  max-height: min(480px, 60vh);
+  overflow-y: auto;
+}
+
+.gyro-settings-sidebar-search .gyro-settings-search-results > button {
+  grid-template-columns: 16px minmax(0, 1fr);
+}
+
+.gyro-settings-sidebar-search .gyro-settings-search-results em {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.gyro-sidebar-actions.is-settings-pages {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px 8px 24px;
+  gap: 24px;
+}
+
+.gyro-sidebar-action.is-settings-page {
+  min-height: 34px;
+  font-size: 14px;
+}
+
+.gyro-sidebar-action.is-settings-page.is-active {
+  box-shadow: none;
+}
+
+.gyro-settings-sidebar-group > span {
+  font-size: 13px;
+  font-weight: 400;
+}
+
 .gyro-settings-topbar {
   background: var(--gyro-pane);
-  border-bottom-color: var(--gyro-border-soft);
+  border-bottom: 0;
   box-shadow: none;
 }
 
@@ -36281,12 +36448,12 @@ textarea:focus-visible,
 }
 
 .gyro-settings-content {
-  max-width: 780px;
-  width: min(100%, 780px);
+  max-width: 920px;
+  width: min(100%, 920px);
 }
 
 .gyro-settings-section > header {
-  padding: 0 0 24px;
+  padding: 0 0 44px;
 }
 
 .gyro-settings-section > header h1 {
@@ -36302,18 +36469,18 @@ textarea:focus-visible,
 }
 
 .gyro-settings-section-body {
-  gap: 24px;
+  gap: 44px;
 }
 
 .gyro-settings-group {
-  gap: 8px;
+  gap: 18px;
 }
 
 .gyro-settings-group > h2 {
-  color: var(--gyro-faint);
-  font-size: 12px;
-  font-weight: 560;
-  padding: 0 4px;
+  color: var(--gyro-text);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 0;
   text-transform: none;
 }
 
@@ -36354,10 +36521,11 @@ textarea:focus-visible,
 
 .gyro-settings-group-rows {
   background: transparent;
-  border: 0;
-  border-radius: 0;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 16px;
   box-shadow: none;
   overflow: visible;
+  padding: 0 18px;
 }
 
 .gyro-settings-row,
@@ -36369,7 +36537,11 @@ textarea:focus-visible,
 }
 
 .gyro-settings-group-rows > :first-child {
-  border-top: 1px solid var(--gyro-border-soft);
+  border-top: 0;
+}
+
+.gyro-settings-group-rows > :last-child {
+  border-bottom: 0;
 }
 
 .gyro-settings-row strong,
@@ -41404,4 +41576,15 @@ textarea:focus-visible,
   margin: 0;
   z-index: 75;
   box-shadow: -12px 0 32px rgb(0 0 0 / 18%);
+}
+
+/* The responsive sidebar disappears below 780px without setting the manual
+   hidden-sidebar flag. Reserve the native macOS controls in that case too. */
+@media (max-width: 780px) {
+  .gyro-app-shell.is-thread-layout:not(.is-sidebar-hidden)
+    .gyro-chat-grid-slot.is-window-origin
+    > .gyro-chat-surface.is-thread
+    > .gyro-chat-thread-topbar {
+    padding-left: 90px;
+  }
 }

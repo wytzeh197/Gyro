@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildRunModel } from "../packages/ui/src/chat-run.ts";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import ts from "typescript";
@@ -272,11 +273,17 @@ new Function("require", "module", "exports", compiled)(
 );
 const renderCounts = (counts, showUnknown = true) =>
   renderToStaticMarkup(
-    createElement(badgeModule.exports.FileChangeCountBadges, { counts, showUnknown }),
+    createElement(badgeModule.exports.FileChangeCountBadges, {
+      counts,
+      showUnknown,
+    }),
   );
 assert.equal(renderCounts(undefined, false), "");
 assert.equal(renderCounts({ additions: 3 }, false), "");
-assert.match(renderCounts({ additions: 9, deletions: 2 }, false), />\+9<.*>−2</);
+assert.match(
+  renderCounts({ additions: 9, deletions: 2 }, false),
+  />\+9<.*>−2</,
+);
 assert.equal(renderCounts(undefined), "<span>Line counts unavailable</span>");
 assert.equal(
   renderCounts({ additions: 3 }),
@@ -287,6 +294,66 @@ assert.match(renderCounts({ additions: 0, deletions: 0 }), />\+0<.*>−0</);
 assert.equal(
   renderCounts(totalFileChangeCounts([...measured, {}])),
   "<span>Line counts unavailable</span>",
+);
+
+// Applied mutations supply counts even when provider/capability rows omit them.
+const appliedEdit = (id, fileChanges, extra = {}) =>
+  event("system-event", "Applied edits", {
+    schema: "gyro.mutation.v1",
+    kind: "mutation-approval",
+    status: "applied",
+    proposalId: id,
+    fileChanges,
+    ...extra,
+  });
+const countedEvents = [
+  fileEdit("src/a.ts"),
+  appliedEdit("edit-1", [{ path: "src/a.ts", additions: 2, deletions: 1 }]),
+  appliedEdit("edit-1", [{ path: "src/a.ts", additions: 2, deletions: 1 }]),
+  appliedEdit("edit-2", [{ path: "src/a.ts", additions: 3, deletions: 0 }]),
+  appliedEdit("native-1", [{ path: "src/b.ts", additions: 0, deletions: 4 }], {
+    schema: "gyro.provider-approval.v1",
+    approvalId: "native-1",
+  }),
+  fileEdit("src/a.ts", { additions: 3, deletions: 0 }),
+  appliedEdit(
+    "rejected",
+    [{ path: "ignored.ts", additions: 99, deletions: 99 }],
+    { status: "rejected" },
+  ),
+];
+const countedRun = buildRunModel(countedEvents);
+assert.deepEqual(
+  countedRun.files.map(({ path, additions, deletions }) => ({
+    path,
+    additions,
+    deletions,
+  })),
+  [
+    { path: "src/a.ts", additions: 5, deletions: 1 },
+    { path: "src/b.ts", additions: 0, deletions: 4 },
+  ],
+);
+assert.deepEqual(
+  latestFileReviewTurn(countedEvents).files.map(
+    ({ path, additions, deletions }) => ({ path, additions, deletions }),
+  ),
+  countedRun.files.map(({ path, additions, deletions }) => ({
+    path,
+    additions,
+    deletions,
+  })),
+);
+assert.match(renderCounts(countedRun.files[0]), />\+5<.*>−1</);
+assert.match(renderCounts(countedRun.files[1]), />\+0<.*>−4</);
+assert.match(
+  renderCounts(totalFileChangeCounts(countedRun.files)),
+  />\+5<.*>−5</,
+);
+assert.deepEqual(
+  buildRunModel(JSON.parse(JSON.stringify(countedEvents))).files,
+  countedRun.files,
+  "counts survive persisted-event reloads",
 );
 
 // --- The inline diff ---------------------------------------------------------

@@ -330,6 +330,82 @@ export function findTimelineMatch(index: TimelineIndex, event: SessionEvent) {
   return earliest?.event;
 }
 
+/**
+ * Capability events arrive outside the provider stream. Give new calls an
+ * explicit position after the text/activity already observed, so moving a
+ * growing assistant event cannot change which sequence they inherit.
+ */
+export function mergeLiveCapabilityEvent(
+  events: SessionEvent[],
+  incoming: SessionEvent,
+) {
+  const existing = events.find(
+    (event) =>
+      event.sessionId === incoming.sessionId && event.id === incoming.id,
+  );
+  if (existing) {
+    return mergeProviderResponseEvents(events, [incoming]);
+  }
+  const incomingPayload = recordFromUnknown(incoming.payload);
+  const firstCall =
+    typeof incomingPayload?.callId === "string"
+      ? events.find(
+          (event) =>
+            event.sessionId === incoming.sessionId &&
+            event.turnId === incoming.turnId &&
+            recordFromUnknown(event.payload)?.callId === incomingPayload.callId,
+        )
+      : undefined;
+  // The broker stamps the same durable clock as the provider stream. Status
+  // records for one call keep that call's first position.
+  if (canonicalTimelineOrder(incomingPayload?.timelineOrder) !== undefined) {
+    return [...events, firstCall
+      ? preserveFirstSeenTimelineMetadata(firstCall, incoming, events)
+      : { ...incoming, createdAt: typeof incomingPayload?.timelineCreatedAt === "string"
+          ? incomingPayload.timelineCreatedAt : incoming.createdAt }];
+  }
+  const firstSequence = recordFromUnknown(firstCall?.payload)?.timelineSequence;
+  if (typeof firstSequence === "number" && Number.isFinite(firstSequence)) {
+    return [
+      ...events,
+      {
+        ...incoming,
+        payload: { ...incomingPayload, timelineSequence: firstSequence },
+      },
+    ];
+  }
+  let sequence = 0;
+  for (const event of events) {
+    if (
+      event.sessionId !== incoming.sessionId ||
+      event.turnId !== incoming.turnId
+    ) {
+      continue;
+    }
+    const payload = recordFromUnknown(event.payload);
+    const segments = Array.isArray(payload?.segments) ? payload.segments : [];
+    for (const value of [
+      payload?.timelineSequence,
+      payload?.providerSequence,
+      ...segments.map((segment) => recordFromUnknown(segment)?.sequence),
+    ]) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        sequence = Math.max(sequence, value);
+      }
+    }
+  }
+  // Provider frames use integers. Calls between frames share a half step and
+  // retain arrival order; never advance into the next provider frame.
+  const timelineSequence = Math.floor(sequence) + 0.5;
+  return [
+    ...events,
+    {
+      ...incoming,
+      payload: { ...recordFromUnknown(incoming.payload), timelineSequence },
+    },
+  ];
+}
+
 export function resetStreamingAssistantForRetry(
   events: SessionEvent[],
   turnId: string,
@@ -536,6 +612,24 @@ function preserveFirstSeenTimelineMetadata(
 ): SessionEvent {
   const firstPayload = recordFromUnknown(firstSeen.payload) ?? {};
   const updatedPayload = recordFromUnknown(updated.payload) ?? {};
+  const firstOrder = canonicalTimelineOrder(firstPayload.timelineOrder);
+  const updatedOrder = canonicalTimelineOrder(updatedPayload.timelineOrder);
+  if (updatedOrder !== undefined) {
+    const closing = updated.kind === "assistant-message" && updatedPayload.kind === "provider-response";
+    const useFirst = !closing && firstOrder !== undefined && firstOrder < updatedOrder;
+    return {
+      ...updated,
+      createdAt: useFirst ? firstSeen.createdAt
+        : typeof updatedPayload.timelineCreatedAt === "string"
+          ? updatedPayload.timelineCreatedAt : updated.createdAt,
+      payload: {
+        ...updatedPayload,
+        timelineOrder: useFirst ? firstOrder : updatedOrder,
+        ...(useFirst && typeof firstPayload.timelineCreatedAt === "string"
+          ? { timelineCreatedAt: firstPayload.timelineCreatedAt } : {}),
+      },
+    };
+  }
   // A durable final reply can replace a title, partial stream, or preamble.
   // Its text is different, so neither the old offsets nor its early position
   // describe this answer. Live and durable sequences also use different
@@ -601,6 +695,10 @@ function preserveFirstSeenTimelineMetadata(
     payload: {
       ...updatedPayload,
       ...(timelineSequence === undefined ? {} : { timelineSequence }),
+      ...(firstOrder === undefined ? {} : {
+        timelineOrder: firstOrder,
+        timelineCreatedAt: firstPayload.timelineCreatedAt ?? firstSeen.createdAt,
+      }),
       ...(segments === undefined ? {} : { segments }),
     },
   };
@@ -683,7 +781,7 @@ export function applyProviderChatStreamActivity(
       id,
       sessionId: streamEvent.sessionId,
       turnId,
-      createdAt: new Date().toISOString(),
+      createdAt: streamEvent.timelineCreatedAt ?? new Date().toISOString(),
       kind: "system-event",
       message: nextLabel,
       payload: {
@@ -703,6 +801,8 @@ export function applyProviderChatStreamActivity(
         // stream clock. Mixing it with text/compaction frame sequences puts
         // later work before compaction. Updates retain this first-seen position.
         timelineSequence: streamEvent.sequence,
+        ...streamTimelineMetadata(streamEvent),
+        ...(streamEvent.timelineSegments ? { timelineSegments: streamEvent.timelineSegments } : {}),
         turnId,
       },
     });
@@ -714,7 +814,7 @@ export function applyProviderChatStreamActivity(
     if (existingIndex < 0) {
       return [...items, nextEvent];
     }
-    if (streamEvent.activityKind === "commentary") {
+    if (streamEvent.activityKind === "commentary" && !streamEvent.timelineSegments?.length) {
       const continuationPrefix = `${eventId}-continuation-`;
       let previousText = "";
       let lastSegmentIndex = existingIndex;
@@ -752,6 +852,27 @@ export function applyProviderChatStreamActivity(
             suffix,
           ),
         ];
+      }
+      // A cumulative snapshot after a split still includes the earlier
+      // segments. Grow only the latest segment; replacing the root would
+      // duplicate the continuation and move new words ahead of intervening work.
+      if (
+        lastSegmentIndex !== existingIndex &&
+        label.startsWith(previousText)
+      ) {
+        const existing = items[lastSegmentIndex]!;
+        const payload = recordFromUnknown(existing.payload) ?? {};
+        const segmentLabel =
+          (typeof payload.label === "string"
+            ? payload.label
+            : existing.message) + suffix;
+        const next = items.slice();
+        next[lastSegmentIndex] = preserveFirstSeenTimelineMetadata(
+          existing,
+          createEvent(existing.id, String(payload.activityId), segmentLabel),
+          items,
+        );
+        return next;
       }
     }
     const next = items.slice();
@@ -796,11 +917,11 @@ export function applyProviderChatStreamDeltas(
     ) {
       continue;
     }
-    const key = `${streamEvent.sessionId}:${turnId}`;
+    const key = `${streamEvent.sessionId}:${turnId}:${streamEvent.timelineOrder ?? "legacy"}`;
     const existing = coalescedDeltaEvents.get(key);
     if (existing) {
       existing.chunks.push(textDelta);
-      existing.streamEvent = streamEvent;
+      // Keep the first delta's position when several tokens share a flush.
       continue;
     }
     coalescedDeltaEvents.set(key, {
@@ -880,17 +1001,22 @@ export function upsertStreamingAssistantEvent(
     // the sentence before it. Marking where it starts lets the timeline show
     // the preamble beside the work it introduced and keep the closing block as
     // the answer, instead of gluing an entire turn into one bubble.
+    const segments = assistantMessageSegments(existingPayload);
+    const lastOrder = canonicalTimelineOrder(recordFromUnknown(segments.at(-1))?.timelineOrder);
+    const incomingOrder = canonicalTimelineOrder(streamEvent.timelineOrder);
     const startsBlock =
       existing.message.length > 0 &&
-      endsStreamedTextBlock(existing.message) &&
-      hasActivityAfter(events, existingIndex, turnId);
+      (incomingOrder !== undefined && lastOrder !== undefined
+        ? incomingOrder !== lastOrder
+        : (endsStreamedTextBlock(existing.message) ||
+            /^\r?\n[ \t]*\r?\n/.test(textDelta)) &&
+          hasActivityAfter(events, existingIndex, turnId));
     // Mirror the Rust stream separator: a text block that resumes after tools
     // must not glue onto the previous sentence when the provider omits a
     // leading newline (`edits.` + `Now the…` → `edits.Now the…`).
     const blockDelta = startsBlock
       ? separateStreamedTextBlock(existing.message, textDelta)
       : textDelta;
-    const segments = assistantMessageSegments(existingPayload);
     const next: SessionEvent = {
       ...existing,
       message: appendChatResponseDelta(existing.message, blockDelta),
@@ -906,7 +1032,8 @@ export function upsertStreamingAssistantEvent(
               {
                 start: existing.message.length,
                 sequence: streamEvent.sequence,
-                createdAt: new Date().toISOString(),
+                timelineOrder: streamEvent.timelineOrder ?? undefined,
+                createdAt: streamEvent.timelineCreatedAt ?? new Date().toISOString(),
               },
             ]
           : segments,
@@ -931,7 +1058,7 @@ export function upsertStreamingAssistantEvent(
       id: eventId,
       sessionId: streamEvent.sessionId,
       turnId,
-      createdAt: new Date().toISOString(),
+      createdAt: streamEvent.timelineCreatedAt ?? new Date().toISOString(),
       kind: "assistant-message" as const,
       message: truncateChatResponse(textDelta),
       payload: {
@@ -940,11 +1067,13 @@ export function upsertStreamingAssistantEvent(
         modelId: streamEvent.modelId,
         streaming: true,
         timelineSequence: streamEvent.sequence,
+        ...streamTimelineMetadata(streamEvent),
         segments: [
           {
             start: 0,
             sequence: streamEvent.sequence,
-            createdAt: new Date().toISOString(),
+            timelineOrder: streamEvent.timelineOrder ?? undefined,
+            createdAt: streamEvent.timelineCreatedAt ?? new Date().toISOString(),
           },
         ],
       },
@@ -966,11 +1095,29 @@ function hasActivityAfter(
 ) {
   for (let cursor = index + 1; cursor < events.length; cursor += 1) {
     const event = events[cursor];
-    if (event && event.turnId === turnId && isProviderActivityEvent(event)) {
+    if (
+      event &&
+      event.turnId === turnId &&
+      (isProviderActivityEvent(event) ||
+        recordFromUnknown(event.payload)?.kind === "capability-call")
+    ) {
       return true;
     }
   }
   return false;
+}
+
+function canonicalTimelineOrder(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value : undefined;
+}
+
+function streamTimelineMetadata(event: ProviderChatStreamEvent) {
+  const timelineOrder = canonicalTimelineOrder(event.timelineOrder);
+  return timelineOrder === undefined ? {} : {
+    timelineOrder,
+    ...(event.timelineCreatedAt ? { timelineCreatedAt: event.timelineCreatedAt } : {}),
+  };
 }
 
 function assistantMessageSegments(payload: Record<string, unknown>) {

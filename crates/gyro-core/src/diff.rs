@@ -35,9 +35,33 @@ pub fn summarize_text_diff(old: &str, new: &str) -> TextDiff {
     }
 }
 
+/// Exact changed-line counts, independent of the bounded review preview.
+pub fn changed_line_counts(old: &[u8], new: &[u8]) -> (usize, usize) {
+    let patch = diffy::create_patch_bytes(old, new);
+    let mut counts = (0, 0);
+    for line in patch.hunks().iter().flat_map(|hunk| hunk.lines()) {
+        match line {
+            diffy::Line::Insert(_) => counts.0 += 1,
+            diffy::Line::Delete(_) => counts.1 += 1,
+            diffy::Line::Context(_) => {}
+        }
+    }
+    counts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_only_changed_lines_even_beyond_the_preview() {
+        let old = format!("{}old\n", "same\n".repeat(100));
+        let new = format!("{}new\nextra\n", "same\n".repeat(100));
+        assert_eq!(changed_line_counts(old.as_bytes(), new.as_bytes()), (2, 1));
+        assert_eq!(changed_line_counts(b"", b"new\nlast"), (2, 0));
+        assert_eq!(changed_line_counts(b"old\n", b""), (0, 1));
+        assert_eq!(changed_line_counts(b"same", b"same"), (0, 0));
+    }
 
     #[test]
     fn summarizes_changed_text() {

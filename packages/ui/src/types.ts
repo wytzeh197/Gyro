@@ -876,6 +876,14 @@ export type ProviderChatStreamEvent = {
   eventId: string;
   sequence: number;
   activitySequence?: number | null;
+  /** Shared first-observation order across provider frames and broker calls. */
+  timelineOrder?: number | null;
+  timelineCreatedAt?: string | null;
+  timelineSegments?: {
+    start: number;
+    timelineOrder: number;
+    createdAt: string;
+  }[] | null;
   phase: ProviderChatStreamPhase;
   contextUsage?: {
     inputTokens?: number;
@@ -1867,6 +1875,14 @@ export type UsageGuardConfig = {
   maxUnattendedCallsPerWindow: number;
   /** Tokens one call may bill before it is stopped. Zero disables it. */
   maxTokensPerCall: number;
+  /**
+   * Tool rounds one turn may run before it stops to summarise. Zero disables
+   * it, so a turn keeps working until the model stops or the user does.
+   *
+   * The spend guards around it still bound the turn: this only decides when
+   * the tool loop ends.
+   */
+  maxToolRounds: number;
   maxResynthesesPerWindow: number;
 };
 
