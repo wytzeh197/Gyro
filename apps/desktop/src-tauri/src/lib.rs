@@ -89,6 +89,9 @@ mod browser_smoke;
 mod git_history_capability;
 mod git_line_counts;
 mod git_main_comparison;
+pub(crate) use git_main_comparison::git_main_comparison_base;
+mod git_status_cache;
+use git_status_cache::*;
 mod language_server;
 mod launch_integrity;
 mod lsp_capability;
@@ -96,6 +99,7 @@ mod lsp_capability;
 mod lsp_smoke;
 mod memory_capability;
 mod menu_bar;
+mod provider_timeline;
 mod reply_segments;
 mod subagent_capability;
 mod web_fetch_capability;
@@ -179,9 +183,15 @@ const WORKSPACE_CHANGE_DEBOUNCE: Duration = Duration::from_millis(250);
 const WORKSPACE_PREPARATION_CACHE_AGE: Duration = Duration::from_secs(2);
 const WORKSPACE_PREPARATION_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const WORKSPACE_PREPARATION_GIT_TIMEOUT: Duration = Duration::from_secs(8);
+/// `git status` prints nothing until it has walked the whole worktree, so a
+/// large or iCloud-evicted checkout stays silent for minutes while it works.
+/// The read is budgeted by wall clock alone; an inactivity timeout would only
+/// ever cut a healthy read short.
+const GIT_STATUS_TIMEOUT: Duration = Duration::from_secs(60);
+const GIT_STATUS_PREPARATION_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_UNTRACKED_LINE_COUNT_BYTES: u64 = 1024 * 1024;
 const MAX_UNTRACKED_LINE_COUNT_FILES: usize = 64;
-const MAX_GIT_STATUS_CACHES: usize = 8;
+const MAX_GIT_STATUS_CACHES: usize = 32;
 const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
 const MAX_WORKSPACE_PREPARATION_CACHES: usize = MAX_WORKSPACE_WATCH_CACHES;
 const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -208,7 +218,6 @@ const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const TRANSIENT_PROVIDER_RETRY_DELAYS: &[Duration] =
     &[Duration::from_millis(400), Duration::from_millis(1_200)];
-const OLLAMA_MAX_TOOL_ROUNDS: usize = 128;
 const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
@@ -537,6 +546,7 @@ struct ProviderRunControl {
     /// again.
     stop_reason: Mutex<Option<ProviderStopReason>>,
     next_event_sequence: AtomicU64,
+    timeline: Mutex<provider_timeline::ProviderTimeline>,
     suggested_title: Mutex<(Option<String>, bool)>,
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
@@ -549,6 +559,7 @@ impl Default for ProviderRunControl {
             cancellation: CancellationToken::default(),
             stop_reason: Mutex::new(None),
             next_event_sequence: AtomicU64::new(0),
+            timeline: Mutex::new(provider_timeline::ProviderTimeline::default()),
             suggested_title: Mutex::new((None, false)),
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
@@ -573,6 +584,14 @@ const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
 /// provider's own failure text.
 const PROVIDER_INTERRUPTED_MARKER: &str =
     "Gyro closed while this turn was running, so it never finished.";
+
+/// The notice attached to a turn that stopped at its tool-round budget.
+///
+/// The turn itself succeeded -- the model's checkpoint is the reply -- so this
+/// rides the completion status's recovery kind, which the transcript renders
+/// next to that checkpoint. It is persisted, so it survives a reload.
+const PROVIDER_TOOL_BUDGET_NOTICE: &str =
+    "Gyro stopped offering tools at this turn's round budget.";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderStopReason {
@@ -1805,6 +1824,10 @@ struct ProviderChatStreamEvent {
     model_id: Option<String>,
     event_id: String,
     sequence: u64,
+    #[serde(flatten)]
+    timeline: provider_timeline::TimelinePosition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeline_segments: Option<serde_json::Value>,
     activity_sequence: Option<u64>,
     phase: String,
     status: Option<String>,
@@ -1839,6 +1862,11 @@ struct ProviderRunnerOutput {
     billed_usage: Option<ProviderContextUsage>,
     rate_limits: Vec<ProviderRateLimitWindow>,
     response: String,
+    /// The reply is the checkpoint Gyro asked for after the turn's tool-round
+    /// budget ran out, not a stop the model chose. The turn still completed, so
+    /// the reply is kept and saved; this only decides whether the completion
+    /// notice says why the tool loop ended.
+    paused_at_tool_budget: bool,
     resume_cursor: Option<ProviderResumeCursor>,
     retry_count: u32,
     resumed: bool,
@@ -5226,6 +5254,20 @@ fn run_provider_chat_blocking(
             );
         }
     }
+    // Reserve unstreamed activity before closing the response. Streamed items
+    // reuse their original positions, including text that preceded broker calls.
+    for activity in &runner_output.activities {
+        provider_timeline::activity(&app, &request.session_id, activity);
+    }
+    provider_timeline::observe(&app, &request.session_id, Some("response"), None)
+        .insert_into(&mut assistant_payload);
+    if let Some(segments) = provider_timeline::response_segments(
+        &app,
+        &request.session_id,
+        &artifact_extraction.message,
+    ) {
+        assistant_payload["segments"] = segments;
+    }
     let assistant_event = store
         .append_event_with_turn_id(
             session_id,
@@ -5347,7 +5389,15 @@ fn run_provider_chat_blocking(
         .iter()
         .enumerate()
         .map(|(sequence, activity)| {
-            provider_activity_event_entry(&request, run_id, sequence as u64, activity)
+            let mut entry =
+                provider_activity_event_entry(&request, run_id, sequence as u64, activity);
+            let (position, segments) =
+                provider_timeline::activity(&app, &request.session_id, activity);
+            position.insert_into(&mut entry.1);
+            if let Some(segments) = segments {
+                entry.1["timelineSegments"] = segments;
+            }
+            entry
         })
         .collect();
     let mut activity_events =
@@ -5378,7 +5428,9 @@ fn run_provider_chat_blocking(
         Some(run_id),
         attempt_id,
         HarnessRunStatus::Done,
-        None,
+        runner_output
+            .paused_at_tool_budget
+            .then_some(PROVIDER_TOOL_BUDGET_NOTICE),
     )
     .unwrap_or_else(|error| {
         eprintln!(
@@ -8092,6 +8144,8 @@ fn resolve_provider_approval_blocking(
                     payload["changedPaths"] =
                         serde_json::to_value(commit.result().changed_paths.clone())
                             .map_err(|error| error.to_string())?;
+                    payload["fileChanges"] = serde_json::to_value(&commit.result().file_changes)
+                        .map_err(|error| error.to_string())?;
                     provider_decision = ProviderApprovalDecision::AppliedByGyro;
                     pending_mutation = Some(commit);
                 }
@@ -8920,14 +8974,10 @@ async fn github_workflow_logs(request: GithubWorkflowRunRequest) -> Result<Strin
 }
 
 #[tauri::command]
-async fn github_rerun_workflow(
-    request: GithubWorkflowRunRequest,
-) -> Result<Vec<gyro_core::GithubWorkflowRun>, String> {
+async fn github_rerun_workflow(request: GithubWorkflowRunRequest) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-        gyro_core::rerun_workflow(&root, request.run_id, request.failed_only).map_err(to_string)?;
-        // Re-list so the caller immediately sees the re-queued run.
-        gyro_core::list_workflow_runs(&root, None, 20).map_err(to_string)
+        gyro_core::rerun_workflow(&root, request.run_id, request.failed_only).map_err(to_string)
     })
     .await
     .map_err(|error| format!("github rerun worker failed: {error}"))?
@@ -9991,462 +10041,6 @@ fn fallback_search_workspace(
         }
     }
     Ok(results)
-}
-
-fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn git_status_stamp(repo_root: &Path, porcelain: &str, files: &[SourceControlFile]) -> String {
-    let mut material = format!("{}\n{}", repo_root.display(), porcelain);
-    // Resolve the base even in linked worktrees and when refs are packed.
-    material.push_str(&git_main_comparison_base(repo_root).unwrap_or_default());
-    for path in [
-        Some(".git/HEAD"),
-        Some(".git/packed-refs"),
-        Some(".git/refs/heads/main"),
-        Some(".git/refs/heads/master"),
-    ]
-    .into_iter()
-    .chain(
-        files
-            .iter()
-            .flat_map(|file| [Some(file.path.as_str()), file.original_path.as_deref()]),
-    )
-    .flatten()
-    {
-        material.push('\n');
-        material.push_str(path);
-        match fs::symlink_metadata(repo_root.join(path)) {
-            Ok(metadata) => {
-                material.push('\t');
-                material.push_str(&metadata.len().to_string());
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(elapsed) = modified.duration_since(SystemTime::UNIX_EPOCH) {
-                        material.push('\t');
-                        material.push_str(&elapsed.as_nanos().to_string());
-                    }
-                }
-            }
-            Err(_) => material.push_str("\tmissing"),
-        }
-    }
-    content_hash(material.as_bytes())
-}
-
-fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceControlStatus> {
-    let cache = git_status_cache().lock().ok()?;
-    let (cached_stamp, status) = cache.get(repo_root)?;
-    if cached_stamp != stamp {
-        return None;
-    }
-    let mut status = status.clone();
-    status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
-    Some(status)
-}
-
-fn store_git_status(repo_root: PathBuf, stamp: String, status: SourceControlStatus) {
-    let Ok(mut cache) = git_status_cache().lock() else {
-        return;
-    };
-    cache.insert(repo_root.clone(), (stamp, status));
-    while cache.len() > MAX_GIT_STATUS_CACHES {
-        let oldest = cache
-            .keys()
-            .find(|path| *path != &repo_root)
-            .cloned()
-            .or_else(|| cache.keys().next().cloned());
-        let Some(path) = oldest else {
-            break;
-        };
-        cache.remove(&path);
-    }
-}
-
-fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
-    inspect_git_status(workspace_path, true)
-}
-
-fn git_status_for_preparation(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
-    inspect_git_status(workspace_path, false)
-}
-
-fn inspect_git_status(workspace_path: &str, detailed: bool) -> anyhow::Result<SourceControlStatus> {
-    let root = workspace_root(workspace_path)?;
-    let mut command = git_command();
-    command
-        .arg("-C")
-        .arg(&root)
-        .arg("status")
-        .arg("--porcelain=v2")
-        .arg("--branch")
-        .arg("--untracked-files=normal");
-    let output = match run_bounded_command(
-        &command,
-        Duration::from_secs(if detailed { 15 } else { 6 }),
-        Some(Duration::from_secs(if detailed { 10 } else { 4 })),
-        4 * 1024 * 1024,
-        64 * 1024,
-    ) {
-        Ok(output) => output,
-        Err(error) => {
-            return Ok(SourceControlStatus {
-                provider: "git".into(),
-                available: false,
-                branch: None,
-                upstream: None,
-                ahead: 0,
-                behind: 0,
-                repo_root: None,
-                additions: 0,
-                deletions: 0,
-                stats_partial: false,
-                compared_to_main: None,
-                files: Vec::new(),
-                history: Vec::new(),
-                history_error: None,
-                last_checked_at: None,
-                error: Some(error.to_string()),
-            });
-        }
-    };
-    if !output.succeeded() || output.stdout_truncated {
-        return Ok(SourceControlStatus {
-            provider: "git".into(),
-            available: false,
-            branch: None,
-            upstream: None,
-            ahead: 0,
-            behind: 0,
-            repo_root: None,
-            additions: 0,
-            deletions: 0,
-            stats_partial: false,
-            compared_to_main: None,
-            files: Vec::new(),
-            history: Vec::new(),
-            history_error: None,
-            last_checked_at: None,
-            error: Some(bounded_command_error("could not inspect Git status", &output).to_string()),
-        });
-    }
-    let mut status = parse_git_status_v2(&output.stdout);
-    let repo_root = git_repo_root(&root).unwrap_or(root);
-    if detailed {
-        let stamp = git_status_stamp(&repo_root, &output.stdout, &status.files);
-        if let Some(cached) = cached_git_status(&repo_root, &stamp) {
-            return Ok(cached);
-        }
-        apply_git_diff_stats(&repo_root, &mut status);
-        match source_control_review::history(&repo_root) {
-            Ok(history) => status.history = history,
-            Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
-                status.history_error = Some(error.to_string());
-            }
-            Err(_) => {}
-        }
-        status.repo_root = Some(repo_root.display().to_string());
-        status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
-        store_git_status(repo_root, stamp, status.clone());
-        return Ok(status);
-    }
-    status.repo_root = Some(repo_root.display().to_string());
-    status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
-    Ok(status)
-}
-
-fn parse_git_status_v2(output: &str) -> SourceControlStatus {
-    let mut status = SourceControlStatus {
-        provider: "git".into(),
-        available: true,
-        branch: None,
-        upstream: None,
-        ahead: 0,
-        behind: 0,
-        repo_root: None,
-        additions: 0,
-        deletions: 0,
-        stats_partial: false,
-        compared_to_main: None,
-        files: Vec::new(),
-        history: Vec::new(),
-        history_error: None,
-        last_checked_at: None,
-        error: None,
-    };
-
-    for line in output.lines() {
-        if let Some(branch) = line.strip_prefix("# branch.head ") {
-            status.branch = Some(branch.to_string());
-        } else if let Some(upstream) = line.strip_prefix("# branch.upstream ") {
-            status.upstream = Some(upstream.to_string());
-        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
-            for part in ab.split_whitespace() {
-                if let Some(value) = part.strip_prefix('+') {
-                    status.ahead = value.parse().unwrap_or(0);
-                } else if let Some(value) = part.strip_prefix('-') {
-                    status.behind = value.parse().unwrap_or(0);
-                }
-            }
-        } else if let Some(path) = line.strip_prefix("? ") {
-            status.files.push(SourceControlFile {
-                path: path.to_string(),
-                original_path: None,
-                state: "untracked".into(),
-                staged: false,
-                additions: 0,
-                deletions: 0,
-            });
-        } else if line.starts_with("1 ") {
-            let mut parts = line.split_whitespace();
-            let _record = parts.next();
-            let xy = parts.next().unwrap_or("..");
-            let path = parts.nth(6).unwrap_or_default().to_string();
-            push_git_status_sides(&mut status.files, xy, path, None);
-        } else if line.starts_with("2 ") {
-            let mut parts = line.split_whitespace();
-            let _record = parts.next();
-            let xy = parts.next().unwrap_or("..");
-            let _sub = parts.next();
-            (0..5).for_each(|_| {
-                let _ = parts.next();
-            });
-            let _score = parts.next();
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            let mut paths = rest.split('\t');
-            let path = paths.next().unwrap_or_default().to_string();
-            let original_path = paths.next().map(ToOwned::to_owned);
-            push_git_status_sides(&mut status.files, xy, path, original_path);
-        } else if line.starts_with("u ") {
-            let path = line
-                .split_whitespace()
-                .last()
-                .unwrap_or_default()
-                .to_string();
-            status.files.push(SourceControlFile {
-                path,
-                original_path: None,
-                state: "conflicted".into(),
-                staged: false,
-                additions: 0,
-                deletions: 0,
-            });
-        }
-    }
-    status
-}
-
-fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
-    let mut command = git_command();
-    command
-        .arg("-C")
-        .arg(workspace)
-        .args(["rev-parse", "--show-toplevel"]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(10),
-        None,
-        64 * 1024,
-        64 * 1024,
-    )
-    .ok()?;
-    if !output.succeeded() || output.stdout_truncated {
-        return None;
-    }
-    let path = output.stdout.trim().to_string();
-    (!path.is_empty()).then(|| PathBuf::from(path))
-}
-
-fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
-    let (tracked, tracked_partial) = git_numstat(repo_root);
-    status.stats_partial = tracked_partial;
-
-    for (additions, deletions) in tracked.values() {
-        status.additions = status.additions.saturating_add(*additions);
-        status.deletions = status.deletions.saturating_add(*deletions);
-    }
-
-    let mut untracked_additions = 0usize;
-    let mut untracked_counted = 0usize;
-    for file in &mut status.files {
-        if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
-            file.original_path
-                .as_ref()
-                .and_then(|path| tracked.get(path))
-        }) {
-            file.additions = *additions;
-            file.deletions = *deletions;
-        }
-        if file.state != "untracked" {
-            continue;
-        }
-        let path = repo_root.join(&file.path);
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
-            status.stats_partial = true;
-            continue;
-        };
-        if metadata.is_dir() {
-            continue;
-        }
-        if untracked_counted >= MAX_UNTRACKED_LINE_COUNT_FILES
-            || metadata.len() > MAX_UNTRACKED_LINE_COUNT_BYTES
-        {
-            status.stats_partial = true;
-            continue;
-        }
-        untracked_counted += 1;
-        let additions = match git_line_counts::untracked_lines(&path) {
-            Ok(lines) => lines,
-            Err(_) => {
-                status.stats_partial = true;
-                continue;
-            }
-        };
-        file.additions = additions;
-        untracked_additions = untracked_additions.saturating_add(additions);
-        status.additions = status.additions.saturating_add(additions);
-    }
-    let untracked: Vec<SourceControlFile> = status
-        .files
-        .iter()
-        .filter(|file| file.state == "untracked")
-        .cloned()
-        .collect();
-    status.compared_to_main = git_main_comparison::git_main_comparison(
-        repo_root,
-        &untracked,
-        untracked_additions,
-        status.stats_partial,
-    );
-}
-
-pub(crate) use git_main_comparison::git_main_comparison_base;
-
-fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
-    let mut command = git_command();
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["diff", "--numstat", "--no-renames", "HEAD", "--"]);
-    let output = match run_bounded_command(
-        &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
-        4 * 1024 * 1024,
-        64 * 1024,
-    ) {
-        Ok(output) if output.succeeded() => output,
-        _ => return git_numstat_without_head(repo_root),
-    };
-    let (stats, partial) = parse_git_numstat(&output.stdout);
-    (stats, partial || output.stdout_truncated)
-}
-
-fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
-    let mut totals = HashMap::new();
-    let mut partial = false;
-    for args in [
-        &["diff", "--numstat", "--no-renames", "--cached", "--"][..],
-        &["diff", "--numstat", "--no-renames", "--"][..],
-    ] {
-        let mut command = git_command();
-        command.arg("-C").arg(repo_root).args(args);
-        let Ok(output) = run_bounded_command(
-            &command,
-            Duration::from_secs(15),
-            Some(Duration::from_secs(10)),
-            4 * 1024 * 1024,
-            64 * 1024,
-        ) else {
-            partial = true;
-            continue;
-        };
-        if !output.succeeded() {
-            partial = true;
-            continue;
-        }
-        let (stats, output_partial) = parse_git_numstat(&output.stdout);
-        partial |= output_partial || output.stdout_truncated;
-        for (path, (additions, deletions)) in stats {
-            let entry = totals.entry(path).or_insert((0usize, 0usize));
-            entry.0 = entry.0.saturating_add(additions);
-            entry.1 = entry.1.saturating_add(deletions);
-        }
-    }
-    (totals, partial)
-}
-
-fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
-    let mut totals = HashMap::new();
-    let mut partial = false;
-    for line in output.lines() {
-        let mut parts = line.splitn(3, '\t');
-        let additions = parts.next().unwrap_or_default();
-        let deletions = parts.next().unwrap_or_default();
-        let path = parts.next().unwrap_or_default();
-        if path.is_empty() {
-            continue;
-        }
-        // Git's binary marker means no text line counts, not missing data.
-        if additions == "-" && deletions == "-" {
-            totals.insert(path.to_string(), (0, 0));
-            continue;
-        }
-        let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
-            partial = true;
-            continue;
-        };
-        totals.insert(path.to_string(), (additions, deletions));
-    }
-    (totals, partial)
-}
-
-/// Porcelain v2 reports two statuses per file: X for the index and Y for the
-/// working tree. A file can carry both — staged edits plus newer unstaged ones
-/// — so each side becomes its own row, which is how VS Code lists the file
-/// under both "Staged Changes" and "Changes".
-fn push_git_status_sides(
-    files: &mut Vec<SourceControlFile>,
-    xy: &str,
-    path: String,
-    original_path: Option<String>,
-) {
-    let mut codes = xy.chars();
-    let index = codes.next().unwrap_or('.');
-    let worktree = codes.next().unwrap_or('.');
-    if index != '.' {
-        files.push(SourceControlFile {
-            path: path.clone(),
-            original_path: original_path.clone(),
-            state: git_state_from_code(index),
-            staged: true,
-            additions: 0,
-            deletions: 0,
-        });
-    }
-    if worktree != '.' || index == '.' {
-        files.push(SourceControlFile {
-            path,
-            original_path,
-            state: git_state_from_code(worktree),
-            staged: false,
-            additions: 0,
-            deletions: 0,
-        });
-    }
-}
-
-fn git_state_from_code(code: char) -> String {
-    match code {
-        'D' => "deleted",
-        'A' => "added",
-        'R' | 'C' => "renamed",
-        'U' => "conflicted",
-        _ => "modified",
-    }
-    .into()
 }
 
 const MAX_CUSTOM_WORKSPACE_TASKS: usize = 64;
@@ -14208,18 +13802,22 @@ fn run_ollama_chat(
         heartbeat_stop.clone(),
     );
     let mut response = None;
+    let mut paused_at_tool_budget = false;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
-        for round in 0..=OLLAMA_MAX_TOOL_ROUNDS {
+        // One turn's tool loop, not a whole task, bounded by
+        // `usageGuard.maxToolRounds`. The round after the budget carries the
+        // checkpoint instead of tools, so the loop ends there.
+        let round_budget = provider_reliability::configured_tool_rounds();
+        for round in 0.. {
+            if round_budget.is_some_and(|limit| round > limit) {
+                break;
+            }
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
             }
-            let round_tools = provider_reliability::tools_for_round(
-                &mut messages,
-                &tools,
-                round,
-                OLLAMA_MAX_TOOL_ROUNDS,
-            );
+            let round_tools =
+                provider_reliability::tools_for_round(&mut messages, &tools, round, round_budget);
             let tools_offered = !round_tools.is_empty();
             let turn = ollama_tool_chat_with_progress(
                 OllamaToolChatRequest {
@@ -14256,6 +13854,10 @@ fn run_ollama_chat(
                 "Ollama returned tool calls although no tools were offered"
             );
             if turn.tool_calls.is_empty() {
+                // A reply given with tools withheld is the checkpoint the budget
+                // asked for, not the model choosing to stop: the turn is paused
+                // and the user is told so, rather than left with prose alone.
+                paused_at_tool_budget = !tools_offered;
                 response = Some(turn);
                 break;
             }
@@ -14327,6 +13929,7 @@ fn run_ollama_chat(
             }),
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
+            paused_at_tool_budget,
             response: response.content,
             resume_cursor: None,
             retry_count: 0,
@@ -14719,6 +14322,7 @@ fn run_kimi_acp_chat(
         billed_usage: None,
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
+        paused_at_tool_budget: false,
         response: response.clone(),
         resume_cursor: Some(ProviderResumeCursor {
             kind: runtime.cursor_kind.into(),
@@ -14866,6 +14470,7 @@ fn run_openai_codex_chat(
                 context_usage: output.context_usage,
                 billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
+                paused_at_tool_budget: false,
                 response,
                 resume_cursor: provider_session_id
                     .clone()
@@ -14893,6 +14498,7 @@ fn run_openai_codex_chat(
                 context_usage: output.context_usage,
                 billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
+                paused_at_tool_budget: false,
                 response: stdout,
                 resume_cursor: provider_session_id
                     .clone()
@@ -14925,6 +14531,7 @@ fn run_openai_codex_chat(
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
+            paused_at_tool_budget: false,
             response,
             resume_cursor: provider_session_id
                 .clone()
@@ -15448,6 +15055,7 @@ fn run_openai_codex_app_server_chat(
             billed_usage: context_usage.clone(),
             context_usage,
             rate_limits: Vec::new(),
+            paused_at_tool_budget: false,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "codex-session".into(),
@@ -16771,6 +16379,7 @@ fn run_anthropic_claude_chat(
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
+            paused_at_tool_budget: false,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -16808,6 +16417,7 @@ fn run_anthropic_claude_chat(
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
+            paused_at_tool_budget: false,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -18661,6 +18271,7 @@ struct StreamingCommandState {
     text_blocks: Vec<StreamedTextBlock>,
     pending_delta_chunks: Vec<String>,
     pending_delta_chars: usize,
+    pending_timeline: Option<provider_timeline::TimelinePosition>,
     provider_session_id: Option<String>,
     stdout_line_buffer: String,
     /// Whether any stdout line parsed as JSON.
@@ -18691,6 +18302,7 @@ impl StreamingCommandState {
             text_blocks: Vec::new(),
             pending_delta_chunks: Vec::new(),
             pending_delta_chars: 0,
+            pending_timeline: None,
             provider_session_id: None,
             stdout_line_buffer: String::new(),
             parsed_stream_json: false,
@@ -18956,6 +18568,24 @@ impl StreamingCommandState {
         !self.pending_delta_chunks.is_empty()
     }
 
+    /// A broker call can arrive between checking the text boundary and
+    /// recording this chunk. Keep text already buffered at its earlier place.
+    fn set_pending_timeline(
+        &mut self,
+        position: provider_timeline::TimelinePosition,
+        previous_chunk_count: usize,
+    ) -> Option<(String, provider_timeline::TimelinePosition)> {
+        let previous = self.pending_timeline.replace(position.clone())?;
+        if previous.timeline_order == position.timeline_order {
+            return None;
+        }
+        let new_chunks = self.pending_delta_chunks.split_off(previous_chunk_count);
+        let previous_delta = self.take_pending_delta();
+        self.pending_delta_chars = new_chunks.iter().map(|chunk| chunk.chars().count()).sum();
+        self.pending_delta_chunks = new_chunks;
+        (!previous_delta.is_empty()).then_some((previous_delta, previous))
+    }
+
     fn flush_pending_delta(
         &mut self,
         app: &tauri::AppHandle,
@@ -18973,8 +18603,9 @@ impl StreamingCommandState {
             return;
         }
         let delta = self.take_pending_delta();
+        let timeline = self.pending_timeline.take();
         self.last_emit_at = Some(Instant::now());
-        emit_provider_chat_event(
+        emit_provider_chat_event_with_timeline(
             app,
             request,
             "delta",
@@ -18982,6 +18613,7 @@ impl StreamingCommandState {
             Some(delta),
             None,
             None,
+            timeline,
         );
     }
 }
@@ -19311,6 +18943,7 @@ fn handle_provider_stdout_value(
         stream_state.note_new_text_content_block();
     }
     if let Some(commentary) = extract_provider_commentary_activity(value) {
+        stream_state.flush_pending_delta(app, request, true);
         if let Some(activity) = stream_state.push_activity(commentary) {
             let activity_sequence = stream_state.activity_sequence(&activity);
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
@@ -19324,6 +18957,7 @@ fn handle_provider_stdout_value(
     // Only provider-reported edits belong to this chat. A shared file changing
     // while a command runs is not evidence that this command wrote it.
     if !activities.is_empty() {
+        stream_state.flush_pending_delta(app, request, true);
         // Tools only start after the text block before them closed. Without
         // this, a marker line followed straight by a tool call left the
         // session untitled until the next text arrived, often minutes later.
@@ -19337,6 +18971,14 @@ fn handle_provider_stdout_value(
         stream_state.note_intervening_work();
     }
     if let Some(chunk) = extract_provider_text_chunk(value) {
+        if provider_timeline::text_has_boundary(app, &request.session_id) {
+            // Broker calls can arrive while provider text awaits its flush.
+            // Preserve the earlier block before buffering text after that call.
+            stream_state.flush_pending_delta(app, request, true);
+            stream_state.note_intervening_work();
+        }
+        let previous_text_len = stream_state.assistant_text.len();
+        let previous_chunk_count = stream_state.pending_delta_chunks.len();
         match chunk {
             ProviderTextChunk::Delta(delta) => {
                 let delta = sanitize_provider_text_delta(&delta);
@@ -19358,6 +19000,28 @@ fn handle_provider_stdout_value(
                     return;
                 }
                 stream_state.push_assistant_delta(&text);
+            }
+        }
+        if let Some(delta) = stream_state
+            .assistant_text
+            .get(previous_text_len..)
+            .filter(|delta| !delta.is_empty())
+        {
+            let position = provider_timeline::observe(app, &request.session_id, None, Some(delta));
+            if let Some((earlier_delta, earlier_position)) =
+                stream_state.set_pending_timeline(position, previous_chunk_count)
+            {
+                stream_state.last_emit_at = Some(Instant::now());
+                emit_provider_chat_event_with_timeline(
+                    app,
+                    request,
+                    "delta",
+                    Some(HarnessRunStatus::Running),
+                    Some(earlier_delta),
+                    None,
+                    None,
+                    Some(earlier_position),
+                );
             }
         }
         publish_streamed_session_title(app, request, &stream_state.assistant_text, false);
@@ -20025,6 +19689,22 @@ fn emit_provider_chat_event(
     message: Option<String>,
     error: Option<String>,
 ) {
+    emit_provider_chat_event_with_timeline(
+        app, request, phase, status, text_delta, message, error, None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_provider_chat_event_with_timeline(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    phase: &str,
+    status: Option<HarnessRunStatus>,
+    text_delta: Option<String>,
+    message: Option<String>,
+    error: Option<String>,
+    timeline: Option<provider_timeline::TimelinePosition>,
+) {
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
     }
@@ -20035,6 +19715,15 @@ fn emit_provider_chat_event(
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
         sequence: next_provider_event_sequence(app, &request.session_id),
+        timeline: timeline.unwrap_or_else(|| {
+            provider_timeline::observe(
+                app,
+                &request.session_id,
+                None,
+                text_delta.as_deref().filter(|_| phase == "delta"),
+            )
+        }),
+        timeline_segments: None,
         activity_sequence: None,
         phase: phase.into(),
         status: status.map(|status| status.as_str().to_string()),
@@ -20091,6 +19780,8 @@ fn emit_provider_activity_event(
     if !matches!(activity.kind.as_str(), "commentary" | "reasoning") {
         timing::tool(&activity.id, &activity.status);
     }
+    let (timeline, timeline_segments) =
+        provider_timeline::activity(app, &request.session_id, activity);
     let payload = ProviderChatStreamEvent {
         session_id: request.session_id.clone(),
         turn_id: request.turn_id.clone(),
@@ -20098,6 +19789,8 @@ fn emit_provider_activity_event(
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
         sequence: next_provider_event_sequence(app, &request.session_id),
+        timeline,
+        timeline_segments,
         activity_sequence,
         phase: "activity".into(),
         status: Some(HarnessRunStatus::Running.as_str().to_string()),
@@ -21141,6 +20834,13 @@ fn capability_event_with_target(
     let store = open_store().map_err(anyhow::Error::msg)?;
     let session_id = Uuid::parse_str(&bound.session_id)?;
     let mut payload = serde_json::to_value(event)?;
+    provider_timeline::observe(
+        app,
+        &bound.session_id,
+        Some(&format!("capability:{call_id}")),
+        None,
+    )
+    .insert_into(&mut payload);
     if let Some(target) = target
         .map(gyro_core::sanitize_capability_summary)
         .filter(|target| !target.is_empty())
@@ -21187,7 +20887,7 @@ fn wait_for_capability_approval(
                 turn_id,
             },
         );
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "schema": CAPABILITY_SCHEMA_V1,
         "kind": "capability-approval",
         "approvalId": approval_id,
@@ -21200,6 +20900,13 @@ fn wait_for_capability_approval(
         "scopeValue": gyro_core::sanitize_capability_summary(scope_value),
         "choices": ["deny", "allow-once", "allow-project"],
     });
+    provider_timeline::observe(
+        app,
+        &bound.session_id,
+        Some(&format!("capability:{call_id}")),
+        None,
+    )
+    .insert_into(&mut payload);
     let store = open_store().map_err(anyhow::Error::msg)?;
     let event = if let Some(turn_id) = turn_id {
         store.append_event_with_turn_id(
@@ -24623,6 +24330,7 @@ mod tests {
                     context_usage: None,
                     billed_usage: None,
                     rate_limits: Vec::new(),
+                    paused_at_tool_budget: false,
                     response: "recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -28471,6 +28179,25 @@ while True:
         assert_eq!(provider_failure_recovery("provider crashed").0, "retry");
     }
 
+    /// The tool-round notice is classified as its own kind, not as a failure.
+    ///
+    /// It rides the *completion* status of a turn that succeeded, so the kind
+    /// is what the transcript keys on to explain why the tool loop ended
+    /// without painting the turn as broken or offering a plain resend.
+    #[test]
+    fn a_tool_budget_pause_is_not_a_failure() {
+        let (kind, message) = provider_failure_recovery(PROVIDER_TOOL_BUDGET_NOTICE);
+        assert_eq!(kind, "tool-budget");
+        // The fix, not just the fact: the budget is a setting.
+        assert!(message.contains("maxToolRounds"), "unhelpful: {message}");
+        // One short clause. The rest of the news is the reply above it.
+        assert!(message.len() < 90, "too long: {message}");
+        // Nothing here may read as a crash: the reply above it is the model's
+        // checkpoint and is saved like any other answer.
+        assert!(!is_provider_cancellation(PROVIDER_TOOL_BUDGET_NOTICE));
+        assert!(is_transient_provider_error(PROVIDER_TOOL_BUDGET_NOTICE) == false);
+    }
+
     /// A stop is not a failure, and the two stops do not have the same fix.
     ///
     /// The ceiling stop is the one that matters: it used to arrive as a bare
@@ -28655,6 +28382,7 @@ while True:
                     context_usage: None,
                     billed_usage: None,
                     rate_limits: Vec::new(),
+                    paused_at_tool_budget: false,
                     response: "Recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -28774,6 +28502,7 @@ while True:
                     context_usage: None,
                     billed_usage: None,
                     rate_limits: Vec::new(),
+                    paused_at_tool_budget: false,
                     response: "Continued".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -30497,6 +30226,47 @@ while True:
             .files
             .iter()
             .any(|file| file.path == "tracked.txt" && file.additions >= 2));
+    }
+
+    #[test]
+    fn git_status_failure_keeps_the_last_snapshot_for_the_repository() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "alpha\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        fs::write(repo.path().join("tracked.txt"), "alpha\nbeta\n").unwrap();
+
+        let read = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(read.available);
+        assert!(read.files.iter().any(|file| file.path == "tracked.txt"));
+        let repo_root =
+            git_repo_root(&workspace_root(repo.path().to_str().unwrap()).unwrap()).unwrap();
+
+        // A read that ran out of budget reports what the last one saw instead of
+        // an empty change list, so the panel keeps its changes and decorations.
+        let stalled = git_status_read_failure(
+            Some(&repo_root),
+            "could not inspect Git status timed out".into(),
+            true,
+        );
+        assert!(stalled.available);
+        assert_eq!(stalled.files, read.files);
+        assert!(stalled
+            .error
+            .unwrap()
+            .contains("showing the last known changes"));
+
+        // An answer from git — a directory that is not a repository — replaces
+        // the snapshot as before.
+        let unavailable = git_status_read_failure(
+            Some(&repo_root),
+            "could not inspect Git status exited with Some(128)".into(),
+            false,
+        );
+        assert!(!unavailable.available);
+        assert!(unavailable.files.is_empty());
+        assert!(unavailable.error.is_some());
     }
 
     #[test]

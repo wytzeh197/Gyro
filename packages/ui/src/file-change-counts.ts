@@ -1,3 +1,45 @@
+import type { SessionEvent } from "./types.ts";
+
+/** Exact counts recorded by successful, guarded mutations in this turn. */
+export function appliedFileChangeCounts(events: readonly SessionEvent[]) {
+  const totals = new Map<string, { additions: number; deletions: number }>();
+  const seen = new Set<string>();
+  for (const event of events) {
+    const payload = event.payload as Record<string, unknown> | undefined;
+    if (
+      event.kind !== "system-event" ||
+      !payload ||
+      payload.status !== "applied" ||
+      !["gyro.mutation.v1", "gyro.provider-approval.v1"].includes(
+        String(payload.schema),
+      ) ||
+      !Array.isArray(payload.fileChanges)
+    )
+      continue;
+    const mutationId = payload.proposalId ?? payload.approvalId ?? event.id;
+    for (const entry of payload.fileChanges) {
+      if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
+        continue;
+      const counts = measuredFileCounts(entry);
+      if (!counts) continue;
+      const key = JSON.stringify([
+        event.sessionId,
+        event.turnId,
+        mutationId,
+        entry.path,
+      ]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const previous = totals.get(entry.path);
+      totals.set(entry.path, {
+        additions: (previous?.additions ?? 0) + counts.additions,
+        deletions: (previous?.deletions ?? 0) + counts.deletions,
+      });
+    }
+  }
+  return totals;
+}
+
 /** Missing measurements are unknown, never zero or live working-tree totals. */
 export type FileChangeCounts = { additions?: number; deletions?: number };
 

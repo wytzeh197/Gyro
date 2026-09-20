@@ -1395,12 +1395,13 @@ export type WorkbenchAction =
     }
   | { type: "ide-set-diagnostics"; diagnostics: ProblemDiagnostic[] }
   | { type: "ide-set-source-control"; sourceControl: SourceControlState }
+  | { type: "github-reset" }
   | { type: "github-loading"; loading: boolean }
   | { type: "github-set-availability"; availability: GithubAvailability }
   | { type: "github-set-runs"; runs: GithubWorkflowRun[] }
   | { type: "github-select-run"; runId?: number }
   | { type: "github-set-run-detail"; detail: GithubWorkflowRunDetail }
-  | { type: "github-set-run-logs"; logs?: string }
+  | { type: "github-set-run-logs"; logs?: string; runId?: number }
   | { type: "github-set-pull-requests"; pullRequests: GithubPullRequest[] }
   | { type: "github-error"; error?: string }
   | { type: "ide-set-tasks"; tasks: TaskDefinition[] }
@@ -2853,6 +2854,8 @@ export function workbenchReducer(
         // status has to re-settle the action bar.
         diffReview: normalizeDiffReview(state.diffReview, action.sourceControl),
       };
+    case "github-reset":
+      return { ...state, ide: { ...state.ide, github: defaultGithubState() } };
     case "github-loading":
       return {
         ...state,
@@ -2903,6 +2906,7 @@ export function workbenchReducer(
         },
       };
     case "github-set-run-detail":
+      if (state.ide.github.selectedRunId !== action.detail.run.id) return state;
       return {
         ...state,
         ide: {
@@ -2910,11 +2914,11 @@ export function workbenchReducer(
           github: {
             ...state.ide.github,
             runDetail: action.detail,
-            selectedRunId: action.detail.run.id,
           },
         },
       };
     case "github-set-run-logs":
+      if (action.runId !== undefined && state.ide.github.selectedRunId !== action.runId) return state;
       return {
         ...state,
         ide: {
@@ -2939,7 +2943,7 @@ export function workbenchReducer(
         ...state,
         ide: {
           ...state.ide,
-          github: { ...state.ide.github, error: action.error, loading: false },
+          github: { ...state.ide.github, error: action.error },
         },
       };
     case "ide-set-tasks":

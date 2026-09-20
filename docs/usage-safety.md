@@ -158,7 +158,11 @@ Built as `UsageGuardConfig` plus a pure `guard_decision`, enforced inside
 `run_provider_chat_with_retry` so no provider path can be added that skips it.
 Counts come from the ledger, so the breakers cover providers that report no
 usage of their own. Defaults: a 10-minute window, 40 calls overall, 12
-unattended calls, 3 re-syntheses, and a 2M-token ceiling per call.
+unattended calls, 3 re-syntheses, a 2M-token ceiling per call, and 512 tool
+rounds in one turn. `usageGuard.maxToolRounds` sets that last one: raising it
+lets a long edit sweep keep going, and `0` removes the round budget entirely so
+a turn works until the model stops or the user does. The window and per-call
+ceilings still bound such a turn, which is what makes `0` safe to offer.
 
 A ledger the guard cannot read is not treated as proof of safety, but blocking
 on a read failure would strand the user with no way to work, so the call runs

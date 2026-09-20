@@ -1,5 +1,8 @@
+import { observeBrowserHostBounds } from "./browser-host-bounds";
+import { latestChatQuestions } from "./chat-questions";
+import { ChatQuestionPopup } from "./chat-question-popup";
 import { WorkspaceSearchResults } from "./workspace-search-results";
-import { chatMediaFiles } from "./chat-media-transfer";
+import { chatMediaFiles, isMediaDrag } from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
 import {
   SidebarProjectCard,
@@ -1992,6 +1995,134 @@ export function AppChrome({
             <SettingsSidebarContent
               activeSection={activeSettingsSection}
               backLabel={settingsBackLabel}
+              search={
+                <div
+                  className="gyro-settings-topbar-search"
+                  onBlurCapture={(event) => {
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      )
+                    ) {
+                      setIsSettingsSearchFocused(false);
+                    }
+                  }}
+                >
+                  <Search aria-hidden="true" size={14} />
+                  <input
+                    aria-activedescendant={
+                      matchingSettings.length > 0
+                        ? `settings-result-${selectedSettingsResultIndex}`
+                        : undefined
+                    }
+                    aria-autocomplete="list"
+                    aria-controls="settings-search-results"
+                    aria-expanded={
+                      isSettingsSearchFocused && Boolean(settingsQuery.trim())
+                    }
+                    aria-label="Search settings"
+                    onChange={(event) => setSettingsQuery(event.target.value)}
+                    onFocus={() => setIsSettingsSearchFocused(true)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "ArrowDown" &&
+                        matchingSettings.length
+                      ) {
+                        event.preventDefault();
+                        setSelectedSettingsResultIndex((current) =>
+                          Math.min(current + 1, matchingSettings.length - 1),
+                        );
+                      } else if (
+                        event.key === "ArrowUp" &&
+                        matchingSettings.length
+                      ) {
+                        event.preventDefault();
+                        setSelectedSettingsResultIndex((current) =>
+                          Math.max(0, current - 1),
+                        );
+                      } else if (event.key === "Enter") {
+                        const result =
+                          matchingSettings[selectedSettingsResultIndex];
+                        if (result) {
+                          event.preventDefault();
+                          openSettingsSearchResult(result);
+                        }
+                      } else if (event.key === "Escape") {
+                        setSettingsQuery("");
+                        setIsSettingsSearchFocused(false);
+                      }
+                    }}
+                    placeholder="Search settings"
+                    role="combobox"
+                    type="search"
+                    value={settingsQuery}
+                  />
+                  {settingsQuery ? (
+                    <button
+                      aria-label="Clear settings search"
+                      onClick={() => setSettingsQuery("")}
+                      type="button"
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : (
+                    <span aria-hidden="true" />
+                  )}
+                  {isSettingsSearchFocused && settingsQuery.trim() ? (
+                    <div
+                      className="gyro-settings-search-results"
+                      id="settings-search-results"
+                      role="listbox"
+                    >
+                      {matchingSettings.length > 0 ? (
+                        matchingSettings.map((entry, index) => {
+                          const section = settingsSidebarItems.find(
+                            (item) => item.id === entry.section,
+                          );
+                          const Icon = section?.icon ?? Settings;
+                          return (
+                            <button
+                              aria-selected={
+                                selectedSettingsResultIndex === index
+                              }
+                              className={
+                                selectedSettingsResultIndex === index
+                                  ? "is-selected"
+                                  : undefined
+                              }
+                              id={`settings-result-${index}`}
+                              key={`${entry.section}-${entry.label}`}
+                              onClick={() => openSettingsSearchResult(entry)}
+                              onMouseEnter={() =>
+                                setSelectedSettingsResultIndex(index)
+                              }
+                              role="option"
+                              type="button"
+                            >
+                              <Icon size={15} />
+                              <span>
+                                <strong>{entry.label}</strong>
+                                <small>{entry.detail}</small>
+                              </span>
+                              <em>{section?.label}</em>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="gyro-settings-search-empty">
+                          <Search size={16} />
+                          <span>
+                            <strong>No matching settings</strong>
+                            <small>
+                              Try a control, feature, or related term.
+                            </small>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              }
               onBack={() => {
                 setSettingsQuery("");
                 (onSettingsBack ?? (() => onSelectDestination("workspace")))();
@@ -2214,125 +2345,6 @@ export function AppChrome({
               className="gyro-settings-topbar-drag-region"
               data-tauri-drag-region
             />
-            <div
-              className="gyro-settings-topbar-search"
-              onBlurCapture={(event) => {
-                if (
-                  !event.currentTarget.contains(
-                    event.relatedTarget as Node | null,
-                  )
-                ) {
-                  setIsSettingsSearchFocused(false);
-                }
-              }}
-            >
-              <Search aria-hidden="true" size={14} />
-              <input
-                aria-activedescendant={
-                  matchingSettings.length > 0
-                    ? `settings-result-${selectedSettingsResultIndex}`
-                    : undefined
-                }
-                aria-autocomplete="list"
-                aria-controls="settings-search-results"
-                aria-expanded={
-                  isSettingsSearchFocused && Boolean(settingsQuery.trim())
-                }
-                aria-label="Search settings"
-                onChange={(event) => setSettingsQuery(event.target.value)}
-                onFocus={() => setIsSettingsSearchFocused(true)}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" && matchingSettings.length) {
-                    event.preventDefault();
-                    setSelectedSettingsResultIndex((current) =>
-                      Math.min(current + 1, matchingSettings.length - 1),
-                    );
-                  } else if (
-                    event.key === "ArrowUp" &&
-                    matchingSettings.length
-                  ) {
-                    event.preventDefault();
-                    setSelectedSettingsResultIndex((current) =>
-                      Math.max(0, current - 1),
-                    );
-                  } else if (event.key === "Enter") {
-                    const result =
-                      matchingSettings[selectedSettingsResultIndex];
-                    if (result) {
-                      event.preventDefault();
-                      openSettingsSearchResult(result);
-                    }
-                  } else if (event.key === "Escape") {
-                    setSettingsQuery("");
-                    setIsSettingsSearchFocused(false);
-                  }
-                }}
-                placeholder="Search settings"
-                role="combobox"
-                type="search"
-                value={settingsQuery}
-              />
-              {settingsQuery ? (
-                <button
-                  aria-label="Clear settings search"
-                  onClick={() => setSettingsQuery("")}
-                  type="button"
-                >
-                  <X size={13} />
-                </button>
-              ) : (
-                <span aria-hidden="true" />
-              )}
-              {isSettingsSearchFocused && settingsQuery.trim() ? (
-                <div
-                  className="gyro-settings-search-results"
-                  id="settings-search-results"
-                  role="listbox"
-                >
-                  {matchingSettings.length > 0 ? (
-                    matchingSettings.map((entry, index) => {
-                      const section = settingsSidebarItems.find(
-                        (item) => item.id === entry.section,
-                      );
-                      const Icon = section?.icon ?? Settings;
-                      return (
-                        <button
-                          aria-selected={selectedSettingsResultIndex === index}
-                          className={
-                            selectedSettingsResultIndex === index
-                              ? "is-selected"
-                              : undefined
-                          }
-                          id={`settings-result-${index}`}
-                          key={`${entry.section}-${entry.label}`}
-                          onClick={() => openSettingsSearchResult(entry)}
-                          onMouseEnter={() =>
-                            setSelectedSettingsResultIndex(index)
-                          }
-                          role="option"
-                          type="button"
-                        >
-                          <Icon size={15} />
-                          <span>
-                            <strong>{entry.label}</strong>
-                            <small>{entry.detail}</small>
-                          </span>
-                          <em>{section?.label}</em>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="gyro-settings-search-empty">
-                      <Search size={16} />
-                      <span>
-                        <strong>No matching settings</strong>
-                        <small>Try a control, feature, or related term.</small>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
           </div>
         ) : activeDestination === "workspace" &&
           activeWorkspaceLayout === "thread" &&
@@ -2582,12 +2594,14 @@ function SidebarUpdateControl({
 
 function SettingsSidebarContent({
   activeSection,
+  search,
   backLabel,
   onBack,
   onSectionChange,
   onToggleSidebar,
 }: {
   activeSection: SettingsSectionId;
+  search: ReactNode;
   backLabel: string;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
@@ -2609,16 +2623,6 @@ function SettingsSidebarContent({
             >
               <PanelLeft size={16} strokeWidth={1.5} />
             </button>
-            <button
-              aria-label={`Back to ${backLabel}`}
-              className="gyro-settings-back-button has-label"
-              onClick={onBack}
-              title={`Back to ${backLabel}`}
-              type="button"
-            >
-              <ArrowLeft size={13} />
-              <span>{backLabel}</span>
-            </button>
           </div>
           <div
             aria-hidden="true"
@@ -2626,9 +2630,23 @@ function SettingsSidebarContent({
             data-tauri-drag-region
           />
         </div>
+        <button
+          aria-label={`Back to ${backLabel}`}
+          className="gyro-settings-back-button has-label"
+          onClick={onBack}
+          title={`Back to ${backLabel}`}
+          type="button"
+        >
+          <ArrowLeft size={13} />
+          <span>Back to app</span>
+        </button>
       </div>
 
-      <div className="gyro-sidebar-actions is-settings-pages">
+      <div className="gyro-settings-sidebar-search">{search}</div>
+      <nav
+        aria-label="Settings pages"
+        className="gyro-sidebar-actions is-settings-pages"
+      >
         {(["Preferences", "AI & Agents", "Workspace", "System"] as const).map(
           (group) => {
             const items = settingsSidebarItems.filter(
@@ -2658,7 +2676,7 @@ function SettingsSidebarContent({
             );
           },
         )}
-      </div>
+      </nav>
     </>
   );
 }
@@ -3414,6 +3432,12 @@ function WorkspaceSidebarContent({
         new Date(first.updatedAt).getTime(),
     );
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
+  // Deleting a chat is two steps on the sidebar: a row menu's Delete opens
+  // this candidate, and the confirm overlay performs the removal.
+  const [sessionDeleteCandidate, setSessionDeleteCandidate] = useState<{
+    id: string;
+    label: string;
+  }>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
   const [newSessionMenuView, setNewSessionMenuView] = useState<
     "closed" | "root" | "more"
@@ -3926,7 +3950,10 @@ function WorkspaceSidebarContent({
       isDragging={draggedSessionId === session.id}
       key={session.id}
       onDelete={() => {
-        onDeleteSession?.(session.id);
+        setSessionDeleteCandidate({
+          id: session.id,
+          label: session.title?.trim() || "This chat",
+        });
         setOpenSessionMenuId(undefined);
       }}
       onMenuClose={() => setOpenSessionMenuId(undefined)}
@@ -3967,6 +3994,21 @@ function WorkspaceSidebarContent({
 
   return (
     <>
+      {sessionDeleteCandidate
+        ? createPortal(
+            <SessionDeleteConfirmOverlay
+              chatLabel={sessionDeleteCandidate.label}
+              isWorking={sendingSessionIds.includes(sessionDeleteCandidate.id)}
+              onCancel={() => setSessionDeleteCandidate(undefined)}
+              onDelete={() => {
+                const candidate = sessionDeleteCandidate;
+                setSessionDeleteCandidate(undefined);
+                onDeleteSession?.(candidate.id);
+              }}
+            />,
+            document.body,
+          )
+        : null}
       <div className="gyro-sidebar-persistent-header">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
           {/* Workspace hides the sidebar from the activity rail instead, so the
@@ -6984,6 +7026,30 @@ export function ChatGridSurface({
   while (slots.length < 4) slots.push(null);
   const dropZones = chatGridDropZones(slots);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
+  const gridRef = useRef<HTMLDivElement>(null);
+  // The pointer position of the last grid-level drag event. macOS only
+  // hit-tests drop targets on mouse movement, so a pointer that arrives over
+  // the grid and then holds still never fires another zone event; this is the
+  // position that lights the tile the overlay mounts under.
+  const dragPointer = useRef<{ x: number; y: number }>();
+  // Drag feedback is local state here: mounting the overlay, lighting a tile,
+  // or clearing both never changes what a pane renders. `renderPane` is a
+  // fresh closure on every app render, so an unchanged identity means no pane
+  // input changed either and the element from the previous render still
+  // stands. Reusing it lets React skip those subtrees, so a hover crossing
+  // costs the four slots instead of re-deriving and repainting every open
+  // chat mid-drag.
+  const paneElementCache = useRef(
+    new Map<
+      string,
+      {
+        element: ReactNode;
+        isMaximized: boolean;
+        isTiled: boolean;
+        renderPane: typeof renderPane;
+      }
+    >(),
+  );
   // Light up the tile the chat will actually land on. Grid-position zones can
   // resolve to a different slot when the pointed-at column is full, and a
   // preview that disagrees with the drop is worse than no preview.
@@ -6997,9 +7063,36 @@ export function ChatGridSurface({
   })();
 
   const finishDrag = useCallback(() => {
+    dragPointer.current = undefined;
     setDragSource(undefined);
     setDropTargetId(undefined);
   }, []);
+
+  // Hover preview and drop share one resolution so the lit tile is always the
+  // tile a release would use — including the gaps and padding between tiles,
+  // which belong to the nearest one rather than to no tile at all.
+  const highlightZoneUnderPointer = useCallback(() => {
+    const grid = gridRef.current;
+    const pointer = dragPointer.current;
+    if (!grid || !pointer) return;
+    const zone = nearestChatGridDropZone(
+      grid.querySelectorAll<HTMLElement>(".gyro-chat-grid-drop-zone"),
+      dropZones,
+      pointer.x,
+      pointer.y,
+    );
+    if (!zone) return;
+    setDropTargetId((current) => (current === zone.id ? current : zone.id));
+  }, [dropZones]);
+
+  // The dragover that mounts the overlay is the only event that ever named a
+  // pointer position; resolve its tile in the same commit so the highlight
+  // paints with the tiles instead of after the next mouse move.
+  useLayoutEffect(() => {
+    if (isChatDragging && dropTargetId === undefined) {
+      highlightZoneUnderPointer();
+    }
+  }, [dropTargetId, highlightZoneUnderPointer, isChatDragging]);
 
   useEffect(() => {
     if (!isChatDragging) return;
@@ -7056,8 +7149,54 @@ export function ChatGridSurface({
     finishDrag();
   };
 
+  // Keep the cache to the panes on screen; a closed pane must not pin its
+  // last element (and its handlers) for the life of the grid.
+  const livePaneIds = new Set(
+    slots.flatMap((pane) => (pane ? [pane.paneId] : [])),
+  );
+  for (const paneId of paneElementCache.current.keys()) {
+    if (!livePaneIds.has(paneId)) {
+      paneElementCache.current.delete(paneId);
+    }
+  }
+  const renderCachedPane = (pane: ChatPaneRef, isTiled: boolean) => {
+    const paneMaximized = pane.paneId === maximizedPaneId;
+    const cached = paneElementCache.current.get(pane.paneId);
+    if (
+      cached &&
+      cached.renderPane === renderPane &&
+      cached.isMaximized === paneMaximized &&
+      cached.isTiled === isTiled
+    ) {
+      return cached.element;
+    }
+    const element = renderPane(pane, {
+      isMaximized: paneMaximized,
+      isTiled,
+      onPaneDragEnd: finishDrag,
+      onPaneDragStart: (event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(CHAT_PANE_DRAG_MIME, pane.paneId);
+        // Render the targets before the pointer leaves the title bar.
+        // Previously the grid consumed pane drops but no chat ever produced
+        // this payload, so reordering a split was impossible.
+        dragPointer.current = undefined;
+        setDragSource("pane");
+        setDropTargetId(undefined);
+      },
+    });
+    paneElementCache.current.set(pane.paneId, {
+      element,
+      isMaximized: paneMaximized,
+      isTiled,
+      renderPane,
+    });
+    return element;
+  };
+
   return (
     <div
+      ref={gridRef}
       className={[
         "gyro-chat-grid",
         `is-count-${occupiedCount}`,
@@ -7088,44 +7227,33 @@ export function ChatGridSurface({
       }}
       onDragOverCapture={(event) => {
         const source = chatDragSource(event.dataTransfer);
-        if (source) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
+        if (!source) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        dragPointer.current = { x: event.clientX, y: event.clientY };
+        if (dragSource !== source) {
+          // First sighting of this drag: mount the overlay, then let the
+          // layout effect light the tile it is already sitting on.
           setDragSource(source);
+          return;
         }
+        // The overlay is up, so every move keeps the preview on the nearest
+        // tile — no zone-level enter event required to update it.
+        highlightZoneUnderPointer();
       }}
       onDropCapture={(event) => {
         if (!chatDragSource(event.dataTransfer)) return;
         // Own the entire grid drop, including floating panels and the gaps
         // between tiles. A child must not swallow a valid chat drop.
-        const targets = event.currentTarget.querySelectorAll<HTMLElement>(
-          ".gyro-chat-grid-drop-zone",
-        );
-        let nearest: ChatGridDropZone | undefined;
-        let distance = Infinity;
-        targets.forEach((target) => {
-          const bounds = target.getBoundingClientRect();
-          const dx = Math.max(
-            bounds.left - event.clientX,
-            0,
-            event.clientX - bounds.right,
-          );
-          const dy = Math.max(
-            bounds.top - event.clientY,
-            0,
-            event.clientY - bounds.bottom,
-          );
-          const candidateDistance = dx * dx + dy * dy;
-          const zone = dropZones.find(
-            (item) => item.position === target.dataset.position,
-          );
-          if (zone && candidateDistance < distance) {
-            nearest = zone;
-            distance = candidateDistance;
-          }
-        });
         const zone =
-          nearest ?? dropZones.find((item) => item.id === dropTargetId);
+          nearestChatGridDropZone(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              ".gyro-chat-grid-drop-zone",
+            ),
+            dropZones,
+            event.clientX,
+            event.clientY,
+          ) ?? dropZones.find((item) => item.id === dropTargetId);
         if (zone) handleDrop(event, zone);
         else finishDrag();
       }}
@@ -7137,8 +7265,11 @@ export function ChatGridSurface({
         const paneMaximized = pane?.paneId === maximizedPaneId;
         const paneFocused = pane?.paneId === focusedPaneId;
         const hiddenByMaximize = isMaximized && !paneMaximized;
+        const atWindowOrigin =
+          paneMaximized ||
+          (!isMaximized && slotIndex === slots.findIndex(Boolean));
         const slotArea =
-          arrangement === "grid"
+          hasMultiplePanes && arrangement === "grid"
             ? chatGridSlotArea(slots, slotIndex)
             : undefined;
         return (
@@ -7149,6 +7280,7 @@ export function ChatGridSurface({
               pane ? "is-occupied" : "is-empty",
               paneFocused ? "is-current-pane" : "is-subdued-pane",
               paneMaximized ? "is-pane-maximized" : "",
+              atWindowOrigin ? "is-window-origin" : "",
               hiddenByMaximize ? "is-hidden-by-maximize" : "",
             ]
               .filter(Boolean)
@@ -7159,24 +7291,7 @@ export function ChatGridSurface({
             style={slotArea}
           >
             {pane
-              ? renderPane(pane, {
-                  isMaximized: paneMaximized,
-                  isTiled: occupiedCount > 1 && !paneMaximized,
-                  onPaneDragEnd: finishDrag,
-                  onPaneDragStart: (event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData(
-                      CHAT_PANE_DRAG_MIME,
-                      pane.paneId,
-                    );
-                    // Render the targets before the pointer leaves the title
-                    // bar. Previously the grid consumed pane drops but no
-                    // chat ever produced this payload, so reordering a split
-                    // was impossible.
-                    setDragSource("pane");
-                    setDropTargetId(undefined);
-                  },
-                })
+              ? renderCachedPane(pane, occupiedCount > 1 && !paneMaximized)
               : null}
           </section>
         );
@@ -7206,18 +7321,11 @@ export function ChatGridSurface({
                   .join(" ")}
                 data-position={zone.position}
                 key={zone.id}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setDropTargetId(zone.id);
-                }}
                 onDragOver={(event) => {
+                  // Keep the zone itself a valid drop target; the highlight
+                  // stays with the grid so preview and drop agree.
                   event.preventDefault();
-                  event.stopPropagation();
                   event.dataTransfer.dropEffect = "move";
-                  if (dropTargetId !== zone.id) {
-                    setDropTargetId(zone.id);
-                  }
                 }}
                 onDrop={(event) => handleDrop(event, zone)}
               >
@@ -7291,6 +7399,38 @@ function chatGridDropZones(
   }));
 }
 
+/**
+ * Resolve the zone that owns a pointer position by distance to the rendered
+ * tiles. The hover preview and the drop itself both use this, so the lit tile
+ * is always the tile a release would land on — including in the gaps and
+ * padding between tiles, where no zone contains the pointer at all.
+ */
+function nearestChatGridDropZone(
+  targets: ArrayLike<HTMLElement>,
+  zones: ChatGridDropZone[],
+  x: number,
+  y: number,
+): ChatGridDropZone | undefined {
+  let nearest: ChatGridDropZone | undefined;
+  let distance = Infinity;
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    if (!target) continue;
+    const bounds = target.getBoundingClientRect();
+    const dx = Math.max(bounds.left - x, 0, x - bounds.right);
+    const dy = Math.max(bounds.top - y, 0, y - bounds.bottom);
+    const candidateDistance = dx * dx + dy * dy;
+    const zone = zones.find(
+      (item) => item.position === target.dataset.position,
+    );
+    if (zone && candidateDistance < distance) {
+      nearest = zone;
+      distance = candidateDistance;
+    }
+  }
+  return nearest;
+}
+
 function chatDragSource(dataTransfer: DataTransfer) {
   if (dataTransferHasType(dataTransfer, CHAT_PANE_DRAG_MIME)) {
     return "pane" as const;
@@ -7321,6 +7461,74 @@ function dataTransferHasType(dataTransfer: DataTransfer, type: string) {
     { length: types.length },
     (_, index) => types[index] ?? types.item?.(index),
   ).includes(type);
+}
+
+/** Draft key shared by a chat that has no session yet; the host uses the same. */
+export const NEW_CHAT_DRAFT_KEY = "new";
+
+/**
+ * The composer a drop belongs to, keyed by the draft it edits.
+ *
+ * Registered rather than passed because a drop can land on the app chrome
+ * around a chat — the drop is delivered to the window, and only the composer
+ * knows which chat its rectangle covers.
+ */
+type MediaDropTarget = {
+  attach: (files: File[]) => void;
+  paneKey: string;
+  rect: () => DOMRect;
+};
+
+const mediaDropTargets = new Map<string, MediaDropTarget[]>();
+
+/** One rectangle that can claim a drop, newest first within its draft. */
+function mediaTargetsFor(paneKey: string | undefined) {
+  return (paneKey && mediaDropTargets.get(paneKey)) || [];
+}
+
+function anyMediaDropTarget() {
+  return Array.from(mediaDropTargets.values()).flat();
+}
+/** The composer currently under the pointer, and the last one it named. */
+let mediaDropTargetUnderPointer = "";
+let mediaDropArmedKey: string | undefined;
+/** Set by the window listener so the surface's own capture pass stands down. */
+let mediaDropHandledAtWindow = false;
+
+const NO_MEDIA_DROP_TARGET: MediaDropTarget = {
+  attach: () => undefined,
+  paneKey: "",
+  rect: () => new DOMRect(),
+};
+
+/** Nothing is armed yet on the very first drag-over, so fall back to the host. */
+let localMediaDrop: MediaDropTarget | undefined;
+
+function registerMediaDropTarget(target: MediaDropTarget) {
+  const targets = mediaDropTargets.get(target.paneKey) ?? [];
+  const next = [...targets.filter((item) => item !== target), target];
+  mediaDropTargets.set(target.paneKey, next);
+  return () => {
+    const current = mediaDropTargets.get(target.paneKey) ?? [];
+    const remaining = current.filter((item) => item !== target);
+    if (remaining.length) mediaDropTargets.set(target.paneKey, remaining);
+    else mediaDropTargets.delete(target.paneKey);
+    // The armed key is left alone on purpose: a surface that unmounts between
+    // the drag-over and the drop must not retarget a drop already in flight.
+  };
+}
+
+/** The chat surface a drop landed on, when the pointer is inside one. */
+function mediaDropTargetAt(point: { x: number; y: number }) {
+  return anyMediaDropTarget().find((target) => {
+    const bounds = target.rect();
+    return (
+      point.x >= bounds.left &&
+      point.x <= bounds.right &&
+      point.y >= bounds.top &&
+      point.y <= bounds.bottom
+    );
+  });
 }
 
 function dragPointerIsOutside(event: ReactDragEvent<HTMLElement>) {
@@ -7395,6 +7603,11 @@ type ChatSurfaceProps = {
   events: SessionEvent[];
   draft?: string;
   draftResetToken?: number;
+  /**
+   * Which draft this surface edits. Drops are routed by it, so a chat in a
+   * split keeps the image that landed on it.
+   */
+  paneKey?: string;
   sessionTitle?: string;
   sessionSummary?: string;
   sessionModel?: {
@@ -7766,6 +7979,7 @@ export function ChatSurface({
   events,
   draft = "",
   draftResetToken = 0,
+  paneKey = NEW_CHAT_DRAFT_KEY,
   sessionTitle,
   sessionSummary,
   sessionModel,
@@ -7983,7 +8197,9 @@ export function ChatSurface({
         setGoalSaveNotice(`Goal saved: ${goal}. Send a message to start work.`);
         cancelGoalComposer();
       } catch {
-        setGoalSaveNotice("Could not save the goal. Your draft is preserved; try again.");
+        setGoalSaveNotice(
+          "Could not save the goal. Your draft is preserved; try again.",
+        );
       } finally {
         goalSavePendingRef.current = false;
       }
@@ -8000,30 +8216,91 @@ export function ChatSurface({
     onSend,
     sessionGoal?.text,
   ]);
+  // A drop is delivered only to the element that armed it, so anything that
+  // takes the composer's place mid-drag -- a re-render, a popover, the app
+  // chrome around the chat -- swallows it. Listening on the window keeps the
+  // drop reachable from anywhere and names the chat surface it landed on.
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (!isMediaDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      const point = { x: event.clientX, y: event.clientY };
+      const under = mediaDropTargetAt(point);
+      if (under) mediaDropTargetUnderPointer = under.paneKey;
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!isMediaDrag(event.dataTransfer)) return;
+      const files = chatMediaFiles(event.dataTransfer!);
+      if (!files.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = { x: event.clientX, y: event.clientY };
+      // The pane the drag was last over is the honest answer when the pointer
+      // sits outside every chat rectangle, and the host is the last resort.
+      const underPointer = mediaDropTargetUnderPointer;
+      mediaDropTargetUnderPointer = "";
+      const target =
+        mediaTargetsFor(mediaDropArmedKey).at(-1) ??
+        mediaTargetsFor(underPointer).at(-1) ??
+        mediaDropTargetAt(point) ??
+        localMediaDrop ??
+        NO_MEDIA_DROP_TARGET;
+      // Park the event only when this pass really took it: with no target the
+      // surface's own capture handler is still the one that can attach.
+      if (target !== NO_MEDIA_DROP_TARGET) mediaDropHandledAtWindow = true;
+      mediaDropArmedKey = target.paneKey || undefined;
+      target.attach(files);
+    };
+    const onDragLeave = (event: DragEvent) => {
+      // Dragging out of the window used to leave the drop armed for the next
+      // drag in, which is how an image landed in the chat before last.
+      if (event.relatedTarget) return;
+      mediaDropArmedKey = undefined;
+    };
+    window.addEventListener("dragover", onDragOver, true);
+    window.addEventListener("drop", onDrop, true);
+    window.addEventListener("dragleave", onDragLeave, true);
+    return () => {
+      window.removeEventListener("dragover", onDragOver, true);
+      window.removeEventListener("drop", onDrop, true);
+      window.removeEventListener("dragleave", onDragLeave, true);
+    };
+  }, []);
+
+  const [dismissedQuestionId, setDismissedQuestionId] = useState<string>();
+  const questionRequest = useMemo(() => latestChatQuestions(events), [events]);
+  const showQuestionPopup =
+    questionRequest &&
+    questionRequest.id !== dismissedQuestionId &&
+    !isComposerSending &&
+    !isGoalComposerActive &&
+    queuedMessages.length === 0;
   const handleArtifactPrompt = useCallback(
     (prompt: string) => onSend(prompt),
     [onSend],
   );
+  // A webview only asks a target to accept a drop if that target cancelled the
+  // drag-over, so arming is the whole job: a drag this misses shows a cursor
+  // that never becomes a drop, which reads as the app ignoring the image.
   const handleMediaDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      if (
-        dataTransferHasType(event.dataTransfer, "Files") ||
-        Array.from(event.dataTransfer.items ?? []).some(
-          (item) => item.kind === "file",
-        )
-      ) {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-      }
+      if (!isMediaDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
     },
     [],
   );
   const handleMediaDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      const files = chatMediaFiles(event.dataTransfer);
-      if (!files.length) {
+      // The window listener runs first and owns routing; it marks the event so
+      // this pass does not attach the same image twice.
+      if (mediaDropHandledAtWindow) {
+        mediaDropHandledAtWindow = false;
         return;
       }
+      const files = chatMediaFiles(event.dataTransfer);
+      if (!files.length) return;
       event.preventDefault();
       event.stopPropagation();
       onAttachMediaFiles?.(files);
@@ -8243,7 +8520,9 @@ export function ChatSurface({
       }
     });
     mutations.observe(transcript, { childList: true });
-    const releasePointer = () => { transcriptPointerDownRef.current = false; };
+    const releasePointer = () => {
+      transcriptPointerDownRef.current = false;
+    };
     window.addEventListener("pointerup", releasePointer);
     window.addEventListener("pointercancel", releasePointer);
     if (dock) observer.observe(dock);
@@ -8846,15 +9125,24 @@ export function ChatSurface({
               onClear={() => onGoalAction?.("clear")}
             />
           ) : null}
-          {goalSaveNotice ? <p role="status" className="gyro-goal-save-notice">{goalSaveNotice}</p> : null}
+          {goalSaveNotice ? (
+            <p role="status" className="gyro-goal-save-notice">
+              {goalSaveNotice}
+            </p>
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
             config={config}
+            draftKey={paneKey}
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}
+            draft={
+              isGoalComposerActive
+                ? (goalDraft ?? sessionGoal?.text ?? "")
+                : localDraft
+            }
             branchName={branchName}
             branchCatalog={branchCatalog}
             onDraftChange={handleComposerDraftChange}
@@ -9013,21 +9301,31 @@ export function ChatSurface({
           className="gyro-thread-body gyro-chat-transcript"
           onScroll={updateTranscriptScrollPosition}
           onWheel={(event) => {
-            if (event.deltaY < 0) isFollowingTranscriptBottomRef.current = false;
+            if (event.deltaY < 0)
+              isFollowingTranscriptBottomRef.current = false;
           }}
-          onPointerDown={() => { transcriptPointerDownRef.current = true; }}
+          onPointerDown={() => {
+            transcriptPointerDownRef.current = true;
+          }}
           onTouchStart={(event) => {
             transcriptTouchYRef.current = event.touches[0]?.clientY;
           }}
           onTouchMove={(event) => {
             const y = event.touches[0]?.clientY;
-            if (y !== undefined && transcriptTouchYRef.current !== undefined && y > transcriptTouchYRef.current) {
+            if (
+              y !== undefined &&
+              transcriptTouchYRef.current !== undefined &&
+              y > transcriptTouchYRef.current
+            ) {
               isFollowingTranscriptBottomRef.current = false;
             }
             transcriptTouchYRef.current = y;
           }}
           onKeyDown={(event) => {
-            if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) {
+            if (
+              ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
+              (event.key === " " && event.shiftKey)
+            ) {
               isFollowingTranscriptBottomRef.current = false;
             }
           }}
@@ -9051,6 +9349,15 @@ export function ChatSurface({
         </div>
 
         <div className="gyro-chat-composer-dock">
+          {showQuestionPopup ? (
+            <ChatQuestionPopup
+              key={questionRequest.id}
+              request={questionRequest}
+              draft={localDraft}
+              onSend={onSend}
+              onDismiss={() => setDismissedQuestionId(questionRequest.id)}
+            />
+          ) : null}
           {isTranscriptAwayFromBottom ? (
             <button
               aria-label="Jump to latest message"
@@ -9089,15 +9396,24 @@ export function ChatSurface({
               plan={sessionPlan}
             />
           ) : null}
-          {goalSaveNotice ? <p role="status" className="gyro-goal-save-notice">{goalSaveNotice}</p> : null}
+          {goalSaveNotice ? (
+            <p role="status" className="gyro-goal-save-notice">
+              {goalSaveNotice}
+            </p>
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
             config={config}
+            draftKey={paneKey}
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}
+            draft={
+              isGoalComposerActive
+                ? (goalDraft ?? sessionGoal?.text ?? "")
+                : localDraft
+            }
             branchName={branchName}
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
@@ -17092,6 +17408,7 @@ function GithubSidebarPanel({
       {github?.loading ? <small>…</small> : null}
       <button
         aria-label="Refresh GitHub"
+        disabled={github?.loading}
         onClick={() => void onRefresh?.()}
         title="Refresh"
         type="button"
@@ -17110,9 +17427,17 @@ function GithubSidebarPanel({
       <>
         {header}
         <div className="gyro-sidebar-mini-copy">
-          {availability?.hint ??
+          {github?.error ??
             availability?.error ??
-            "Checking GitHub availability…"}
+            availability?.hint ??
+            (github?.loading
+              ? "Checking GitHub availability…"
+              : "Refresh to check GitHub availability.")}
+          {availability?.hint &&
+          (github?.error || availability.error) &&
+          availability.hint !== (github?.error ?? availability.error)
+            ? ` ${availability.hint}`
+            : null}
         </div>
       </>
     );
@@ -17919,35 +18244,11 @@ export function BrowserPreviewSurface({
     if (!element) {
       return;
     }
-    const report = () => {
-      if (hostShouldHide) {
-        onHostBoundsChange(null);
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) {
-        onHostBoundsChange(null);
-        return;
-      }
-      onHostBoundsChange({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      });
-    };
-    report();
-    const observer = new ResizeObserver(() => report());
-    observer.observe(element);
-    window.addEventListener("resize", report);
-    // Capture scroll on ancestors so rail scrolling repositions the webview.
-    window.addEventListener("scroll", report, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", report);
-      window.removeEventListener("scroll", report, true);
+    if (hostShouldHide) {
       onHostBoundsChange(null);
-    };
+      return;
+    }
+    return observeBrowserHostBounds(element, onHostBoundsChange);
   }, [
     useNativeHost,
     onHostBoundsChange,
@@ -19550,6 +19851,86 @@ export function ChatCloseConfirmOverlay({
             type="button"
           >
             Stop and close
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type SessionDeleteConfirmOverlayProps = {
+  chatLabel: string;
+  /**
+   * A live provider turn blocks deletion in the backend, so a working chat
+   * explains that here rather than failing after the user commits.
+   */
+  isWorking?: boolean;
+  onCancel: () => void;
+  onDelete: () => void;
+};
+
+/**
+ * Deleting a sidebar chat is the one sidebar action that cannot be undone —
+ * it removes the transcript, saved attachments, panes, and terminals bound to
+ * the session — so the row menu's Delete asks here first.
+ */
+export function SessionDeleteConfirmOverlay({
+  chatLabel,
+  isWorking = false,
+  onCancel,
+  onDelete,
+}: SessionDeleteConfirmOverlayProps) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      aria-modal="true"
+      className="gyro-terminal-terminate-overlay"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+      role="alertdialog"
+    >
+      <section
+        aria-label={`Delete ${chatLabel}`}
+        className="gyro-terminal-terminate-card gyro-chat-delete-card"
+      >
+        <div className="gyro-terminal-terminate-heading">
+          <Trash2 size={16} />
+          <h2>Delete this chat?</h2>
+        </div>
+        <p>
+          Deleting <strong>{chatLabel}</strong> removes its messages and saved
+          attachments from Gyro, and this can't be undone. Files in the project
+          are not touched.
+        </p>
+        {isWorking ? (
+          <p className="gyro-chat-delete-note">
+            This chat is still working. Stop its turn before deleting it.
+          </p>
+        ) : null}
+        <div className="gyro-terminal-terminate-actions">
+          <button autoFocus onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button
+            className="is-danger"
+            disabled={isWorking}
+            onClick={onDelete}
+            type="button"
+          >
+            Delete chat
           </button>
         </div>
       </section>
@@ -23189,6 +23570,7 @@ function composerModelPickerItem(
 function Composer({
   attachments = [],
   chatMode = "normal",
+  draftKey = NEW_CHAT_DRAFT_KEY,
   constrainToParent = false,
   draft,
   branchName,
@@ -23237,6 +23619,11 @@ function Composer({
 }: {
   attachments?: ChatAttachment[];
   chatMode?: ChatMode;
+  /**
+   * Which draft this composer edits, so a drop routed from the window reaches
+   * the chat it landed on rather than whichever one happens to be focused.
+   */
+  draftKey?: string;
   constrainToParent?: boolean;
   draft: string;
   branchName?: string;
@@ -24127,6 +24514,37 @@ function Composer({
     }
   }, [isSlashMenuOpen, selectedSlashCommandIndex]);
 
+  // Drops land on a chat, not on a textarea: the rectangle that claims one is
+  // the whole chat surface this composer sits in, falling back to the composer
+  // itself when the surface is not the shell's ancestor.
+  const composerShellRef = useRef<HTMLDivElement | null>(null);
+  const attachMediaFilesRef = useRef(onAttachMediaFiles);
+  attachMediaFilesRef.current = onAttachMediaFiles;
+  useEffect(() => {
+    const attach = (files: File[]) => attachMediaFilesRef.current?.(files);
+    const host: MediaDropTarget = {
+      attach,
+      paneKey: draftKey,
+      rect: () => new DOMRect(),
+    };
+    // Any mounted composer can take a drop that landed off every chat, so there
+    // is always somewhere for it to go.
+    localMediaDrop = host;
+    const deregister = registerMediaDropTarget({
+      attach,
+      paneKey: draftKey,
+      rect: () => {
+        const shell = composerShellRef.current;
+        const surface = shell?.closest(".gyro-chat-surface");
+        return (surface ?? shell)?.getBoundingClientRect() ?? new DOMRect();
+      },
+    });
+    return () => {
+      deregister();
+      if (localMediaDrop === host) localMediaDrop = undefined;
+    };
+  }, [draftKey]);
+
   return (
     <div
       className={[
@@ -24145,7 +24563,10 @@ function Composer({
           ? { justifySelf: constrainToParent ? "stretch" : "center" }
           : undefined
       }
-      ref={slashMenuScopeRef}
+      ref={(node) => {
+        slashMenuScopeRef.current = node;
+        composerShellRef.current = node;
+      }}
     >
       {attachments.length > 0 ? (
         <div className="gyro-composer-attachments" aria-label="Attachments">
@@ -26144,6 +26565,14 @@ function ChatTurn({
           renderSay={(text) =>
             renderAssistantInlineContent(text, onOpenBrowserUrl)
           }
+          toolBudgetNotice={
+            providerStatus?.recoveryKind === "tool-budget"
+              ? (providerStatus.recoveryMessage ??
+                providerStatus.error ??
+                undefined)
+              : undefined
+          }
+          onContinueAfterToolBudget={canContinue ? onContinueChat : undefined}
         />
         {responseEvent && shouldShowFinalResponse ? (
           <div

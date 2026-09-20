@@ -514,6 +514,7 @@ export {
   ChatThread,
   ChatGridSurface,
   ChatSurface,
+  NEW_CHAT_DRAFT_KEY,
   CliUpdateBanner,
   ChatUtilityBar,
   CliWorkspaceSurface,
@@ -525,6 +526,7 @@ export {
   IdeSurface,
   ModelStandardPromptOverlay,
   ChatCloseConfirmOverlay,
+  SessionDeleteConfirmOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
   ProvidersSurface,
@@ -537,6 +539,9 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
+export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
+export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
+export { ChatQuestionPopup } from "./chat-question-popup";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,

@@ -270,6 +270,15 @@ pub struct UsageGuardConfig {
     /// Tokens one call may bill before it is stopped. Zero disables it.
     #[serde(default = "default_max_tokens_per_call")]
     pub max_tokens_per_call: u64,
+    /// Tool rounds one turn may run before it stops to summarise. Zero disables
+    /// it, so a turn keeps working until the model stops or the user does.
+    ///
+    /// This is the runaway guard for a model that answers every result with
+    /// another call. It is not a spend ceiling: `max_calls_per_window` and
+    /// `max_tokens_per_call` remain the ceilings that bound cost, which is why
+    /// switching this off leaves the turn finite and still rate-limited.
+    #[serde(default = "default_max_tool_rounds")]
+    pub max_tool_rounds: usize,
     /// Denominator for the usage percentages when no budget is configured.
     ///
     /// A percentage needs something to be a percentage *of*. Only Codex
@@ -306,6 +315,10 @@ fn default_max_tokens_per_call() -> u64 {
     2_000_000
 }
 
+fn default_max_tool_rounds() -> usize {
+    512
+}
+
 fn default_max_resyntheses_per_window() -> u32 {
     3
 }
@@ -324,6 +337,7 @@ impl Default for UsageGuardConfig {
             max_calls_per_window: default_max_calls_per_window(),
             max_unattended_calls_per_window: default_max_unattended_calls_per_window(),
             max_tokens_per_call: default_max_tokens_per_call(),
+            max_tool_rounds: default_max_tool_rounds(),
             max_resyntheses_per_window: default_max_resyntheses_per_window(),
             daily_reference_tokens: default_daily_reference_tokens(),
         }

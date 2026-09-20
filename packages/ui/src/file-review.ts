@@ -14,6 +14,7 @@
  */
 
 import { workItemFromEvent } from "./chat-run.ts";
+import { appliedFileChangeCounts } from "./file-change-counts.ts";
 import { FILE_REVIEW_SCHEMA } from "./types.ts";
 import type {
   FileReviewDecision,
@@ -164,7 +165,8 @@ export function diffHunks(diff: string): DiffHunk[] {
   }
   if (hunks.length === 0) {
     const body = raw.filter(
-      (line) => line.startsWith("+") || line.startsWith("-") || line.startsWith(" "),
+      (line) =>
+        line.startsWith("+") || line.startsWith("-") || line.startsWith(" "),
     );
     if (body.length) {
       return [
@@ -266,6 +268,15 @@ export function latestFileReviewTurn(
   for (const event of events) {
     const turnId = event.turnId;
     if (!turnId) continue;
+    const measured = appliedFileChangeCounts([event]);
+    if (measured.size) {
+      const files = byTurn.get(turnId) ?? new Map<string, FileReviewFile>();
+      for (const [path, counts] of measured) {
+        files.set(path, { ...files.get(path), path, ...counts });
+      }
+      byTurn.set(turnId, files);
+      latestTurnId = turnId;
+    }
     const item = workItemFromEvent(event);
     if (item?.kind !== "file") continue;
     const path = item.path?.trim();
@@ -288,5 +299,10 @@ export function latestFileReviewTurn(
   if (!latestTurnId) return undefined;
   const files = byTurn.get(latestTurnId);
   if (!files?.size) return undefined;
+  for (const [path, counts] of appliedFileChangeCounts(
+    events.filter((event) => event.turnId === latestTurnId),
+  )) {
+    files.set(path, { ...files.get(path), path, ...counts });
+  }
   return { turnId: latestTurnId, files: [...files.values()] };
 }

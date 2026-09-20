@@ -529,6 +529,7 @@ mod tests {
                         context_usage: None,
                         billed_usage: None,
                         rate_limits: Vec::new(),
+                        paused_at_tool_budget: false,
                         response: "done".into(),
                         resume_cursor: None,
                         retry_count: 0,

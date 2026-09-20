@@ -36,7 +36,9 @@ Completed output stays available when other chats start terminals.
 
 This runs within an active provider turn while Gyro is open. It is not a
 scheduled wakeup or a promise to resume after quitting the app. Existing provider
-turn/runtime/usage limits still apply (including Ollama's tool-round limit).
+turn/runtime/usage limits still apply: a turn stops asking for tools once it
+passes `usageGuard.maxToolRounds` rounds (default 512, `0` for no round budget)
+and gives a checkpoint instead. A long wait belongs in one call rather than many.
 Publishing remains subject to the user's original authorization.
 
 Processes that should stay up after the reply — dev servers, watchers, local

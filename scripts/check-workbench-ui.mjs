@@ -398,6 +398,7 @@ const menuBarRustSource = readRepoFile(
 );
 const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
 ].join("\n");
 expect(
@@ -567,6 +568,16 @@ expect(
       ".gyro-chat-grid.is-count-4,\n.gyro-chat-grid.is-dragging",
     ),
   "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
+);
+expect(
+  surfaceSource.includes("function nearestChatGridDropZone") &&
+    surfaceSource.includes("highlightZoneUnderPointer") &&
+    surfaceSource.includes("isChatDragging && dropTargetId === undefined") &&
+    surfaceSource.includes("paneElementCache") &&
+    surfaceSource.includes("cached.renderPane === renderPane") &&
+    surfaceSource.includes("cached.isTiled === isTiled") &&
+    !surfaceSource.includes("onDragEnter={(event) => {"),
+  "Chat drag hover should light the tile under the pointer immediately and reuse pane elements instead of rebuilding every open chat mid-drag.",
 );
 expect(
   surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
@@ -966,7 +977,10 @@ const coreCapabilitiesSource = readRepoFile(
 );
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
-const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const tauriSource = [
+  readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
 );
@@ -4521,7 +4535,7 @@ expect(
     appSource.includes("optimisticEvents && optimisticEvents.length > 0") &&
     appSource.includes("workspaceSearchRequestRef") &&
     appSource.includes("workspaceTreeRequestRef") &&
-    appSource.includes("ideSourceControlRequestRef") &&
+    appSource.includes("ideSourceControlRootRef.current === root") &&
     appSource.includes("ideServicesRequestRef") &&
     appSource.includes("if (cancelled)") &&
     reducerSource.includes(
@@ -5155,16 +5169,12 @@ expect(
     surfaceSource.includes("data-setting-key={settingsSearchKey(label)}") &&
     surfaceSource.includes('className="gyro-settings-topbar"') &&
     surfaceSource.includes('aria-label="Clear settings search"') &&
-    !surfaceSource.includes("gyro-settings-sidebar-search") &&
+    surfaceSource.includes("gyro-settings-sidebar-search") &&
     !surfaceSource.includes("query={settingsQuery}") &&
     styleSource.includes(".gyro-settings-topbar-search:focus-within") &&
     styleSource.includes(".gyro-settings-search-results") &&
     styleSource.includes(".gyro-settings-row.is-search-target") &&
-    cssRules(styleSource, ".gyro-settings-topbar").some(
-      (rule) =>
-        rule.includes("position: fixed") &&
-        rule.includes("justify-content: center"),
-    ) &&
+    surfaceSource.includes('aria-label="Settings pages"') &&
     styleSource.includes(
       ".gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface",
     ) &&
@@ -5199,7 +5209,7 @@ expect(
     styleSource.includes(".gyro-settings-section > header h1") &&
     appSource.includes("lastNonSettingsDestinationRef") &&
     appSource.includes("returnFromSettings"),
-  "Settings should keep a stable grouped sidebar and use a centered result dropdown that targets individual settings.",
+  "Settings should keep grouped page navigation and sidebar search that targets individual settings.",
 );
 const settingsSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("function SettingsSidebarContent"),
@@ -5209,9 +5219,9 @@ expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
     settingsSidebarSource.includes("onToggleSidebar") &&
     settingsSidebarSource.includes("aria-label={`Back to ${backLabel}`}") &&
-    settingsSidebarSource.includes("<span>{backLabel}</span>") &&
+    settingsSidebarSource.includes("<span>Back to app</span>") &&
     !settingsSidebarSource.includes('aria-label="Forward"'),
-  "Settings should use a contextual back control that names the originating surface.",
+  "Settings should offer Back to app with the originating surface in its accessible label.",
 );
 expect(
   surfaceSource.includes('onOpenSettingsSection("editor-workspace")') &&
@@ -5303,7 +5313,7 @@ expect(
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
     chatSurfaceSource.includes(
-      'draft={isGoalComposerActive ? (goalDraft ?? sessionGoal?.text ?? "") : localDraft}',
+      "draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? \"\")\n                : localDraft\n            }",
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
@@ -6422,7 +6432,10 @@ expect(
         `activePopover === "${popover}" ? popoverScopeRef : undefined`,
       ),
     ) &&
-    surfaceSource.includes("ref={slashMenuScopeRef}") &&
+    // The slash menu scope is attached through a callback ref because the same
+    // node is also the composer shell the goal editor measures.
+    surfaceSource.includes("slashMenuScopeRef.current = node;") &&
+    surfaceSource.includes("composerShellRef.current = node;") &&
     surfaceSource.includes(
       "const slashMenuScopeRef = useOutsidePointerDismiss",
     ) &&
@@ -7091,6 +7104,18 @@ expect(
 );
 
 expect(
+  surfaceSource.includes("export function SessionDeleteConfirmOverlay") &&
+    surfaceSource.includes("gyro-chat-delete-card") &&
+    surfaceSource.includes("Delete this chat?") &&
+    styleSource.includes(".gyro-chat-delete-card") &&
+    styleSource.includes(".gyro-chat-delete-note") &&
+    surfaceSource.includes("setSessionDeleteCandidate({") &&
+    surfaceSource.includes("<SessionDeleteConfirmOverlay") &&
+    surfaceSource.includes("onDeleteSession?.(candidate.id)"),
+  "Deleting a sidebar chat should confirm in a styled overlay before the session is removed.",
+);
+
+expect(
   appSource.includes('type: "close-tool-panel"'),
   "First send should explicitly keep the shared tool panel closed.",
 );
@@ -7284,7 +7309,7 @@ expect(
     ).some(
       (rule) =>
         rule.includes("background: var(--gyro-workspace-chrome)") &&
-        rule.includes("border-bottom: 1px solid var(--gyro-border-soft)") &&
+        !rule.includes("border-bottom:") &&
         rule.includes("height: 48px"),
     ) &&
     cssRules(

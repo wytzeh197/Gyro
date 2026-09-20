@@ -56,7 +56,8 @@ impl GithubRunState {
         if let Some(conclusion) = conclusion {
             return match conclusion.to_ascii_lowercase().as_str() {
                 "success" => Self::Success,
-                "failure" => Self::Failure,
+                "failure" | "error" | "startup_failure" => Self::Failure,
+                "pending" | "expected" => Self::Queued,
                 "cancelled" | "canceled" => Self::Cancelled,
                 "skipped" => Self::Skipped,
                 "neutral" => Self::Neutral,
@@ -69,7 +70,6 @@ impl GithubRunState {
         match status.trim().to_ascii_lowercase().as_str() {
             "queued" | "requested" | "waiting" | "pending" => Self::Queued,
             "in_progress" | "in-progress" => Self::InProgress,
-            "completed" => Self::Neutral,
             _ => Self::Unknown,
         }
     }
@@ -202,47 +202,58 @@ pub struct CreatePullRequestRequest {
 /// Returns `Ok` with `available: false` rather than `Err` for every expected
 /// "not set up" case; `Err` is reserved for genuinely unexpected failures.
 pub fn github_availability(repo: &Path) -> GithubAvailability {
-    let auth = match gh_output(repo, &["auth", "status"], GH_TIMEOUT) {
+    github_availability_with(|args| gh_output(repo, args, GH_TIMEOUT))
+}
+
+fn github_availability_with(
+    mut command: impl FnMut(&[&str]) -> Result<GhOutput>,
+) -> GithubAvailability {
+    let auth = match command(&["auth", "status"]) {
         Ok(output) => output,
         Err(error) => {
-            let message = error.to_string();
+            // Process-spawn errors carry the actual OS cause below "start gh".
+            let message = format!("{error:#}");
             // A missing binary and a logged-out CLI need different remedies.
             let looks_missing = message.contains("No such file")
                 || message.contains("not found")
                 || message.contains("cannot find");
-            return GithubAvailability::unavailable(
-                if looks_missing {
-                    "The GitHub CLI (gh) is not installed.".to_string()
-                } else {
-                    message
-                },
-                Some(INSTALL_HINT),
-            );
+            return GithubAvailability {
+                cli_installed: !looks_missing,
+                ..GithubAvailability::unavailable(
+                    if looks_missing {
+                        "The GitHub CLI (gh) is not installed.".to_string()
+                    } else {
+                        message
+                    },
+                    looks_missing.then_some(INSTALL_HINT),
+                )
+            };
         }
     };
 
     let combined = format!("{}\n{}", auth.stdout, auth.stderr);
-    if !auth.succeeded {
-        return GithubAvailability {
-            cli_installed: true,
-            error: Some(
-                first_meaningful_line(&combined)
-                    .unwrap_or_else(|| "The GitHub CLI is not authenticated.".to_string()),
-            ),
-            hint: Some(LOGIN_HINT.into()),
-            ..GithubAvailability::unavailable("", None)
-        };
-    }
-
-    let (host, account) = parse_auth_status(&combined);
+    // `gh auth status` exits unsuccessfully if *any* configured account has
+    // trouble. A stale account on another host must not disable this workspace.
+    // Repository access is the authoritative availability check.
+    let repository_result = command(&[
+        "repo",
+        "view",
+        "--json",
+        "nameWithOwner,defaultBranchRef,url",
+    ])
+    .and_then(|output| parse_gh_json("gh repo view", &output));
+    let repository_host = repository_result
+        .as_ref()
+        .ok()
+        .and_then(|value| value.get("url"))
+        .and_then(Value::as_str)
+        .and_then(|url| url::Url::parse(url).ok())
+        .and_then(|url| url.host_str().map(ToOwned::to_owned));
+    let (host, account) = parse_auth_status(&combined, repository_host.as_deref());
 
     // `gh repo view` fails when the directory is not a GitHub repository, which
     // is an ordinary state for a local-only workspace.
-    let (repository, default_branch, repo_error) = match gh_json(
-        repo,
-        &["repo", "view", "--json", "nameWithOwner,defaultBranchRef"],
-        GH_TIMEOUT,
-    ) {
+    let (repository, default_branch, repo_error) = match repository_result {
         Ok(value) => (
             value
                 .get("nameWithOwner")
@@ -258,14 +269,14 @@ pub fn github_availability(repo: &Path) -> GithubAvailability {
         Err(error) => (None, None, Some(error.to_string())),
     };
 
-    let authenticated = account.is_some();
+    let authenticated = repository.is_some() || auth.succeeded || account.is_some();
     GithubAvailability {
         schema: GITHUB_SCHEMA_V1.into(),
-        available: authenticated && repository.is_some(),
+        available: repository.is_some(),
         cli_installed: true,
         authenticated,
         account,
-        host,
+        host: repository_host.or(host),
         repository: repository.clone(),
         default_branch,
         error: repository.is_none().then(|| {
@@ -427,19 +438,76 @@ pub fn create_pull_request(
         args.push("--draft");
     }
     let output = gh_output(repo, &args, GH_TIMEOUT)?;
+    finish_pull_request_creation(request, &output, |url| pull_request_for_branch(repo, url))
+}
+
+fn finish_pull_request_creation(
+    request: &CreatePullRequestRequest,
+    output: &GhOutput,
+    read_back: impl FnOnce(&str) -> Result<Option<GithubPullRequest>>,
+) -> Result<GithubPullRequest> {
     if !output.succeeded {
-        return Err(gh_error("gh pr create", &output));
+        return Err(gh_error("gh pr create", output));
     }
-    // `gh pr create` prints the new PR URL; re-read it for the full record so
-    // callers get the same shape as `list_pull_requests`.
-    let url = output
+    // Once gh confirms creation, a failing follow-up read must not invite the
+    // user to repeat the mutation. Enrich the confirmed result when possible.
+    let (url, number) = output
         .stdout
         .lines()
         .map(str::trim)
-        .find(|line| line.starts_with("https://"))
+        .find_map(|line| pull_request_number_from_url(line).map(|number| (line, number)))
         .ok_or_else(|| anyhow!("gh pr create did not report a pull request URL"))?;
-    pull_request_for_branch(repo, url)?
-        .ok_or_else(|| anyhow!("the new pull request could not be read back"))
+    if let Ok(Some(pull_request)) = read_back(url) {
+        return Ok(pull_request);
+    }
+    Ok(GithubPullRequest {
+        number,
+        title: request.title.trim().to_string(),
+        state: "OPEN".to_string(),
+        author: None,
+        head_ref: request
+            .head
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        base_ref: request
+            .base
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        url: url.to_string(),
+        is_draft: request.draft,
+        checks: None,
+        created_at: None,
+        updated_at: None,
+    })
+}
+
+fn pull_request_number_from_url(value: &str) -> Option<u64> {
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let parts: Vec<_> = url.path_segments()?.collect();
+    match parts.as_slice() {
+        [owner, repository, "pull", number]
+            if !owner.is_empty()
+                && !repository.is_empty()
+                && !number.is_empty()
+                && number.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            number.parse::<u64>().ok().filter(|number| *number > 0)
+        }
+        _ => None,
+    }
 }
 
 fn parse_workflow_run(value: &Value) -> GithubWorkflowRun {
@@ -518,54 +586,77 @@ fn parse_pull_request(value: &Value) -> GithubPullRequest {
 }
 
 /// Collapse a PR's check rollup into one state: any failure wins, then any
-/// still-running check, otherwise success.
+/// still-running check. Cancelled and unknown outcomes never count as success.
 fn parse_status_check_rollup(value: Option<&Value>) -> Option<GithubRunState> {
     let checks = value?.as_array()?;
     if checks.is_empty() {
         return None;
     }
-    let mut has_active = false;
+    let mut result = GithubRunState::Success;
     for check in checks {
         let status = string_field(check, "status").unwrap_or_default();
         let conclusion = string_field(check, "conclusion")
-            .filter(|value| !value.is_empty())
+            .filter(|value| !value.trim().is_empty())
             // Non-Actions checks report `state` instead of `conclusion`.
-            .or_else(|| string_field(check, "state").filter(|value| !value.is_empty()));
+            .or_else(|| string_field(check, "state").filter(|value| !value.trim().is_empty()));
         let state = GithubRunState::from_status_and_conclusion(&status, conclusion.as_deref());
         if state.is_failure() {
             return Some(state);
         }
-        has_active |= state.is_active();
+        // An unfinished, cancelled, or unrecognized check is not a passing
+        // check. Keep these visible even when every other check succeeded.
+        result = match (result, state) {
+            (GithubRunState::InProgress, _) => GithubRunState::InProgress,
+            (_, state) if state.is_active() => GithubRunState::InProgress,
+            (GithubRunState::Cancelled, _) | (_, GithubRunState::Cancelled) => {
+                GithubRunState::Cancelled
+            }
+            (GithubRunState::Unknown, _) | (_, GithubRunState::Unknown) => GithubRunState::Unknown,
+            _ => result,
+        };
     }
-    Some(if has_active {
-        GithubRunState::InProgress
-    } else {
-        GithubRunState::Success
-    })
+    Some(result)
 }
 
-fn parse_auth_status(output: &str) -> (Option<String>, Option<String>) {
-    let mut host = None;
-    let mut account = None;
+fn parse_auth_status(output: &str, target_host: Option<&str>) -> (Option<String>, Option<String>) {
+    let mut accounts: Vec<(&str, &str, Option<bool>)> = Vec::new();
     for line in output.lines() {
         let line = line.trim();
         // gh prints: "✓ Logged in to github.com account NAME (keyring)".
         // Older builds print "... as NAME (...)".
-        if let Some(rest) = line
-            .split_once("Logged in to ")
-            .map(|(_, rest)| rest)
-            .filter(|_| account.is_none())
-        {
+        if let Some((_, rest)) = line.split_once("Logged in to ") {
             let mut parts = rest.split_whitespace();
-            host = parts.next().map(ToOwned::to_owned);
-            if let Some(marker) = parts.next() {
-                if marker == "account" || marker == "as" {
-                    account = parts.next().map(ToOwned::to_owned);
-                }
+            if let (Some(host), Some("account" | "as"), Some(account)) =
+                (parts.next(), parts.next(), parts.next())
+            {
+                accounts.push((host, account, None));
+            }
+        } else if let Some((_, active)) = line.split_once("Active account:") {
+            if let Some(account) = accounts.last_mut() {
+                account.2 = match active.trim() {
+                    "true" => Some(true),
+                    "false" => Some(false),
+                    _ => None,
+                };
             }
         }
     }
-    (host, account)
+    let eligible = |entry: &&(&str, &str, Option<bool>)| {
+        target_host.map_or(true, |host| host.eq_ignore_ascii_case(entry.0))
+    };
+    let selected = accounts
+        .iter()
+        .filter(eligible)
+        .find(|entry| entry.2 == Some(true))
+        .or_else(|| {
+            accounts
+                .iter()
+                .filter(eligible)
+                .find(|entry| entry.2.is_none())
+        });
+    selected
+        .map(|(host, account, _)| (Some((*host).to_string()), Some((*account).to_string())))
+        .unwrap_or_default()
 }
 
 fn first_meaningful_line(output: &str) -> Option<String> {
@@ -607,8 +698,12 @@ fn gh_error(label: &str, output: &GhOutput) -> anyhow::Error {
 
 fn gh_json(repo: &Path, args: &[&str], timeout: Duration) -> Result<Value> {
     let output = gh_output(repo, args, timeout)?;
+    parse_gh_json(&format!("gh {}", args.join(" ")), &output)
+}
+
+fn parse_gh_json(label: &str, output: &GhOutput) -> Result<Value> {
     if !output.succeeded {
-        return Err(gh_error(&format!("gh {}", args.join(" ")), &output));
+        return Err(gh_error(label, output));
     }
     serde_json::from_str(&output.stdout)
         .map_err(|error| anyhow!("could not read gh JSON output: {error}"))
@@ -662,6 +757,248 @@ fn gh_output_with_limits(
 mod tests {
     use super::*;
 
+    fn gh_result(stdout: &str, stderr: &str, succeeded: bool) -> GhOutput {
+        GhOutput {
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+            succeeded,
+        }
+    }
+
+    #[test]
+    fn availability_uses_repository_access_despite_unrelated_auth_failure() {
+        let mut calls = 0;
+        let availability = github_availability_with(|args| {
+            calls += 1;
+            Ok(match args[0] {
+                "auth" => gh_result(
+                    "",
+                    "github.com\n  ✓ Logged in to github.com account old (keyring)\n  - Active account: false\n  ✓ Logged in to github.com account current (keyring)\n  - Active account: true\ngithub.corp.example\n  X Failed to log in with expired credentials",
+                    false,
+                ),
+                "repo" => gh_result(
+                    r#"{"nameWithOwner":"owner/repo","defaultBranchRef":{"name":"main"},"url":"https://github.com/owner/repo"}"#,
+                    "",
+                    true,
+                ),
+                _ => panic!("unexpected GitHub command"),
+            })
+        });
+        assert_eq!(calls, 2);
+        assert!(availability.available);
+        assert!(availability.authenticated);
+        assert_eq!(availability.account.as_deref(), Some("current"));
+        assert_eq!(availability.host.as_deref(), Some("github.com"));
+        assert_eq!(availability.repository.as_deref(), Some("owner/repo"));
+        assert!(availability.error.is_none());
+        assert!(availability.hint.is_none());
+    }
+
+    #[test]
+    fn availability_selects_the_repository_host_account() {
+        let availability = github_availability_with(|args| {
+            Ok(if args[0] == "auth" {
+                gh_result(
+                    "✓ Logged in to github.com account personal (keyring)\n- Active account: true\n✓ Logged in to git.corp.example account work (keyring)\n- Active account: true",
+                    "",
+                    true,
+                )
+            } else {
+                gh_result(
+                    r#"{"nameWithOwner":"team/repo","url":"https://git.corp.example/team/repo"}"#,
+                    "",
+                    true,
+                )
+            })
+        });
+        assert!(availability.available);
+        assert_eq!(availability.host.as_deref(), Some("git.corp.example"));
+        assert_eq!(availability.account.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn availability_does_not_require_human_readable_account_output() {
+        let availability = github_availability_with(|args| {
+            Ok(if args[0] == "auth" {
+                gh_result("", "", true)
+            } else {
+                gh_result(
+                    r#"{"nameWithOwner":"owner/repo","url":"https://github.com/owner/repo"}"#,
+                    "",
+                    true,
+                )
+            })
+        });
+        assert!(availability.available);
+        assert!(availability.authenticated);
+        assert!(availability.account.is_none());
+    }
+
+    #[test]
+    fn availability_keeps_repository_errors_and_login_hints() {
+        let availability = github_availability_with(|args| {
+            Ok(if args[0] == "auth" {
+                gh_result("", "You are not logged into any GitHub hosts.", false)
+            } else {
+                gh_result(
+                    "",
+                    "To get started with GitHub CLI, please run: gh auth login",
+                    false,
+                )
+            })
+        });
+        assert!(!availability.available);
+        assert!(availability.cli_installed);
+        assert!(!availability.authenticated);
+        assert_eq!(availability.hint.as_deref(), Some(LOGIN_HINT));
+        assert!(availability.error.unwrap().contains("gh auth login"));
+    }
+
+    #[test]
+    fn availability_does_not_call_a_timeout_a_missing_installation() {
+        let availability =
+            github_availability_with(|_| Err(anyhow!("gh timed out after 30 seconds")));
+        assert!(!availability.available);
+        assert!(availability.cli_installed);
+        assert!(availability.hint.is_none());
+
+        let missing = github_availability_with(|_| {
+            Err(
+                anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+                    .context("start gh"),
+            )
+        });
+        assert!(!missing.cli_installed);
+        assert_eq!(missing.hint.as_deref(), Some(INSTALL_HINT));
+    }
+
+    #[test]
+    fn created_pull_request_survives_follow_up_read_failure() {
+        let request = CreatePullRequestRequest {
+            title: " Fix reliability ".into(),
+            draft: true,
+            ..Default::default()
+        };
+        let output = gh_result("https://git.corp.example/team/repo/pull/123\n", "", true);
+        for missing in [false, true] {
+            let pull_request = finish_pull_request_creation(&request, &output, |url| {
+                assert_eq!(url, "https://git.corp.example/team/repo/pull/123");
+                if missing {
+                    Ok(None)
+                } else {
+                    Err(anyhow!("connection reset"))
+                }
+            })
+            .unwrap();
+            assert_eq!(pull_request.number, 123);
+            assert_eq!(pull_request.title, "Fix reliability");
+            assert!(pull_request.is_draft);
+            assert_eq!(pull_request.state, "OPEN");
+            assert_eq!(pull_request.head_ref, "");
+            assert_eq!(pull_request.base_ref, "");
+            assert!(pull_request.checks.is_none());
+        }
+    }
+
+    #[test]
+    fn created_pull_request_uses_enriched_record_when_available() {
+        let request = CreatePullRequestRequest::default();
+        let output = gh_result("https://github.com/team/repo/pull/123", "", true);
+        let pull_request = finish_pull_request_creation(&request, &output, |_| {
+            Ok(Some(parse_pull_request(&serde_json::json!({
+                "number": 123, "title": "Server title", "author": {"login": "author"},
+                "headRefName": "feature", "baseRefName": "main"
+            }))))
+        })
+        .unwrap();
+        assert_eq!(pull_request.author.as_deref(), Some("author"));
+        assert_eq!(pull_request.head_ref, "feature");
+        assert_eq!(pull_request.base_ref, "main");
+    }
+
+    #[test]
+    fn creation_requires_success_and_an_unambiguous_pull_request_url() {
+        let request = CreatePullRequestRequest::default();
+        let output = gh_result(
+            "https://github.com/team/repo/pull/123",
+            "permission denied",
+            false,
+        );
+        assert!(finish_pull_request_creation(&request, &output, |_| {
+            panic!("failed mutation must not be read back")
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("permission denied"));
+
+        for value in [
+            "https://github.com/team/repo",
+            "https://github.com/team/repo/issues/123",
+            "https://github.com/team/repo/pull/0",
+            "https://github.com/team/repo/pull/not-a-number",
+            "https://github.com/team/repo/pull/+123",
+            "https://github.com/team/repo/pull/123/files",
+            "https://github.com/team/repo/pull/123?next=other",
+            "https://user:password@github.com/team/repo/pull/123",
+            "https://github.com//repo/pull/123",
+            "not a URL",
+        ] {
+            let output = gh_result(value, "", true);
+            assert!(
+                finish_pull_request_creation(&request, &output, |_| {
+                    panic!("unconfirmed mutation must not be read back")
+                })
+                .is_err(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_checks_do_not_report_unfinished_or_unsuccessful_checks_as_passing() {
+        for (check, expected) in [
+            (
+                serde_json::json!({"state": "PENDING"}),
+                GithubRunState::InProgress,
+            ),
+            (
+                serde_json::json!({"state": "EXPECTED"}),
+                GithubRunState::InProgress,
+            ),
+            (
+                serde_json::json!({"state": "ERROR"}),
+                GithubRunState::Failure,
+            ),
+            (
+                serde_json::json!({"status": "COMPLETED", "conclusion": "CANCELLED"}),
+                GithubRunState::Cancelled,
+            ),
+            (
+                serde_json::json!({"status": "COMPLETED", "conclusion": "STARTUP_FAILURE"}),
+                GithubRunState::Failure,
+            ),
+            (
+                serde_json::json!({"status": "COMPLETED", "conclusion": null}),
+                GithubRunState::Unknown,
+            ),
+            (
+                serde_json::json!({"state": "FUTURE_STATE"}),
+                GithubRunState::Unknown,
+            ),
+        ] {
+            for checks in [
+                serde_json::json!([{"state": "SUCCESS"}, check]),
+                serde_json::json!([check, {"state": "SUCCESS"}]),
+            ] {
+                assert_eq!(
+                    parse_status_check_rollup(Some(&checks)),
+                    Some(expected),
+                    "{checks}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn run_state_prefers_conclusion_over_status() {
         assert_eq!(
@@ -689,18 +1026,19 @@ mod tests {
     #[test]
     fn auth_status_parses_current_and_legacy_phrasing() {
         let (host, account) =
-            parse_auth_status("✓ Logged in to github.com account octocat (keyring)");
+            parse_auth_status("✓ Logged in to github.com account octocat (keyring)", None);
         assert_eq!(host.as_deref(), Some("github.com"));
         assert_eq!(account.as_deref(), Some("octocat"));
 
-        let (host, account) = parse_auth_status("✓ Logged in to github.com as octocat (oauth)");
+        let (host, account) =
+            parse_auth_status("✓ Logged in to github.com as octocat (oauth)", None);
         assert_eq!(host.as_deref(), Some("github.com"));
         assert_eq!(account.as_deref(), Some("octocat"));
     }
 
     #[test]
     fn auth_status_reports_nothing_when_logged_out() {
-        let (host, account) = parse_auth_status("You are not logged into any GitHub hosts.");
+        let (host, account) = parse_auth_status("You are not logged into any GitHub hosts.", None);
         assert!(host.is_none());
         assert!(account.is_none());
     }

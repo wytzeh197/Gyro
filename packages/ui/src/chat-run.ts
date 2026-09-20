@@ -13,6 +13,7 @@ import {
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
 import { FILE_REVIEW_SCHEMA } from "./types.ts";
+import { appliedFileChangeCounts } from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
 
 /**
@@ -652,6 +653,17 @@ export function buildRunModel(
     }
   }
 
+  // Guarded mutations record exact per-operation counts before writing. These
+  // survive reloads and take precedence over duplicate provider/capability rows.
+  for (const [path, counts] of appliedFileChangeCounts(events)) {
+    const existing = files.find((file) => file.path === path);
+    if (existing) {
+      Object.assign(existing, counts);
+    } else {
+      files.push({ path, ...counts, status: "done" });
+    }
+  }
+
   // Providers of every kind leave intermediate tool frames as "running" when
   // they end a turn without a final status update. Once the surface is no
   // longer driving the turn, nothing is still running — settle the rail so
@@ -947,7 +959,7 @@ function runPhase(
       name: "failed",
       message: cancelled
         ? status.message?.trim() || "Stopped"
-        : (status.error?.trim() || status.message || "The run stopped early"),
+        : status.error?.trim() || status.message || "The run stopped early",
       // Normalize so the header and problem tone can tell user-stop from crash.
       recoveryKind: cancelled ? "cancelled" : status.recoveryKind,
       recoveryMessage: status.recoveryMessage,

@@ -17,9 +17,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// The same budget as the local runner: one turn's tool loop, not a whole task.
-const OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS: usize = 128;
-
 /// What an endpoint speaking the OpenAI wire format runs as.
 ///
 /// This is a plain HTTPS call Gyro makes itself, so the credential owner is the
@@ -205,18 +202,22 @@ pub(super) fn run_openai_compatible_chat(
         heartbeat_stop.clone(),
     );
     let mut response = None;
+    let mut paused_at_tool_budget = false;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
-        for round in 0..=OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS {
+        // One turn's tool loop, not a whole task, bounded by
+        // `usageGuard.maxToolRounds`. The round after the budget carries the
+        // checkpoint instead of tools, so the loop ends there.
+        let round_budget = provider_reliability::configured_tool_rounds();
+        for round in 0.. {
+            if round_budget.is_some_and(|limit| round > limit) {
+                break;
+            }
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
             }
-            let round_tools = provider_reliability::tools_for_round(
-                &mut messages,
-                &tools,
-                round,
-                OPENAI_COMPATIBLE_MAX_TOOL_ROUNDS,
-            );
+            let round_tools =
+                provider_reliability::tools_for_round(&mut messages, &tools, round, round_budget);
             let tools_offered = !round_tools.is_empty();
             let turn = openai_compat_tool_chat_with_progress(
                 OpenAiCompatChatRequest {
@@ -258,6 +259,10 @@ pub(super) fn run_openai_compatible_chat(
                 "{label} returned tool calls although no tools were offered"
             );
             if turn.tool_calls.is_empty() {
+                // A reply given with tools withheld is the checkpoint the budget
+                // asked for, not the model choosing to stop: the turn is paused
+                // and the user is told so, rather than left with prose alone.
+                paused_at_tool_budget = !tools_offered;
                 response = Some(turn);
                 break;
             }
@@ -335,6 +340,7 @@ pub(super) fn run_openai_compatible_chat(
             }),
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
+            paused_at_tool_budget,
             response: response.content,
             resume_cursor: None,
             retry_count: 0,

@@ -1109,6 +1109,9 @@ const invoke: Invoke = (command, args) => {
       statusEvent,
     };
   }
+  if (command === "provider_api_key_status") {
+    return { configured: false };
+  }
   if (command === "get_provider_usage_ledger") {
     const providerId = String(args?.providerId ?? "anthropic");
     return {
