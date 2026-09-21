@@ -7,6 +7,8 @@ import {
   formatBytes,
   formatPublishedDate,
   isUsableRelease,
+  isPublicRelease,
+  validateSnapshot,
   selectReleaseAssets,
   sha256FromDigest,
 } from "./release-utils.js";
@@ -41,6 +43,12 @@ function setStatus(surface, text) {
 function applyArchitectureHint(surface, architecture) {
   const input = surface.querySelector(`input[value="${architecture}"]`);
   if (input) input.checked = true;
+  if (surface.releaseData)
+    configureSelectedDownload(
+      surface,
+      surface.releaseData.release,
+      surface.releaseData.assets,
+    );
   setStatus(surface, `${ARCHITECTURE_LABELS[architecture]} selected.`);
 }
 
@@ -94,13 +102,24 @@ function configureRelease(surface, release) {
   if (checksums) {
     checksums.href = assets.checksums?.browser_download_url ?? release.html_url;
   }
-  if (fallback) fallback.hidden = true;
+  if (fallback) fallback.textContent = "Release details refreshed from GitHub.";
 
   surface.releaseData = { release, assets };
   configureSelectedDownload(surface, release, assets);
+  surface.querySelector(".architecture-selector").hidden = false;
+  surface.querySelector(".enhanced-download").hidden = false;
+  surface.querySelector(".selected-checksum").hidden = false;
+  surface.querySelector(".static-downloads").hidden = true;
 }
 
 function showFallback(surface) {
+  if (surface.releaseData) {
+    const fallback = find(surface, "release-fallback");
+    if (fallback)
+      fallback.textContent =
+        "Live refresh unavailable. Showing the verified release snapshot; check GitHub for newer releases.";
+    return;
+  }
   const fallback = find(surface, "release-fallback");
   if (fallback) fallback.hidden = false;
   const link = find(surface, "download-link");
@@ -131,6 +150,7 @@ async function copyChecksum(surface, button) {
 function bindSurface(surface) {
   for (const input of surface.querySelectorAll('input[name="architecture"]')) {
     input.addEventListener("change", () => {
+      surface.architectureChosen = true;
       const data = surface.releaseData;
       if (data) configureSelectedDownload(surface, data.release, data.assets);
       setStatus(
@@ -162,16 +182,43 @@ async function startDownloadSurfaces() {
   if (!surfaces.length) return;
 
   for (const surface of surfaces) bindSurface(surface);
+  try {
+    const response = await fetch("/releases.json");
+    if (!response.ok) throw new Error("Snapshot unavailable");
+    const snapshot = validateSnapshot(await response.json());
+    const release = snapshot.releases.find((item) => !item.prerelease);
+    if (!release) throw new Error("No default release");
+    for (const surface of surfaces) {
+      configureRelease(surface, release);
+      find(surface, "release-fallback").textContent =
+        `Release snapshot checked ${snapshot.retrievedAt}.`;
+    }
+  } catch {
+    // Static architecture links remain usable even if the snapshot request fails.
+  }
   const recommendation = await reliableArchitectureHint();
   if (recommendation) {
     for (const surface of surfaces)
-      applyArchitectureHint(surface, recommendation);
+      if (!surface.architectureChosen)
+        applyArchitectureHint(surface, recommendation);
   }
 
   try {
     const release = await fetchGitHubJson(LATEST_RELEASE_API);
-    if (!isUsableRelease(release)) throw new Error("Invalid release response");
-    for (const surface of surfaces) configureRelease(surface, release);
+    if (
+      !isUsableRelease(release) ||
+      !isPublicRelease(release) ||
+      release.prerelease
+    )
+      throw new Error("Invalid release response");
+    for (const surface of surfaces) {
+      if (
+        !surface.releaseData ||
+        Date.parse(release.published_at) >=
+          Date.parse(surface.releaseData.release.published_at)
+      )
+        configureRelease(surface, release);
+    }
   } catch {
     for (const surface of surfaces) showFallback(surface);
   }
@@ -186,35 +233,31 @@ for (const link of document.querySelectorAll("[data-releases-link]")) {
 
 startDownloadSurfaces();
 
-// Progressive enhancement: every surface remains available without JavaScript.
-const workspaceSwitcher = document.querySelector(".workspace-switcher");
-if (workspaceSwitcher) {
-  const surfaceCards = [...document.querySelectorAll(".spine > .surface-card")];
-  const surfaceButtons = [...workspaceSwitcher.querySelectorAll("button")];
-  function showSurface(index) {
-    surfaceCards.forEach((card, i) => {
-      card.hidden = i !== index;
+// All stages are readable without JavaScript. Only these outer controls are interactive.
+for (const workflow of document.querySelectorAll("[data-workflow]")) {
+  const controls = workflow.querySelector(".workflow-controls");
+  if (!controls) continue;
+  const panels = [...workflow.querySelectorAll("[data-panel]")];
+  const buttons = [...controls.querySelectorAll("[data-stage]")];
+  const show = (id) => {
+    panels.forEach((panel) => {
+      panel.hidden = panel.dataset.panel !== id;
     });
-    surfaceButtons.forEach((button, i) => {
-      button.setAttribute("aria-pressed", String(i === index));
-    });
-  }
-  surfaceButtons.forEach((button, index) => {
-    surfaceCards[index].id = `workspace-surface-${index}`;
-    button.setAttribute("aria-controls", surfaceCards[index].id);
-    button.addEventListener("click", () => showSurface(index));
-  });
-  workspaceSwitcher.hidden = false;
-  showSurface(0);
-}
-
-// Keep the hero quiet; restore the navigation surface over scrolling content.
-const homeHeader = document.querySelector(".home-page .site-header");
-if (homeHeader) {
-  const updateHeaderSurface = () => {
-    homeHeader.classList.toggle("is-at-top", window.scrollY <= 8);
+    buttons.forEach((button) =>
+      button.setAttribute("aria-pressed", String(button.dataset.stage === id)),
+    );
   };
-  updateHeaderSurface();
-  window.addEventListener("scroll", updateHeaderSurface, { passive: true });
-  window.addEventListener("pageshow", updateHeaderSurface);
+  buttons.forEach((button) =>
+    button.addEventListener("click", () => show(button.dataset.stage)),
+  );
+  controls.hidden = false;
+  show(workflow.dataset.initialStage || buttons[0].dataset.stage);
+}
+for (const menu of document.querySelectorAll(".mobile-menu")) {
+  menu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      menu.open = false;
+      menu.querySelector("summary").focus();
+    }
+  });
 }

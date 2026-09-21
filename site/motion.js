@@ -7,7 +7,7 @@ const toggle = stage?.querySelector(".motion-toggle");
 if (stage && video && toggle) {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   let visible = false;
-  let userChoice = null;
+  let userChoice = false;
   let revision = 0;
   const wantsMotion = () =>
     userChoice ?? (!reduced.matches && !navigator.connection?.saveData);
@@ -29,7 +29,7 @@ if (stage && video && toggle) {
     }
     const theme =
       document.documentElement.dataset.theme === "light" ? "light" : "dark";
-    const source = `assets/motion/workflow-${theme}.mp4?v=2`;
+    const source = `/assets/motion/workflow-${theme}.mp4?v=2`;
     if (video.getAttribute("src") !== source) {
       video.classList.remove("is-playing");
       video.src = source;
@@ -80,7 +80,7 @@ if (stage && video && toggle) {
     attributeFilter: ["data-theme"],
   });
   reduced.addEventListener("change", () => {
-    userChoice = null;
+    userChoice = false;
     void sync();
   });
   document.addEventListener("visibilitychange", sync);
