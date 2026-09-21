@@ -371,7 +371,7 @@ impl Default for GyroConfig {
                     args: Vec::new(),
                     working_directory: None,
                     provider_id: Some("xai".into()),
-                    default_model: Some("grok-4.6".into()),
+                    default_model: Some("grok-4.7".into()),
                     readiness: CommandProfileReadiness::Waiting,
                 },
                 CommandProfile {
@@ -673,7 +673,7 @@ impl GyroConfig {
                 args: Vec::new(),
                 working_directory: None,
                 provider_id: Some("xai".into()),
-                default_model: Some("grok-4.6".into()),
+                default_model: Some("grok-4.7".into()),
                 readiness: CommandProfileReadiness::Waiting,
             },
             CommandProfile {
@@ -967,7 +967,7 @@ mod tests {
                 .iter()
                 .find(|profile| profile.id == "grok-build")
                 .and_then(|profile| profile.default_model.as_deref()),
-            Some("grok-4.6")
+            Some("grok-4.7")
         );
     }
 

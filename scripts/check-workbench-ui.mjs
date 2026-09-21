@@ -1306,18 +1306,20 @@ expect(
   "Kimi should default to K3 with the low/high/max effort levels it accepts.",
 );
 const xaiCatalog = providerCatalog.find((provider) => provider.id === "xai");
+const grok47 = xaiCatalog?.models.find((model) => model.id === "grok-4.7");
 const grok46 = xaiCatalog?.models.find((model) => model.id === "grok-4.6");
 expect(
   GROK_46_REASONING_EFFORTS.join(",") === "low,medium,high,xhigh" &&
-    xaiCatalog?.defaultModelId === "grok-4.6" &&
-    xaiCatalog.selectedModelId === "grok-4.6" &&
-    grok46?.displayName === "Grok 4.6" &&
-    grok46.contextWindowTokens === 500_000 &&
-    grok46.defaultReasoningEffort === "high" &&
-    grok46.supportedReasoningEfforts?.join(",") ===
+    xaiCatalog?.defaultModelId === "grok-4.7" &&
+    xaiCatalog.selectedModelId === "grok-4.7" &&
+    grok47?.displayName === "Grok 4.7" &&
+    grok47.contextWindowTokens === 500_000 &&
+    grok47.defaultReasoningEffort === "high" &&
+    grok47.supportedReasoningEfforts?.join(",") ===
       GROK_46_REASONING_EFFORTS.join(",") &&
+    grok46?.contextWindowTokens === 500_000 &&
     xaiCatalog.models.some((model) => model.id === "grok-4.5"),
-  "xAI should expose Grok 4.6 as the default while retaining Grok 4.5.",
+  "xAI should expose Grok 4.7 as the default while retaining Grok 4.6 and 4.5.",
 );
 const restoredGrok45Config = normalizedConfig({
   telemetryEnabled: false,
@@ -1340,8 +1342,32 @@ expect(
     ?.selectedModelId === "grok-4.5" &&
     restoredGrok45Config.modelProviders
       .find((provider) => provider.id === "xai")
-      ?.models.some((model) => model.id === "grok-4.6"),
-  "Adding Grok 4.6 should preserve an existing user's saved Grok 4.5 choice.",
+      ?.models.some((model) => model.id === "grok-4.7"),
+  "Adding Grok 4.7 should preserve an existing user's saved Grok 4.5 choice.",
+);
+const restoredGrok46Config = normalizedConfig({
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  selectedProviderId: "xai",
+  modelProviders: [
+    {
+      ...xaiCatalog,
+      enabled: true,
+      authStatus: "connected",
+      defaultModelId: "grok-4.6",
+      selectedModelId: "grok-4.6",
+    },
+  ],
+  commandProfiles: [],
+});
+expect(
+  restoredGrok46Config.modelProviders.find((provider) => provider.id === "xai")
+    ?.selectedModelId === "grok-4.6" &&
+    restoredGrok46Config.modelProviders
+      .find((provider) => provider.id === "xai")
+      ?.models.some((model) => model.id === "grok-4.7"),
+  "Adding Grok 4.7 should preserve an existing user's saved Grok 4.6 choice.",
 );
 
 const streamRegressionEvents = [

@@ -14007,7 +14007,7 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             ],
             auth_methods: &["xai.api_key", "cached_token"],
             cursor_kind: "xai-acp-session",
-            default_model: "grok-4.6",
+            default_model: "grok-4.7",
             runner: "grok-acp",
         }),
         "gemini" => Some(AcpProviderRuntime {
@@ -17751,9 +17751,9 @@ fn claude_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String>
 
 /// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
 ///
-/// Earlier Grok models publish `low`, `medium`, and `high`; Grok 4.6 also
-/// publishes `xhigh`. The flag parser accepts still more words, but the model
-/// rejects them once the turn starts, so unsupported carried-over levels are
+/// Earlier Grok models publish `low`, `medium`, and `high`; Grok 4.6 and
+/// Grok 4.7 also publish `xhigh`. The flag parser accepts still more words,
+/// but the model rejects them once the turn starts, so unsupported levels are
 /// dropped here and Grok keeps its own default.
 fn grok_reasoning_effort_arg(
     model_id: Option<&str>,
@@ -17762,7 +17762,8 @@ fn grok_reasoning_effort_arg(
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let supported = matches!(effort.as_str(), "low" | "medium" | "high")
-        || (effort == "xhigh" && (model_id.is_empty() || model_id == "grok-4.6"));
+        || (effort == "xhigh"
+            && (model_id.is_empty() || model_id == "grok-4.7" || model_id == "grok-4.6"));
     supported.then_some(effort)
 }
 
@@ -27550,6 +27551,10 @@ while True:
             Some("xhigh".into())
         );
         assert_eq!(
+            grok_reasoning_effort_arg(Some("grok-4.7"), Some("xhigh")),
+            Some("xhigh".into())
+        );
+        assert_eq!(
             grok_reasoning_effort_arg(Some("grok-4.5"), Some("xhigh")),
             None
         );
@@ -27726,6 +27731,10 @@ while True:
         assert_eq!(
             provider_model_context_window("openai", Some("gpt-5.4-mini")),
             Some(400_000)
+        );
+        assert_eq!(
+            provider_model_context_window("xai", Some("grok-4.7")),
+            Some(500_000)
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.6")),

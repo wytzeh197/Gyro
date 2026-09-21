@@ -36,7 +36,7 @@ export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
  *
  * The CLI's flag parser accepts more words than this, but each model publishes
  * its own selectable set and rejects the rest at turn time. This is the set
- * shared by Grok 4.5 and earlier models; Grok 4.6 adds xhigh below.
+ * shared by Grok 4.5 and earlier models; Grok 4.6 and 4.7 add xhigh below.
  */
 export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
@@ -44,7 +44,7 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
-/** Grok 4.6 adds xhigh to the reasoning levels supported by earlier models. */
+/** Grok 4.6 and Grok 4.7 add xhigh to the levels supported by earlier models. */
 export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
   ...GROK_REASONING_EFFORTS,
   "xhigh",
@@ -354,8 +354,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     authMode: "cli",
     authStatus: "not-connected",
     baseUrl: null,
-    defaultModelId: "grok-4.6",
-    selectedModelId: "grok-4.6",
+    defaultModelId: "grok-4.7",
+    selectedModelId: "grok-4.7",
     selectedReasoningEffort: "high",
     capabilities: {
       executionKind: "acp-cli",
@@ -369,10 +369,19 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "grok-4.7",
+        displayName: "Grok 4.7",
+        description:
+          "xAI's frontier model for coding, agentic tasks, and knowledge work.",
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
+      },
+      {
         id: "grok-4.6",
         displayName: "Grok 4.6",
         description:
-          "xAI's frontier model for coding, agentic tasks, and knowledge work.",
+          "Previous xAI frontier model for coding, agentic tasks, and knowledge work.",
         contextWindowTokens: 500_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
@@ -639,6 +648,14 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Gemini 3.8 Flash",
         description: "Long-context reasoning, routed by OpenRouter.",
         contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+      },
+      {
+        id: "x-ai/grok-4.7",
+        displayName: "Grok 4.7",
+        description: "xAI's frontier model, routed by OpenRouter.",
+        contextWindowTokens: 500_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },
