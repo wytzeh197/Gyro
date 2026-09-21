@@ -206,6 +206,7 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
+  isManualCompaction,
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
@@ -26560,6 +26561,15 @@ function ChatTurn({
     );
   }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
+  // `/compact` produces no answer, only its compaction step. Without a result
+  // line the finished turn reads as an empty, stalled response.
+  const isCompactionResult =
+    !responseEvent &&
+    !isRunning &&
+    runModel.phase.name === "done" &&
+    turn.timelineEvents.some((event) =>
+      isManualCompaction(turn.timelineEvents, event),
+    );
   // A completed run needs a conclusion as well as its evidence. The work
   // summary and file review answer "what changed"; the final response answers
   // whether the request is actually done and names any remaining caveat.
@@ -26568,6 +26578,7 @@ function ChatTurn({
   // a text answer, or work that stopped before an answer (empty void + tools).
   const canContinue =
     !isRunning &&
+    !isCompactionResult &&
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0) &&
     runModel.phase.name === "done";
@@ -26717,6 +26728,23 @@ function ChatTurn({
                       {turnTokensLabel(turn.turnTokens)}
                     </p>
                   ) : null}
+                </div>
+              </article>
+            </div>
+          </div>
+        ) : null}
+        {isCompactionResult ? (
+          <div
+            className="gyro-chat-run-sequence is-response"
+            aria-label="Compaction result"
+          >
+            <div className="gyro-chat-run-timeline is-final-response">
+              <article className="gyro-message is-assistant">
+                <div>
+                  <p>
+                    Context compacted. Earlier conversation was summarized so
+                    this chat has room to continue.
+                  </p>
                 </div>
               </article>
             </div>

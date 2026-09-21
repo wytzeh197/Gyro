@@ -5544,35 +5544,46 @@ fn compact_provider_chat_blocking(
     let running = codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
-    let completed = match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
-        Ok(()) => codex_context_compaction_activity(&activity_params, "done"),
-        Err(error) => {
-            let error = gyro_core::security::redact_secrets(&error.to_string());
-            let failed = ProviderActivity {
-                id: running.id,
-                kind: "context".into(),
-                label: "Context compaction failed".into(),
-                detail: Some(error.clone()),
-                file_counts: None,
-                note: None,
-                status: "failed".into(),
-            };
-            emit_provider_activity_event(&app, &request, &failed, Some(0));
-            let _ = store.append_system_events_with_turn_id(
-                session_uuid,
-                vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
-            );
-            return Err(error);
-        }
-    };
+    let (completed, context_usage) =
+        match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
+            Ok(usage) => (
+                codex_context_compaction_activity(&activity_params, "done"),
+                provider_context_usage_with_window(
+                    usage,
+                    &request.provider_id,
+                    request.model_id.as_deref(),
+                ),
+            ),
+            Err(error) => {
+                let error = gyro_core::security::redact_secrets(&error.to_string());
+                let failed = ProviderActivity {
+                    id: running.id,
+                    kind: "context".into(),
+                    label: "Context compaction failed".into(),
+                    detail: Some(error.clone()),
+                    file_counts: None,
+                    note: None,
+                    status: "failed".into(),
+                };
+                emit_provider_activity_event(&app, &request, &failed, Some(0));
+                let _ = store.append_system_events_with_turn_id(
+                    session_uuid,
+                    vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
+                );
+                return Err(error);
+            }
+        };
     emit_provider_activity_event(&app, &request, &completed, Some(0));
+    let mut entry = provider_activity_event_entry(&request, run_id, 0, &completed);
+    // The compacted thread's own measurement supersedes every earlier reading.
+    if let (Some(usage), Some(payload)) = (context_usage, entry.1.as_object_mut()) {
+        payload.insert(
+            "contextUsage".into(),
+            serde_json::to_value(&usage).map_err(to_string)?,
+        );
+    }
     let activity_events = store
-        .append_system_events_with_turn_id(
-            session_uuid,
-            vec![provider_activity_event_entry(
-                &request, run_id, 0, &completed,
-            )],
-        )
+        .append_system_events_with_turn_id(session_uuid, vec![entry])
         .map_err(to_string)?;
     Ok(ProviderContextCompactionResponse { activity_events })
 }
@@ -15096,7 +15107,7 @@ fn run_openai_codex_context_compaction(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: &ProviderResumeCursor,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<ProviderContextUsage>> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let mut process = command_for_provider("codex", "openai");
     process
@@ -15110,7 +15121,7 @@ fn run_openai_codex_context_compaction(
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     let mut child = ProviderProcessGuard::new(child);
-    let result = (|| -> anyhow::Result<()> {
+    let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
         let mut stdin = child
             .stdin
             .take()
@@ -15193,6 +15204,10 @@ fn run_openai_codex_context_compaction(
 
         let mut request_confirmed = false;
         let mut compaction_completed = false;
+        // Codex re-measures the thread after replacing its history. Keeping
+        // that reading lets the composer meter drop instead of showing the
+        // pre-compaction fill until the next turn reports.
+        let mut context_usage = None;
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
@@ -15221,17 +15236,23 @@ fn run_openai_codex_context_compaction(
                 codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
                 request_confirmed = true;
                 if compaction_completed {
-                    return Ok(());
+                    break;
                 }
                 continue;
             }
             let method = message.get("method").and_then(serde_json::Value::as_str);
             let params = message.get("params").cloned().unwrap_or_default();
             match method {
+                Some("thread/tokenUsage/updated") => {
+                    if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                        emit_provider_context_usage(app, request, &usage);
+                        context_usage = Some(usage);
+                    }
+                }
                 Some("thread/compacted") => {
                     compaction_completed = true;
                     if request_confirmed {
-                        return Ok(());
+                        break;
                     }
                 }
                 Some("item/completed") => {
@@ -15242,7 +15263,7 @@ fn run_openai_codex_context_compaction(
                     {
                         compaction_completed = true;
                         if request_confirmed {
-                            return Ok(());
+                            break;
                         }
                     }
                 }
@@ -15255,7 +15276,7 @@ fn run_openai_codex_context_compaction(
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("failed");
                     if status == "completed" {
-                        return Ok(());
+                        break;
                     }
                     let detail = params
                         .pointer("/turn/error/message")
@@ -15266,6 +15287,28 @@ fn run_openai_codex_context_compaction(
                 _ => {}
             }
         }
+        // The fresh reading can trail the completion notice; wait briefly for
+        // it rather than persisting a result the meter cannot use.
+        let usage_deadline = Instant::now() + Duration::from_millis(750);
+        while context_usage.is_none() {
+            let remaining = usage_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let Ok(Ok(message)) = messages.recv_timeout(remaining) else {
+                break;
+            };
+            if message.get("method").and_then(serde_json::Value::as_str)
+                == Some("thread/tokenUsage/updated")
+            {
+                let params = message.get("params").cloned().unwrap_or_default();
+                if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                    emit_provider_context_usage(app, request, &usage);
+                    context_usage = Some(usage);
+                }
+            }
+        }
+        Ok(context_usage)
     })();
     drop(child);
     result
