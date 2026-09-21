@@ -611,7 +611,38 @@ function preserveFirstSeenTimelineMetadata(
   timeline: SessionEvent[],
 ): SessionEvent {
   const firstPayload = recordFromUnknown(firstSeen.payload) ?? {};
-  const updatedPayload = recordFromUnknown(updated.payload) ?? {};
+  const updatedPayload = { ...recordFromUnknown(updated.payload) };
+  // Status-only frames and durable snapshots can omit counts already measured
+  // for this operation. Carry them only within the same chat, turn and file.
+  const fileKinds = ["file", "edit", "delete", "move"];
+  const firstPath = firstPayload.path ?? firstPayload.detail;
+  const updatedPath = updatedPayload.path ?? updatedPayload.detail;
+  if (
+    firstSeen.sessionId === updated.sessionId &&
+    firstSeen.turnId === updated.turnId &&
+    (firstSeen.id === updated.id ||
+      (typeof firstPayload.activityId === "string" &&
+        firstPayload.activityId === updatedPayload.activityId)) &&
+    firstPayload.kind === "provider-activity" &&
+    updatedPayload.kind === "provider-activity" &&
+    fileKinds.includes(String(firstPayload.activityKind)) &&
+    fileKinds.includes(String(updatedPayload.activityKind)) &&
+    typeof firstPath === "string" &&
+    firstPath.length > 0 &&
+    firstPath === updatedPath
+  ) {
+    for (const key of ["additions", "deletions"] as const) {
+      const previous = firstPayload[key];
+      if (
+        updatedPayload[key] == null &&
+        typeof previous === "number" &&
+        Number.isSafeInteger(previous) &&
+        previous >= 0
+      ) {
+        updatedPayload[key] = previous;
+      }
+    }
+  }
   const firstOrder = canonicalTimelineOrder(firstPayload.timelineOrder);
   const updatedOrder = canonicalTimelineOrder(updatedPayload.timelineOrder);
   if (updatedOrder !== undefined) {

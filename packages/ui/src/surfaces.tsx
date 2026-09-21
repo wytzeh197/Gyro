@@ -170,7 +170,10 @@ import {
   isKeptCurrent,
 } from "./file-review";
 import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
-import { totalFileChangeCounts } from "./file-change-counts";
+import {
+  isAppliedFileMutationEvent,
+  totalFileChangeCounts,
+} from "./file-change-counts";
 import { FileChangeCountBadges } from "./file-change-counts-view";
 import {
   sourceControlTotals,
@@ -373,10 +376,7 @@ import {
 } from "./chat-companion";
 import type { ChatCompanionWidthMode } from "./chat-companion";
 import type { ChatCompanionTabId } from "./chat-companion";
-import {
-  preferredCleanMachineConnectProvider,
-  resolveCleanMachinePath,
-} from "./clean-machine-path";
+import { resolveCleanMachinePath } from "./clean-machine-path";
 import {
   CUSTOM_PROVIDER_PREFIX,
   defaultModelLabel,
@@ -924,7 +924,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "general",
-    label: "When the model opens a workspace surface",
+    label: "Model activity previews",
     detail: "Choose Off, Peek, or Follow",
     keywords: "model activity preview follow",
   },
@@ -961,42 +961,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "general",
     label: "General",
-    detail: "Startup, sessions, workspace, and default surface",
-  },
-  {
-    section: "general",
-    label: "Startup behavior",
-    detail: "Open the last workspace on launch",
-    keywords: "restore reopen boot",
-  },
-  {
-    section: "general",
-    label: "Default workspace",
-    detail: "Choose a project folder when a chat needs one",
-    keywords: "project path launch",
-  },
-  {
-    section: "general",
-    label: "Default surface",
-    detail: "Restore the last saved view",
-    keywords: "chat destination",
-  },
-  {
-    section: "general",
-    label: "Session restore",
-    detail: "Restore app and terminal layouts after restart",
-    keywords: "resume reopen",
-  },
-  {
-    section: "general",
-    label: "Continue sessions from CLI",
-    detail: "Attach CLI-origin sessions to the desktop app",
-    keywords: "terminal resume",
+    detail: "Menu bar visibility and model activity",
   },
   {
     section: "appearance",
     label: "Appearance",
-    detail: "Theme, density, font, and motion",
+    detail: "Theme, density, colors, and quick actions",
   },
   {
     section: "appearance",
@@ -1021,18 +991,6 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     label: "Quick actions",
     detail: "Show starter prompts below an empty new-chat composer",
     keywords: "welcome start screen shortcuts buttons composer",
-  },
-  {
-    section: "appearance",
-    label: "Terminal font",
-    detail: "Font used by CLI panes, logs, and command blocks",
-    keywords: "sf mono typography",
-  },
-  {
-    section: "appearance",
-    label: "Reduce motion",
-    detail: "Follow macOS animation preferences",
-    keywords: "animation accessibility transitions",
   },
   {
     section: "usage-limits",
@@ -1162,13 +1120,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "advanced",
     label: "Advanced",
-    detail: "Local runtime, storage, diagnostics, and reset",
-  },
-  {
-    section: "advanced",
-    label: "Local socket",
-    detail: "Desktop bridge used by CLI agents",
-    keywords: "runtime connection",
+    detail: "Storage, diagnostics, and reset",
   },
   {
     section: "advanced",
@@ -2338,17 +2290,9 @@ export function AppChrome({
             ) : null}
           </div>
         ) : null}
-        {activeDestination === "settings" ? (
-          <div className="gyro-settings-topbar">
-            <div
-              aria-hidden="true"
-              className="gyro-settings-topbar-drag-region"
-              data-tauri-drag-region
-            />
-          </div>
-        ) : activeDestination === "workspace" &&
-          activeWorkspaceLayout === "thread" &&
-          !activeSession ? (
+        {activeDestination === "workspace" &&
+        activeWorkspaceLayout === "thread" &&
+        !activeSession ? (
           <div
             aria-hidden="true"
             className="gyro-main-titlebar-drag-region"
@@ -19992,6 +19936,8 @@ type SettingsSurfaceProps = {
   onDefaultWorkspaceModeChange?: (mode: WorkbenchMode) => void;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
+  onUseProvider?: (providerId: ProviderId, modelId: string) => void;
+  connectingProviderIds?: ProviderId[];
   onAppearanceColorsChange?: (
     mainColor: string,
     secondaryColor: string,
@@ -20073,6 +20019,11 @@ type SettingsSurfaceProps = {
 
 function ProviderApiKeySection({
   config,
+  selectedProviderId,
+  onSelectedProviderChange,
+  onUseProvider,
+  providerStatuses,
+  connectingProviderIds = [],
   providerApiKeyConfigured,
   savingProviderApiKeyId,
   onSaveProviderApiKey,
@@ -20080,18 +20031,36 @@ function ProviderApiKeySection({
 }: Pick<
   SettingsSurfaceProps,
   | "config"
+  | "onUseProvider"
+  | "providerStatuses"
+  | "connectingProviderIds"
   | "providerApiKeyConfigured"
   | "savingProviderApiKeyId"
   | "onSaveProviderApiKey"
   | "onClearProviderApiKey"
->) {
+> & {
+  selectedProviderId?: ProviderId;
+  onSelectedProviderChange?: (id: ProviderId) => void;
+}) {
   const providers = providersForConfig(config).filter((provider) =>
     providerSupportsApiKey(provider.id),
   );
   const [selectedId, setSelectedId] = useState("openai");
   const provider =
-    providers.find((item) => item.id === selectedId) ?? providers[0];
+    providers.find((item) => item.id === (selectedProviderId ?? selectedId)) ??
+    providers[0];
   if (!provider) return null;
+  const health = providerStatuses?.find((status) => status.id === provider.id);
+  const modelId = providerDefaultModelId(provider);
+  const canUse =
+    modelId &&
+    !savingProviderApiKeyId &&
+    !connectingProviderIds.includes(provider.id) &&
+    providerApiKeyConfigured?.[provider.id] &&
+    isProviderRuntimeUsable(provider, health) &&
+    !providerNeedsSignInRepair(provider, health) &&
+    health?.connectionStatus !== "failed" &&
+    health?.connectionStatus !== "checking";
   return (
     <SettingsGroup label="Connect with an API key">
       <div className="gyro-provider-api-key-section">
@@ -20110,7 +20079,10 @@ function ProviderApiKeySection({
           <SettingsSelect
             aria-label="API key provider"
             disabled={Boolean(savingProviderApiKeyId)}
-            onChange={(event) => setSelectedId(event.target.value)}
+            onChange={(event) => {
+              setSelectedId(event.target.value);
+              onSelectedProviderChange?.(event.target.value as ProviderId);
+            }}
             value={provider.id}
           >
             {providers.map((item) => (
@@ -20120,6 +20092,15 @@ function ProviderApiKeySection({
             ))}
           </SettingsSelect>
         </ProviderApiKeyField>
+        {canUse && onUseProvider ? (
+          <button
+            className="gyro-primary-button"
+            type="button"
+            onClick={() => onUseProvider(provider.id, modelId!)}
+          >
+            Use in chat
+          </button>
+        ) : null}
       </div>
     </SettingsGroup>
   );
@@ -20612,6 +20593,8 @@ export function SettingsSurface({
   onFetchCustomProviderModels,
   providerStatuses,
   onSelectProviderDefaultModel,
+  onUseProvider,
+  connectingProviderIds = [],
   selectedUsageProviderId,
   usageVisualization = "bars",
   dailyPaceWarning = true,
@@ -20640,6 +20623,8 @@ export function SettingsSurface({
   onToggleWorkspaceContribution,
   onRemoveWorkspaceContribution,
 }: SettingsSurfaceProps) {
+  const [apiKeyProviderId, setApiKeyProviderId] =
+    useState<ProviderId>("openai");
   const providerConfigs = providersForConfig(config);
   const enabledProviders = providerConfigs.filter(
     (provider) => provider.authStatus === "connected",
@@ -20705,24 +20690,9 @@ export function SettingsSurface({
           <SettingsSection
             icon={SlidersHorizontal}
             title="General"
-            description="Workspace startup, local sessions, and default surfaces."
+            description="Choose how Gyro stays available and responds to model activity."
           >
-            <SettingsGroup label="Startup">
-              <SettingsRow
-                label="Startup behavior"
-                value="Restore saved workspace"
-                detail="Gyro keeps local sessions available across app and CLI."
-              />
-              <SettingsRow
-                label="Default workspace"
-                value="Choose per chat"
-                detail="Choose a folder only when the session needs filesystem access."
-              />
-              <SettingsRow
-                label="Default surface"
-                value="Last used"
-                detail="Gyro restores your saved view. Switch between Sessions and Workspace in the sidebar."
-              />
+            <SettingsGroup label="App behavior">
               <SettingsRow
                 label="Menu bar"
                 detail="Keep Gyro's logo visible while chats and automations work in the background."
@@ -20736,7 +20706,7 @@ export function SettingsSurface({
             </SettingsGroup>
             <SettingsGroup label="Model activity">
               <SettingsRow
-                label="When the model opens a workspace surface"
+                label="Model activity previews"
                 detail="Off hides model activity previews. Peek shows a preview above the composer. Follow switches to the editor, terminal, or browser the model opens."
               >
                 <SettingsSegmented
@@ -20750,18 +20720,6 @@ export function SettingsSurface({
                   onChange={(value) => onModelFollowChange?.(value)}
                 />
               </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup label="Session behavior">
-              <SettingsRow
-                label="Session restore"
-                value="Enabled by Gyro"
-                detail="Terminal layouts and app sessions come back after restart."
-              />
-              <SettingsRow
-                label="Continue sessions from CLI"
-                value="Available"
-                detail="CLI-origin sessions can attach back into the desktop app."
-              />
             </SettingsGroup>
           </SettingsSection>
         ) : null}
@@ -20807,7 +20765,7 @@ export function SettingsSurface({
             <SettingsGroup label="Interface">
               <SettingsRow
                 label="Density"
-                detail="Compact fits more sessions, tools, and editor chrome; Comfortable gives rows and controls more breathing room."
+                detail="Choose tighter rows or more room between controls."
               >
                 <SettingsSegmented
                   label="Interface density"
@@ -20876,18 +20834,6 @@ export function SettingsSurface({
                   Reset colors
                 </button>
               </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup label="System">
-              <SettingsRow
-                label="Terminal font"
-                value="SF Mono"
-                detail="Applied across command blocks, CLI panes, and logs."
-              />
-              <SettingsRow
-                label="Reduce motion"
-                value="System"
-                detail="Activity rings and transitions follow macOS preferences."
-              />
             </SettingsGroup>
           </SettingsSection>
         ) : null}
@@ -21190,8 +21136,60 @@ export function SettingsSurface({
           <SettingsSection
             icon={KeyRound}
             title="Providers"
-            description="Connect a provider and choose the model it starts new chats with."
+            description="Connect an account, add an API key, or use a local model. Then choose a model and return to chat."
           >
+            <nav
+              className="gyro-provider-connect-path"
+              aria-label="Connection methods"
+            >
+              {(
+                [
+                  [
+                    "gyro-provider-accounts",
+                    "Existing account",
+                    "Use your provider’s sign-in.",
+                  ],
+                  [
+                    "gyro-provider-api-keys",
+                    "API key",
+                    "Use a key from your provider.",
+                  ],
+                  [
+                    "gyro-provider-ollama",
+                    "Local models",
+                    "Connect to Ollama on this Mac.",
+                  ],
+                ] as const
+              ).map(([target, label, detail]) => (
+                <button
+                  key={target}
+                  type="button"
+                  onClick={() => {
+                    const section = document.getElementById(target);
+                    section?.scrollIntoView({
+                      behavior: "instant",
+                      block: "start",
+                    });
+                    section?.focus({ preventScroll: true });
+                  }}
+                >
+                  <strong>{label}</strong>
+                  <span>{detail}</span>
+                </button>
+              ))}
+            </nav>
+            <div
+              className="gyro-provider-connect-help"
+              id="gyro-provider-accounts"
+              tabIndex={-1}
+            >
+              <h2>Connect your provider</h2>
+              <p>
+                Choose your provider below. Sign-in opens a terminal and may
+                continue in your browser. Finish there, then return here to
+                choose “Use in chat”.
+              </p>
+            </div>
             <div className="gyro-provider-table is-native-list">
               <div className="gyro-provider-table-head">
                 <span>Provider</span>
@@ -21212,8 +21210,26 @@ export function SettingsSurface({
                 const needsSignInRepair =
                   !needsModelInstall &&
                   providerNeedsSignInRepair(provider, health);
+                const isConnecting =
+                  connectingProviderIds.includes(provider.id) ||
+                  provider.authStatus === "connecting";
+                const isChecking =
+                  isConnecting || health?.connectionStatus === "checking";
+                const canUseInChat =
+                  capabilities?.executable &&
+                  isProviderRuntimeUsable(provider, health) &&
+                  !needsSignInRepair &&
+                  health?.connectionStatus !== "failed" &&
+                  !isChecking &&
+                  Boolean(defaultModelId);
                 return (
                   <div
+                    id={
+                      provider.id === "ollama"
+                        ? "gyro-provider-ollama"
+                        : undefined
+                    }
+                    tabIndex={provider.id === "ollama" ? -1 : undefined}
                     className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
                     key={provider.id}
                   >
@@ -21222,7 +21238,32 @@ export function SettingsSurface({
                         label={provider.displayName}
                         providerId={provider.id}
                       />
-                      <strong>{provider.displayName}</strong>
+                      <div>
+                        <strong>{provider.displayName}</strong>
+                        <small
+                          className="gyro-provider-setup-message"
+                          role="status"
+                        >
+                          {isConnecting
+                            ? "Connecting. Follow the sign-in instructions if prompted."
+                            : isChecking
+                              ? "Checking connection…"
+                              : needsModelInstall
+                                ? "Install a model, then refresh."
+                                : health?.connectionStatus === "failed" ||
+                                    needsSignInRepair
+                                  ? (health?.healthSummary ??
+                                    "Connection needs attention. Try signing in again.")
+                                  : canUseInChat
+                                    ? "Choose a model, then use it in chat."
+                                    : provider.id === "ollama"
+                                      ? "Start Ollama, then refresh models."
+                                      : provider.authMode === "env" &&
+                                          providerSupportsApiKey(provider.id)
+                                        ? "Add your provider’s API key below."
+                                        : "Sign in to connect this provider."}
+                        </small>
+                      </div>
                     </div>
                     <div className="gyro-provider-default-model">
                       {hasModelChoice ? (
@@ -21255,20 +21296,48 @@ export function SettingsSurface({
                       status={
                         needsModelInstall ||
                         needsSignInRepair ||
-                        provider.authStatus === "connecting"
+                        isChecking ||
+                        health?.connectionStatus === "failed"
                           ? "warning"
                           : provider.authStatus === "connected"
                             ? "good"
                             : "neutral"
                       }
                     >
-                      {providerConnectionLabel(provider, health)}
+                      {isChecking
+                        ? "Connecting…"
+                        : providerConnectionLabel(provider, health)}
                     </SettingsStatus>
                     <div className="gyro-settings-provider-actions">
+                      {canUseInChat && onUseProvider ? (
+                        <button
+                          className="gyro-primary-button"
+                          type="button"
+                          onClick={() =>
+                            onUseProvider(provider.id, defaultModelId!)
+                          }
+                        >
+                          Use in chat
+                        </button>
+                      ) : null}
+                      {!canUseInChat &&
+                      !isChecking &&
+                      !needsSignInRepair &&
+                      !needsModelInstall &&
+                      provider.authStatus === "connected" &&
+                      health?.connectionStatus === "failed" ? (
+                        <button
+                          className="gyro-secondary-button"
+                          type="button"
+                          onClick={() => onTestProvider?.(provider.id)}
+                        >
+                          Check connection
+                        </button>
+                      ) : null}
                       {provider.id === "ollama" ? (
                         <button
                           className="gyro-secondary-button"
-                          disabled={provider.authStatus === "connecting"}
+                          disabled={isChecking}
                           onClick={() => onTestProvider?.(provider.id)}
                           type="button"
                         >
@@ -21281,27 +21350,46 @@ export function SettingsSurface({
                         <button
                           className="gyro-primary-button"
                           disabled={
-                            provider.authStatus === "connecting" ||
+                            isChecking ||
                             needsModelInstall ||
                             (provider.authStatus === "connected" &&
                               !needsSignInRepair)
                           }
-                          onClick={() =>
-                            needsSignInRepair
-                              ? onSignInProvider?.(provider.id)
-                              : onToggleProvider?.(provider.id)
-                          }
+                          onClick={() => {
+                            if (
+                              provider.authMode === "env" &&
+                              providerSupportsApiKey(provider.id)
+                            ) {
+                              setApiKeyProviderId(provider.id);
+                              const section = document.getElementById(
+                                "gyro-provider-api-keys",
+                              );
+                              section?.scrollIntoView({
+                                behavior: "instant",
+                                block: "start",
+                              });
+                              section?.focus({ preventScroll: true });
+                            } else if (needsSignInRepair) {
+                              onSignInProvider?.(provider.id);
+                            } else {
+                              onToggleProvider?.(provider.id);
+                            }
+                          }}
                           type="button"
                         >
-                          {needsModelInstall
-                            ? "Model required"
-                            : needsSignInRepair
-                              ? "Sign in again"
-                              : provider.authStatus === "connected"
-                                ? "Connected"
-                                : provider.authMode === "env"
-                                  ? "Check environment"
-                                  : providerPrimaryActionLabel(provider)}
+                          {isChecking
+                            ? "Connecting…"
+                            : needsModelInstall
+                              ? "Model required"
+                              : needsSignInRepair
+                                ? "Sign in again"
+                                : provider.authStatus === "connected"
+                                  ? "Connected"
+                                  : provider.authMode === "env"
+                                    ? providerSupportsApiKey(provider.id)
+                                      ? "Add API key"
+                                      : "Check environment"
+                                    : providerPrimaryActionLabel(provider)}
                         </button>
                       ) : null}
                       <ProviderDetailsMenu
@@ -21310,7 +21398,7 @@ export function SettingsSurface({
                         <div>
                           <button
                             className="gyro-secondary-button"
-                            disabled={provider.authStatus === "connecting"}
+                            disabled={isChecking}
                             onClick={() => onTestProvider?.(provider.id)}
                             type="button"
                           >
@@ -21432,13 +21520,20 @@ export function SettingsSurface({
                 </SettingsRow>
               </SettingsGroup>
             )}
-            <ProviderApiKeySection
-              config={config}
-              providerApiKeyConfigured={providerApiKeyConfigured}
-              savingProviderApiKeyId={savingProviderApiKeyId}
-              onSaveProviderApiKey={onSaveProviderApiKey}
-              onClearProviderApiKey={onClearProviderApiKey}
-            />
+            <div id="gyro-provider-api-keys" tabIndex={-1}>
+              <ProviderApiKeySection
+                connectingProviderIds={connectingProviderIds}
+                selectedProviderId={apiKeyProviderId}
+                onSelectedProviderChange={setApiKeyProviderId}
+                onUseProvider={onUseProvider}
+                providerStatuses={providerStatuses}
+                config={config}
+                providerApiKeyConfigured={providerApiKeyConfigured}
+                savingProviderApiKeyId={savingProviderApiKeyId}
+                onSaveProviderApiKey={onSaveProviderApiKey}
+                onClearProviderApiKey={onClearProviderApiKey}
+              />
+            </div>
             <CustomProviderSection
               config={config}
               savingProviderApiKeyId={savingProviderApiKeyId}
@@ -21773,15 +21868,8 @@ export function SettingsSurface({
           <SettingsSection
             icon={Settings}
             title="Advanced"
-            description="Local sockets, files, diagnostics, and state reset."
+            description="Find local data, export diagnostics, and reset presentation preferences."
           >
-            <SettingsGroup label="Local runtime">
-              <SettingsRow
-                label="Local socket"
-                value="Desktop app only"
-                detail="The desktop app provides a local bridge for CLI agents. This row does not run a connection check."
-              />
-            </SettingsGroup>
             <SettingsGroup label="Storage and diagnostics">
               <SettingsRow
                 label="Session store"
@@ -23899,19 +23987,21 @@ function Composer({
         hasUserWorkspace
       : canSendChat(hasReadyProvider, workspacePath));
   const canSubmitComposer = isGoalComposerActive || canSubmitChat;
-  const preferredConnect = preferredCleanMachineConnectProvider(
-    providerConfigs
-      .filter((provider) => isProviderExecutable(provider.id))
-      .map((provider) => ({
-        executable: true,
-        id: provider.id,
-        label: provider.displayName,
-      })),
-  );
+  const needsProviderSetup =
+    !boundToSession &&
+    !providerConfigs.some((provider) =>
+      isProviderRuntimeUsable(
+        provider,
+        providerStatuses?.find((status) => status.id === provider.id),
+      ),
+    );
   const cleanMachinePath = resolveCleanMachinePath({
     hasReadyProvider,
-    preferredProviderId: preferredConnect.id,
-    preferredProviderLabel: preferredConnect.label,
+    preferredProviderId:
+      hasSelectedProvider && !needsProviderSetup
+        ? selectedProvider?.id
+        : undefined,
+    preferredProviderLabel: selectedProvider?.displayName,
     providerBlockAction: providerRuntimeBlock?.action,
     providerBlockActionLabel: providerRuntimeBlock?.actionLabel,
     providerBlockMessage: providerErrorMessage,
@@ -24913,7 +25003,7 @@ function Composer({
       !canSubmitChat &&
       chatMode !== "council" &&
       !isCliUpdating &&
-      !hasUserWorkspace ? (
+      (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider) ? (
         <div className="gyro-composer-blocker" role="status">
           <span>
             <PlugZap
@@ -26142,6 +26232,12 @@ function deriveTranscriptState(events: SessionEvent[]) {
       if (tokens) {
         ensureTurn(turnId, event.createdAt).turnTokens = tokens;
       }
+    }
+    // Keep the receipt in its owning turn before hiding approval bookkeeping.
+    // Both the live dock and final summary read measurements from this timeline.
+    if (isAppliedFileMutationEvent(event)) {
+      ensureTurn(turnId, event.createdAt).timelineEvents.push(event);
+      continue;
     }
     if (isHiddenTranscriptEvent(event)) {
       continue;

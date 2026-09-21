@@ -138,6 +138,87 @@ const freshLongWork = (): SessionEvent[] => {
   }));
 };
 
+// Counts arrive on hidden guarded-edit receipts, independently of provider rows.
+// Replaying these through ChatThread catches transcript filtering before the
+// shared run model feeds both the live dock and completed file summary.
+const countedFileActivity = [
+  activity("counted-a", "file", "Updated src/a.ts", { path: "src/a.ts" }),
+  activity("counted-b", "file", "Updated src/b.ts", { path: "src/b.ts" }),
+];
+const editReceipt = (
+  id: string,
+  fileChanges: Array<{ path: string; additions: number; deletions: number }>,
+  extra: Record<string, unknown> = {},
+) =>
+  makeEvent(id, "system-event", "Applied fixture edits", {
+    schema: "gyro.mutation.v1",
+    kind: "mutation-approval",
+    proposalId: id,
+    status: "applied",
+    fileChanges,
+    ...extra,
+  });
+const countedReceipts = [
+  editReceipt("edit-a-1", [{ path: "src/a.ts", additions: 2, deletions: 1 }]),
+  editReceipt("edit-a-2", [{ path: "src/a.ts", additions: 3, deletions: 0 }]),
+  editReceipt("edit-b", [{ path: "src/b.ts", additions: 2, deletions: 2 }], {
+    schema: "gyro.provider-approval.v1",
+    kind: "provider-tool-approval",
+    approvalId: "edit-b",
+  }),
+  // Redelivery must not count the same applied operation twice.
+  editReceipt(
+    "edit-a-replayed",
+    [{ path: "src/a.ts", additions: 2, deletions: 1 }],
+    {
+      proposalId: "edit-a-1",
+    },
+  ),
+  editReceipt(
+    "rejected-edit",
+    [{ path: "ignored.ts", additions: 99, deletions: 99 }],
+    {
+      status: "rejected",
+    },
+  ),
+];
+function fileCountsReplay(phase: "before" | "live" | "done"): SessionEvent[] {
+  const start = Date.now() - 10_000;
+  return [
+    { ...user, message: "Show the line counts for this turn's edits." },
+    // This approval anchor carries no counts. Its applied update does.
+    makeEvent("edit-a-request", "approval-requested", "Update src/a.ts", {
+      schema: "gyro.mutation.v1",
+      kind: "mutation-approval",
+      proposalId: "edit-a-1",
+      path: "src/a.ts",
+      operation: "update",
+      status: "pending",
+    }),
+    ...countedFileActivity,
+    ...(phase === "before" ? [] : countedReceipts),
+    ...(phase === "done"
+      ? [
+          {
+            ...answer,
+            message: "Updated both files. The recorded edits total +7/−3.",
+          },
+        ]
+      : []),
+    {
+      ...status,
+      payload: {
+        kind: "provider-status",
+        status: phase === "done" ? "done" : "running",
+      },
+    },
+  ].map((event, index) => ({
+    ...event,
+    createdAt: new Date(start + index * 100).toISOString(),
+    payload: { ...(event.payload as object), timelineSequence: index },
+  }));
+}
+
 // The chat design layer is scoped to a themed root, as in the app.
 document.documentElement.dataset.theme = "dark";
 
@@ -169,9 +250,11 @@ function Fixture() {
   const [keepAlivePanes, setKeepAlivePanes] = useState<TerminalPane[]>([]);
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      {/* Hidden browser previews pause entrance animations at opacity zero. */}
+      <style>{`.gyro-chat-thread-canvas, .gyro-chat-composer-dock { animation: none !important; }`}</style>
       <nav
         aria-label="Replay controls"
-        style={{ display: "flex", gap: 16, padding: 16 }}
+        style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: 16 }}
       >
         <button
           onClick={() => {
@@ -237,8 +320,34 @@ function Fixture() {
         >
           Keep-alive
         </button>
+        {(
+          [
+            ["before", "Before file counts"],
+            ["live", "Live file counts"],
+            ["done", "Completed file counts"],
+          ] as const
+        ).map(([phase, label]) => (
+          <button
+            key={phase}
+            onClick={() => {
+              setKeepAlivePanes([]);
+              setEvents(fileCountsReplay(phase));
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        <button
+          onClick={() => {
+            setKeepAlivePanes([]);
+            // A fresh durable read, without optimistic rows to fill gaps.
+            setEvents(JSON.parse(JSON.stringify(fileCountsReplay("done"))));
+          }}
+        >
+          Reload file counts
+        </button>
       </nav>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <ChatThread
           isSending={events.some(
             (event) =>

@@ -32302,6 +32302,14 @@ button.gyro-account-menu-row:hover,
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent) !important;
 }
 
+/* Workspace chat sits flush in its sidebar, without navigation-list gutters. */
+.gyro-app-shell.is-workspace-shell
+  > .gyro-sidebar:has(> .gyro-sidebar-ai-chat) {
+  padding-inline: 0;
+  padding-bottom: 0;
+  border-right: 1px solid var(--gyro-border-soft);
+}
+
 /* The AI view is the workspace chat, rendered at sidebar width. It fills the
    sidebar edge to edge — a section header would only steal rows from the
    transcript. Chat compaction rules are shared with `gyro-ide-assistant-chat`. */
@@ -36377,7 +36385,7 @@ textarea:focus-visible,
 .gyro-settings-sidebar-search {
   padding: 0 8px 8px;
   position: relative;
-  z-index: 20;
+  z-index: 30;
   flex-shrink: 0;
 }
 
@@ -36397,6 +36405,7 @@ textarea:focus-visible,
 }
 
 .gyro-settings-sidebar-search .gyro-settings-search-results {
+  background: var(--gyro-surface-raised);
   left: 0;
   right: 0;
   width: 100%;
@@ -36444,7 +36453,7 @@ textarea:focus-visible,
 .gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface,
 .gyro-settings-surface {
   background: var(--gyro-pane);
-  padding: clamp(76px, 9vh, 96px) clamp(28px, 5vw, 72px) 72px;
+  padding: clamp(32px, 5vh, 52px) clamp(24px, 4vw, 56px) 48px;
 }
 
 .gyro-settings-content {
@@ -36453,7 +36462,7 @@ textarea:focus-visible,
 }
 
 .gyro-settings-section > header {
-  padding: 0 0 44px;
+  padding: 0 0 28px;
 }
 
 .gyro-settings-section > header h1 {
@@ -36469,11 +36478,11 @@ textarea:focus-visible,
 }
 
 .gyro-settings-section-body {
-  gap: 44px;
+  gap: 28px;
 }
 
 .gyro-settings-group {
-  gap: 18px;
+  gap: 12px;
 }
 
 .gyro-settings-group > h2 {
@@ -36521,11 +36530,12 @@ textarea:focus-visible,
 
 .gyro-settings-group-rows {
   background: transparent;
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: 16px;
+  border: 0;
+  border-top: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
   box-shadow: none;
   overflow: visible;
-  padding: 0 18px;
+  padding: 0;
 }
 
 .gyro-settings-row,
@@ -37744,6 +37754,35 @@ textarea:focus-visible,
   .gyro-composer-chip:is(:hover, [aria-expanded="true"]) {
   background: var(--gyro-welcome-composer-hover);
   color: var(--gyro-text);
+}
+
+/* The Environment popover overlays an embedded chat. Desktop window width
+   must never reserve a second column inside a narrow workspace sidebar. */
+:is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
+  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
+  --gyro-environment-popover-gutter: 0px;
+}
+
+:is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
+  .gyro-chat-surface.is-thread > .gyro-chat-thread-canvas {
+  min-width: 0;
+}
+
+.gyro-sidebar-ai-chat .gyro-chat-surface.is-thread .gyro-chat-transcript,
+.gyro-sidebar-ai-chat .gyro-chat-surface.is-thread .gyro-chat-composer-dock {
+  padding-inline: 16px;
+}
+
+.gyro-sidebar-ai-chat .gyro-chat-surface.is-thread .gyro-chat-composer-dock {
+  padding-bottom: 12px;
+}
+
+.gyro-sidebar-ai-chat .gyro-chat-environment-popover {
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 76px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  right: 12px;
 }
 
 /* Workspace AI lives in a resizable sidebar, independently of window width. */
@@ -40452,16 +40491,6 @@ textarea:focus-visible,
 }
 
 /* Appearance uses visual theme samples with labels outside the selection ring. */
-.gyro-settings-section[data-setting-key="appearance"] > header h1 {
-  font-weight: 400;
-}
-.gyro-settings-section[data-setting-key="appearance"] > header h1 > svg,
-.gyro-settings-section[data-setting-key="appearance"] > header span {
-  display: none;
-}
-.gyro-settings-section[data-setting-key="appearance"] > header {
-  padding-bottom: 42px;
-}
 .gyro-settings-group:has(.gyro-theme-picker) {
   gap: 16px;
 }
@@ -41587,4 +41616,49 @@ textarea:focus-visible,
     > .gyro-chat-thread-topbar {
     padding-left: 90px;
   }
+}
+
+/* Provider setup: clear entry points without hiding searchable controls. */
+.gyro-provider-connect-path {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.gyro-provider-connect-path > button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  min-width: 0;
+  text-align: left;
+  color: var(--gyro-text);
+  background: transparent;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-provider-connect-path > button:hover {
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-muted);
+}
+.gyro-provider-connect-path span,
+.gyro-provider-connect-help p,
+.gyro-provider-identity .gyro-provider-setup-message {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.gyro-provider-connect-help h2 { margin: 0 0 8px; font-size: 15px; }
+.gyro-provider-connect-help p { margin: 0; max-width: 70ch; }
+.gyro-provider-identity .gyro-provider-setup-message {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+.gyro-provider-connect-help,
+#gyro-provider-api-keys,
+#gyro-provider-ollama { scroll-margin-block: 24px; }
+@media (max-width: 760px) {
+  .gyro-provider-connect-path { grid-template-columns: 1fr; gap: 8px; }
+  .gyro-provider-connect-path > button { padding: 12px; }
 }

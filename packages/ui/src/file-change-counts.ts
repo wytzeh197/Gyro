@@ -1,5 +1,17 @@
 import type { SessionEvent } from "./types.ts";
 
+/** Applied receipts carry measurements even when their approval UI is hidden. */
+export function isAppliedFileMutationEvent(event: SessionEvent): boolean {
+  const payload = event.payload as Record<string, unknown> | undefined;
+  return (
+    event.kind === "system-event" &&
+    payload?.status === "applied" &&
+    ["gyro.mutation.v1", "gyro.provider-approval.v1"].includes(
+      String(payload.schema),
+    )
+  );
+}
+
 /** Exact counts recorded by successful, guarded mutations in this turn. */
 export function appliedFileChangeCounts(events: readonly SessionEvent[]) {
   const totals = new Map<string, { additions: number; deletions: number }>();
@@ -7,12 +19,8 @@ export function appliedFileChangeCounts(events: readonly SessionEvent[]) {
   for (const event of events) {
     const payload = event.payload as Record<string, unknown> | undefined;
     if (
-      event.kind !== "system-event" ||
+      !isAppliedFileMutationEvent(event) ||
       !payload ||
-      payload.status !== "applied" ||
-      !["gyro.mutation.v1", "gyro.provider-approval.v1"].includes(
-        String(payload.schema),
-      ) ||
       !Array.isArray(payload.fileChanges)
     )
       continue;

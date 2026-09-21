@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+</head>
+<body>
+<script>
+"use strict";
+// Only the containing Canvas may initialize this isolated document, once.
+// There is deliberately no message channel from the preview to native APIs.
+function initialize(event) {
+  if (event.source !== parent || event.data?.type !== "gyro.canvas.render" ||
+      typeof event.data.document !== "string" || event.data.document.length > 100000) return;
+  removeEventListener("message", initialize);
+  document.open();
+  document.write(event.data.document);
+  document.close();
+}
+addEventListener("message", initialize);
+</script>
+</body>
+</html>

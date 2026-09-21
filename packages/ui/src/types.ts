@@ -1017,7 +1017,7 @@ export type ChatArtifact =
       kind: "canvas";
       title: string;
       status?: ChatArtifactStatus;
-      format: "text" | "code";
+      format: "text" | "code" | "html";
       content: string;
     }
   | {

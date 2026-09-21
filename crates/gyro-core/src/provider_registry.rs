@@ -166,9 +166,8 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "openai-compatible-api",
         auth_owner: "provider-sdk",
         supports_approvals: true,
-        // Attachments would reach these runners as OpenAI `image_url` parts,
-        // which the text-only client does not build yet.
-        supports_images: false,
+        // Flash supports image input; the runner checks the selected model.
+        supports_images: true,
         supports_resume: true,
         // Token spend lands in the local ledger; there is no plan-window API.
         supports_usage: false,

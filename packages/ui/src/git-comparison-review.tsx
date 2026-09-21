@@ -1,4 +1,5 @@
 import { FileDiff, GitPullRequest } from "lucide-react";
+import "./review-design.css";
 import { useEffect, useMemo, useState } from "react";
 import { PlainDiffView } from "./plain-diff-view.tsx";
 import { totalFileChangeCounts } from "./file-change-counts.ts";
@@ -45,7 +46,8 @@ export function GitComparisonReview({
   );
   const [selectedPath, setSelectedPath] = useState<string>();
   const selected =
-    listing.files.find((file) => file.path === selectedPath) ?? listing.files[0];
+    listing.files.find((file) => file.path === selectedPath) ??
+    listing.files[0];
   useEffect(() => {
     if (
       selectedPath &&
@@ -62,8 +64,7 @@ export function GitComparisonReview({
   return (
     <div
       className={[
-        "gyro-diff-review",
-        "is-compact",
+        "gyro-comparison-review",
         "gyro-git-comparison-review",
         hasFiles ? "" : "is-empty",
       ]
@@ -85,7 +86,7 @@ export function GitComparisonReview({
         <header>
           <strong>Changed files</strong>
         </header>
-        <div className="gyro-diff-tree" role="tree">
+        <div className="gyro-diff-tree" aria-label="Select a file">
           {!hasFiles ? (
             <div className="gyro-diff-tree-empty">
               {listing.limitation ?? empty.detail}
@@ -110,7 +111,15 @@ export function GitComparisonReview({
                   title={file.path}
                   type="button"
                 >
-                  <span>{relative}</span>
+                  <FileDiff size={14} aria-hidden="true" />
+                  <span className="gyro-review-file-name">
+                    <strong>{relative.split("/").at(-1)}</strong>
+                    <span>
+                      {relative.includes("/")
+                        ? relative.slice(0, relative.lastIndexOf("/"))
+                        : "Project root"}
+                    </span>
+                  </span>
                   <small>
                     <FileChangeCountBadges counts={file} />
                   </small>
@@ -120,7 +129,7 @@ export function GitComparisonReview({
           )}
         </div>
       </aside>
-      <section className="gyro-diff-main" aria-label="Diff review">
+      <section className="gyro-comparison-main" aria-label="Diff review">
         {selected ? (
           <ComparisonDiffPane
             comparison={reviewComparisonForScope(scope, selected)}
@@ -189,7 +198,14 @@ function ComparisonDiffPane({
     return () => {
       cancelled = true;
     };
-  }, [comparison, file.path, file.originalPath, file.staged, onLoadDiff, reload]);
+  }, [
+    comparison,
+    file.path,
+    file.originalPath,
+    file.staged,
+    onLoadDiff,
+    reload,
+  ]);
 
   const relative = workspaceRelativeFilePath(file.path, workspacePath);
   const scopeLabel =
@@ -203,7 +219,11 @@ function ComparisonDiffPane({
     <div className="gyro-comparison-diff-pane">
       <div className="gyro-diff-review-toolbar">
         <div>
-          <strong title={file.path}>{relative}</strong>
+          <strong title={file.path}>{relative.split("/").at(-1)}</strong>
+          <span title={file.path}>{relative}</span>
+        </div>
+        <div className="gyro-review-file-meta">
+          <FileChangeCountBadges counts={file} />
           <span>{scopeLabel}</span>
         </div>
       </div>
@@ -211,7 +231,9 @@ function ComparisonDiffPane({
         <div className="gyro-diff-empty-state" role="status">
           <FileDiff size={18} />
           <strong>Loading changes…</strong>
-          <span>Reading {relative} for {scopeLabel}.</span>
+          <span>
+            Reading {relative} for {scopeLabel}.
+          </span>
         </div>
       ) : state.kind === "failed" ? (
         <div className="gyro-diff-empty-state" role="alert">
@@ -219,7 +241,10 @@ function ComparisonDiffPane({
           <strong>Could not load this diff</strong>
           <span>{state.message}</span>
           <div className="gyro-plain-diff-actions">
-            <button onClick={() => setReload((value) => value + 1)} type="button">
+            <button
+              onClick={() => setReload((value) => value + 1)}
+              type="button"
+            >
               Try again
             </button>
             {onOpenFile ? (
@@ -235,7 +260,10 @@ function ComparisonDiffPane({
           <strong>Preview unavailable</strong>
           <span>{state.result.notice}</span>
           <div className="gyro-plain-diff-actions">
-            <button onClick={() => setReload((value) => value + 1)} type="button">
+            <button
+              onClick={() => setReload((value) => value + 1)}
+              type="button"
+            >
               Try again
             </button>
             {onOpenFile ? (
@@ -249,7 +277,11 @@ function ComparisonDiffPane({
         <PlainDiffView
           diff={
             state.result.unified?.trim() ||
-            syntheticUnified(file.path, state.result.original, state.result.modified)
+            syntheticUnified(
+              file.path,
+              state.result.original,
+              state.result.modified,
+            )
           }
           notice={
             state.result.notice ||

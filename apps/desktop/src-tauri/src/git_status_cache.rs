@@ -132,6 +132,16 @@ pub(super) fn git_status_for_preparation(workspace_path: &str) -> anyhow::Result
 }
 
 pub(super) fn inspect_git_status(workspace_path: &str, detailed: bool) -> anyhow::Result<SourceControlStatus> {
+    let deadline = Instant::now()
+        + if detailed { GIT_STATUS_TIMEOUT } else { GIT_STATUS_PREPARATION_TIMEOUT };
+    inspect_git_status_before(workspace_path, detailed, deadline)
+}
+
+pub(super) fn inspect_git_status_before(
+    workspace_path: &str,
+    detailed: bool,
+    deadline: Instant,
+) -> anyhow::Result<SourceControlStatus> {
     let root = workspace_root(workspace_path)?;
     let mut command = git_command();
     command
@@ -143,20 +153,11 @@ pub(super) fn inspect_git_status(workspace_path: &str, detailed: bool) -> anyhow
         .arg("--untracked-files=normal");
     // The repository is resolved before the read so that a read which cannot
     // finish can still be answered with what the last one saw.
-    let repo_root = git_repo_root(&root).unwrap_or_else(|| root.clone());
-    let output = match run_bounded_command(
-        &command,
-        if detailed {
-            GIT_STATUS_TIMEOUT
-        } else {
-            GIT_STATUS_PREPARATION_TIMEOUT
-        },
-        // `git status` is silent until it has walked the whole worktree, so an
-        // inactivity timeout can only ever cut a healthy read short.
-        None,
-        4 * 1024 * 1024,
-        64 * 1024,
-    ) {
+    let repo_root = match git_read::repo_root(&root, deadline) {
+        Ok(path) => path.unwrap_or_else(|| root.clone()),
+        Err(error) => return Ok(git_status_read_failure(Some(&root), error.to_string(), true)),
+    };
+    let output = match git_read::run(&command, deadline, 4 * 1024 * 1024) {
         Ok(output) => output,
         Err(error) => {
             return Ok(git_status_read_failure(

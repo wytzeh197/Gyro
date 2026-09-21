@@ -69,15 +69,17 @@ export function resolveCleanMachinePath(
   const hasReadyProvider = input.hasReadyProvider === true;
   const canSend = canSendChat(hasReadyProvider, input.workspacePath);
 
-  const connectProviderId =
-    input.preferredProviderId ?? DEFAULT_CONNECT_PROVIDER;
+  const connectProviderId = input.preferredProviderId;
   const connectLabel = input.preferredProviderLabel ?? DEFAULT_CONNECT_LABEL;
-  const connectAction = `connect-provider:${connectProviderId}`;
+  const connectAction = connectProviderId
+    ? `connect-provider:${connectProviderId}`
+    : "open-settings:providers";
   const providerBlockMessage = input.providerBlockMessage?.trim();
   const providerBlockAction =
     input.providerBlockAction?.trim() || connectAction;
   const providerBlockActionLabel =
-    input.providerBlockActionLabel?.trim() || `Connect ${connectLabel}`;
+    input.providerBlockActionLabel?.trim() ||
+    (connectProviderId ? `Connect ${connectLabel}` : "Connect a provider");
 
   const projectStep: CleanMachineStep = hasProject
     ? {
@@ -106,7 +108,7 @@ export function resolveCleanMachinePath(
         label: input.providerBlockStepLabel?.trim() || "Connect a provider",
         detail:
           providerBlockMessage ||
-          `Sign in with ${connectLabel} or another supported CLI. Gyro uses the provider's own login — no config file.`,
+          "Choose an existing provider account, an API key, or a local model in provider settings.",
         action: providerBlockAction,
         actionLabel: providerBlockActionLabel,
       };
@@ -143,7 +145,9 @@ export function resolveCleanMachinePath(
       ? input.providerBlockPlaceholder.trim()
       : providerBlockMessage
         ? `${connectLabel} needs attention — reconnect to send…`
-        : `Connect ${connectLabel} to send a message…`;
+        : connectProviderId
+          ? `Connect ${connectLabel} to send a message…`
+          : "Connect a provider to send a message…";
     readinessLabel = blockedReason;
   } else {
     placeholder = "Describe a task or attach images";

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CanvasPreview } from "./canvas-preview-view";
 import { ChatArtifactContent } from "./chat-artifacts";
 import type { CanvasArtifact } from "./chat-canvas";
 
@@ -24,6 +25,7 @@ export function ChatCanvas({
 }) {
   const [request, setRequest] = useState("");
   const [copied, setCopied] = useState(false);
+  const [codeIds, setCodeIds] = useState<Record<string, boolean>>({});
   const artifact =
     artifacts.find((item) => item.id === selectedId) ?? artifacts.at(-1);
   const draft = artifact ? drafts[artifact.id] : undefined;
@@ -39,8 +41,8 @@ export function ChatCanvas({
         <div className="gyro-thread-empty">
           <strong>A place to work beside chat</strong>
           <p>
-            Ask for a document, code draft, table, or diagram in Canvas.
-            Interactive apps open in Browser.
+            Build an interface, try an idea, or work on a document here. Ask the
+            model to create something, then refine it together.
           </p>
         </div>
       ) : (
@@ -60,6 +62,34 @@ export function ChatCanvas({
                 </option>
               ))}
             </select>
+            {artifact.kind === "canvas" && artifact.format === "html" ? (
+              <div className="gyro-canvas-view-switch" aria-label="Canvas view">
+                <button
+                  type="button"
+                  aria-pressed={!codeIds[artifact.id]}
+                  onClick={() =>
+                    setCodeIds((current) => ({
+                      ...current,
+                      [artifact.id]: false,
+                    }))
+                  }
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={!!codeIds[artifact.id]}
+                  onClick={() =>
+                    setCodeIds((current) => ({
+                      ...current,
+                      [artifact.id]: true,
+                    }))
+                  }
+                >
+                  Code
+                </button>
+              </div>
+            ) : null}
             {content !== undefined ? (
               <button
                 type="button"
@@ -98,12 +128,22 @@ export function ChatCanvas({
               </button>
             </div>
           ) : null}
-          <div className="gyro-canvas-body">
-            {artifact.kind === "canvas" ? (
+          <div
+            className={`gyro-canvas-body${artifact.kind === "canvas" && artifact.format === "html" && !codeIds[artifact.id] ? " is-preview" : ""}`}
+          >
+            {artifact.kind === "canvas" &&
+            artifact.format === "html" &&
+            !codeIds[artifact.id] ? (
+              <CanvasPreview
+                key={artifact.id}
+                content={content ?? artifact.content}
+                title={artifact.title}
+              />
+            ) : artifact.kind === "canvas" ? (
               <textarea
                 aria-label={`${artifact.title} content`}
-                className={`gyro-canvas-editor is-${artifact.format}`}
-                spellCheck={artifact.format !== "code"}
+                className={`gyro-canvas-editor is-${artifact.format === "text" ? "text" : "code"}`}
+                spellCheck={artifact.format === "text"}
                 value={content}
                 onChange={(event) => {
                   const value = event.target.value;

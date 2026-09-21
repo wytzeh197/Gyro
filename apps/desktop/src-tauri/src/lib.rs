@@ -1,4 +1,6 @@
 mod provider_reliability;
+mod git_read;
+mod canvas_preview;
 use provider_reliability::{is_transient_provider_error, provider_failure_recovery};
 mod openai_compatible_runner;
 mod provider_api_keys;
@@ -6072,7 +6074,7 @@ fn provider_context_message_for_turn(
         request,
         conversation_history,
         gyro_core::provider_capability_support(&request.provider_id).available,
-        provider_descriptor(&request.provider_id).is_some_and(|provider| provider.supports_images),
+        openai_compatible_runner::supports_images(request),
         turn,
     )
 }
@@ -6087,7 +6089,7 @@ fn provider_context_message_with_tool_support(
         request,
         conversation_history,
         supports_tools,
-        provider_descriptor(&request.provider_id).is_some_and(|provider| provider.supports_images),
+        openai_compatible_runner::supports_images(request),
     )
 }
 
@@ -7751,7 +7753,10 @@ impl WorkspacePreparationManager {
         loop {
             prune_workspace_preparation_completed(&mut state);
             if let Some((completed_at, cached)) = state.completed.get(&root) {
-                if completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE {
+                if completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE
+                    && cached.progress.status == "ready"
+                    && cached.progress.errors.is_empty()
+                {
                     let mut cached = cached.clone();
                     cached.progress.run_id = request.run_id.clone();
                     let _ = app.emit(WORKSPACE_PREPARATION_EVENT, cached.progress.clone());
@@ -7777,10 +7782,12 @@ impl WorkspacePreparationManager {
             .map_err(|_| "workspace preparation state is unavailable".to_string())?;
         state.in_flight.remove(&root);
         if let Ok(snapshot) = result.as_ref() {
-            state
-                .completed
-                .insert(root, (Instant::now(), snapshot.clone()));
-            prune_workspace_preparation_completed(&mut state);
+            if snapshot.progress.status == "ready" && snapshot.progress.errors.is_empty() {
+                state.completed.insert(root, (Instant::now(), snapshot.clone()));
+                prune_workspace_preparation_completed(&mut state);
+            } else {
+                state.completed.remove(&root);
+            }
         }
         state_changed.notify_all();
         result
@@ -7893,6 +7900,7 @@ fn prepare_workspace_impl(
         &errors,
     );
 
+    let git_deadline = Instant::now() + WORKSPACE_PREPARATION_GIT_TIMEOUT;
     let git_root = root_text.clone();
     let branch_root = root_text.clone();
     let task_root = root_text.clone();
@@ -7900,16 +7908,26 @@ fn prepare_workspace_impl(
     let (branch_tx, branch_rx) = mpsc::sync_channel(1);
     let task_handle = std::thread::spawn(move || task_discover_impl(&task_root));
     std::thread::spawn(move || {
-        let _ = git_tx.send(git_status_for_preparation(&git_root));
+        let _ = git_tx.send(git_status_cache::inspect_git_status_before(
+            &git_root, false, git_deadline,
+        ));
     });
     std::thread::spawn(move || {
-        let _ = branch_tx.send(git_branch_catalog_impl(&branch_root));
+        let _ = branch_tx.send(git_branch_catalog_before(&branch_root, git_deadline));
     });
 
-    let git_deadline = Instant::now() + WORKSPACE_PREPARATION_GIT_TIMEOUT;
     let remaining_git = || git_deadline.saturating_duration_since(Instant::now());
     let source_control = match git_rx.recv_timeout(remaining_git()) {
-        Ok(Ok(status)) => Some(status),
+        Ok(Ok(status)) => {
+            if let Some(error) = &status.error {
+                if !error.contains("not a git repository") {
+                    errors.push(WorkspacePreparationError {
+                        phase: "git".into(), message: error.clone(),
+                    });
+                }
+            }
+            Some(status)
+        }
         Ok(Err(error)) => {
             errors.push(WorkspacePreparationError {
                 phase: "git".into(),
@@ -7922,27 +7940,23 @@ fn prepare_workspace_impl(
                 phase: "git".into(),
                 message: "Inspecting Git timed out".into(),
             });
-            None
+            Some(git_status_read_failure(
+                Some(root), "Inspecting Git timed out".into(), true,
+            ))
         }
     };
     let branches = match branch_rx.recv_timeout(remaining_git()) {
         Ok(Ok(catalog)) => Some(catalog),
         Ok(Err(error)) => {
-            if git_repo_root(root).is_some() {
-                errors.push(WorkspacePreparationError {
-                    phase: "git".into(),
-                    message: error.to_string(),
-                });
-            }
+            errors.push(WorkspacePreparationError {
+                phase: "git".into(), message: format!("Branch inspection: {error}"),
+            });
             None
         }
         Err(_) => {
-            if git_repo_root(root).is_some() {
-                errors.push(WorkspacePreparationError {
-                    phase: "git".into(),
-                    message: "Inspecting Git timed out".into(),
-                });
-            }
+            errors.push(WorkspacePreparationError {
+                phase: "git".into(), message: "Branch inspection timed out".into(),
+            });
             None
         }
     };
@@ -8353,8 +8367,14 @@ fn sort_branch_catalog_entries(branches: &mut [(i64, String)]) {
 }
 
 fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCatalog> {
+    git_branch_catalog_before(workspace_path, Instant::now() + Duration::from_secs(30))
+}
+
+fn git_branch_catalog_before(
+    workspace_path: &str, deadline: Instant,
+) -> anyhow::Result<GitBranchCatalog> {
     let root = workspace_root(workspace_path)?;
-    let Some(repo_root) = git_repo_root(&root) else {
+    let Some(repo_root) = git_read::repo_root(&root, deadline)? else {
         return Ok(GitBranchCatalog {
             available: false,
             current: None,
@@ -8369,14 +8389,8 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         "--format=%(committerdate:unix)%09%(refname:short)",
         "refs/heads/",
     ]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(10),
-        None,
-        2 * 1024 * 1024,
-        64 * 1024,
-    )?;
-    if !output.succeeded() {
+    let output = git_read::run(&command, deadline, 2 * 1024 * 1024)?;
+    if !output.succeeded() || output.stdout_truncated {
         return Err(bounded_command_error(
             "could not list local branches",
             &output,
@@ -8406,18 +8420,15 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         .arg("-C")
         .arg(&repo_root)
         .args(["branch", "--show-current"]);
-    let current_output = run_bounded_command(
-        &current_command,
-        Duration::from_secs(10),
-        None,
-        64 * 1024,
-        64 * 1024,
-    )?;
+    let current_output = git_read::run(&current_command, deadline, 64 * 1024)?;
+    if !current_output.succeeded() || current_output.stdout_truncated {
+        return Err(bounded_command_error("could not read current branch", &current_output));
+    }
     let current = current_output
         .succeeded()
         .then(|| current_output.stdout.trim().to_string());
     let current = current.filter(|branch| !branch.is_empty());
-    let worktrees = git_linked_worktrees(&repo_root)?;
+    let worktrees = git_linked_worktrees_before(&repo_root, deadline)?;
     Ok(GitBranchCatalog {
         available: true,
         current,
@@ -8428,19 +8439,19 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
 }
 
 fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktree>> {
+    git_linked_worktrees_before(repo_root, Instant::now() + Duration::from_secs(10))
+}
+
+fn git_linked_worktrees_before(
+    repo_root: &Path, deadline: Instant,
+) -> anyhow::Result<Vec<GitLinkedWorktree>> {
     let mut command = git_command();
     command
         .arg("-C")
         .arg(repo_root)
         .args(["worktree", "list", "--porcelain"]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(10),
-        None,
-        2 * 1024 * 1024,
-        64 * 1024,
-    )?;
-    if !output.succeeded() {
+    let output = git_read::run(&command, deadline, 2 * 1024 * 1024)?;
+    if !output.succeeded() || output.stdout_truncated {
         return Err(bounded_command_error(
             "could not list linked worktrees",
             &output,
@@ -13607,7 +13618,7 @@ fn run_provider_chat_once(
     timing::attempt();
     let expanded = with_browser_attachment_images(
         request,
-        provider_descriptor(&request.provider_id).is_some_and(|provider| provider.supports_images),
+        openai_compatible_runner::supports_images(request),
     )?;
     let request = &expanded;
     match provider_adapter_for(&request.provider_id).kind {
@@ -17224,7 +17235,7 @@ fn valid_chat_artifact(value: &serde_json::Value) -> bool {
     match kind {
         "canvas" => {
             bounded_string("content", 12_000).is_some()
-                && matches!(bounded_string("format", 12), Some("text" | "code"))
+                && matches!(bounded_string("format", 12), Some("text" | "code" | "html"))
         }
         "decision" => value
             .get("options")
@@ -23067,6 +23078,9 @@ pub fn run() {
                 }
             }
         })
+        .register_uri_scheme_protocol("gyro-canvas", |_context, request| {
+            canvas_preview::response(request)
+        })
         .invoke_handler(tauri::generate_handler![
             turn_timing::timing_diagnostics_enabled,
             turn_timing::record_frontend_timing,
@@ -28778,7 +28792,10 @@ while True:
         let extracted = extract_chat_artifact_marker(&response);
         assert_eq!(extracted.items[0]["content"], "  const n = 1;\n");
         assert_eq!(extracted.message.trim(), "Ready.");
-        for format in ["html", "javascript", ""] {
+        let mut html = artifact.clone();
+        html["format"] = serde_json::json!("html");
+        assert!(valid_chat_artifact(&html));
+        for format in ["javascript", ""] {
             let mut invalid = artifact.clone();
             invalid["format"] = serde_json::json!(format);
             assert!(!valid_chat_artifact(&invalid));

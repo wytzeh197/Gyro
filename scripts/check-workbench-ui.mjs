@@ -4947,7 +4947,7 @@ expect(
     surfaceSource.includes("gyro-browser-skeleton") &&
     !reducerSource.includes("screenshotCount") &&
     createInitialWorkbenchState().browserPreview.history.length === 0 &&
-    tauriConfigSource.includes("frame-src http://localhost:*") &&
+    /frame-src[^;"]*http:\/\/localhost:\*/.test(tauriConfigSource) &&
     tauriConfigSource.includes("http://127.0.0.1:*") &&
     styleSource.includes(".gyro-browser-page iframe"),
   "Browser preview should render a real local URL, open it externally, and collect bounded loopback diagnostics without remote Tauri IPC.",
@@ -5167,7 +5167,8 @@ expect(
     surfaceSource.includes('role="combobox"') &&
     surfaceSource.includes('role="listbox"') &&
     surfaceSource.includes("data-setting-key={settingsSearchKey(label)}") &&
-    surfaceSource.includes('className="gyro-settings-topbar"') &&
+    !surfaceSource.includes('className="gyro-settings-topbar"') &&
+    surfaceSource.includes('className="gyro-sidebar-windowbar is-settings"') &&
     surfaceSource.includes('aria-label="Clear settings search"') &&
     surfaceSource.includes("gyro-settings-sidebar-search") &&
     !surfaceSource.includes("query={settingsQuery}") &&
@@ -7681,7 +7682,7 @@ expect(
 
 expect(
   surfaceSource.includes(
-    "Compact fits more sessions, tools, and editor chrome; Comfortable gives rows and controls more breathing room.",
+    "Choose tighter rows or more room between controls.",
   ) &&
     styleSource.includes("Product-wide density contract") &&
     styleSource.includes(

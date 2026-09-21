@@ -124,6 +124,9 @@ export function ChatArtifactContent({
   artifact: ChatArtifact;
 }) {
   if (artifact.kind === "canvas") {
+    if (artifact.format === "html") {
+      return <p>Interactive UI · Open in Canvas to preview and refine.</p>;
+    }
     return <pre className={`gyro-canvas-document is-${artifact.format}`}>{artifact.content}</pre>;
   }
   if (artifact.kind === "decision") {
@@ -433,7 +436,7 @@ function normalizeChatArtifact(value: unknown): ChatArtifact | undefined {
   if (kind === "canvas") {
     const content = typeof item?.content === "string" ? item.content : "";
     const format = item?.format;
-    return content.trim() && [...content].length <= 12000 && (format === "text" || format === "code")
+    return content.trim() && [...content].length <= 12000 && (format === "text" || format === "code" || format === "html")
       ? { id, kind, title, status, content, format }
       : undefined;
   }
