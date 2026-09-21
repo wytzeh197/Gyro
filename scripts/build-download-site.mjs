@@ -1,103 +1,111 @@
 #!/usr/bin/env node
+
 import {
   copyFileSync,
   mkdirSync,
   rmSync,
-  writeFileSync,
-  existsSync,
-  readdirSync,
-  lstatSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
-import { dirname, resolve, relative, sep, parse } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pages } from "../site/content/pages.mjs";
-import { layout } from "../site/templates/layout.mjs";
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const arg = process.argv.indexOf("--output");
-const output = resolve(
-  arg < 0 ? resolve(root, "site/dist") : process.argv[arg + 1],
-);
-// Never recursively remove a source directory or an ancestor of the checkout.
-if (
-  output !== resolve(root, "site/dist") &&
-  (output === parse(output).root ||
-    output === root ||
-    root.startsWith(output + sep) ||
-    output.startsWith(root + sep))
-)
-  throw new Error("Custom output must be outside the repository");
-if (
-  existsSync(output) &&
-  (lstatSync(output).isSymbolicLink() ||
-    (output !== resolve(root, "site/dist") && readdirSync(output).length))
-) {
-  throw new Error(
-    "Refusing to replace a symlink or nonempty custom output directory",
-  );
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const sourceRoot = resolve(repoRoot, "site");
+
+function argument(name) {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
 }
-export const assets = [
-  "_headers",
-  "robots.txt",
-  "styles.css",
-  "theme.js",
-  "app.js",
-  "release-utils.js",
-  "motion.js",
-  "assets/fonts/inter-latin.woff2",
-  "assets/fonts/inter-tight-latin.woff2",
-  "assets/gyro-mark.png",
-  ...["codex", "claude", "gemini", "grok", "kimi", "ollama"].map(
-    (name) => `assets/providers/${name}.svg`,
-  ),
-  "assets/social-preview.png",
-  "assets/ATTRIBUTIONS.md",
-  "assets/gyro-coast.webp",
-  "assets/screenshots/hero-current-light.webp",
-  "assets/screenshots/hero-current-dark.webp",
-  "assets/screenshots/hero-light-1200.webp",
-  "assets/screenshots/hero-1200.webp",
-  "assets/screenshots/hero-light-2400.webp",
-  "assets/screenshots/hero-2400.webp",
-  "assets/motion/workflow-light.mp4",
-  "assets/motion/workflow-dark.mp4",
+
+function fail(message) {
+  console.error(`Download site build failed: ${message}`);
+  process.exit(1);
+}
+
+const outputRoot = resolve(argument("--output") ?? resolve(sourceRoot, "dist"));
+if (outputRoot === repoRoot || outputRoot === sourceRoot) {
+  fail("--output must not be the repository root or site source directory");
+}
+
+const files = [
+  ["site/motion.js", "motion.js"],
+  ["site/assets/gyro-coast.webp", "assets/gyro-coast.webp"],
+  ["site/assets/motion/workflow-dark.mp4", "assets/motion/workflow-dark.mp4"],
+  ["site/assets/motion/workflow-light.mp4", "assets/motion/workflow-light.mp4"],
+  ["site/_headers", "_headers"],
+  ["site/robots.txt", "robots.txt"],
+  ["site/sitemap.xml", "sitemap.xml"],
+  ["site/index.html", "index.html"],
+  ["site/install/index.html", "install/index.html"],
+  ["site/changelog/index.html", "changelog/index.html"],
+  ["site/privacy/index.html", "privacy/index.html"],
+  ["site/styles.css", "styles.css"],
+  ["site/app.js", "app.js"],
+  ["site/theme.js", "theme.js"],
+  ["site/changelog.js", "changelog.js"],
+  ["site/release-utils.js", "release-utils.js"],
+  ["site/assets/fonts/inter-latin.woff2", "assets/fonts/inter-latin.woff2"],
+  [
+    "site/assets/fonts/inter-tight-latin.woff2",
+    "assets/fonts/inter-tight-latin.woff2",
+  ],
+  ["site/assets/gyro-logo.png", "assets/gyro-logo.png"],
+  ["site/assets/gyro-mark.png", "assets/gyro-mark.png"],
+  ["site/assets/apple.svg", "assets/apple.svg"],
+  ["site/assets/github.svg", "assets/github.svg"],
+  ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
+  ["site/assets/social-preview.png", "assets/social-preview.png"],
+  ["site/assets/screenshots/hero-600.webp", "assets/screenshots/hero-600.webp"],
+  [
+    "site/assets/screenshots/hero-current-dark.webp",
+    "assets/screenshots/hero-current-dark.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-current-light.webp",
+    "assets/screenshots/hero-current-light.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-1200.webp",
+    "assets/screenshots/hero-1200.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-2400.webp",
+    "assets/screenshots/hero-2400.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-600.webp",
+    "assets/screenshots/hero-light-600.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-1200.webp",
+    "assets/screenshots/hero-light-1200.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-2400.webp",
+    "assets/screenshots/hero-light-2400.webp",
+  ],
 ];
-for (const asset of assets) {
-  if (!statSync(resolve(root, "site", asset)).isFile())
-    throw new Error(`Missing public asset: ${asset}`);
+
+for (const [source] of files) {
+  const path = resolve(repoRoot, source);
+  try {
+    if (!statSync(path).isFile()) fail(`${source} is not a file`);
+  } catch {
+    fail(`required source file is missing: ${source}`);
+  }
 }
-// Render before replacing the previous build; malformed content cannot erase it.
-const rendered = pages.map((page) => [
-  page.path === "/"
-    ? "index.html"
-    : page.path.endsWith(".html")
-      ? page.path.slice(1)
-      : page.path.slice(1) + "index.html",
-  layout(page),
-]);
-rmSync(output, { recursive: true, force: true });
-mkdirSync(output, { recursive: true });
-for (const file of assets) {
-  const dest = resolve(output, file);
-  mkdirSync(dirname(dest), { recursive: true });
-  copyFileSync(resolve(root, "site", file), dest);
+
+rmSync(outputRoot, { force: true, recursive: true });
+mkdirSync(outputRoot, { recursive: true });
+
+for (const [source, destination] of files) {
+  const destinationPath = resolve(outputRoot, destination);
+  mkdirSync(dirname(destinationPath), { recursive: true });
+  copyFileSync(resolve(repoRoot, source), destinationPath);
 }
-for (const [file, html] of rendered) {
-  const dest = resolve(output, file);
-  mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, html);
-}
-// Public runtime gets only validated public release metadata, never source notes.
-copyFileSync(
-  resolve(root, "site/content/releases.json"),
-  resolve(output, "releases.json"),
+
+writeFileSync(resolve(outputRoot, ".nojekyll"), "", "utf8");
+console.log(
+  `Built dependency-free download site at ${relative(repoRoot, outputRoot) || outputRoot}`,
 );
-writeFileSync(
-  resolve(output, "sitemap.xml"),
-  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages
-    .filter((p) => !p.noindex)
-    .map((p) => `<url><loc>https://usegyro.io${p.path}</loc></url>`)
-    .join("")}</urlset>\n`,
-);
-writeFileSync(resolve(output, ".nojekyll"), "");
-console.log(`Built ${pages.length} pages at ${relative(root, output)}`);

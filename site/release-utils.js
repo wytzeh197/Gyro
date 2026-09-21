@@ -56,39 +56,12 @@ export function architectureFromHints(hints) {
   return null;
 }
 
-export function isSafeReleaseUrl(value, asset = false) {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      url.hostname === "github.com" &&
-      !url.username &&
-      !url.password &&
-      url.pathname.startsWith(
-        asset
-          ? "/wytzeh197/Gyro/releases/download/"
-          : "/wytzeh197/Gyro/releases/",
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function isUsableRelease(release) {
   return Boolean(
     release &&
     typeof release.tag_name === "string" &&
-    isSafeReleaseUrl(release.html_url) &&
-    Array.isArray(release.assets) &&
-    Number.isFinite(Date.parse(release.published_at)) &&
-    release.assets.every(
-      (asset) =>
-        typeof asset.name === "string" &&
-        Number.isFinite(asset.size) &&
-        asset.size >= 0 &&
-        isSafeReleaseUrl(asset.browser_download_url, true),
-    ),
+    typeof release.html_url === "string" &&
+    Array.isArray(release.assets),
   );
 }
 
@@ -251,47 +224,22 @@ export function releaseAnchor(tag) {
     .replace(/^-|-$/g, "");
 }
 
-export function isPublicRelease(release) {
+export function isPublicAlphaRelease(release) {
   if (!isUsableRelease(release) || release.draft) return false;
   if (
     /\bprivate\s+(?:developer\s+)?preview\b/i.test(
       cleanMarkdownText(release.body),
     )
-  )
+  ) {
     return false;
-  const tag = release.tag_name.match(
-    /^v(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+)(?:\.\d+)*)?$/i,
-  );
-  if (!tag) return false;
-  // Alpha 1–20 of 0.1.0 were private previews, even if release metadata changes.
-  return !(
-    tag[1] === "0" &&
-    tag[2] === "1" &&
-    tag[3] === "0" &&
-    tag[4]?.toLowerCase() === "alpha" &&
-    Number(tag[5]) < 21
-  );
-}
-
-export function isPublicAlphaRelease(release) {
-  return isPublicRelease(release) && /-alpha\./i.test(release.tag_name);
-}
-
-export function validateSnapshot(value) {
-  if (
-    !value ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(value.retrievedAt) ||
-    !Array.isArray(value.releases) ||
-    !value.releases.length ||
-    !value.releases.every(isPublicRelease)
-  )
-    throw new Error("Invalid public release snapshot");
-  return value;
+  }
+  const match = release.tag_name.match(/^v0\.1\.0-alpha\.(\d+)(?:\.\d+)?$/i);
+  return match ? Number(match[1]) >= 21 : false;
 }
 
 export async function fetchGitHubJson(url) {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(
+  const timeout = window.setTimeout(
     () => controller.abort(),
     REQUEST_TIMEOUT_MS,
   );
@@ -303,6 +251,6 @@ export async function fetchGitHubJson(url) {
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
     return await response.json();
   } finally {
-    globalThis.clearTimeout(timeout);
+    window.clearTimeout(timeout);
   }
 }
