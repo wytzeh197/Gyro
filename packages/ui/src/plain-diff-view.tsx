@@ -21,6 +21,7 @@ export function PlainDiffView({
 }) {
   const hunks = useMemo(() => diffHunks(diff), [diff]);
   const [page, setPage] = useState(0);
+  const [wrapLines, setWrapLines] = useState(false);
   const pageCount = Math.max(1, Math.ceil(hunks.length / HUNKS_PER_PAGE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = hunks.slice(
@@ -39,7 +40,7 @@ export function PlainDiffView({
   }
 
   return (
-    <div className="gyro-plain-diff">
+    <div className={`gyro-plain-diff${wrapLines ? " is-wrapped" : ""}`}>
       {notice ? (
         <div className="gyro-plain-diff-notice" role="status">
           {notice}
@@ -47,11 +48,17 @@ export function PlainDiffView({
       ) : null}
       <div className="gyro-plain-diff-toolbar">
         <span>
-          {hunks.length} hunk{hunks.length === 1 ? "" : "s"}
-          {pageCount > 1
-            ? ` · ${safePage + 1} of ${pageCount}`
-            : ""}
+          {hunks.length} changed section{hunks.length === 1 ? "" : "s"}
+          {pageCount > 1 ? ` · ${safePage + 1} of ${pageCount}` : ""}
         </span>
+        <button
+          className="gyro-review-wrap-toggle"
+          aria-pressed={wrapLines}
+          onClick={() => setWrapLines((value) => !value)}
+          type="button"
+        >
+          Wrap lines
+        </button>
         {pageCount > 1 ? (
           <span className="gyro-plain-diff-pager">
             <button
@@ -84,17 +91,45 @@ export function PlainDiffView({
 }
 
 function PlainDiffHunk({ hunk }: { hunk: DiffHunk }) {
+  const range = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(hunk.header);
+  let oldLine = range ? Number(range[1]) : undefined;
+  let newLine = range ? Number(range[2]) : undefined;
   return (
     <section className="gyro-plain-diff-hunk">
       <header>{hunk.header}</header>
-      {hunk.lines.map((line, index) => (
-        <div className={`gyro-diff-line is-${line.kind}`} key={index}>
-          <span className="gyro-diff-line-marker" aria-label={line.kind}>
-            {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}
-          </span>
-          <code>{line.text.slice(1) || " "}</code>
-        </div>
-      ))}
+      {hunk.lines.map((line, index) => {
+        const marker = line.text.startsWith("\\");
+        const before = !marker && line.kind !== "added" ? oldLine : undefined;
+        const after = !marker && line.kind !== "removed" ? newLine : undefined;
+        if (before !== undefined) oldLine = before + 1;
+        if (after !== undefined) newLine = after + 1;
+        return (
+          <div className={`gyro-diff-line is-${line.kind}`} key={index}>
+            <span
+              className="gyro-review-line-number"
+              aria-label={
+                before === undefined ? undefined : `Old line ${before}`
+              }
+            >
+              {before}
+            </span>
+            <span
+              className="gyro-review-line-number"
+              aria-label={after === undefined ? undefined : `New line ${after}`}
+            >
+              {after}
+            </span>
+            <span className="gyro-diff-line-marker" aria-label={line.kind}>
+              {line.kind === "added"
+                ? "+"
+                : line.kind === "removed"
+                  ? "−"
+                  : " "}
+            </span>
+            <code>{(marker ? line.text : line.text.slice(1)) || " "}</code>
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -111,7 +146,7 @@ function PlainDiffActions({
     <div className="gyro-plain-diff-actions">
       {onRetry ? (
         <button onClick={onRetry} type="button">
-          Try again
+          Refresh diff
         </button>
       ) : null}
       {onOpenFile ? (

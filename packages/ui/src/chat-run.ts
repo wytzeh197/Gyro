@@ -13,7 +13,10 @@ import {
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
 import { FILE_REVIEW_SCHEMA } from "./types.ts";
-import { appliedFileChangeCounts } from "./file-change-counts.ts";
+import {
+  appliedFileChangeCounts,
+  isAppliedFileMutationEvent,
+} from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
 
 /**
@@ -1147,6 +1150,8 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         id,
         status,
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
+        additions: count(payload, "additions"),
+        deletions: count(payload, "deletions"),
       };
     case "execute":
       return classifyCommandActivity({
@@ -1992,6 +1997,10 @@ function mergeFileChange(
 
 /** Control markers are instructions to the app, never beats in the run. */
 function isHiddenRunEvent(event: SessionEvent) {
+  // Applied receipts feed file totals, not extra work or approval cards.
+  if (isAppliedFileMutationEvent(event)) {
+    return true;
+  }
   if (event.kind !== "system-event") {
     return false;
   }

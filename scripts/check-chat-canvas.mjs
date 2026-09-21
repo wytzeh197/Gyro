@@ -58,4 +58,16 @@ assert.deepEqual(
 );
 state = chatCompanionReducer(state, { type: "focus-pane", paneId: "a" });
 assert.equal(chatCompanionPane(state).activeTab, "canvas");
+const html = {
+  ...original,
+  id: "ui",
+  format: "html",
+  content: "<button>Try it</button>",
+};
+const htmlRevision = { ...html, content: "<button>Updated</button>" };
+assert.deepEqual(latestCanvasArtifacts([html, revised, htmlRevision]), [
+  revised,
+  htmlRevision,
+]);
+assert.equal(html.content, "<button>Try it</button>");
 console.log("check-chat-canvas: ok");

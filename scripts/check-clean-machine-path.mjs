@@ -32,7 +32,15 @@ assert.equal(noProject.hasProject, false);
 assert.equal(noProject.steps[0]?.status, "done");
 assert.equal(noProject.steps[0]?.label, "No folder");
 assert.equal(noProject.steps[1]?.status, "active");
-assert.equal(noProject.nextAction, "connect-provider:openai");
+assert.equal(noProject.nextAction, "open-settings:providers");
+assert.equal(noProject.nextActionLabel, "Connect a provider");
+assert.equal(
+  resolveCleanMachinePath({
+    hasReadyProvider: false,
+    workspacePath: "/Users/example/Project",
+  }).nextAction,
+  "open-settings:providers",
+);
 assert.match(noProject.readinessLabel, /provider|Connect/i);
 assert.match(noProject.placeholder, /Connect/i);
 

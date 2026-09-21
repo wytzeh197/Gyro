@@ -504,7 +504,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       // Token spend lands in the local ledger; there is no plan-window API.
       supportsUsage: false,

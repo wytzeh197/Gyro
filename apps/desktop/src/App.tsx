@@ -1,4 +1,5 @@
 import { useProviderApiKeys } from "./provider-api-keys";
+import { useProviderConnectionGuard } from "./provider-connection-guard";
 import {
   providerHealthDetailsFromCheck,
   providerHealthRequest,
@@ -7657,7 +7658,7 @@ export function App() {
     [setProviderAuthStatus],
   );
 
-  const connectProvider = useCallback(
+  const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
       options?: { forceLogin?: boolean },
@@ -8019,6 +8020,10 @@ export function App() {
       workbench.workspaceMode,
       workspacePath,
     ],
+  );
+
+  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+    runProviderConnection,
   );
 
   const recordModelSelection = useCallback(
@@ -16575,6 +16580,15 @@ export function App() {
               secondaryColor,
             })
           }
+          connectingProviderIds={connectingProviderIds}
+          onUseProvider={(providerId, modelId) => {
+            selectProviderModel(providerId, modelId);
+            dispatchWorkbench({
+              type: "select-workspace-layout",
+              layout: "thread",
+            });
+            selectDestination("workspace");
+          }}
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
           {...providerApiKeyProps}

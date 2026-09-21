@@ -313,6 +313,7 @@ const countedEvents = [
   appliedEdit("edit-2", [{ path: "src/a.ts", additions: 3, deletions: 0 }]),
   appliedEdit("native-1", [{ path: "src/b.ts", additions: 0, deletions: 4 }], {
     schema: "gyro.provider-approval.v1",
+    kind: "provider-tool-approval",
     approvalId: "native-1",
   }),
   fileEdit("src/a.ts", { additions: 3, deletions: 0 }),
@@ -323,6 +324,18 @@ const countedEvents = [
   ),
 ];
 const countedRun = buildRunModel(countedEvents);
+for (const isRunning of [true, false]) {
+  const receiptOnly = buildRunModel(
+    countedEvents.filter((event) => event.payload.status === "applied"),
+    { isRunning },
+  );
+  assert.equal(
+    receiptOnly.steps.length,
+    0,
+    "applied receipts measure files without creating work or approval rows",
+  );
+  assert.deepEqual(receiptOnly.files, countedRun.files);
+}
 assert.deepEqual(
   countedRun.files.map(({ path, additions, deletions }) => ({
     path,
@@ -357,6 +370,15 @@ assert.deepEqual(
 );
 
 // --- The inline diff ---------------------------------------------------------
+
+for (const activityKind of ["edit", "delete", "move"]) {
+  const run = buildRunModel([fileEdit("src/native.ts", {
+    activityKind, additions: 0, deletions: 3,
+  })]);
+  assert.equal(run.files[0].additions, 0, `${activityKind} retains zero additions`);
+  assert.equal(run.files[0].deletions, 3, `${activityKind} retains measured deletions`);
+  assert.match(renderCounts(totalFileChangeCounts(run.files)), />\+0<.*>−3</);
+}
 
 const preview = diffPreviewLines(
   [

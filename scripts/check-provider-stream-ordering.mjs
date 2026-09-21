@@ -1214,6 +1214,31 @@ for (const merge of [
   const model = buildRunModel(ref.current.get("counts-session"));
   assert.equal(model.files[0].additions, 7);
   assert.equal(model.files[0].deletions, 2);
+  const update = (extra = {}) => applyProviderChatStreamActivity(ref, () => {}, {
+    sessionId: "counts-session", turnId: "counts-turn", providerId: "openai",
+    eventId: "counts-finished", sequence: 2, phase: "activity",
+    activityId: "counts-file", activityKind: "file",
+    activityLabel: "Updated src/a.ts", activityDetail: "src/a.ts",
+    activityStatus: "done", ...extra,
+  });
+  update();
+  const afterStatus = ref.current.get("counts-session");
+  assert.equal(buildRunModel(afterStatus).files[0].additions, 7,
+    "a status-only frame must not erase measured additions");
+  assert.equal(buildRunModel(afterStatus).files[0].deletions, 2);
+  const durable = JSON.parse(JSON.stringify(afterStatus));
+  delete durable[0].payload.additions;
+  delete durable[0].payload.deletions;
+  const reloaded = mergePersistedAndOptimisticEvents(durable, afterStatus);
+  assert.equal(buildRunModel(reloaded).files[0].additions, 7,
+    "a durable snapshot without counts retains live measurements");
+  assert.equal(buildRunModel(reloaded).files[0].deletions, 2);
+  update({ additions: 0, deletions: 0 });
+  assert.equal(buildRunModel(ref.current.get("counts-session")).files[0].additions, 0,
+    "explicit zero replaces an older count");
+  update({ activityDetail: "src/other.ts" });
+  assert.equal(buildRunModel(ref.current.get("counts-session")).files[0].additions, undefined,
+    "a reused activity id cannot transfer counts to another file");
 }
 
 // Concurrent chats can report the same path and activity id without sharing totals.

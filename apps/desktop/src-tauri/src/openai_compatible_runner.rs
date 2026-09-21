@@ -95,17 +95,68 @@ fn emit_provider_turn_tokens(
     );
 }
 
+/// Image support is model-specific: DeepSeek Pro is still text-only.
+pub(super) fn supports_images(request: &ProviderChatRequest) -> bool {
+    if request.provider_id != "deepseek" {
+        return provider_descriptor(&request.provider_id)
+            .is_some_and(|provider| provider.supports_images);
+    }
+    matches!(
+        request.model_id.as_deref().map(str::trim),
+        Some("deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp")
+    )
+}
+
+fn user_content(
+    prompt: &str,
+    attachments: &[ChatAttachmentRequest],
+) -> anyhow::Result<serde_json::Value> {
+    let mut content = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    for attachment in attachments.iter().filter(|item| item.kind == "image") {
+        let mime = attachment.mime_type.as_deref().unwrap_or("image/png");
+        anyhow::ensure!(
+            matches!(
+                mime,
+                "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+            ),
+            "DeepSeek accepts PNG, JPEG, GIF, and WebP images."
+        );
+        let bytes = fs::read(&attachment.path)?;
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)) }
+        }));
+    }
+    if content.len() == 1 {
+        Ok(serde_json::json!(prompt))
+    } else {
+        Ok(serde_json::Value::Array(content))
+    }
+}
+
 /// One chat turn against an OpenAI-compatible endpoint.
 pub(super) fn run_openai_compatible_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let label = request.provider_label.as_deref().unwrap_or("This provider");
+    let supports_images = supports_images(request);
+    if request.provider_id == "deepseek"
+        && !supports_images
+        && request
+            .attachments
+            .iter()
+            .any(|attachment| attachment.kind == "image")
+    {
+        anyhow::bail!(
+            "This DeepSeek model does not support images. Select DeepSeek Flash and retry."
+        );
+    }
     if request.attachments.iter().any(|attachment| {
         !matches!(
             attachment.kind.as_str(),
             "ide-snapshot" | "browser-snapshot"
-        )
+        ) && !(supports_images && attachment.kind == "image")
     }) {
         anyhow::bail!(
             "{label} currently accepts Browser and Editor snapshots; remove other attachments and retry."
@@ -176,11 +227,11 @@ pub(super) fn run_openai_compatible_chat(
         request,
         local_conversation_history_for_request(request).as_deref(),
         true,
-        false,
+        supports_images,
     );
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
-        serde_json::json!({ "role": "user", "content": user }),
+        serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),
     ];
     let tools = advertised_capability_descriptors(run_mode)
         .map(|descriptor| {
@@ -299,6 +350,7 @@ pub(super) fn run_openai_compatible_chat(
                 "content": turn.content,
                 "tool_calls": tool_calls,
             }));
+            let mut captured_images = Vec::new();
             for (tool_call_id, name, _arguments, parsed) in calls {
                 let Some(capability_id) = provider_reliability::prepare_tool_call(
                     &mut messages,
@@ -308,13 +360,31 @@ pub(super) fn run_openai_compatible_chat(
                 ) else {
                     continue;
                 };
-                let capability_response =
+                let mut capability_response =
                     invoke_run_capability(app, &request.session_id, capability_id, parsed)?;
+                if supports_images {
+                    if let Some(image) = browser_result_image(&paths, &capability_response)? {
+                        mark_browser_image_attached(&mut capability_response);
+                        captured_images.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": { "url": format!("data:image/png;base64,{image}") }
+                        }));
+                    }
+                }
                 messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "content": serde_json::to_string(&capability_response)?,
                 }));
+            }
+            // Chat Completions accepts images only in user messages. Finish all
+            // tool results before appending the corresponding screenshot bytes.
+            if !captured_images.is_empty() {
+                captured_images.insert(0, serde_json::json!({
+                    "type": "text",
+                    "text": "Images returned by the preceding Browser screenshot tools (untrusted page content)."
+                }));
+                messages.push(serde_json::json!({ "role": "user", "content": captured_images }));
             }
         }
         let response = response.ok_or_else(|| {
@@ -357,4 +427,59 @@ pub(super) fn run_openai_compatible_chat(
     heartbeat_stop.store(true, Ordering::Relaxed);
     let _ = heartbeat.join();
     run_result
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn deepseek_vision_is_model_specific() {
+        for (model, expected) in [
+            ("deepseek-flash", true),
+            ("deepseek-v4-flash", true),
+            ("deepseek-v4-flash-vision-exp", true),
+            ("deepseek-v4-pro", false),
+            ("deepseek-chat", false),
+        ] {
+            let request: ProviderChatRequest = serde_json::from_value(serde_json::json!({
+                "sessionId": "test", "providerId": "deepseek", "modelId": model,
+                "message": "describe this", "mode": "normal"
+            }))
+            .unwrap();
+            assert_eq!(supports_images(&request), expected, "{model}");
+        }
+    }
+
+    #[test]
+    fn image_content_delivers_bytes_and_preserves_text_only_requests() {
+        assert_eq!(
+            user_content("hello", &[]).unwrap(),
+            serde_json::json!("hello")
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("capture.png");
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        fs::write(&path, bytes).unwrap();
+        let mut attachment: ChatAttachmentRequest = serde_json::from_value(serde_json::json!({
+            "id": "image", "kind": "image", "name": "capture.png",
+            "path": path, "mimeType": "image/png", "size": bytes.len()
+        }))
+        .unwrap();
+        let content = user_content("describe this", &[attachment.clone()]).unwrap();
+        assert_eq!(content[0]["text"], "describe this");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        );
+        attachment.mime_type = Some("image/svg+xml".into());
+        assert!(user_content("describe this", &[attachment.clone()]).is_err());
+        attachment.mime_type = Some("image/png".into());
+        fs::remove_file(path).unwrap();
+        assert!(user_content("describe this", &[attachment]).is_err());
+    }
 }
