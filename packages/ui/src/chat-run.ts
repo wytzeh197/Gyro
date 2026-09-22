@@ -363,6 +363,21 @@ export function summarizeSegment(steps: RunStep[]): string {
 }
 
 /**
+ * Split a segment summary so only the failure clause can be emphasized.
+ *
+ * The rest of the line is ordinary work ("Ran 14 commands, Read 7 files").
+ * "3 failed" is the only part that should read as a problem.
+ */
+export function splitSegmentSummary(summary: string): {
+  lead: string;
+  failed: string | null;
+} {
+  const match = summary.match(/^(.*), (\d+ failed)$/);
+  if (!match) return { lead: summary, failed: null };
+  return { lead: match[1] ?? summary, failed: match[2] ?? null };
+}
+
+/**
  * The live tail of a stretch: its newest calls, and how many scrolled out of
  * view above them. The in-flight call is always the newest, so it is never the
  * one hidden.

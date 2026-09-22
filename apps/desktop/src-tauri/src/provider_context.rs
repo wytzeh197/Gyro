@@ -149,7 +149,7 @@ pub(super) fn provider_model_context_window(
         },
         "kimi" | "gemini" => 1_000_000,
         "xai" => match model_id {
-            "grok-4.6" | "" => 500_000,
+            "grok-4.7" | "grok-4.6" | "" => 500_000,
             _ => 131_072,
         },
         _ => return None,

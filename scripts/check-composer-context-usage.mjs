@@ -197,6 +197,12 @@ const grok46Fallback = estimateComposerContextUsage([], "hello", {
   modelLabel: "Grok 4.6",
 });
 assert.equal(grok46Fallback.windowLabel, "500K");
+const grok47Fallback = estimateComposerContextUsage([], "hello", {
+  providerId: "xai",
+  modelId: "grok-4.7",
+  modelLabel: "Grok 4.7",
+});
+assert.equal(grok47Fallback.windowLabel, "500K");
 
 // Browsing another model must rescale the same occupancy against that
 // model's window immediately, rather than keep the previous model's remaining.

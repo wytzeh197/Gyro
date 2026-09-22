@@ -92,7 +92,7 @@ pub(super) fn execute(
             } else {
                 format!("Proposed changes to {path} for Workspace review")
             },
-            serde_json::to_value(&proposal)?,
+            bounded_proposal_result(&proposal),
         ),
         EditShape::Replacement { count, line } => {
             let noun = if count == 1 { "edit" } else { "edits" };
@@ -109,20 +109,28 @@ pub(super) fn execute(
     Ok((summary, data, Some(resource)))
 }
 
-/// The string-edit result is deliberately not the full proposal: the model
-/// already knows the content it asked for, and a 2 MB echo would spend the
-/// capability budget on a file it just read.
-fn bounded_edit_result(proposal: &MutationProposal, count: usize, line: u64) -> Value {
+/// Return the durable outcome without echoing the file body. A full proposal
+/// can exceed the tool budget after the mutation has already succeeded, which
+/// would incorrectly report failure and encourage the model to repeat a write.
+fn bounded_proposal_result(proposal: &MutationProposal) -> Value {
     json!({
         "schema": WORKSPACE_EDIT_SCHEMA,
+        "id": proposal.id,
         "proposalId": proposal.id,
         "path": proposal.path,
         "status": proposal.status.as_str(),
         "operation": proposal.operation,
-        "replacements": count,
-        "line": line,
-        "error": proposal.error,
+        "expectedHash": proposal.expected_hash,
+        "contentHash": content_hash(proposal.content.as_bytes()),
+        "error": proposal.error.as_deref().map(gyro_core::sanitize_capability_summary),
     })
+}
+
+fn bounded_edit_result(proposal: &MutationProposal, count: usize, line: u64) -> Value {
+    let mut data = bounded_proposal_result(proposal);
+    data["replacements"] = json!(count);
+    data["line"] = json!(line);
+    data
 }
 
 #[derive(Debug)]
@@ -308,6 +316,60 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_proposals_return_the_durable_outcome_within_the_tool_budget() {
+        for apply_immediately in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let store =
+                SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+            let session = store
+                .create_session(temp.path(), SessionOrigin::Desktop, "large edit")
+                .unwrap();
+            let content = "line with quoted text: \"hello\"\n".repeat(10_000);
+            let proposal = create_file_mutation_proposal_in_store(
+                &store,
+                FileMutationProposalRequest {
+                    session_id: session.id.to_string(),
+                    turn_id: Some(Uuid::new_v4().to_string()),
+                    path: "large.txt".into(),
+                    content: content.clone(),
+                    expected_hash: None,
+                },
+                apply_immediately,
+            )
+            .unwrap();
+            // This is the former wire payload, which fails after the write.
+            assert!(gyro_core::validate_capability_result_data(
+                serde_json::to_value(&proposal).unwrap()
+            )
+            .is_err());
+            for data in [
+                bounded_proposal_result(&proposal),
+                bounded_edit_result(&proposal, 1, 1),
+            ] {
+                let data =
+                    gyro_core::validate_capability_result_data(redact_json_strings(data)).unwrap();
+                assert_eq!(data["proposalId"], proposal.id.to_string());
+                assert_eq!(
+                    data["status"],
+                    if apply_immediately {
+                        "applied"
+                    } else {
+                        "pending"
+                    }
+                );
+                assert_eq!(data["contentHash"], content_hash(content.as_bytes()));
+                assert!(data.get("content").is_none());
+            }
+            let target = temp.path().join("large.txt");
+            if apply_immediately {
+                assert_eq!(fs::read_to_string(target).unwrap(), content);
+            } else {
+                assert!(!target.exists());
+            }
+        }
+    }
 
     fn workspace_with_file(content: &str) -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();

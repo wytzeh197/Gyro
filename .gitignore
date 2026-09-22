@@ -13,6 +13,10 @@
 # Maintainer-local planning docs — never published to the OSS repo.
 /docs/internal/
 
+# Local design references containing private conversation content.
+/docs/design-polish/reference-comparison.png
+/docs/design-polish/composer-comparison.png
+
 node_modules/
 .pnpm-store/
 dist/

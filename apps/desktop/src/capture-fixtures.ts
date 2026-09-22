@@ -54,7 +54,7 @@ const session = {
   title: "Bound the sync queue retries",
   workspacePath: WORKSPACE,
   origin: "desktop",
-  workspaceMode: "chat",
+  workspaceMode: "local",
   branch: "main",
   providerId: isOllamaScene ? "ollama" : "anthropic",
   providerLabel: isOllamaScene ? "Ollama" : "Claude Code",
@@ -745,7 +745,6 @@ const responses: Record<string, unknown> = {
       ranges: [{ startColumn: 17, endColumn: 24 }],
     },
   ],
-  prepare_workspace: preparation,
   restore_terminal_panes: scene === "cli" ? terminalPanes : [],
   create_terminal_pane: terminalPanes[0],
   task_discover: [],
@@ -807,12 +806,27 @@ const invoke: Invoke = (command, args) => {
   // Deterministic folder choice for exercising project editing in browser QA.
   if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
   if (command === "timing_diagnostics_enabled") return false;
+  if (command === "prepare_workspace") {
+    const request = args?.request as
+      | { runId?: string; workspacePath?: string }
+      | undefined;
+    return {
+      ...preparation,
+      // App accepts progress only for the preparation request it issued.
+      runId: request?.runId ?? preparation.runId,
+      workspacePath: request?.workspacePath ?? preparation.workspacePath,
+      files:
+        parameters.get("edge") === "lazy-explorer"
+          ? workspaceTree.filter(
+              (entry) => entry.isWorkspaceRoot || entry.depth === 1,
+            )
+          : preparation.files,
+    };
+  }
   if (parameters.get("edge") === "lazy-explorer") {
     const rootFiles = workspaceTree.filter(
       (entry) => entry.isWorkspaceRoot || entry.depth === 1,
     );
-    if (command === "prepare_workspace")
-      return { ...preparation, files: rootFiles };
     if (command === "watch_workspace") return rootFiles;
   }
   if (command === "list_workspace_tree" && args?.depth === 1) {

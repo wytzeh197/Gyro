@@ -101,11 +101,20 @@
       }
     }
     function schedule() {
-      if (!frame) frame = requestAnimationFrame(draw);
+      if (!frame && media.matches && !document.hidden) {
+        frame = requestAnimationFrame(draw);
+      }
     }
     function resize() {
-      width = innerWidth;
-      height = innerHeight;
+      var enabled = media.matches && !document.hidden;
+      width = enabled ? innerWidth : 0;
+      height = enabled ? innerHeight : 0;
+      canvas.hidden = !enabled;
+      if (!enabled) {
+        pointer = null;
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+      }
       var ratio = Math.min(devicePixelRatio || 1, 2);
       canvas.width = Math.round(width * ratio);
       canvas.height = Math.round(height * ratio);
@@ -121,7 +130,8 @@
     document.documentElement.addEventListener("pointerleave", clear);
     window.addEventListener("blur", clear);
     window.addEventListener("resize", resize, { passive: true });
-    media.addEventListener("change", clear);
+    media.addEventListener("change", resize);
+    document.addEventListener("visibilitychange", resize);
     new MutationObserver(schedule).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     resize();
   }

@@ -7,7 +7,7 @@
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::time::Duration;
 use url::{Host, Url};
 
@@ -179,13 +179,13 @@ where
 {
     crate::provider_retry::stream_response(
         cancellation,
-        |emit| ollama_tool_chat_once(request.clone(), cancellation, emit),
+        |emit| ollama_tool_chat_once(&request, cancellation, emit),
         on_delta,
     )
 }
 
 fn ollama_tool_chat_once<F>(
-    request: OllamaToolChatRequest<'_>,
+    request: &OllamaToolChatRequest<'_>,
     cancellation: &CancellationToken,
     mut on_delta: F,
 ) -> Result<OllamaChatResponse>
@@ -211,21 +211,20 @@ where
     })
     .map_err(ollama_http_error)?;
     ensure_loopback_response(&response, &endpoint)?;
-    let is_stream = response.content_type().contains("ndjson");
+    let mut is_stream = response.content_type().contains("ndjson");
     let mut reader = BufReader::new(response.into_reader());
     let mut content = String::new();
     let mut tool_calls = Vec::new();
     let mut input_tokens = None;
     let mut output_tokens = None;
     let mut line = String::new();
+    let mut remaining = crate::provider_retry::MAX_CHAT_RESPONSE_BYTES;
     let mut completed = false;
     loop {
         if cancellation.is_cancelled() {
             return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
         }
-        line.clear();
-        let read = reader
-            .read_line(&mut line)
+        let read = crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining)
             .context("invalid Ollama chat stream")?;
         if read == 0 {
             break;
@@ -236,6 +235,17 @@ where
         }
         let frame: OllamaChatStreamFrame =
             serde_json::from_str(trimmed).context("invalid Ollama chat response")?;
+        anyhow::ensure!(
+            frame.error.is_none(),
+            "Ollama reported a generation error; no tool calls were executed"
+        );
+        anyhow::ensure!(
+            frame.done_reason.as_deref() != Some("length"),
+            "Ollama reached its output token limit; the response is incomplete and no tool calls from this response were executed"
+        );
+        // Some gateways label NDJSON as JSON. An explicit incomplete frame
+        // still requires a final done marker before tool calls can be used.
+        is_stream |= frame.done == Some(false);
         if !frame.message.content.is_empty() {
             on_delta(&frame.message.content);
             content.push_str(&frame.message.content);
@@ -244,6 +254,10 @@ where
             if call.function.name.trim().is_empty() {
                 continue;
             }
+            anyhow::ensure!(
+                tool_calls.len() < crate::provider_retry::MAX_CHAT_TOOL_CALLS,
+                "Ollama returned too many tool calls; no tool calls were executed"
+            );
             tool_calls.push(OllamaToolCall {
                 name: call.function.name,
                 arguments: call.function.arguments,
@@ -255,7 +269,7 @@ where
         if frame.eval_count.is_some() {
             output_tokens = frame.eval_count;
         }
-        if frame.done {
+        if frame.done == Some(true) {
             completed = true;
             break;
         }
@@ -352,9 +366,13 @@ struct OllamaShowResponse {
 #[derive(Default, Deserialize)]
 struct OllamaChatStreamFrame {
     #[serde(default)]
+    error: Option<serde_json::Value>,
+    #[serde(default)]
     message: OllamaChatWireMessage,
     #[serde(default)]
-    done: bool,
+    done: Option<bool>,
+    #[serde(default)]
+    done_reason: Option<String>,
     #[serde(default)]
     prompt_eval_count: Option<u64>,
     #[serde(default)]
@@ -441,6 +459,112 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener};
+
+    fn chat_once_from_body(body: String, content_type: &'static str) -> Result<OllamaChatResponse> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut content_length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            reader.read_exact(&mut vec![0; content_length]).unwrap();
+            drop(reader);
+            write!(stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()).unwrap();
+        });
+        let response = ollama_tool_chat_once(
+            &OllamaToolChatRequest {
+                base_url: Some(&format!("http://{address}/api")),
+                model: "test",
+                messages: Vec::new(),
+                tools: Vec::new(),
+            },
+            &CancellationToken::default(),
+            |_| {},
+        );
+        server.join().unwrap();
+        response
+    }
+
+    #[test]
+    fn requires_completion_even_when_a_stream_is_mislabeled_as_json() {
+        let body = r#"{"message":{"tool_calls":[{"function":{"name":"write_file","arguments":{}}}]},"done":false}"#;
+        let error = chat_once_from_body(body.to_string(), "application/json").unwrap_err();
+        assert!(error.to_string().contains("stream ended before completion"));
+
+        let complete = format!("{body}\n{{\"done\":true}}\n");
+        assert_eq!(
+            chat_once_from_body(complete, "application/json")
+                .unwrap()
+                .tool_calls
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn refuses_generation_errors_after_partial_tool_calls() {
+        let body = concat!(
+            "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"write_file\",\"arguments\":{}}}]},\"done\":false}\n",
+            "{\"error\":\"generation failed\"}\n",
+            "{\"done\":true}\n"
+        );
+        let error = chat_once_from_body(body.to_string(), "application/x-ndjson").unwrap_err();
+        assert!(error.to_string().contains("generation error"));
+    }
+
+    #[test]
+    fn refuses_output_limit_completion_even_with_valid_tool_arguments() {
+        for body in [
+            concat!(
+                "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"write_file\",\"arguments\":{}}}]},\"done\":false}\n",
+                "{\"done\":true,\"done_reason\":\"length\"}\n"
+            ),
+            r#"{"message":{"content":"partial answer"},"done":true,"done_reason":"length"}"#,
+            r#"{"message":{"tool_calls":[{"function":{"name":"write_file","arguments":{}}}]},"done":true,"done_reason":"length"}"#,
+        ] {
+            let error = chat_once_from_body(body.to_string(), "application/json").unwrap_err();
+            assert!(error.to_string().contains("output token limit"), "{error}");
+        }
+    }
+
+    #[test]
+    fn accepts_tool_calls_with_normal_stop_reason() {
+        let body = r#"{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":{"path":"README.md"}}}]},"done":true,"done_reason":"stop"}"#;
+        let response = chat_once_from_body(body.to_string(), "application/json").unwrap();
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "read_file");
+    }
+
+    #[test]
+    fn refuses_excessive_tool_calls() {
+        let call = serde_json::json!({"function":{"name":"read_file","arguments":{}}});
+        let body = serde_json::json!({
+            "message": {"tool_calls": vec![call; crate::provider_retry::MAX_CHAT_TOOL_CALLS + 1]},
+            "done": true
+        })
+        .to_string();
+        let error = chat_once_from_body(body, "application/json").unwrap_err();
+        assert!(error.to_string().contains("too many tool calls"));
+    }
 
     #[test]
     fn permits_only_loopback_http_endpoints() {

@@ -28,6 +28,33 @@ visibly labeled **Alpha** but published as a non-prerelease. A draft becomes
 available to the site and installed apps only after manual acceptance and
 publication.
 
+## Adding new models
+
+Models compatible with an existing Gyro integration can ship through the remote
+catalog without a new app version. Users must already have an app release with
+catalog support; new providers, authentication flows, or native model handling
+still require a normal app release.
+
+1. Verify the model ID, reasoning options, and capabilities against the supported
+   provider API or CLI version. Edit `site/model-catalog.json`, update its
+   `revision`, and set each entry's `minClientRevision` to the catalog client
+   revision it requires.
+2. Run `node --experimental-strip-types scripts/check-model-catalog.mjs`
+   and verify an actual chat with the model in a compatible app.
+3. Merge the reviewed catalog change, then publish it with `pnpm site:deploy`.
+   Confirm `https://usegyro.io/model-catalog.json` serves the expected revision
+   and the model appears in a compatible app's picker after refresh.
+
+Use `rolloutPercentage` for a gradual rollout. Apps check at startup and every
+six hours, retaining their last valid catalog when offline. To withdraw a remote
+addition, remove its entry and redeploy; to roll back all remote changes, publish
+`enabled: false`. These changes take effect on the next successful refresh and
+do not cancel running chats or remove bundled models.
+
+See [Remote model catalog](model-catalog.md) for the schema, compatibility limits,
+and rollback details. Catalog-only updates do not need an app version bump,
+GitHub release tag, or new binaries.
+
 ## Public artifact contract
 
 Every release must contain one complete, version-aligned set:
@@ -75,7 +102,14 @@ authenticate Gyro-issued updates and are independent of the ad-hoc macOS code
 signature. Direct app installs and updates must reject missing or invalid
 updater signatures.
 
-## Required repository configuration
+## One-time repository setup
+
+Complete this setup before the first public release, and revisit it when the
+release infrastructure changes. These are not steps to repeat for every version.
+Only configuration names belong in this public guide; keep secret values and
+private operational details out of documentation, release notes, and logs.
+
+### Signing and workflow configuration
 
 The tagged release workflow needs:
 
@@ -90,10 +124,16 @@ No Apple certificate or notarization secret belongs in the Alpha workflow.
 Keep the updater private key backed up outside the repository; rotate it only
 when no released app trusts the current public key.
 
-Enable GitHub immutable releases before publishing the corrected Alpha. Draft
-assets remain replaceable during acceptance; after publication, the tag and
-assets must be locked. The release workflow must continue to refuse any attempt
-to overwrite a published release.
+### Release immutability and public site
+
+Enable GitHub immutable releases before publishing. Draft assets remain
+replaceable during acceptance; after publication, the tag and assets must be
+locked. The release workflow must continue to refuse any attempt to overwrite
+a published release.
+
+Deploy and verify the public download site, then set the GitHub repository
+homepage to `https://usegyro.io/`. Keep repository topics aligned with the public
+product description.
 
 ## Release notes contract
 
@@ -151,17 +191,21 @@ do not require a product release by themselves.
    appropriate hardware.
 5. Complete the clean-user Gatekeeper and updater acceptance checks. Publish
    the draft as a non-prerelease only when every check passes.
-6. Confirm the Cloudflare Worker site (`pnpm site:deploy`) and
-   `/releases/latest` show the new version and that updater metadata resolves.
-   The `release.published` workflow then validates the CLI Formula on Apple
-   Silicon and Intel before updating the tap.
+6. Confirm the [download site](https://usegyro.io/) shows the new version and
+   the [GitHub latest-release API](https://api.github.com/repos/wytzeh197/Gyro/releases/latest)
+   returns the published tag. Verify the updater's `latest.json` URL above
+   resolves to the matching version. The `release.published` workflow validates
+   the CLI Formula on Apple Silicon and Intel; confirm the tap then receives
+   the validated Formula as described below.
 7. If the prior latest release is defective, mark its title and first release
    paragraph as superseded only after the replacement is live. Link to the
    fixed release; never replace the old assets in place.
 
-After the usegyro.io deployment is verified, set the GitHub repository homepage to
-`https://usegyro.io/` and keep repository topics aligned with the
-public product description.
+The download site fetches release metadata from GitHub at runtime, so publishing
+a normal app release does not require a website redeployment. Run
+`pnpm site:deploy` when website content or `site/model-catalog.json` changes,
+and verify the deployed content. Model-only releases follow
+[Adding new models](#adding-new-models) above.
 
 ## Homebrew CLI
 

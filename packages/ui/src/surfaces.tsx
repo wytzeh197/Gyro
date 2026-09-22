@@ -206,6 +206,7 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
+  isManualCompaction,
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
@@ -1584,6 +1585,10 @@ export function AppChrome({
   const isIdeSurface =
     activeDestination === "workspace" && activeWorkspaceLayout === "code";
   const [localSidebarHidden, setLocalSidebarHidden] = useState(false);
+  const [isCompactNavigationOpen, setIsCompactNavigationOpen] = useState(false);
+  const compactNavigationId = useId();
+  const compactNavigationButtonRef = useRef<HTMLButtonElement>(null);
+  const compactSidebarRef = useRef<HTMLElement>(null);
   // Workspace (code) always keeps the sidebar. Hide/show only exists on
   // Sessions and other non-IDE shells — the restore control never landed
   // cleanly under the traffic lights in Workspace.
@@ -1643,6 +1648,66 @@ export function AppChrome({
   const [isIdeSidebarCustomized, setIsIdeSidebarCustomized] = useState(false);
   const [isIdeSidebarResizing, setIsIdeSidebarResizing] = useState(false);
   const appShellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const compact = window.matchMedia("(max-width: 780px)");
+    const onChange = () => {
+      if (!compact.matches) setIsCompactNavigationOpen(false);
+    };
+    compact.addEventListener("change", onChange);
+    return () => compact.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    setIsCompactNavigationOpen(false);
+  }, [
+    activeDestination,
+    activeSettingsSection,
+    activeSessionId,
+    activeWorkspaceLayout,
+    workspacePath,
+    ide?.activeView,
+  ]);
+
+  useEffect(() => {
+    if (!isCompactNavigationOpen) return;
+    const sidebar = compactSidebarRef.current;
+    const main = appShellRef.current?.querySelector<HTMLElement>(".gyro-main");
+    if (!sidebar) return;
+    const previouslyInert = main?.inert ?? false;
+    if (main) main.inert = true;
+    const focusable = () =>
+      Array.from(
+        sidebar.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsCompactNavigationOpen(false);
+      } else if (event.key === "Tab") {
+        const controls = focusable();
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      if (main) main.inert = previouslyInert;
+      document.removeEventListener("keydown", onKeyDown);
+      compactNavigationButtonRef.current?.focus({ preventScroll: true });
+    };
+  }, [isCompactNavigationOpen]);
   const previousSidebarViewRef = useRef<IdeViewId>();
   const ideSidebarResizeRef = useRef<
     | {
@@ -1891,7 +1956,7 @@ export function AppChrome({
           : ""
       } ${isIdeSurface ? "is-workspace-chrome-active" : ""} ${
         isSidebarHidden ? "is-sidebar-hidden" : ""
-      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""}`}
+      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${isCompactNavigationOpen ? "is-compact-navigation-open" : ""}`}
       data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}
       style={
         {
@@ -1900,6 +1965,42 @@ export function AppChrome({
       }
       ref={appShellRef}
     >
+      <div
+        className={`gyro-compact-navigation-toolbar${activeDestination === "settings" ? " is-settings" : ""}`}
+      >
+        <button
+          aria-controls={compactNavigationId}
+          aria-expanded={isCompactNavigationOpen}
+          aria-label="Open navigation"
+          onClick={() => setIsCompactNavigationOpen(true)}
+          ref={compactNavigationButtonRef}
+          title="Open navigation"
+          type="button"
+        >
+          <PanelLeft size={17} strokeWidth={1.6} />
+        </button>
+        {activeDestination === "settings" ? (
+          <button
+            onClick={() => {
+              setSettingsQuery("");
+              (onSettingsBack ?? (() => onSelectDestination("workspace")))();
+            }}
+            type="button"
+          >
+            <ArrowLeft size={15} />
+            <span>Back to app</span>
+          </button>
+        ) : null}
+      </div>
+      {isCompactNavigationOpen ? (
+        <button
+          aria-label="Close navigation"
+          className="gyro-compact-navigation-backdrop"
+          onClick={() => setIsCompactNavigationOpen(false)}
+          tabIndex={-1}
+          type="button"
+        />
+      ) : null}
       <WorkspaceActivityRail
         activeView={ide?.activeView ?? "explorer"}
         badges={sourceControlRailBadge(ide?.sourceControl)}
@@ -1917,7 +2018,7 @@ export function AppChrome({
         onSelectView={onSelectIdeView}
         onToggleSidebar={() => undefined}
       />
-      {isSidebarHidden ? (
+      {isSidebarHidden && !isCompactNavigationOpen ? (
         <div className="gyro-sidebar-restore-cluster">
           <div className="gyro-sidebar-window-actions">
             <button
@@ -1942,7 +2043,24 @@ export function AppChrome({
           />
         </div>
       ) : (
-        <aside className="gyro-sidebar">
+        <aside
+          aria-label={isCompactNavigationOpen ? "Navigation" : undefined}
+          aria-modal={isCompactNavigationOpen ? true : undefined}
+          className="gyro-sidebar"
+          id={compactNavigationId}
+          ref={compactSidebarRef}
+          role={isCompactNavigationOpen ? "dialog" : undefined}
+        >
+          {isCompactNavigationOpen ? (
+            <button
+              aria-label="Close navigation"
+              className="gyro-compact-navigation-close"
+              onClick={() => setIsCompactNavigationOpen(false)}
+              type="button"
+            >
+              <X size={17} />
+            </button>
+          ) : null}
           {activeDestination === "settings" ? (
             <SettingsSidebarContent
               activeSection={activeSettingsSection}
@@ -2080,7 +2198,11 @@ export function AppChrome({
                 (onSettingsBack ?? (() => onSelectDestination("workspace")))();
               }}
               onSectionChange={onSettingsSectionChange}
-              onToggleSidebar={() => setIsSidebarHidden(true)}
+              onToggleSidebar={() =>
+                isCompactNavigationOpen
+                  ? setIsCompactNavigationOpen(false)
+                  : setIsSidebarHidden(true)
+              }
             />
           ) : (
             <WorkspaceSidebarContent
@@ -2158,7 +2280,11 @@ export function AppChrome({
               onToggleChatsCollapsed={onToggleChatsCollapsed}
               onToggleSourceControlFile={onToggleSourceControlFile}
               onDiscardSourceControlFile={onDiscardSourceControlFile}
-              onToggleSidebar={() => setIsSidebarHidden(true)}
+              onToggleSidebar={() =>
+                isCompactNavigationOpen
+                  ? setIsCompactNavigationOpen(false)
+                  : setIsSidebarHidden(true)
+              }
               pinnedSessionIds={pinnedSessionIds}
               openChatSessionIds={openChatSessionIds}
               savedProjects={savedProjects}
@@ -2561,6 +2687,7 @@ function SettingsSidebarContent({
           <div className="gyro-sidebar-window-actions">
             <button
               aria-label="Hide sidebar"
+              title="Hide sidebar"
               className="gyro-sidebar-toggle-button"
               onClick={onToggleSidebar}
               type="button"
@@ -3963,6 +4090,7 @@ function WorkspaceSidebarContent({
             <div className="gyro-sidebar-window-actions">
               <button
                 aria-label="Hide sidebar"
+                title="Hide sidebar"
                 className="gyro-sidebar-toggle-button"
                 onClick={onToggleSidebar}
                 type="button"
@@ -7230,7 +7358,16 @@ export function ChatGridSurface({
               .filter(Boolean)
               .join(" ")}
             key={pane?.paneId ?? `empty-${slotIndex}`}
-            onFocusCapture={() => pane && onFocusPane(pane)}
+            onFocusCapture={(event) => {
+              // Closing another pane must not select its chat first. A click
+              // focuses buttons even when their pointerdown stops bubbling.
+              if (
+                pane &&
+                !event.target.closest('[data-chat-pane-action="close"]')
+              ) {
+                onFocusPane(pane);
+              }
+            }}
             onPointerDown={() => pane && onFocusPane(pane)}
             style={slotArea}
           >
@@ -9009,12 +9146,55 @@ export function ChatSurface({
         onDragOverCapture={handleMediaDragOver}
         onDropCapture={handleMediaDrop}
       >
-        <div
-          aria-hidden="true"
-          className="gyro-chat-empty-drag-region"
-          data-tauri-drag-region
-        />
-        {chatSwitcher ? (
+        {isTiled ? (
+          <div className="gyro-chat-thread-topbar">
+            <div className="gyro-chat-thread-identity">
+              {onPaneDragStart ? (
+                <span
+                  aria-label="Drag chat to rearrange split"
+                  className="gyro-chat-pane-drag-handle"
+                  draggable
+                  onDragEnd={onPaneDragEnd}
+                  onDragStart={(event) => {
+                    event.stopPropagation();
+                    onPaneDragStart(event);
+                  }}
+                  role="img"
+                  title="Drag to rearrange split"
+                >
+                  <GripVertical aria-hidden="true" size={14} />
+                </span>
+              ) : null}
+              {chatSwitcher ? (
+                <ChatSwitcher chatSwitcher={chatSwitcher} />
+              ) : null}
+              <Folder
+                aria-hidden="true"
+                className="gyro-thread-project-icon"
+                size={16}
+              />
+              <strong>{sessionTitle ?? "New chat"}</strong>
+            </div>
+            <div className="gyro-thread-topbar-actions">
+              <ChatSurfaceControls
+                isDockOpen={false}
+                isPlanOpen={false}
+                isToolPanelOpen={false}
+                onCloseChat={onCloseChat}
+                planItemCount={0}
+                showOverflow={false}
+                showPanel={false}
+              />
+            </div>
+          </div>
+        ) : (
+          <div
+            aria-hidden="true"
+            className="gyro-chat-empty-drag-region"
+            data-tauri-drag-region
+          />
+        )}
+        {chatSwitcher && !isTiled ? (
           <div className="gyro-chat-start-switcher">
             <ChatSwitcher chatSwitcher={chatSwitcher} />
           </div>
@@ -10011,6 +10191,7 @@ function ChatSurfaceControls({
         <button
           aria-label="Close chat"
           className="gyro-chat-surface-button"
+          data-chat-pane-action="close"
           onClick={onCloseChat}
           // The grid slot focuses its pane on pointerdown, which for this button
           // means focusing the pane on the way to closing it — making the chat
@@ -26560,6 +26741,15 @@ function ChatTurn({
     );
   }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
+  // `/compact` produces no answer, only its compaction step. Without a result
+  // line the finished turn reads as an empty, stalled response.
+  const isCompactionResult =
+    !responseEvent &&
+    !isRunning &&
+    runModel.phase.name === "done" &&
+    turn.timelineEvents.some((event) =>
+      isManualCompaction(turn.timelineEvents, event),
+    );
   // A completed run needs a conclusion as well as its evidence. The work
   // summary and file review answer "what changed"; the final response answers
   // whether the request is actually done and names any remaining caveat.
@@ -26568,6 +26758,7 @@ function ChatTurn({
   // a text answer, or work that stopped before an answer (empty void + tools).
   const canContinue =
     !isRunning &&
+    !isCompactionResult &&
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0) &&
     runModel.phase.name === "done";
@@ -26717,6 +26908,23 @@ function ChatTurn({
                       {turnTokensLabel(turn.turnTokens)}
                     </p>
                   ) : null}
+                </div>
+              </article>
+            </div>
+          </div>
+        ) : null}
+        {isCompactionResult ? (
+          <div
+            className="gyro-chat-run-sequence is-response"
+            aria-label="Compaction result"
+          >
+            <div className="gyro-chat-run-timeline is-final-response">
+              <article className="gyro-message is-assistant">
+                <div>
+                  <p>
+                    Context compacted. Earlier conversation was summarized so
+                    this chat has room to continue.
+                  </p>
                 </div>
               </article>
             </div>

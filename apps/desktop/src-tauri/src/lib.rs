@@ -1,6 +1,8 @@
-mod provider_reliability;
-mod git_read;
 mod canvas_preview;
+mod git_read;
+mod model_catalog;
+mod provider_mcp;
+mod provider_reliability;
 use provider_reliability::{is_transient_provider_error, provider_failure_recovery};
 mod openai_compatible_runner;
 mod provider_api_keys;
@@ -5544,35 +5546,46 @@ fn compact_provider_chat_blocking(
     let running = codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
-    let completed = match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
-        Ok(()) => codex_context_compaction_activity(&activity_params, "done"),
-        Err(error) => {
-            let error = gyro_core::security::redact_secrets(&error.to_string());
-            let failed = ProviderActivity {
-                id: running.id,
-                kind: "context".into(),
-                label: "Context compaction failed".into(),
-                detail: Some(error.clone()),
-                file_counts: None,
-                note: None,
-                status: "failed".into(),
-            };
-            emit_provider_activity_event(&app, &request, &failed, Some(0));
-            let _ = store.append_system_events_with_turn_id(
-                session_uuid,
-                vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
-            );
-            return Err(error);
-        }
-    };
+    let (completed, context_usage) =
+        match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
+            Ok(usage) => (
+                codex_context_compaction_activity(&activity_params, "done"),
+                provider_context_usage_with_window(
+                    usage,
+                    &request.provider_id,
+                    request.model_id.as_deref(),
+                ),
+            ),
+            Err(error) => {
+                let error = gyro_core::security::redact_secrets(&error.to_string());
+                let failed = ProviderActivity {
+                    id: running.id,
+                    kind: "context".into(),
+                    label: "Context compaction failed".into(),
+                    detail: Some(error.clone()),
+                    file_counts: None,
+                    note: None,
+                    status: "failed".into(),
+                };
+                emit_provider_activity_event(&app, &request, &failed, Some(0));
+                let _ = store.append_system_events_with_turn_id(
+                    session_uuid,
+                    vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
+                );
+                return Err(error);
+            }
+        };
     emit_provider_activity_event(&app, &request, &completed, Some(0));
+    let mut entry = provider_activity_event_entry(&request, run_id, 0, &completed);
+    // The compacted thread's own measurement supersedes every earlier reading.
+    if let (Some(usage), Some(payload)) = (context_usage, entry.1.as_object_mut()) {
+        payload.insert(
+            "contextUsage".into(),
+            serde_json::to_value(&usage).map_err(to_string)?,
+        );
+    }
     let activity_events = store
-        .append_system_events_with_turn_id(
-            session_uuid,
-            vec![provider_activity_event_entry(
-                &request, run_id, 0, &completed,
-            )],
-        )
+        .append_system_events_with_turn_id(session_uuid, vec![entry])
         .map_err(to_string)?;
     Ok(ProviderContextCompactionResponse { activity_events })
 }
@@ -6156,6 +6169,15 @@ fn provider_context_message_with_capabilities_for_turn(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if supports_tools {
+        if let Some(workspace) = request.workspace_path.as_deref() {
+            context.push(format!("Selected workspace: {workspace}"));
+        }
+        // Send this on resume too: older provider sessions may still carry the
+        // former instruction to treat the workspace as optional context.
+        context.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls.".into());
+        if request.mode == ChatMode::Normal {
+            context.push("When the user requests implementation, carry it through authorized edits and relevant verification. Use gyro_workspace_list or gyro_workspace_search to locate files, gyro_workspace_read or gyro_workspace_read_range to inspect them, gyro_workspace_edit for exact replacements, and gyro_workspace_propose_edit for whole-file changes. Paths are relative to the selected workspace. A completed tool call is not proof that a proposed edit was applied: inspect its status, report pending review when applicable, and verify applied changes with a fresh read or diff. Never claim an action succeeded without a confirming tool result. If a tool fails, use its error to correct the request; report an unavailable bridge rather than inventing workspace results.".into());
+        }
         if let Some(check) = request.workspace_check.as_ref() {
             let diagnostics = request
                 .workspace_context
@@ -7410,7 +7432,9 @@ fn normalize_workspace_context_paths(
         if selection
             .get("path")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(gyro_core::capability_path_is_sensitive)
+            .map(|path| capability_path_is_sensitive_in_workspace(&workspace, path))
+            .transpose()?
+            .unwrap_or(false)
         {
             selection
                 .as_object_mut()
@@ -7422,7 +7446,9 @@ fn normalize_workspace_context_paths(
         if buffer
             .get("path")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(gyro_core::capability_path_is_sensitive)
+            .map(|path| capability_path_is_sensitive_in_workspace(&workspace, path))
+            .transpose()?
+            .unwrap_or(false)
         {
             buffer
                 .as_object_mut()
@@ -7783,7 +7809,9 @@ impl WorkspacePreparationManager {
         state.in_flight.remove(&root);
         if let Ok(snapshot) = result.as_ref() {
             if snapshot.progress.status == "ready" && snapshot.progress.errors.is_empty() {
-                state.completed.insert(root, (Instant::now(), snapshot.clone()));
+                state
+                    .completed
+                    .insert(root, (Instant::now(), snapshot.clone()));
                 prune_workspace_preparation_completed(&mut state);
             } else {
                 state.completed.remove(&root);
@@ -7909,7 +7937,9 @@ fn prepare_workspace_impl(
     let task_handle = std::thread::spawn(move || task_discover_impl(&task_root));
     std::thread::spawn(move || {
         let _ = git_tx.send(git_status_cache::inspect_git_status_before(
-            &git_root, false, git_deadline,
+            &git_root,
+            false,
+            git_deadline,
         ));
     });
     std::thread::spawn(move || {
@@ -7922,7 +7952,8 @@ fn prepare_workspace_impl(
             if let Some(error) = &status.error {
                 if !error.contains("not a git repository") {
                     errors.push(WorkspacePreparationError {
-                        phase: "git".into(), message: error.clone(),
+                        phase: "git".into(),
+                        message: error.clone(),
                     });
                 }
             }
@@ -7941,7 +7972,9 @@ fn prepare_workspace_impl(
                 message: "Inspecting Git timed out".into(),
             });
             Some(git_status_read_failure(
-                Some(root), "Inspecting Git timed out".into(), true,
+                Some(root),
+                "Inspecting Git timed out".into(),
+                true,
             ))
         }
     };
@@ -7949,13 +7982,15 @@ fn prepare_workspace_impl(
         Ok(Ok(catalog)) => Some(catalog),
         Ok(Err(error)) => {
             errors.push(WorkspacePreparationError {
-                phase: "git".into(), message: format!("Branch inspection: {error}"),
+                phase: "git".into(),
+                message: format!("Branch inspection: {error}"),
             });
             None
         }
         Err(_) => {
             errors.push(WorkspacePreparationError {
-                phase: "git".into(), message: "Branch inspection timed out".into(),
+                phase: "git".into(),
+                message: "Branch inspection timed out".into(),
             });
             None
         }
@@ -8371,7 +8406,8 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
 }
 
 fn git_branch_catalog_before(
-    workspace_path: &str, deadline: Instant,
+    workspace_path: &str,
+    deadline: Instant,
 ) -> anyhow::Result<GitBranchCatalog> {
     let root = workspace_root(workspace_path)?;
     let Some(repo_root) = git_read::repo_root(&root, deadline)? else {
@@ -8422,7 +8458,10 @@ fn git_branch_catalog_before(
         .args(["branch", "--show-current"]);
     let current_output = git_read::run(&current_command, deadline, 64 * 1024)?;
     if !current_output.succeeded() || current_output.stdout_truncated {
-        return Err(bounded_command_error("could not read current branch", &current_output));
+        return Err(bounded_command_error(
+            "could not read current branch",
+            &current_output,
+        ));
     }
     let current = current_output
         .succeeded()
@@ -8443,7 +8482,8 @@ fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktre
 }
 
 fn git_linked_worktrees_before(
-    repo_root: &Path, deadline: Instant,
+    repo_root: &Path,
+    deadline: Instant,
 ) -> anyhow::Result<Vec<GitLinkedWorktree>> {
     let mut command = git_command();
     command
@@ -9616,6 +9656,44 @@ fn decode_workspace_utf8(bytes: &[u8], truncated: bool) -> anyhow::Result<String
 #[cfg(test)]
 mod workspace_utf8_tests {
     use super::decode_workspace_utf8;
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_fifo_without_waiting_for_a_writer() {
+        use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt};
+        use std::time::Duration;
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pipe");
+        let fifo = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let reader_path = path.clone();
+        let reader = std::thread::spawn(move || {
+            let _ = sender.send(super::read_bounded_regular_file(
+                &reader_path,
+                1024,
+                "workspace file",
+            ));
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(2));
+        if result.is_err() {
+            // Unblock a regressed reader without hanging the test itself.
+            let _writer = std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&path);
+            let _ = receiver.recv_timeout(Duration::from_secs(2));
+        }
+        if reader.is_finished() {
+            reader.join().unwrap();
+        }
+        let error = result
+            .expect("FIFO read blocked waiting for a writer")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a regular file"), "{error}");
+    }
     #[test]
     fn rejects_invalid_utf8_even_in_previews() {
         assert!(decode_workspace_utf8(&[0xff, 0x61], false).is_err());
@@ -9642,7 +9720,9 @@ fn read_bounded_regular_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        // A FIFO must not block in open() before the regular-file check.
+        // O_NONBLOCK has no effect on ordinary file reads.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let mut file = options
         .open(path)
@@ -13996,7 +14076,7 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             ],
             auth_methods: &["xai.api_key", "cached_token"],
             cursor_kind: "xai-acp-session",
-            default_model: "grok-4.6",
+            default_model: "grok-4.7",
             runner: "grok-acp",
         }),
         "gemini" => Some(AcpProviderRuntime {
@@ -15096,7 +15176,7 @@ fn run_openai_codex_context_compaction(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: &ProviderResumeCursor,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<ProviderContextUsage>> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let mut process = command_for_provider("codex", "openai");
     process
@@ -15110,7 +15190,7 @@ fn run_openai_codex_context_compaction(
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     let mut child = ProviderProcessGuard::new(child);
-    let result = (|| -> anyhow::Result<()> {
+    let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
         let mut stdin = child
             .stdin
             .take()
@@ -15193,6 +15273,10 @@ fn run_openai_codex_context_compaction(
 
         let mut request_confirmed = false;
         let mut compaction_completed = false;
+        // Codex re-measures the thread after replacing its history. Keeping
+        // that reading lets the composer meter drop instead of showing the
+        // pre-compaction fill until the next turn reports.
+        let mut context_usage = None;
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
@@ -15221,17 +15305,23 @@ fn run_openai_codex_context_compaction(
                 codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
                 request_confirmed = true;
                 if compaction_completed {
-                    return Ok(());
+                    break;
                 }
                 continue;
             }
             let method = message.get("method").and_then(serde_json::Value::as_str);
             let params = message.get("params").cloned().unwrap_or_default();
             match method {
+                Some("thread/tokenUsage/updated") => {
+                    if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                        emit_provider_context_usage(app, request, &usage);
+                        context_usage = Some(usage);
+                    }
+                }
                 Some("thread/compacted") => {
                     compaction_completed = true;
                     if request_confirmed {
-                        return Ok(());
+                        break;
                     }
                 }
                 Some("item/completed") => {
@@ -15242,7 +15332,7 @@ fn run_openai_codex_context_compaction(
                     {
                         compaction_completed = true;
                         if request_confirmed {
-                            return Ok(());
+                            break;
                         }
                     }
                 }
@@ -15255,7 +15345,7 @@ fn run_openai_codex_context_compaction(
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("failed");
                     if status == "completed" {
-                        return Ok(());
+                        break;
                     }
                     let detail = params
                         .pointer("/turn/error/message")
@@ -15266,6 +15356,28 @@ fn run_openai_codex_context_compaction(
                 _ => {}
             }
         }
+        // The fresh reading can trail the completion notice; wait briefly for
+        // it rather than persisting a result the meter cannot use.
+        let usage_deadline = Instant::now() + Duration::from_millis(750);
+        while context_usage.is_none() {
+            let remaining = usage_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let Ok(Ok(message)) = messages.recv_timeout(remaining) else {
+                break;
+            };
+            if message.get("method").and_then(serde_json::Value::as_str)
+                == Some("thread/tokenUsage/updated")
+            {
+                let params = message.get("params").cloned().unwrap_or_default();
+                if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                    emit_provider_context_usage(app, request, &usage);
+                    context_usage = Some(usage);
+                }
+            }
+        }
+        Ok(context_usage)
     })();
     drop(child);
     result
@@ -16284,7 +16396,7 @@ fn run_anthropic_claude_chat(
         &contextual_message,
         request.workspace_path.as_deref(),
         request.suggest_title,
-        request.mode != ChatMode::Plan,
+        request.mode == ChatMode::Normal,
         can_resume,
     );
     let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
@@ -17108,7 +17220,6 @@ fn openai_codex_chat_prompt(
          If the user asks what model you are, answer with exactly that selected model label only.\n\
          {title_instruction}\
          {artifact_instruction}\n\
-         Use the selected workspace only as optional context.\n\
          {mutation_instruction}\n\
          Selected workspace: {workspace}\n\n\
          User message:\n{message}"
@@ -17153,7 +17264,6 @@ fn claude_chat_prompt(
          If the user asks what model you are, answer with the model label only.\n\
          {title_instruction}\
          {artifact_instruction}\n\
-         Use the selected workspace only as optional context.\n\
          {action_instruction}\
          Selected workspace: {workspace}\n\n\
          User message:\n{message}"
@@ -17708,9 +17818,9 @@ fn claude_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String>
 
 /// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
 ///
-/// Earlier Grok models publish `low`, `medium`, and `high`; Grok 4.6 also
-/// publishes `xhigh`. The flag parser accepts still more words, but the model
-/// rejects them once the turn starts, so unsupported carried-over levels are
+/// Earlier Grok models publish `low`, `medium`, and `high`; Grok 4.6 and
+/// Grok 4.7 also publish `xhigh`. The flag parser accepts still more words,
+/// but the model rejects them once the turn starts, so unsupported levels are
 /// dropped here and Grok keeps its own default.
 fn grok_reasoning_effort_arg(
     model_id: Option<&str>,
@@ -17719,7 +17829,8 @@ fn grok_reasoning_effort_arg(
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let supported = matches!(effort.as_str(), "low" | "medium" | "high")
-        || (effort == "xhigh" && (model_id.is_empty() || model_id == "grok-4.6"));
+        || (effort == "xhigh"
+            && (model_id.is_empty() || model_id == "grok-4.7" || model_id == "grok-4.6"));
     supported.then_some(effort)
 }
 
@@ -20459,7 +20570,20 @@ fn capability_positive_position(
     Ok(Some(value))
 }
 
+fn capability_path_is_sensitive_in_workspace(workspace: &Path, path: &str) -> anyhow::Result<bool> {
+    if gyro_core::capability_path_is_sensitive(path) {
+        return Ok(true);
+    }
+    let workspace = workspace.canonicalize()?;
+    let candidate = gyro_core::security::assert_path_inside_workspace(&workspace, Path::new(path))?;
+    let relative = candidate.strip_prefix(&workspace)?;
+    Ok(gyro_core::capability_path_is_sensitive(
+        &relative.to_string_lossy(),
+    ))
+}
+
 fn effective_capability_class(
+    workspace: &Path,
     capability_id: CapabilityId,
     arguments: &serde_json::Value,
 ) -> anyhow::Result<CapabilityClass> {
@@ -20478,7 +20602,9 @@ fn effective_capability_class(
         let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
             arguments, "path",
         )?)?;
-        if gyro_core::capability_path_is_sensitive(&path) {
+        // Classify the resolved target as well as the requested name. An
+        // ordinary-looking symlink must not bypass sensitive-read approval.
+        if capability_path_is_sensitive_in_workspace(workspace, &path)? {
             return Ok(CapabilityClass::WorkspaceSensitiveRead);
         }
     }
@@ -20486,7 +20612,8 @@ fn effective_capability_class(
         let path = capability_git_diff_path(arguments)?;
         if path
             .as_deref()
-            .map(gyro_core::capability_path_is_sensitive)
+            .map(|path| capability_path_is_sensitive_in_workspace(workspace, path))
+            .transpose()?
             .unwrap_or(true)
         {
             return Ok(CapabilityClass::WorkspaceSensitiveRead);
@@ -22123,7 +22250,11 @@ fn handle_desktop_provider_capability_request(
             "Council seats cannot use tools or mutate the workspace.".into(),
         );
     }
-    let class = match effective_capability_class(request.capability_id, &request.arguments) {
+    let class = match effective_capability_class(
+        &bound.workspace,
+        request.capability_id,
+        &request.arguments,
+    ) {
         Ok(class) => class,
         Err(error) => return fail("invalid-arguments", error.to_string()),
     };
@@ -22807,164 +22938,40 @@ fn write_desktop_mcp_message(
 pub fn run_provider_permission_server() -> anyhow::Result<()> {
     let context = DesktopProviderPermissionContext::from_env()?;
     let paths = desktop_provider_ipc_paths()?;
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout().lock();
-    let mut stdin = stdin.lock();
-    while let Some(line) = read_bounded_protocol_line(&mut stdin, MAX_PERMISSION_MCP_MESSAGE_BYTES)
-        .map_err(anyhow::Error::msg)?
-    {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        let request: serde_json::Value = match serde_json::from_slice(&line) {
-            Ok(request) => request,
-            Err(error) => {
-                write_desktop_mcp_message(
-                    &mut stdout,
-                    &serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32700, "message": error.to_string() },
-                    }),
-                )?;
-                continue;
-            }
-        };
-        let Some(method) = request.get("method").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(id) = request.get("id").cloned() else {
-            continue;
-        };
-        let result = match method {
-            "initialize" => Ok(serde_json::json!({
-                "protocolVersion": request
-                    .pointer("/params/protocolVersion")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("2024-11-05"),
-                "capabilities": { "tools": {} },
-                "serverInfo": {
-                    "name": "gyro-desktop-approval",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
-            })),
-            "ping" => Ok(serde_json::json!({})),
-            "tools/list" => Ok(serde_json::json!({
-                "tools": [{
-                    "name": "approve",
-                    "description": "Ask Gyro.app to approve or reject one Claude Code tool action.",
-                    "inputSchema": {
-                        "type": "object",
-                        "additionalProperties": true,
-                    },
-                }],
-            })),
-            "tools/call" => desktop_permission_tool_call(
-                &paths,
-                &context,
-                request.get("params").cloned().unwrap_or_default(),
-            ),
-            _ => Err(anyhow::anyhow!("unsupported MCP method `{method}`")),
-        };
-        match result {
-            Ok(result) => write_desktop_mcp_message(
-                &mut stdout,
-                &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-            )?,
-            Err(error) => write_desktop_mcp_message(
-                &mut stdout,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32603,
-                        "message": gyro_core::sanitize_harness_text(&error.to_string()),
-                    },
-                }),
-            )?,
-        }
-    }
-    Ok(())
+    provider_mcp::serve(
+        &mut std::io::stdin().lock(),
+        std::io::stdout(),
+        "gyro-desktop-approval",
+        vec![serde_json::json!({
+            "name": "approve",
+            "description": "Ask Gyro.app to approve or reject one Claude Code tool action.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": true,
+            },
+        })],
+        |params| desktop_permission_tool_call(&paths, &context, params),
+    )
 }
 
 pub fn run_provider_capability_server() -> anyhow::Result<()> {
     let context = DesktopProviderCapabilityContext::from_env()?;
     let paths = desktop_provider_ipc_paths()?;
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout().lock();
-    let mut stdin = stdin.lock();
-    while let Some(line) = read_bounded_protocol_line(&mut stdin, MAX_PERMISSION_MCP_MESSAGE_BYTES)
-        .map_err(anyhow::Error::msg)?
-    {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        let request: serde_json::Value = match serde_json::from_slice(&line) {
-            Ok(request) => request,
-            Err(error) => {
-                write_desktop_mcp_message(
-                    &mut stdout,
-                    &serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32700, "message": error.to_string() },
-                    }),
-                )?;
-                continue;
-            }
-        };
-        let Some(method) = request.get("method").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(id) = request.get("id").cloned() else {
-            continue;
-        };
-        let result = match method {
-            "initialize" => Ok(serde_json::json!({
-                "protocolVersion": request
-                    .pointer("/params/protocolVersion")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("2024-11-05"),
-                "capabilities": { "tools": {} },
-                "serverInfo": {
-                    "name": "gyro-provider-capabilities",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
-            })),
-            "ping" => Ok(serde_json::json!({})),
-            "tools/list" => Ok(serde_json::json!({
-                "tools": advertised_capability_descriptors(context.mode).map(|descriptor| serde_json::json!({
+    provider_mcp::serve(
+        &mut std::io::stdin().lock(),
+        std::io::stdout(),
+        "gyro-provider-capabilities",
+        advertised_capability_descriptors(context.mode)
+            .map(|descriptor| {
+                serde_json::json!({
                     "name": descriptor.id.provider_tool_name(),
                     "description": descriptor.description,
                     "inputSchema": desktop_capability_tool_schema(descriptor.id),
-                })).collect::<Vec<_>>()
-            })),
-            "tools/call" => desktop_capability_tool_call(
-                &paths,
-                &context,
-                request.get("params").cloned().unwrap_or_default(),
-            ),
-            _ => Err(anyhow::anyhow!("unsupported MCP method `{method}`")),
-        };
-        match result {
-            Ok(result) => write_desktop_mcp_message(
-                &mut stdout,
-                &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-            )?,
-            Err(error) => write_desktop_mcp_message(
-                &mut stdout,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32603,
-                        "message": gyro_core::sanitize_capability_summary(&error.to_string()),
-                    },
-                }),
-            )?,
-        }
-    }
-    Ok(())
+                })
+            })
+            .collect(),
+        |params| desktop_capability_tool_call(&paths, &context, params),
+    )
 }
 
 pub fn run_entrypoint() {
@@ -23130,6 +23137,7 @@ pub fn run() {
             get_project_capability_policy,
             get_provider_capability_support,
             list_provider_capability_support,
+            model_catalog::fetch_model_catalog,
             get_provider_usage,
             get_session_usage_totals,
             get_usage_safety_snapshot,
@@ -23553,40 +23561,68 @@ fn bind_cli_ipc_listener(
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
 
-    let bind = || UnixListener::bind(&paths.socket_path);
-    let listener = match bind() {
-        Ok(listener) => listener,
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
-            let before = fs::symlink_metadata(&paths.socket_path)
-                .with_context(|| format!("inspect {}", paths.socket_path.display()))?;
-            if before.file_type().is_symlink() || !before.file_type().is_socket() {
-                anyhow::bail!(
-                    "Gyro IPC path is not a safe Unix socket: {}",
-                    paths.socket_path.display()
-                );
+    // Only retry endpoint races a bounded number of times. A failed request
+    // is never replayed here; these probes happen before a listener is bound.
+    for _ in 0..3 {
+        let listener = match UnixListener::bind(&paths.socket_path) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                let before = match fs::symlink_metadata(&paths.socket_path) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error).context("inspect existing Gyro IPC socket"),
+                };
+                if before.file_type().is_symlink() || !before.file_type().is_socket() {
+                    anyhow::bail!(
+                        "Gyro IPC path is not a safe Unix socket: {}",
+                        paths.socket_path.display()
+                    );
+                }
+                match UnixStream::connect(&paths.socket_path) {
+                    Ok(_) => return Ok(None),
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        // Permission failures and transient resource exhaustion do
+                        // not prove the owner exited. Never unlink a live bridge.
+                        return Err(error).with_context(|| {
+                            format!(
+                                "probe existing Gyro IPC socket {}",
+                                paths.socket_path.display()
+                            )
+                        });
+                    }
+                }
+                let after = match fs::symlink_metadata(&paths.socket_path) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error).context("reinspect existing Gyro IPC socket"),
+                };
+                if before.dev() != after.dev()
+                    || before.ino() != after.ino()
+                    || after.file_type().is_symlink()
+                    || !after.file_type().is_socket()
+                {
+                    anyhow::bail!("Gyro IPC socket changed while checking whether it was stale");
+                }
+                match fs::remove_file(&paths.socket_path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error).context("remove stale Gyro IPC socket"),
+                }
+                continue;
             }
-            if UnixStream::connect(&paths.socket_path).is_ok() {
-                return Ok(None);
+            Err(error) => {
+                return Err(error).with_context(|| format!("bind {}", paths.socket_path.display()))
             }
-            let after = fs::symlink_metadata(&paths.socket_path)
-                .with_context(|| format!("reinspect {}", paths.socket_path.display()))?;
-            if before.dev() != after.dev()
-                || before.ino() != after.ino()
-                || after.file_type().is_symlink()
-                || !after.file_type().is_socket()
-            {
-                anyhow::bail!("Gyro IPC socket changed while checking whether it was stale");
-            }
-            fs::remove_file(&paths.socket_path)
-                .with_context(|| format!("remove stale {}", paths.socket_path.display()))?;
-            bind().with_context(|| format!("bind {}", paths.socket_path.display()))?
-        }
-        Err(error) => {
-            return Err(error).with_context(|| format!("bind {}", paths.socket_path.display()))
-        }
-    };
-    fs::set_permissions(&paths.socket_path, fs::Permissions::from_mode(0o600))?;
-    Ok(Some(listener))
+        };
+        fs::set_permissions(&paths.socket_path, fs::Permissions::from_mode(0o600))?;
+        return Ok(Some(listener));
+    }
+    anyhow::bail!(
+        "Gyro IPC socket kept changing while binding {}",
+        paths.socket_path.display()
+    )
 }
 
 #[cfg(unix)]
@@ -24130,13 +24166,19 @@ mod tests {
 
     #[test]
     fn capability_diff_and_reload_scopes_are_conservative() {
+        let temp = tempfile::tempdir().unwrap();
         assert_eq!(
-            effective_capability_class(CapabilityId::WorkspaceDiff, &serde_json::json!({}))
-                .unwrap(),
+            effective_capability_class(
+                temp.path(),
+                CapabilityId::WorkspaceDiff,
+                &serde_json::json!({}),
+            )
+            .unwrap(),
             CapabilityClass::WorkspaceSensitiveRead
         );
         assert_eq!(
             effective_capability_class(
+                temp.path(),
                 CapabilityId::WorkspaceDiff,
                 &serde_json::json!({ "path": "src/main.rs" }),
             )
@@ -24145,6 +24187,7 @@ mod tests {
         );
         assert_eq!(
             effective_capability_class(
+                temp.path(),
                 CapabilityId::WorkspaceDiff,
                 &serde_json::json!({ "path": ".env.local" }),
             )
@@ -24152,6 +24195,7 @@ mod tests {
             CapabilityClass::WorkspaceSensitiveRead
         );
         assert!(effective_capability_class(
+            temp.path(),
             CapabilityId::WorkspaceDiff,
             &serde_json::json!({ "path": "*.env" }),
         )
@@ -24166,6 +24210,7 @@ mod tests {
         // same way a workspace read does, and its schemas require positions.
         assert_eq!(
             effective_capability_class(
+                temp.path(),
                 CapabilityId::CodeDefinition,
                 &serde_json::json!({ "path": ".env", "line": 1, "column": 1 }),
             )
@@ -24233,6 +24278,78 @@ mod tests {
         assert!(normalize_workspace_context_paths(temp.path(), &mut context).is_err());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_symlink_targets_require_approval_and_are_withheld_from_context() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        fs::create_dir_all(workspace.join(".ssh")).unwrap();
+        fs::write(workspace.join(".env"), "private contents").unwrap();
+        fs::write(workspace.join(".ssh/config"), "private configuration").unwrap();
+        fs::write(workspace.join("main.rs"), "ordinary code").unwrap();
+        fs::write(temp.path().join("outside.txt"), "outside").unwrap();
+        symlink(".env", workspace.join("public.txt")).unwrap();
+        symlink(".ssh", workspace.join("assets")).unwrap();
+        symlink("main.rs", workspace.join("source.rs")).unwrap();
+        symlink(temp.path().join("outside.txt"), workspace.join("escape")).unwrap();
+
+        for id in [
+            CapabilityId::WorkspaceRead,
+            CapabilityId::WorkspaceReadRange,
+            CapabilityId::CodeDefinition,
+            CapabilityId::CodeReferences,
+            CapabilityId::CodeHover,
+            CapabilityId::CodeSymbols,
+            CapabilityId::WorkspaceGitBlame,
+            CapabilityId::WorkspaceGitShow,
+            CapabilityId::WorkspaceGitLog,
+            CapabilityId::WorkspaceDiff,
+        ] {
+            for path in ["public.txt", "assets/config"] {
+                assert_eq!(
+                    effective_capability_class(
+                        &workspace,
+                        id,
+                        &serde_json::json!({ "path": path })
+                    )
+                    .unwrap(),
+                    CapabilityClass::WorkspaceSensitiveRead,
+                    "{id}: {path}"
+                );
+            }
+        }
+        assert_eq!(
+            effective_capability_class(
+                &workspace,
+                CapabilityId::WorkspaceRead,
+                &serde_json::json!({ "path": "source.rs" }),
+            )
+            .unwrap(),
+            CapabilityClass::WorkspaceInspect
+        );
+        assert!(effective_capability_class(
+            &workspace,
+            CapabilityId::WorkspaceRead,
+            &serde_json::json!({ "path": "escape" }),
+        )
+        .is_err());
+
+        let mut context = WorkspaceContextSnapshot::empty(workspace.display().to_string());
+        context.selection = Some(serde_json::json!({
+            "path": "public.txt", "text": "private contents",
+        }));
+        context.buffers = vec![
+            serde_json::json!({ "path": "assets/config", "content": "private configuration" }),
+            serde_json::json!({ "path": "source.rs", "content": "unsaved ordinary code" }),
+        ];
+        normalize_workspace_context_paths(&workspace, &mut context).unwrap();
+        assert!(context.selection.as_ref().unwrap().get("text").is_none());
+        assert!(context.buffers[0].get("content").is_none());
+        assert_eq!(context.buffers[1]["content"], "unsaved ordinary code");
+    }
+
     #[test]
     fn capability_child_fails_closed_without_the_desktop_host() {
         let temp = tempfile::tempdir().unwrap();
@@ -24282,6 +24399,53 @@ mod tests {
         assert!(text.contains("1 diagnostic"));
         assert!(text.contains("gyro_workspace_check"));
         assert!(text.contains("compact workspace check is attached"));
+    }
+
+    #[test]
+    fn workspace_guidance_survives_resume_and_respects_tool_access() {
+        let mut request = anthropic_provider_request();
+        for resumed in [false, true] {
+            let turn = PromptTurn {
+                resumed,
+                approvals_sent_separately: false,
+            };
+            let context = provider_context_message_for_turn(&request, None, turn);
+            assert!(context.contains("Selected workspace: /tmp/gyro-workspace"));
+            assert!(context.contains("do not ask the user to paste files you can read"));
+            assert!(context.contains("gyro_workspace_edit"));
+            assert!(context.contains("report pending review"));
+            for prompt in [
+                openai_codex_chat_prompt(
+                    &context,
+                    request.workspace_path.as_deref(),
+                    None,
+                    false,
+                    true,
+                    resumed,
+                ),
+                claude_chat_prompt(
+                    &context,
+                    request.workspace_path.as_deref(),
+                    false,
+                    true,
+                    resumed,
+                ),
+            ] {
+                assert!(!prompt.contains("only as optional context"));
+                assert!(prompt.contains("inspect its status"));
+            }
+        }
+        request.mode = ChatMode::Plan;
+        let plan = provider_context_message(&request);
+        assert!(plan.contains("Plan mode is read-only"));
+        assert!(!plan.contains("carry it through authorized edits"));
+        request.mode = ChatMode::Council;
+        let council = provider_context_message(&request);
+        assert!(council.contains("advisory only"));
+        assert!(!council.contains("Prefer Gyro Workspace tools"));
+        request.mode = ChatMode::Normal;
+        let chat_only = provider_context_message_with_tool_support(&request, None, false);
+        assert!(!chat_only.contains("Prefer Gyro Workspace tools"));
     }
 
     #[test]
@@ -27507,6 +27671,10 @@ while True:
             Some("xhigh".into())
         );
         assert_eq!(
+            grok_reasoning_effort_arg(Some("grok-4.7"), Some("xhigh")),
+            Some("xhigh".into())
+        );
+        assert_eq!(
             grok_reasoning_effort_arg(Some("grok-4.5"), Some("xhigh")),
             None
         );
@@ -27683,6 +27851,10 @@ while True:
         assert_eq!(
             provider_model_context_window("openai", Some("gpt-5.4-mini")),
             Some(400_000)
+        );
+        assert_eq!(
+            provider_model_context_window("xai", Some("grok-4.7")),
+            Some(500_000)
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.6")),

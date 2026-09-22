@@ -3,11 +3,12 @@
 import {
   copyFileSync,
   mkdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,11 +25,28 @@ function fail(message) {
 }
 
 const outputRoot = resolve(argument("--output") ?? resolve(sourceRoot, "dist"));
-if (outputRoot === repoRoot || outputRoot === sourceRoot) {
-  fail("--output must not be the repository root or site source directory");
+// Resolve existing parent symlinks even when the output directory is new.
+function actualPath(path) {
+  const suffix = [];
+  let parent = path;
+  for (;;) {
+    try {
+      return resolve(realpathSync(parent), ...suffix);
+    } catch (error) {
+      if (error.code !== "ENOENT" || dirname(parent) === parent) throw error;
+      suffix.unshift(basename(parent));
+      parent = dirname(parent);
+    }
+  }
+}
+
+function containsPath(parent, path) {
+  const child = relative(parent, path);
+  return child === "" || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
 }
 
 const files = [
+  ["site/model-catalog.json", "model-catalog.json"],
   ["site/motion.js", "motion.js"],
   ["site/assets/gyro-coast.webp", "assets/gyro-coast.webp"],
   ["site/assets/motion/workflow-dark.mp4", "assets/motion/workflow-dark.mp4"],
@@ -86,6 +104,18 @@ const files = [
     "assets/screenshots/hero-light-2400.webp",
   ],
 ];
+
+// Reject destructive destinations before removing anything. Custom build
+// directories remain supported, including new directories reached via symlinks.
+try {
+  const output = actualPath(outputRoot);
+  const protectedPaths = [repoRoot, ...files.map(([source]) => resolve(repoRoot, source))];
+  if (protectedPaths.some((path) => containsPath(output, actualPath(path)))) {
+    fail("--output must not contain the repository or any site source file");
+  }
+} catch (error) {
+  fail(`cannot validate --output: ${error.message}`);
+}
 
 for (const [source] of files) {
   const path = resolve(repoRoot, source);

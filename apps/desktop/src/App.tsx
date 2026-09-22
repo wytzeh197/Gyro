@@ -1,3 +1,4 @@
+import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
 import {
@@ -17,6 +18,7 @@ import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { createGithubRefreshController } from "./github-refresh";
 import { useProviderUsage } from "./use-provider-usage";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
+import { resolveChatPaneClose } from "./chat-pane-close";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
@@ -764,6 +766,9 @@ export function App() {
   const resolvedTheme: ResolvedTheme =
     themePreference === "system" ? systemThemeValue : themePreference;
   const [sessions, setSessions] = useState<Session[]>([]);
+  // Session persistence and title updates must not interrupt live tool events.
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
@@ -2827,7 +2832,7 @@ export function App() {
         if (payload.resource.kind === "browser") {
           const data = recordFromUnknown(payload.data);
           const capture = recordFromUnknown(data?.capture);
-          const session = sessions.find(
+          const session = sessionsRef.current.find(
             (item) => item.id === payload.sessionId,
           );
           const url = stringFromRecord(data, "url") ?? payload.resource.label;
@@ -2987,7 +2992,7 @@ export function App() {
       unlistenCapability?.();
       unlistenResource?.();
     };
-  }, [flushProviderStreamBatches, sessions, setEventsForSession]);
+  }, [flushProviderStreamBatches, setEventsForSession]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -3388,6 +3393,7 @@ export function App() {
       return;
     }
     try {
+      restoreModelCatalog();
       const [nextConfig, capabilityManifest] = await Promise.all([
         invoke<GyroConfig>("load_config"),
         invoke<ProviderCapabilitySupport[]>(
@@ -4350,7 +4356,9 @@ export function App() {
     // Narrow deps so a cursor move or a keystroke no longer mints a new
     // revision and re-pushes IDE evidence over IPC.
   }, [
+    activeWorkspaceRoot,
     selectedFile,
+    workspaceActionRoot,
     workbench.ide.activeOutputChannelId,
     workbench.ide.diagnostics,
     workbench.ide.outputChannels,
@@ -4359,10 +4367,7 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root =
-      workspaceRootForPath(workspaceRoots, selectedFile) ??
-      workspaceActionRoot ??
-      activeWorkspaceRoot;
+    const root = workspaceContextSnapshot?.workspaceKey;
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
@@ -4370,15 +4375,11 @@ export function App() {
         diagnostics: workspaceContextSnapshot?.diagnostics ?? [],
         context: workspaceContextSnapshot,
       },
+    }).catch(() => {
+      // A background evidence refresh must not produce an unhandled rejection.
+      // Sending a turn awaits this same update and exposes any persistent error.
     });
-  }, [
-    selectedFile,
-    workspaceActionRoot,
-    activeWorkspaceRoot,
-    workbench.ide.diagnostics,
-    workspaceContextSnapshot,
-    workspaceRoots,
-  ]);
+  }, [workspaceContextSnapshot]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -12213,43 +12214,27 @@ export function App() {
       sessionId?: string;
       workspacePath?: string;
     }) => {
-      const projectKey = chatProjectKey(candidate.workspacePath);
-      // Prefer the active project layout, then the candidate workspace, so a
-      // slightly mismatched path still finds the sibling pane in a split.
-      const paneLayout =
-        (chatGrid.activeProjectKey
-          ? chatGrid.layouts[chatGrid.activeProjectKey]
-          : undefined) ??
-        (projectKey ? chatGrid.layouts[projectKey] : undefined) ??
-        Object.values(chatGrid.layouts).find((layout) =>
-          layout.slots.some((slot) => slot?.paneId === candidate.paneId),
-        );
-      const layoutProjectKey = paneLayout?.projectKey || projectKey;
+      // A running-chat confirmation can outlive navigation or replacement.
+      // Close only its original pane, without switching the visible project.
+      const target = resolveChatPaneClose(chatGrid, candidate);
+      if (!target) return;
+      const { projectKey: layoutProjectKey, nextPane, isActiveProject } = target;
       if (candidate.sessionId) {
         closedChatPaneSessionsRef.current.add(candidate.sessionId);
       }
-      const nextPane =
-        paneLayout?.slots.find(
-          (slot) =>
-            slot?.paneId === paneLayout.focusedPaneId &&
-            slot?.paneId !== candidate.paneId,
-        ) ??
-        paneLayout?.slots.find(
-          (slot) => slot && slot.paneId !== candidate.paneId,
-        );
-      if (nextPane?.kind === "session") {
+      if (isActiveProject && nextPane?.kind === "session") {
         suppressSessionAutoSelectRef.current = false;
         activeSessionIdRef.current = nextPane.sessionId;
         setActiveSessionId(nextPane.sessionId);
         setWorkspacePath(nextPane.workspacePath);
-      } else if (nextPane?.kind === "draft") {
+      } else if (isActiveProject && nextPane?.kind === "draft") {
         // Leaving a draft open after closing a session pane is still a split
         // exit — keep the draft visible rather than collapsing to empty home.
         suppressSessionAutoSelectRef.current = true;
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
         setWorkspacePath(nextPane.workspacePath);
-      } else {
+      } else if (isActiveProject) {
         suppressSessionAutoSelectRef.current = true;
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
@@ -12266,7 +12251,7 @@ export function App() {
           projectKey: layoutProjectKey,
           paneId: candidate.paneId,
         });
-        if (nextPane) {
+        if (isActiveProject && nextPane) {
           // Explicitly focus the remaining pane after close so the grid does
           // not briefly render with no focused slot and fall through to empty.
           dispatchChatGrid({
@@ -12277,7 +12262,7 @@ export function App() {
         }
       }
     },
-    [chatGrid.activeProjectKey, chatGrid.layouts],
+    [chatGrid],
   );
 
   const requestCloseChatPane = useCallback(
@@ -13634,6 +13619,8 @@ export function App() {
       cancelled = true;
     };
   }, [refreshAutomations, refreshConfig, refreshSessions]);
+
+  useModelCatalog(isShellOptimizing, setConfig, withCouncilConfig);
 
   useEffect(() => {
     if (!isTauriRuntime() || isShellOptimizing) return;

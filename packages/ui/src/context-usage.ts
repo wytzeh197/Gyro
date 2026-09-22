@@ -155,6 +155,31 @@ function occupiedTokens(usage: Record<string, unknown>) {
   );
 }
 
+/**
+ * A completed `/compact` turn: its compaction activity finished and no
+ * response followed. Compaction inside a normal turn is excluded — that turn's
+ * own response carries the reading taken after it.
+ */
+export function isManualCompaction(
+  events: SessionEvent[],
+  event: SessionEvent,
+) {
+  const payload = eventPayload(event);
+  const activityId = stringValue(payload, "activityId");
+  return (
+    payload?.kind === "provider-activity" &&
+    payload.activityKind === "context" &&
+    payload.status === "done" &&
+    Boolean(activityId?.startsWith("context-compaction-")) &&
+    !events.some(
+      (item) =>
+        item.turnId === event.turnId &&
+        item.sessionId === event.sessionId &&
+        eventPayload(item)?.kind === "provider-response",
+    )
+  );
+}
+
 export function estimateComposerContextUsage(
   events: SessionEvent[],
   draft: string,
@@ -174,6 +199,13 @@ export function estimateComposerContextUsage(
     if (!event) continue;
     const payload = eventPayload(event);
     const usage = recordFromUnknown(payload?.contextUsage);
+    // A manual compaction replaced the thread's history. Any reading taken
+    // before it measures a conversation the provider no longer holds, so when
+    // the compaction did not report its own, the estimate starts over here.
+    if (!usage && !reportedUsage && isManualCompaction(events, event)) {
+      reportedEventIndex = index;
+      break;
+    }
     if (!usage) continue;
     // A completed response replaces the live checkpoint even when its streamed
     // assistant row has retained an earlier position in the event array.
@@ -230,7 +262,7 @@ export function estimateComposerContextUsage(
   );
 
   const checkpoint =
-    reportedEventIndex >= 0
+    reportedEventIndex >= 0 && reportedUsage
       ? recordFromUnknown(
           eventPayload(events[reportedEventIndex]!)?.contextCharacterBaseline,
         )

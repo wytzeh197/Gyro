@@ -33,6 +33,7 @@ import {
   runWorkGroupText,
   segmentRunSteps,
   segmentWorkSteps,
+  splitSegmentSummary,
   summarizeSegment,
 } from "./chat-run";
 import type {
@@ -468,11 +469,11 @@ function RunSegmentSummary({
   onOpenChanges?: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const failed = calls.some((step) => step.item.status === "failed");
+  const summary = splitSegmentSummary(summarizeSegment(calls));
   const className = [
     "gyro-run-segment",
     isExpanded ? "is-expanded" : "",
-    failed ? "is-failed" : "",
+    summary.failed ? "is-failed" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -485,7 +486,13 @@ function RunSegmentSummary({
         type="button"
       >
         <span className="gyro-run-segment-label">
-          {summarizeSegment(calls)}
+          {summary.lead}
+          {summary.failed ? (
+            <>
+              {", "}
+              <span className="gyro-run-segment-failed">{summary.failed}</span>
+            </>
+          ) : null}
         </span>
         <ChevronRight
           aria-hidden="true"

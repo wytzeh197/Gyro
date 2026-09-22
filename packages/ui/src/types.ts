@@ -775,6 +775,8 @@ export type ProviderHealthDetails = {
 };
 
 export type ProviderModel = {
+  /** Derived remote entry; discard saved copies when its catalog entry is withdrawn. */
+  catalogManaged?: boolean;
   id: string;
   displayName: string;
   description?: string;

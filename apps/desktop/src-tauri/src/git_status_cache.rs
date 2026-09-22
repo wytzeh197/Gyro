@@ -2,13 +2,18 @@
 //! snapshot cache, and the diff line stats that decorate Source Control.
 use super::*;
 
-pub(super) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>> {
+pub(super) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>
+{
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>> =
         OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub(super) fn git_status_stamp(repo_root: &Path, porcelain: &str, files: &[SourceControlFile]) -> String {
+pub(super) fn git_status_stamp(
+    repo_root: &Path,
+    porcelain: &str,
+    files: &[SourceControlFile],
+) -> String {
     let mut material = format!("{}\n{}", repo_root.display(), porcelain);
     // Resolve the base even in linked worktrees and when refs are packed.
     material.push_str(&git_main_comparison_base(repo_root).unwrap_or_default());
@@ -127,13 +132,22 @@ pub(super) fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceCont
     inspect_git_status(workspace_path, true)
 }
 
-pub(super) fn git_status_for_preparation(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+pub(super) fn git_status_for_preparation(
+    workspace_path: &str,
+) -> anyhow::Result<SourceControlStatus> {
     inspect_git_status(workspace_path, false)
 }
 
-pub(super) fn inspect_git_status(workspace_path: &str, detailed: bool) -> anyhow::Result<SourceControlStatus> {
+pub(super) fn inspect_git_status(
+    workspace_path: &str,
+    detailed: bool,
+) -> anyhow::Result<SourceControlStatus> {
     let deadline = Instant::now()
-        + if detailed { GIT_STATUS_TIMEOUT } else { GIT_STATUS_PREPARATION_TIMEOUT };
+        + if detailed {
+            GIT_STATUS_TIMEOUT
+        } else {
+            GIT_STATUS_PREPARATION_TIMEOUT
+        };
     inspect_git_status_before(workspace_path, detailed, deadline)
 }
 
@@ -155,7 +169,13 @@ pub(super) fn inspect_git_status_before(
     // finish can still be answered with what the last one saw.
     let repo_root = match git_read::repo_root(&root, deadline) {
         Ok(path) => path.unwrap_or_else(|| root.clone()),
-        Err(error) => return Ok(git_status_read_failure(Some(&root), error.to_string(), true)),
+        Err(error) => {
+            return Ok(git_status_read_failure(
+                Some(&root),
+                error.to_string(),
+                true,
+            ))
+        }
     };
     let output = match git_read::run(&command, deadline, 4 * 1024 * 1024) {
         Ok(output) => output,
@@ -390,7 +410,9 @@ pub(super) fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>,
     (stats, partial || output.stdout_truncated)
 }
 
-pub(super) fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
+pub(super) fn git_numstat_without_head(
+    repo_root: &Path,
+) -> (HashMap<String, (usize, usize)>, bool) {
     let mut totals = HashMap::new();
     let mut partial = false;
     for args in [

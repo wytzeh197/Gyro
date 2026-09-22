@@ -13,6 +13,9 @@ import { tmpdir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+await import("./check-download-site-runtime.mjs");
+await import("./check-download-site-build.mjs");
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(resolve(repoRoot, path), "utf8");
 const failures = [];

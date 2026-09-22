@@ -1,5 +1,5 @@
 use crate::capabilities::{
-    CapabilityRequest, CapabilityResponse, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    CapabilityRequest, CapabilityResponse, CapabilityStatus, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 use crate::paths::GyroPaths;
 use crate::sessions::SessionWorkspaceMode;
@@ -389,6 +389,13 @@ pub fn request_desktop_provider_approval(
         if response.schema != DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1 {
             return Err(anyhow!("Gyro.app returned an incompatible approval schema"));
         }
+        if !response.compatible
+            || !versions_compatible(&request.sender_version, &response.app_version)
+        {
+            return Err(anyhow!(
+                "Gyro.app returned an incompatible approval response"
+            ));
+        }
         Ok(response)
     }
 
@@ -427,11 +434,7 @@ pub fn request_desktop_provider_capability(
         .ok_or_else(|| anyhow!("Gyro.app closed the capability request"))?;
         let response: CapabilityResponse = serde_json::from_slice(&response)
             .context("decode provider capability response from Gyro.app")?;
-        if response.schema != PROVIDER_CAPABILITY_IPC_SCHEMA_V1 {
-            return Err(anyhow!(
-                "Gyro.app returned an incompatible capability schema"
-            ));
-        }
+        validate_capability_response(request, &response)?;
         Ok(response)
     }
 
@@ -443,6 +446,51 @@ pub fn request_desktop_provider_capability(
             "desktop provider capability IPC is not supported on this platform"
         ))
     }
+}
+
+fn validate_capability_response(
+    request: &CapabilityRequest,
+    response: &CapabilityResponse,
+) -> Result<()> {
+    anyhow::ensure!(
+        response.schema == PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+        "Gyro.app returned an incompatible capability schema"
+    );
+    anyhow::ensure!(
+        response.compatible && versions_compatible(&request.sender_version, &response.app_version),
+        "Gyro.app returned an incompatible capability response"
+    );
+    anyhow::ensure!(
+        response.call_id == request.context.call_id,
+        "Gyro.app returned a response for a different capability call"
+    );
+    match response.status {
+        CapabilityStatus::Completed => {
+            let result = response.result.as_ref().ok_or_else(|| {
+                anyhow!("Gyro.app returned a completed capability response without a result")
+            })?;
+            anyhow::ensure!(
+                result.call_id == request.context.call_id
+                    && result.capability_id == request.capability_id,
+                "Gyro.app returned a result for a different capability call"
+            );
+            anyhow::ensure!(
+                response.error.is_none(),
+                "Gyro.app returned a capability response with both a result and an error"
+            );
+        }
+        CapabilityStatus::Failed
+        | CapabilityStatus::Denied
+        | CapabilityStatus::Cancelled
+        | CapabilityStatus::Inactive => {
+            anyhow::ensure!(
+                response.result.is_none() && response.error.is_some(),
+                "Gyro.app returned an invalid capability failure response"
+            );
+        }
+        _ => anyhow::bail!("Gyro.app returned a nonterminal capability response"),
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -508,6 +556,9 @@ fn remove_stale_app_socket(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::capabilities::{
+        CapabilityId, CapabilityInvocationContext, CapabilityResult, CapabilityRunMode,
+    };
     use std::io::{BufRead, BufReader, Cursor, Write};
     use std::os::unix::net::UnixListener;
 
@@ -539,6 +590,104 @@ mod tests {
             require_command_approval: true,
             require_file_edit_approval: true,
         }
+    }
+
+    fn capability_request() -> CapabilityRequest {
+        CapabilityRequest {
+            schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+            sender_version: env!("CARGO_PKG_VERSION").into(),
+            context: CapabilityInvocationContext {
+                session_id: "session-1".into(),
+                turn_id: Some("turn-1".into()),
+                provider_id: "openai".into(),
+                run_nonce: "run-nonce-1".into(),
+                call_id: uuid::Uuid::new_v4(),
+                workspace_key: "/tmp/workspace".into(),
+                mode: CapabilityRunMode::Normal,
+                policy_revision: 0,
+                workspace_context_revision: 0,
+            },
+            capability_id: CapabilityId::WorkspaceRead,
+            arguments: serde_json::json!({"path": "README.md"}),
+        }
+    }
+
+    fn capability_response(request: &CapabilityRequest) -> CapabilityResponse {
+        CapabilityResponse::completed(
+            env!("CARGO_PKG_VERSION"),
+            CapabilityResult {
+                call_id: request.context.call_id,
+                capability_id: request.capability_id,
+                summary: "Read README.md".into(),
+                data: serde_json::json!({"content": "hello"}),
+                resource: None,
+            },
+        )
+    }
+
+    #[test]
+    fn capability_responses_require_matching_calls_and_terminal_payloads() {
+        let request = capability_request();
+        let valid = capability_response(&request);
+        validate_capability_response(&request, &valid).unwrap();
+        validate_capability_response(
+            &request,
+            &CapabilityResponse::failed(
+                env!("CARGO_PKG_VERSION"),
+                request.context.call_id,
+                "denied",
+                "Read denied",
+            ),
+        )
+        .unwrap();
+
+        for change in [
+            |response: &mut CapabilityResponse| response.compatible = false,
+            |response: &mut CapabilityResponse| response.app_version = "99.0.0".into(),
+            |response: &mut CapabilityResponse| response.call_id = uuid::Uuid::new_v4(),
+            |response: &mut CapabilityResponse| {
+                response.result.as_mut().unwrap().call_id = uuid::Uuid::new_v4()
+            },
+            |response: &mut CapabilityResponse| {
+                response.result.as_mut().unwrap().capability_id = CapabilityId::WorkspaceDiff
+            },
+            |response: &mut CapabilityResponse| response.result = None,
+            |response: &mut CapabilityResponse| response.status = CapabilityStatus::Running,
+            |response: &mut CapabilityResponse| response.status = CapabilityStatus::Failed,
+        ] {
+            let mut invalid = valid.clone();
+            change(&mut invalid);
+            assert!(validate_capability_response(&request, &invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn capability_socket_rejects_a_reply_for_another_call() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        std::fs::create_dir_all(paths.socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&paths.socket_path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let frame = read_bounded_frame(&mut reader, DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES)
+                .unwrap()
+                .unwrap();
+            let request: CapabilityRequest = serde_json::from_slice(&frame).unwrap();
+            let mut response = capability_response(&request);
+            response.call_id = uuid::Uuid::new_v4();
+            write_json_frame(
+                reader.get_mut(),
+                &response,
+                DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES,
+                "fixture response",
+            )
+            .unwrap();
+        });
+
+        let error = request_desktop_provider_capability(&paths, &capability_request()).unwrap_err();
+        assert!(error.to_string().contains("different capability call"));
+        server.join().unwrap();
     }
 
     #[test]

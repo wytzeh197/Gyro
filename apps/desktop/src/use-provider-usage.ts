@@ -119,6 +119,10 @@ export function useProviderUsage(options: {
       return undefined;
     }
     const refreshInBackground = () => {
+      // Background polling should not wake provider CLIs in a hidden window
+      // or retry the network while offline. Focus/online events catch up.
+      if (document.visibilityState !== "visible" || navigator.onLine === false)
+        return;
       for (const providerId of backgroundUsageProviderIds) {
         void refreshProviderUsage(providerId);
       }

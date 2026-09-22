@@ -1,13 +1,5 @@
-@media (min-width: 781px) {
-  body {
-    min-width: 860px;
-  }
-}
-
-@media (max-width: 780px) {
-  body {
-    min-width: 0;
-  }
+body {
+  min-width: 0;
 }
 
 button {
@@ -31,7 +23,7 @@ textarea:focus-visible {
 
 .gyro-root-error {
   align-items: flex-start;
-  background: #0e0e0e;
+  background: #181818;
   color: #f0f0f0;
   display: flex;
   flex-direction: column;
@@ -62,7 +54,7 @@ textarea:focus-visible {
 }
 
 :root[data-theme="light"] .gyro-root-error {
-  background: #f2f4f7;
+  background: #f8f9f9;
   color: #161b23;
 }
 

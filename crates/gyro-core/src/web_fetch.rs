@@ -13,10 +13,9 @@ use url::Url;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// A redirect chain is followed, unlike the provider adapters which refuse one
-/// outright because they carry a credential. Here there is no credential to
-/// leak, and http→https promotion is ordinary; the final URL is reported so a
-/// reviewer can always see where the request landed.
+/// Redirects may remain on the approved origin only. Following a different
+/// host, scheme, or port would bypass the capability broker's origin grant;
+/// the model must request that URL separately so its origin can be approved.
 const MAX_REDIRECTS: u32 = 5;
 /// Absolute ceiling for one fetch. The capability asks for less than this.
 pub const MAX_WEB_FETCH_BYTES: usize = 512 * 1024;
@@ -36,22 +35,45 @@ pub struct WebFetchPage {
 /// Fetch a text-like document. The caller has already decided that this URL is
 /// one the user allows; this function still refuses any scheme but http(s).
 pub fn fetch_text(url: &Url, max_bytes: usize) -> Result<WebFetchPage> {
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(anyhow!("web fetch needs an http or https URL"));
-    }
+    validate_fetch_url(url)?;
     let max_bytes = max_bytes.clamp(1, MAX_WEB_FETCH_BYTES);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(CONNECT_TIMEOUT)
         .timeout_read(REQUEST_TIMEOUT)
         .timeout_write(REQUEST_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
-        .redirects(MAX_REDIRECTS)
+        .redirects(0)
         .build();
-    let response =
-        crate::provider_retry::http_response(&crate::CancellationToken::default(), || {
-            agent.get(url.as_str()).call()
-        })
-        .map_err(http_error)?;
+    let mut current_url = url.clone();
+    let mut redirects = 0;
+    let response = loop {
+        let response =
+            crate::provider_retry::http_response(&crate::CancellationToken::default(), || {
+                agent.get(current_url.as_str()).call()
+            })
+            .map_err(http_error)?;
+        if !matches!(response.status(), 301 | 302 | 303 | 307 | 308) {
+            break response;
+        }
+        if redirects >= MAX_REDIRECTS {
+            return Err(anyhow!("web fetch exceeded the redirect limit"));
+        }
+        let location = response
+            .header("location")
+            .ok_or_else(|| anyhow!("web fetch redirect did not include a Location header"))?;
+        let next_url = current_url
+            .join(location)
+            .map_err(|_| anyhow!("web fetch redirect has an invalid destination"))?;
+        validate_fetch_url(&next_url)?;
+        if next_url.origin() != url.origin() {
+            return Err(anyhow!(
+                "web fetch redirect leaves the approved origin; request {} separately",
+                next_url.origin().ascii_serialization()
+            ));
+        }
+        current_url = next_url;
+        redirects += 1;
+    };
     let status = response.status();
     let final_url = response.get_url().to_string();
     let content_type = response
@@ -85,6 +107,16 @@ pub fn fetch_text(url: &Url, max_bytes: usize) -> Result<WebFetchPage> {
         truncated,
         text,
     })
+}
+
+fn validate_fetch_url(url: &Url) -> Result<()> {
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(anyhow!("web fetch needs an http or https URL"));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(anyhow!("web fetch refuses credential-bearing URLs"));
+    }
+    Ok(())
 }
 
 fn content_type_is_text(value: &str) -> bool {
@@ -199,6 +231,94 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("http or https"), "{error}");
+    }
+
+    #[test]
+    fn fetch_follows_relative_redirects_on_the_approved_origin() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!("http://{}/page", listener.local_addr().unwrap())).unwrap();
+        let server = std::thread::spawn(move || {
+            for (path, response) in [
+                ("/page", b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()),
+                ("/final", text_response("text/plain", "final page")),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = [0u8; 2048];
+                let count = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..count]).starts_with(&format!("GET {path} ")));
+                stream.write_all(&response).unwrap();
+            }
+        });
+        let result = fetch_text(&url, MAX_WEB_FETCH_BYTES);
+        server.join().unwrap();
+        let page = result.unwrap();
+        assert_eq!(page.text, "final page");
+        assert_eq!(page.requested_url, url.as_str());
+        assert_eq!(page.final_url, url.join("/final").unwrap().as_str());
+    }
+
+    #[test]
+    fn fetch_never_requests_a_redirect_to_an_unapproved_origin() {
+        let target = TcpListener::bind("127.0.0.1:0").unwrap();
+        target.set_nonblocking(true).unwrap();
+        let destination = format!("http://{}/private", target.local_addr().unwrap());
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let (url, server) = serve_once(response.into_bytes());
+        let error = fetch_text(&url, MAX_WEB_FETCH_BYTES)
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(error.contains("leaves the approved origin"), "{error}");
+        assert_eq!(
+            target.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn fetch_refuses_credentials_in_initial_and_redirect_urls() {
+        let url = Url::parse("http://user:private-value@127.0.0.1:1/page").unwrap();
+        let error = fetch_text(&url, MAX_WEB_FETCH_BYTES)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("credential-bearing"), "{error}");
+        assert!(!error.contains("private-value"));
+
+        let response = b"HTTP/1.1 302 Found\r\nLocation: http://user:private-value@example.com/page\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec();
+        let (url, server) = serve_once(response);
+        let error = fetch_text(&url, MAX_WEB_FETCH_BYTES)
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(error.contains("credential-bearing"), "{error}");
+        assert!(!error.contains("private-value"));
+    }
+
+    #[test]
+    fn fetch_bounds_redirect_loops() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!("http://{}/page", listener.local_addr().unwrap())).unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..=MAX_REDIRECTS {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = [0u8; 2048];
+                stream.read(&mut request).unwrap();
+                stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: /page\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            }
+        });
+        let error = fetch_text(&url, MAX_WEB_FETCH_BYTES)
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(error.contains("redirect limit"), "{error}");
     }
 
     #[test]
