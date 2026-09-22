@@ -15472,8 +15472,6 @@ export function App() {
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isTiled={options.isTiled}
-        onPaneDragEnd={options.onPaneDragEnd}
-        onPaneDragStart={options.onPaneDragStart}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onboarding={workbench.onboarding}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}

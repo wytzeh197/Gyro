@@ -7792,9 +7792,6 @@ type ChatSurfaceProps = {
   /** A provider executable is being updated, so sending must wait briefly. */
   isCliUpdating?: boolean;
   isTiled?: boolean;
-  /** Optional title-bar handle used to rearrange a chat inside a split grid. */
-  onPaneDragStart?: (event: ReactDragEvent<HTMLSpanElement>) => void;
-  onPaneDragEnd?: () => void;
   maxDraftLength?: number;
   activeChatPanel?: ChatSidePanelId;
   /**
@@ -8131,8 +8128,6 @@ export function ChatSurface({
   shellReady = true,
   isCliUpdating = false,
   isTiled = false,
-  onPaneDragStart,
-  onPaneDragEnd,
   isBranchLoading,
   maxDraftLength,
   providerStatuses,
@@ -9149,22 +9144,6 @@ export function ChatSurface({
         {isTiled ? (
           <div className="gyro-chat-thread-topbar">
             <div className="gyro-chat-thread-identity">
-              {onPaneDragStart ? (
-                <span
-                  aria-label="Drag chat to rearrange split"
-                  className="gyro-chat-pane-drag-handle"
-                  draggable
-                  onDragEnd={onPaneDragEnd}
-                  onDragStart={(event) => {
-                    event.stopPropagation();
-                    onPaneDragStart(event);
-                  }}
-                  role="img"
-                  title="Drag to rearrange split"
-                >
-                  <GripVertical aria-hidden="true" size={14} />
-                </span>
-              ) : null}
               {chatSwitcher ? (
                 <ChatSwitcher chatSwitcher={chatSwitcher} />
               ) : null}
@@ -9345,22 +9324,6 @@ export function ChatSurface({
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
-          {onPaneDragStart ? (
-            <span
-              aria-label="Drag chat to rearrange split"
-              className="gyro-chat-pane-drag-handle"
-              draggable
-              onDragEnd={onPaneDragEnd}
-              onDragStart={(event) => {
-                event.stopPropagation();
-                onPaneDragStart(event);
-              }}
-              role="img"
-              title="Drag to rearrange split"
-            >
-              <GripVertical aria-hidden="true" size={14} />
-            </span>
-          ) : null}
           {chatSwitcher ? <ChatSwitcher chatSwitcher={chatSwitcher} /> : null}
           <Folder
             aria-hidden="true"
