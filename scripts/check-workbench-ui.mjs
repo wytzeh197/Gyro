@@ -580,10 +580,12 @@ expect(
   "Chat drag hover should light the tile under the pointer immediately and reuse pane elements instead of rebuilding every open chat mid-drag.",
 );
 expect(
-  surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
-    surfaceSource.includes("onPaneDragStart: (event) =>") &&
-    surfaceSource.includes("event.dataTransfer.setData(") &&
-    surfaceSource.includes("CHAT_PANE_DRAG_MIME,") &&
+  !surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
+    !surfaceSource.includes("Drag chat to rearrange split") &&
+    !styleSource.includes(".gyro-chat-pane-drag-handle") &&
+    !appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    surfaceSource.includes("CHAT_SESSION_DRAG_MIME") &&
+    surfaceSource.includes("onDropSession(") &&
     surfaceSource.includes("function dataTransferHasType") &&
     surfaceSource.includes("types.contains(type)") &&
     !surfaceSource.includes(
@@ -596,9 +598,8 @@ expect(
     appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
     styleSource.includes("Sessions/Workspace is navigation") &&
     styleSource.includes("var(--gyro-sidebar-mode-active)") &&
-    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
     surfaceSource.includes("{zone.label}"),
-  "Each tiled chat should publish a pane drag payload and label every split drop target.",
+  "Split placement comes from dragging a sidebar chat onto the grid. The chat header has no pane drag handle.",
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
@@ -7358,6 +7359,20 @@ expect(
     ) &&
     !workspaceRailFoundation.includes(":has(.gyro-workspace-route.is-code)"),
   "Workspace and Sessions should share a stable shell while the Workspace-only Activity Rail animates accessibly between 44px and zero, keeps its divider below native window controls, and avoids a duplicate Settings footer.",
+);
+
+expect(
+  cssRules(
+    styleSource,
+    ":root[data-theme]\n  .gyro-app-shell.is-workspace-chrome-active\n  .gyro-sidebar-windowbar:not(.is-settings)",
+  ).some((rule) => rule.includes("background: transparent")) &&
+    styleSource.indexOf(
+      ":root[data-theme] .gyro-sidebar .gyro-sidebar-windowbar",
+    ) <
+      styleSource.indexOf(
+        ".gyro-app-shell.is-workspace-chrome-active\n  .gyro-sidebar-windowbar:not(.is-settings)",
+      ),
+  "Workspace title bar stays clear of the chrome band so the activity rail and the 48px header are one tone behind the traffic lights.",
 );
 
 expect(

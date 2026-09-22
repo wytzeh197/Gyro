@@ -253,12 +253,11 @@ function Fixture() {
         },
       }),
     );
-  const renderChat = (pane?: ChatPaneRef, isTiled = false, dragProps = {}) => {
+  const renderChat = (pane?: ChatPaneRef, isTiled = false) => {
     const key = pane?.paneId ?? "empty";
     const isSession = pane?.kind === "session";
     return (
       <ChatSurface
-        {...dragProps}
         config={config}
         events={isSession ? transcript(pane.sessionId, long, completed) : []}
         sessionTitle={
@@ -449,10 +448,7 @@ function Fixture() {
                 })
               }
               renderPane={(pane, options) =>
-                renderChat(pane, options.isTiled, {
-                  onPaneDragStart: options.onPaneDragStart,
-                  onPaneDragEnd: options.onPaneDragEnd,
-                })
+                renderChat(pane, options.isTiled)
               }
             >
               {renderChat()}

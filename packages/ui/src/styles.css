@@ -28946,32 +28946,6 @@ button.gyro-account-menu-row:hover,
   opacity: 1;
   transform: scale(1);
 }
-/* The title's compatibility styles hide generic spans; the pane handle must
-   remain visible and draggable in both existing chats and draft panes. */
-.gyro-chat-thread-topbar
-  > .gyro-chat-thread-identity
-  > .gyro-chat-pane-drag-handle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-faint);
-  cursor: grab;
-  display: inline-flex;
-  flex: 0 0 auto;
-  justify-content: center;
-  margin: -3px 1px -3px -4px;
-  padding: 3px;
-}
-.gyro-chat-pane-drag-handle:active {
-  cursor: grabbing;
-}
-.gyro-chat-pane-drag-handle:hover,
-.gyro-chat-pane-drag-handle:focus-visible {
-  background: var(--gyro-control-hover);
-  color: var(--gyro-text);
-  outline: none;
-}
 .gyro-session-row[draggable="true"] {
   cursor: grab;
 }
@@ -29177,7 +29151,7 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-surface.is-tiled
     .gyro-chat-thread-topbar
     > div:first-child
-    span:not(.gyro-chat-pane-drag-handle),
+    span,
   .gyro-chat-surface.is-tiled .gyro-chat-surface-controls span {
     display: none;
   }
@@ -41551,7 +41525,7 @@ textarea:focus-visible,
 }
 
 .gyro-titlebar-switch-option:hover {
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  background: transparent;
   color: var(--gyro-text);
 }
 
@@ -41767,6 +41741,17 @@ textarea:focus-visible,
   background: var(--gyro-sidebar);
 }
 
+/* This finish lands after the Workspace chrome band. An opaque windowbar
+   covers that band, so the activity rail's tone stops at the column edge and
+   cuts through the traffic lights. Leave the bar clear and the band painted on
+   the sidebar shows through, meeting the rail as one 48px surface. Settings
+   keeps the solid bar: it has no rail and no band. */
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-sidebar-windowbar:not(.is-settings) {
+  background: transparent;
+}
+
 /* Only set the vertical measure. Horizontal offsets still protect native
    traffic lights and the hidden-sidebar restore control. */
 :root[data-theme] .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar,
@@ -41901,13 +41886,21 @@ textarea:focus-visible,
 
 :root[data-theme] .gyro-titlebar-switch {
   background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-sidebar));
-  border-radius: 7px;
+  border-radius: 999px;
   box-shadow: none;
 }
 
 :root[data-theme] .gyro-titlebar-switch-option {
-  border-radius: 5px;
+  border-radius: 999px;
   color: var(--gyro-muted);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option svg {
+  transition: color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover svg {
+  color: var(--gyro-text);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option.is-active,
@@ -42046,6 +42039,17 @@ textarea:focus-visible,
   box-shadow: 0 3px 12px
     color-mix(in srgb, var(--gyro-heavy-shadow) 28%, transparent);
   filter: none;
+}
+
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .gyro-chat-message-queue {
+  background: #fcfcfd;
 }
 
 :root[data-theme]
