@@ -8,6 +8,28 @@ export const LATEST_RELEASE_PAGE = `${RELEASES_PAGE}/latest`;
 
 const REQUEST_TIMEOUT_MS = 8000;
 
+// Release metadata is remote input, including every URL assigned to a link.
+function isRepositoryReleaseUrl(value, section) {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    const prefix = `/wytzeh197/Gyro/releases/${section}/`;
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      !url.port &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      url.pathname.startsWith(prefix) &&
+      url.pathname.length > prefix.length
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return "Size unavailable";
   if (bytes < 1024) return `${bytes} B`;
@@ -29,8 +51,13 @@ export function sha256FromDigest(digest) {
 }
 
 export function selectReleaseAssets(release) {
-  const assets = Array.isArray(release?.assets) ? release.assets : [];
-  const isDmg = (asset) => asset?.name?.toLowerCase().endsWith(".dmg");
+  const assets = (Array.isArray(release?.assets) ? release.assets : []).filter(
+    (asset) =>
+      asset &&
+      typeof asset.name === "string" &&
+      isRepositoryReleaseUrl(asset.browser_download_url, "download"),
+  );
+  const isDmg = (asset) => asset.name.toLowerCase().endsWith(".dmg");
   const appleSilicon = assets.find(
     (asset) =>
       isDmg(asset) &&
@@ -60,7 +87,9 @@ export function isUsableRelease(release) {
   return Boolean(
     release &&
     typeof release.tag_name === "string" &&
-    typeof release.html_url === "string" &&
+    release.tag_name.trim().length > 0 &&
+    !release.draft &&
+    isRepositoryReleaseUrl(release.html_url, "tag") &&
     Array.isArray(release.assets),
   );
 }
@@ -246,6 +275,8 @@ export async function fetchGitHubJson(url) {
   try {
     const response = await fetch(url, {
       headers: { Accept: "application/vnd.github+json" },
+      credentials: "omit",
+      redirect: "error",
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);

@@ -1,0 +1,7 @@
+{
+  "schema": "gyro.model-catalog.v1",
+  "revision": "2026-09-22.1",
+  "enabled": true,
+  "rolloutPercentage": 100,
+  "models": []
+}

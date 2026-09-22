@@ -119,6 +119,21 @@ disables process inactivity, and CLI ACP/Codex inactivity cannot undercut
 the selected run deadline. Transient network errors retry twice with short
 backoff; hard timeouts and cancellations do not.
 
+Workspace-capable chat turns carry the selected project and instructions to
+inspect, edit, and verify through Gyro tools, including resumed sessions. Plan
+and Council retain their existing action limits. File-edit results return
+bounded proposal metadata and an explicit pending/applied status; file bodies
+remain in the proposal store so a large successful edit cannot overflow the
+tool response budget. Capability event subscriptions remain active when the
+session list changes, and IDE evidence is sent with its snapshot's project key.
+
+The stdio capability and permission bridges use a bounded worker queue so a
+long tool call does not block health checks or tool discovery. Cancelled queued
+calls are discarded before execution; running calls retain the broker's run
+cancellation and approval checks. Responses must match the request's call and
+capability identity and carry a valid terminal outcome. Transport failures do
+not automatically replay workspace actions.
+
 The OpenAI-compatible API runner is the third adapter family. Gyro ships
 DeepSeek, Mistral, and OpenRouter presets, and a user can add any other endpoint
 as a `custom:<slug>` provider. All of them share one HTTPS client in `gyro-core`

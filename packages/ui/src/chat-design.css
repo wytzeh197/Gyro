@@ -472,8 +472,7 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
-  .gyro-run-segment.is-failed
-  .gyro-run-segment-label {
+  .gyro-run-segment-failed {
   color: var(--gyro-danger);
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-pulse {

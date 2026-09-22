@@ -1,0 +1,203 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import {
+  applyModelCatalog,
+  createModelCatalogClient,
+  parseModelCatalog,
+  MODEL_CATALOG_CACHE_KEY,
+} from "../packages/ui/src/remote-model-catalog.ts";
+import {
+  providerCatalog,
+  providersForConfig,
+} from "../packages/ui/src/provider-catalog.ts";
+
+const provider = providerCatalog.find((p) => p.id === "openai");
+const original = structuredClone(provider);
+const entry = {
+  providerId: "openai",
+  id: "catalog-test-model",
+  displayName: "Catalog test",
+  minClientRevision: 1,
+  contextWindowTokens: 123456,
+  supportedReasoningEfforts: ["low", "high"],
+  defaultReasoningEffort: "high",
+};
+const document = (models = [entry], extra = {}) =>
+  JSON.stringify({
+    schema: "gyro.model-catalog.v1",
+    revision: "test.1",
+    enabled: true,
+    rolloutPercentage: 100,
+    models,
+    ...extra,
+  });
+const reset = () => applyModelCatalog(parseModelCatalog(document([])), 0);
+const hasModel = () => provider.models.some((m) => m.id === entry.id);
+const memory = () => {
+  const values = new Map();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+};
+
+parseModelCatalog(
+  readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+);
+for (const raw of [
+  "broken",
+  document([entry, entry]),
+  document([{ ...entry, contextWindowTokens: -1 }]),
+  document([{ ...entry, defaultReasoningEffort: "medium" }]),
+  document([{ ...entry, supportedReasoningEfforts: ["invented"] }]),
+  document([{ ...entry, id: "--unsafe-flag" }]),
+  document([{ ...entry, displayName: "bad\nname" }]),
+  document([], { schema: "future" }),
+  document([], { rolloutPercentage: 101 }),
+  " ".repeat(256 * 1024 + 1),
+])
+  assert.throws(() => parseModelCatalog(raw));
+const sanitized = parseModelCatalog(
+  document([{ ...entry, baseUrl: "https://bad.invalid", supportsTools: true }]),
+);
+assert.equal(sanitized.models[0].baseUrl, undefined);
+assert.equal(sanitized.models[0].supportsTools, undefined);
+
+applyModelCatalog(sanitized, 0);
+assert.ok(hasModel());
+assert.deepEqual(provider.capabilities, original.capabilities);
+assert.equal(provider.apiKeyRef, original.apiKeyRef);
+assert.equal(provider.baseUrl, original.baseUrl);
+let config = {
+  modelProviders: [
+    {
+      ...provider,
+      enabled: true,
+      authStatus: "connected",
+      selectedModelId: entry.id,
+      defaultModelId: entry.id,
+    },
+  ],
+};
+let merged = providersForConfig(config).find((p) => p.id === "openai");
+assert.equal(merged.selectedModelId, entry.id);
+assert.equal(
+  merged.models.find((m) => m.id === entry.id).contextWindowTokens,
+  123456,
+);
+config.modelProviders = [merged];
+reset();
+merged = providersForConfig(config).find((p) => p.id === "openai");
+assert.ok(!merged.models.some((m) => m.id === entry.id));
+assert.equal(merged.selectedModelId, original.defaultModelId);
+
+applyModelCatalog(
+  parseModelCatalog(
+    document([
+      { ...entry, id: original.models[0].id, displayName: "Revised name" },
+    ]),
+  ),
+  0,
+);
+merged = providersForConfig({ modelProviders: [original] }).find(
+  (p) => p.id === "openai",
+);
+assert.equal(merged.models[0].displayName, "Revised name");
+reset();
+assert.equal(
+  providersForConfig({ modelProviders: [merged] })[0].models[0].displayName,
+  original.models[0].displayName,
+);
+
+applyModelCatalog(
+  parseModelCatalog(document([{ ...entry, minClientRevision: 2 }])),
+  0,
+);
+assert.ok(!hasModel());
+applyModelCatalog(
+  parseModelCatalog(document([entry], { rolloutPercentage: 25 })),
+  25,
+);
+assert.ok(!hasModel());
+applyModelCatalog(
+  parseModelCatalog(document([entry], { rolloutPercentage: 25 })),
+  24,
+);
+assert.ok(hasModel());
+applyModelCatalog(parseModelCatalog(document([entry], { enabled: false })), 0);
+assert.ok(!hasModel());
+applyModelCatalog(
+  parseModelCatalog(
+    document([
+      { ...entry, providerId: "ollama" },
+      { ...entry, providerId: "unknown" },
+    ]),
+  ),
+  0,
+);
+assert.ok(
+  !providerCatalog
+    .find((p) => p.id === "ollama")
+    .models.some((m) => m.id === entry.id),
+);
+
+reset();
+const storage = memory();
+let payload = document();
+let calls = 0;
+const client = createModelCatalogClient(
+  storage,
+  async () => {
+    calls++;
+    return payload;
+  },
+  () => 0.12,
+);
+const first = client.refresh();
+assert.equal(client.refresh(), first);
+assert.equal(await first, true);
+assert.equal(calls, 1);
+assert.ok(hasModel());
+assert.equal(await client.refresh(), false);
+payload = "invalid";
+assert.equal(await client.refresh(), false);
+assert.ok(hasModel());
+assert.equal(storage.getItem(MODEL_CATALOG_CACHE_KEY), document());
+reset();
+const offline = createModelCatalogClient(
+  storage,
+  async () => {
+    throw Error("offline");
+  },
+  () => 0.99,
+);
+offline.restore();
+assert.ok(hasModel());
+assert.equal(await offline.refresh(), false);
+assert.ok(hasModel());
+assert.equal(storage.getItem(MODEL_CATALOG_CACHE_KEY + ".bucket"), "12");
+payload = document([], { revision: "rollback" });
+assert.equal(await client.refresh(), true);
+assert.ok(!hasModel());
+reset();
+const corrupt = memory();
+corrupt.setItem(MODEL_CATALOG_CACHE_KEY, "invalid");
+createModelCatalogClient(corrupt, async () => "").restore();
+assert.deepEqual(provider.models, original.models);
+const blocked = createModelCatalogClient(
+  {
+    getItem() {
+      throw Error("blocked");
+    },
+    setItem() {
+      throw Error("full");
+    },
+  },
+  async () => document(),
+);
+assert.equal(await blocked.refresh(), true);
+assert.ok(hasModel());
+reset();
+console.log(
+  "Model catalog validation, picker merge, rollback, rollout, cache, and offline checks passed.",
+);

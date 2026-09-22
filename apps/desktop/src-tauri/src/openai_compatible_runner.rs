@@ -134,6 +134,25 @@ fn user_content(
     }
 }
 
+fn assistant_tool_message(
+    content: &str,
+    reasoning_content: Option<&str>,
+    tool_calls: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "content": content,
+        "tool_calls": tool_calls,
+    });
+    // DeepSeek thinking mode rejects the next tool round with HTTP 400 if its
+    // reasoning state is omitted. Replay it only within this request's tool
+    // loop; it is not user-visible content or saved conversation history.
+    if let Some(reasoning) = reasoning_content {
+        message["reasoning_content"] = reasoning.into();
+    }
+    message
+}
+
 /// One chat turn against an OpenAI-compatible endpoint.
 pub(super) fn run_openai_compatible_chat(
     app: &tauri::AppHandle,
@@ -345,11 +364,11 @@ pub(super) fn run_openai_compatible_chat(
                     })
                 })
                 .collect::<Vec<_>>();
-            messages.push(serde_json::json!({
-                "role": "assistant",
-                "content": turn.content,
-                "tool_calls": tool_calls,
-            }));
+            messages.push(assistant_tool_message(
+                &turn.content,
+                turn.reasoning_content.as_deref(),
+                tool_calls,
+            ));
             let mut captured_images = Vec::new();
             for (tool_call_id, name, _arguments, parsed) in calls {
                 let Some(capability_id) = provider_reliability::prepare_tool_call(
@@ -432,6 +451,26 @@ pub(super) fn run_openai_compatible_chat(
 #[cfg(test)]
 mod image_tests {
     use super::*;
+
+    #[test]
+    fn tool_follow_up_replays_reasoning_without_publishing_it_as_text() {
+        let calls = vec![serde_json::json!({
+            "id": "workspace-read", "type": "function",
+            "function": {"name": "gyro_workspace_read_file", "arguments": "{}"}
+        })];
+        let message =
+            assistant_tool_message("Reading the file.", Some("opaque state"), calls.clone());
+        assert_eq!(message["content"], "Reading the file.");
+        assert_eq!(message["reasoning_content"], "opaque state");
+        assert_eq!(message["tool_calls"], serde_json::json!(calls));
+        assert!(assistant_tool_message("", None, calls.clone())
+            .get("reasoning_content")
+            .is_none());
+        assert_eq!(
+            assistant_tool_message("", Some(""), calls)["reasoning_content"],
+            ""
+        );
+    }
 
     #[test]
     fn deepseek_vision_is_model_specific() {

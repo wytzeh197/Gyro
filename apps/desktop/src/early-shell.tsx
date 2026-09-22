@@ -8,22 +8,23 @@ export function EarlyShell() {
       <aside className="gyro-early-shell-sidebar" aria-hidden="true">
         <div className="gyro-early-shell-brand">Gyro</div>
         <div className="gyro-early-shell-nav">
-          <span className="is-active">Chat</span>
-          <span>CLI</span>
-          <span>IDE</span>
+          <span>New Session</span>
+          <span>Search</span>
         </div>
         <div className="gyro-early-shell-footer">
           <span className="gyro-early-shell-optimizing" role="status">
             <span className="gyro-early-shell-spinner" aria-hidden="true" />
-            Optimizing Gyro
+            Starting Gyro…
           </span>
         </div>
       </aside>
       <main className="gyro-early-shell-main">
         <div className="gyro-early-shell-hero">
-          <h1>What should we build?</h1>
+          <h1>What should we work on?</h1>
           <div className="gyro-early-shell-composer" aria-hidden="true">
-            <div className="gyro-early-shell-input">Do anything</div>
+            <div className="gyro-early-shell-input">
+              Describe a task or attach images
+            </div>
             <div className="gyro-early-shell-composer-row">
               <span>Choose model</span>
               <span className="gyro-early-shell-send" />

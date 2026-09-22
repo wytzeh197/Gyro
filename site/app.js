@@ -12,6 +12,7 @@ import {
 } from "./release-utils.js";
 
 const DEFAULT_ARCHITECTURE = "apple-silicon";
+const manuallySelectedSurfaces = new WeakSet();
 const ARCHITECTURE_LABELS = {
   "apple-silicon": "Apple Silicon",
   intel: "Intel",
@@ -41,6 +42,8 @@ function setStatus(surface, text) {
 function applyArchitectureHint(surface, architecture) {
   const input = surface.querySelector(`input[value="${architecture}"]`);
   if (input) input.checked = true;
+  const data = surface.releaseData;
+  if (data) configureSelectedDownload(surface, data.release, data.assets);
   setStatus(surface, `${ARCHITECTURE_LABELS[architecture]} selected.`);
 }
 
@@ -60,7 +63,10 @@ function configureSelectedDownload(surface, release, assets) {
     if (metadata)
       metadata.textContent = `${label} build unavailable in this release`;
     if (digest) digest.textContent = "Checksum unavailable";
-    if (copy) copy.disabled = true;
+    if (copy) {
+      copy.disabled = true;
+      copy.dataset.hash = "";
+    }
     return;
   }
 
@@ -131,6 +137,7 @@ async function copyChecksum(surface, button) {
 function bindSurface(surface) {
   for (const input of surface.querySelectorAll('input[name="architecture"]')) {
     input.addEventListener("change", () => {
+      manuallySelectedSurfaces.add(surface);
       const data = surface.releaseData;
       if (data) configureSelectedDownload(surface, data.release, data.assets);
       setStatus(
@@ -162,11 +169,15 @@ async function startDownloadSurfaces() {
   if (!surfaces.length) return;
 
   for (const surface of surfaces) bindSurface(surface);
-  const recommendation = await reliableArchitectureHint();
-  if (recommendation) {
-    for (const surface of surfaces)
-      applyArchitectureHint(surface, recommendation);
-  }
+  // Optional browser hints must never delay release loading or replace a choice.
+  void reliableArchitectureHint().then((recommendation) => {
+    if (!recommendation) return;
+    for (const surface of surfaces) {
+      if (!manuallySelectedSurfaces.has(surface)) {
+        applyArchitectureHint(surface, recommendation);
+      }
+    }
+  });
 
   try {
     const release = await fetchGitHubJson(LATEST_RELEASE_API);

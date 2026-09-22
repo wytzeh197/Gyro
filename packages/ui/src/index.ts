@@ -363,6 +363,10 @@ export type {
   CleanMachineStepStatus,
 } from "./clean-machine-path";
 export {
+  createModelCatalogClient,
+  MODEL_CATALOG_REFRESH_MS,
+} from "./remote-model-catalog";
+export {
   applyProviderCapabilityManifest,
   CUSTOM_PROVIDER_PREFIX,
   defaultModelLabel,

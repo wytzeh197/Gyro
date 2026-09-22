@@ -16,7 +16,7 @@ use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::time::Duration;
 use url::{Host, Url};
 
@@ -50,6 +50,10 @@ pub struct OpenAiCompatChatRequest<'a> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OpenAiCompatChatResponse {
     pub content: String,
+    /// Transport-only reasoning state. Thinking models such as DeepSeek require
+    /// this on the assistant message when continuing after a tool result. Keep
+    /// it inside the active tool loop, separate from visible text and history.
+    pub reasoning_content: Option<String>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub tool_calls: Vec<OpenAiCompatToolCall>,
@@ -154,13 +158,13 @@ where
 {
     crate::provider_retry::stream_response(
         cancellation,
-        |emit| openai_compat_tool_chat_once(request.clone(), cancellation, emit),
+        |emit| openai_compat_tool_chat_once(&request, cancellation, emit),
         on_delta,
     )
 }
 
 fn openai_compat_tool_chat_once<F>(
-    request: OpenAiCompatChatRequest<'_>,
+    request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
     mut on_delta: F,
 ) -> Result<OpenAiCompatChatResponse>
@@ -219,13 +223,12 @@ where
     // Gateways that ignore `stream: true` answer with one JSON object, which may
     // be pretty-printed across lines; collect it until EOF.
     let mut buffered_body = String::new();
+    let mut remaining = crate::provider_retry::MAX_CHAT_RESPONSE_BYTES;
     loop {
         if cancellation.is_cancelled() {
             return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
         }
-        line.clear();
-        let read = reader
-            .read_line(&mut line)
+        let read = crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining)
             .context("invalid provider chat stream")?;
         if read == 0 {
             break;
@@ -249,8 +252,8 @@ where
             completed |= frame
                 .choices
                 .iter()
-                .any(|choice| choice.finish_reason.is_some());
-            state.apply(frame, &mut on_delta);
+                .any(|choice| choice.index == 0 && choice.finish_reason.is_some());
+            state.apply(frame, &mut on_delta)?;
         } else if trimmed.starts_with(':') {
             // SSE comment; gateways send these as keep-alives.
         } else if !saw_stream_frames {
@@ -274,10 +277,11 @@ where
         }
         let parsed: WireCompletion =
             serde_json::from_str(body).context("invalid provider chat response")?;
-        state.apply(parsed, &mut on_delta);
+        state.apply(parsed, &mut on_delta)?;
     }
 
     let content = state.content.trim().to_string();
+    let reasoning_content = state.reasoning_content.take();
     let input_tokens = state.input_tokens;
     let output_tokens = state.output_tokens;
     let tool_calls = state.tool_calls()?;
@@ -286,6 +290,7 @@ where
     }
     Ok(OpenAiCompatChatResponse {
         content,
+        reasoning_content,
         input_tokens,
         output_tokens,
         tool_calls,
@@ -490,16 +495,21 @@ struct ToolCallAccumulator {
 #[derive(Default)]
 struct ChatAccumulator {
     content: String,
+    reasoning_content: Option<String>,
     tool_calls: Vec<ToolCallAccumulator>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
 }
 
 impl ChatAccumulator {
-    fn apply<F>(&mut self, frame: WireCompletion, on_delta: &mut F)
+    fn apply<F>(&mut self, frame: WireCompletion, on_delta: &mut F) -> Result<()>
     where
         F: FnMut(&str),
     {
+        anyhow::ensure!(
+            frame.error.is_none(),
+            "the provider reported a generation error; no tool calls were executed"
+        );
         if let Some(usage) = frame.usage {
             if usage.prompt_tokens.is_some() {
                 self.input_tokens = usage.prompt_tokens;
@@ -508,14 +518,33 @@ impl ChatAccumulator {
                 self.output_tokens = usage.completion_tokens;
             }
         }
-        for choice in frame.choices {
+        // Choices are alternative answers, not parallel work. Mixing them can
+        // execute mutually exclusive edits and corrupt tool-call indexes.
+        for choice in frame.choices.into_iter().filter(|choice| choice.index == 0) {
+            // A terminal marker can still represent an incomplete generation.
+            // Even syntactically valid arguments in that answer are unsafe to
+            // execute: later tool calls or parameters may have been cut off.
+            match choice.finish_reason.as_deref() {
+                Some("length") => anyhow::bail!(
+                    "the provider reached its output token limit; the response is incomplete and no tool calls from this response were executed"
+                ),
+                Some("content_filter") => anyhow::bail!(
+                    "the provider filtered the response; no tool calls from this response were executed"
+                ),
+                _ => {}
+            }
             let message = choice.effective_message();
+            if let Some(reasoning) = &message.reasoning_content {
+                self.reasoning_content
+                    .get_or_insert_with(String::new)
+                    .push_str(reasoning);
+            }
             if let Some(content) = message.text().filter(|text| !text.is_empty()) {
                 on_delta(&content);
                 self.content.push_str(&content);
             }
             for call in &message.tool_calls {
-                let slot = self.slot_for(call);
+                let slot = self.slot_for(call)?;
                 if let Some(id) = call.id.as_deref().filter(|id| !id.trim().is_empty()) {
                     slot.id = Some(id.to_string());
                 }
@@ -533,20 +562,37 @@ impl ChatAccumulator {
                 }
             }
         }
+        Ok(())
     }
 
     /// Streaming frames address tool calls by `index`. A gateway that omits the
-    /// index still starts a new call whenever it names one, so both shapes land
-    /// in the right slot.
-    fn slot_for(&mut self, call: &WireToolCall) -> &mut ToolCallAccumulator {
+    /// index can still correlate fragments by id. Only a new id (or a named
+    /// call without an id) starts a new slot.
+    fn slot_for(&mut self, call: &WireToolCall) -> Result<&mut ToolCallAccumulator> {
         match call.index {
             Some(index) => {
+                anyhow::ensure!(
+                    index < crate::provider_retry::MAX_CHAT_TOOL_CALLS,
+                    "provider returned too many tool calls; no tool calls were executed"
+                );
                 while self.tool_calls.len() <= index {
                     self.tool_calls.push(ToolCallAccumulator::default());
                 }
-                &mut self.tool_calls[index]
+                Ok(&mut self.tool_calls[index])
             }
             None => {
+                if let Some(index) = call
+                    .id
+                    .as_deref()
+                    .filter(|id| !id.trim().is_empty())
+                    .and_then(|id| {
+                        self.tool_calls
+                            .iter()
+                            .position(|slot| slot.id.as_deref() == Some(id))
+                    })
+                {
+                    return Ok(&mut self.tool_calls[index]);
+                }
                 let names_call = call.id.is_some()
                     || call
                         .function
@@ -554,11 +600,16 @@ impl ChatAccumulator {
                         .and_then(|function| function.name.as_deref())
                         .is_some_and(|name| !name.trim().is_empty());
                 if names_call || self.tool_calls.is_empty() {
+                    anyhow::ensure!(
+                        self.tool_calls.len() < crate::provider_retry::MAX_CHAT_TOOL_CALLS,
+                        "provider returned too many tool calls; no tool calls were executed"
+                    );
                     self.tool_calls.push(ToolCallAccumulator::default());
                 }
-                self.tool_calls
+                Ok(self
+                    .tool_calls
                     .last_mut()
-                    .expect("a tool call slot was just ensured")
+                    .expect("a tool call slot was just ensured"))
             }
         }
     }
@@ -594,6 +645,8 @@ fn parse_tool_arguments(raw: &str) -> serde_json::Value {
 #[derive(Default, Deserialize)]
 struct WireCompletion {
     #[serde(default)]
+    error: Option<serde_json::Value>,
+    #[serde(default)]
     choices: Vec<WireChoice>,
     #[serde(default)]
     usage: Option<WireUsage>,
@@ -601,6 +654,8 @@ struct WireCompletion {
 
 #[derive(Default, Deserialize)]
 struct WireChoice {
+    #[serde(default)]
+    index: usize,
     #[serde(default)]
     finish_reason: Option<String>,
     /// Streaming frames carry the text under `delta`.
@@ -626,12 +681,14 @@ struct WireMessage {
     #[serde(default)]
     content: Option<WireContent>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Vec<WireToolCall>,
 }
 
 impl WireMessage {
     fn is_empty(&self) -> bool {
-        self.content.is_none() && self.tool_calls.is_empty()
+        self.content.is_none() && self.reasoning_content.is_none() && self.tool_calls.is_empty()
     }
 
     /// The answer text, with any thinking trace left out.
@@ -721,7 +778,7 @@ struct WireModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
 
     struct RecordedRequest {
@@ -798,6 +855,173 @@ mod tests {
     }
 
     #[test]
+    fn refuses_out_of_range_tool_indexes_without_allocating_slots() {
+        for index in [crate::provider_retry::MAX_CHAT_TOOL_CALLS, usize::MAX] {
+            let mut state = ChatAccumulator::default();
+            let call = WireToolCall {
+                index: Some(index),
+                ..Default::default()
+            };
+            assert!(state.slot_for(&call).is_err());
+            assert!(state.tool_calls.is_empty());
+        }
+    }
+
+    #[test]
+    fn caps_unindexed_tool_calls_but_accepts_argument_continuations() {
+        let mut state = ChatAccumulator::default();
+        let new_call = WireToolCall {
+            id: Some("call".to_string()),
+            ..Default::default()
+        };
+        for _ in 0..crate::provider_retry::MAX_CHAT_TOOL_CALLS {
+            state.slot_for(&new_call).unwrap();
+        }
+        assert!(state.slot_for(&WireToolCall::default()).is_ok());
+        assert!(state.slot_for(&new_call).is_err());
+        assert_eq!(
+            state.tool_calls.len(),
+            crate::provider_retry::MAX_CHAT_TOOL_CALLS
+        );
+    }
+
+    #[test]
+    fn repeated_unindexed_call_ids_correlate_interleaved_argument_fragments() {
+        let mut state = ChatAccumulator::default();
+        for frame in [
+            serde_json::json!({"choices":[{"delta":{"tool_calls":[
+                {"id":"read-a","function":{"name":"read_file","arguments":"{\"path\":"}},
+                {"id":"read-b","function":{"name":"read_file","arguments":"{\"path\":"}}
+            ]}}]}),
+            serde_json::json!({"choices":[{"delta":{"tool_calls":[
+                {"id":"read-a","function":{"arguments":"\"a.txt\"}"}},
+                {"id":"read-b","function":{"arguments":"\"b.txt\"}"}}
+            ]}}]}),
+        ] {
+            state
+                .apply(serde_json::from_value(frame).unwrap(), &mut |_| {})
+                .unwrap();
+        }
+        let calls = state.tool_calls().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id.as_deref(), Some("read-a"));
+        assert_eq!(calls[0].arguments, serde_json::json!({"path":"a.txt"}));
+        assert_eq!(calls[1].id.as_deref(), Some("read-b"));
+        assert_eq!(calls[1].arguments, serde_json::json!({"path":"b.txt"}));
+    }
+
+    #[test]
+    fn alternative_completion_choices_cannot_add_or_replace_workspace_actions() {
+        let mut state = ChatAccumulator::default();
+        let frame = serde_json::json!({"choices":[
+            {"index":0,"message":{"content":"Reading.","reasoning_content":"read state", "tool_calls":[
+                {"index":0,"id":"read","function":{"name":"read_file","arguments":"{}"}}
+            ]}},
+            {"index":1,"message":{"content":"Writing.","reasoning_content":"write state", "tool_calls":[
+                {"index":0,"id":"write","function":{"name":"write_file","arguments":"{}"}}
+            ]}}
+        ]});
+        let mut deltas = Vec::new();
+        state
+            .apply(serde_json::from_value(frame).unwrap(), &mut |text| {
+                deltas.push(text.to_owned())
+            })
+            .unwrap();
+        assert_eq!(deltas, ["Reading."]);
+        assert_eq!(state.reasoning_content.as_deref(), Some("read state"));
+        let calls = state.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].id.as_deref(), Some("read"));
+    }
+
+    #[test]
+    fn generation_error_after_tool_fragments_cannot_return_a_successful_turn() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "text/event-stream",
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n\n",
+                "data: {\"error\":{\"message\":\"generation failed\"}}\n\n",
+                "data: [DONE]\n",
+            ),
+        );
+        let result = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "",
+            model: "test",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: None,
+        });
+        server.join().unwrap();
+        assert!(result.unwrap_err().to_string().contains("generation error"));
+    }
+
+    #[test]
+    fn refuses_incomplete_terminal_reasons_even_with_valid_tool_arguments() {
+        for (content_type, body, expected) in [
+            (
+                "text/event-stream",
+                concat!(
+                    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"edit\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+                    "data: [DONE]\n",
+                ),
+                "output token limit",
+            ),
+            (
+                "text/event-stream",
+                concat!(
+                    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n",
+                    "data: [DONE]\n",
+                ),
+                "filtered the response",
+            ),
+            (
+                "application/json",
+                r#"{"choices":[{"message":{"tool_calls":[{"id":"edit","function":{"name":"write_file","arguments":"{}"}}]},"finish_reason":"length"}]}"#,
+                "output token limit",
+            ),
+            (
+                "application/json",
+                r#"{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]}"#,
+                "output token limit",
+            ),
+        ] {
+            let (address, server) = serve_once("200 OK", content_type, body);
+            let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "",
+                model: "test",
+                messages: Vec::new(),
+                tools: Vec::new(),
+                reasoning_effort: None,
+            })
+            .unwrap_err();
+            server.join().unwrap();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn accepts_successful_tool_completion_when_an_alternative_hits_its_limit() {
+        let mut state = ChatAccumulator::default();
+        state.apply(serde_json::from_value(serde_json::json!({
+            "choices": [
+                {"index": 0, "finish_reason": "tool_calls", "message": {
+                    "tool_calls": [{"id": "read", "function": {"name": "read_file", "arguments": "{}"}}]
+                }},
+                {"index": 1, "finish_reason": "length", "message": {"content": "alternative"}}
+            ]
+        })).unwrap(), &mut |_| {}).unwrap();
+        let calls = state.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+    }
+
+    #[test]
     fn requires_https_except_for_loopback_hosts() {
         assert_eq!(
             openai_compat_endpoint("https://api.deepseek.com/v1")
@@ -858,6 +1082,8 @@ mod tests {
             concat!(
                 ": keep-alive\n",
                 "\n",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"state \"}}]}\n",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"continued\"}}]}\n",
                 "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n",
                 "\n",
                 "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"}}]}\n",
@@ -889,6 +1115,10 @@ mod tests {
 
         assert_eq!(deltas, ["Hel", "lo"]);
         assert_eq!(response.content, "Hello");
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some("state continued")
+        );
         assert_eq!(response.input_tokens, Some(11));
         assert_eq!(response.output_tokens, Some(7));
         assert_eq!(response.tool_calls.len(), 1);
@@ -1067,6 +1297,7 @@ mod tests {
     fn rejects_truncated_tool_stream_and_accepts_finish_reason() {
         for (body, succeeds) in [
             ("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n", false),
+            ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}},{\"index\":1,\"finish_reason\":\"stop\"}]}\n", false),
             ("data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n", true),
         ] {
             let (address, server) = serve_once("200 OK", "text/event-stream", body);
@@ -1078,6 +1309,37 @@ mod tests {
             assert_eq!(response.is_ok(), succeeds);
             if let Err(error) = response { assert!(error.to_string().contains("before completion")); }
         }
+    }
+
+    #[test]
+    fn nonstream_tool_completion_preserves_reasoning_state() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"choices":[{"message":{"content":null,"reasoning_content":"opaque state","tool_calls":[{"id":"read","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}]}}]}"#,
+        );
+        let mut deltas = Vec::new();
+        let response = openai_compat_tool_chat_with_progress(
+            OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "",
+                model: "test",
+                messages: vec![],
+                tools: vec![],
+                reasoning_effort: None,
+            },
+            &CancellationToken::default(),
+            |text| deltas.push(text.to_owned()),
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(response.reasoning_content.as_deref(), Some("opaque state"));
+        assert!(response.content.is_empty());
+        assert!(deltas.is_empty());
+        assert_eq!(
+            response.tool_calls[0].arguments,
+            serde_json::json!({"path":"README.md"})
+        );
     }
 
     #[test]

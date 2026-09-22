@@ -21,6 +21,7 @@ import {
   runRowText,
   segmentRunSteps,
   splitToolName,
+  splitSegmentSummary,
   summarizeSegment,
   workItemFromEvent,
 } from "../packages/ui/src/chat-run.ts";
@@ -1269,6 +1270,23 @@ assert.equal(
   summarizeSegment([call("a", { kind: "tool", name: "Skill" }, 2)]),
   "Used 2 tools",
   "a stretch of only unnamed tools should not read as 'other'",
+);
+assert.deepEqual(
+  splitSegmentSummary(
+    "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls, 3 failed",
+  ),
+  {
+    lead: "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls",
+    failed: "3 failed",
+  },
+  "only the failure clause of a summary should be separable for emphasis",
+);
+assert.deepEqual(
+  splitSegmentSummary("Ran 3 commands, Read 1 file, 1 other tool call"),
+  {
+    lead: "Ran 3 commands, Read 1 file, 1 other tool call",
+    failed: null,
+  },
 );
 
 assert.deepEqual(

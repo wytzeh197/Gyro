@@ -20,11 +20,12 @@ const MAX_GIT_OUTPUT_BYTES: usize = 96 * 1024;
 const MAX_GIT_OUTPUT_LINES: usize = 400;
 const DEFAULT_LOG_ENTRIES: usize = 20;
 const MAX_LOG_ENTRIES: usize = 50;
+const MAX_LOG_AUTHOR_CHARS: usize = 200;
+const MAX_LOG_SUBJECT_CHARS: usize = 1000;
 const MAX_BLAME_LINES: u64 = 400;
 const MAX_BLAME_LINE_CHARS: usize = 300;
-/// Field and record separators git expands with `%x1f` / `%x1e`. A commit
-/// subject can contain a tab, so the separators are control characters that a
-/// subject cannot contain.
+/// Field and record separators git expands with `%x1f` / `%x1e`, so tabs in
+/// commit subjects do not split the fields.
 const UNIT: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 
@@ -37,41 +38,9 @@ pub(super) fn execute(
     let root = bound.workspace.clone();
     let (summary, data) = match request.capability_id {
         CapabilityId::WorkspaceGitLog => {
-            let limit = capability_argument_usize(arguments, "limit")
-                .unwrap_or(DEFAULT_LOG_ENTRIES)
-                .clamp(1, MAX_LOG_ENTRIES);
-            let revision = optional_revision(arguments)?;
-            let path = optional_workspace_path(arguments)?;
-            let mut command = git_command();
-            command
-                .arg("-C")
-                .arg(&root)
-                .arg("log")
-                .arg(format!("--max-count={limit}"))
-                .arg("--date=short")
-                .arg(format!(
-                    "--pretty=format:%H{UNIT}%ad{UNIT}%an{UNIT}%s{RECORD}"
-                ))
-                .arg("--no-color");
-            if let Some(revision) = revision.as_deref() {
-                command.arg(revision);
-            }
-            command.arg("--");
-            if let Some(path) = path.as_deref() {
-                command.arg(path);
-            }
-            let output = run_git_history(command)?;
-            let commits = parse_log(&output.stdout);
-            let label = revision.clone().unwrap_or_else(|| "HEAD".into());
-            (
-                format!("Read {} commit(s) from git log", commits.len()),
-                json!({
-                    "schema": GIT_HISTORY_SCHEMA,
-                    "revision": label,
-                    "path": path,
-                    "commits": commits,
-                }),
-            )
+            let data = read_git_log(&root, arguments)?;
+            let count = data["commits"].as_array().map(Vec::len).unwrap_or(0);
+            (format!("Read {count} commit(s) from git log"), data)
         }
         CapabilityId::WorkspaceGitShow => {
             let revision = validated_revision(capability_argument_string(arguments, "revision")?)?;
@@ -85,6 +54,8 @@ pub(super) fn execute(
                 .arg("-C")
                 .arg(&root)
                 .arg("show")
+                .arg("--no-ext-diff")
+                .arg("--no-textconv")
                 .arg("--no-color")
                 .arg("--date=short");
             if stat_only {
@@ -116,7 +87,8 @@ pub(super) fn execute(
                 &bound.workspace,
                 Path::new(&path),
             )?;
-            let (start, end) = blame_range(arguments, file_line_count(&candidate, &path)?)?;
+            let total_lines = file_line_count(&candidate, &path)?;
+            let (start, end) = blame_range(arguments, total_lines)?;
             let mut command = git_command();
             command
                 .arg("-C")
@@ -135,6 +107,9 @@ pub(super) fn execute(
                     "path": path,
                     "lineStart": start,
                     "lineEnd": end,
+                    "totalLines": total_lines,
+                    "hasMore": end < total_lines,
+                    "nextLineStart": (end < total_lines).then_some(end + 1),
                     "lines": lines,
                 }),
             )
@@ -142,7 +117,65 @@ pub(super) fn execute(
         other => anyhow::bail!("git_history_capability does not handle {other}"),
     };
     let data = bound_git_result(data)?;
+    let summary = if matches!(request.capability_id, CapabilityId::WorkspaceGitBlame) {
+        format!(
+            "Read git blame for {} lines {}-{}",
+            data["path"].as_str().unwrap_or_default(),
+            data["lineStart"],
+            data["lineEnd"]
+        )
+    } else {
+        summary
+    };
     Ok((summary, data, None))
+}
+
+fn read_git_log(root: &Path, arguments: &Value) -> anyhow::Result<Value> {
+    let limit = capability_argument_usize(arguments, "limit")
+        .unwrap_or(DEFAULT_LOG_ENTRIES)
+        .clamp(1, MAX_LOG_ENTRIES);
+    let offset = match arguments.get("offset") {
+        Some(_) => capability_argument_u64(arguments, "offset")?,
+        None => 0,
+    };
+    let revision = optional_revision(arguments)?;
+    let path = optional_workspace_path(arguments)?;
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("log")
+        // One lookahead commit distinguishes a full final page from more history.
+        .arg(format!("--max-count={}", limit + 1))
+        .arg(format!("--skip={offset}"))
+        .arg("--date=short")
+        .arg(format!(
+            "--pretty=format:%H{UNIT}%ad{UNIT}%an{UNIT}%s{RECORD}"
+        ))
+        .arg("--no-patch")
+        .arg("--no-show-signature")
+        .arg("--no-color");
+    if let Some(revision) = revision.as_deref() {
+        command.arg(revision);
+    }
+    command.arg("--");
+    if let Some(path) = path.as_deref() {
+        command.arg(path);
+    }
+    let output = run_git_history(command)?;
+    let mut commits = parse_log(&output.stdout);
+    let has_more = commits.len() > limit;
+    commits.truncate(limit);
+    bound_git_result(json!({
+        "schema": GIT_HISTORY_SCHEMA,
+        "revision": revision.unwrap_or_else(|| "HEAD".into()),
+        "path": path,
+        "offset": offset,
+        "limit": limit,
+        "hasMore": has_more,
+        "nextOffset": has_more.then_some(offset.saturating_add(commits.len() as u64)),
+        "commits": commits,
+    }))
 }
 
 /// A revision is data for git, never syntax: the argv list already removes
@@ -224,7 +257,7 @@ fn file_line_count(candidate: &Path, path: &str) -> anyhow::Result<u64> {
         anyhow::bail!("{path} is binary, so there is nothing to blame");
     }
     let newlines = bytes.iter().filter(|byte| **byte == b'\n').count() as u64;
-    Ok(if bytes.last() == Some(&b'\n') || newlines == 0 {
+    Ok(if bytes.is_empty() || bytes.last() == Some(&b'\n') {
         newlines
     } else {
         newlines + 1
@@ -257,16 +290,21 @@ fn parse_log(stdout: &str) -> Vec<Value> {
         .map(str::trim_start)
         .filter(|record| !record.is_empty())
         .filter_map(|record| {
-            let mut fields = record.split(UNIT);
+            let mut fields = record.splitn(4, UNIT);
             let sha = fields.next()?.trim();
-            if sha.is_empty() {
+            if !matches!(sha.len(), 40 | 64) || !sha.bytes().all(|c| c.is_ascii_hexdigit()) {
                 return None;
             }
+            let date = fields.next()?.trim();
+            let author = fields.next()?.trim();
+            let subject = fields.next()?.trim();
             Some(json!({
                 "sha": sha,
-                "date": fields.next().unwrap_or("").trim(),
-                "author": fields.next().unwrap_or("").trim(),
-                "subject": fields.next().unwrap_or("").trim(),
+                "date": truncate_chars(date, 40),
+                "author": truncate_chars(author, MAX_LOG_AUTHOR_CHARS),
+                "subject": truncate_chars(subject, MAX_LOG_SUBJECT_CHARS),
+                "contentTruncated": author.chars().count() > MAX_LOG_AUTHOR_CHARS
+                    || subject.chars().count() > MAX_LOG_SUBJECT_CHARS,
             }))
         })
         .collect()
@@ -292,7 +330,7 @@ fn parse_blame(stdout: &str) -> Vec<Value> {
             continue;
         }
         if let Some(value) = raw.strip_prefix("author ") {
-            author = value.trim().to_string();
+            author = truncate_chars(value.trim(), MAX_LOG_AUTHOR_CHARS);
             continue;
         }
         let fields = raw.split(' ').collect::<Vec<_>>();
@@ -349,6 +387,18 @@ fn bound_git_result(mut data: Value) -> anyhow::Result<Value> {
             items.truncate(length / 2);
         }
         data["truncated"] = json!(true);
+        data["hasMore"] = json!(true);
+        if key == "commits" {
+            let offset = data["offset"].as_u64().unwrap_or(0);
+            data["nextOffset"] = json!(offset.saturating_add((length / 2) as u64));
+        } else if let Some(last_line) = data["lines"]
+            .as_array()
+            .and_then(|lines| lines.last())
+            .and_then(|line| line["line"].as_u64())
+        {
+            data["lineEnd"] = json!(last_line);
+            data["nextLineStart"] = json!(last_line + 1);
+        }
     }
     Ok(data)
 }
@@ -364,6 +414,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                     "description": "Revision or range to walk back from, such as HEAD, main, v0.1.0-alpha.48.7, or HEAD~5..HEAD. Defaults to HEAD. Must not start with a dash."
                 },
                 "limit": { "type": "integer", "minimum": 1, "maximum": MAX_LOG_ENTRIES },
+                "offset": { "type": "integer", "minimum": 0, "description": "Number of matching commits to skip. Defaults to 0. Continue with nextOffset from the previous result, keeping revision and path unchanged." },
                 "path": { "type": "string", "description": "Optional workspace-relative path to limit history to." }
             }),
             vec![],
@@ -415,16 +466,156 @@ mod tests {
 
     #[test]
     fn log_records_split_on_control_separators() {
+        let first_sha = "a".repeat(40);
+        let second_sha = "b".repeat(40);
         let stdout = format!(
-            "abc123{UNIT}2026-09-19{UNIT}Wytze{UNIT}Ship the thing{UNIT}subject with a tab\
-             {RECORD}def456{UNIT}2026-09-18{UNIT}Someone{UNIT}Fix the other thing{RECORD}"
+            "{first_sha}{UNIT}2026-09-19{UNIT}Wytze{UNIT}Ship\tthe thing{UNIT}extra subject text\
+             {RECORD}{second_sha}{UNIT}2026-09-18{UNIT}Someone{UNIT}Fix the other thing{RECORD}\n"
         );
         let commits = parse_log(&stdout);
         assert_eq!(commits.len(), 2);
-        assert_eq!(commits[0]["sha"], "abc123");
+        assert_eq!(commits[0]["sha"], first_sha);
         assert_eq!(commits[0]["date"], "2026-09-19");
         assert_eq!(commits[0]["author"], "Wytze");
+        assert_eq!(
+            commits[0]["subject"],
+            format!("Ship\tthe thing{UNIT}extra subject text")
+        );
         assert_eq!(commits[1]["subject"], "Fix the other thing");
+    }
+
+    #[test]
+    fn log_pages_can_reach_all_history_without_repeating_commits() {
+        let repository = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let output = git_command()
+                .arg("-C")
+                .arg(repository.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.name", "History test"]);
+        git(&["config", "user.email", "history@example.com"]);
+        for subject in ["First", "Second", "Third", "Fourth"] {
+            git(&[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                subject,
+            ]);
+        }
+
+        let first = read_git_log(repository.path(), &json!({ "limit": 2 })).unwrap();
+        assert_eq!(first["commits"][0]["subject"], "Fourth");
+        assert_eq!(first["commits"][1]["subject"], "Third");
+        assert_eq!(first["hasMore"], true);
+        assert_eq!(first["nextOffset"], 2);
+
+        let last = read_git_log(
+            repository.path(),
+            &json!({
+                "limit": 2,
+                "offset": first["nextOffset"],
+            }),
+        )
+        .unwrap();
+        assert_eq!(last["commits"][0]["subject"], "Second");
+        assert_eq!(last["commits"][1]["subject"], "First");
+        assert_eq!(last["hasMore"], false);
+        assert!(last["nextOffset"].is_null());
+
+        let past_end = read_git_log(repository.path(), &json!({ "offset": 4 })).unwrap();
+        assert!(past_end["commits"].as_array().unwrap().is_empty());
+        assert_eq!(past_end["hasMore"], false);
+        assert!(read_git_log(repository.path(), &json!({ "offset": -1 })).is_err());
+    }
+
+    #[test]
+    fn log_bounds_oversized_fields_and_ignores_incomplete_records() {
+        let sha = "a".repeat(40);
+        let subject = "界".repeat(200_000);
+        let commits = parse_log(&format!(
+            "{sha}{UNIT}2026-09-19{UNIT}Author{UNIT}{subject}{RECORD}{sha}{UNIT}incomplete"
+        ));
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0]["contentTruncated"], true);
+        assert_eq!(
+            commits[0]["subject"].as_str().unwrap().chars().count(),
+            MAX_LOG_SUBJECT_CHARS + 1
+        );
+        assert!(
+            serde_json::to_vec(&commits).unwrap().len()
+                < gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+        );
+    }
+
+    #[test]
+    fn line_count_includes_unterminated_lines_and_handles_empty_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file.txt");
+        for (content, expected) in [
+            ("", 0),
+            ("single line", 1),
+            ("single line\n", 1),
+            ("first\nsecond", 2),
+            ("first\nsecond\n", 2),
+            ("\n\n", 2),
+        ] {
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(
+                file_line_count(&path, "file.txt").unwrap(),
+                expected,
+                "{content:?}"
+            );
+        }
+        std::fs::write(&path, b"binary\0data").unwrap();
+        assert!(file_line_count(&path, "file.txt").is_err());
+    }
+
+    #[test]
+    fn bounded_results_resume_after_the_last_returned_entry() {
+        let commits = (0..MAX_LOG_ENTRIES)
+            .map(|index| json!({ "sha": index, "subject": "界".repeat(MAX_LOG_SUBJECT_CHARS) }))
+            .collect::<Vec<_>>();
+        let page = bound_git_result(json!({
+            "offset": 20,
+            "commits": commits,
+            "hasMore": false,
+            "nextOffset": null,
+        }))
+        .unwrap();
+        let returned = page["commits"].as_array().unwrap().len();
+        assert!(returned < MAX_LOG_ENTRIES);
+        assert_eq!(page["hasMore"], true);
+        assert_eq!(page["nextOffset"], 20 + returned);
+
+        let lines = (100..100 + MAX_BLAME_LINES)
+            .map(|line| json!({ "line": line, "content": "界".repeat(MAX_BLAME_LINE_CHARS) }))
+            .collect::<Vec<_>>();
+        let page = bound_git_result(json!({
+            "lines": lines,
+            "lineStart": 100,
+            "lineEnd": 499,
+            "hasMore": false,
+            "nextLineStart": null,
+        }))
+        .unwrap();
+        let last_line = page["lines"].as_array().unwrap().last().unwrap()["line"]
+            .as_u64()
+            .unwrap();
+        assert!(last_line < 499);
+        assert_eq!(page["hasMore"], true);
+        assert_eq!(page["lineEnd"], last_line);
+        assert_eq!(page["nextLineStart"], last_line + 1);
     }
 
     #[test]
@@ -515,6 +706,7 @@ author Someone Else\n\
     fn schemas_require_the_arguments_each_tool_needs() {
         let (properties, required) = schema(CapabilityId::WorkspaceGitLog).unwrap();
         assert!(properties["revision"].is_object());
+        assert_eq!(properties["offset"]["minimum"], 0);
         assert!(required.is_empty());
         let (_, required) = schema(CapabilityId::WorkspaceGitShow).unwrap();
         assert_eq!(required, vec!["revision"]);

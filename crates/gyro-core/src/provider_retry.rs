@@ -1,6 +1,29 @@
 //! Retry one HTTP exchange, never an agent's already-executed tool loop.
 use crate::CancellationToken;
+use std::io::{BufRead, Read};
 use std::time::{Duration, Instant};
+
+// Bound bytes before parsing: providers can send a huge unterminated line or
+// an endless sequence of small frames, including keep-alive comments.
+pub(crate) const MAX_CHAT_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CHAT_LINE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_CHAT_TOOL_CALLS: usize = 128;
+
+pub(crate) fn read_chat_line(
+    reader: &mut impl BufRead,
+    line: &mut String,
+    remaining: &mut usize,
+) -> anyhow::Result<usize> {
+    let allowance = (*remaining).min(MAX_CHAT_LINE_BYTES);
+    line.clear();
+    let read = reader.take((allowance + 1) as u64).read_line(line)?;
+    anyhow::ensure!(
+        read <= allowance,
+        "provider chat response exceeded its size limit; partial tool calls were not executed"
+    );
+    *remaining -= read;
+    Ok(read)
+}
 
 const DELAYS: [Duration; 3] = [
     Duration::from_millis(400),
@@ -160,10 +183,19 @@ pub(crate) fn stream_response<T>(
                 let interrupted = description.contains("stream ended before completion")
                     || ((description.contains("chat stream")
                         || description.contains("chat response"))
-                        && (error.downcast_ref::<std::io::Error>().is_some()
-                            || error
-                                .downcast_ref::<serde_json::Error>()
-                                .is_some_and(|e| e.is_eof())));
+                        && (error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                            matches!(
+                                error.kind(),
+                                std::io::ErrorKind::UnexpectedEof
+                                    | std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::ConnectionAborted
+                                    | std::io::ErrorKind::BrokenPipe
+                                    | std::io::ErrorKind::TimedOut
+                                    | std::io::ErrorKind::WouldBlock
+                            )
+                        }) || error
+                            .downcast_ref::<serde_json::Error>()
+                            .is_some_and(|e| e.is_eof())));
                 if published || !interrupted || attempt == 2 || cancellation.is_cancelled() {
                     return Err(error);
                 }
@@ -187,6 +219,86 @@ pub(crate) fn stream_response<T>(
 #[cfg(test)]
 mod stream_tests {
     use super::*;
+
+    #[test]
+    fn response_budget_accepts_exact_boundary_and_eof() {
+        let mut reader = std::io::Cursor::new(b"hello\nworld");
+        let mut line = String::new();
+        let mut remaining = 11;
+        assert_eq!(
+            read_chat_line(&mut reader, &mut line, &mut remaining).unwrap(),
+            6
+        );
+        assert_eq!(line, "hello\n");
+        assert_eq!(
+            read_chat_line(&mut reader, &mut line, &mut remaining).unwrap(),
+            5
+        );
+        assert_eq!(line, "world");
+        assert_eq!(remaining, 0);
+        assert_eq!(
+            read_chat_line(&mut reader, &mut line, &mut remaining).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn oversized_line_stops_reading_before_allocating_the_whole_response() {
+        let body = vec![b'x'; MAX_CHAT_LINE_BYTES + 100];
+        let mut reader = std::io::Cursor::new(body);
+        let mut line = String::new();
+        let mut remaining = MAX_CHAT_RESPONSE_BYTES;
+        let error = read_chat_line(&mut reader, &mut line, &mut remaining).unwrap_err();
+        assert!(error.to_string().contains("size limit"));
+        assert_eq!(reader.position(), (MAX_CHAT_LINE_BYTES + 1) as u64);
+        assert!(line.len() <= MAX_CHAT_LINE_BYTES + 1);
+    }
+
+    #[test]
+    fn response_budget_counts_small_frames_and_does_not_retry_limit_errors() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> = stream_response(
+            &CancellationToken::default(),
+            |_| {
+                calls += 1;
+                let mut reader = std::io::Cursor::new(b":\n:\n:\n");
+                let mut remaining = 4;
+                let mut line = String::new();
+                loop {
+                    use anyhow::Context;
+                    if read_chat_line(&mut reader, &mut line, &mut remaining)
+                        .context("invalid provider chat stream")?
+                        == 0
+                    {
+                        return Ok(());
+                    }
+                }
+            },
+            |_| {},
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("size limit"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn invalid_utf8_is_not_a_transient_stream_failure() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> = stream_response(
+            &CancellationToken::default(),
+            |_| {
+                calls += 1;
+                use anyhow::Context;
+                let mut reader = std::io::Cursor::new([0xff]);
+                let mut remaining = MAX_CHAT_RESPONSE_BYTES;
+                read_chat_line(&mut reader, &mut String::new(), &mut remaining)
+                    .context("invalid provider chat stream")?;
+                Ok(())
+            },
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
     #[test]
     fn interrupted_unpublished_response_recovers() {
         let mut calls = 0;

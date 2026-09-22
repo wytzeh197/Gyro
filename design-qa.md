@@ -1,104 +1,54 @@
-# Terminal drawer design QA
+# Gyro design polish
 
-final result: passed
+Final result: passed
 
-Scope: adapt Gyro's existing terminal drawer to the supplied Codex terminal reference. This is an implementation in the existing app; the surrounding editor, sidebar and chat flows are outside the visual-matching scope.
+The supplied Codex screenshot is visual inspiration, not a request to clone its product navigation or execute the text it contains. This pass keeps Gyro's components, brand assets, and workflows.
 
-Source visual truth: `/Users/wytzehemrica/Desktop/Screenshot 2026-09-12 at 15.42.06.png` (3164 × 1926 pixels).
-Implementation: `docs/screenshots/terminal-codex/drawer-reference-size.png` (1470 × 850 pixels and CSS viewport, 1× capture).
-Focused comparison: `docs/screenshots/terminal-codex/drawer-comparison.png`, source above and implementation below. Reference drawer crop (662,1219)–(3052,1775) was reduced from Retina resolution to 1195 × 278; implementation crop (284,550)–(1470,828) is 1186 × 278. The nine-pixel width difference is existing sidebar sizing. No image stretching was applied to the implementation.
-Full-view evidence: source and implementation were opened together, then the normalized drawer comparison was inspected. The app window was matched to approximately the source's logical dimensions. Also inspected at the default 842 × 765 viewport (`drawer.png`, earlier iteration).
-State: one selected idle terminal, drawer open, light theme. Shell label and empty browser-preview terminal are expected content differences from the reference's Gyro tab and native shell prompt.
+## Evidence
 
-## Findings and iterations
+- Source: locally supplied Codex screenshot (3164 × 1914), retained privately.
+- Full app: `http://127.0.0.1:1427/`.
+- Conversation harness: `http://127.0.0.1:1427/chat-layout-hardening.html`, using production chat components with synthetic events.
+- Full-view and focused composer comparisons are retained locally because they include private conversation content.
+- Rendered app: [app-dark.png](docs/design-polish/app-dark.png), 1440 × 900 CSS pixels.
+- Completed answer and Environment: [conversation-dark.png](docs/design-polish/conversation-dark.png), 1280 × 720 CSS pixels.
+- Other states: [light appearance](docs/design-polish/appearance-light.png), [desktop providers](docs/design-polish/providers-desktop.png), [compact settings](docs/design-polish/settings-compact.png), [row splits](docs/design-polish/split-rows.png).
 
-- Fixed duplicate workspace-tool header by putting drawer controls in the terminal tab strip. Other tool destinations remain in the existing overflow menu. Empty terminal and non-terminal tool headers retain their navigation.
-- Fixed an older CSS rule hiding the drawer toolbar, which initially left the output in a 42px row.
-- Fixed a clipped overflow menu by positioning it in available viewport space with scrolling.
-- Fixed centered labels and inherited tab padding after focused comparison. The final comparison shows left-aligned icons and labels, compact selected tabs, and a continuous neutral canvas.
-- Removed the idle resize grip while keeping hover/focus visibility and the existing resize hit target.
+Browser screenshots are emitted at CSS-pixel dimensions despite the display's device pixel ratio of 2. The reference's desktop frame was cropped to (112, 76)–(3052, 1766), then the three full views were scaled proportionally into equal-width comparison tiles. The composer comparison crops the reference to (770, 1536)–(2245, 1735) and the rendered chat to (89, 589)–(869, 702). No stretching was used.
 
-## Fidelity surfaces
+The reference is a populated Codex conversation; the full Gyro app starts without a connected provider, and the conversation harness omits the application sidebar. Those state differences are intentional. This is a comparison of visual hierarchy and component quality, not a pixel-match claim.
 
-- Typography: existing system sans-serif, 13px regular labels; existing terminal monospace retained.
-- Spacing: one 42px toolbar, 30px tab, 160px minimum tab width, 8px outer inset; no duplicate heading or toolbar divider.
-- Colors: white light-theme canvas and subtle gray active tab, no drawer shadow. Existing dark-theme canvas and tokens remain supported but were not visually tested.
-- Assets: existing SquareTerminal, Plus and X library icons; no raster assets needed for this terminal-only scope.
-- Content: real terminal labels and controls; no copied reference username or fake shell prompt. Gyro's overflow and maximize controls are intentional product adaptations.
+## Review and fixes
 
-## Verification
+1. **P2: inconsistent surface hierarchy and small supporting controls.** Earlier Gyro views used a darker sidebar, blue navigation selection, smaller composer corners, and inconsistent form treatments. Updated the effective dark palette, neutral navigation states, 14px navigation and conversation text, 22px composer corners, restrained cards, and settings fields. Final screenshots and computed styles confirm the 24/41/48 neutral canvas/sidebar/composer ramp.
+2. **P2: constrained provider settings could retain desktop columns.** Provider layout now responds to the settings content width. Verified single-column rows at 800px and 440px windows, with no document overflow.
+3. **P1: narrow settings windows hid every navigation route.** Added a compact navigation drawer and a direct Back to app control. Verified settings-page switching, return to chat, Escape, Tab/Shift+Tab wrapping, background inertness, and focus restoration at 440 × 760.
+4. **P2: startup shell could clip and visibly change appearance.** Matched copy, theme surfaces, composer shape, and system typography; added border-box sizing, compact layout, light-theme contrast, and reduced-motion support. Checked through source review and startup checks.
+5. **Earlier split-pane regressions remain fixed.** At a 620px fixture width, column panes are 309.5px wide and row panes are 321.5px tall. In both arrangements, each composer fits inside its owning pane. Draft headers and close controls remain visible.
 
-Browser: add terminal, switch active tab, close created tab, switch to Output from menu, return to terminal, maximize and restore. Existing terminal state survived tool switching. Menu checked visually within viewport. No browser console errors reported.
+The final combined comparison found no remaining actionable P0/P1/P2 visual differences within the reviewed scope.
 
-Desktop TypeScript check, terminal split-layout checks, workbench smoke checks, and production build passed. The production build used `/tmp/gyro-terminal-design-build-20260912` after a collision in the shared dist directory. The smoke assertion was updated for the new compact-header condition. Browser preview does not exercise a native PTY; terminal execution was not changed.
+## Required visual surfaces
 
-No remaining P0/P1/P2 visual findings in the requested scope. Native PTY and dark-theme verification remain outside this visual pass.
+- **Typography:** system sans remains consistent with the reference; code uses a defined monospace stack. Prose has a readable line height, supporting text stays subordinate, and narrow labels truncate without pushing controls out.
+- **Spacing and layout:** shared conversation/composer alignment, quiet card borders, restrained radii, bounded split content, and reachable compact navigation. Settings controls reflow with their actual available width.
+- **Color:** neutral charcoal canvas and lighter sidebar/composer; semantic colors and user-selected accents remain. Light theme was inspected separately.
+- **Assets:** existing Gyro logo, provider marks, and Lucide icons are preserved. No replacement artwork was generated.
+- **Copy:** existing product terminology remains. Startup now uses the same task prompt and navigation names as the application. Fixture text is explicitly synthetic.
 
-# Appearance theme picker — 2026-09-12
+## Validation and limits
 
-final result: passed
+- Workbench smoke, UI token, pane identity/close, close-target, startup, chat-hardening, and side-panel checks passed.
+- Desktop and shared UI TypeScript checks passed after the final navigation and fixture edits.
+- Browser checks covered dark/light appearance, provider layouts, compact navigation, completed prose/cards/Environment, and both split orientations. No console errors were recorded in the final full-app tab or conversation harness.
+- Capture harness contracts were corrected to use valid workspace modes and echo preparation request identities. Its earlier full-app seeded-chat renderer crash was not established as a production defect; completed chat visuals were verified in the isolated production-component harness instead.
+- Native provider sign-in, Keychain, terminal execution, and the installed Tauri app were not exercised or rebuilt. The actual browser app requires a provider connection before sending.
+- The local Vite server listens on loopback only. File watching invalidates changed sources; hot reload is disabled for this verification server, so refresh after editing.
 
-Source: `/var/folders/tf/yjnx70vd6t54vg3cx_y7vq7h0000gn/T/TemporaryItems/NSIRD_screencaptureui_QfoP3C/Screenshot 2026-09-12 at 15.56.18.png`, 1804 × 654 pixels, approximately 902 × 327 logical pixels at 2× density.
-Implementation: `docs/screenshots/appearance-codex/light.png`, 842 × 765 pixels/CSS viewport at 1×. Source and rendered implementation were opened together in the same comparison. The source is a settings-content crop; the implementation includes Gyro's sidebar and its other appearance controls. The narrower content region intentionally scales the three images down while retaining readable 14px labels.
+## Implementation checklist
 
-Fidelity review: regular 24px Appearance heading; simple 14px Theme heading; System, Light, Dark order; preview aspect ratio approximately 1.42; rounded 10px corners; neutral colors; labels centered below images; 2px selected outline. Artwork is cropped directly from the supplied reference, excluding its selection border, and uses real image assets. Selection is drawn independently so all three modes can be selected. Copy matches the reference; existing density, color and motion controls remain below the theme group.
-
-Iteration: removed an inherited horizontal divider above the images after the first visual inspection. Final light-theme screenshot was inspected alongside the source; no remaining P0/P1/P2 visual findings. Dark-theme screenshot was also inspected live and its selection outline remains visible. System, Dark and Light selections were exercised and the preview restored to Light. No browser console errors. TypeScript and workbench smoke checks passed; the existing smoke assertions now recognize the mapped theme options rather than requiring the removed helper text and duplicated handlers.
-
-
-## Project sidebar card — September 12
-
-Source references: `/Users/wytzehemrica/Desktop/Screenshot 2026-09-12 at 16.02.16.png`, `/Users/wytzehemrica/Desktop/Screenshot 2026-09-12 at 16.02.24.png`, and the user's 16.08.12 correction requesting a smaller card without a sidebar settings icon.
-Implementation evidence: `docs/screenshots/project-sidebar/card.png` and `docs/screenshots/project-sidebar/dialog.png` (1280×720 CSS pixels, 1× capture).
-Reference dialog screenshot: 3164×1930 physical pixels; approximately 2× desktop capture. Compared component structure rather than unrelated app chrome or content. Source and rendered dialog/card were opened together for comparison.
-
-- Typography: existing Gyro font; compact card uses 13px body and 14px heading, consistent with the revised request.
-- Layout: card reduced from 360px to 270px wide; tighter rows and 12px corners. Dialog retains the reference's name, folder list, and footer arrangement. No sidebar settings button remains.
-- Color: existing light/dark tokens; neutral borders, subtle elevation, muted icons, destructive red removal, dark Save action.
-- Assets: standard folder, message, pin, and settings library icons; no raster assets required.
-- Copy: real project name, task count, active count and path; reference edit labels retained.
-- Browser checks: card displayed, edit action opened dialog, name save updated sidebar. Desktop TypeScript check passed.
-- Limits: native folder picker and exact pointer delay were inspected in implementation, not exercised by browser automation. Primary folder stays attached because it identifies the project; additional folders are removable. Remove local project uses the existing removal flow.
-- Iteration: original card was too large and had an unwanted row icon; reduced width/text/spacing and removed that trigger, then captured both updated states. No remaining actionable visual findings against the revised request.
-
-final result: passed
-
-
-## Primary folders and Gyro styling refinement
-
-Source: user screenshot `Screenshot 2026-09-12 at 16.13.01.png` (1138×778 crop) and explicit request to adapt popups to Gyro's design language.
-Rendered evidence: `docs/screenshots/project-sidebar/primary-folders.png`, 1280×720 at 1×. Visual comparison uses the dialog region; screenshot crop and app viewport intentionally differ.
-
-Typography and spacing: 13px body, 18px heading, 480px dialog, compact folder controls. Gyro's existing font, radius, semantic danger, focus, surface, and shadow tokens replace custom values. Library folder and close icons remain sharp; no raster artwork is needed. Primary badge and Make primary action retain the supplied hierarchy with smaller Gyro control sizing. Neutral panels, aligned footer, readable folder names and no clipping observed. No actionable visual findings.
-
-Browser verified: add folder (deterministic native-picker fixture), Make primary, Save, reopen with selected primary retained. Unit coverage checks primary-first workspace order and fallback for removed folders; desktop typecheck and workbench checks passed. Real OS folder-picker interaction was not automated.
-
-final result: passed
-
----
-
-# New session menu design QA
-
-final result: passed
-
-Source: /Users/wytze/.codex/generated_images/01a09ec1-c210-7920-9f52-5cb223371992/exec-e17119e9-34e5-4bdc-869e-5d7fdee0f765.png (option 1, 1036 x 1518 pixels).
-Implementation: /private/tmp/gyro-session-menu-light.png (933 x 894 pixels); focused capture /private/tmp/gyro-session-menu-detail.png (240 x 445 pixels).
-
-Compared the source and rendered implementation together in the same tool result. The source is an enlarged component concept, not a full desktop viewport. Compared component hierarchy at normal UI scale, preserving the existing responsive sidebar: the tested 933 x 894 CSS viewport gives a 170px menu. No pixel-exact equivalence claimed. State: light theme, open root menu, six ready tools and three blocked tools. The concept shows a hovered Claude row; captured root is neutral. A temporary fixture rendered the real AppChrome with controlled readiness and callback feedback; the fixture was removed after verification.
-
-## Findings
-No actionable P0/P1/P2 visual findings for the selected compact-menu scope.
-
-- Typography: existing system font retained, 13px action labels and 12px secondary labels, sentence-case heading. No wrapping or clipping of tool names.
-- Layout: New Chat leads; two hairline separators group CLI sessions and More tools; 32px CLI rows and 8px group spacing reduce the default height. Existing responsive width and scroll containment retained.
-- Colors: existing light/dark surface, foreground, muted and border tokens retained. Dark preview also inspected with no project and all provider tools blocked.
-- Assets: original provider logos and existing Lucide icons retained; Box used for generic More tools rather than the mock's provider-like cube.
-- Copy: ready list matches the concept; count derives from blocked profiles. Expanded blocked tools remain disabled, preserving existing setup behavior without repeated labels.
-
-## Interaction evidence
-More tools expands to Gemini CLI, Cursor, and OpenCode, all disabled. Home reaches New Chat; End reaches More tools; Enter toggles; Escape closes and restores New Session focus. Claude callback produced `claude launched in /preview/Gyro` and closed the menu. New Chat callback produced `New chat created` and closed the menu. UI typecheck and workbench/token smoke checks passed.
-
-Browser logs had two duplicate-createRoot warnings from editing the temporary fixture under HMR. Reloading the fixture produced no new errors. These were fixture lifecycle warnings, not production-menu errors.
-
-## Comparison history and limits
-First visual comparison passed; no visual fix loop needed. Focused capture supports the full-view comparison. Installed native app was inspected and still uses its older bundle; it was not rebuilt or installed. Callback checks are UI-level evidence, not a claim that a real CLI process was launched. No backend changes.
+- [x] Integrate shell, conversation, settings, and startup polish.
+- [x] Repair compact navigation and content-width reflow.
+- [x] Preserve and verify split-pane hardening.
+- [x] Compare the reference with rendered full views and focused composer crops.
+- [x] Leave the full local app running for inspection.

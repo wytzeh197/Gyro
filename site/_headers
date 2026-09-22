@@ -5,3 +5,6 @@
   Strict-Transport-Security: max-age=300
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
+
+/model-catalog.json
+  Cache-Control: public, max-age=300

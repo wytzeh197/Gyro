@@ -81,6 +81,7 @@ const refreshConfig = hook("refreshConfig", "selectDestination", {
   providersForConfig: (value) => value.modelProviders,
   withCouncilConfig: (value) => value,
   applyProviderCapabilityManifest: () => {},
+  restoreModelCatalog: () => {},
   invoke: (command) => {
     if (command === "load_config") {
       return Promise.resolve({

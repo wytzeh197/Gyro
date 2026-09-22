@@ -232,7 +232,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
       while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
       const focusedPaneId = storedChatGridText(layout.focusedPaneId, 160);
       const fallbackFocus = slots.find(Boolean)?.paneId;
-      layouts[projectKey] = {
+      layouts[projectKey] = chatLayoutWithUniquePanes({
         projectKey,
         slots,
         focusedPaneId: slots.some((pane) => pane?.paneId === focusedPaneId)
@@ -241,7 +241,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
         splitDirection:
           layout.splitDirection === "vertical" ? "vertical" : "horizontal",
         arrangement: normalizedChatArrangement(layout.arrangement),
-      };
+      });
     }
   }
   const requestedProjectKey = chatProjectKey(
@@ -289,6 +289,12 @@ export function chatGridReducer(
   action: ChatGridAction,
 ): ChatGridState {
   if (action.type === "toggle-maximize-pane") {
+    const activeLayout = state.activeProjectKey
+      ? state.layouts[state.activeProjectKey]
+      : undefined;
+    if (!activeLayout?.slots.some((pane) => pane?.paneId === action.paneId)) {
+      return state;
+    }
     return {
       ...state,
       maximizedPaneId:
@@ -299,7 +305,7 @@ export function chatGridReducer(
     const layouts = Object.fromEntries(
       Object.entries(state.layouts).map(([key, layout]) => [
         key,
-        {
+        chatLayoutWithUniquePanes({
           ...layout,
           slots: layout.slots.map((pane) => {
             if (pane?.kind !== "draft" || pane.draftKey !== action.draftKey) {
@@ -312,19 +318,19 @@ export function chatGridReducer(
               workspacePath: action.workspacePath,
             };
           }),
-        },
+        }),
       ]),
     );
-    return {
+    return chatGridWithValidMaximize({
       ...state,
       layouts,
-    };
+    });
   }
   if (action.type === "rekey-session-pane") {
     const layouts = Object.fromEntries(
       Object.entries(state.layouts).map(([key, layout]) => [
         key,
-        {
+        chatLayoutWithUniquePanes({
           ...layout,
           slots: layout.slots.map((pane) =>
             pane?.kind === "session" && pane.sessionId === action.fromSessionId
@@ -335,33 +341,38 @@ export function chatGridReducer(
                 }
               : pane,
           ),
-        },
+        }),
       ]),
     );
-    return {
+    return chatGridWithValidMaximize({
       ...state,
       layouts,
-    };
+    });
   }
   if (action.type === "remove-session-pane") {
     const layouts = Object.fromEntries(
       Object.entries(state.layouts).map(([key, layout]) => {
-        const slots = layout.slots.map((pane) =>
-          pane?.kind === "session" && pane.sessionId === action.sessionId
-            ? null
-            : pane,
+        if (
+          !layout.slots.some(
+            (pane) =>
+              pane?.kind === "session" && pane.sessionId === action.sessionId,
+          )
+        ) {
+          return [key, layout];
+        }
+        const slots = layout.slots.filter(
+          (pane) =>
+            pane &&
+            !(pane.kind === "session" && pane.sessionId === action.sessionId),
         );
-        return [key, chatLayoutWithValidFocus({ ...layout, slots })];
+        while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+        return [key, chatLayoutWithUniquePanes({ ...layout, slots })];
       }),
     );
-    const maximizedStillExists = Object.values(layouts).some((layout) =>
-      layout.slots.some((pane) => pane?.paneId === state.maximizedPaneId),
-    );
-    return {
+    return chatGridWithValidMaximize({
       ...state,
       layouts,
-      maximizedPaneId: maximizedStillExists ? state.maximizedPaneId : undefined,
-    };
+    });
   }
   if (action.type === "clear-project-layout") {
     const projectKey = chatProjectKey(action.projectKey);
@@ -386,14 +397,14 @@ export function chatGridReducer(
   if (action.type === "set-arrangement") {
     const layout = state.layouts[projectKey];
     if (!layout) return state;
-    return {
+    return chatGridWithValidMaximize({
       ...state,
       activeProjectKey: projectKey,
       layouts: {
         ...state.layouts,
         [projectKey]: { ...layout, arrangement: action.arrangement },
       },
-    };
+    });
   }
   if (action.type === "activate-project") {
     return {
@@ -497,6 +508,11 @@ export function chatGridReducer(
       next = { ...current, focusedPaneId: action.paneId };
     }
   } else if (action.type === "close-pane") {
+    // Confirmation can resolve after the user navigated elsewhere. An old
+    // close must neither create a layout nor move focus back to its project.
+    if (!current.slots.some((pane) => pane?.paneId === action.paneId)) {
+      return state;
+    }
     // Compact so a single remaining pane sits in the first cell. Leaving a
     // hole after unsplit made some layouts look empty even though a chat was
     // still open.
@@ -541,15 +557,69 @@ export function chatGridReducer(
   ) {
     return state;
   }
-  return {
+  return chatGridWithValidMaximize({
     ...state,
-    activeProjectKey: projectKey,
+    activeProjectKey:
+      action.type === "close-pane" ? state.activeProjectKey : projectKey,
     layouts: { ...state.layouts, [projectKey]: next },
     maximizedPaneId:
       action.type === "close-pane" && state.maximizedPaneId === action.paneId
         ? undefined
         : state.maximizedPaneId,
-  };
+  });
+}
+
+/** A removed/replaced pane cannot keep every pane in the active grid hidden. */
+function chatGridWithValidMaximize(state: ChatGridState): ChatGridState {
+  const layout = state.activeProjectKey
+    ? state.layouts[state.activeProjectKey]
+    : undefined;
+  if (
+    state.maximizedPaneId &&
+    !layout?.slots.some((pane) => pane?.paneId === state.maximizedPaneId)
+  ) {
+    return { ...state, maximizedPaneId: undefined };
+  }
+  return state;
+}
+
+/**
+ * A draft/session can be selected while its persisted identity is resolving.
+ * Merging those identities must keep a single pane, preferring the one the
+ * user is interacting with, and discard the split when only that pane remains.
+ */
+function chatLayoutWithUniquePanes(
+  layout: ChatProjectLayout,
+): ChatProjectLayout {
+  const focusedIndex = layout.slots.findIndex(
+    (pane) => pane?.paneId === layout.focusedPaneId,
+  );
+  const identities = new Set<string>();
+  const paneIds = new Set<string>();
+  const survivors = new Set<number>();
+  for (const index of [focusedIndex, ...layout.slots.keys()]) {
+    const pane = layout.slots[index];
+    if (!pane) continue;
+    const identity = chatPaneIdentity(pane);
+    if (identities.has(identity) || paneIds.has(pane.paneId)) continue;
+    identities.add(identity);
+    paneIds.add(pane.paneId);
+    survivors.add(index);
+  }
+  let slots = layout.slots.map((pane, index) =>
+    pane && survivors.has(index) ? pane : null,
+  );
+  const occupied = slots.filter((pane): pane is ChatPaneRef => Boolean(pane));
+  if (occupied.length <= 1) {
+    slots = [...occupied];
+    while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+  }
+  return chatLayoutWithValidFocus({
+    ...layout,
+    slots,
+    splitDirection: occupied.length === 2 ? layout.splitDirection : undefined,
+    arrangement: occupied.length > 1 ? layout.arrangement : undefined,
+  });
 }
 
 function normalizedChatSlotIndex(value?: number) {

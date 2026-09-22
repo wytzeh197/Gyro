@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   chatGridReducer,
   createInitialChatGridState,
+  sanitizeStoredChatGridState,
 } from "../packages/ui/src/workbench-state.ts";
 
 // Closing a chat pane has to survive everything that happens afterwards.
@@ -242,4 +243,204 @@ assert.deepEqual(
   "closing a reopened chat should stick too",
 );
 
-console.log("chat pane close checks passed");
+// An optimistic draft can already have a second pane for the persisted
+// session by the time the create response arrives. Identity changes must
+// collapse those panes, keeping the focused view and its stable pane ID.
+const draftPane = {
+  kind: "draft",
+  paneId: "pane-draft",
+  draftKey: "draft-one",
+  workspacePath: PROJECT,
+};
+const sessionPane = paneFor(sessions[0]);
+for (const focusedPane of [draftPane, sessionPane]) {
+  const state = {
+    activeProjectKey: PROJECT,
+    maximizedPaneId: sessionPane.paneId,
+    layouts: {
+      [PROJECT]: {
+        projectKey: PROJECT,
+        slots: [draftPane, sessionPane, null, null],
+        focusedPaneId: focusedPane.paneId,
+        arrangement: "rows",
+        splitDirection: "vertical",
+      },
+    },
+  };
+  const migrated = chatGridReducer(state, {
+    type: "migrate-draft-pane",
+    draftKey: draftPane.draftKey,
+    sessionId: sessionPane.sessionId,
+    workspacePath: PROJECT,
+  });
+  assert.deepEqual(
+    migrated.layouts[PROJECT].slots,
+    [{ ...sessionPane, paneId: focusedPane.paneId }, null, null, null],
+    "draft migration must show each session once and retain the focused pane",
+  );
+  assert.equal(migrated.layouts[PROJECT].focusedPaneId, focusedPane.paneId);
+  assert.equal(migrated.layouts[PROJECT].arrangement, undefined);
+  assert.equal(migrated.layouts[PROJECT].splitDirection, undefined);
+  assert.equal(
+    migrated.maximizedPaneId,
+    focusedPane === sessionPane ? sessionPane.paneId : undefined,
+    "deduplicating a maximized pane must leave the remaining chat visible",
+  );
+
+  const optimisticPane = {
+    ...sessionPane,
+    paneId: "optimistic-pane",
+    sessionId: "optimistic",
+  };
+  const rekeyed = chatGridReducer(
+    {
+      ...state,
+      layouts: {
+        [PROJECT]: {
+          ...state.layouts[PROJECT],
+          slots: [optimisticPane, sessionPane, null, null],
+          focusedPaneId:
+            focusedPane === draftPane
+              ? optimisticPane.paneId
+              : sessionPane.paneId,
+        },
+      },
+    },
+    {
+      type: "rekey-session-pane",
+      fromSessionId: optimisticPane.sessionId,
+      toSessionId: sessionPane.sessionId,
+      workspacePath: PROJECT,
+    },
+  );
+  assert.equal(rekeyed.layouts[PROJECT].slots.filter(Boolean).length, 1);
+  assert.equal(
+    rekeyed.layouts[PROJECT].slots[0].sessionId,
+    sessionPane.sessionId,
+  );
+  assert.equal(
+    rekeyed.layouts[PROJECT].slots[0].paneId,
+    focusedPane === draftPane ? optimisticPane.paneId : sessionPane.paneId,
+    "persisted session IDs must merge without replacing the focused pane",
+  );
+}
+
+const otherProject = "/w/other";
+const otherPane = { ...paneFor(sessions[1]), workspacePath: otherProject };
+const backgroundCloseState = {
+  activeProjectKey: otherProject,
+  maximizedPaneId: otherPane.paneId,
+  layouts: {
+    [PROJECT]: {
+      projectKey: PROJECT,
+      slots: [sessionPane, null, null, null],
+      focusedPaneId: sessionPane.paneId,
+    },
+    [otherProject]: {
+      projectKey: otherProject,
+      slots: [otherPane, null, null, null],
+      focusedPaneId: otherPane.paneId,
+    },
+  },
+};
+const backgroundClosed = chatGridReducer(backgroundCloseState, {
+  type: "close-pane",
+  projectKey: PROJECT,
+  paneId: sessionPane.paneId,
+});
+assert.equal(
+  backgroundClosed.activeProjectKey,
+  otherProject,
+  "delayed pane close must preserve the user's current project",
+);
+assert.equal(backgroundClosed.maximizedPaneId, otherPane.paneId);
+assert.equal(
+  backgroundClosed.layouts[otherProject],
+  backgroundCloseState.layouts[otherProject],
+);
+assert.equal(backgroundClosed.layouts[PROJECT].slots.filter(Boolean).length, 0);
+for (const projectKey of [PROJECT, "/w/missing"]) {
+  assert.equal(
+    chatGridReducer(backgroundClosed, {
+      type: "close-pane",
+      projectKey,
+      paneId: sessionPane.paneId,
+    }),
+    backgroundClosed,
+    "closing a removed pane must be a no-op, even after its project disappears",
+  );
+}
+
+const replacedMaximized = chatGridReducer(backgroundCloseState, {
+  type: "select-pane",
+  projectKey: otherProject,
+  pane: { ...sessionPane, workspacePath: otherProject },
+  mode: "replace",
+});
+assert.equal(
+  replacedMaximized.maximizedPaneId,
+  undefined,
+  "replacing the maximized pane must not hide its replacement",
+);
+const switchedProject = chatGridReducer(backgroundCloseState, {
+  type: "select-pane",
+  projectKey: PROJECT,
+  pane: sessionPane,
+  mode: "replace",
+});
+assert.equal(
+  switchedProject.maximizedPaneId,
+  undefined,
+  "a maximized pane from another project must not hide the selected chat",
+);
+assert.equal(
+  chatGridReducer(backgroundCloseState, {
+    type: "toggle-maximize-pane",
+    paneId: "missing-pane",
+  }),
+  backgroundCloseState,
+  "a stale maximize action must not hide the active grid",
+);
+
+const sparseState = {
+  activeProjectKey: PROJECT,
+  layouts: {
+    [PROJECT]: {
+      projectKey: PROJECT,
+      slots: [null, null, sessionPane, null],
+      focusedPaneId: sessionPane.paneId,
+      splitDirection: "vertical",
+      arrangement: "rows",
+    },
+  },
+};
+const restoredSparse =
+  sanitizeStoredChatGridState(sparseState).layouts[PROJECT];
+assert.deepEqual(
+  restoredSparse.slots,
+  [sessionPane, null, null, null],
+  "restoring a lone pane must fill the first slot",
+);
+assert.equal(restoredSparse.arrangement, undefined);
+assert.equal(restoredSparse.splitDirection, undefined);
+const removedSession = chatGridReducer(
+  {
+    ...sparseState,
+    layouts: {
+      [PROJECT]: {
+        ...sparseState.layouts[PROJECT],
+        slots: [paneFor(sessions[1]), null, sessionPane, null],
+      },
+    },
+  },
+  { type: "remove-session-pane", sessionId: sessions[1].id },
+);
+assert.deepEqual(
+  removedSession.layouts[PROJECT].slots,
+  [sessionPane, null, null, null],
+  "removing a session must expand the surviving pane",
+);
+assert.equal(removedSession.layouts[PROJECT].arrangement, undefined);
+assert.equal(removedSession.layouts[PROJECT].splitDirection, undefined);
+
+console.log("chat pane close and identity hardening checks passed");

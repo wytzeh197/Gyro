@@ -989,8 +989,11 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
 
   const catalogProviders = providerCatalog.map((catalogProvider) => {
     const savedProvider = savedProviders.get(catalogProvider.id);
+    const retainedModels = (savedProvider?.models ?? []).filter(
+      (model) => !model.catalogManaged,
+    );
     const savedModels = new Map(
-      (savedProvider?.models ?? []).map((model) => [model.id, model]),
+      retainedModels.map((model) => [model.id, model]),
     );
     const catalogModelIds = new Set(
       catalogProvider.models.map((model) => model.id),
@@ -998,14 +1001,12 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
     const models = [
       ...catalogProvider.models.map((model) => ({
         ...model,
-        ...savedModels.get(model.id),
+        ...(model.catalogManaged ? {} : savedModels.get(model.id)),
         contextWindowTokens: model.contextWindowTokens,
         defaultReasoningEffort: model.defaultReasoningEffort,
         supportedReasoningEfforts: model.supportedReasoningEfforts,
       })),
-      ...(savedProvider?.models ?? []).filter(
-        (model) => !catalogModelIds.has(model.id),
-      ),
+      ...retainedModels.filter((model) => !catalogModelIds.has(model.id)),
     ];
     const defaultModelId =
       savedProvider?.defaultModelId &&

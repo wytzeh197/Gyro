@@ -32,16 +32,28 @@ const initialTheme = (() => {
 document.documentElement.dataset.theme = initialTheme;
 document
   .querySelector('meta[name="theme-color"]')
-  ?.setAttribute("content", initialTheme === "light" ? "#f2f4f7" : "#0e0e0e");
+  ?.setAttribute("content", initialTheme === "light" ? "#f8f9f9" : "#181818");
+
+function AppFailure({ startup = false }: { startup?: boolean }) {
+  return (
+    <main className="gyro-root-error" role="alert">
+      <h1>{startup ? "Gyro couldn’t load." : "Gyro hit a rendering error."}</h1>
+      <p>Reload the window to try again.</p>
+      <button type="button" onClick={() => window.location.reload()}>
+        Reload Gyro
+      </button>
+    </main>
+  );
+}
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { error: Error | null }
+  { failed: boolean }
 > {
-  override state: { error: Error | null } = { error: null };
+  override state = { failed: false };
 
-  static getDerivedStateFromError(error: Error) {
-    return { error };
+  static getDerivedStateFromError() {
+    return { failed: true };
   }
 
   override componentDidCatch(error: Error) {
@@ -49,14 +61,7 @@ class AppErrorBoundary extends React.Component<
   }
 
   override render() {
-    if (this.state.error) {
-      return (
-        <main className="gyro-root-error" role="alert">
-          <strong>Gyro hit a rendering error.</strong>
-          <span>{this.state.error.message}</span>
-        </main>
-      );
-    }
+    if (this.state.failed) return <AppFailure />;
     return this.props.children;
   }
 }
@@ -67,6 +72,12 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+
+// React boundaries do not catch rejected module/CSS imports.
+function reportStartupFailure(error: unknown) {
+  console.error("Gyro startup failed", error);
+  root.render(<AppFailure startup />);
+}
 
 // Paint a chat-shaped shell immediately; the full App (and packages/ui)
 // arrives asynchronously so cold start never blocks on the big modules.
@@ -80,19 +91,26 @@ if (bootSurface === "embedded") {
     </main>,
   );
 } else if (isMenuBarSurface) {
+  root.render(
+    <main className="gyro-root-error" role="status">
+      Starting Gyro…
+    </main>,
+  );
   void Promise.all([
     import("./MenuBarPopover"),
     import("./menu-bar.css"),
     import("@gyro-dev/ui/styles.css"),
-  ]).then(([{ MenuBarPopover }]) => {
-    root.render(
-      <React.StrictMode>
-        <AppErrorBoundary>
-          <MenuBarPopover />
-        </AppErrorBoundary>
-      </React.StrictMode>,
-    );
-  });
+  ])
+    .then(([{ MenuBarPopover }]) => {
+      root.render(
+        <React.StrictMode>
+          <AppErrorBoundary>
+            <MenuBarPopover />
+          </AppErrorBoundary>
+        </React.StrictMode>,
+      );
+    })
+    .catch(reportStartupFailure);
 } else {
   root.render(
     <React.StrictMode>
@@ -106,13 +124,15 @@ if (bootSurface === "embedded") {
     import("./App"),
     import("@gyro-dev/ui/styles.css"),
     import("./menu-bar.css"),
-  ]).then(([{ App }]) => {
-    root.render(
-      <React.StrictMode>
-        <AppErrorBoundary>
-          <App />
-        </AppErrorBoundary>
-      </React.StrictMode>,
-    );
-  });
+  ])
+    .then(([{ App }]) => {
+      root.render(
+        <React.StrictMode>
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
+        </React.StrictMode>,
+      );
+    })
+    .catch(reportStartupFailure);
 }
