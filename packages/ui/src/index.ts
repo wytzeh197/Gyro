@@ -344,6 +344,22 @@ export type {
   BrowserRevealReason,
   BrowserRevealRequest,
 } from "./browser-reveal";
+export {
+  buildTerminalFailureContext,
+  extractTerminalFileReferences,
+  stripTerminalControl,
+  terminalOutputHasError,
+} from "./terminal-failure";
+export {
+  TerminalAttachmentActionsContext,
+  useTerminalAttachmentActions,
+} from "./terminal-attachment-actions";
+export type { TerminalAttachmentActions } from "./terminal-attachment-actions";
+export type {
+  TerminalFailureContext,
+  TerminalFailureSource,
+  TerminalFileReference,
+} from "./terminal-failure";
 export { environmentActions } from "./environment-actions";
 export type {
   EnvironmentAction,
@@ -364,7 +380,12 @@ export type {
 } from "./clean-machine-path";
 export {
   createModelCatalogClient,
+  MODEL_CATALOG_POLL_MS,
   MODEL_CATALOG_REFRESH_MS,
+} from "./remote-model-catalog";
+export type {
+  ModelCatalogAddition,
+  ModelCatalogRefresh,
 } from "./remote-model-catalog";
 export {
   applyProviderCapabilityManifest,

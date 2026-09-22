@@ -1,7 +1,18 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-09-22.1",
+  "revision": "2026-09-22.2",
   "enabled": true,
   "rolloutPercentage": 100,
-  "models": []
+  "models": [
+    {
+      "providerId": "anthropic",
+      "id": "claude-opus-5-5",
+      "displayName": "Claude Opus 5.5",
+      "description": "Long-running agentic coding and knowledge work.",
+      "minClientRevision": 1,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
+    }
+  ]
 }

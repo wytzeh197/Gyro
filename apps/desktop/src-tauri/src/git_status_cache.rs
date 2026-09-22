@@ -104,8 +104,12 @@ pub(super) fn git_status_read_failure(
         available: false,
         branch: None,
         upstream: None,
+        upstream_gone: false,
         ahead: 0,
         behind: 0,
+        detached: false,
+        operation: None,
+        stash_count: 0,
         repo_root: None,
         additions: 0,
         deletions: 0,
@@ -199,9 +203,14 @@ pub(super) fn inspect_git_status_before(
         return Ok(git_status_read_failure(Some(&repo_root), error, transient));
     }
     let mut status = parse_git_status_v2(&output.stdout);
+    // Read on every pass rather than cached: the stamp does not cover the
+    // files these come from, and they are a handful of metadata reads.
+    let repository_state = git_repository_state(&repo_root);
+    repository_state.apply(&mut status);
     if detailed {
         let stamp = git_status_stamp(&repo_root, &output.stdout, &status.files);
-        if let Some(cached) = cached_git_status(&repo_root, &stamp) {
+        if let Some(mut cached) = cached_git_status(&repo_root, &stamp) {
+            repository_state.apply(&mut cached);
             return Ok(cached);
         }
         apply_git_diff_stats(&repo_root, &mut status);
@@ -231,8 +240,12 @@ pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         available: true,
         branch: None,
         upstream: None,
+        upstream_gone: false,
         ahead: 0,
         behind: 0,
+        detached: false,
+        operation: None,
+        stash_count: 0,
         repo_root: None,
         additions: 0,
         deletions: 0,
@@ -245,12 +258,15 @@ pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         error: None,
     };
 
+    let mut saw_ahead_behind = false;
     for line in output.lines() {
         if let Some(branch) = line.strip_prefix("# branch.head ") {
+            status.detached = branch == "(detached)";
             status.branch = Some(branch.to_string());
         } else if let Some(upstream) = line.strip_prefix("# branch.upstream ") {
             status.upstream = Some(upstream.to_string());
         } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            saw_ahead_behind = true;
             for part in ab.split_whitespace() {
                 if let Some(value) = part.strip_prefix('+') {
                     status.ahead = value.parse().unwrap_or(0);
@@ -303,7 +319,82 @@ pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
             });
         }
     }
+    // Porcelain v2 omits `branch.ab` exactly when the upstream is configured but
+    // its ref is missing — the remote branch was deleted, usually by a merge.
+    status.upstream_gone = status.upstream.is_some() && !saw_ahead_behind;
     status
+}
+
+/// Repository state that `git status --porcelain` does not report: an
+/// operation left in progress and the stash depth.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct GitRepositoryState {
+    pub(super) operation: Option<&'static str>,
+    pub(super) stash_count: usize,
+}
+
+impl GitRepositoryState {
+    fn apply(&self, status: &mut SourceControlStatus) {
+        status.operation = self.operation.map(str::to_string);
+        status.stash_count = self.stash_count;
+    }
+}
+
+/// The per-worktree git directory and the shared common directory. A linked
+/// worktree's `.git` is a file pointing at `.git/worktrees/<name>`, whose
+/// `commondir` points back at the main repository's `.git`.
+pub(super) fn git_dirs(repo_root: &Path) -> Option<(PathBuf, PathBuf)> {
+    let dot_git = repo_root.join(".git");
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let pointer = fs::read_to_string(&dot_git).ok()?;
+        let target = PathBuf::from(pointer.trim().strip_prefix("gitdir:")?.trim());
+        if target.is_absolute() {
+            target
+        } else {
+            repo_root.join(target)
+        }
+    };
+    let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
+        Ok(pointer) => {
+            let target = PathBuf::from(pointer.trim());
+            if target.is_absolute() {
+                target
+            } else {
+                git_dir.join(target)
+            }
+        }
+        Err(_) => git_dir.clone(),
+    };
+    Some((git_dir, common_dir))
+}
+
+pub(super) fn git_repository_state(repo_root: &Path) -> GitRepositoryState {
+    let Some((git_dir, common_dir)) = git_dirs(repo_root) else {
+        return GitRepositoryState::default();
+    };
+    // Checked in the order git itself reports them: a rebase that stopped on a
+    // conflicting pick also leaves CHERRY_PICK_HEAD behind.
+    let operation = [
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+        ("BISECT_LOG", "bisect"),
+    ]
+    .into_iter()
+    .find(|(marker, _)| git_dir.join(marker).exists())
+    .map(|(_, operation)| operation);
+    // Each stash entry is one line of the stash reflog, shared by all worktrees.
+    let stash_count = fs::read_to_string(common_dir.join("logs/refs/stash"))
+        .map(|log| log.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(0);
+    GitRepositoryState {
+        operation,
+        stash_count,
+    }
 }
 
 pub(super) fn git_repo_root(workspace: &Path) -> Option<PathBuf> {

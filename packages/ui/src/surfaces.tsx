@@ -26,6 +26,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowUpDown,
   ArrowUpRight,
   Atom,
   Binary,
@@ -74,10 +75,12 @@ import {
   HardDrive,
   Hash,
   HelpCircle,
+  History,
   Image as ImageIcon,
   ImagePlus,
   KeyRound,
   Laptop,
+  Lightbulb,
   ListChecks,
   LayoutPanelLeft,
   LockKeyhole,
@@ -181,7 +184,12 @@ import {
   sourceControlTotalsLabel,
   sourceControlTotalsScope,
 } from "./source-control-stats";
-import { environmentActions } from "./environment-actions";
+import {
+  environmentActions,
+  environmentNotice,
+  environmentSync,
+  middleTruncate,
+} from "./environment-actions";
 import type { EnvironmentActionIntent } from "./environment-actions";
 import { GitComparisonReview } from "./git-comparison-review";
 import type { ComparisonDiffResult } from "./git-comparison-review";
@@ -391,10 +399,13 @@ import {
   providerDefaultModelId,
   providerNeedsSignInRepair,
   providerSupportsApiKey,
+  providerSupportsUsage,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
 } from "./provider-catalog";
+import { useTerminalAttachmentActions } from "./terminal-attachment-actions";
+import { terminalOutputHasError } from "./terminal-failure";
 import {
   councilPreflightLabel,
   COUNCIL_COMING_SOON,
@@ -409,8 +420,16 @@ import {
   cliUpdateActionLabel,
   cliUpdateNoticeMessage,
   shouldShowSidebarUpdate,
+  updateAnnouncement,
+  updateFacts,
+  updateInstalledVersion,
+  updatePrimaryActionLabel,
+  updateProgressPercent,
   updateSidebarLabel,
   updateSizeLabel,
+  updateStatusLabel,
+  updateStatusLevel,
+  updateStatusSummary,
   updateVersionTag,
 } from "./update-state";
 
@@ -804,6 +823,8 @@ type AppChromeProps = {
   ) => void | Promise<void>;
   onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
+  /** Attach a failed command's output to the chat so a model can fix it. */
+  onFixIdeTaskWithAi?: (task: TaskDefinition) => void;
   onStopIdeTask?: (task: TaskDefinition) => void | Promise<void>;
   onRefreshIdeTasks?: () => void;
   onCreateCustomTask?: (draft: CustomTaskDraft) => void | Promise<void>;
@@ -1556,6 +1577,7 @@ export function AppChrome({
   onRerunGithubRun,
   onOpenGithubUrl,
   onRunIdeTask,
+  onFixIdeTaskWithAi,
   onStopIdeTask,
   onRefreshIdeTasks,
   onCreateCustomTask,
@@ -2065,6 +2087,7 @@ export function AppChrome({
             <SettingsSidebarContent
               activeSection={activeSettingsSection}
               backLabel={settingsBackLabel}
+              pendingUpdate={showSidebarUpdate}
               search={
                 <div
                   className="gyro-settings-topbar-search"
@@ -2261,6 +2284,7 @@ export function AppChrome({
               onRerunGithubRun={onRerunGithubRun}
               onOpenGithubUrl={onOpenGithubUrl}
               onRunIdeTask={onRunIdeTask}
+              onFixIdeTaskWithAi={onFixIdeTaskWithAi}
               onStopIdeTask={onStopIdeTask}
               onRefreshIdeTasks={onRefreshIdeTasks}
               onCreateCustomTask={onCreateCustomTask}
@@ -2669,6 +2693,7 @@ function SettingsSidebarContent({
   onBack,
   onSectionChange,
   onToggleSidebar,
+  pendingUpdate,
 }: {
   activeSection: SettingsSectionId;
   search: ReactNode;
@@ -2676,6 +2701,9 @@ function SettingsSidebarContent({
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
+  /** True while an update is downloading, ready, or waiting for a retry, so
+      the Updates row is findable without opening the page. */
+  pendingUpdate?: boolean;
 }) {
   return (
     <>
@@ -2741,6 +2769,15 @@ function SettingsSidebarContent({
                   >
                     <Icon size={15} />
                     {label}
+                    {pendingUpdate && id === "updates" ? (
+                      <>
+                        <i
+                          aria-hidden="true"
+                          className="gyro-settings-page-flag"
+                        />
+                        <span className="gyro-sr-only">Update available</span>
+                      </>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -3357,6 +3394,7 @@ function WorkspaceSidebarContent({
   onRerunGithubRun,
   onOpenGithubUrl,
   onRunIdeTask,
+  onFixIdeTaskWithAi,
   onStopIdeTask,
   onRefreshIdeTasks,
   onCreateCustomTask,
@@ -3456,6 +3494,8 @@ function WorkspaceSidebarContent({
   ) => void | Promise<void>;
   onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
+  /** Attach a failed command's output to the chat so a model can fix it. */
+  onFixIdeTaskWithAi?: (task: TaskDefinition) => void;
   onStopIdeTask?: (task: TaskDefinition) => void | Promise<void>;
   onRefreshIdeTasks?: () => void;
   onCreateCustomTask?: (draft: CustomTaskDraft) => void | Promise<void>;
@@ -5321,6 +5361,11 @@ function WorkspaceSidebarContent({
                             ? () => void onDeleteCustomTask(task)
                             : undefined
                         }
+                        onFixWithAi={
+                          task.status === "failed" && onFixIdeTaskWithAi
+                            ? () => onFixIdeTaskWithAi(task)
+                            : undefined
+                        }
                         onRun={() => onRunIdeTask?.(task)}
                         onStop={() => void onStopIdeTask?.(task)}
                         task={task}
@@ -6633,11 +6678,13 @@ function runTaskStatusCopy(task: TaskDefinition): string | undefined {
 
 function RunTaskRow({
   task,
+  onFixWithAi,
   onRun,
   onStop,
   onRemove,
 }: {
   task: TaskDefinition;
+  onFixWithAi?: () => void;
   onRun: () => void;
   onStop: () => void;
   onRemove?: () => void;
@@ -6671,6 +6718,18 @@ function RunTaskRow({
         </span>
       </button>
       {status ? <em className="gyro-run-task-status">{status}</em> : null}
+      {onFixWithAi ? (
+        <button
+          aria-label={`Fix ${task.label} with AI`}
+          className="gyro-run-task-fix"
+          onClick={onFixWithAi}
+          title="Attach this failure to the chat so a model can fix it"
+          type="button"
+        >
+          <Sparkles size={11} />
+          <span>Fix with AI</span>
+        </button>
+      ) : null}
       {onRemove ? (
         <button
           aria-label={`Remove ${task.label}`}
@@ -7868,7 +7927,7 @@ type ChatSurfaceProps = {
     decision: "approve" | "reject",
   ) => boolean | void | Promise<boolean | void>;
   onGoalAction?: (
-    action: "set" | "edit" | "complete" | "reopen" | "clear",
+    action: SessionGoalAction,
     value?: string,
   ) => boolean | void | Promise<boolean | void>;
   onCancelGoalComposer?: () => void;
@@ -8261,7 +8320,9 @@ export function ChatSurface({
       }
       if (goalSavePendingRef.current) return;
       goalSavePendingRef.current = true;
-      setGoalSaveNotice("Saving goal…");
+      // Nothing is announced on the way in or out. The strip on the composer
+      // appears and updates the moment the goal lands — a saved goal is simply
+      // the goal now on screen — so only a failure needs a line of its own.
       try {
         if (!onGoalAction) throw new Error("Goal saving unavailable");
         const result = await onGoalAction(
@@ -8270,7 +8331,7 @@ export function ChatSurface({
         );
         if (result === false) throw new Error("Goal was not saved");
         setGoalDraft(undefined);
-        setGoalSaveNotice(`Goal saved: ${goal}. Send a message to start work.`);
+        setGoalSaveNotice("");
         cancelGoalComposer();
       } catch {
         setGoalSaveNotice(
@@ -8658,6 +8719,7 @@ export function ChatSurface({
   const composerLedger = contextModel.providerId
     ? providerLedgerById?.[contextModel.providerId]
     : undefined;
+  const limitClock = useLimitClock(Boolean(contextModel.providerId));
   const composerLimits = useMemo(
     () =>
       // Only allowances the provider itself reports belong here. Gyro's local
@@ -8667,8 +8729,14 @@ export function ChatSurface({
         transcriptEvents,
         contextModel,
         composerProviderUsage?.windows ?? [],
+        limitClock,
       ),
-    [composerProviderUsage?.windows, contextModel, transcriptEvents],
+    [
+      composerProviderUsage?.windows,
+      contextModel,
+      limitClock,
+      transcriptEvents,
+    ],
   );
   // Manual compaction still runs only against a resumable Codex thread.
   // The slash command stays listed so `/compact` can be found; the action
@@ -8748,20 +8816,11 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
+        {/* The outcome rides on the composer now, so the transcript starts with
+            the route: the plan belongs to the run, not to the message box. */}
         <SessionGoalBand
-          goal={sessionGoal?.text ? sessionGoal : undefined}
           plan={sessionPlan}
           density="thread"
-          onComplete={
-            sessionGoal?.text
-              ? () =>
-                  onGoalAction?.(
-                    sessionGoal.status === "complete" ? "reopen" : "complete",
-                  )
-              : undefined
-          }
-          onEdit={() => onComposerAction?.("add-goal")}
-          onClear={() => onGoalAction?.("clear")}
           onOpenPlan={
             activeRailPanel === "plan" ? undefined : onTogglePlanPanel
           }
@@ -9215,19 +9274,9 @@ export function ChatSurface({
               <span>What should we work on?</span>
             )}
           </h1>
-          {sessionGoal?.text ? (
-            <SessionGoalBand
-              goal={sessionGoal}
-              density="hero"
-              onComplete={() =>
-                onGoalAction?.(
-                  sessionGoal.status === "complete" ? "reopen" : "complete",
-                )
-              }
-              onEdit={() => onComposerAction?.("add-goal")}
-              onClear={() => onGoalAction?.("clear")}
-            />
-          ) : null}
+          {/* The outcome is drawn on the composer itself rather than above it,
+              so the start screen and a running chat show the goal the same
+              way. Only a save failure still needs a line of its own. */}
           {goalSaveNotice ? (
             <p role="status" className="gyro-goal-save-notice">
               {goalSaveNotice}
@@ -9273,6 +9322,7 @@ export function ChatSurface({
             workspacePath={workspacePath}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
+            onGoalAction={onGoalAction}
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
@@ -9527,6 +9577,7 @@ export function ChatSurface({
             workspacePath={workspacePath}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
+            onGoalAction={onGoalAction}
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
@@ -9746,7 +9797,6 @@ function PlanArtifactCard({
   onOpenBrowserUrl,
   onPlanDecision,
   showDecision,
-  stepCount,
   title,
 }: {
   content: string;
@@ -9756,54 +9806,67 @@ function PlanArtifactCard({
   onOpenBrowserUrl?: (url: string) => void;
   onPlanDecision?: (decision: "approve" | "reject") => void;
   showDecision: boolean;
-  stepCount?: number;
   title: string;
 }) {
-  const steps = stepCount ?? 0;
-  const stepLabel =
-    steps > 0 ? `${steps} ${steps === 1 ? "step" : "steps"}` : "Proposal";
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  // While the plan panel shows the document, the transcript keeps only the
+  // header row: the same text twice side by side is noise, not context.
   return (
     <div className="gyro-plan-artifact">
-      <section className="gyro-plan-artifact-card" aria-label="Plan">
-        <button
-          aria-expanded={isOpen}
-          aria-label={isOpen ? "Close plan document" : "Open plan document"}
-          className="gyro-plan-artifact-header"
-          onClick={onOpen}
-          type="button"
-        >
-          <span aria-hidden="true" className="gyro-plan-artifact-mark">
-            <ListChecks size={14} />
+      <section
+        aria-label="Plan"
+        className={["gyro-plan-artifact-card", isOpen ? "is-open" : ""]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <header className="gyro-plan-artifact-header">
+          <Lightbulb aria-hidden="true" size={14} />
+          <span>Plan</span>
+          <span className="gyro-plan-artifact-tools">
+            <button
+              aria-label={copied ? "Plan copied" : "Copy plan"}
+              onClick={() => {
+                copyAssistantResponse(content);
+                setCopied(true);
+              }}
+              title={copied ? "Copied" : "Copy plan"}
+              type="button"
+            >
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </button>
+            <button
+              aria-expanded={isOpen}
+              aria-label={isOpen ? "Close plan document" : "Open plan document"}
+              onClick={onOpen}
+              title={isOpen ? "Close plan" : "Open plan"}
+              type="button"
+            >
+              {isOpen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
           </span>
-          {/* The card is one of many in a long transcript, so it leads with the
-              plan's own title rather than the word "Plan". */}
-          <span className="gyro-plan-artifact-identity">
-            <small>Plan</small>
-            <strong>{title || "Implementation plan"}</strong>
-          </span>
-          <span className="gyro-plan-artifact-meta">
-            <em>{stepLabel}</em>
-            {isOpen ? <PanelLeftClose size={14} /> : <Maximize2 size={14} />}
-          </span>
-        </button>
-        <div className="gyro-plan-artifact-preview">
-          <PlanDocument
-            content={content}
-            onOpenBrowserUrl={onOpenBrowserUrl}
-            title={title}
-          />
-        </div>
-        {/* The preview fades out mid-document; this row is the read-more the
-            fade implies, since the preview itself is not clickable. */}
-        <button
-          className="gyro-plan-artifact-open"
-          onClick={onOpen}
-          tabIndex={-1}
-          type="button"
-        >
-          <ListChecks size={12} />
-          {isOpen ? "Showing in the plan panel" : "Read the full plan"}
-        </button>
+        </header>
+        {isOpen ? null : (
+          // The fade promises more document; clicking anywhere in it opens the
+          // full plan. The header button is the keyboard path.
+          <button
+            aria-hidden="true"
+            className="gyro-plan-artifact-preview"
+            onClick={onOpen}
+            tabIndex={-1}
+            type="button"
+          >
+            <PlanDocument
+              content={content}
+              onOpenBrowserUrl={onOpenBrowserUrl}
+              title={title}
+            />
+          </button>
+        )}
       </section>
       {showDecision ? (
         <div className="gyro-plan-artifact-actions">
@@ -10253,7 +10316,7 @@ function ChatSidePanel({
     value?: string,
   ) => void;
   onGoalAction?: (
-    action: "set" | "edit" | "complete" | "reopen" | "clear",
+    action: SessionGoalAction,
     value?: string,
   ) => boolean | void | Promise<boolean | void>;
   editorRequest?: {
@@ -11917,9 +11980,15 @@ function ChatEnvironmentPopover({
   const runningProcesses = (terminalPanes ?? []).filter(
     terminalPaneHasActiveWork,
   ).length;
-  const sourceItems = attachments.length
-    ? attachments.slice(0, 3).map((attachment) => attachment.name)
-    : (sourceControl?.files ?? []).slice(0, 3).map((file) => file.path);
+  // Sources are what the chat was given. Changed files used to stand in when
+  // there were none, which labelled the working tree as attachments.
+  const sourceItems = attachments
+    .slice(0, 3)
+    .map((attachment) => attachment.name);
+  const sync = environmentSync(sourceControl);
+  const notice = environmentNotice(sourceControl);
+  const lastCommit = sourceControl?.history?.[0];
+  const stashCount = sourceControl?.stashCount ?? 0;
   const openCompanionTab = (tab: ChatCompanionTabId) => {
     onClose?.();
     onOpenTab?.(tab);
@@ -11964,6 +12033,17 @@ function ChatEnvironmentPopover({
           <X size={14} />
         </button>
       </header>
+      {notice ? (
+        <button
+          className="gyro-chat-environment-popover-notice"
+          onClick={openReview}
+          title={notice}
+          type="button"
+        >
+          <TriangleAlert aria-hidden="true" size={13} />
+          <span>{notice}</span>
+        </button>
+      ) : null}
       <div className="gyro-chat-environment-popover-rows">
         <button
           aria-label={`Switch branch, ${branchLabel}`}
@@ -11977,7 +12057,7 @@ function ChatEnvironmentPopover({
         >
           <GitBranch size={14} />
           <span>Branch</span>
-          <strong>{branchLabel}</strong>
+          <strong title={branchLabel}>{middleTruncate(branchLabel, 24)}</strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
         {showBranches ? (
@@ -11991,6 +12071,19 @@ function ChatEnvironmentPopover({
               if (action) onBranchAction?.(action);
             }}
           />
+        ) : null}
+        {sync ? (
+          <button
+            aria-label={`Open changes, sync ${sync.detail}`}
+            onClick={openReview}
+            title={sync.detail}
+            type="button"
+          >
+            <ArrowUpDown size={14} />
+            <span>Sync</span>
+            <strong className={`is-${sync.tone}`}>{sync.label}</strong>
+            <ChevronRight aria-hidden="true" size={13} />
+          </button>
         ) : null}
         <button
           aria-label={`Open files for ${workspaceName(workspacePath)}`}
@@ -12019,9 +12112,30 @@ function ChatEnvironmentPopover({
             ) : (
               changesDetail
             )}
+            {stashCount > 0 ? (
+              <small
+                title={`${stashCount} stash${stashCount === 1 ? "" : "es"}`}
+              >
+                {" · "}
+                {stashCount} stashed
+              </small>
+            ) : null}
           </strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
+        {lastCommit ? (
+          <button
+            aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
+            onClick={openReview}
+            title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
+            type="button"
+          >
+            <History size={14} />
+            <span>Last commit</span>
+            <strong>{lastCommit.relativeDate}</strong>
+            <ChevronRight aria-hidden="true" size={13} />
+          </button>
+        ) : null}
         <button
           aria-label={`Open terminal, ${runningProcesses} running process${runningProcesses === 1 ? "" : "es"}`}
           onClick={() => openCompanionTab("terminal")}
@@ -12058,18 +12172,20 @@ function ChatEnvironmentPopover({
               type="button"
             >
               <Icon aria-hidden="true" size={14} />
-              <span>{action.label}</span>
-              <small>{action.detail}</small>
+              <span>
+                {action.label}
+                <small>{action.detail}</small>
+              </span>
             </button>
           );
         })}
       </div>
-      <section className="gyro-chat-environment-popover-sources">
-        <header>
-          <span>Sources</span>
-          {sourceItems.length > 0 ? <small>{sourceItems.length}</small> : null}
-        </header>
-        {sourceItems.length ? (
+      {sourceItems.length ? (
+        <section className="gyro-chat-environment-popover-sources">
+          <header>
+            <span>Sources</span>
+            <small>{attachments.length}</small>
+          </header>
           <ul>
             {sourceItems.map((source) => (
               <li key={source} title={source}>
@@ -12078,10 +12194,8 @@ function ChatEnvironmentPopover({
               </li>
             ))}
           </ul>
-        ) : (
-          <p>No attached sources</p>
-        )}
-      </section>
+        </section>
+      ) : null}
     </aside>
   );
 }
@@ -14351,6 +14465,8 @@ type TerminalPanelProps = {
   onTerminalUtilityAction?: (action: string) => void;
   onRefreshTerminalSourceControl?: () => void;
   onReviewTerminalChanges?: (file?: SourceControlFile) => void;
+  /** Attach a terminal's recent error output to the chat. */
+  onSendTerminalErrorToChat?: (paneId: string) => void;
   onWriteTerminalInput?: (input: string) => void;
   renderTerminalPaneBody?: (pane: TerminalPane) => ReactNode;
 };
@@ -14717,6 +14833,7 @@ export function TerminalPanel({
   onTerminalUtilityAction,
   onRefreshTerminalSourceControl,
   onReviewTerminalChanges,
+  onSendTerminalErrorToChat,
   renderTerminalPaneBody,
   revealWorkspaceOnLaunch = true,
 }: TerminalPanelProps) {
@@ -14744,6 +14861,16 @@ export function TerminalPanel({
   );
   const canStopActivePane =
     activePane?.status === "running" || activePane?.status === "waiting";
+  // Offered for a failure, not every warning: a failed exit, or error lines
+  // near the end of a process that is still running (a dev server).
+  const activePaneOutput = activePane?.output;
+  const activePaneHasError = useMemo(
+    () =>
+      activePane?.status === "failed" ||
+      (typeof activePane?.exitCode === "number" && activePane.exitCode !== 0) ||
+      terminalOutputHasError(activePaneOutput ?? ""),
+    [activePane?.exitCode, activePane?.status, activePaneOutput],
+  );
   const presetLabel = cliLaunchPreset
     ? cliLaunchPresetLabel(cliLaunchPreset, profiles)
     : "Start preset";
@@ -14961,6 +15088,17 @@ export function TerminalPanel({
                 onClick: () =>
                   activePaneId && onKillTerminalPane?.(activePaneId),
               },
+              ...(onSendTerminalErrorToChat
+                ? [
+                    {
+                      label: "Send last error to chat",
+                      icon: Sparkles,
+                      disabled: !activePaneId || !activePaneHasError,
+                      onClick: () =>
+                        activePaneId && onSendTerminalErrorToChat(activePaneId),
+                    },
+                  ]
+                : []),
               {
                 label: "Review changes",
                 icon: GitPullRequest,
@@ -15268,6 +15406,7 @@ function WorkbenchPaneContent({
   onTerminalUtilityAction,
   onRefreshTerminalSourceControl,
   onReviewTerminalChanges,
+  onSendTerminalErrorToChat,
   onWriteTerminalInput,
   renderTerminalPaneBody,
   onSelectDiffFile,
@@ -15331,6 +15470,8 @@ function WorkbenchPaneContent({
   onTerminalUtilityAction?: (action: string) => void;
   onRefreshTerminalSourceControl?: () => void;
   onReviewTerminalChanges?: (file?: SourceControlFile) => void;
+  /** Attach a terminal's recent error output to the chat. */
+  onSendTerminalErrorToChat?: (paneId: string) => void;
   onWriteTerminalInput?: (input: string) => void;
   renderTerminalPaneBody?: (pane: TerminalPane) => ReactNode;
   onSelectDiffFile?: (path: string) => void;
@@ -15539,6 +15680,7 @@ function WorkbenchPaneContent({
       onTerminalUtilityAction={onTerminalUtilityAction}
       onRefreshTerminalSourceControl={onRefreshTerminalSourceControl}
       onReviewTerminalChanges={onReviewTerminalChanges}
+      onSendTerminalErrorToChat={onSendTerminalErrorToChat}
       onWriteTerminalInput={onWriteTerminalInput}
       output={terminalOutput}
       profiles={profiles}
@@ -15605,6 +15747,8 @@ type WorkspaceToolPanelProps = {
   onTerminalUtilityAction?: (action: string) => void;
   onRefreshTerminalSourceControl?: () => void;
   onReviewTerminalChanges?: (file?: SourceControlFile) => void;
+  /** Attach a terminal's recent error output to the chat. */
+  onSendTerminalErrorToChat?: (paneId: string) => void;
   onWriteTerminalInput?: (input: string) => void;
   renderTerminalPaneBody?: (pane: TerminalPane) => ReactNode;
   onSelectDiffFile?: (path: string) => void;
@@ -15679,6 +15823,7 @@ export function WorkspaceToolPanel({
   onTerminalUtilityAction,
   onRefreshTerminalSourceControl,
   onReviewTerminalChanges,
+  onSendTerminalErrorToChat,
   onWriteTerminalInput,
   renderTerminalPaneBody,
   onSelectDiffFile,
@@ -15956,6 +16101,7 @@ export function WorkspaceToolPanel({
         onTerminalUtilityAction={onTerminalUtilityAction}
         onRefreshTerminalSourceControl={onRefreshTerminalSourceControl}
         onReviewTerminalChanges={onReviewTerminalChanges}
+        onSendTerminalErrorToChat={onSendTerminalErrorToChat}
         onToggleDiffDirectory={onToggleDiffDirectory}
         onUndoDiff={onUndoDiff}
         onWriteTerminalInput={onWriteTerminalInput}
@@ -20092,6 +20238,8 @@ type SettingsSurfaceProps = {
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
   onCheckForUpdates?: () => void;
+  /** Runs the updater's next step (download, install, or retry) from Settings. */
+  onUpdateAction?: (state: UpdateState) => void;
   onCliLaunchPresetChange?: (preset: CliLaunchPreset) => void;
   onResetUiState?: () => void;
   onExportDiagnostics?: () => void;
@@ -20715,6 +20863,7 @@ export function SettingsSurface({
   onSectionChange,
   onConfigChange,
   onCheckForUpdates,
+  onUpdateAction,
   onCliLaunchPresetChange,
   onResetUiState,
   onExportDiagnostics,
@@ -20826,6 +20975,34 @@ export function SettingsSurface({
       previous?.focus();
     };
   }, [isResetConfirmOpen]);
+
+  const isCheckingUpdate = updateState?.status === "checking";
+  // One level drives the card's mark and the status dot, so "waiting for you"
+  // cannot read as "fine" in one place and "in progress" in another.
+  const updateLevel = updateStatusLevel(updateState);
+  const updateVersion = updateInstalledVersion(updateState);
+  const updateFactRows = updateFacts(updateState);
+  const updateNotice = updateAnnouncement(updateState);
+  // Only some statuses carry a sentence; "available" is fully described by the
+  // status dot and the primary button, so it renders no paragraph.
+  const updateSummary = updateStatusSummary(updateState);
+  // The check button would fight the updater while it is mid-install.
+  const isUpdateBusy = isCheckingUpdate || updateState?.status === "installing";
+  // The bar prefers measured bytes and falls back to the reported percentage,
+  // so it still fills on updaters that only send a percent.
+  const updatePercent = updateState
+    ? (updateProgressPercent(
+        updateState.downloadedBytes ?? 0,
+        updateState.totalBytes,
+      ) ?? updateState.progressPercent)
+    : undefined;
+  // Settings offers the same step the sidebar button would take, and only for
+  // statuses where a click actually moves the update forward.
+  const canRunUpdateAction =
+    onUpdateAction !== undefined &&
+    (updateState?.status === "available" ||
+      updateState?.status === "ready" ||
+      updateState?.status === "failed");
 
   return (
     <div className="gyro-settings-surface">
@@ -21882,31 +22059,100 @@ export function SettingsSurface({
           <SettingsSection
             icon={RefreshCw}
             title="Updates"
-            description="Public Alpha updates verified with Gyro's updater signature."
+            description="Keep Gyro on the newest signed Alpha build."
           >
-            <div className="gyro-update-summary">
-              <div>
-                <span>Installed</span>
-                <strong>{updateState?.currentVersion ?? "Unknown"}</strong>
+            <section
+              aria-busy={isCheckingUpdate}
+              aria-label="Update status"
+              className="gyro-update-card"
+              data-level={updateLevel}
+              data-status={updateState?.status ?? "unavailable"}
+            >
+              <div className="gyro-update-card-head">
+                <span aria-hidden="true" className="gyro-update-mark">
+                  <RefreshCw
+                    className={isCheckingUpdate ? "is-spinning" : ""}
+                    size={18}
+                  />
+                </span>
+                <div className="gyro-update-copy">
+                  <div className="gyro-update-heading">
+                    <strong className="gyro-update-version">
+                      {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
+                    </strong>
+                    <span className="gyro-update-channel">Public Alpha</span>
+                    <SettingsStatus status={updateLevel}>
+                      {updateStatusLabel(updateState)}
+                    </SettingsStatus>
+                  </div>
+                  {updateSummary ? (
+                    <p className="gyro-update-summary">{updateSummary}</p>
+                  ) : null}
+                  {updateState?.status === "downloading" &&
+                  updatePercent !== undefined ? (
+                    <span
+                      aria-label="Download progress"
+                      aria-valuemax={100}
+                      aria-valuemin={0}
+                      aria-valuenow={Math.round(updatePercent)}
+                      aria-valuetext={`${Math.round(updatePercent)}% downloaded`}
+                      className="gyro-update-progress"
+                      role="progressbar"
+                    >
+                      <span
+                        className="gyro-update-progress-fill"
+                        style={{ width: `${updatePercent}%` }}
+                      />
+                    </span>
+                  ) : null}
+                </div>
+                <div className="gyro-update-actions">
+                  {canRunUpdateAction && updateState ? (
+                    <button
+                      className="gyro-primary-button gyro-update-card-primary"
+                      onClick={() => onUpdateAction?.(updateState)}
+                      type="button"
+                    >
+                      {updatePrimaryActionLabel(updateState)}
+                    </button>
+                  ) : null}
+                  <button
+                    className="gyro-secondary-button"
+                    disabled={isUpdateBusy}
+                    onClick={onCheckForUpdates}
+                    type="button"
+                  >
+                    <RefreshCw
+                      className={isCheckingUpdate ? "is-spinning" : ""}
+                      size={14}
+                    />
+                    {isCheckingUpdate ? "Checking…" : "Check for updates"}
+                  </button>
+                </div>
               </div>
-              <div>
-                <span>Channel</span>
-                <strong>Public Alpha</strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <strong>{updateState?.status ?? "Unavailable"}</strong>
-              </div>
-            </div>
-            <SettingsGroup label="Update preferences">
+              {updateFactRows.length > 0 ? (
+                <dl className="gyro-update-facts">
+                  {updateFactRows.map((fact) => (
+                    <div key={fact.label}>
+                      <dt>{fact.label}</dt>
+                      <dd>{fact.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              <span aria-live="polite" className="gyro-sr-only">
+                {updateNotice}
+              </span>
+            </section>
+            <SettingsGroup label="Preferences">
               <SettingsRow
                 label="Update source"
                 value="GitHub Releases"
-                detail="Published public Alpha updater archives signed by Gyro's updater key."
+                detail="Signed Alpha archives are published to GitHub Releases and checked against Gyro's updater key before install."
               />
               <SettingsRow
                 label="Automatic checks"
-                detail="Checks after launch and occasionally when Gyro regains focus. Downloads still require a click."
+                detail="Checks after launch and when Gyro regains focus. Downloads still require a click."
               >
                 <SettingsSwitch
                   label="Automatic update checks"
@@ -21920,39 +22166,22 @@ export function SettingsSurface({
                 />
               </SettingsRow>
             </SettingsGroup>
-            <SettingsGroup label="Update status">
-              <SettingsRow
-                label="Last checked"
-                detail={updateSettingsDetail(updateState)}
+            {updateState?.releaseNotes ? (
+              <section
+                aria-label="What’s new"
+                className="gyro-update-card gyro-update-notes"
               >
-                <button
-                  className="gyro-secondary-button"
-                  disabled={updateState?.status === "checking"}
-                  onClick={onCheckForUpdates}
-                  type="button"
-                >
-                  <RefreshCw
-                    className={
-                      updateState?.status === "checking" ? "is-spinning" : ""
-                    }
-                    size={14}
-                  />
-                  {updateState?.status === "checking"
-                    ? "Checking…"
-                    : "Check for updates"}
-                </button>
-                <span className="gyro-settings-control-note">
-                  {formatUpdateCheckedAt(updateState?.lastCheckedAt)}
-                </span>
-              </SettingsRow>
-              {updateState?.releaseNotes ? (
-                <SettingsRow
-                  label="What’s new"
-                  value={updateState.nextVersion ?? "Available"}
-                  detail={updateState.releaseNotes}
-                />
-              ) : null}
-            </SettingsGroup>
+                <div className="gyro-update-notes-head">
+                  <strong>What’s new</strong>
+                  <span>
+                    {updateState.nextVersion
+                      ? `in ${updateState.nextVersion}`
+                      : "in this release"}
+                  </span>
+                </div>
+                <p>{updateState.releaseNotes}</p>
+              </section>
+            ) : null}
           </SettingsSection>
         ) : null}
 
@@ -22136,47 +22365,6 @@ export function SettingsSurface({
       ) : null}
     </div>
   );
-}
-
-function formatUpdateCheckedAt(value?: string) {
-  if (!value) {
-    return "Not checked yet";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function updateSettingsDetail(state?: UpdateState) {
-  if (!state) {
-    return "Updater status is unavailable.";
-  }
-  if (state.status === "development") {
-    return "Updater disabled in development. Production endpoints are not contacted.";
-  }
-  if (state.status === "checking") {
-    return "Checking the signed update channel…";
-  }
-  if (state.status === "current") {
-    return "Gyro is up to date.";
-  }
-  if (state.status === "failed") {
-    return (
-      state.error ??
-      "The update check failed. Click Check for updates to retry."
-    );
-  }
-  if (state.status === "ready") {
-    return "The downloaded update passed signature verification.";
-  }
-  return state.nextVersion
-    ? `Signed update ${state.nextVersion} is ${state.status}.`
-    : `Updater status: ${state.status}.`;
 }
 
 export function SettingsPanel({ config }: SettingsPanelProps) {
@@ -22547,7 +22735,7 @@ function SettingsStatus({
   status,
   children,
 }: {
-  status: "good" | "warning" | "critical" | "neutral";
+  status: "good" | "info" | "warning" | "critical" | "neutral";
   children: ReactNode;
 }) {
   return (
@@ -22704,6 +22892,36 @@ function UsageCard({
  * rather than a guess, so the bar reads as "Gyro was not told" instead of
  * "you have used none of it" — the two look identical once a bar is filled.
  */
+const LIMIT_CLOCK_INTERVAL_MS = 20_000;
+/** A reading younger than this already answers a hover on the context meter. */
+const CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS = 15_000;
+
+/**
+ * The time plan limits are read against.
+ *
+ * A reset countdown computed once goes on saying "Resets in 3 hr 51 min" until
+ * something else re-renders the chat, and a window past its reset lingers on
+ * the old reading. Ticking keeps both honest; a hidden window skips the work
+ * and catches up when it is shown again.
+ */
+function useLimitClock(enabled: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const tick = () => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    };
+    tick();
+    const interval = window.setInterval(tick, LIMIT_CLOCK_INTERVAL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [enabled]);
+  return now;
+}
+
 function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
   const measured = window.percent !== undefined;
   return (
@@ -23799,6 +24017,13 @@ function composerModelPickerItem(
   };
 }
 
+/**
+ * Every way the goal can be changed. The composer, the chat surface and the
+ * plan rail all speak this one set, so a control added to any of them is a
+ * control the others already handle.
+ */
+type SessionGoalAction = "set" | "edit" | "complete" | "reopen" | "clear";
+
 function Composer({
   attachments = [],
   chatMode = "normal",
@@ -23827,6 +24052,7 @@ function Composer({
   canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
+  onGoalAction,
   sessionModel,
   sessionGoal,
   promptHistory = [],
@@ -23882,6 +24108,14 @@ function Composer({
   canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
+  /**
+   * Complete, reopen or clear the goal from the strip that rides on the
+   * composer. Absent in read-only embeds, where the strip shows state only.
+   */
+  onGoalAction?: (
+    action: SessionGoalAction,
+    value?: string,
+  ) => boolean | void | Promise<boolean | void>;
   sessionModel?: {
     modelId?: string;
     modelLabel?: string;
@@ -24028,6 +24262,26 @@ function Composer({
         )
       : undefined;
   const displayProvider = selectedProvider ?? sessionProvider;
+  const [previewedAttachmentId, setPreviewedAttachmentId] = useState<string>();
+  const previewedTerminalAttachment = attachments.find(
+    (attachment) =>
+      attachment.id === previewedAttachmentId &&
+      attachment.kind === "terminal-output",
+  );
+  const usageProviderId = providerUsage?.providerId ?? effectiveProviderId;
+  const usageFetchedAt = providerUsage?.fetchedAt;
+  const usageLoading = providerUsage?.status === "loading";
+  const refreshContextMeterUsage = useCallback(() => {
+    if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
+    const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
+    if (
+      usageLoading ||
+      Date.now() - fetchedMs < CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS
+    ) {
+      return;
+    }
+    onComposerAction?.(`refresh-provider-usage:${usageProviderId}`);
+  }, [onComposerAction, usageFetchedAt, usageLoading, usageProviderId]);
   const previewedProviderId = modelPickerProviderId;
   const modelPickerProvider = providerConfigs.find(
     (provider) =>
@@ -24802,34 +25056,83 @@ function Composer({
         composerShellRef.current = node;
       }}
     >
+      {/* The goal rides on the composer, above the message that pursues it.
+          It steps aside for the goal editor, which is the same outcome being
+          written in the same place. */}
+      {sessionGoal?.text && !isGoalComposerActive ? (
+        <SessionGoalStrip
+          goal={sessionGoal}
+          isRunning={isSending}
+          onClear={onGoalAction ? () => void onGoalAction("clear") : undefined}
+          onComplete={
+            onGoalAction
+              ? () =>
+                  void onGoalAction(
+                    sessionGoal.status === "complete" ? "reopen" : "complete",
+                  )
+              : undefined
+          }
+          onEdit={() => onComposerAction?.("add-goal")}
+        />
+      ) : null}
       {attachments.length > 0 ? (
-        <div className="gyro-composer-attachments" aria-label="Attachments">
-          {attachments.map((attachment) => (
-            <div
-              className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}`}
-              key={attachment.id}
-              title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}
-            >
-              {attachment.kind === "image" || attachment.kind === "video" ? (
-                <ComposerMediaPreview attachment={attachment} />
-              ) : (
-                <FileText size={15} />
-              )}
-              <span>
-                <strong>{attachment.name}</strong>
-                <small>{formatAttachmentSize(attachment.size)}</small>
-              </span>
-              <button
-                aria-label={`Remove ${attachment.name}`}
-                onClick={() => onRemoveAttachment?.(attachment.id)}
-                title={`Remove ${attachment.name}`}
-                type="button"
+        <>
+          <div className="gyro-composer-attachments" aria-label="Attachments">
+            {attachments.map((attachment) => (
+              <div
+                className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}`}
+                key={attachment.id}
+                title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}${attachment.stale ? " · the command ran again after this was captured" : ""}`}
               >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
+                {attachment.kind === "image" || attachment.kind === "video" ? (
+                  <ComposerMediaPreview attachment={attachment} />
+                ) : attachment.kind === "terminal-output" &&
+                  attachment.previewText ? (
+                  <button
+                    aria-expanded={previewedAttachmentId === attachment.id}
+                    aria-label={`Preview ${attachment.name}`}
+                    className="gyro-composer-attachment-preview-toggle"
+                    onClick={() =>
+                      setPreviewedAttachmentId((current) =>
+                        current === attachment.id ? undefined : attachment.id,
+                      )
+                    }
+                    title="Preview exactly what the model will receive"
+                    type="button"
+                  >
+                    <SquareTerminal size={15} />
+                  </button>
+                ) : (
+                  <FileText size={15} />
+                )}
+                <span>
+                  <strong>{attachment.name}</strong>
+                  <small>
+                    {attachment.stale
+                      ? "Out of date"
+                      : formatAttachmentSize(attachment.size)}
+                  </small>
+                </span>
+                <button
+                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() => onRemoveAttachment?.(attachment.id)}
+                  title={`Remove ${attachment.name}`}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+          {previewedTerminalAttachment?.previewText ? (
+            <pre
+              aria-label={`${previewedTerminalAttachment.name} preview`}
+              className="gyro-composer-attachment-preview"
+            >
+              {previewedTerminalAttachment.previewText}
+            </pre>
+          ) : null}
+        </>
       ) : null}
       {chatMode === "council" && councilResolution ? (
         <div
@@ -25291,11 +25594,10 @@ function Composer({
         ) : null}
         {isGoalComposerActive ? (
           <button
-            aria-label="Close goal editor"
+            aria-label="Close goal editor — draft is kept"
             aria-pressed="true"
             className="gyro-composer-chip is-goal"
             onClick={onCancelGoalComposer}
-            title="Close goal editor — draft is kept"
             type="button"
           >
             <Goal size={13} />
@@ -25319,7 +25621,13 @@ function Composer({
         ) : null}
         <div className="gyro-composer-spacer" />
         {contextUsage ? (
-          <div className="gyro-composer-context-meter">
+          <div
+            className="gyro-composer-context-meter"
+            // Opening the meter asks for the plan's current level; the account
+            // poll coalesces repeat hovers into one request.
+            onFocus={refreshContextMeterUsage}
+            onPointerEnter={refreshContextMeterUsage}
+          >
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
               aria-label={contextUsage.label}
@@ -26161,6 +26469,7 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
       })
     : [];
   const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment>();
+  const terminalAttachmentActions = useTerminalAttachmentActions();
   useEffect(() => {
     if (!previewAttachment) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -26191,6 +26500,8 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
               <ImagePlus size={14} />
             ) : attachment.kind === "video" ? (
               <Video size={14} />
+            ) : attachment.kind === "terminal-output" ? (
+              <SquareTerminal size={14} />
             ) : (
               <FileText size={14} />
             )}
@@ -26202,6 +26513,19 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
                 {formatAttachmentSize(attachment.size)}
               </small>
             </span>
+            {attachment.kind === "terminal-output" &&
+            terminalAttachmentActions?.canRerun(attachment.id) ? (
+              <button
+                aria-label={`Re-run the command from ${attachment.name}`}
+                className="gyro-transcript-attachment-rerun"
+                onClick={() => terminalAttachmentActions.rerun(attachment.id)}
+                title="Run the command again to check the fix"
+                type="button"
+              >
+                <RotateCcw size={12} />
+                <span>Re-run</span>
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
@@ -26845,7 +27169,6 @@ function ChatTurn({
                       onOpenBrowserUrl={onOpenBrowserUrl}
                       onPlanDecision={onPlanDecision}
                       showDecision={false}
-                      stepCount={plan?.items.length}
                       title={plan?.title ?? "Implementation plan"}
                     />
                   ) : (
@@ -27200,6 +27523,110 @@ function ChatRunChangeSummary({
  * shows only the goal, a plan with no goal shows only the steps, and neither
  * row ever invents the other.
  */
+/**
+ * The outcome, docked to the composer it belongs to.
+ *
+ * Codex keeps this strip on the surface the user types into: one line, on
+ * screen for as long as the goal is open, with the clock and the three
+ * controls. Gyro drew the goal at the top of the transcript — where it
+ * scrolled out of sight — and announced a save with a paragraph that had to be
+ * read and then ignored. The outcome belongs with the next message, not above
+ * the first one.
+ */
+function SessionGoalStrip({
+  goal,
+  isRunning = false,
+  onClear,
+  onComplete,
+  onEdit,
+}: {
+  goal: SessionGoal;
+  /**
+   * True while a turn for this chat is running. The goal is only being
+   * pursued then, so only then does the mark rotate — a goal that is open but
+   * idle must not look like work in progress.
+   */
+  isRunning?: boolean;
+  onClear?: () => void;
+  onComplete?: () => void;
+  onEdit?: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const isActive = goal.status === "active";
+  useEffect(() => {
+    if (!isActive) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [isActive]);
+
+  const startedAt = Date.parse(goal.createdAt ?? goal.updatedAt ?? "");
+  const finishedAt = Date.parse(goal.updatedAt ?? "");
+  const durationEnd =
+    isActive || !Number.isFinite(finishedAt) ? now : finishedAt;
+  const duration = Number.isFinite(startedAt)
+    ? formatRunDuration(
+        Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
+      )
+    : undefined;
+  const label = isActive ? "Pursuing goal" : "Goal completed";
+
+  return (
+    <section
+      aria-label={`${label}: ${goal.text}`}
+      className="gyro-goal-strip"
+      data-running={isActive && isRunning ? "true" : undefined}
+      data-status={goal.status}
+    >
+      <span aria-hidden="true" className="gyro-goal-strip-mark">
+        {isActive ? <CircleDashed size={14} /> : <Check size={14} />}
+      </span>
+      <strong className="gyro-goal-strip-label">{label}</strong>
+      <span className="gyro-goal-strip-text" title={goal.text}>
+        {goal.text}
+      </span>
+      {duration ? (
+        <time className="gyro-goal-strip-time">{duration}</time>
+      ) : null}
+      <span className="gyro-goal-strip-actions">
+        {onEdit ? (
+          <button
+            aria-label="Edit goal"
+            onClick={onEdit}
+            title="Edit goal"
+            type="button"
+          >
+            <Edit3 aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+        {onComplete ? (
+          <button
+            aria-label={isActive ? "Complete goal" : "Reopen goal"}
+            onClick={onComplete}
+            title={isActive ? "Complete goal" : "Reopen goal"}
+            type="button"
+          >
+            {isActive ? (
+              <Check aria-hidden="true" size={13} />
+            ) : (
+              <RefreshCw aria-hidden="true" size={13} />
+            )}
+          </button>
+        ) : null}
+        {onClear ? (
+          <button
+            aria-label="Clear goal"
+            onClick={onClear}
+            title="Clear goal"
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+      </span>
+    </section>
+  );
+}
+
 function SessionGoalBand({
   goal,
   plan,

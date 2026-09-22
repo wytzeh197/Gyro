@@ -44,12 +44,18 @@ still require a normal app release.
 3. Merge the reviewed catalog change, then publish it with `pnpm site:deploy`.
    Confirm `https://usegyro.io/model-catalog.json` serves the expected revision
    and the model appears in a compatible app's picker after refresh.
+4. Run `pnpm catalog:verify`. It fails when the served document is not the one
+   `HEAD` records, which catches a catalog published from an uncommitted working
+   tree before the next deploy from a clean checkout silently withdraws it.
 
-Use `rolloutPercentage` for a gradual rollout. Apps check at startup and every
-six hours, retaining their last valid catalog when offline. To withdraw a remote
-addition, remove its entry and redeploy; to roll back all remote changes, publish
-`enabled: false`. These changes take effect on the next successful refresh and
-do not cancel running chats or remove bundled models.
+Use `rolloutPercentage` for a gradual rollout. A focused, visible app checks once
+a minute and a background app every six hours; both check immediately when the
+window regains focus or the machine comes back online, and they retain their last
+valid catalog when offline. An addition raises a provider notification naming the
+new models. To withdraw a remote addition, remove its entry and redeploy; to roll
+back all remote changes, publish `enabled: false`. These changes take effect on
+the next successful refresh and do not cancel running chats or remove bundled
+models.
 
 See [Remote model catalog](model-catalog.md) for the schema, compatibility limits,
 and rollback details. Catalog-only updates do not need an app version bump,

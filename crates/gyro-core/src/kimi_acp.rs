@@ -57,6 +57,8 @@ pub struct KimiAcpActivity {
     pub kind: String,
     pub label: String,
     pub detail: Option<String>,
+    /// Lines added and removed, measured from the call's ACP `diff` content.
+    pub file_counts: Option<(usize, usize)>,
     pub status: String,
 }
 
@@ -917,6 +919,7 @@ where
                         id: "cursor-input-required".into(), kind: "tool".into(),
                         label: "Cursor needs input".into(),
                         detail: Some("Cursor's interactive question or plan was cancelled. Continue with instructions in chat.".into()),
+                        file_counts: None,
                         status: "failed".into(),
                     });
                 }
@@ -1019,6 +1022,7 @@ fn handle_session_update<Delta, Activity>(
                 kind,
                 label,
                 detail,
+                file_counts: acp_diff_counts(update.get("content")),
                 status,
             });
         }
@@ -1028,11 +1032,32 @@ fn handle_session_update<Delta, Activity>(
                 kind: "plan".into(),
                 label: "Updated plan".into(),
                 detail: update.get("entries").map(Value::to_string),
+                file_counts: None,
                 status: "done".into(),
             });
         }
         _ => {}
     }
+}
+
+/// Lines changed by a tool call's ACP `diff` blocks (`oldText` is absent for a
+/// new file). Every agent on this path reports edits this way, so counting
+/// here covers them all rather than one model at a time.
+fn acp_diff_counts(content: Option<&Value>) -> Option<(usize, usize)> {
+    let diffs = content?
+        .as_array()?
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("diff"))
+        .collect::<Vec<_>>();
+    if diffs.is_empty() {
+        return None;
+    }
+    diffs.into_iter().try_fold((0, 0), |total, diff| {
+        let new = diff.get("newText")?.as_str()?;
+        let old = diff.get("oldText").and_then(Value::as_str).unwrap_or("");
+        let counts = crate::diff::changed_line_counts(old.as_bytes(), new.as_bytes());
+        Some((total.0 + counts.0, total.1 + counts.1))
+    })
 }
 
 /// Stable id fragment from a provider label (`xAI` → `xai`, `Grok` → `grok`).
@@ -1462,11 +1487,25 @@ fn append_bounded(target: &mut String, text: &str, max_chars: usize) {
 mod tests {
 
     use super::{
-        acp_activity_id_slug, acp_model_id, acp_offered_model_ids, acp_session_reopen_methods,
-        check_kimi_acp_health, classify_approval, is_acp_method_not_found, permission_option_id,
-        resolve_workspace_write_path, run_kimi_acp, CredentialPolicy, KimiAcpApprovalDecision,
-        KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
+        acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
+        acp_session_reopen_methods, check_kimi_acp_health, classify_approval,
+        is_acp_method_not_found, permission_option_id, resolve_workspace_write_path, run_kimi_acp,
+        CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
+        KimiAcpMode, KimiAcpRequest,
     };
+
+    #[test]
+    fn acp_diff_content_counts_changed_lines() {
+        let content = serde_json::json!([
+            { "type": "content", "content": { "type": "text", "text": "done" } },
+            { "type": "diff", "path": "/r/a.rs", "oldText": "a\nb\n", "newText": "a\nc\nd\n" },
+            { "type": "diff", "path": "/r/new.rs", "newText": "x\ny\n" }
+        ]);
+        assert_eq!(acp_diff_counts(Some(&content)), Some((4, 1)));
+        let no_diff = serde_json::json!([{ "type": "content" }]);
+        assert_eq!(acp_diff_counts(Some(&no_diff)), None);
+        assert_eq!(acp_diff_counts(None), None);
+    }
 
     #[test]
     fn direct_acp_reads_refuse_sensitive_files_and_aliases() {

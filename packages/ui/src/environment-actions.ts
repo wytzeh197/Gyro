@@ -71,6 +71,25 @@ function commitOrPush(sourceControl?: SourceControlState): EnvironmentAction {
       intent: { kind: "review" },
     };
   }
+  if (sourceControl.detached) {
+    return {
+      id: "commit-or-push",
+      label,
+      detail: "Check out a branch to push",
+      enabled: false,
+    };
+  }
+  // A deleted remote branch reports no ahead count at all, yet pushing is
+  // exactly what brings it back.
+  if (sourceControl.upstreamGone) {
+    return {
+      id: "commit-or-push",
+      label,
+      detail: "Publish this branch again",
+      enabled: true,
+      intent: { kind: "git", actionId: "push" },
+    };
+  }
   if (unpushedWork(sourceControl)) {
     return {
       id: "commit-or-push",
@@ -102,9 +121,17 @@ function createPullRequest(
       enabled: false,
     };
   }
+  if (sourceControl.detached) {
+    return {
+      id: "create-pull-request",
+      label,
+      detail: "Check out a branch first",
+      enabled: false,
+    };
+  }
   // A pull request compares two refs the remote can see, so an unpublished
   // branch or unpushed commits would open a request that misses the work.
-  if (!sourceControl.upstream) {
+  if (!sourceControl.upstream || sourceControl.upstreamGone) {
     return {
       id: "create-pull-request",
       label,
@@ -137,4 +164,113 @@ export function environmentActions(
   sourceControl?: SourceControlState,
 ): EnvironmentAction[] {
   return [commitOrPush(sourceControl), createPullRequest(sourceControl)];
+}
+
+export type EnvironmentTone = "neutral" | "pending" | "warning";
+
+/** How the branch stands against its upstream, as one short value. */
+export type EnvironmentSync = {
+  label: string;
+  /** The longer explanation for the tooltip and screen readers. */
+  detail: string;
+  tone: EnvironmentTone;
+};
+
+export function environmentSync(
+  sourceControl?: SourceControlState,
+): EnvironmentSync | undefined {
+  if (!sourceControl?.available) return undefined;
+  if (sourceControl.detached) {
+    return {
+      label: "Detached",
+      detail: "HEAD is not on a branch, so there is nothing to sync",
+      tone: "warning",
+    };
+  }
+  const upstream = sourceControl.upstream;
+  if (!upstream) {
+    return {
+      label: "Not published",
+      detail: "This branch has no upstream yet",
+      tone: "pending",
+    };
+  }
+  if (sourceControl.upstreamGone) {
+    return {
+      label: "Remote deleted",
+      detail: `${upstream} no longer exists on the remote`,
+      tone: "warning",
+    };
+  }
+  const { ahead, behind } = sourceControl;
+  if (ahead > 0 && behind > 0) {
+    return {
+      label: `↑${ahead} ↓${behind}`,
+      detail: `Diverged from ${upstream}: ${plural(ahead, "commit")} to push, ${plural(behind, "commit")} to pull`,
+      tone: "warning",
+    };
+  }
+  if (ahead > 0) {
+    return {
+      label: `↑${ahead}`,
+      detail: `${plural(ahead, "commit")} ahead of ${upstream}`,
+      tone: "pending",
+    };
+  }
+  if (behind > 0) {
+    return {
+      label: `↓${behind}`,
+      detail: `${plural(behind, "commit")} behind ${upstream}`,
+      tone: "pending",
+    };
+  }
+  return {
+    label: "Up to date",
+    detail: `In sync with ${upstream}`,
+    tone: "neutral",
+  };
+}
+
+const operationLabels: Record<
+  NonNullable<SourceControlState["operation"]>,
+  string
+> = {
+  rebase: "Rebase",
+  merge: "Merge",
+  "cherry-pick": "Cherry-pick",
+  revert: "Revert",
+  bisect: "Bisect",
+};
+
+/**
+ * The one thing about the repository that needs attention before anything
+ * else, or nothing. Ordered by what blocks the user most: an operation left
+ * half-done outranks conflicts it caused, which outrank a stale read.
+ */
+export function environmentNotice(
+  sourceControl?: SourceControlState,
+): string | undefined {
+  if (!sourceControl) return undefined;
+  const conflicts = sourceControl.files.filter(
+    (file) => file.state === "conflicted",
+  ).length;
+  if (sourceControl.operation) {
+    const operation = operationLabels[sourceControl.operation];
+    return conflicts > 0
+      ? `${operation} in progress with ${plural(conflicts, "conflict")}`
+      : `${operation} in progress`;
+  }
+  if (conflicts > 0) return `${plural(conflicts, "conflicted file")}`;
+  return sourceControl.error || undefined;
+}
+
+/**
+ * Shortens a long label from the middle, so a branch keeps both its family
+ * (`release/`) and the part that tells it apart from its siblings (`49.3`).
+ */
+export function middleTruncate(value: string, max: number) {
+  if (value.length <= max) return value;
+  const keep = max - 1;
+  const head = Math.ceil(keep / 2);
+  return `${value.slice(0, head)}…${value.slice(value.length - (keep - head))}`;
 }

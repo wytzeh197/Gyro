@@ -7,4 +7,4 @@
   X-Frame-Options: DENY
 
 /model-catalog.json
-  Cache-Control: public, max-age=300
+  Cache-Control: public, max-age=60, must-revalidate

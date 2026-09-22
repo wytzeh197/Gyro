@@ -82,9 +82,14 @@ import {
 } from "../apps/desktop/src/provider-stream-events.ts";
 import {
   shouldShowSidebarUpdate,
+  updateAnnouncement,
+  updateFacts,
+  updateInstalledVersion,
+  updateLatestLabel,
   updatePrimaryActionLabel,
   updateProgressPercent,
   updateSidebarLabel,
+  updateStatusLevel,
 } from "../packages/ui/src/update-state.ts";
 import { isUpdateVersionNewer } from "../apps/desktop/src/update-version.ts";
 
@@ -354,6 +359,9 @@ const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
 const appAndStreamSource = `${appSource}\n${providerStreamSource}`;
+const liveTerminalPaneSource = readRepoFile(
+  "apps/desktop/src/live-terminal-pane.tsx",
+);
 const systemAccessBootstrapStart = appSource.indexOf("const alreadyPrompted =");
 const systemAccessRestartGuard = appSource.indexOf(
   "if (alreadyPrompted)",
@@ -978,9 +986,12 @@ const coreCapabilitiesSource = readRepoFile(
 );
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
+// Extracted domains are read alongside the shell: these checks assert on the
+// source that holds the code, not on where it used to live.
 const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
 ].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
@@ -1232,6 +1243,64 @@ expect(
     updateProgressPercent(64, 100) === 64 &&
     updateProgressPercent(10, undefined) === undefined,
   "Update state should drive sidebar visibility, labels, and bounded progress.",
+);
+// The Settings card reads from the same module as the sidebar button, so its
+// level, its facts, and its live-region line are testable without rendering.
+expect(
+  updateStatusLevel({ status: "current", currentVersion: "0.2.0" }) ===
+    "good" &&
+    updateStatusLevel({ status: "ready", currentVersion: "0.2.0" }) ===
+      "info" &&
+    updateStatusLevel({ status: "failed", currentVersion: "0.2.0" }) ===
+      "critical" &&
+    updateStatusLevel({ status: "development", currentVersion: "0.2.0" }) ===
+      "neutral" &&
+    updateStatusLevel(undefined) === "neutral",
+  "One status level should drive both the card's mark and the Settings status dot: up to date is good, waiting or working is accent, a failure is critical, and a disabled updater is neutral.",
+);
+expect(
+  updateInstalledVersion({
+    status: "current",
+    currentVersion: "0.1.0-alpha.49.3",
+  }) === "0.1.0-alpha.49.3" &&
+    updateInstalledVersion({
+      status: "development",
+      currentVersion: "development",
+    }) === undefined &&
+    updateInstalledVersion({ status: "checking", currentVersion: "" }) ===
+      undefined &&
+    updateLatestLabel({ status: "current", currentVersion: "0.2.0" }) ===
+      "Up to date" &&
+    updateLatestLabel({ status: "checking", currentVersion: "0.2.0" }) ===
+      undefined &&
+    updateFacts(undefined).length === 0 &&
+    updateFacts({ status: "current", currentVersion: "0.2.0" }).length === 2 &&
+    updateFacts({
+      status: "current",
+      currentVersion: "unknown",
+    }).length === 1 &&
+    updateFacts({
+      status: "available",
+      currentVersion: "0.2.0",
+      nextVersion: "0.3.0",
+      totalBytes: 41_943_040,
+    }).length === 3 &&
+    updateFacts({
+      status: "ready",
+      currentVersion: "0.2.0",
+      nextVersion: "0.3.0",
+      totalBytes: 41_943_040,
+    })[2].label === "Downloaded" &&
+    updateAnnouncement({
+      status: "available",
+      currentVersion: "0.2.0",
+      nextVersion: "0.3.0",
+    }) === "Update available: 0.3.0" &&
+    updateAnnouncement({ status: "ready", currentVersion: "0.2.0" }) ===
+      "Update downloaded. Restart Gyro to install it." &&
+    updateAnnouncement({ status: "development", currentVersion: "0.2.0" }) ===
+      "",
+  "The card should list only the facts Gyro has — never a placeholder version or an empty cell — and announce its state in words while staying silent when there is nothing to say.",
 );
 expect(
   !isUpdateVersionNewer("0.1.0-alpha.44", "0.1.0-alpha.45") &&
@@ -4549,7 +4618,7 @@ expect(
     appSource.includes("terminalSourceControlByPane") &&
     appSource.includes("terminalSourceControlRequestRef") &&
     appSource.includes("openSourceControlDiffForRoot") &&
-    appSource.includes("terminal.onBell") &&
+    liveTerminalPaneSource.includes("terminal.onBell") &&
     tauriSource.includes("apply_git_diff_stats") &&
     tauriSource.includes("git_line_counts::untracked_lines"),
   "CLI should keep changes accessible in the menu and terminal attention visible in its contextual sidebar.",
@@ -4577,7 +4646,7 @@ expect(
     appSource.includes("launchCliPreset") &&
     appSource.includes("launchTerminalPane") &&
     appSource.includes("@xterm/xterm") &&
-    appSource.includes("@xterm/addon-fit") &&
+    liveTerminalPaneSource.includes("@xterm/addon-fit") &&
     appSource.includes("selectedTerminalPaneIdRef") &&
     appSource.includes("TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS") &&
     appSource.includes(
@@ -4674,10 +4743,12 @@ expect(
   "Standalone terminals should default home and allow explicit folder selection.",
 );
 expect(
-  appSource.includes("Previous output · process is no longer running") &&
-    appSource.includes("Start again") &&
-    appSource.includes("macOptionIsMeta") &&
-    appSource.includes("rightClickSelectsWord") &&
+  liveTerminalPaneSource.includes(
+    "Previous output · process is no longer running",
+  ) &&
+    liveTerminalPaneSource.includes("Start again") &&
+    liveTerminalPaneSource.includes("macOptionIsMeta") &&
+    liveTerminalPaneSource.includes("rightClickSelectsWord") &&
     appSource.includes(
       "startingOutput: `Reconnecting ${profile.displayName}",
     ) &&
@@ -5341,7 +5412,7 @@ expect(
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
     chatSurfaceSource.includes(
-      "draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? \"\")\n                : localDraft\n            }",
+      'draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? "")\n                : localDraft\n            }',
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
@@ -5817,11 +5888,60 @@ expect(
     surfaceSource.includes('title="Updates"') &&
     surfaceSource.includes("Public Alpha") &&
     surfaceSource.includes('"Check for updates"') &&
-    surfaceSource.includes("formatUpdateCheckedAt") &&
+    updateStateSource.includes("formatUpdateCheckedAt") &&
     !surfaceSource.includes('label="Release channel"') &&
     !surfaceSource.includes('value="Valid"') &&
     !surfaceSource.includes('value="Today"'),
   "Workspace preparation should appear before the updater beside Settings while Update keeps the right edge.",
+);
+
+// The Updates page itself: one status card built on the shared Settings status
+// primitive, colour from the theme and the user's accent, only the facts Gyro
+// actually has, and a nav row that says an update is waiting.
+const updatesSectionStart = surfaceSource.indexOf(
+  "aria-busy={isCheckingUpdate}",
+);
+const updatesSectionSource = surfaceSource.slice(
+  updatesSectionStart,
+  surfaceSource.indexOf("What\u2019s new", updatesSectionStart),
+);
+expect(
+  updatesSectionStart > 0 &&
+    updatesSectionSource.includes('className="gyro-update-card"') &&
+    updatesSectionSource.includes("data-level={updateLevel}") &&
+    updatesSectionSource.includes("aria-busy={isCheckingUpdate}") &&
+    updatesSectionSource.includes("<SettingsStatus status={updateLevel}>") &&
+    updatesSectionSource.includes('className="gyro-update-facts"') &&
+    updatesSectionSource.includes("updateFactRows.map") &&
+    updatesSectionSource.includes(
+      'className="gyro-primary-button gyro-update-card-primary"',
+    ) &&
+    // The workspace-preparation popover owns .gyro-update-primary and its
+    // hardcoded blue; the card must not borrow it.
+    !updatesSectionSource.includes("gyro-update-primary") &&
+    updatesSectionSource.includes('aria-live="polite"') &&
+    !updatesSectionSource.includes("Unknown") &&
+    !updatesSectionSource.includes("gyro-update-pill") &&
+    !updatesSectionSource.includes("gyro-update-blue") &&
+    !surfaceSource.includes("gyro-update-hero") &&
+    !styleSource.includes(".gyro-update-hero") &&
+    !styleSource.includes(".gyro-update-pill") &&
+    styleSource.includes(".gyro-update-facts") &&
+    styleSource.includes(
+      '.gyro-update-card[data-level="critical"] .gyro-update-mark',
+    ) &&
+    styleSource.includes(".gyro-settings-status.is-info i") &&
+    styleSource.includes(
+      "@media (prefers-reduced-motion: reduce) {\n  .gyro-update-card .is-spinning",
+    ) &&
+    surfaceSource.includes("pendingUpdate={showSidebarUpdate}") &&
+    surfaceSource.includes('className="gyro-settings-page-flag"') &&
+    surfaceSource.includes("Update available</span>") &&
+    styleSource.includes(".gyro-settings-page-flag") &&
+    styleSource.includes(
+      ".gyro-sidebar-action.is-settings-page:has(> .gyro-settings-page-flag)",
+    ),
+  "Updates should read as one status card on the shared status and accent tokens with no empty or placeholder cell, and the Settings navigation should mark the Updates row while an update is waiting.",
 );
 expect(
   updateControllerSource.includes(
@@ -6812,20 +6932,9 @@ expect(
     appSource.includes("document.documentElement.dataset.windowActive") &&
     appSource.includes('window.addEventListener("blur", syncWindowFocus)') &&
     appSource.includes('window.addEventListener("focus", syncWindowFocus)') &&
-    styleSource.includes(
-      ':root[data-theme="light"][data-window-active="false"]',
-    ) &&
-    styleSource.includes("rgba(82, 92, 104, 0.2)") &&
-    cssRules(
-      styleSource,
-      ':root[data-theme="light"][data-window-active="false"]\n  .gyro-sidebar-persistent-header::after',
-    ).some(
-      (rule) =>
-        rule.includes("left: 16px") &&
-        rule.includes("top: 17px") &&
-        rule.includes("height: 14px") &&
-        rule.includes("width: 58px"),
-    ) &&
+    // macOS draws its own inactive traffic lights. A painted copy never
+    // matched their spacing and showed up as a second, offset set.
+    !styleSource.includes(".gyro-sidebar-persistent-header::after") &&
     surfaceSource.includes('className="gyro-composer-branch-picker"') &&
     cssRules(styleSource, ".gyro-composer-branch-picker").some(
       (rule) =>
@@ -7079,11 +7188,11 @@ for (const className of [
 }
 
 expect(
-  appSource.includes("drawBoldTextInBrightColors: true") &&
-    appSource.includes("minimumContrastRatio: 1") &&
-    appSource.includes('brightMagenta: "#f08cff"') &&
-    appSource.includes('magenta: "#d86cff"') &&
-    appSource.includes('brightYellow: "#ffd166"'),
+  liveTerminalPaneSource.includes("drawBoldTextInBrightColors: true") &&
+    liveTerminalPaneSource.includes("minimumContrastRatio: 1") &&
+    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
+    liveTerminalPaneSource.includes('magenta: "#d86cff"') &&
+    liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "Embedded CLI terminals should preserve visible ANSI accent colors.",
 );
 
@@ -7467,12 +7576,14 @@ expect(
     surfaceSource.includes('mode: "light", label: "Light"') &&
     surfaceSource.includes('mode: "dark", label: "Dark"') &&
     surfaceSource.includes("onThemeChange(mode)") &&
-    appSource.includes("function terminalThemeFor") &&
-    appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
-    appSource.includes('background: "#ffffff"') &&
-    appSource.includes('background: "#0c0c0c"') &&
-    appSource.includes('brightMagenta: "#f08cff"') &&
-    appSource.includes('brightYellow: "#ffd166"'),
+    liveTerminalPaneSource.includes("function terminalThemeFor") &&
+    liveTerminalPaneSource.includes(
+      "terminal.options.theme = terminalThemeFor(theme)",
+    ) &&
+    liveTerminalPaneSource.includes('background: "#ffffff"') &&
+    liveTerminalPaneSource.includes('background: "#0c0c0c"') &&
+    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
+    liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "System, dark, and light preferences should resolve before live terminals update their palette in place.",
 );
 
@@ -7747,7 +7858,7 @@ for (const settingsSelector of [
   ".gyro-settings-control-column",
   ".gyro-provider-table",
   ".gyro-usage-cards",
-  ".gyro-update-summary",
+  ".gyro-update-facts",
 ]) {
   expect(
     styleSource.includes(settingsSelector),
@@ -7996,6 +8107,32 @@ expect(
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
   "Live file changes lead the composer dock — above queued turns and the plan card, so the running count holds its place instead of sliding down — without negative-margin overlap, and completed edits retain their file review card.",
+);
+
+expect(
+  // The outcome is drawn on the composer, where the next message is typed,
+  // instead of at the top of the transcript where it scrolled out of sight.
+  // Nothing announces a save: a saved goal is simply the goal on screen.
+  surfaceSource.includes("function SessionGoalStrip") &&
+    surfaceSource.includes('className="gyro-goal-strip"') &&
+    surfaceSource.includes(
+      'data-running={isActive && isRunning ? "true" : undefined}',
+    ) &&
+    surfaceSource.includes("isRunning={isSending}") &&
+    surfaceSource.includes("sessionGoal?.text && !isGoalComposerActive") &&
+    !surfaceSource.includes("Send a message to start work") &&
+    styleSource.includes(".gyro-goal-strip {") &&
+    styleSource.includes(
+      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark svg',
+    ) &&
+    styleSource.includes(".gyro-chat-start .gyro-goal-strip") &&
+    styleSource.includes(".gyro-goal-strip-text::before") &&
+    // Opening the editor from `/goal` or the "+" menu puts this chip under
+    // the pointer, so a native title surfaces an OS tooltip nobody asked
+    // for. The draft promise lives in the accessible name instead.
+    surfaceSource.includes('aria-label="Close goal editor — draft is kept"') &&
+    !surfaceSource.includes('title="Close goal editor'),
+  "The goal rides on the composer as a one-line strip with its clock and controls, its mark rotates only while a turn is running, no save is announced in prose, and closing the goal editor never fires a stray hover tooltip.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

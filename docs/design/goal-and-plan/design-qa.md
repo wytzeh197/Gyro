@@ -60,3 +60,51 @@ messages. The tested goal/plan interactions completed; that host notification
 permission issue is outside this change.
 
 Changes remain uncommitted and include pre-existing workspace work.
+
+## 2026-09-22 — the outcome moves onto the composer
+
+The goal is no longer drawn at the top of the transcript, where it scrolled out
+of sight, and saving one is no longer announced by a paragraph ("Goal saved: …
+Send a message to start work."). It is one line on the composer: mark, word,
+outcome, clock, and the edit, complete/reopen and clear controls. The thread's
+band keeps the plan's steps count and Open plan action; the rail keeps the
+editable goal above Document or Steps.
+
+The mark rotates only while a turn for that chat is running. An open goal that
+is idle keeps its mark still and its clock running.
+
+### Automated checks
+
+- `pnpm -r typecheck` (UI and desktop).
+- `pnpm smoke:workbench` — now guards the strip: it exists, it takes its running
+  state from the composer's send state, and no "Send a message to start work"
+  copy is left anywhere in the chat surface.
+- Chat run, chat hardening, chat companion, chat side panel, chat message queue,
+  chat timeline, plan document, surface boundaries, chat canvas and composer
+  context usage checks: all passed. `pnpm test:reliability` stops earlier at the
+  pre-existing architecture-ceiling failure in `check-architecture-boundaries.mjs`
+  (`lib.rs` 31,520 lines against a 31,266-line ceiling), which this change does
+  not touch.
+
+### Browser evidence
+
+Gyro Browser, the production ChatSurface in `goal-plan-fixture.html`:
+
+| View | Image |
+| --- | --- |
+| Dark, goal open | [goal-strip-dark.png](2026-09-22/goal-strip-dark.png) |
+| Light, goal open | [goal-strip-light.png](2026-09-22/goal-strip-light.png) |
+| Dark, goal completed | [goal-strip-completed.png](2026-09-22/goal-strip-completed.png) |
+
+Observed in the live DOM, not only in source: the strip carries
+`data-running="true"` while a turn is running and loses it when the fixture's
+running toggle is switched off; "Complete goal" turns the mark into a check, the
+word into "Goal completed" and the control into "Reopen goal"; the clock ticks
+(10s, then 25s in a later capture). The fixture seeds a goal set six seconds
+before mount and a running toggle so both states are reachable.
+
+### Evidence limits
+
+The fixture proves rendering and the local callbacks, not provider execution or
+native persistence. The screenshots are desktop-width; the 620px truncation rule
+was inspected in source rather than exercised through viewport emulation.

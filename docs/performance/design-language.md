@@ -102,13 +102,20 @@ Dark status colors are tuned for graphite; light values resolve through the ligh
 blue, success, warning, danger and muted tokens. Plan mode itself is neutral.
 Use `ListChecks` for the plan and `Goal` for the outcome affordance.
 
-`SessionGoalBand` has hero, thread and rail densities. The thread adds a compact
-steps count and an Open plan action; rail density omits the duplicate clock.
-The rail renders the same editable goal above either Document or Steps. Blocking
+`SessionGoalStrip` rides on the composer — mark, label, the outcome, its clock
+and three controls on one line — so the goal stays on screen for every turn of
+the chat instead of scrolling away at the top of the transcript, and saving one
+is announced by the strip itself rather than by a sentence to read and dismiss.
+Its mark rotates only while a turn for that chat is running: an open goal that
+is idle is not work in progress. `SessionGoalBand` keeps the thread's compact
+steps count with its Open plan action, and the rail's editable goal above either
+Document or Steps. Blocking
 is an explicit item action; the normal check cycle stays todo → working → complete.
 Progress labels expose blocked counts to assistive technology as well as a dot.
 
-Use `--gyro-radius-xl` on the goal row, plan artifact and plan decision surface.
-At 620px, goal actions wrap and remain reachable. Reduced motion removes status
+Use `--gyro-radius-xl` on the goal strip where it floats above the start
+surface, the plan artifact and the plan decision surface; inside a chat the
+strip shares the composer's own radius and top edge.
+At 620px, the strip truncates the outcome rather than its controls. Reduced motion removes status
 rotation and progress transitions. Verification notes live in
 [`docs/design/goal-and-plan/design-qa.md`](../design/goal-and-plan/design-qa.md).

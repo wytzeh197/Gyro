@@ -5,6 +5,8 @@ import {
   createModelCatalogClient,
   parseModelCatalog,
   MODEL_CATALOG_CACHE_KEY,
+  MODEL_CATALOG_POLL_MS,
+  MODEL_CATALOG_REFRESH_MS,
 } from "../packages/ui/src/remote-model-catalog.ts";
 import {
   providerCatalog,
@@ -40,6 +42,17 @@ const memory = () => {
     setItem: (key, value) => values.set(key, value),
   };
 };
+
+// An announcement is only trustworthy while a focused picker polls inside a
+// minute, and the background cadence must never outrun the focused one.
+assert.ok(
+  MODEL_CATALOG_POLL_MS <= 60_000,
+  "A focused picker must check for new models at least once a minute",
+);
+assert.ok(
+  MODEL_CATALOG_REFRESH_MS >= MODEL_CATALOG_POLL_MS,
+  "The background cadence must not be faster than the focused one",
+);
 
 parseModelCatalog(
   readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
@@ -155,12 +168,12 @@ const client = createModelCatalogClient(
 );
 const first = client.refresh();
 assert.equal(client.refresh(), first);
-assert.equal(await first, true);
+assert.deepEqual(await first, { applied: true, additions: [] });
 assert.equal(calls, 1);
 assert.ok(hasModel());
-assert.equal(await client.refresh(), false);
+assert.deepEqual(await client.refresh(), { applied: false, additions: [] });
 payload = "invalid";
-assert.equal(await client.refresh(), false);
+assert.equal((await client.refresh()).applied, false);
 assert.ok(hasModel());
 assert.equal(storage.getItem(MODEL_CATALOG_CACHE_KEY), document());
 reset();
@@ -173,11 +186,11 @@ const offline = createModelCatalogClient(
 );
 offline.restore();
 assert.ok(hasModel());
-assert.equal(await offline.refresh(), false);
+assert.equal((await offline.refresh()).applied, false);
 assert.ok(hasModel());
 assert.equal(storage.getItem(MODEL_CATALOG_CACHE_KEY + ".bucket"), "12");
 payload = document([], { revision: "rollback" });
-assert.equal(await client.refresh(), true);
+assert.equal((await client.refresh()).applied, true);
 assert.ok(!hasModel());
 reset();
 const corrupt = memory();
@@ -195,9 +208,73 @@ const blocked = createModelCatalogClient(
   },
   async () => document(),
 );
-assert.equal(await blocked.refresh(), true);
+assert.equal((await blocked.refresh()).applied, true);
 assert.ok(hasModel());
 reset();
+
+// Additions are reported remote document against remote document, and only
+// when the picker really gains something the installation can run.
+const secondEntry = {
+  ...entry,
+  id: "catalog-test-model-two",
+  displayName: "Catalog test two",
+};
+const thirdEntry = {
+  ...entry,
+  id: "catalog-test-model-three",
+  displayName: "Catalog test three",
+};
+let additionsPayload = document([entry], { revision: "add.1" });
+const additionsClient = createModelCatalogClient(
+  memory(),
+  async () => additionsPayload,
+  () => 0.12,
+);
+assert.deepEqual(await additionsClient.refresh(), {
+  applied: true,
+  additions: [],
+});
+additionsPayload = document([entry, secondEntry], { revision: "add.2" });
+assert.deepEqual((await additionsClient.refresh()).additions, [
+  {
+    providerId: "openai",
+    providerLabel: "OpenAI",
+    id: secondEntry.id,
+    displayName: "Catalog test two",
+  },
+]);
+assert.ok(provider.models.some((m) => m.id === secondEntry.id));
+// An entry gated on a later client revision is not selectable, so it is not news.
+additionsPayload = document(
+  [entry, secondEntry, { ...thirdEntry, minClientRevision: 2 }],
+  { revision: "add.3" },
+);
+assert.deepEqual((await additionsClient.refresh()).additions, []);
+assert.ok(!provider.models.some((m) => m.id === thirdEntry.id));
+// Withdrawing the document changes the picker without announcing anything.
+additionsPayload = document([entry, secondEntry], {
+  revision: "add.4",
+  enabled: false,
+});
+assert.deepEqual((await additionsClient.refresh()).additions, []);
+assert.ok(!provider.models.some((m) => m.id === secondEntry.id));
+// Re-enabling announces nothing: this user already knew about these models.
+additionsPayload = document([entry, secondEntry, thirdEntry], {
+  revision: "add.5",
+});
+assert.deepEqual((await additionsClient.refresh()).additions, []);
+// A removal is never reported as an addition.
+additionsPayload = document([entry], { revision: "add.6" });
+assert.deepEqual((await additionsClient.refresh()).additions, []);
+// An entry outside this installation's rollout bucket stays invisible and silent.
+additionsPayload = document([entry, secondEntry], {
+  revision: "add.7",
+  rolloutPercentage: 10,
+});
+assert.deepEqual((await additionsClient.refresh()).additions, []);
+assert.ok(!provider.models.some((m) => m.id === secondEntry.id));
+reset();
+
 console.log(
-  "Model catalog validation, picker merge, rollback, rollout, cache, and offline checks passed.",
+  "Model catalog validation, picker merge, rollback, rollout, cache, offline, and addition-announcement checks passed.",
 );
