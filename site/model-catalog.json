@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-09-22.2",
+  "revision": "2026-09-22.3",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -10,6 +10,7 @@
       "displayName": "Claude Opus 5.5",
       "description": "Long-running agentic coding and knowledge work.",
       "minClientRevision": 1,
+      "insertBefore": "claude-opus-5",
       "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "high"

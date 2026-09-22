@@ -275,6 +275,63 @@ assert.deepEqual((await additionsClient.refresh()).additions, []);
 assert.ok(!provider.models.some((m) => m.id === secondEntry.id));
 reset();
 
+// Added models land where they belong in the picker, not at the bottom.
+const anthropic = providerCatalog.find((p) => p.id === "anthropic");
+const anthropicIds = () => anthropic.models.map((m) => m.id);
+applyModelCatalog(
+  parseModelCatalog(
+    readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+  ),
+  0,
+);
+assert.deepEqual(anthropicIds(), [
+  "claude-fable-5-1",
+  "claude-fable-5",
+  "claude-opus-5-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-sonnet-5",
+  "claude-haiku-4-5",
+]);
+const anthropicEntry = (id, extra = {}) => ({
+  providerId: "anthropic",
+  id,
+  displayName: id,
+  minClientRevision: 1,
+  ...extra,
+});
+// Without a placement hint, a model goes above its family's older versions…
+applyModelCatalog(
+  parseModelCatalog(document([anthropicEntry("claude-sonnet-5-2")])),
+  0,
+);
+assert.equal(anthropicIds().indexOf("claude-sonnet-5-2"), 4);
+// …below its newer ones…
+applyModelCatalog(
+  parseModelCatalog(document([anthropicEntry("claude-opus-4-9")])),
+  0,
+);
+assert.deepEqual(anthropicIds().slice(2, 5), [
+  "claude-opus-5",
+  "claude-opus-4-9",
+  "claude-opus-4-8",
+]);
+// …and a hint naming a model that is not there falls back to the same rule.
+applyModelCatalog(
+  parseModelCatalog(
+    document([anthropicEntry("claude-opus-5-5", { insertBefore: "gone" })]),
+  ),
+  0,
+);
+assert.equal(anthropicIds()[2], "claude-opus-5-5");
+// A model with no family in the list still goes last.
+applyModelCatalog(
+  parseModelCatalog(document([anthropicEntry("claude-mythos")])),
+  0,
+);
+assert.equal(anthropicIds().at(-1), "claude-mythos");
+reset();
+
 console.log(
-  "Model catalog validation, picker merge, rollback, rollout, cache, offline, and addition-announcement checks passed.",
+  "Model catalog validation, picker merge, picker order, rollback, rollout, cache, offline, and addition-announcement checks passed.",
 );

@@ -25,6 +25,8 @@ const bundled = new Map(
 type CatalogModel = ProviderModel & {
   providerId: string;
   minClientRevision: number;
+  /** Bundled or earlier catalog model this one is listed above in the picker. */
+  insertBefore?: string;
 };
 export type ModelCatalog = {
   schema: "gyro.model-catalog.v1";
@@ -94,6 +96,8 @@ export function parseModelCatalog(raw: string): ModelCatalog {
     };
     if (model.description !== undefined)
       result.description = text(model.description, 600);
+    if (model.insertBefore !== undefined)
+      result.insertBefore = text(model.insertBefore, 200);
     if (model.contextWindowTokens !== undefined) {
       result.contextWindowTokens = integer(
         model.contextWindowTokens,
@@ -154,14 +158,65 @@ export function applyModelCatalog(catalog: ModelCatalog, bucket: number): void {
       const {
         providerId: _provider,
         minClientRevision: _minimum,
+        insertBefore,
         ...model
       } = entry;
       const managed = { ...model, catalogManaged: true };
       const index = provider.models.findIndex((item) => item.id === model.id);
-      if (index < 0) provider.models.push(managed);
-      else provider.models[index] = managed;
+      if (index >= 0) provider.models[index] = managed;
+      else
+        provider.models.splice(
+          catalogInsertIndex(provider.models, model.id, insertBefore),
+          0,
+          managed,
+        );
     }
   }
+}
+
+/** "claude-opus-5-5" → family "claude-opus", version [5, 5]. */
+function modelLineage(id: string) {
+  const parts = id.toLowerCase().split(/[-.]/);
+  return {
+    family: parts.filter((part) => !/^\d/.test(part)).join("-"),
+    version: parts
+      .filter((part) => /^\d+$/.test(part))
+      .map((part) => Number(part)),
+  };
+}
+
+function compareVersions(a: number[], b: number[]) {
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const difference = (a[i] ?? 0) - (b[i] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Where an added model lands in the picker, which lists newest first within a
+ * family. An explicit `insertBefore` wins; otherwise the model goes above the
+ * first older sibling of its family (Opus 5.5 above Opus 5), below its newer
+ * siblings, and only a model with no family in the list goes last.
+ */
+function catalogInsertIndex(
+  models: ProviderModel[],
+  id: string,
+  insertBefore: string | undefined,
+) {
+  if (insertBefore) {
+    const anchor = models.findIndex((item) => item.id === insertBefore);
+    if (anchor >= 0) return anchor;
+  }
+  const lineage = modelLineage(id);
+  let lastSibling = -1;
+  for (const [index, item] of models.entries()) {
+    const sibling = modelLineage(item.id);
+    if (sibling.family !== lineage.family) continue;
+    if (compareVersions(lineage.version, sibling.version) > 0) return index;
+    lastSibling = index;
+  }
+  return lastSibling >= 0 ? lastSibling + 1 : models.length;
 }
 
 /** A newly selectable catalog entry, framed for the message that announces it. */

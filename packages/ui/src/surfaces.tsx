@@ -17,6 +17,7 @@ import { SettingsHelp } from "./settings-help";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
+import { ComposerModelRail } from "./composer-model-rail";
 import { resolveLanguage } from "./editor/languages/registry";
 import { LanguagePicker } from "./editor/languages/language-picker";
 import {
@@ -9524,21 +9525,22 @@ export function ChatSurface({
               />
             </div>
           ) : null}
-          {isPlanReadyForDecision && sessionPlan ? (
-            <PlanDecisionCard
-              goal={sessionGoal?.text ? sessionGoal : undefined}
-              isPending={isPlanDecisionPending}
-              onDecision={handlePlanDecision}
-              onOpenPlan={onTogglePlanPanel}
-              plan={sessionPlan}
-            />
-          ) : null}
           {goalSaveNotice ? (
             <p role="status" className="gyro-goal-save-notice">
               {goalSaveNotice}
             </p>
           ) : null}
           <Composer
+            overlay={
+              isPlanReadyForDecision && sessionPlan ? (
+                <PlanDecisionCard
+                  isPending={isPlanDecisionPending}
+                  onDecision={handlePlanDecision}
+                  onOpenPlan={onTogglePlanPanel}
+                  plan={sessionPlan}
+                />
+              ) : undefined
+            }
             attachments={attachments}
             chatMode={chatMode}
             config={config}
@@ -9603,119 +9605,101 @@ export function ChatSurface({
   );
 }
 
-/** Keep approval focused: the full document remains one click away. */
-const PLAN_DECISION_VISIBLE_STEPS = 3;
-
+/**
+ * One quiet row above the composer: the question, the plan it is about (which
+ * opens the document), and the two answers. The steps live in the plan itself.
+ */
 function PlanDecisionCard({
-  goal,
   isPending,
   onDecision,
   onOpenPlan,
   plan,
 }: {
-  goal?: SessionGoal;
   isPending: boolean;
   onDecision: (decision: "approve" | "reject") => void;
   onOpenPlan?: () => void;
   plan: SessionPlan;
 }) {
-  const visibleItems = plan.items.slice(0, PLAN_DECISION_VISIBLE_STEPS);
-  const hiddenCount = plan.items.length - visibleItems.length;
   const stepLabel =
     plan.items.length > 0
       ? `${plan.items.length} ${plan.items.length === 1 ? "step" : "steps"}`
-      : "Plan document";
+      : undefined;
+  const summary = planDecisionSummary(plan);
   return (
     <section
       aria-label="Plan ready for approval"
       className={`gyro-plan-decision-card${isPending ? " is-pending" : ""}`}
     >
-      <header>
-        <span aria-hidden="true" className="gyro-plan-decision-mark">
-          <ListChecks size={14} />
+      <header className="gyro-plan-decision-head">
+        <Lightbulb aria-hidden="true" size={13} />
+        <span>
+          Plan ready{stepLabel ? <small> · {stepLabel}</small> : null}
         </span>
-        <div>
-          <strong>Ready to implement</strong>
-          <small>
-            {plan.title ? `${plan.title} · ` : ""}
-            {stepLabel}
-          </small>
-          {/* Approving a route reads better next to the destination. This
-              says what the plan is for, never that it will get there. */}
-          {goal?.text ? (
-            <small className="gyro-plan-decision-goal">
-              Toward: {goal.text}
-            </small>
-          ) : null}
-        </div>
-        <button
-          className="gyro-plan-decision-open"
-          onClick={onOpenPlan}
-          type="button"
-        >
-          Review plan
-        </button>
+        {onOpenPlan ? (
+          <button
+            aria-label="Open plan"
+            className="gyro-plan-decision-open"
+            onClick={onOpenPlan}
+            title="Open plan"
+            type="button"
+          >
+            <Maximize2 aria-hidden="true" size={13} />
+          </button>
+        ) : null}
       </header>
-      {visibleItems.length > 0 ? (
-        <ol>
-          {visibleItems.map((item, index) => (
-            <li key={item.id}>
-              {/* Every step reads `todo` at this moment, so identical status
-                  glyphs carry nothing; the ordinal carries the sequence. */}
-              <span aria-hidden="true">
-                {item.status === "complete" ? (
-                  <Check size={12} />
-                ) : item.status === "blocked" ? (
-                  <X size={12} />
-                ) : (
-                  index + 1
-                )}
-              </span>
-              <div>
-                <strong>{item.title}</strong>
-                {item.detail ? <small>{item.detail}</small> : null}
-              </div>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="gyro-plan-decision-summary">
-          The full plan is written up in the Plan document.
-        </p>
-      )}
-      {hiddenCount > 0 || visibleItems.length === 0 ? (
-        <button
-          className="gyro-plan-decision-more"
-          onClick={onOpenPlan}
-          type="button"
-        >
-          <ListChecks size={12} />
-          {hiddenCount > 0 ? `+${hiddenCount} more · open plan` : "Open plan"}
-        </button>
-      ) : null}
-      <footer>
-        <button
-          className="is-secondary"
-          disabled={isPending}
-          onClick={() => onDecision("reject")}
-          type="button"
-        >
-          Keep planning
-        </button>
-        <button
-          className="is-primary"
-          disabled={isPending}
-          onClick={() => onDecision("approve")}
-          type="button"
-        >
-          {isPending ? "Starting…" : "Implement plan"}
-        </button>
+      <div className="gyro-plan-decision-text">
+        <strong>{plan.title || "Ready to implement"}</strong>
+        {summary ? <p>{summary}</p> : null}
+      </div>
+      <footer className="gyro-plan-decision-foot">
+        <span className="gyro-plan-decision-hint">
+          Implementing switches to Normal mode
+        </span>
+        <div className="gyro-plan-decision-actions">
+          <button
+            className="is-secondary"
+            disabled={isPending}
+            onClick={() => onDecision("reject")}
+            type="button"
+          >
+            Keep planning
+          </button>
+          <button
+            className="is-primary"
+            disabled={isPending}
+            onClick={() => onDecision("approve")}
+            type="button"
+          >
+            {isPending ? "Starting…" : "Implement"}
+          </button>
+        </div>
       </footer>
       {isPending ? (
         <span aria-hidden="true" className="gyro-plan-decision-progress" />
       ) : null}
     </section>
   );
+}
+
+/** First prose line of the plan document, so the approval says what it builds. */
+function planDecisionSummary(plan: SessionPlan) {
+  const title = plan.title.trim().toLowerCase();
+  for (const raw of (plan.content ?? "").split("\n")) {
+    const line = raw
+      .trim()
+      .replace(/^>\s*/, "")
+      .replace(/[*_`]/g, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    if (
+      !line ||
+      /^(#|[-+*]\s|\d+[.)]\s|\||```|---)/.test(raw.trim()) ||
+      line.toLowerCase() === title
+    ) {
+      continue;
+    }
+    return line;
+  }
+  return plan.items[0]?.detail ?? undefined;
 }
 
 function PlanDocument({
@@ -10251,7 +10235,6 @@ function ChatSidePanel({
   sourceControl,
   onPlanItemStatusChange,
   onPlanAction,
-  onGoalAction,
   editorRequest,
   onEditorRequestHandled,
   onClose,
@@ -10271,7 +10254,6 @@ function ChatSidePanel({
   onBrowserOpenExternal,
   onBrowserHostBoundsChange,
   sessionPlan,
-  sessionGoal,
   terminalPanes = [],
   workspacePath,
 }: {
@@ -10354,7 +10336,6 @@ function ChatSidePanel({
     itemId?: string;
     value: string;
   }>();
-  const [goalEditor, setGoalEditor] = useState<string>();
   /**
    * A written plan used to hide its own checklist: the document and the steps
    * were two arms of one branch, so whichever the model produced last was the
@@ -10371,30 +10352,17 @@ function ChatSidePanel({
       return;
     }
     handledEditorRequestTokenRef.current = editorRequest.token;
-    if (editorRequest.kind === "goal") {
-      setPlanEditor(undefined);
-      setGoalEditor(sessionGoal?.text ?? "");
-    } else {
-      setGoalEditor(undefined);
+    // The goal is edited on the composer; the plan panel only edits steps.
+    if (editorRequest.kind === "item") {
       setPlanEditor({ mode: "add", value: "" });
     }
     onEditorRequestHandled?.();
-  }, [activePanel, editorRequest, onEditorRequestHandled, sessionGoal?.text]);
+  }, [activePanel, editorRequest, onEditorRequestHandled]);
   const submitPlanEditor = () => {
     const title = planEditor?.value.trim();
     if (!planEditor || !title) return;
     onPlanAction?.(planEditor.mode, planEditor.itemId, title);
     setPlanEditor(undefined);
-  };
-  const submitGoalEditor = async () => {
-    const text = goalEditor?.trim();
-    if (goalEditor === undefined || !text) return;
-    const result = await onGoalAction?.(
-      sessionGoal?.text ? "edit" : "set",
-      text,
-    );
-    if (result === false) return;
-    setGoalEditor(undefined);
   };
 
   const pendingDiffs =
@@ -10565,69 +10533,6 @@ function ChatSidePanel({
     );
   }
 
-  const planGoalBand = (
-    <div className="gyro-plan-goal-section">
-      {goalEditor !== undefined ? (
-        <form
-          className="gyro-plan-inline-editor is-goal"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitGoalEditor();
-          }}
-        >
-          <input
-            aria-label="Session goal"
-            autoFocus
-            maxLength={240}
-            onChange={(event) => setGoalEditor(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setGoalEditor(undefined);
-            }}
-            placeholder="Define the outcome for this chat"
-            value={goalEditor}
-          />
-          <button
-            aria-label="Save session goal"
-            disabled={!goalEditor.trim()}
-            title="Save session goal"
-            type="submit"
-          >
-            <Check size={13} />
-          </button>
-          <button
-            aria-label="Cancel session goal"
-            onClick={() => setGoalEditor(undefined)}
-            title="Cancel"
-            type="button"
-          >
-            <X size={13} />
-          </button>
-        </form>
-      ) : sessionGoal?.text ? (
-        <SessionGoalBand
-          goal={sessionGoal}
-          density="rail"
-          onComplete={() =>
-            onGoalAction?.(
-              sessionGoal.status === "complete" ? "reopen" : "complete",
-            )
-          }
-          onEdit={() => setGoalEditor(sessionGoal.text)}
-          onClear={() => onGoalAction?.("clear")}
-        />
-      ) : (
-        <button
-          className="gyro-rail-row is-action"
-          onClick={() => onComposerAction?.("add-goal")}
-          type="button"
-        >
-          <Goal size={14} />
-          <span>Set session goal</span>
-        </button>
-      )}
-    </div>
-  );
-
   if (
     activePanel === "plan" &&
     sessionPlan?.content &&
@@ -10669,7 +10574,6 @@ function ChatSidePanel({
             <X size={14} />
           </button>
         </header>
-        {planGoalBand}
         <PlanDocument
           content={sessionPlan.content}
           onOpenBrowserUrl={onBrowserNavigate}
@@ -10718,7 +10622,6 @@ function ChatSidePanel({
           terminalLabel={terminalLabel}
           workspacePath={workspacePath}
         />
-        {planGoalBand}
         <section className="gyro-plan-harness" aria-label="Plan harness">
           <header>
             <div className="gyro-plan-harness-title">
@@ -24052,6 +23955,7 @@ function Composer({
   canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
+  overlay,
   onGoalAction,
   sessionModel,
   sessionGoal,
@@ -24108,6 +24012,8 @@ function Composer({
   canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
+  /** Covers the whole composer while it asks for a decision, e.g. plan approval. */
+  overlay?: ReactNode;
   /**
    * Complete, reopen or clear the goal from the strip that rides on the
    * composer. Absent in read-only embeds, where the strip shows state only.
@@ -24200,9 +24106,8 @@ function Composer({
     () => {
       if (activePopover !== "provider" || modelMenuPane === "root")
         return false;
-      setModelMenuPane(
-        modelMenuPane === "provider-model" ? "provider" : "root",
-      );
+      // The model rail is one level deep: Escape goes straight back to root.
+      setModelMenuPane("root");
       requestAnimationFrame(() =>
         popoverScopeRef.current
           ?.querySelector<HTMLElement>('[role="menuitem"], input[type="range"]')
@@ -24282,12 +24187,6 @@ function Composer({
     }
     onComposerAction?.(`refresh-provider-usage:${usageProviderId}`);
   }, [onComposerAction, usageFetchedAt, usageLoading, usageProviderId]);
-  const previewedProviderId = modelPickerProviderId;
-  const modelPickerProvider = providerConfigs.find(
-    (provider) =>
-      provider.id === previewedProviderId &&
-      provider.authStatus === "connected",
-  );
   const hasSelectedProvider = Boolean(
     selectedProvider ?? sessionModel?.modelLabel ?? sessionModel?.modelId,
   );
@@ -24409,54 +24308,26 @@ function Composer({
   });
   const isHero = variant === "hero";
   const shouldShowContextRow = showContextRow ?? isHero;
-  const providerItems: ComposerPopoverItem[] = [
-    ...(providerErrorMessage
-      ? [
-          {
-            disabled: true,
-            detail: providerErrorMessage,
-            icon: ShieldCheck,
-            kind: "warning" as const,
-            label: "Provider needs attention",
-          },
-        ]
-      : []),
-    ...providerConfigs
-      .filter((provider) => isProviderExecutable(provider.id))
-      // Connected first (A–Z), then not-yet-connected (A–Z).
-      .slice()
-      .sort((left, right) => {
-        const leftConnected = left.authStatus === "connected" ? 0 : 1;
-        const rightConnected = right.authStatus === "connected" ? 0 : 1;
-        if (leftConnected !== rightConnected) {
-          return leftConnected - rightConnected;
-        }
-        return left.displayName.localeCompare(right.displayName, undefined, {
+  // Same order as the provider list: connected A–Z, then the rest A–Z.
+  const modelRailProviders = providerConfigs
+    .filter((provider) => isProviderExecutable(provider.id))
+    .map((provider) => ({
+      id: provider.id,
+      label: provider.displayName,
+      connected: provider.authStatus === "connected",
+      models: provider.models,
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.connected) - Number(left.connected) ||
+        left.label.localeCompare(right.label, undefined, {
           sensitivity: "base",
-        });
-      })
-      .map((provider) => {
-        const isConnected = provider.authStatus === "connected";
-        // Clean-machine path: disconnected providers start their own login
-        // instead of appearing as dead "Unavailable" rows. Always pass
-        // providerId so each row shows that provider's brand mark, not a
-        // generic key/bot icon (connected or Connect alike).
-        return {
-          action: isConnected
-            ? `select-provider:${provider.id}`
-            : `connect-provider:${provider.id}`,
-          active: isConnected && provider.id === effectiveProviderId,
-          disabled: false,
-          disconnected: !isConnected,
-          icon: Sparkles,
-          kind: "provider" as const,
-          label: provider.displayName,
-          providerId: provider.id,
-          showChevron: isConnected,
-          trailingLabel: isConnected ? undefined : "Connect",
-        };
-      }),
-  ];
+        }),
+    );
+  const isModelRailPane =
+    modelMenuPane === "model" ||
+    modelMenuPane === "provider" ||
+    modelMenuPane === "provider-model";
   const handoffProviders = providerConfigs
     .filter(
       (provider) =>
@@ -24464,25 +24335,6 @@ function Composer({
         provider.id !== effectiveProviderId,
     )
     .map((provider) => ({ id: provider.id, label: provider.displayName }));
-  const activeModelIdForPicker =
-    modelPickerProvider && modelPickerProvider.id === effectiveProviderId
-      ? (effectiveModelId ?? modelPickerProvider.selectedModelId)
-      : modelPickerProvider?.selectedModelId;
-  const providerModelItems: ComposerPopoverItem[] = [
-    ...(modelPickerProvider
-      ? [
-          ...modelPickerProvider.models.map((model) =>
-            composerModelPickerItem(
-              modelPickerProvider.id,
-              model,
-              modelPickerProvider.id === effectiveProviderId
-                ? activeModelIdForPicker
-                : undefined,
-            ),
-          ),
-        ]
-      : []),
-  ];
   const effortSourceModel = selectedProvider
     ? getProviderModel(selectedProvider, effectiveModelId)
     : undefined;
@@ -24955,7 +24807,7 @@ function Composer({
     // Long lists scroll into the available space instead of jumping below it.
     const roomAbove = anchor.top - bounds.top - gap - edgePad;
     if (
-      modelMenuPane === "model" &&
+      isModelRailPane &&
       preferredProviderPlacement === "up" &&
       roomAbove >= 96
     ) {
@@ -25043,6 +24895,7 @@ function Composer({
           : "is-provider-collapsed",
         isHero && constrainToParent ? "is-constrained" : "",
         isSending ? "is-sending" : "",
+        overlay ? "has-overlay" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -25056,6 +24909,7 @@ function Composer({
         composerShellRef.current = node;
       }}
     >
+      {overlay}
       {/* The goal rides on the composer, above the message that pursues it.
           It steps aside for the goal editor, which is the same outcome being
           written in the same place. */}
@@ -25731,14 +25585,33 @@ function Composer({
             ) : null}
             <ChevronDown size={13} />
           </button>
-          {activePopover === "provider" && modelMenuPane === "provider" ? (
-            <ComposerPopover
-              align="end"
-              className="gyro-model-menu gyro-provider-picker-menu"
+          {activePopover === "provider" && isModelRailPane ? (
+            <ComposerModelRail
+              activeModelId={effectiveModelId ?? displayProvider?.selectedModelId}
+              activeProviderId={effectiveProviderId}
               id={`${popoverBaseId}-provider`}
-              items={[modelMenuBackItem("Provider"), ...providerItems]}
-              onAction={runModelMenuAction}
+              onConnect={(providerId) =>
+                onComposerAction?.(`connect-provider:${providerId}`)
+              }
+              onManageProviders={() => {
+                dismissActiveComposerPopover();
+                onComposerAction?.("open-settings:providers");
+              }}
+              onSelectModel={(providerId, modelId) => {
+                dismissActiveComposerPopover();
+                onComposerAction?.(
+                  `select-provider-model:${providerId}:${modelId}`,
+                );
+              }}
               placement={providerPopoverPlacement}
+              providers={modelRailProviders}
+              renderLogo={(provider) => (
+                <ProviderLogo
+                  label={provider.label}
+                  providerId={provider.id as ProviderId}
+                />
+              )}
+              warning={providerErrorMessage}
             />
           ) : activePopover === "provider" &&
             modelMenuPane === "root" &&
@@ -25767,45 +25640,17 @@ function Composer({
             <ComposerPopover
               align="end"
               className={
-                modelMenuPane === "model" || modelMenuPane === "provider-model"
-                  ? "gyro-model-menu gyro-model-list"
-                  : modelMenuPane === "effort"
-                    ? "gyro-model-menu gyro-effort-picker"
-                    : "gyro-model-menu"
+                modelMenuPane === "effort"
+                  ? "gyro-model-menu gyro-effort-picker"
+                  : "gyro-model-menu"
               }
               id={`${popoverBaseId}-provider`}
               items={
-                modelMenuPane === "model"
-                  ? [
-                      modelMenuBackItem("Select model"),
-                      {
-                        hideIcon: true,
-                        icon: Sparkles,
-                        kind: "setting" as const,
-                        label: "Change provider",
-                        menuPane: "provider" as const,
-                        trailingLabel: displayProvider?.displayName ?? "Choose",
-                      },
-                      ...currentModelItems,
-                    ]
-                  : modelMenuPane === "provider-model"
-                    ? [
-                        {
-                          ...modelMenuBackItem(
-                            modelPickerProvider?.displayName ?? "Models",
-                          ),
-                          menuPane: "provider" as const,
-                        },
-                        ...providerModelItems,
-                      ]
-                    : modelMenuPane === "effort"
-                      ? [modelMenuBackItem("Effort"), ...effortItems]
-                      : modelMenuPane === "settings"
-                        ? [
-                            modelMenuBackItem("Model settings"),
-                            ...modelMenuItems,
-                          ]
-                        : modelMenuItems
+                modelMenuPane === "effort"
+                  ? [modelMenuBackItem("Effort"), ...effortItems]
+                  : modelMenuPane === "settings"
+                    ? [modelMenuBackItem("Model settings"), ...modelMenuItems]
+                    : modelMenuItems
               }
               onAction={runModelMenuAction}
               placement={providerPopoverPlacement}

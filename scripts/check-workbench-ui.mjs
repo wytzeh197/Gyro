@@ -386,6 +386,7 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
 const scmFileActionsSource = readRepoFile(
   "packages/ui/src/scm-file-actions.tsx",
 );
@@ -5380,9 +5381,11 @@ expect(
     surfaceSource.includes("gyro-plan-inline-editor") &&
     surfaceSource.includes('aria-label="Plan item title"') &&
     surfaceSource.includes('aria-label="Save plan item"') &&
-    surfaceSource.includes('aria-label="Session goal"') &&
-    surfaceSource.includes('aria-label="Save session goal"') &&
-    surfaceSource.includes("Set session goal") &&
+    // Goal and plan stay separate: the goal is edited on the composer, never
+    // inside the plan panel or the plan approval card.
+    !surfaceSource.includes('aria-label="Save session goal"') &&
+    !surfaceSource.includes("gyro-plan-goal-section") &&
+    !surfaceSource.includes("gyro-plan-decision-goal") &&
     surfaceSource.includes('kind: "goal" | "item"') &&
     surfaceSource.includes("editorRequest={planEditorRequest}") &&
     surfaceSource.includes("onEditorRequestHandled?.()") &&
@@ -6339,67 +6342,37 @@ expect(
     surfaceSource.includes("returnFocus.focus()"),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
+// Model rail: provider marks down the left, the previewed provider's models
+// beside them, so any model is one pointer trip away instead of a drill-down.
 expect(
-  surfaceSource.includes("gyro-provider-picker") &&
-    surfaceSource.includes("const providerModelItems: ComposerPopoverItem[]") &&
-    !surfaceSource.includes('sectionLabel: index === 0 ? "Effort"') &&
-    !surfaceSource.includes('sectionLabel: index === 0 ? "Model"') &&
-    !surfaceSource.includes(
-      "refresh-provider-models:${modelPickerProvider.id}",
-    ) &&
-    !surfaceSource.includes("connect-provider:${modelPickerProvider.id}") &&
+  modelRailSource.includes("export function ComposerModelRail") &&
+    modelRailSource.includes('role="tablist"') &&
+    modelRailSource.includes('aria-orientation="vertical"') &&
+    modelRailSource.includes('role="menuitemradio"') &&
+    modelRailSource.includes("HOVER_PREVIEW_MS") &&
+    // Disconnected providers stay on the rail and offer Connect, never a
+    // dead "Unavailable" row.
+    modelRailSource.includes("onConnect(preview.id)") &&
+    surfaceSource.includes("`connect-provider:${providerId}`") &&
+    surfaceSource.includes("`select-provider-model:${providerId}:${modelId}`") &&
+    surfaceSource.includes('onComposerAction?.("open-settings:providers")') &&
+    // Every tile keeps its brand mark, connected or not.
+    surfaceSource.includes("<ProviderLogo") &&
+    surfaceSource.includes("providerId={provider.id as ProviderId}") &&
     // Split-screen: each composer prefers its bound session/draft model over
     // the workbench-wide selectedProviderId so panes can diverge.
     surfaceSource.includes("const effectiveProviderId = boundToSession") &&
-    surfaceSource.includes(
-      "(provider) => provider.id === effectiveProviderId",
-    ) &&
-    surfaceSource.includes(
-      "active: isConnected && provider.id === effectiveProviderId",
-    ) &&
-    // Clean-machine path: disconnected providers start login instead of a
-    // dead "Unavailable" label that leaves send blocked without a next step.
-    surfaceSource.includes(
-      'trailingLabel: isConnected ? undefined : "Connect"',
-    ) &&
-    surfaceSource.includes("`connect-provider:${provider.id}`") &&
-    // Every provider row (Connect or open models) keeps its brand mark —
-    // never gate providerId on auth, or disconnected rows fall back to KeyRound.
-    surfaceSource.includes("providerId: provider.id") &&
-    !surfaceSource.includes(
-      "providerId: isConnected ? provider.id : undefined",
-    ) &&
-    surfaceSource.includes("showChevron: isConnected") &&
-    surfaceSource.includes("disabled: false") &&
-    // Connected providers list first (A–Z); disconnected stay muted, not recolored.
-    surfaceSource.includes('left.authStatus === "connected" ? 0 : 1') &&
-    surfaceSource.includes(
-      "left.displayName.localeCompare(right.displayName",
-    ) &&
-    surfaceSource.includes("disconnected: !isConnected") &&
-    styleSource.includes(".is-provider.is-disconnected") &&
-    styleSource.includes("opacity: 0.58") &&
-    // Provider clicks replace the menu; hover never opens a second panel.
-    surfaceSource.includes('setModelMenuPane("provider-model")') &&
-    !surfaceSource.includes("previewConnectedProviderModels") &&
-    !surfaceSource.includes('className="gyro-provider-model-flyout"') &&
-    surfaceSource.includes('authStatus === "connected"') &&
-    surfaceSource.includes("modelPickerProvider.id === effectiveProviderId") &&
-    appSource.includes("selectProvider(providerId);") &&
-    appSource.includes("{ notifySuccess: false }") &&
+    surfaceSource.includes("activeProviderId={effectiveProviderId}") &&
+    // Connected providers first (A–Z); disconnected dimmed below a divider.
+    surfaceSource.includes("Number(right.connected) - Number(left.connected)") &&
+    surfaceSource.includes("isProviderExecutable(provider.id)") &&
+    styleSource.includes(".gyro-model-rail-tile.is-disconnected") &&
+    styleSource.includes(".gyro-model-rail-tile.is-in-use::after") &&
+    styleSource.includes(".gyro-model-rail-divider") &&
+    !surfaceSource.includes('title="Model & effort"') &&
     !appSource.includes('"Model selected"') &&
-    !surfaceSource.includes('action: "select-model"') &&
-    styleSource.includes(".gyro-composer-menu-trailing") &&
-    styleSource.includes(".gyro-composer-menu-item.is-provider:disabled") &&
-    styleSource.includes(".gyro-provider-picker.has-flyout") &&
-    styleSource.includes(".gyro-provider-model-flyout") &&
-    styleSource.includes("margin-left: 2px") &&
-    styleSource.includes("left: 100% !important") &&
-    styleSource.includes(".gyro-composer-menu-item.is-effort") &&
-    styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
-    surfaceSource.includes("getBoundingClientRect") &&
-    !surfaceSource.includes('title="Model & effort"'),
-  "Provider clicks should open models in the same menu and retain provider connection actions.",
+    appSource.includes("{ notifySuccess: false }"),
+  "The model picker should be a provider rail with in-place model lists and connect actions.",
 );
 
 // Split-screen chats each bind their own model. Changing the picker in a new
@@ -6472,12 +6445,12 @@ expect(
   "Anthropic plan usage and the update tip should read live account windows and archive size.",
 );
 
-// Provider drill-down shares the same bounded popover as the model list.
+// The model, provider and provider-model panes all resolve to the one rail.
 expect(
   surfaceSource.includes('modelMenuPane === "provider-model"') &&
-    surfaceSource.includes('menuPane: "provider" as const') &&
+    surfaceSource.includes('activePopover === "provider" && isModelRailPane') &&
     !surfaceSource.includes("modelFlyoutShiftX"),
-  "Provider models should replace the popup with a path back to providers.",
+  "Every model/provider pane should open the model rail.",
 );
 // One chip carries model and effort together, still under the provider's own
 // brand mark. It opens a drill-down menu that names each setting's current
@@ -6501,7 +6474,6 @@ expect(
     surfaceSource.includes("const modelMenuItems: ComposerPopoverItem[]") &&
     surfaceSource.includes('menuPane: "effort" as const') &&
     surfaceSource.includes('kind: "disclosure" as const') &&
-    surfaceSource.includes('modelMenuBackItem("Provider")') &&
     surfaceSource.includes('modelMenuPane === "provider"') &&
     surfaceSource.includes('"gyro-model-menu gyro-effort-picker"') &&
     !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
@@ -6514,7 +6486,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer should expose one model chip whose menu drills into model, effort, and provider.",
+  "Composer should expose one model chip whose menu opens effort first and the model rail from there.",
 );
 
 // Drilling should feel like one card changing its mind, not a stack of
@@ -6766,9 +6738,11 @@ expect(
 );
 expect(
   surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes("{isPlanReadyForDecision && sessionPlan ? (") &&
+    surfaceSource.includes("overlay={") &&
+    surfaceSource.includes("isPlanReadyForDecision && sessionPlan ? (") &&
     surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes("<strong>Ready to implement</strong>") &&
+    surfaceSource.includes("function planDecisionSummary") &&
+    surfaceSource.includes("Implementing switches to Normal mode") &&
     surfaceSource.includes('onDecision("reject")') &&
     surfaceSource.includes('onDecision("approve")') &&
     surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
@@ -8092,7 +8066,7 @@ expect(
     surfaceSource.indexOf('className="gyro-composer-live-changes"') <
       surfaceSource.indexOf("{queuedMessages.length > 0 ?") &&
     surfaceSource.indexOf('className="gyro-composer-live-changes"') <
-      surfaceSource.indexOf("{isPlanReadyForDecision && sessionPlan ?") &&
+      surfaceSource.indexOf("isPlanReadyForDecision && sessionPlan ?") &&
     cssRules(styleSource, ".gyro-chat-message-queue-wrap").every(
       (rule) => !/margin-bottom:\s*-/.test(rule),
     ) &&

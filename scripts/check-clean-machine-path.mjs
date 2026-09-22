@@ -116,7 +116,7 @@ const surfaces = readFileSync(
 );
 assert.match(
   surfaces,
-  /connect-provider:\$\{provider\.id\}/,
+  /connect-provider:\$\{providerId\}/,
   "disconnected providers must offer connect-provider, not a dead Unavailable row",
 );
 assert.doesNotMatch(

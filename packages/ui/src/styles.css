@@ -24786,42 +24786,6 @@ button.gyro-settings-row em::after {
   border-color: var(--gyro-border);
 }
 
-/* In the rail the goal is a companion to the checklist beside it, not the
-   lead element of a transcript, so it drops to the rail's own scale. */
-.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status {
-  border-radius: var(--gyro-radius-md);
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  margin: 0;
-  min-height: 0;
-  padding: 8px 10px;
-}
-
-.gyro-session-goal-band[data-density="rail"]
-  .gyro-session-goal-status
-  > strong {
-  font-size: 12px;
-  grid-column: 2;
-}
-
-.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status-text {
-  font-size: 12px;
-  grid-column: 2;
-  grid-row: 2;
-}
-
-.gyro-plan-goal-section {
-  min-width: 0;
-}
-.gyro-plan-goal-section .gyro-session-goal-band {
-  margin: 0;
-}
-.gyro-plan-rail.is-document > .gyro-plan-goal-section {
-  padding: 12px clamp(14px, 3vw, 24px) 0;
-}
-.gyro-session-goal-band[data-density="rail"] .gyro-session-goal-status-actions {
-  grid-column: 3;
-  grid-row: 1 / 3;
-}
 @media (prefers-reduced-motion: reduce) {
   .gyro-plan-progress > span,
   .gyro-plan-strip-track > span {
@@ -26728,212 +26692,157 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-danger);
 }
 
-/* A sheet the composer sits on: the bottom edge tucks under the composer so
-   the two read as one stack, and only the composer's own border draws the seam. */
+/* Plan approval takes the composer's place: same shell, same corners, with the
+   plan it would build and the two answers. The composer stays mounted (hidden)
+   so a draft survives "Keep planning". */
+.gyro-composer-shell.has-overlay > :not(.gyro-plan-decision-card) {
+  display: none;
+}
+
 .gyro-plan-decision-card {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-bottom: 0;
-  border-radius: var(--gyro-radius-xl) var(--gyro-radius-xl) 0 0;
-  box-shadow: 0 18px 44px rgb(0 0 0 / 28%);
   box-sizing: border-box;
   color: var(--gyro-text);
-  margin-bottom: -8px;
-  max-width: 700px;
-  overflow: hidden;
-  padding: 14px 16px 20px;
-  position: relative;
-  width: min(700px, calc(100% - 24px));
-  /* Behind the composer, not over it: the composer's own top edge is the seam. */
-  z-index: 0;
-}
-
-.gyro-plan-decision-card > header {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-}
-
-.gyro-plan-decision-mark {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted);
-  display: inline-flex;
-  flex: none;
-  height: 26px;
-  justify-content: center;
-  width: 26px;
-}
-
-.gyro-plan-decision-card > header > div {
   display: grid;
-  gap: 2px;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px 12px 12px 16px;
+  position: relative;
+}
+
+.gyro-plan-decision-head {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  min-height: 24px;
+}
+
+.gyro-plan-decision-head > svg {
+  color: var(--gyro-faint);
+  flex: none;
+}
+
+.gyro-plan-decision-head > span {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.gyro-plan-decision-goal {
+.gyro-plan-decision-head small {
+  color: var(--gyro-faint);
+  font-size: inherit;
+}
+
+.gyro-plan-decision-open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.gyro-plan-decision-open:hover,
+.gyro-plan-decision-open:focus-visible {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-decision-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.gyro-plan-decision-text > strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-plan-decision-card > header small,
-.gyro-plan-decision-card li small {
-  color: var(--gyro-faint);
-  font-size: 11px;
-  line-height: 1.4;
+.gyro-plan-decision-text > p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--gyro-muted);
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  overflow: hidden;
 }
 
-.gyro-plan-decision-card > header strong {
-  font-size: 13.5px;
-  font-weight: 630;
-  letter-spacing: -0.012em;
-  line-height: 1.3;
-}
-
-/* Capped at five rows in the markup, so the list never scrolls inside the
-   transcript's own scroller. */
-.gyro-plan-decision-card ol {
-  display: grid;
-  gap: 3px;
-  list-style: none;
-  margin: 12px 0 10px;
-  padding: 0;
-  position: relative;
-}
-
-/* Hairline spine behind the ordinals turns a flat list into a sequence. */
-.gyro-plan-decision-card ol::before {
-  background: var(--gyro-premium-hairline-soft);
-  bottom: 17px;
-  content: "";
-  left: 16px;
-  position: absolute;
-  top: 17px;
-  width: 1px;
-}
-
-.gyro-plan-decision-card li {
-  align-items: start;
-  border-radius: var(--gyro-radius-md);
-  display: grid;
+.gyro-plan-decision-foot {
+  align-items: center;
+  display: flex;
   gap: 10px;
-  grid-template-columns: 20px minmax(0, 1fr);
-  padding: 6px;
-}
-
-.gyro-plan-decision-card li > span {
-  align-items: center;
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 999px;
-  box-sizing: border-box;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 620;
-  height: 20px;
-  justify-content: center;
-  position: relative;
-  width: 20px;
-}
-
-.gyro-plan-decision-summary {
-  color: var(--gyro-muted);
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 12px 0;
-}
-
-.gyro-plan-decision-more {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted);
-  display: inline-flex;
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 560;
-  gap: 7px;
-  margin-bottom: 10px;
-  min-height: 28px;
-  padding: 0 6px;
-}
-
-.gyro-plan-decision-more:hover {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-card li > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.gyro-plan-decision-card li strong {
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.gyro-plan-decision-card > footer {
-  align-items: center;
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
-  display: flex;
-  gap: 12px;
   justify-content: space-between;
-  padding-top: 12px;
+  margin-top: 6px;
 }
 
-.gyro-plan-decision-card > footer > span {
-  color: var(--gyro-muted);
+.gyro-plan-decision-hint {
+  color: var(--gyro-faint);
+  flex: 1 1 auto;
   font-size: 12px;
-  font-weight: 560;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.gyro-plan-decision-card > footer > div {
+.gyro-plan-decision-actions {
   display: flex;
-  gap: 8px;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
 }
 
-.gyro-plan-decision-card > footer button {
-  border: 1px solid var(--gyro-premium-hairline-strong);
+.gyro-plan-decision-actions > button {
+  border: 1px solid transparent;
   border-radius: var(--gyro-radius-md);
+  cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  font-weight: 620;
-  min-height: 32px;
-  padding: 0 13px;
+  font-size: 12.5px;
+  font-weight: 560;
+  min-height: 30px;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
-.gyro-plan-decision-card > footer button.is-secondary {
+.gyro-plan-decision-actions > button.is-secondary {
   background: transparent;
   color: var(--gyro-muted);
 }
 
-.gyro-plan-decision-card > footer button.is-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+.gyro-plan-decision-actions > button.is-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
 }
 
-.gyro-plan-decision-card > footer button.is-primary {
+.gyro-plan-decision-actions > button.is-primary {
   background: var(--gyro-text);
-  border-color: var(--gyro-text);
   color: var(--gyro-app);
 }
 
-.gyro-plan-decision-card > footer button.is-primary:hover:not(:disabled) {
+.gyro-plan-decision-actions > button.is-primary:hover:not(:disabled) {
   opacity: 0.88;
 }
 
-.gyro-plan-decision-card > footer button:disabled {
+.gyro-plan-decision-actions > button:disabled {
   cursor: wait;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 /* Approving switches modes and sends a turn; the bar says the click landed
@@ -26965,37 +26874,16 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+@media (max-width: 520px) {
+  .gyro-plan-decision-hint {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gyro-plan-decision-progress::after {
     animation: none;
     opacity: 0.55;
-  }
-}
-
-.gyro-plan-decision-card > footer button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
-:root[data-theme="light"] .gyro-plan-decision-card {
-  box-shadow: 0 18px 44px rgb(31 41 55 / 16%);
-}
-
-@media (max-width: 620px) {
-  .gyro-plan-decision-card {
-    max-height: min(360px, calc(100vh - 190px));
-    padding-inline: 12px;
-    width: calc(100% - 12px);
-  }
-
-  .gyro-plan-decision-card > footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .gyro-plan-decision-card > footer > div {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -31234,8 +31122,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-composer-dock > .gyro-composer-shell,
 .gyro-chat-composer-dock > .gyro-chat-message-queue,
 .gyro-chat-composer-dock > .gyro-model-focus-strip,
-.gyro-chat-composer-dock > .gyro-model-focus-peek,
-.gyro-chat-composer-dock > .gyro-plan-decision-card {
+.gyro-chat-composer-dock > .gyro-model-focus-peek {
   align-self: stretch;
   box-sizing: border-box;
   margin-inline: auto;
@@ -35058,78 +34945,6 @@ button.gyro-account-menu-row:hover,
   }
 }
 
-/* Approval is a compact decision, not a second copy of the full plan. */
-.gyro-plan-decision-card {
-  box-shadow: 0 14px 32px rgb(0 0 0 / 20%);
-  padding: 12px 14px 18px;
-}
-
-.gyro-plan-decision-card > header {
-  gap: 9px;
-}
-
-.gyro-plan-decision-card > header > .gyro-plan-decision-open {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  margin-left: auto;
-  min-height: 28px;
-  padding: 0 8px;
-}
-
-.gyro-plan-decision-card > header > .gyro-plan-decision-open:hover {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-card ol {
-  margin: 10px 0 8px;
-}
-
-.gyro-plan-decision-card li {
-  padding-block: 4px;
-}
-
-.gyro-plan-decision-card > footer {
-  gap: 8px;
-  justify-content: flex-end;
-  padding-top: 10px;
-}
-
-.gyro-plan-decision-card > footer > button {
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 620;
-  min-height: 31px;
-  padding: 0 12px;
-}
-
-.gyro-plan-decision-card > footer > button.is-secondary {
-  background: transparent;
-  color: var(--gyro-muted);
-}
-
-.gyro-plan-decision-card > footer > button.is-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-card > footer > button.is-primary {
-  background: var(--gyro-text);
-  border-color: var(--gyro-text);
-  color: var(--gyro-app);
-}
-
-.gyro-plan-decision-card > footer > button.is-primary:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
 /* Sent screenshots are clearly interactive, then open above the whole app. */
 .gyro-transcript-image-preview {
   background: transparent;
@@ -35690,18 +35505,6 @@ button.gyro-account-menu-row:hover,
 }
 
 @media (max-width: 620px) {
-  .gyro-plan-decision-card > header {
-    align-items: flex-start;
-  }
-
-  .gyro-plan-decision-card > header > .gyro-plan-decision-open {
-    margin-top: -2px;
-  }
-
-  .gyro-plan-decision-card > footer {
-    flex-direction: row;
-  }
-
   .gyro-image-preview-overlay {
     padding: 16px;
   }
@@ -41697,13 +41500,6 @@ textarea:focus-visible,
   font-weight: 450;
 }
 
-/* Goal and plan: reserve a row for the shared outcome in both rail views. */
-.gyro-chat-surface.has-environment .gyro-chat-tool-rail.has-plan {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-}
-.gyro-chat-tool-rail.has-plan > .gyro-plan-goal-section {
-  padding-block: 8px;
-}
 .gyro-plan-harness > header {
   flex-wrap: wrap;
 }
@@ -42417,15 +42213,6 @@ textarea:focus-visible,
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-plan-decision-card {
-  background: var(--gyro-surface);
-  border-color: var(--gyro-border);
-  border-radius: 16px 16px 0 0;
-  box-shadow: none;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-message-queue
   article
   p {
@@ -42980,4 +42767,312 @@ textarea:focus-visible,
 
 .gyro-transcript-attachment.is-terminal-output {
   max-width: 320px;
+}
+
+/* Model rail: provider marks down the left, the previewed provider's models
+   beside them. One panel replaces the model → provider → model drill-down. */
+.gyro-composer-control-model {
+  --gyro-model-rail-width: min(340px, calc(100vw - 24px));
+  --gyro-model-rail-accent: #3982fa;
+  --gyro-model-rail-tile: 36px;
+}
+:root .gyro-composer-popover.gyro-model-rail {
+  display: grid;
+  grid-template-columns: calc(var(--gyro-model-rail-tile) + 14px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  width: var(--gyro-model-rail-width);
+  min-width: 0;
+  max-width: none;
+  height: min(372px, calc(100vh - 96px));
+  padding: 0;
+  gap: 0;
+  border-radius: 19px;
+  background: var(--gyro-surface);
+  overflow: hidden;
+}
+
+.gyro-model-rail-providers {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 7px 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-right: 1px solid var(--gyro-premium-hairline-strong);
+  background: color-mix(in srgb, var(--gyro-text) 2.5%, transparent);
+}
+.gyro-model-rail-providers::-webkit-scrollbar {
+  display: none;
+}
+.gyro-model-rail-divider {
+  flex: none;
+  width: 18px;
+  height: 1px;
+  margin: 3px 0;
+  background: var(--gyro-premium-hairline-strong);
+}
+
+.gyro-model-rail-tile {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--gyro-model-rail-tile);
+  height: var(--gyro-model-rail-tile);
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.gyro-model-rail-tile .gyro-provider-logo {
+  width: 19px;
+  height: 19px;
+  transition: filter 120ms ease;
+}
+.gyro-model-rail-tile:hover {
+  background: var(--gyro-premium-control-hover);
+}
+.gyro-model-rail-tile.is-selected {
+  background: var(--gyro-surface-raised, var(--gyro-surface));
+  box-shadow:
+    0 0 0 1px var(--gyro-premium-hairline-strong),
+    0 1px 3px rgb(0 0 0 / 8%);
+}
+/* A short accent bar marks the provider being browsed. */
+.gyro-model-rail-tile.is-selected::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--gyro-model-rail-accent);
+}
+/* A dot marks the provider the composer is using right now. */
+.gyro-model-rail-tile.is-in-use::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gyro-model-rail-accent);
+  box-shadow: 0 0 0 2px var(--gyro-surface);
+}
+.gyro-model-rail-tile.is-disconnected .gyro-provider-logo {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.gyro-model-rail-tile.is-disconnected:hover .gyro-provider-logo,
+.gyro-model-rail-tile.is-disconnected.is-selected .gyro-provider-logo {
+  filter: grayscale(0.4);
+  opacity: 0.85;
+}
+/* The gear stays reachable however many providers the rail has to scroll. */
+.gyro-model-rail-tile.is-utility {
+  position: sticky;
+  bottom: -7px;
+  z-index: 1;
+  margin-top: auto;
+  --gyro-model-rail-floor: color-mix(
+    in srgb,
+    var(--gyro-text) 2.5%,
+    var(--gyro-surface)
+  );
+  box-shadow: 0 -6px 0 1px var(--gyro-model-rail-floor);
+  background: var(--gyro-model-rail-floor);
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--gyro-faint);
+}
+.gyro-model-rail-tile.is-utility:hover {
+  color: var(--gyro-text);
+}
+.gyro-model-rail-tile:focus-visible,
+.gyro-model-rail-model:focus-visible,
+.gyro-model-rail-empty button:focus-visible {
+  outline: 1.9px solid var(--gyro-model-rail-accent);
+  outline-offset: -1.9px;
+}
+
+.gyro-model-rail-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.gyro-model-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 13px 14px 8px 14px;
+}
+.gyro-model-rail-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gyro-text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-model-rail-head small {
+  flex: none;
+  color: var(--gyro-faint);
+  font-size: 11.5px;
+}
+.gyro-model-rail-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 8px 6px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #e5a100 12%, transparent);
+  color: color-mix(in srgb, #b97d00 80%, var(--gyro-text));
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.gyro-model-rail-warning svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.gyro-model-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  padding: 0 6px 6px;
+  overflow-y: auto;
+  animation: gyro-model-rail-swap 140ms ease-out;
+}
+@keyframes gyro-model-rail-swap {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-model-rail-list {
+    animation: none;
+  }
+}
+.gyro-model-rail-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 8px 0 9px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-model-rail-model:hover,
+.gyro-model-rail-model:focus-visible {
+  background: var(--gyro-premium-control-hover);
+}
+.gyro-model-rail-model.is-active {
+  background: color-mix(in srgb, var(--gyro-model-rail-accent) 9%, transparent);
+}
+.gyro-model-rail-model.is-active:hover {
+  background: color-mix(in srgb, var(--gyro-model-rail-accent) 13%, transparent);
+}
+.gyro-model-rail-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-model-rail-model.is-active .gyro-model-rail-model-name {
+  font-weight: 550;
+}
+.gyro-model-rail-context {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.gyro-model-rail-check {
+  display: grid;
+  place-items: center;
+  color: var(--gyro-model-rail-accent);
+}
+
+.gyro-model-rail-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 20px 28px;
+  text-align: center;
+}
+.gyro-model-rail-empty p {
+  margin: 0;
+  max-width: 22ch;
+  color: var(--gyro-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.gyro-model-rail-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+.gyro-model-rail-empty-mark .gyro-provider-logo {
+  width: 22px;
+  height: 22px;
+}
+.gyro-model-rail-empty button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.gyro-model-rail-empty button:hover {
+  background: var(--gyro-premium-control-hover);
+}
+.gyro-model-rail-empty button.is-primary {
+  border-color: transparent;
+  background: var(--gyro-model-rail-accent);
+  color: #fff;
+}
+.gyro-model-rail-empty button.is-primary:hover {
+  background: color-mix(in srgb, var(--gyro-model-rail-accent) 88%, black);
 }
