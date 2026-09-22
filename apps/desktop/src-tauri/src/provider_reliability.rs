@@ -103,17 +103,17 @@ mod tests {
             .contains("unfinished"));
         // The model is no longer told to name the internal budget, so it cannot
         // paraphrase it into a product limit the user cannot lift.
-        assert!(!messages[1]["content"]
-            .as_str()
-            .unwrap()
-            .contains("round"));
+        assert!(!messages[1]["content"].as_str().unwrap().contains("round"));
     }
 
     #[test]
     fn a_raised_budget_keeps_offering_tools_past_the_old_ceiling() {
         let mut messages = Vec::new();
         let tools = vec![serde_json::json!({"type":"function"})];
-        assert_eq!(tools_for_round(&mut messages, &tools, 128, Some(512)), tools);
+        assert_eq!(
+            tools_for_round(&mut messages, &tools, 128, Some(512)),
+            tools
+        );
         assert!(messages.is_empty());
         assert!(tools_for_round(&mut messages, &tools, 512, Some(512)).is_empty());
         assert_eq!(messages.len(), 1);

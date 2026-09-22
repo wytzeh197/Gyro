@@ -1,8 +1,8 @@
-mod model_catalog;
-mod provider_reliability;
-mod provider_mcp;
-mod git_read;
 mod canvas_preview;
+mod git_read;
+mod model_catalog;
+mod provider_mcp;
+mod provider_reliability;
 use provider_reliability::{is_transient_provider_error, provider_failure_recovery};
 mod openai_compatible_runner;
 mod provider_api_keys;
@@ -7809,7 +7809,9 @@ impl WorkspacePreparationManager {
         state.in_flight.remove(&root);
         if let Ok(snapshot) = result.as_ref() {
             if snapshot.progress.status == "ready" && snapshot.progress.errors.is_empty() {
-                state.completed.insert(root, (Instant::now(), snapshot.clone()));
+                state
+                    .completed
+                    .insert(root, (Instant::now(), snapshot.clone()));
                 prune_workspace_preparation_completed(&mut state);
             } else {
                 state.completed.remove(&root);
@@ -7935,7 +7937,9 @@ fn prepare_workspace_impl(
     let task_handle = std::thread::spawn(move || task_discover_impl(&task_root));
     std::thread::spawn(move || {
         let _ = git_tx.send(git_status_cache::inspect_git_status_before(
-            &git_root, false, git_deadline,
+            &git_root,
+            false,
+            git_deadline,
         ));
     });
     std::thread::spawn(move || {
@@ -7948,7 +7952,8 @@ fn prepare_workspace_impl(
             if let Some(error) = &status.error {
                 if !error.contains("not a git repository") {
                     errors.push(WorkspacePreparationError {
-                        phase: "git".into(), message: error.clone(),
+                        phase: "git".into(),
+                        message: error.clone(),
                     });
                 }
             }
@@ -7967,7 +7972,9 @@ fn prepare_workspace_impl(
                 message: "Inspecting Git timed out".into(),
             });
             Some(git_status_read_failure(
-                Some(root), "Inspecting Git timed out".into(), true,
+                Some(root),
+                "Inspecting Git timed out".into(),
+                true,
             ))
         }
     };
@@ -7975,13 +7982,15 @@ fn prepare_workspace_impl(
         Ok(Ok(catalog)) => Some(catalog),
         Ok(Err(error)) => {
             errors.push(WorkspacePreparationError {
-                phase: "git".into(), message: format!("Branch inspection: {error}"),
+                phase: "git".into(),
+                message: format!("Branch inspection: {error}"),
             });
             None
         }
         Err(_) => {
             errors.push(WorkspacePreparationError {
-                phase: "git".into(), message: "Branch inspection timed out".into(),
+                phase: "git".into(),
+                message: "Branch inspection timed out".into(),
             });
             None
         }
@@ -8397,7 +8406,8 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
 }
 
 fn git_branch_catalog_before(
-    workspace_path: &str, deadline: Instant,
+    workspace_path: &str,
+    deadline: Instant,
 ) -> anyhow::Result<GitBranchCatalog> {
     let root = workspace_root(workspace_path)?;
     let Some(repo_root) = git_read::repo_root(&root, deadline)? else {
@@ -8448,7 +8458,10 @@ fn git_branch_catalog_before(
         .args(["branch", "--show-current"]);
     let current_output = git_read::run(&current_command, deadline, 64 * 1024)?;
     if !current_output.succeeded() || current_output.stdout_truncated {
-        return Err(bounded_command_error("could not read current branch", &current_output));
+        return Err(bounded_command_error(
+            "could not read current branch",
+            &current_output,
+        ));
     }
     let current = current_output
         .succeeded()
@@ -8469,7 +8482,8 @@ fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktre
 }
 
 fn git_linked_worktrees_before(
-    repo_root: &Path, deadline: Instant,
+    repo_root: &Path,
+    deadline: Instant,
 ) -> anyhow::Result<Vec<GitLinkedWorktree>> {
     let mut command = git_command();
     command
@@ -22948,11 +22962,13 @@ pub fn run_provider_capability_server() -> anyhow::Result<()> {
         std::io::stdout(),
         "gyro-provider-capabilities",
         advertised_capability_descriptors(context.mode)
-            .map(|descriptor| serde_json::json!({
-                "name": descriptor.id.provider_tool_name(),
-                "description": descriptor.description,
-                "inputSchema": desktop_capability_tool_schema(descriptor.id),
-            }))
+            .map(|descriptor| {
+                serde_json::json!({
+                    "name": descriptor.id.provider_tool_name(),
+                    "description": descriptor.description,
+                    "inputSchema": desktop_capability_tool_schema(descriptor.id),
+                })
+            })
             .collect(),
         |params| desktop_capability_tool_call(&paths, &context, params),
     )
@@ -23570,7 +23586,10 @@ fn bind_cli_ipc_listener(
                         // Permission failures and transient resource exhaustion do
                         // not prove the owner exited. Never unlink a live bridge.
                         return Err(error).with_context(|| {
-                            format!("probe existing Gyro IPC socket {}", paths.socket_path.display())
+                            format!(
+                                "probe existing Gyro IPC socket {}",
+                                paths.socket_path.display()
+                            )
                         });
                     }
                 }
@@ -23600,7 +23619,10 @@ fn bind_cli_ipc_listener(
         fs::set_permissions(&paths.socket_path, fs::Permissions::from_mode(0o600))?;
         return Ok(Some(listener));
     }
-    anyhow::bail!("Gyro IPC socket kept changing while binding {}", paths.socket_path.display())
+    anyhow::bail!(
+        "Gyro IPC socket kept changing while binding {}",
+        paths.socket_path.display()
+    )
 }
 
 #[cfg(unix)]
@@ -24383,15 +24405,31 @@ mod tests {
     fn workspace_guidance_survives_resume_and_respects_tool_access() {
         let mut request = anthropic_provider_request();
         for resumed in [false, true] {
-            let turn = PromptTurn { resumed, approvals_sent_separately: false };
+            let turn = PromptTurn {
+                resumed,
+                approvals_sent_separately: false,
+            };
             let context = provider_context_message_for_turn(&request, None, turn);
             assert!(context.contains("Selected workspace: /tmp/gyro-workspace"));
             assert!(context.contains("do not ask the user to paste files you can read"));
             assert!(context.contains("gyro_workspace_edit"));
             assert!(context.contains("report pending review"));
             for prompt in [
-                openai_codex_chat_prompt(&context, request.workspace_path.as_deref(), None, false, true, resumed),
-                claude_chat_prompt(&context, request.workspace_path.as_deref(), false, true, resumed),
+                openai_codex_chat_prompt(
+                    &context,
+                    request.workspace_path.as_deref(),
+                    None,
+                    false,
+                    true,
+                    resumed,
+                ),
+                claude_chat_prompt(
+                    &context,
+                    request.workspace_path.as_deref(),
+                    false,
+                    true,
+                    resumed,
+                ),
             ] {
                 assert!(!prompt.contains("only as optional context"));
                 assert!(prompt.contains("inspect its status"));
