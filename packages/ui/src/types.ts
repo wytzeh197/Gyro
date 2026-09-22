@@ -321,7 +321,12 @@ export type SessionGoal = {
 };
 
 export type ChatAttachmentKind =
-  "ide-snapshot" | "browser-snapshot" | "image" | "video" | "workspace-file";
+  | "ide-snapshot"
+  | "browser-snapshot"
+  | "terminal-output"
+  | "image"
+  | "video"
+  | "workspace-file";
 
 export type ChatAttachment = {
   id: string;
@@ -336,6 +341,8 @@ export type ChatAttachment = {
   available?: boolean;
   stale?: boolean;
   previewUrl?: string;
+  /** Redacted stored text of a terminal-output attachment, for the composer preview. */
+  previewText?: string;
 };
 
 export type SettingsSectionId =
@@ -1462,8 +1469,15 @@ export type SourceControlState = {
   available: boolean;
   branch?: string;
   upstream?: string;
+  /** The upstream is configured but the remote branch no longer exists. */
+  upstreamGone?: boolean;
   ahead: number;
   behind: number;
+  /** HEAD points at a commit rather than a branch. */
+  detached?: boolean;
+  /** A git operation left in progress in this worktree. */
+  operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect" | null;
+  stashCount?: number;
   repoRoot?: string;
   additions: number;
   deletions: number;

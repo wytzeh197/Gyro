@@ -3,7 +3,8 @@
 use std::time::{Duration, Instant};
 
 pub(crate) struct UsagePoll<T> {
-    cached: Option<(Instant, Result<T, String>)>,
+    /// When the reading was taken, when it expires, and what it was.
+    cached: Option<(Instant, Instant, Result<T, String>)>,
     failures: u32,
 }
 
@@ -15,13 +16,31 @@ impl<T: Clone> UsagePoll<T> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn read(
         &mut self,
         now: Instant,
         fetch: impl FnOnce(&mut Duration) -> Result<T, String>,
     ) -> Result<T, String> {
-        if let Some((until, result)) = &self.cached {
-            if now < *until {
+        self.read_within(now, None, fetch)
+    }
+
+    /// Like `read`, but a successful reading older than `max_age` is refetched
+    /// before its cache expires. A finished turn just spent from the plan, so
+    /// it asks for a reading taken after it rather than one from before.
+    /// Failures keep their full cooldown: asking sooner only earns another 429.
+    pub(crate) fn read_within(
+        &mut self,
+        now: Instant,
+        max_age: Option<Duration>,
+        fetch: impl FnOnce(&mut Duration) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if let Some((fetched_at, until, result)) = &self.cached {
+            let young_enough = match (result, max_age) {
+                (Ok(_), Some(max_age)) => now < *fetched_at + max_age,
+                _ => true,
+            };
+            if now < *until && young_enough {
                 return result.clone();
             }
         }
@@ -33,7 +52,7 @@ impl<T: Clone> UsagePoll<T> {
         } else {
             self.failures = self.failures.saturating_add(1);
         }
-        self.cached = Some((now + cooldown, result.clone()));
+        self.cached = Some((now, now + cooldown, result.clone()));
         result
     }
 }
@@ -71,6 +90,31 @@ mod tests {
             Ok(93)
         );
         assert_eq!(poll.read(now + Duration::from_secs(45), |_| Ok(94)), Ok(94));
+    }
+
+    #[test]
+    fn a_fresh_read_refetches_an_aging_reading_but_not_a_failure() {
+        let mut poll = UsagePoll::new();
+        let now = Instant::now();
+        let fresh = Some(Duration::from_secs(10));
+        assert_eq!(poll.read(now, |_| Ok(1)), Ok(1));
+        assert_eq!(
+            poll.read_within(now + Duration::from_secs(9), fresh, |_| panic!(
+                "duplicate request"
+            )),
+            Ok(1)
+        );
+        assert_eq!(
+            poll.read_within(now + Duration::from_secs(10), fresh, |_| Ok(2)),
+            Ok(2)
+        );
+        let failed = poll.read(now + Duration::from_secs(60), |_| Err("Offline".into()));
+        assert_eq!(
+            poll.read_within(now + Duration::from_secs(80), fresh, |_| panic!(
+                "early retry"
+            )),
+            failed
+        );
     }
 
     #[test]

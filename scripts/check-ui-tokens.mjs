@@ -90,6 +90,9 @@ const allowedGradient = [
   // content samples, not decorative surface washes.
   /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong|theme-preview-(?:dark|light)-(?:canvas|content))\) 0 0\)/,
   /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/,
+  // A mask is an alpha ramp, not paint: the plan card's preview fades its
+  // lower edge out so the cut matches whichever surface the card sits on.
+  /mask-image:\s*linear-gradient\(#000 40%, transparent\)/,
 ];
 
 const styleLines = styles.split("\n");

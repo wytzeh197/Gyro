@@ -146,6 +146,14 @@ containsAll(headers, "Cloudflare Pages headers", [
   "X-Content-Type-Options: nosniff",
   "X-Frame-Options: DENY",
 ]);
+// A published model can only reach a picker as fast as the edge hands the
+// catalog over, so it must not be cached longer than a focused poll interval.
+check(
+  headers.includes(
+    "/model-catalog.json\n  Cache-Control: public, max-age=60, must-revalidate",
+  ),
+  "site/_headers must revalidate /model-catalog.json within a minute",
+);
 containsAll(robots, "robots.txt", [
   "User-agent: *",
   "Allow: /",

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { environmentActions } from "../packages/ui/src/environment-actions.ts";
+import {
+  environmentActions,
+  environmentNotice,
+  environmentSync,
+  middleTruncate,
+} from "../packages/ui/src/environment-actions.ts";
 
 const repo = (overrides = {}) => ({
   provider: "git",
@@ -118,6 +123,76 @@ for (const state of [undefined, repo({ available: false })]) {
     assert.equal(action.enabled, false);
     assert.equal(action.detail, "No repository here");
   }
+}
+
+// A deleted remote branch reports no ahead count, but pushing is what restores
+// it — and a pull request against a ref that is gone cannot open.
+{
+  const actions = byId(repo({ upstream: "origin/feature", upstreamGone: true }));
+  assert.equal(actions["commit-or-push"].enabled, true);
+  assert.equal(actions["commit-or-push"].detail, "Publish this branch again");
+  assert.equal(actions["create-pull-request"].enabled, false);
+}
+
+// Nothing can be pushed or proposed from a detached HEAD.
+{
+  const actions = byId(repo({ branch: "(detached)", detached: true }));
+  assert.equal(actions["commit-or-push"].enabled, false);
+  assert.equal(actions["create-pull-request"].enabled, false);
+}
+
+// Sync names where the branch stands, in the fewest characters.
+assert.equal(environmentSync(undefined), undefined);
+assert.equal(environmentSync(repo()).label, "Not published");
+assert.equal(environmentSync(repo({ upstream: "origin/main" })).label, "Up to date");
+assert.equal(
+  environmentSync(repo({ upstream: "origin/main", ahead: 2 })).label,
+  "↑2",
+);
+assert.equal(
+  environmentSync(repo({ upstream: "origin/main", behind: 1 })).label,
+  "↓1",
+);
+{
+  const diverged = environmentSync(
+    repo({ upstream: "origin/main", ahead: 2, behind: 1 }),
+  );
+  assert.equal(diverged.label, "↑2 ↓1");
+  assert.equal(diverged.tone, "warning");
+}
+assert.equal(
+  environmentSync(repo({ upstream: "origin/x", upstreamGone: true })).label,
+  "Remote deleted",
+);
+assert.equal(environmentSync(repo({ detached: true })).label, "Detached");
+
+// The notice surfaces the most blocking state first, and nothing when healthy.
+assert.equal(environmentNotice(repo()), undefined);
+assert.equal(
+  environmentNotice(
+    repo({
+      operation: "rebase",
+      files: [{ ...file("a.ts"), state: "conflicted" }],
+    }),
+  ),
+  "Rebase in progress with 1 conflict",
+);
+assert.equal(
+  environmentNotice(repo({ files: [{ ...file("a.ts"), state: "conflicted" }] })),
+  "1 conflicted file",
+);
+assert.equal(
+  environmentNotice(repo({ error: "git timed out" })),
+  "git timed out",
+);
+
+// Long branches keep both their family and the part that tells them apart.
+assert.equal(middleTruncate("main", 24), "main");
+{
+  const short = middleTruncate("release/v0.1.0-alpha.49.3-hotfix", 24);
+  assert.equal(short.length, 24);
+  assert.ok(short.startsWith("release/"));
+  assert.ok(short.endsWith("hotfix"));
 }
 
 // The popover's readiness rule has to match the Review surface's git action

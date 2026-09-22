@@ -174,11 +174,11 @@ pub(super) fn run_openai_compatible_chat(
     if request.attachments.iter().any(|attachment| {
         !matches!(
             attachment.kind.as_str(),
-            "ide-snapshot" | "browser-snapshot"
+            "ide-snapshot" | "browser-snapshot" | "terminal-output"
         ) && !(supports_images && attachment.kind == "image")
     }) {
         anyhow::bail!(
-            "{label} currently accepts Browser and Editor snapshots; remove other attachments and retry."
+            "{label} currently accepts Browser and Editor snapshots and terminal output; remove other attachments and retry."
         );
     }
     let cancellation = app

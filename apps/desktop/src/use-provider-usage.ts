@@ -32,9 +32,19 @@ export function useProviderUsage(options: {
     {},
   );
   const providerUsageInFlightRef = useRef(new Set<ProviderId>());
+  // A fresh read asked for while another is in flight runs once that one
+  // lands: the earlier request may predate the spend it was asked to show.
+  const providerUsageFreshQueuedRef = useRef(new Set<ProviderId>());
   const refreshProviderUsage = useCallback(
-    async (providerId: ProviderId, showFailureNotification = false) => {
-      if (providerUsageInFlightRef.current.has(providerId)) return;
+    async (
+      providerId: ProviderId,
+      showFailureNotification = false,
+      fresh = false,
+    ): Promise<void> => {
+      if (providerUsageInFlightRef.current.has(providerId)) {
+        if (fresh) providerUsageFreshQueuedRef.current.add(providerId);
+        return;
+      }
       const request = (providerUsageRequestRef.current[providerId] ?? 0) + 1;
       providerUsageRequestRef.current[providerId] = request;
       setProviderUsageByProvider((current) => ({
@@ -79,7 +89,7 @@ export function useProviderUsage(options: {
       try {
         const snapshot = await invoke<ProviderUsageSnapshot>(
           "get_provider_usage",
-          { providerId },
+          { providerId, fresh },
         );
         if (request !== providerUsageRequestRef.current[providerId]) return;
         setProviderUsageByProvider((current) => ({
@@ -106,6 +116,9 @@ export function useProviderUsage(options: {
         }
       } finally {
         providerUsageInFlightRef.current.delete(providerId);
+        if (providerUsageFreshQueuedRef.current.delete(providerId)) {
+          void refreshProviderUsage(providerId, false, true);
+        }
       }
     },
     [notify],

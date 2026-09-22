@@ -1,16 +1,24 @@
+/* The composer expands upward with this card over it: a sheet in the
+   composer's own column, never the pane width, whose bottom tucks under the
+   composer so the composer's top border draws the seam between the two. The
+   dock publishes the column as --gyro-composer-width for its own children. */
 .gyro-chat-question-popup {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: 60;
+  position: relative;
+  z-index: 0;
   display: flex;
   flex-direction: column;
-  max-height: min(680px, 72vh);
-  margin: 0;
-  background: var(--gyro-pane);
+  box-sizing: border-box;
+  width: min(100%, var(--gyro-composer-width, 760px));
+  max-width: min(100%, var(--gyro-composer-width, 760px));
+  max-height: min(600px, 64vh);
+  margin: 0 auto -8px;
+  /* The composer's own surface: white in light, one step above the dock in
+     dark, the same treatment the plan sheet under the composer uses. */
+  background: var(--gyro-surface-raised);
   color: var(--gyro-text);
   border: 1px solid var(--gyro-border);
-  border-radius: 20px;
+  border-bottom: 0;
+  border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
   box-shadow: 0 -8px 40px color-mix(in srgb, black 16%, transparent);
   overflow: hidden;
   pointer-events: auto;
