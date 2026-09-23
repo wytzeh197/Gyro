@@ -73,8 +73,12 @@ so this infrastructure introduces no unverified models.
 
 - `minClientRevision` gates entries on an explicit catalog implementation
   revision bundled into the app. Revision 1 supports only the existing provider
-  integrations and reasoning vocabulary. Increment it when a later app release
-  adds capabilities that older clients cannot execute.
+  integrations and reasoning vocabulary, but its Codex runner rejects
+  reasoning efforts for model IDs it does not already know. Revision 2 (Alpha
+  49.4) forwards any effort in the shared vocabulary for unknown Codex models
+  and lets Codex validate it; new OpenAI entries need `minClientRevision: 2`.
+  Increment it when a later app release adds capabilities that older clients
+  cannot execute.
 - `rolloutPercentage` uses a persistent installation bucket from 0 to 99.
   Raising it expands the rollout without transmitting an installation ID.
 - Remove an overlay entry to withdraw it, publish an earlier document to roll
@@ -90,11 +94,24 @@ whole document atomically.
 
 ## Scope and release requirements
 
-This first version updates model-picker metadata and available choices. It does
-not install or upgrade provider CLIs, change authentication, add runners, or
-update the native fallback context-window tables. Runtime-reported context
-limits remain authoritative; models requiring new native handling still need
-an app release. Catalog publication must account for supported CLI versions.
+From revision 2 the native runner keeps its own copy of the catalog. Every
+fetch the picker makes also installs the document in the runner and saves it to
+`model-catalog.json` in Gyro's data directory, so it survives a restart without a
+network. The Codex and Grok runners take a model's allowed reasoning levels from
+`supportedReasoningEfforts`, and context tracking takes its window from
+`contextWindowTokens`, before falling back to the bundled tables. So an ordinary
+new model for an existing provider needs only a catalog entry at
+`minClientRevision: 2` with both fields filled in, and no app release. The runner
+applies the same `minClientRevision` gate as the picker; a Rust test keeps the
+two revision constants equal, and another checks that `site/model-catalog.json`
+parses natively.
+
+The catalog does not install or upgrade provider CLIs, change authentication,
+add runners, or add CLI flags. Runtime-reported context limits remain
+authoritative. A model that needs any of those still needs an app release, and
+that release bumps the client revision in both `remote-model-catalog.ts` and
+`model_catalog.rs`. Catalog publication must account for supported CLI
+versions.
 
 Users need one app release containing this client, and the site catalog must
 be deployed, before remote model additions work. The minute-level check is part

@@ -21,6 +21,36 @@ composer, companion panel, and the right-hand tools rail.
 - Blue indicates selection, focus, or the primary action. Additions remain green;
   deletions remain red. Verification and failure include words and symbols.
 
+### Workspace panel rules
+
+- Keep the existing graphite, porcelain, and blue palette. Use spacing and
+  hierarchy to reduce bulk before reducing readable text size.
+- A workspace AI chat needs at least 440px. Its Environment card takes a bounded
+  row below the title when open, leaving the transcript and composer unobscured.
+- Source Control starts at 360px so its branch and file names remain useful. It
+  can still be resized; editor space remains the other priority.
+- Keep the conversation's reading width near 760px in the full chat. Utility
+  panels may take adjacent space only while the remaining conversation stays
+  readable. At a narrow width, stack a utility above content within its pane.
+- Review may fold its changed-file list into a single row so the diff has room
+  to read. The list reopens in place without losing the selected file.
+- Reopening Terminal or another ordinary workspace drawer after Browser focus
+  or a near-full drawer restores a useful editor height. Resizing an open drawer
+  remains an explicit way to give that tool more space.
+- Explorer keeps source folders and root files first, then dotfile configuration,
+  then known dependency and build output paths. These paths stay visible and
+  keyboard reachable; children of each folder retain the usual directory-first
+  order.
+- Session titles stay on one line in the narrow rail. Truncated titles retain
+  their full tooltip and accessible name; the timestamp keeps its own space.
+- Appearance theme samples stay short enough that density and color controls
+  remain in the first view. Provider rows show setup guidance when a connection
+  needs action, while the model, connection state, and primary button carry the
+  routine connected state.
+- Large-file text diffs open with lines wrapped, and the toggle still allows
+  horizontal scrolling when exact line layout matters. An empty editor uses a
+  centered, single-line prompt that names the next file selection.
+
 ## The activity thread
 
 A small state mark and restrained vertical line anchor the existing `ChatRun`.
@@ -90,13 +120,13 @@ The goal states the outcome; the plan describes the route. Completing every step
 does not complete the goal. Changing chat mode preserves both the saved goal and
 a goal draft. Plan mode carries the goal into the planning request.
 
-| State | Label | Mark | Token |
-| --- | --- | --- | --- |
-| Not started | Not started | Open circle | `--gyro-faint` |
-| In progress | Working | Dashed ring; rotation only without reduced motion | `--gyro-status-running` |
-| Complete | Completed | Filled check | `--gyro-status-success` |
-| Blocked | Blocked | Minus in outlined circle | `--gyro-status-failed` |
-| Approval | Awaiting approval | Diamond | `--gyro-status-waiting` |
+| State       | Label             | Mark                                              | Token                   |
+| ----------- | ----------------- | ------------------------------------------------- | ----------------------- |
+| Not started | Not started       | Open circle                                       | `--gyro-faint`          |
+| In progress | Working           | Dashed ring; rotation only without reduced motion | `--gyro-status-running` |
+| Complete    | Completed         | Filled check                                      | `--gyro-status-success` |
+| Blocked     | Blocked           | Minus in outlined circle                          | `--gyro-status-failed`  |
+| Approval    | Awaiting approval | Diamond                                           | `--gyro-status-waiting` |
 
 Dark status colors are tuned for graphite; light values resolve through the light
 blue, success, warning, danger and muted tokens. Plan mode itself is neutral.

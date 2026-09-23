@@ -35,6 +35,33 @@ assert.deepEqual(
   [root, dir, entry, other],
   "Added workspace roots retain their order",
 );
+const rootEntries = [
+  { path: "/project/.github", kind: "directory" },
+  { path: "/project/.pnpm-store", kind: "directory" },
+  { path: "/project/.wrangler", kind: "directory" },
+  { path: "/project/node_modules", kind: "directory" },
+  { path: "/project/target", kind: "directory" },
+  { path: "/project/README.md", kind: "file" },
+  { path: "/project/apps", kind: "directory" },
+  { path: "/project/.env.example", kind: "file" },
+  { path: "/project/src", kind: "directory" },
+];
+assert.deepEqual(
+  mergeExplorerDirectories([root, ...rootEntries], []).map((file) => file.path),
+  [
+    "/project",
+    "/project/apps",
+    "/project/src",
+    "/project/README.md",
+    "/project/.github",
+    "/project/.env.example",
+    "/project/.pnpm-store",
+    "/project/.wrangler",
+    "/project/node_modules",
+    "/project/target",
+  ],
+  "Root content should lead while configuration and generated paths remain visible",
+);
 const many = Array.from({ length: 1250 }, (_, i) => ({
   path: `/project/src/file-${i}.ts`,
   kind: "file",
@@ -67,5 +94,5 @@ assert.deepEqual(
   "Search exclusions should remain independent of Explorer visibility",
 );
 console.log(
-  "Workspace Explorer checks passed: complete listings, refresh, deletion, multiple roots, and exclusion migration.",
+  "Workspace Explorer checks passed: complete listings, root order, refresh, deletion, multiple roots, and exclusion migration.",
 );

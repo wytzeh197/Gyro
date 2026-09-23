@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { WorkspaceFile } from "@gyro-dev/ui";
+import { workspaceExplorerRootEntryGroup } from "@gyro-dev/ui/workspace-project";
 
 type DirectoryListing = { path: string; files: WorkspaceFile[] };
 
@@ -22,10 +23,16 @@ export function mergeExplorerDirectories(
   const visit = (file: WorkspaceFile) => {
     result.push(file);
     if (file.kind !== "directory") return;
+    const groupRank = (entry: WorkspaceFile) => {
+      if (!file.isWorkspaceRoot) return entry.kind === "directory" ? 0 : 1;
+      const name = entry.path.slice(entry.path.lastIndexOf("/") + 1);
+      const group = workspaceExplorerRootEntryGroup(name);
+      if (group === "generated") return entry.kind === "directory" ? 4 : 5;
+      if (group === "configuration") return entry.kind === "directory" ? 2 : 3;
+      return entry.kind === "directory" ? 0 : 1;
+    };
     const entries = [...(children.get(file.path) ?? [])].sort(
-      (a, b) =>
-        Number(b.kind === "directory") - Number(a.kind === "directory") ||
-        a.path.localeCompare(b.path),
+      (a, b) => groupRank(a) - groupRank(b) || a.path.localeCompare(b.path),
     );
     entries.forEach(visit);
   };

@@ -16,7 +16,8 @@ pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 // A streamed local generation, including model load on a CPU host, can sit
 // quiet for minutes. The 180s non-stream budget is what dropped those answers.
-const CHAT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+// This is the longest silence between bytes, not a limit on the whole answer.
+const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_DISCOVERED_MODELS: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -294,14 +295,20 @@ fn agent() -> ureq::Agent {
     agent_with_read_timeout(REQUEST_TIMEOUT)
 }
 
+/// Shared so tool rounds reuse the pooled connection. No overall deadline: a
+/// slow local generation that keeps streaming must not be cut at a wall clock.
 fn chat_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(REQUEST_TIMEOUT)
-        .timeout_read(CHAT_TIMEOUT)
-        .timeout_write(CHAT_TIMEOUT)
-        .timeout(CHAT_TIMEOUT)
-        .redirects(0)
-        .build()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::AgentBuilder::new()
+                .timeout_connect(REQUEST_TIMEOUT)
+                .timeout_read(CHAT_IDLE_TIMEOUT)
+                .timeout_write(CHAT_IDLE_TIMEOUT)
+                .redirects(0)
+                .build()
+        })
+        .clone()
 }
 
 fn agent_with_read_timeout(read_timeout: Duration) -> ureq::Agent {

@@ -859,6 +859,8 @@ export function App() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [draftResetToken, setDraftResetToken] = useState(0);
+  const [automationCreateRequestToken, setAutomationCreateRequestToken] =
+    useState(0);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
     loadChatDrafts(),
   );
@@ -3133,8 +3135,11 @@ export function App() {
       let existing = providerStreamBatchRef.current.get(batchKey);
       // A broker call can split text while delivery is buffered. Keep both
       // blocks' canonical positions even if their frames share a UI flush.
-      if (existing && streamEvent.timelineOrder != null &&
-          existing.streamEvent.timelineOrder !== streamEvent.timelineOrder) {
+      if (
+        existing &&
+        streamEvent.timelineOrder != null &&
+        existing.streamEvent.timelineOrder !== streamEvent.timelineOrder
+      ) {
         flushProviderStreamBatches();
         existing = undefined;
       }
@@ -5775,7 +5780,8 @@ export function App() {
   ]);
 
   const githubRequests = useMemo(
-    () => createGithubRefreshController({ invoke, dispatch: dispatchWorkbench }),
+    () =>
+      createGithubRefreshController({ invoke, dispatch: dispatchWorkbench }),
     [dispatchWorkbench],
   );
   const githubRerunsRef = useRef(new Set<string>());
@@ -5786,8 +5792,10 @@ export function App() {
   }, [githubRequests, workspaceActionRoot]);
 
   const refreshGithub = useCallback(
-    (root: string, options?: { force?: boolean }) => isTauriRuntime()
-      ? githubRequests.refresh(root, options) : Promise.resolve(),
+    (root: string, options?: { force?: boolean }) =>
+      isTauriRuntime()
+        ? githubRequests.refresh(root, options)
+        : Promise.resolve(),
     [githubRequests],
   );
 
@@ -5837,9 +5845,12 @@ export function App() {
     // Pick up newly pushed workflows and recover from transient failures even
     // when the last snapshot contained no active run.
     void refreshGithub(workspaceActionRoot);
-    const timer = window.setInterval(() => {
-      void refreshGithub(workspaceActionRoot);
-    }, hasActiveGithubRun ? 15_000 : 60_000);
+    const timer = window.setInterval(
+      () => {
+        void refreshGithub(workspaceActionRoot);
+      },
+      hasActiveGithubRun ? 15_000 : 60_000,
+    );
     return () => window.clearInterval(timer);
   }, [
     hasActiveGithubRun,
@@ -5872,13 +5883,24 @@ export function App() {
     let cancelled = false;
     void invoke<GithubWorkflowRunDetail>("github_workflow_run_detail", {
       request: { workspacePath: root, runId },
-    }).then((detail) => {
-      if (!cancelled && isCurrent()) dispatchWorkbench({ type: "github-set-run-detail", detail });
-    }).catch((error) => {
-      if (!cancelled && isCurrent()) dispatchWorkbench({ type: "github-error", error: String(error) });
-    });
-    return () => { cancelled = true; };
-  }, [githubRequests, workbench.ide.github.selectedRunId, workbench.ide.github.runs, workspaceActionRoot]);
+    })
+      .then((detail) => {
+        if (!cancelled && isCurrent())
+          dispatchWorkbench({ type: "github-set-run-detail", detail });
+      })
+      .catch((error) => {
+        if (!cancelled && isCurrent())
+          dispatchWorkbench({ type: "github-error", error: String(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    githubRequests,
+    workbench.ide.github.selectedRunId,
+    workbench.ide.github.runs,
+    workspaceActionRoot,
+  ]);
 
   /**
    * Load a run's failed-step logs into the Output panel, which is already the
@@ -5916,7 +5938,12 @@ export function App() {
         });
         dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
       } catch (error) {
-        if (isCurrent()) notify("command-failed", "Could not read workflow logs", String(error));
+        if (isCurrent())
+          notify(
+            "command-failed",
+            "Could not read workflow logs",
+            String(error),
+          );
       }
     },
     [githubRequests, notify, workspaceActionRoot],
@@ -8681,13 +8708,20 @@ export function App() {
         }
       }
       if (prepared.length) {
-        setChatAttachments((current) => ({
-          ...current,
-          [attachmentDraftKey]: [
-            ...(current[attachmentDraftKey] ?? []),
-            ...prepared,
-          ],
-        }));
+        // Uploads are stored by content hash, so a repeated path is the same
+        // file arriving twice (a doubled drop event, or drop plus paste).
+        setChatAttachments((current) => {
+          const draft = current[attachmentDraftKey] ?? [];
+          const seen = new Set(draft.map((item) => item.path));
+          const fresh = prepared.filter((item) => {
+            if (seen.has(item.path)) return false;
+            seen.add(item.path);
+            return true;
+          });
+          return fresh.length
+            ? { ...current, [attachmentDraftKey]: [...draft, ...fresh] }
+            : current;
+        });
       }
       if (limitExceeded) {
         notify(
@@ -12256,7 +12290,11 @@ export function App() {
       // Close only its original pane, without switching the visible project.
       const target = resolveChatPaneClose(chatGrid, candidate);
       if (!target) return;
-      const { projectKey: layoutProjectKey, nextPane, isActiveProject } = target;
+      const {
+        projectKey: layoutProjectKey,
+        nextPane,
+        isActiveProject,
+      } = target;
       if (candidate.sessionId) {
         closedChatPaneSessionsRef.current.add(candidate.sessionId);
       }
@@ -13075,75 +13113,86 @@ export function App() {
     ],
   );
 
-  const createAutomation = useCallback(async () => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    if (!root) {
-      notify(
-        "command-failed",
-        "Choose a workspace first",
-        "Automations need a concrete local folder before they can run",
-      );
-      return;
-    }
-    const providerConfigs = providersForConfig(config);
-    const provider =
-      providerConfigs.find(
-        (item) => item.id === config.selectedProviderId && item.enabled,
-      ) ?? providerConfigs.find((item) => item.enabled);
-    if (!provider || !isProviderExecutable(provider.id)) {
-      notify(
-        "provider",
-        "Connect a provider first",
-        "Automations run through a connected executable provider",
-      );
-      return;
-    }
-    const providerHealth = workbench.providerStatuses.find(
-      (status) => status.id === provider.id,
-    );
-    const providerReady = isProviderRuntimeUsable(provider, providerHealth);
-    if (!providerReady) {
-      notify(
-        "provider",
-        `${provider.displayName} is not connected`,
-        "Connect the provider before scheduling unattended work",
-      );
-      return;
-    }
-    const draft = createAutomationDraft(
-      workbench.workspaceMode,
-      root,
-      provider,
-    );
-
-    if (isTauriRuntime()) {
-      try {
-        const automation = await invoke<Automation>("create_automation", {
-          draft,
-        });
-        dispatchWorkbench({ type: "upsert-automation", automation });
-        notify("terminal", "Automation created", automation.title);
-      } catch {
+  const createAutomation = useCallback(
+    async (details: {
+      title: string;
+      prompt: string;
+      schedule: Automation["schedule"];
+      stopCondition?: string;
+    }): Promise<boolean> => {
+      const root = workspaceRootForPath(workspaceRoots, selectedFile);
+      if (!root) {
         notify(
           "command-failed",
-          "Automation create failed",
-          "No automation was saved",
+          "Choose a workspace first",
+          "Automations need a concrete local folder before they can run",
         );
+        return false;
       }
-      return;
-    }
+      const providerConfigs = providersForConfig(config);
+      const provider =
+        providerConfigs.find(
+          (item) => item.id === config.selectedProviderId && item.enabled,
+        ) ?? providerConfigs.find((item) => item.enabled);
+      if (!provider || !isProviderExecutable(provider.id)) {
+        notify(
+          "provider",
+          "Connect a provider first",
+          "Automations run through a connected executable provider",
+        );
+        return false;
+      }
+      const providerHealth = workbench.providerStatuses.find(
+        (status) => status.id === provider.id,
+      );
+      const providerReady = isProviderRuntimeUsable(provider, providerHealth);
+      if (!providerReady) {
+        notify(
+          "provider",
+          `${provider.displayName} is not connected`,
+          "Connect the provider before scheduling unattended work",
+        );
+        return false;
+      }
+      const draft = createAutomationDraft(
+        workbench.workspaceMode,
+        root,
+        provider,
+        details,
+      );
 
-    const automation = createPreviewAutomation(draft);
-    dispatchWorkbench({ type: "create-automation", automation });
-    notify("terminal", "Automation created", automation.title);
-  }, [
-    activeSession?.workspacePath,
-    config,
-    notify,
-    workbench.providerStatuses,
-    workbench.workspaceMode,
-    workspacePath,
-  ]);
+      if (isTauriRuntime()) {
+        try {
+          const automation = await invoke<Automation>("create_automation", {
+            draft,
+          });
+          dispatchWorkbench({ type: "upsert-automation", automation });
+          notify("terminal", "Automation created", automation.title);
+          return true;
+        } catch {
+          notify(
+            "command-failed",
+            "Automation create failed",
+            "No automation was saved",
+          );
+          return false;
+        }
+      }
+
+      const automation = createPreviewAutomation(draft);
+      dispatchWorkbench({ type: "create-automation", automation });
+      notify("terminal", "Automation created", automation.title);
+      return true;
+    },
+    [
+      config,
+      notify,
+      selectedFile,
+      workbench.providerStatuses,
+      workbench.workspaceMode,
+      workspaceRoots,
+    ],
+  );
 
   const runAutomation = useCallback(
     async (automationId: string) => {
@@ -13608,7 +13657,11 @@ export function App() {
           });
           break;
         case "create-automation":
-          void createAutomation();
+          setAutomationCreateRequestToken((current) => current + 1);
+          dispatchWorkbench({
+            type: "select-destination",
+            destination: "automations",
+          });
           break;
         case "run-automation":
           if (workbench.selectedAutomationId) {
@@ -13620,7 +13673,6 @@ export function App() {
     [
       addTerminalPane,
       addWorkspaceFolder,
-      createAutomation,
       createTask,
       handleBrowserNavigate,
       notify,
@@ -15195,7 +15247,12 @@ export function App() {
   // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
   const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
-  const [cliUpdateError, setCliUpdateError] = useState<string>();
+  // Only an update (or a check) the user pressed can fail the notice; a
+  // background check that times out keeps the last known offers silently.
+  const [cliUpdateFailure, setCliUpdateFailure] = useState<{
+    message: string;
+    providerIds: string[];
+  }>();
   const cliUpdateCheckingRef = useRef(false);
   const cliUpdatePhaseRef = useRef(cliUpdatePhase);
   cliUpdatePhaseRef.current = cliUpdatePhase;
@@ -15222,12 +15279,18 @@ export function App() {
             ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
             : null;
         setCliUpdateOffers(dismissed && dismissed === dismissKey ? [] : offers);
-        setCliUpdatePhase("idle");
-        setCliUpdateError(undefined);
+        // Keep a failure visible while the CLI it names still needs updating;
+        // clear it once another path (terminal, auto-update) resolved it.
+        setCliUpdateFailure((failure) =>
+          failure &&
+          offers.some((offer) => failure.providerIds.includes(offer.providerId))
+            ? failure
+            : undefined,
+        );
+        setCliUpdatePhase((phase) => (phase === "checking" ? "idle" : phase));
       } catch (error) {
-        setCliUpdatePhase(userInitiated ? "failed" : "idle");
-        setCliUpdateError(String(error));
         if (userInitiated) {
+          setCliUpdatePhase("idle");
           notify("command-failed", "CLI update check failed", String(error));
         }
       } finally {
@@ -15242,7 +15305,7 @@ export function App() {
       return;
     }
     setCliUpdatePhase("updating");
-    setCliUpdateError(undefined);
+    setCliUpdateFailure(undefined);
     try {
       const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
       const results = await invoke<CliUpdateApplyResult[]>(
@@ -15250,9 +15313,14 @@ export function App() {
         { providerIds },
       );
       const failed = results.filter((result) => !result.ok);
+      setCliUpdatePhase("idle");
       if (failed.length > 0) {
-        setCliUpdatePhase("failed");
-        setCliUpdateError(failed.map((item) => item.message).join(" · "));
+        setCliUpdateFailure({
+          message: failed
+            .map((item) => `${item.displayName}: ${item.message}`)
+            .join("\n"),
+          providerIds: failed.map((item) => item.providerId),
+        });
         notify(
           "command-failed",
           failed.length === results.length
@@ -15271,14 +15339,16 @@ export function App() {
           results.map((item) => item.message).join("\n"),
         );
         setCliUpdateOffers([]);
-        setCliUpdatePhase("idle");
         localStorage.removeItem("gyro.cli-updates.dismissed.v1");
       }
       // Re-check so a partial failure still lists remaining updates.
       void checkCliUpdates(false);
     } catch (error) {
-      setCliUpdatePhase("failed");
-      setCliUpdateError(String(error));
+      setCliUpdatePhase("idle");
+      setCliUpdateFailure({
+        message: String(error),
+        providerIds: cliUpdateOffers.map((offer) => offer.providerId),
+      });
       notify("command-failed", "CLI update failed", String(error));
     }
   }, [checkCliUpdates, cliUpdateOffers, notify]);
@@ -15290,7 +15360,7 @@ export function App() {
     }
     setCliUpdateOffers([]);
     setCliUpdatePhase("idle");
-    setCliUpdateError(undefined);
+    setCliUpdateFailure(undefined);
   }, [cliUpdateOffers]);
 
   useEffect(() => {
@@ -15537,11 +15607,7 @@ export function App() {
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isTiled={options.isTiled}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-        onboarding={workbench.onboarding}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
-        onCompleteOnboardingStep={(step) =>
-          dispatchWorkbench({ type: "complete-onboarding-step", step })
-        }
         canAttachEditorSnapshot={canAttachEditorSnapshot}
         onAttachMediaFiles={(files) => {
           focusChatPane(pane);
@@ -15667,9 +15733,6 @@ export function App() {
           handleProviderStatusAction(action, event);
         }}
         onSend={requestSend}
-        onSetOnboardingStep={(step) =>
-          dispatchWorkbench({ type: "set-onboarding-step", step })
-        }
         onToggleEnvironmentRail={paneEnvironmentControls.toggle}
         onTogglePlanPanel={() => togglePanePanel("plan")}
         providerReadiness={workbench.providerReadiness}
@@ -15876,7 +15939,12 @@ export function App() {
       commandProfiles={commandProfiles}
       updateState={updater.state}
       cliUpdateOffers={cliUpdateOffers}
-      cliUpdatePhase={cliUpdateError ? "failed" : cliUpdatePhase}
+      cliUpdateFailure={cliUpdateFailure}
+      cliUpdatePhase={
+        cliUpdatePhase === "idle" && cliUpdateFailure
+          ? "failed"
+          : cliUpdatePhase
+      }
       onUpdateClis={() => void applyCliUpdates()}
       onDismissCliUpdates={dismissCliUpdates}
       providerReadinessNotice={providerReadinessNotice}
@@ -16169,15 +16237,8 @@ export function App() {
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
                     maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-                    onboarding={workbench.onboarding}
                     onAgentAction={(action) =>
                       notify("terminal", "Agent action", action)
-                    }
-                    onCompleteOnboardingStep={(step) =>
-                      dispatchWorkbench({
-                        type: "complete-onboarding-step",
-                        step,
-                      })
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
@@ -16212,9 +16273,6 @@ export function App() {
                     onProviderApprovalAction={handleProviderApprovalAction}
                     onProviderStatusAction={handleProviderStatusAction}
                     onSend={sendDraft}
-                    onSetOnboardingStep={(step) =>
-                      dispatchWorkbench({ type: "set-onboarding-step", step })
-                    }
                     onToggleEnvironmentRail={soloEnvironment.toggle}
                     onTogglePlanPanel={() =>
                       dispatchWorkbench({ type: "toggle-chat-plan" })
@@ -16764,8 +16822,42 @@ export function App() {
       {activeDestination === "automations" ? (
         <AutomationsSurface
           automations={workbench.automations}
+          createRequestToken={automationCreateRequestToken}
+          creationWorkspace={workspaceRootForPath(workspaceRoots, selectedFile)}
+          creationProvider={(() => {
+            const providers = providersForConfig(config);
+            const provider =
+              providers.find(
+                (item) => item.id === config.selectedProviderId && item.enabled,
+              ) ?? providers.find((item) => item.enabled);
+            const health = workbench.providerStatuses.find(
+              (status) => status.id === provider?.id,
+            );
+            return provider &&
+              isProviderExecutable(provider.id) &&
+              isProviderRuntimeUsable(provider, health)
+              ? provider.displayName
+              : undefined;
+          })()}
           onArchiveAutomation={archiveAutomation}
           onCreateAutomation={createAutomation}
+          onCreateRequestHandled={() => setAutomationCreateRequestToken(0)}
+          onOpenWorkspace={() =>
+            dispatchWorkbench({
+              type: "select-destination",
+              destination: "workspace",
+            })
+          }
+          onOpenProviders={() => {
+            dispatchWorkbench({
+              type: "set-settings-section",
+              section: "providers",
+            });
+            dispatchWorkbench({
+              type: "select-destination",
+              destination: "settings",
+            });
+          }}
           onRunAutomation={runAutomation}
           onSelectAutomation={(automationId) =>
             dispatchWorkbench({ type: "select-automation", automationId })
@@ -16839,10 +16931,6 @@ export function App() {
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-          onboarding={workbench.onboarding}
-          onCompleteOnboardingStep={(step) =>
-            dispatchWorkbench({ type: "complete-onboarding-step", step })
-          }
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
           onComposerAction={handleComposerAction}
@@ -16869,9 +16957,6 @@ export function App() {
           onProviderApprovalAction={handleProviderApprovalAction}
           onProviderStatusAction={handleProviderStatusAction}
           onSend={sendDraft}
-          onSetOnboardingStep={(step) =>
-            dispatchWorkbench({ type: "set-onboarding-step", step })
-          }
           sessionModel={
             activeSession
               ? sessionModelSelectionFromSession(activeSession)
@@ -16894,7 +16979,6 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
-          showOnboardingSteps
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
@@ -19824,22 +19908,25 @@ function createAutomationDraft(
   mode: WorkbenchState["workspaceMode"],
   workspacePath: string,
   provider: ModelProviderConfig,
+  details: {
+    title: string;
+    prompt: string;
+    schedule: Automation["schedule"];
+    stopCondition?: string;
+  },
 ): AutomationDraft {
-  const metadata = workspaceRunMetadata(mode, "heartbeat-automation");
+  const metadata = workspaceRunMetadata(mode, details.title);
   const model = getProviderModel(provider);
   return {
-    title: "Heartbeat check",
-    prompt:
-      "Check the workspace, run the smoke gate, and report only if attention is needed.",
-    schedule: "heartbeat",
+    title: details.title,
+    prompt: details.prompt,
+    schedule: details.schedule,
     project: workspaceName(workspacePath),
     provider: provider.displayName,
     branch: metadata.branch,
     workspaceMode: metadata.workspaceMode,
     worktreeName: metadata.worktreeName,
-    stopCondition:
-      "Stop after the workspace passes smoke twice without changes.",
-    nextRunAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    stopCondition: details.stopCondition,
     execution: {
       workspacePath,
       providerId: provider.id,
@@ -19853,8 +19940,19 @@ function createAutomationDraft(
 
 function createPreviewAutomation(draft: AutomationDraft): Automation {
   const now = new Date().toISOString();
+  const nextRunDelay =
+    draft.schedule === "manual"
+      ? 0
+      : draft.schedule === "weekly"
+        ? 7 * 24 * 60 * 60 * 1000
+        : draft.schedule === "daily"
+          ? 24 * 60 * 60 * 1000
+          : 60 * 60 * 1000;
   return {
     ...draft,
+    nextRunAt: nextRunDelay
+      ? new Date(Date.now() + nextRunDelay).toISOString()
+      : undefined,
     id: `automation-${Date.now()}`,
     status: "current",
     triageState: "none",

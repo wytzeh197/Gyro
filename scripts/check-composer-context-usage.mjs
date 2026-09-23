@@ -9,6 +9,7 @@ import {
   composerLimitWindows,
   estimateComposerContextUsage,
   formatLimitReset,
+  formatUsageFreshness,
   providerResetSummary,
 } from "../packages/ui/src/context-usage.ts";
 
@@ -332,6 +333,51 @@ assert.equal(merged[0].id, "five-hour");
 assert.equal(merged[0].percent, 84);
 assert.equal(merged[0].severity, "warning");
 assert.equal(merged.length, 1);
+
+// Sources round the same reset differently (API 13:59:59.836, stream
+// 14:00:00). A sub-second disagreement must not discard the measured level.
+const roundedReset = composerLimitWindows(
+  [
+    event("12", "assistant-message", "hi", {
+      providerId: "anthropic",
+      rateLimits: [
+        {
+          id: "five-hour",
+          label: "5-hour limit",
+          usedPercent: 8,
+          resetsAt: "2026-07-27T13:59:59.836Z",
+        },
+      ],
+    }),
+  ],
+  { providerId: "anthropic" },
+  [
+    {
+      id: "five-hour",
+      label: "5-hour limit",
+      status: "ok",
+      resetsAt: "2026-07-27T14:00:00.000Z",
+    },
+  ],
+  now,
+);
+assert.equal(roundedReset[0].percent, 8);
+
+// An old or failed reading says so instead of passing for a live one.
+const freshnessNow = Date.parse("2026-07-27T10:00:00.000Z");
+assert.deepEqual(
+  formatUsageFreshness("2026-07-27T09:59:40.000Z", freshnessNow),
+  { label: "Updated just now", stale: false },
+);
+assert.deepEqual(
+  formatUsageFreshness("2026-07-26T20:00:00.000Z", freshnessNow),
+  { label: "Last read 14 hr ago", stale: true },
+);
+assert.equal(
+  formatUsageFreshness("2026-07-27T09:58:00.000Z", freshnessNow, true)?.stale,
+  true,
+);
+assert.equal(formatUsageFreshness(undefined, freshnessNow), undefined);
 
 // Limits belong to the provider, not the thread: another provider's windows
 // never carry over, and no default pair is invented.

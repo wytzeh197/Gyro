@@ -136,21 +136,28 @@ pub(super) fn provider_model_context_window(
     provider_id: &str,
     model_id: Option<&str>,
 ) -> Option<u64> {
+    if let Some(window) = crate::model_catalog::catalog_model_profile(provider_id, model_id)
+        .and_then(|profile| profile.context_window_tokens)
+    {
+        return Some(window);
+    }
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let window = match provider_id {
+        // Codex serves every current model with a 272K window, whatever the
+        // API allows; the CLI's own report still wins when it sends one.
         "openai" => match model_id {
-            "gpt-6-astra" => 272_000,
             "gpt-5.4-mini" => 400_000,
-            _ => 1_050_000,
+            _ => 272_000,
         },
         "anthropic" => match model_id {
             "claude-haiku-4-5" => 200_000,
             _ => 1_000_000,
         },
-        "kimi" | "gemini" => 1_000_000,
+        "kimi" => 262_144,
+        "gemini" => 1_000_000,
         "xai" => match model_id {
-            "grok-4.7" | "grok-4.6" | "" => 500_000,
-            _ => 131_072,
+            "grok-4.3" => 131_072,
+            _ => 500_000,
         },
         _ => return None,
     };

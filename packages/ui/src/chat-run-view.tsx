@@ -114,6 +114,11 @@ export type ChatRunProps = {
    */
   toolBudgetNotice?: string;
   /**
+   * The notice's heading. Defaults to the tool-round budget; an answer kept
+   * after the provider exited early uses the same notice with its own title.
+   */
+  toolBudgetNoticeTitle?: string;
+  /**
    * What the notice's button does. Continuing is a new send rather than a
    * retry: the checkpoint already answered this turn.
    */
@@ -145,6 +150,7 @@ export function ChatRun({
   renderAsk,
   renderSay,
   toolBudgetNotice,
+  toolBudgetNoticeTitle,
   onContinueAfterToolBudget,
   layout = "segments",
 }: ChatRunProps) {
@@ -370,6 +376,7 @@ export function ChatRun({
         <RunBudgetNotice
           notice={toolBudgetNotice}
           onContinue={onContinueAfterToolBudget}
+          title={toolBudgetNoticeTitle}
         />
       ) : null}
     </div>
@@ -881,9 +888,11 @@ function RunPulse({ label }: { label: string }) {
 function RunBudgetNotice({
   notice,
   onContinue,
+  title = "Tool-round budget reached",
 }: {
   notice: string;
   onContinue?: () => void;
+  title?: string;
 }) {
   return (
     <div className="gyro-run-budget" role="status">
@@ -891,7 +900,7 @@ function RunBudgetNotice({
         <Pause size={14} />
       </span>
       <span className="gyro-run-budget-text">
-        <strong>Tool-round budget reached</strong>
+        <strong>{title}</strong>
         <span>{notice}</span>
       </span>
       {onContinue ? (

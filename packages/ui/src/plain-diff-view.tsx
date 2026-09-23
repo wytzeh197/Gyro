@@ -21,7 +21,7 @@ export function PlainDiffView({
 }) {
   const hunks = useMemo(() => diffHunks(diff), [diff]);
   const [page, setPage] = useState(0);
-  const [wrapLines, setWrapLines] = useState(false);
+  const [wrapLines, setWrapLines] = useState(true);
   const pageCount = Math.max(1, Math.ceil(hunks.length / HUNKS_PER_PAGE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = hunks.slice(

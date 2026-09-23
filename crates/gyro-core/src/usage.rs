@@ -938,6 +938,13 @@ pub struct ProviderRateLimitRecord {
     pub observed_at: String,
 }
 
+/// How far apart two reset times can be and still name the same window.
+///
+/// Sources round the same instant differently: the account API says
+/// `13:59:59.836`, the chat stream says `14:00:00`. Comparing whole seconds
+/// exactly treated those as two windows and threw the measured level away.
+const SAME_RESET_TOLERANCE_SECONDS: i64 = 60;
+
 /// Keep the newest reading for each window a provider named.
 pub fn record_provider_rate_limits(
     conn: &Connection,
@@ -952,17 +959,23 @@ pub fn record_provider_rate_limits(
              ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              on conflict(provider_id, window_id) do update set
                label = excluded.label,
-               status = excluded.status,
+               status = case
+                 when excluded.used_percent is null
+                   and excluded.status = 'ok'
+                   and provider_rate_limits.used_percent is not null
+                   and abs(strftime('%s', excluded.resets_at) - strftime('%s', provider_rate_limits.resets_at)) < ?8
+                 then provider_rate_limits.status
+                 else excluded.status end,
                used_percent = case
                  when excluded.used_percent is null
-                   and strftime('%s', excluded.resets_at) = strftime('%s', provider_rate_limits.resets_at)
+                   and abs(strftime('%s', excluded.resets_at) - strftime('%s', provider_rate_limits.resets_at)) < ?8
                  then provider_rate_limits.used_percent
                  else excluded.used_percent end,
                resets_at = excluded.resets_at,
                observed_at = case
                  when excluded.used_percent is null
                    and provider_rate_limits.used_percent is not null
-                   and strftime('%s', excluded.resets_at) = strftime('%s', provider_rate_limits.resets_at)
+                   and abs(strftime('%s', excluded.resets_at) - strftime('%s', provider_rate_limits.resets_at)) < ?8
                  then provider_rate_limits.observed_at
                  else excluded.observed_at end
              where julianday(excluded.observed_at) >= julianday(provider_rate_limits.observed_at)",
@@ -974,6 +987,7 @@ pub fn record_provider_rate_limits(
                 window.used_percent,
                 window.resets_at,
                 window.observed_at,
+                SAME_RESET_TOLERANCE_SECONDS,
             ],
         )?;
     }
@@ -1063,6 +1077,7 @@ pub fn provider_rate_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     fn memory_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory database");
@@ -1728,6 +1743,31 @@ mod tests {
             provider_rate_limits(&conn, "anthropic", now).unwrap()[0].used_percent,
             None
         );
+    }
+
+    #[test]
+    fn a_stream_reset_rounded_up_still_names_the_measured_window() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        // The account API said 13:59:59.836; the stream says 14:00:00.
+        let stream_reset = (now + chrono::Duration::hours(3))
+            .with_nanosecond(0)
+            .unwrap();
+        let api_reset = stream_reset - chrono::Duration::milliseconds(164);
+        let mut measured = window("five-hour", "warning", Some(&api_reset.to_rfc3339()));
+        measured.used_percent = Some(84);
+        measured.observed_at = (now - chrono::Duration::minutes(1)).to_rfc3339();
+        record_provider_rate_limits(&conn, "anthropic", &[measured]).unwrap();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "ok", Some(&stream_reset.to_rfc3339()))],
+        )
+        .unwrap();
+        let stored = provider_rate_limits(&conn, "anthropic", now).unwrap();
+        assert_eq!(stored[0].used_percent, Some(84));
+        // "Allowed" from the stream is not news against a measured warning.
+        assert_eq!(stored[0].status, "warning");
     }
 
     #[test]

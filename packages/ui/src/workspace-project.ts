@@ -65,9 +65,11 @@ export function workspaceFolderPaths(
       (path, index, paths) => Boolean(path) && paths.indexOf(path) === index,
     )
     .slice(0, MAX_WORKSPACE_FOLDERS);
-  const preferred = preferredPrimary ? normalizedWorkspaceFolderPath(preferredPrimary) : undefined;
+  const preferred = preferredPrimary
+    ? normalizedWorkspaceFolderPath(preferredPrimary)
+    : undefined;
   return preferred && roots.includes(preferred)
-    ? [preferred, ...roots.filter(root => root !== preferred)]
+    ? [preferred, ...roots.filter((root) => root !== preferred)]
     : roots;
 }
 
@@ -111,6 +113,27 @@ export function workspaceRelativeFilePath(
     return file.slice(root.length + 1);
   }
   return normalized;
+}
+
+const GENERATED_EXPLORER_ENTRY_NAMES = new Set([
+  ".DS_Store",
+  ".next",
+  ".pnpm-store",
+  ".turbo",
+  ".wrangler",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "target",
+]);
+
+/** Keep project content ahead of root-level setup and generated folders. */
+export function workspaceExplorerRootEntryGroup(name: string) {
+  if (GENERATED_EXPLORER_ENTRY_NAMES.has(name)) return "generated" as const;
+  return name.startsWith(".")
+    ? ("configuration" as const)
+    : ("project" as const);
 }
 
 export function absoluteWorkspaceFilePath(root: string, path: string) {

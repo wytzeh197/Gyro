@@ -8,8 +8,10 @@ use crate::cli_path::augmented_gui_path;
 use crate::execution::{run_command, CancellationToken, ExecutionRequest, ExecutionTermination};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const CLI_CHECK_TIMEOUT: Duration = Duration::from_secs(25);
@@ -56,6 +58,10 @@ struct CliUpdateSpec {
     /// Grok: `update --check --json`.
     native_check_args: Option<&'static [&'static str]>,
     update_args: &'static [&'static str],
+    /// The update command installs through npm (directly, or via the CLI's
+    /// own updater). It must then run with the npm that owns `npm_package`
+    /// first on PATH, or a second npm on PATH installs into the wrong prefix.
+    updates_through_npm: bool,
 }
 
 const CLI_UPDATE_SPECS: &[CliUpdateSpec] = &[
@@ -66,6 +72,7 @@ const CLI_UPDATE_SPECS: &[CliUpdateSpec] = &[
         npm_package: Some("@anthropic-ai/claude-code"),
         native_check_args: None,
         update_args: &["update"],
+        updates_through_npm: false,
     },
     CliUpdateSpec {
         provider_id: "openai",
@@ -74,14 +81,18 @@ const CLI_UPDATE_SPECS: &[CliUpdateSpec] = &[
         npm_package: Some("@openai/codex"),
         native_check_args: None,
         update_args: &["update"],
+        updates_through_npm: false,
     },
     CliUpdateSpec {
         provider_id: "xai",
         display_name: "Grok",
         program: "grok",
-        npm_package: None,
+        // Only used to find the owning npm: the native check stays the source
+        // of truth, and `grok update` shells out to npm for npm installs.
+        npm_package: Some("@xai-official/grok"),
         native_check_args: Some(&["update", "--check", "--json"]),
         update_args: &["update"],
+        updates_through_npm: true,
     },
     CliUpdateSpec {
         provider_id: "gemini",
@@ -90,6 +101,7 @@ const CLI_UPDATE_SPECS: &[CliUpdateSpec] = &[
         npm_package: Some("@google/gemini-cli"),
         native_check_args: None,
         update_args: &[], // filled via npm install when updating
+        updates_through_npm: true,
     },
     CliUpdateSpec {
         provider_id: "kimi",
@@ -98,6 +110,7 @@ const CLI_UPDATE_SPECS: &[CliUpdateSpec] = &[
         npm_package: None,
         native_check_args: None,
         update_args: &["upgrade"],
+        updates_through_npm: false,
     },
 ];
 
@@ -124,23 +137,42 @@ pub fn check_cli_updates() -> Result<CliUpdateCheckReport> {
 /// Apply updates for the given provider ids (or all pending if empty).
 pub fn apply_cli_updates(provider_ids: &[String]) -> Result<Vec<CliUpdateApplyResult>> {
     let report = check_cli_updates()?;
-    let targets: Vec<CliUpdateOffer> = if provider_ids.is_empty() {
-        report.offers
-    } else {
-        report
-            .offers
-            .into_iter()
-            .filter(|offer| provider_ids.iter().any(|id| id == &offer.provider_id))
-            .collect()
-    };
-    if targets.is_empty() {
-        return Ok(Vec::new());
+    let mut results = Vec::new();
+    if provider_ids.is_empty() {
+        for offer in &report.offers {
+            results.push(apply_one_cli_update(offer));
+        }
+        return Ok(results);
     }
-    let mut results = Vec::with_capacity(targets.len());
-    for offer in targets {
-        results.push(apply_one_cli_update(&offer));
+    for provider_id in provider_ids {
+        match report
+            .offers
+            .iter()
+            .find(|offer| &offer.provider_id == provider_id)
+        {
+            Some(offer) => results.push(apply_one_cli_update(offer)),
+            // The notice can be older than the CLI: another terminal, or the
+            // CLI's own auto-updater, may already have installed the release.
+            // That is the outcome the user asked for, not a failure.
+            None => {
+                if let Some(spec) = spec_for(provider_id) {
+                    results.push(CliUpdateApplyResult {
+                        provider_id: spec.provider_id.into(),
+                        display_name: spec.display_name.into(),
+                        ok: true,
+                        message: format!("{} is already up to date", spec.display_name),
+                    });
+                }
+            }
+        }
     }
     Ok(results)
+}
+
+fn spec_for(provider_id: &str) -> Option<&'static CliUpdateSpec> {
+    CLI_UPDATE_SPECS
+        .iter()
+        .find(|spec| spec.provider_id == provider_id)
 }
 
 fn check_one_cli(
@@ -249,14 +281,24 @@ fn check_via_native_json(
 }
 
 fn apply_one_cli_update(offer: &CliUpdateOffer) -> CliUpdateApplyResult {
+    let search_path = update_search_path(offer);
     let program = offer
         .update_command
         .first()
         .cloned()
         .unwrap_or_else(|| offer.program.clone());
+    // Launch the same executable the check inspected, even when the update
+    // PATH puts another installation's bin directory first.
+    let program = if program == offer.program {
+        find_on_path(&program, &augmented_gui_path())
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or(program)
+    } else {
+        program
+    };
     let args = offer.update_command.get(1..).unwrap_or(&[]).to_vec();
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    match run_cli_capture(&program, &arg_refs, CLI_UPDATE_TIMEOUT) {
+    match run_cli_capture_with_path(&program, &arg_refs, CLI_UPDATE_TIMEOUT, &search_path) {
         Ok(output) => {
             match verify_applied_cli_update(offer, installed_version(&offer.program).as_deref()) {
                 Ok(verification) => {
@@ -284,9 +326,130 @@ fn apply_one_cli_update(offer: &CliUpdateOffer) -> CliUpdateApplyResult {
             provider_id: offer.provider_id.clone(),
             display_name: offer.display_name.clone(),
             ok: false,
-            message: error.to_string(),
+            message: summarize_failure(&error.to_string()),
         },
     }
+}
+
+/// PATH for an update command. npm-backed updates put the bin directory of
+/// the npm that owns the package first; everything else uses Gyro's GUI PATH.
+///
+/// Several npm installations are common (Homebrew, nvm, and tools that bundle
+/// their own Node in `~/.local/bin`). Whichever comes first on PATH would
+/// otherwise run `npm install -g` against its own prefix, which either
+/// collides with existing links (EEXIST) or installs a copy Gyro never runs.
+fn update_search_path(offer: &CliUpdateOffer) -> String {
+    let base = augmented_gui_path();
+    let Some(spec) = spec_for(&offer.provider_id) else {
+        return base;
+    };
+    let Some(package) = spec.npm_package else {
+        return base;
+    };
+    let Some(owner) = owning_npm(package, &base) else {
+        return base;
+    };
+    let launches_npm_install = find_on_path(spec.program, &base)
+        .and_then(|path| path.canonicalize().ok())
+        .is_some_and(|path| path.starts_with(&owner.package_dir));
+    if !spec.updates_through_npm && !launches_npm_install {
+        return base;
+    }
+    prepend_path(&owner.bin_dir, &base)
+}
+
+struct NpmOwner {
+    bin_dir: PathBuf,
+    package_dir: PathBuf,
+}
+
+/// Find the npm whose global root contains `package`, preferring PATH order.
+fn owning_npm(package: &str, search_path: &str) -> Option<NpmOwner> {
+    let mut seen = Vec::new();
+    for dir in std::env::split_paths(search_path) {
+        let npm = dir.join("npm");
+        let Ok(resolved) = npm.canonicalize() else {
+            continue;
+        };
+        if seen.contains(&resolved) {
+            continue;
+        }
+        seen.push(resolved);
+        // Run each npm with its own directory first so `#!/usr/bin/env node`
+        // picks the Node it was installed with.
+        let path = prepend_path(&dir, search_path);
+        let Ok(output) = run_cli_capture_with_path(
+            &npm.to_string_lossy(),
+            &["root", "-g"],
+            CLI_CHECK_TIMEOUT,
+            &path,
+        ) else {
+            continue;
+        };
+        let Some(root) = output
+            .lines()
+            .map(str::trim)
+            .rfind(|line| line.starts_with('/'))
+        else {
+            continue;
+        };
+        let package_dir = Path::new(root).join(package);
+        if package_dir.join("package.json").is_file() {
+            return Some(NpmOwner {
+                bin_dir: dir,
+                package_dir: package_dir.canonicalize().unwrap_or(package_dir),
+            });
+        }
+    }
+    None
+}
+
+fn prepend_path(dir: &Path, search_path: &str) -> String {
+    std::iter::once(dir.to_path_buf())
+        .chain(std::env::split_paths(search_path).filter(|entry| entry != dir))
+        .map(|entry| entry.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+fn find_on_path(program: &str, search_path: &str) -> Option<PathBuf> {
+    if program.contains('/') {
+        return Some(PathBuf::from(program));
+    }
+    std::env::split_paths(search_path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+/// Keep the lines that explain a failed update and drop npm log noise, so the
+/// notice and notification say why instead of echoing the whole transcript.
+fn summarize_failure(message: &str) -> String {
+    let lines = message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.contains("A complete log of this run"))
+        .filter(|line| !line.starts_with("npm warn"))
+        .collect::<Vec<_>>();
+    let text = lines.join(" · ");
+    if text.chars().count() <= 360 {
+        return text;
+    }
+    let mut short = text.chars().take(359).collect::<String>();
+    short.push('…');
+    short
 }
 
 /// Confirm that the exact executable Gyro launched for the update reached the
@@ -312,7 +475,8 @@ fn verify_applied_cli_update(
         .map(normalize_version)
         .filter(|version| !version.is_empty())
     {
-        if observed != expected {
+        // The CLI may install a release newer than the one the notice named.
+        if compare_versions(&observed, &expected) == Ordering::Less {
             return Err(format!(
                 "{} finished its update command, but Gyro still uses {} (expected {})",
                 offer.display_name, observed, expected
@@ -428,6 +592,40 @@ fn npm_update_versions(current: Option<&str>, latest: Option<&str>) -> Option<(S
     Some((current, latest))
 }
 
+/// Compare dotted numeric versions; non-numeric suffixes sort before the
+/// release (`1.2.0-beta` < `1.2.0`). Falls back to string order.
+fn compare_versions(left: &str, right: &str) -> Ordering {
+    fn parts(value: &str) -> (Vec<u64>, bool) {
+        let (core, pre) = match value.split_once('-') {
+            Some((core, _)) => (core, true),
+            None => (value, false),
+        };
+        (
+            core.split('.')
+                .map(|part| part.parse::<u64>().unwrap_or(0))
+                .collect(),
+            pre,
+        )
+    }
+    let (left_core, left_pre) = parts(left);
+    let (right_core, right_pre) = parts(right);
+    let width = left_core.len().max(right_core.len());
+    for index in 0..width {
+        let a = left_core.get(index).copied().unwrap_or(0);
+        let b = right_core.get(index).copied().unwrap_or(0);
+        match a.cmp(&b) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    match (left_pre, right_pre) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ if left == right => Ordering::Equal,
+        _ => left.cmp(right),
+    }
+}
+
 fn versions_differ(current: Option<&str>, latest: Option<&str>) -> bool {
     match (current, latest) {
         (Some(current), Some(latest)) if !current.is_empty() && !latest.is_empty() => {
@@ -473,11 +671,26 @@ fn npm_global_outdated() -> Result<HashMap<String, NpmOutdatedEntry>> {
 
 fn npm_view_version(package: &str) -> Result<String> {
     let output = run_cli_capture("npm", &["view", package, "version"], CLI_CHECK_TIMEOUT)?;
-    parse_version_line(&output).ok_or_else(|| anyhow!("npm view returned no version"))
+    // npm prints config warnings before the answer; the version is last.
+    output
+        .lines()
+        .rev()
+        .filter(|line| !line.trim_start().starts_with("npm "))
+        .find_map(parse_version_line)
+        .ok_or_else(|| anyhow!("npm view returned no version"))
 }
 
 fn run_cli_capture(program: &str, args: &[&str], timeout: Duration) -> Result<String> {
-    let outcome = run_cli(program, args, timeout)?;
+    run_cli_capture_with_path(program, args, timeout, &augmented_gui_path())
+}
+
+fn run_cli_capture_with_path(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+    search_path: &str,
+) -> Result<String> {
+    let outcome = run_cli_with_path(program, args, timeout, search_path)?;
     match &outcome.termination {
         ExecutionTermination::Exited { code: Some(0) } => Ok(join_output(&outcome)),
         ExecutionTermination::Exited { code } => Err(anyhow!(
@@ -512,12 +725,21 @@ fn run_cli(
     args: &[&str],
     timeout: Duration,
 ) -> Result<crate::execution::ExecutionOutcome> {
+    run_cli_with_path(program, args, timeout, &augmented_gui_path())
+}
+
+fn run_cli_with_path(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+    search_path: &str,
+) -> Result<crate::execution::ExecutionOutcome> {
     let mut request = ExecutionRequest::new(OsString::from(program));
     request.args = args.iter().map(|arg| OsString::from(*arg)).collect();
-    request.env = vec![(
-        OsString::from("PATH"),
-        Some(OsString::from(augmented_gui_path())),
-    )];
+    // Run from home, not wherever Gyro was launched: a project `.npmrc` or
+    // `package.json` must not change how global CLIs are checked or updated.
+    request.current_dir = std::env::var_os("HOME").map(PathBuf::from);
+    request.env = vec![(OsString::from("PATH"), Some(OsString::from(search_path)))];
     request.timeout = timeout;
     request.inactivity_timeout = Some(timeout);
     request.max_stdout_chars = CLI_CHECK_OUTPUT_CHARS;
@@ -635,6 +857,53 @@ mod tests {
             verify_applied_cli_update(&offer, Some("0.152.1")).unwrap(),
             "Codex updated to 0.152.1"
         );
+    }
+
+    #[test]
+    fn post_update_verification_accepts_a_newer_release() {
+        let offer = CliUpdateOffer {
+            provider_id: "xai".into(),
+            display_name: "Grok".into(),
+            program: "grok".into(),
+            current_version: Some("1.0.40".into()),
+            latest_version: Some("1.0.41".into()),
+            update_available: true,
+            check_source: "native".into(),
+            update_command: vec!["grok".into(), "update".into()],
+        };
+        assert_eq!(
+            verify_applied_cli_update(&offer, Some("1.0.42")).unwrap(),
+            "Grok updated to 1.0.42"
+        );
+    }
+
+    #[test]
+    fn compare_versions_orders_numeric_parts() {
+        assert_eq!(compare_versions("1.0.41", "1.0.40"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0.9", "1.0.10"), Ordering::Less);
+        assert_eq!(compare_versions("2.1.280", "2.1.280"), Ordering::Equal);
+        assert_eq!(compare_versions("1.2.0-beta.1", "1.2.0"), Ordering::Less);
+    }
+
+    #[test]
+    fn prepend_path_moves_the_owning_npm_first_without_duplicates() {
+        assert_eq!(
+            prepend_path(
+                Path::new("/opt/homebrew/bin"),
+                "/u/.local/bin:/opt/homebrew/bin:/usr/bin"
+            ),
+            "/opt/homebrew/bin:/u/.local/bin:/usr/bin"
+        );
+    }
+
+    #[test]
+    fn summarize_failure_keeps_the_reason_and_drops_npm_noise() {
+        let summary = summarize_failure(
+            "grok exited with Some(1): Updating Grok 1.0.40 → 1.0.41\n\nnpm warn config x\nnpm error code EEXIST\nnpm error A complete log of this run can be found in: /tmp/x.log\n",
+        );
+        assert!(summary.contains("EEXIST"));
+        assert!(!summary.contains("complete log"));
+        assert!(!summary.contains("npm warn"));
     }
 
     #[test]
