@@ -216,4 +216,34 @@ mod tests {
             "Offline"
         );
     }
+
+    #[test]
+    fn the_limits_list_answers_when_the_keyed_windows_are_gone() {
+        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": null,
+            "seven_day": null,
+            "limits": [
+                {"kind": "session", "percent": 8, "resets_at": "2026-09-23T13:59:59Z"},
+                {"kind": "weekly_all", "percent": 84, "resets_at": "2026-09-27T16:59:59Z"},
+                {"kind": "something_new", "percent": 3}
+            ]
+        }));
+        let summary: Vec<_> = windows
+            .iter()
+            .map(|window| {
+                (
+                    window.id.as_str(),
+                    window.used_percent,
+                    window.status.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("five-hour", Some(8), "ok"),
+                ("weekly", Some(84), "warning")
+            ]
+        );
+    }
 }

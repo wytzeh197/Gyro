@@ -88,6 +88,10 @@ pub struct KimiAcpRequest {
     /// tool calls as their own children, so this is the point where an agent's
     /// whole subprocess tree stops seeing the user's unrelated secrets.
     pub credentials: CredentialPolicy,
+    /// Filled with the agent's session id as soon as the session is open, so a
+    /// caller can keep the conversation when the run is stopped or fails before
+    /// it returns an output.
+    pub opened_session: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -454,6 +458,11 @@ where
         &mut on_approval,
         &mut on_write_file,
     )?;
+    if let Some(slot) = &request.opened_session {
+        if let Ok(mut slot) = slot.lock() {
+            *slot = Some(session_id.clone());
+        }
+    }
 
     // Grok takes model/effort as process flags (Synara style). In-session
     // session/set_model and session/set_config_option often return Method not
@@ -1386,6 +1395,7 @@ pub fn check_acp_health(
         cancellation: CancellationToken::default(),
         // Gyro's own auth probe, not an agent run.
         credentials: CredentialPolicy::Inherit,
+        opened_session: None,
     };
     let mut connection = match KimiAcpConnection::start(&request) {
         Ok(connection) => connection,
@@ -1651,6 +1661,7 @@ mod tests {
             inactivity_timeout: Duration::from_secs(3),
             cancellation,
             credentials: CredentialPolicy::for_provider("kimi"),
+            opened_session: None,
         }
     }
 

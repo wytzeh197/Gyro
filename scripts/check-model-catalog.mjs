@@ -7,6 +7,7 @@ import {
   MODEL_CATALOG_CACHE_KEY,
   MODEL_CATALOG_POLL_MS,
   MODEL_CATALOG_REFRESH_MS,
+  MODEL_CATALOG_CLIENT_REVISION,
 } from "../packages/ui/src/remote-model-catalog.ts";
 import {
   providerCatalog,
@@ -123,7 +124,11 @@ assert.equal(
 );
 
 applyModelCatalog(
-  parseModelCatalog(document([{ ...entry, minClientRevision: 2 }])),
+  parseModelCatalog(
+    document([
+      { ...entry, minClientRevision: MODEL_CATALOG_CLIENT_REVISION + 1 },
+    ]),
+  ),
   0,
 );
 assert.ok(!hasModel());
@@ -246,7 +251,14 @@ assert.deepEqual((await additionsClient.refresh()).additions, [
 assert.ok(provider.models.some((m) => m.id === secondEntry.id));
 // An entry gated on a later client revision is not selectable, so it is not news.
 additionsPayload = document(
-  [entry, secondEntry, { ...thirdEntry, minClientRevision: 2 }],
+  [
+    entry,
+    secondEntry,
+    {
+      ...thirdEntry,
+      minClientRevision: MODEL_CATALOG_CLIENT_REVISION + 1,
+    },
+  ],
   { revision: "add.3" },
 );
 assert.deepEqual((await additionsClient.refresh()).additions, []);
@@ -280,7 +292,10 @@ const anthropic = providerCatalog.find((p) => p.id === "anthropic");
 const anthropicIds = () => anthropic.models.map((m) => m.id);
 applyModelCatalog(
   parseModelCatalog(
-    readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+    readFileSync(
+      new URL("../site/model-catalog.json", import.meta.url),
+      "utf8",
+    ),
   ),
   0,
 );

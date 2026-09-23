@@ -3225,6 +3225,7 @@ fn execute_kimi_acp_provider(
     program_args.extend(runtime.args.iter().map(Into::into));
     let result = run_kimi_acp(
         KimiAcpRequest {
+            opened_session: None,
             credentials: CredentialPolicy::for_provider(&provider_id),
             provider_label: provider_label.into(),
             program: profile.command.clone().into(),

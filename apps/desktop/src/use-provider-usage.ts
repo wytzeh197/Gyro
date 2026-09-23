@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   providerSupportsUsage,
   type ProviderId,
@@ -12,6 +13,8 @@ import {
 } from "./provider-usage-state";
 
 const PROVIDER_USAGE_REFRESH_INTERVAL_MS = 45_000;
+/** Readings the backend pushes: mid-turn plan checks and other windows' polls. */
+const PROVIDER_USAGE_UPDATED_EVENT = "gyro://provider-usage-updated";
 
 export function useProviderUsage(options: {
   notify: (kind: "command-failed", title: string, detail: string) => void;
@@ -123,6 +126,44 @@ export function useProviderUsage(options: {
     },
     [notify],
   );
+
+  // A pushed reading replaces the shown one only when it is at least as new,
+  // so a slow poll landing late cannot roll a live figure back.
+  useEffect(() => {
+    if (!hasDesktopRuntime()) return undefined;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<ProviderUsageSnapshot>(PROVIDER_USAGE_UPDATED_EVENT, (event) => {
+      const snapshot = event.payload;
+      if (!snapshot?.providerId) return;
+      setProviderUsageByProvider((current) => {
+        const previous = current[snapshot.providerId];
+        const previousMs = previous?.fetchedAt
+          ? Date.parse(previous.fetchedAt)
+          : Number.NaN;
+        const nextMs = Date.parse(snapshot.fetchedAt);
+        if (
+          previous?.status === "available" &&
+          !previous.stale &&
+          Number.isFinite(previousMs) &&
+          (!Number.isFinite(nextMs) || nextMs < previousMs)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          [snapshot.providerId]: providerUsageFromSnapshot(snapshot),
+        };
+      });
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (

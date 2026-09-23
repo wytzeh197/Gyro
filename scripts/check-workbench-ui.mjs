@@ -468,7 +468,7 @@ expect(
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)\n  .gyro-session-row.is-active::before",
     ) &&
-    styleSource.includes("inset: 3px auto 3px 0;") &&
+    styleSource.includes("transform: translateY(-50%);") &&
     styleSource.includes("width: 4px;"),
   "Grid focus should drive the selected sidebar chat, emphasize it with a substantial accent, and dim every inactive pane and row.",
 );
@@ -1326,7 +1326,7 @@ expect(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
             "low,medium,high,xhigh,max,ultra" &&
-          model.contextWindowTokens === 1_050_000,
+          model.contextWindowTokens === 272_000,
       ),
   "OpenAI should expose GPT-6 Astra and all GPT-5.6 variants with their supported effort levels.",
 );
@@ -6354,7 +6354,9 @@ expect(
     // dead "Unavailable" row.
     modelRailSource.includes("onConnect(preview.id)") &&
     surfaceSource.includes("`connect-provider:${providerId}`") &&
-    surfaceSource.includes("`select-provider-model:${providerId}:${modelId}`") &&
+    surfaceSource.includes(
+      "`select-provider-model:${providerId}:${modelId}`",
+    ) &&
     surfaceSource.includes('onComposerAction?.("open-settings:providers")') &&
     // Every tile keeps its brand mark, connected or not.
     surfaceSource.includes("<ProviderLogo") &&
@@ -6364,7 +6366,9 @@ expect(
     surfaceSource.includes("const effectiveProviderId = boundToSession") &&
     surfaceSource.includes("activeProviderId={effectiveProviderId}") &&
     // Connected providers first (A–Z); disconnected dimmed below a divider.
-    surfaceSource.includes("Number(right.connected) - Number(left.connected)") &&
+    surfaceSource.includes(
+      "Number(right.connected) - Number(left.connected)",
+    ) &&
     surfaceSource.includes("isProviderExecutable(provider.id)") &&
     styleSource.includes(".gyro-model-rail-tile.is-disconnected") &&
     styleSource.includes(".gyro-model-rail-tile.is-in-use::after") &&
@@ -7137,7 +7141,7 @@ for (const className of [
   "gyro-tool-detail-panel",
   "gyro-tool-detail-trigger",
   "aria-expanded",
-  "gyro-onboarding-steps",
+  "gyro-composer-blocker",
   "gyro-chat-surface.is-empty",
   "gyro-chat-start",
   "gyro-chat-thread-canvas",

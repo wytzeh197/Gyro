@@ -25,6 +25,9 @@ struct CommentaryTimeline {
 #[derive(Default)]
 pub(super) struct ProviderTimeline {
     next_order: u64,
+    /// Text blocks and items shown so far; heartbeats and status frames take
+    /// an order position but are not counted.
+    shown: u64,
     first_seen: HashMap<String, TimelinePosition>,
     text: String,
     blocks: Vec<(usize, TimelinePosition)>,
@@ -51,12 +54,14 @@ impl ProviderTimeline {
                 return position.clone();
             }
             let position = self.next_position();
+            self.shown += 1;
             self.first_seen.insert(key.to_string(), position.clone());
             self.last_item_key = Some(key.to_string());
             self.text_boundary = true;
             return position;
         }
         if let Some(delta) = delta.filter(|delta| !delta.is_empty()) {
+            self.shown += 1;
             self.last_item_key = None;
             let position = if self.blocks.is_empty() || self.text_boundary {
                 let position = self.next_position();
@@ -229,6 +234,21 @@ pub(super) fn activity(
     )
 }
 
+/// How many timeline items (text blocks, tool calls, notes) this run has shown.
+///
+/// A retry compares this before and after an attempt: once anything reached
+/// the chat, the provider may already have run tools, and running the turn
+/// again could repeat an edit or a command.
+pub(super) fn item_count(app: &tauri::AppHandle, session_id: &str) -> u64 {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .and_then(|control| control.timeline.lock().ok().map(|timeline| timeline.shown))
+        .unwrap_or(0)
+}
+
 pub(super) fn text_has_boundary(app: &tauri::AppHandle, session_id: &str) -> bool {
     let control = app
         .state::<ProviderCancellationManager>()
@@ -266,6 +286,16 @@ pub(super) fn response_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heartbeats_are_not_counted_as_shown_output() {
+        let mut timeline = ProviderTimeline::default();
+        timeline.observe(None, None);
+        assert_eq!(timeline.shown, 0);
+        timeline.observe(None, Some("Hello"));
+        timeline.activity(&commentary("Reading files"));
+        assert_eq!(timeline.shown, 2);
+    }
 
     fn commentary(label: &str) -> ProviderActivity {
         ProviderActivity {

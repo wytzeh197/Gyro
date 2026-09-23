@@ -43,5 +43,5 @@ block2 = "0.6"
 notify-rust = "4.18"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSBitmapImageRep", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSResponder", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSNotification", "NSOperation", "NSString", "NSGeometry", "block2"] }
 objc2-web-kit = { version = "0.3", features = ["WKSnapshotConfiguration", "WKWebView", "block2"] }

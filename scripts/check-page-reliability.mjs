@@ -153,6 +153,8 @@ runInNewContext(usage, {
           return {};
         },
       };
+    if (id === "@tauri-apps/api/event")
+      return { listen: async () => () => {} };
     if (id === "@gyro-dev/ui") return { providerSupportsUsage: () => true };
     if (id === "./provider-usage-state")
       return {

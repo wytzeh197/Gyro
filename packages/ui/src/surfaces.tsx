@@ -146,6 +146,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type MutableRefObject,
   type KeyboardEvent as ReactKeyboardEvent,
   type DragEvent as ReactDragEvent,
@@ -215,6 +216,7 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
+  formatUsageFreshness,
   isManualCompaction,
   type ComposerContextUsage,
   type ComposerLimitWindow,
@@ -260,7 +262,10 @@ import {
   workspaceModeShortLabel,
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
-import { workspaceRelativeFilePath } from "./workspace-project";
+import {
+  workspaceExplorerRootEntryGroup,
+  workspaceRelativeFilePath,
+} from "./workspace-project";
 import type {
   CustomTaskDraft,
   AppDestination,
@@ -307,7 +312,6 @@ import type {
   ModelProviderConfig,
   Notification,
   NotificationPermissionState,
-  OnboardingState,
   ProviderId,
   ProviderModel,
   ProviderLedgerSummary,
@@ -472,6 +476,7 @@ const TOOL_PANEL_COLLAPSE_HEIGHT = 96;
 const TOOL_PANEL_MAX_VIEWPORT_RATIO = 0.92;
 const IDE_SIDEBAR_KEYBOARD_STEP = 16;
 const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
+const SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH = 360;
 /**
  * How far off the bottom of the transcript still counts as being at the bottom.
  *
@@ -748,6 +753,8 @@ type AppChromeProps = {
   /** Provider CLIs with available updates (Claude, Codex, Grok, …). */
   cliUpdateOffers?: CliUpdateOffer[];
   cliUpdatePhase?: CliUpdatePhase;
+  /** Why the last pressed update did not finish, per provider. */
+  cliUpdateFailure?: CliUpdateFailure;
   onUpdateClis?: () => void;
   onDismissCliUpdates?: () => void;
   /** A blocked provider belongs with the other app-level status notices. */
@@ -1398,15 +1405,39 @@ function cliUpdateNoticeHeadline(available: CliUpdateOffer[]) {
   return <>Updates available for {joined}</>;
 }
 
+export type CliUpdateFailure = {
+  message: string;
+  providerIds: string[];
+};
+
+/** Names the CLIs that did not update, so a retry is not a guess. */
+function cliUpdateFailureHeadline(
+  available: CliUpdateOffer[],
+  failure?: CliUpdateFailure,
+) {
+  const failed = available.filter((offer) =>
+    failure?.providerIds.includes(offer.providerId),
+  );
+  if (failed.length === 1) {
+    return `${failed[0]!.displayName} didn't update`;
+  }
+  if (failed.length > 1) {
+    return `${failed.length} CLIs didn't update`;
+  }
+  return "The update didn't finish";
+}
+
 /** Center-top notice when provider CLIs can be updated. */
 export function CliUpdateBanner({
   offers,
   phase = "idle",
+  failure,
   onUpdate,
   onDismiss,
 }: {
   offers: CliUpdateOffer[];
   phase?: CliUpdatePhase;
+  failure?: CliUpdateFailure;
   onUpdate?: () => void;
   onDismiss?: () => void;
 }) {
@@ -1415,30 +1446,48 @@ export function CliUpdateBanner({
     return null;
   }
   const isBusy = phase === "updating" || phase === "checking";
+  const isFailed = phase === "failed";
   const actionLabel =
-    phase === "updating" ? "Updating…" : cliUpdateActionLabel(available);
-  const headline =
-    phase === "failed"
-      ? "CLI update failed — try again"
+    phase === "updating"
+      ? "Updating…"
+      : isFailed
+        ? "Retry"
+        : cliUpdateActionLabel(available);
+  const failureHeadline = cliUpdateFailureHeadline(available, failure);
+  const headline = isFailed
+    ? failureHeadline
+    : phase === "updating"
+      ? available.length === 1
+        ? `Updating ${available[0]!.displayName}…`
+        : `Updating ${available.length} CLIs…`
       : cliUpdateNoticeHeadline(available);
 
   return (
     <div
+      aria-busy={isBusy}
       aria-label={
-        phase === "failed"
-          ? "CLI update failed — try again"
-          : cliUpdateNoticeMessage(available)
+        isFailed ? failureHeadline : cliUpdateNoticeMessage(available)
       }
       aria-live="polite"
       className="gyro-cli-update-banner"
       data-phase={phase}
       role="status"
+      title={isFailed ? failure?.message : undefined}
     >
       <span className="gyro-cli-update-banner-icon" aria-hidden="true">
-        <Download size={13} />
+        {isFailed ? (
+          <TriangleAlert size={13} />
+        ) : phase === "updating" ? (
+          <RefreshCw className="gyro-cli-update-banner-spinner" size={13} />
+        ) : (
+          <Download size={13} />
+        )}
       </span>
       <span className="gyro-cli-update-banner-copy">
         <strong>{headline}</strong>
+        {isFailed && failure?.message ? (
+          <small>{failure.message.split("\n")[0]}</small>
+        ) : null}
       </span>
       <button
         className="gyro-cli-update-banner-action"
@@ -1525,6 +1574,7 @@ export function AppChrome({
   updateState,
   cliUpdateOffers = [],
   cliUpdatePhase = "idle",
+  cliUpdateFailure,
   onUpdateClis,
   onDismissCliUpdates,
   providerReadinessNotice,
@@ -1650,6 +1700,58 @@ export function AppChrome({
     () => settingsSearchResults(settingsQuery),
     [settingsQuery],
   );
+  const [noticeLane, noticeLaneRef] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const main = noticeLane?.parentElement;
+    if (!noticeLane || !main) {
+      return;
+    }
+    // Center app notices over the conversation rather than the whole content
+    // pane: with Canvas, Browser, or another right panel open, the pane's
+    // center lands inside that panel. Tiled chats keep the full-width lane.
+    const chatColumnSelector = ".gyro-chat-thread-canvas, .gyro-chat-start";
+    let frame = 0;
+    const place = () => {
+      frame = 0;
+      const columns = main.querySelectorAll<HTMLElement>(chatColumnSelector);
+      const column = columns.length === 1 ? columns[0] : undefined;
+      const rect = column?.getBoundingClientRect();
+      if (!rect || rect.width === 0) {
+        noticeLane.style.removeProperty("left");
+        noticeLane.style.removeProperty("right");
+        noticeLane.style.removeProperty("width");
+        return;
+      }
+      const mainRect = main.getBoundingClientRect();
+      noticeLane.style.left = `${rect.left - mainRect.left}px`;
+      noticeLane.style.right = "auto";
+      noticeLane.style.width = `${rect.width}px`;
+    };
+    const schedule = () => {
+      if (!frame) {
+        frame = window.requestAnimationFrame(place);
+      }
+    };
+    const resize = new ResizeObserver(schedule);
+    const observeColumns = () => {
+      resize.observe(main);
+      main
+        .querySelectorAll<HTMLElement>(chatColumnSelector)
+        .forEach((column) => resize.observe(column));
+    };
+    const mutations = new MutationObserver(() => {
+      observeColumns();
+      schedule();
+    });
+    observeColumns();
+    mutations.observe(main, { childList: true, subtree: true });
+    place();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resize.disconnect();
+      mutations.disconnect();
+    };
+  }, [noticeLane]);
   const [isWorkspacePreparationOpen, setIsWorkspacePreparationOpen] =
     useState(false);
   const workspacePreparationRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -1660,7 +1762,12 @@ export function AppChrome({
     () =>
       isIdeSurface && ide?.activeView === "ai"
         ? Math.max(restingSidebarWidth(), AI_VIEW_SIDEBAR_MINIMUM_WIDTH)
-        : restingSidebarWidth(),
+        : isIdeSurface && ide?.activeView === "source-control"
+          ? Math.max(
+              restingSidebarWidth(),
+              SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH,
+            )
+          : restingSidebarWidth(),
     [isIdeSurface, ide?.activeView],
   );
   const [ideSidebarMinimumWidth, setIdeSidebarMinimumWidth] =
@@ -1814,7 +1921,10 @@ export function AppChrome({
     previousSidebarViewRef.current = ide?.activeView;
     const requestedWidth = isIdeSurface
       ? enteringSourceControl
-        ? Math.min(workspaceSidebarWidth ?? 300, 300)
+        ? Math.min(
+            workspaceSidebarWidth ?? SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH,
+            SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH,
+          )
         : (workspaceSidebarWidth ?? restingWidth)
       : restingWidth;
     const nextWidth = Math.min(
@@ -2423,7 +2533,7 @@ export function AppChrome({
         {activeDestination !== "settings" &&
         (providerReadinessNotice ||
           cliUpdateOffers.some((offer) => offer.updateAvailable)) ? (
-          <div className="gyro-global-status-notices">
+          <div className="gyro-global-status-notices" ref={noticeLaneRef}>
             {providerReadinessNotice ? (
               <ProviderReadinessBanner
                 actionLabel={providerReadinessNotice.actionLabel}
@@ -2433,6 +2543,7 @@ export function AppChrome({
             ) : null}
             {cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
               <CliUpdateBanner
+                failure={cliUpdateFailure}
                 offers={cliUpdateOffers}
                 onDismiss={onDismissCliUpdates}
                 onUpdate={onUpdateClis}
@@ -4296,6 +4407,18 @@ function WorkspaceSidebarContent({
                         const decoration = ide?.fileDecorations.find(
                           (item) => item.path === file.path,
                         );
+                        const rootGroup = explorerRootGroupForFile(file);
+                        let previousRootGroup: typeof rootGroup;
+                        if (rootGroup) {
+                          for (let prior = index - 1; prior >= 0; prior -= 1) {
+                            const candidate = visibleFiles[prior];
+                            if (candidate?.workspacePath !== file.workspacePath)
+                              break;
+                            previousRootGroup =
+                              explorerRootGroupForFile(candidate);
+                            if (previousRootGroup) break;
+                          }
+                        }
                         return (
                           <WorkspaceExplorerRow
                             collapsed={
@@ -4317,6 +4440,12 @@ function WorkspaceSidebarContent({
                             )}
                             key={file.path}
                             kind={file.kind}
+                            rootGroup={rootGroup}
+                            startsRootGroup={
+                              rootGroup !== undefined &&
+                              rootGroup !== "project" &&
+                              rootGroup !== previousRootGroup
+                            }
                             label={
                               file.isWorkspaceRoot
                                 ? workspaceName(file.workspacePath)
@@ -6775,11 +6904,22 @@ function SidebarDestinationRow({
   );
 }
 
+function explorerRootGroupForFile(file: WorkspaceFile | undefined) {
+  if (!file || file.isWorkspaceRoot) return undefined;
+  const relativePath =
+    file.relativePath ??
+    workspaceRelativeFilePath(file.path, file.workspacePath);
+  if (!relativePath || relativePath.includes("/")) return undefined;
+  return workspaceExplorerRootEntryGroup(workspaceName(file.path));
+}
+
 function WorkspaceExplorerRow({
   label,
   decoration,
   bufferStatus,
   kind,
+  rootGroup,
+  startsRootGroup,
   depth,
   collapsed,
   isActive,
@@ -6795,6 +6935,8 @@ function WorkspaceExplorerRow({
   decoration?: IdeState["fileDecorations"][number];
   bufferStatus?: EditorBuffer["status"];
   kind: WorkspaceFile["kind"];
+  rootGroup?: ReturnType<typeof workspaceExplorerRootEntryGroup>;
+  startsRootGroup?: boolean;
   depth: number;
   collapsed: boolean;
   isActive: boolean;
@@ -6824,6 +6966,8 @@ function WorkspaceExplorerRow({
       data-explorer-path={path}
       data-file-state={decoration?.color}
       data-file-tone={badge?.tone}
+      data-root-group={rootGroup}
+      data-root-group-start={startsRootGroup || undefined}
       data-open={isOpen || undefined}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -7633,8 +7777,13 @@ function anyMediaDropTarget() {
 /** The composer currently under the pointer, and the last one it named. */
 let mediaDropTargetUnderPointer = "";
 let mediaDropArmedKey: string | undefined;
-/** Set by the window listener so the surface's own capture pass stands down. */
-let mediaDropHandledAtWindow = false;
+/**
+ * Drops a window listener already attached. Every mounted chat surface
+ * registers the listener, and `stopPropagation` does not stop sibling
+ * listeners on `window`, so without this each open chat attached the image
+ * again. Keyed by the event itself, so nothing lingers into the next drop.
+ */
+const handledMediaDrops = new WeakSet<Event>();
 
 const NO_MEDIA_DROP_TARGET: MediaDropTarget = {
   attach: () => undefined,
@@ -7800,7 +7949,6 @@ type ChatSurfaceProps = {
   modelFollow?: ModelFollowMode;
   onLoadModelFocusPeek?: (focus: ModelFocus) => Promise<ModelFocusPeekContent>;
   onOpenModelFocus?: (focus: ModelFocus) => void;
-  onboarding?: OnboardingState;
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
   isGoalComposerActive?: boolean;
@@ -7841,7 +7989,6 @@ type ChatSurfaceProps = {
     onNewChat: () => void;
   };
   workspaceMode?: WorkbenchMode;
-  showOnboardingSteps?: boolean;
   /** Whether empty chats show their starter prompt shortcuts. */
   showQuickActions?: boolean;
   isEnvironmentRailOpen?: boolean;
@@ -7932,8 +8079,6 @@ type ChatSurfaceProps = {
     value?: string,
   ) => boolean | void | Promise<boolean | void>;
   onCancelGoalComposer?: () => void;
-  onSetOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
-  onCompleteOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onAgentAction?: (action: string) => void;
   /**
    * End-of-turn file review, shown only in "Ask first".
@@ -8152,7 +8297,6 @@ export function ChatSurface({
   modelFocus,
   modelFollow = "peek",
   onOpenModelFocus,
-  onboarding,
   sessionPlan,
   sessionGoal,
   isGoalComposerActive = false,
@@ -8168,7 +8312,6 @@ export function ChatSurface({
   worktreeName,
   chatSwitcher,
   workspaceMode = "local",
-  showOnboardingSteps = false,
   showQuickActions = true,
   activeChatPanel,
   companionTabs,
@@ -8211,8 +8354,6 @@ export function ChatSurface({
   onMutationApprovalAction,
   onProviderApprovalAction,
   onProviderStatusAction,
-  onSetOnboardingStep,
-  onCompleteOnboardingStep,
   fileReview,
   onLoadChangeDiff,
   onLoadComparisonDiff,
@@ -8368,6 +8509,7 @@ export function ChatSurface({
       if (under) mediaDropTargetUnderPointer = under.paneKey;
     };
     const onDrop = (event: DragEvent) => {
+      if (handledMediaDrops.has(event)) return;
       if (!isMediaDrag(event.dataTransfer)) return;
       const files = chatMediaFiles(event.dataTransfer!);
       if (!files.length) return;
@@ -8386,7 +8528,7 @@ export function ChatSurface({
         NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
       // surface's own capture handler is still the one that can attach.
-      if (target !== NO_MEDIA_DROP_TARGET) mediaDropHandledAtWindow = true;
+      if (target !== NO_MEDIA_DROP_TARGET) handledMediaDrops.add(event);
       mediaDropArmedKey = target.paneKey || undefined;
       target.attach(files);
     };
@@ -8433,10 +8575,7 @@ export function ChatSurface({
     (event: ReactDragEvent<HTMLDivElement>) => {
       // The window listener runs first and owns routing; it marks the event so
       // this pass does not attach the same image twice.
-      if (mediaDropHandledAtWindow) {
-        mediaDropHandledAtWindow = false;
-        return;
-      }
+      if (handledMediaDrops.has(event.nativeEvent)) return;
       const files = chatMediaFiles(event.dataTransfer);
       if (!files.length) return;
       event.preventDefault();
@@ -9341,12 +9480,6 @@ export function ChatSurface({
           {localDraft.trim().length > 0 || !showQuickActions ? null : (
             <ChatStartSuggestions onPick={handleStartSuggestion} />
           )}
-          <CleanMachineActivation
-            showLegacySteps={showOnboardingSteps}
-            onboarding={onboarding}
-            onCompleteStep={onCompleteOnboardingStep}
-            onSelectStep={onSetOnboardingStep}
-          />
         </section>
         {sidePanel}
       </div>
@@ -10457,6 +10590,7 @@ function ChatSidePanel({
         {reviewScope.kind === "proposed" ? (
           <DiffReviewSurface
             compact
+            collapsibleFiles
             diffReview={diffReview}
             workspacePath={workspacePath}
             onAcceptAll={railDiffTools?.onAcceptAll}
@@ -14107,10 +14241,18 @@ function EditorGroupPane({
             <code>{fileContent.content}</code>
           </pre>
         ) : (
-          <div className="gyro-code-empty">
-            {filesAvailable || emptyPrompt === "Select a changed file to review"
-              ? `${emptyPrompt}.`
-              : "Open a workspace file to review it here."}
+          <div className="gyro-code-empty is-placeholder">
+            {emptyPrompt === "Select a changed file to review" ? (
+              <FileDiff aria-hidden="true" size={18} />
+            ) : (
+              <FileCode2 aria-hidden="true" size={18} />
+            )}
+            <span>
+              {filesAvailable ||
+              emptyPrompt === "Select a changed file to review"
+                ? `${emptyPrompt}.`
+                : "Open a workspace file to review it here."}
+            </span>
           </div>
         )}
       </div>
@@ -15759,6 +15901,29 @@ export function WorkspaceToolPanel({
   const maxHeight = maxToolPanelHeight();
   const currentHeight = height ?? TOOL_PANEL_DEFAULT_HEIGHT;
   const isNearFull = canResize && currentHeight >= maxHeight - 24;
+  const previousPaneTabRef = useRef<WorkbenchPaneTab>();
+
+  useLayoutEffect(() => {
+    const previousTab = previousPaneTabRef.current;
+    previousPaneTabRef.current = activePaneTab;
+    if (
+      !canResize ||
+      !onHeightChange ||
+      activePaneTab === "browser" ||
+      (previousTab && previousTab !== "browser")
+    ) {
+      return;
+    }
+    // A browser or maximized drawer may have saved nearly the whole window.
+    // Restore a readable editor when an ordinary tool first takes that space.
+    const comfortableHeight = Math.max(
+      TOOL_PANEL_DEFAULT_HEIGHT,
+      Math.round(window.innerHeight * 0.45),
+    );
+    if (currentHeight > comfortableHeight) {
+      onHeightChange(TOOL_PANEL_DEFAULT_HEIGHT);
+    }
+  }, [activePaneTab, canResize, currentHeight, onHeightChange]);
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (!canResize || !onHeightChange) {
@@ -16289,20 +16454,49 @@ export function TaskBoardSurface({
 export function AutomationsSurface({
   automations = [],
   selectedAutomationId,
+  createRequestToken = 0,
+  creationWorkspace,
+  creationProvider,
+  onCreateRequestHandled,
   onArchiveAutomation,
   onCreateAutomation,
+  onOpenWorkspace,
+  onOpenProviders,
   onRunAutomation,
   onSelectAutomation,
   onToggleAutomation,
 }: {
   automations?: Automation[];
   selectedAutomationId?: string;
+  createRequestToken?: number;
+  creationWorkspace?: string;
+  creationProvider?: string;
+  onCreateRequestHandled?: () => void;
   onArchiveAutomation?: (automationId: string) => void;
-  onCreateAutomation?: () => void;
+  onCreateAutomation?: (details: {
+    title: string;
+    prompt: string;
+    schedule: Automation["schedule"];
+    stopCondition?: string;
+  }) => Promise<boolean>;
+  onOpenWorkspace?: () => void;
+  onOpenProviders?: () => void;
   onRunAutomation?: (automationId: string) => void;
   onSelectAutomation?: (automationId: string) => void;
   onToggleAutomation?: (automationId: string) => void;
 }) {
+  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [schedule, setSchedule] = useState<Automation["schedule"]>("daily");
+  const [stopCondition, setStopCondition] = useState("");
+  useEffect(() => {
+    if (createRequestToken > 0) {
+      setIsCreating(true);
+      onCreateRequestHandled?.();
+    }
+  }, [createRequestToken, onCreateRequestHandled]);
   const selectedAutomation =
     automations.find((automation) => automation.id === selectedAutomationId) ??
     automations[0];
@@ -16315,16 +16509,36 @@ export function AutomationsSurface({
   const reviewCount = automations.filter(
     (automation) => automation.triageState === "needs-review",
   ).length;
-  const selectedAutomationRunning = Boolean(
-    selectedAutomation?.leaseOwner ||
-    selectedAutomation?.runHistory[0]?.status === "running",
+  const canCreate = Boolean(
+    title.trim() && prompt.trim() && creationWorkspace && creationProvider,
   );
-  const selectedAutomationCanRun = Boolean(
-    selectedAutomation?.status === "current" && !selectedAutomationRunning,
-  );
+  const submitAutomation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canCreate || isSaving || !onCreateAutomation) return;
+    setIsSaving(true);
+    try {
+      const created = await onCreateAutomation({
+        title: title.trim(),
+        prompt: prompt.trim(),
+        schedule,
+        stopCondition: stopCondition.trim() || undefined,
+      });
+      if (created) {
+        setIsCreating(false);
+        setTitle("");
+        setPrompt("");
+        setSchedule("daily");
+        setStopCondition("");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
-    <div className="gyro-automations-surface">
+    <div
+      className={`gyro-automations-surface${isCreating ? " is-creating" : automations.length === 0 ? " is-empty" : ""}`}
+    >
       <header className="gyro-automation-toolbar gyro-surface-page-header">
         <div className="gyro-surface-page-title">
           <span className="gyro-surface-page-icon" aria-hidden="true">
@@ -16333,56 +16547,136 @@ export function AutomationsSurface({
           <div>
             <span className="gyro-surface-page-eyebrow">Scheduled work</span>
             <h1>Automations</h1>
-            <p>
-              Run recurring agent work with local triage and stop conditions.
-            </p>
+            <p>Schedule checks and follow-ups in your project.</p>
           </div>
         </div>
         <div className="gyro-board-actions">
           <button
-            className="gyro-secondary-button"
-            disabled={!selectedAutomationCanRun}
-            onClick={() =>
-              selectedAutomation && onRunAutomation?.(selectedAutomation.id)
+            className={
+              isCreating ? "gyro-secondary-button" : "gyro-primary-button"
             }
+            onClick={() => setIsCreating((current) => !current)}
             type="button"
           >
-            <Play size={15} />
-            {selectedAutomationRunning ? "Running" : "Run now"}
-          </button>
-          <button
-            className="gyro-primary-button"
-            onClick={onCreateAutomation}
-            type="button"
-          >
-            <Plus size={15} />
-            New automation
+            {isCreating ? null : <Plus size={15} />}
+            {isCreating ? "Cancel" : "New automation"}
           </button>
         </div>
       </header>
 
-      <div className="gyro-automation-summary">
-        <AutomationMetric label="Current" value={currentCount} />
-        <AutomationMetric label="Paused" value={pausedCount} />
-        <AutomationMetric label="Needs review" value={reviewCount} />
-      </div>
+      {!isCreating && automations.length > 0 ? (
+        <div className="gyro-automation-summary">
+          <AutomationMetric label="Current" value={currentCount} />
+          <AutomationMetric label="Paused" value={pausedCount} />
+          <AutomationMetric label="Needs review" value={reviewCount} />
+        </div>
+      ) : null}
 
-      {automations.length === 0 ? (
+      {isCreating ? (
+        <form
+          className="gyro-automation-create"
+          onSubmit={(event) => void submitAutomation(event)}
+        >
+          <header>
+            <h2>New automation</h2>
+            <p>Describe the work, then choose when Gyro should run it.</p>
+          </header>
+          <div className="gyro-automation-create-context">
+            {creationWorkspace ? (
+              <span>Project: {creationWorkspace}</span>
+            ) : (
+              <button onClick={onOpenWorkspace} type="button">
+                Open a project
+              </button>
+            )}
+            {creationProvider ? (
+              <span>Provider: {creationProvider}</span>
+            ) : (
+              <button onClick={onOpenProviders} type="button">
+                Connect a provider
+              </button>
+            )}
+          </div>
+          <label>
+            Name
+            <input
+              autoFocus
+              maxLength={120}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Daily workspace check"
+              required
+              value={title}
+            />
+          </label>
+          <label>
+            Instructions
+            <textarea
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Check the project and report what needs attention."
+              required
+              rows={5}
+              value={prompt}
+            />
+          </label>
+          <div className="gyro-automation-create-fields">
+            <label>
+              Schedule
+              <select
+                onChange={(event) =>
+                  setSchedule(event.target.value as Automation["schedule"])
+                }
+                value={schedule}
+              >
+                <option value="manual">Manual only</option>
+                <option value="hourly">Every hour</option>
+                <option value="daily">Every 24 hours</option>
+                <option value="weekly">Every 7 days</option>
+                <option value="heartbeat">Heartbeat (hourly)</option>
+              </select>
+            </label>
+            <label>
+              <span className="gyro-automation-field-label">
+                Stop condition <em>(optional)</em>
+              </span>
+              <input
+                onChange={(event) => setStopCondition(event.target.value)}
+                placeholder="Stop when the check passes twice"
+                value={stopCondition}
+              />
+            </label>
+          </div>
+          <footer>
+            <button
+              className="gyro-primary-button"
+              disabled={!canCreate || isSaving}
+              type="submit"
+            >
+              {isSaving ? "Creating…" : "Create automation"}
+            </button>
+          </footer>
+        </form>
+      ) : automations.length === 0 ? (
         <section className="gyro-automation-empty">
           <div className="gyro-pane-empty-icon">
             <CalendarClock size={22} />
           </div>
           <strong>No scheduled work yet</strong>
-          <span>
-            Create a local automation for recurring checks, heartbeat prompts,
-            or follow-up agent runs.
-          </span>
+          <span>Schedule a check or follow-up for a project.</span>
+          <button
+            className="gyro-primary-button"
+            onClick={() => setIsCreating(true)}
+            type="button"
+          >
+            <Plus size={15} />
+            New automation
+          </button>
         </section>
       ) : (
         <div className="gyro-automation-layout">
           <section className="gyro-automation-list" aria-label="Automations">
             {automations.map((automation) => (
               <button
+                aria-label={`${automation.title}, ${automation.schedule}, ${automation.status}`}
                 className={
                   automation.id === selectedAutomation?.id
                     ? "gyro-automation-row is-active"
@@ -16390,15 +16684,12 @@ export function AutomationsSurface({
                 }
                 key={automation.id}
                 onClick={() => onSelectAutomation?.(automation.id)}
+                title={automation.title}
                 type="button"
               >
-                <div>
-                  <strong>{automation.title}</strong>
-                  <span>{automation.prompt}</span>
-                </div>
-                <small>{automation.schedule}</small>
+                <strong>{automation.title}</strong>
                 <small className={`is-${automation.status}`}>
-                  {automation.status}
+                  {automation.schedule} · {automation.status}
                 </small>
                 {automation.unreadResults > 0 ? (
                   <b>{automation.unreadResults}</b>
@@ -17008,6 +17299,7 @@ export function ProvidersSurface({
 
 export function DiffReviewSurface({
   compact = false,
+  collapsibleFiles = false,
   diffReview,
   workspacePath,
   onSelectFile,
@@ -17022,6 +17314,7 @@ export function DiffReviewSurface({
   onRunGitAction,
 }: {
   compact?: boolean;
+  collapsibleFiles?: boolean;
   diffReview?: DiffReview;
   workspacePath?: string;
   onSelectFile?: (path: string) => void;
@@ -17035,6 +17328,8 @@ export function DiffReviewSurface({
   onOpenInEditor?: (path: string) => void;
   onRunGitAction?: (actionId: GitReviewActionId) => void;
 }) {
+  const [isFileListCollapsed, setIsFileListCollapsed] = useState(false);
+  const fileTreeId = useId();
   const review: DiffReview = diffReview ?? {
     files: [],
     selectedPath: "",
@@ -17060,6 +17355,9 @@ export function DiffReviewSurface({
       className={[
         "gyro-diff-review",
         compact ? "is-compact" : "",
+        collapsibleFiles && isFileListCollapsed && hasFiles
+          ? "is-file-list-collapsed"
+          : "",
         hasFiles ? "" : "is-empty",
       ]
         .filter(Boolean)
@@ -17079,12 +17377,30 @@ export function DiffReviewSurface({
       </header>
       <aside className="gyro-diff-file-list" aria-label="Changed files">
         <header>
-          <strong>Changed files</strong>
+          {collapsibleFiles && hasFiles ? (
+            <button
+              aria-controls={fileTreeId}
+              aria-expanded={!isFileListCollapsed}
+              className="gyro-diff-file-list-toggle"
+              onClick={() => setIsFileListCollapsed((current) => !current)}
+              type="button"
+            >
+              <ChevronDown aria-hidden="true" size={14} />
+              <strong>Changed files</strong>
+            </button>
+          ) : (
+            <strong>Changed files</strong>
+          )}
           <span>
             +{additions} -{deletions}
           </span>
         </header>
-        <div className="gyro-diff-tree" role="tree">
+        <div
+          className="gyro-diff-tree"
+          hidden={collapsibleFiles && isFileListCollapsed}
+          id={fileTreeId}
+          role="tree"
+        >
           {diffTree.length === 0 ? (
             <div className="gyro-diff-tree-empty">No file changes yet.</div>
           ) : (
@@ -21183,6 +21499,13 @@ export function SettingsSurface({
                   </div>
                 </div>
                 {providerUsage?.status === "available" &&
+                providerUsage.stale &&
+                providerUsage.error ? (
+                  <p className="gyro-usage-stale-note" role="status">
+                    {providerUsage.error}
+                  </p>
+                ) : null}
+                {providerUsage?.status === "available" &&
                 providerUsage.windows.length > 0 ? (
                   <div className="gyro-usage-cards">
                     {/* Show every window the provider (or ledger) reported —
@@ -21446,6 +21769,14 @@ export function SettingsSurface({
                   health?.connectionStatus !== "failed" &&
                   !isChecking &&
                   Boolean(defaultModelId);
+                const setupMessage = isConnecting
+                  ? "Connecting. Follow the sign-in instructions if prompted."
+                  : needsModelInstall
+                    ? "Install a model, then refresh."
+                    : health?.connectionStatus === "failed" || needsSignInRepair
+                      ? (health?.healthSummary ??
+                        "Connection needs attention. Try signing in again.")
+                      : undefined;
                 return (
                   <div
                     id={
@@ -21464,29 +21795,14 @@ export function SettingsSurface({
                       />
                       <div>
                         <strong>{provider.displayName}</strong>
-                        <small
-                          className="gyro-provider-setup-message"
-                          role="status"
-                        >
-                          {isConnecting
-                            ? "Connecting. Follow the sign-in instructions if prompted."
-                            : isChecking
-                              ? "Checking connection…"
-                              : needsModelInstall
-                                ? "Install a model, then refresh."
-                                : health?.connectionStatus === "failed" ||
-                                    needsSignInRepair
-                                  ? (health?.healthSummary ??
-                                    "Connection needs attention. Try signing in again.")
-                                  : canUseInChat
-                                    ? "Choose a model, then use it in chat."
-                                    : provider.id === "ollama"
-                                      ? "Start Ollama, then refresh models."
-                                      : provider.authMode === "env" &&
-                                          providerSupportsApiKey(provider.id)
-                                        ? "Add your provider’s API key below."
-                                        : "Sign in to connect this provider."}
-                        </small>
+                        {setupMessage ? (
+                          <small
+                            className="gyro-provider-setup-message"
+                            role="status"
+                          >
+                            {setupMessage}
+                          </small>
+                        ) : null}
                       </div>
                     </div>
                     <div className="gyro-provider-default-model">
@@ -22831,10 +23147,13 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
     <div className={`gyro-composer-limit-row is-${window.severity}`}>
       <div className="gyro-composer-limit-heading">
         <strong>{window.label}</strong>
-        <span>
-          {window.resetsLabel ? <em>{window.resetsLabel}</em> : null}
-          <b>{window.percentLabel}</b>
-        </span>
+        <b className={measured ? undefined : "is-unmeasured"}>
+          {measured
+            ? `${window.percentLabel} used`
+            : window.status === "exhausted"
+              ? window.percentLabel
+              : "Not reported"}
+        </b>
       </div>
       <div
         aria-label={`${window.label}: ${
@@ -22848,6 +23167,9 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
       >
         {measured ? <span style={{ width: `${window.percent}%` }} /> : null}
       </div>
+      {window.resetsLabel ? (
+        <em className="gyro-composer-limit-reset">{window.resetsLabel}</em>
+      ) : null}
     </div>
   );
 }
@@ -24176,6 +24498,21 @@ function Composer({
   const usageProviderId = providerUsage?.providerId ?? effectiveProviderId;
   const usageFetchedAt = providerUsage?.fetchedAt;
   const usageLoading = providerUsage?.status === "loading";
+  // An empty thread has nothing to measure yet. Printing "0 of 1M" there
+  // claims a reading nobody took — the system prompt alone is not zero.
+  const contextSource: "reported" | "estimated" | "empty" = !contextUsage
+    ? "empty"
+    : contextUsage.source === "reported"
+      ? "reported"
+      : contextUsage.usedTokens > 0
+        ? "estimated"
+        : "empty";
+  const usageClock = useLimitClock(Boolean(usageFetchedAt));
+  const usageFreshness = formatUsageFreshness(
+    usageFetchedAt,
+    usageClock,
+    Boolean(providerUsage?.stale || providerUsage?.error),
+  );
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
     const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
@@ -25504,38 +25841,83 @@ function Composer({
               id={`${popoverBaseId}-context-usage-tooltip`}
               role="tooltip"
             >
-              <header>
-                <strong>Context</strong>
-                <span>{contextUsage.percentLabel}</span>
-              </header>
-              <p className="gyro-composer-context-model">
-                {contextUsage.modelLabel}
-              </p>
-              <div className="gyro-composer-context-value">
-                <strong>{contextUsage.usedLabel}</strong>
-                <span>
-                  of {contextUsage.windowLabel} · {contextUsage.remainingLabel}{" "}
-                  remaining
-                </span>
-              </div>
-              <div
-                aria-label="Context window used"
-                aria-valuemax={100}
-                aria-valuemin={0}
-                aria-valuenow={contextUsage.percent}
-                className="gyro-composer-context-bar"
-                role="progressbar"
-              >
-                <span style={{ width: `${contextUsage.percent}%` }} />
-              </div>
-              {limitWindows.length > 0 || providerUsage ? (
+              <section className="gyro-composer-context-section">
+                <header>
+                  <div className="gyro-composer-context-heading">
+                    <strong>Context</strong>
+                    <span
+                      className="gyro-composer-context-model"
+                      title={contextUsage.modelLabel}
+                    >
+                      {contextUsage.modelLabel}
+                    </span>
+                  </div>
+                  <span
+                    className={`gyro-composer-context-source is-${contextSource}`}
+                    title={contextUsage.detail}
+                  >
+                    {contextSource === "reported"
+                      ? "Measured"
+                      : contextSource === "empty"
+                        ? "Not started"
+                        : "Estimated"}
+                  </span>
+                </header>
                 <div
+                  className="gyro-composer-context-value"
+                  title={
+                    contextSource === "empty"
+                      ? "Measured once the model replies"
+                      : `${contextUsage.remainingLabel} left`
+                  }
+                >
+                  <strong>
+                    {contextSource === "empty"
+                      ? "—"
+                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
+                  </strong>
+                  <span>/ {contextUsage.windowLabel} tokens</span>
+                  {contextSource === "empty" ? null : (
+                    <b>{contextUsage.percentLabel}</b>
+                  )}
+                </div>
+                <div
+                  aria-label="Context window used"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={contextUsage.percent}
+                  className="gyro-composer-context-bar"
+                  role="progressbar"
+                >
+                  <span style={{ width: `${contextUsage.percent}%` }} />
+                </div>
+                {contextSource !== "reported" ? (
+                  <small className="gyro-composer-context-note">
+                    {contextSource === "empty"
+                      ? "Measured once the model replies"
+                      : "Provider count pending"}
+                  </small>
+                ) : null}
+              </section>
+              {limitWindows.length > 0 || providerUsage ? (
+                <section
                   aria-label="Plan usage limits"
                   className="gyro-composer-limit-summary"
                 >
-                  <span className="gyro-composer-limit-title">
-                    Plan usage limits
-                  </span>
+                  <header className="gyro-composer-limit-title">
+                    <span>Plan usage</span>
+                    {usageFreshness ? (
+                      <em
+                        className={
+                          usageFreshness.stale ? "is-stale" : undefined
+                        }
+                      >
+                        {usageFreshness.label}
+                      </em>
+                    ) : providerUsage?.status === "loading" ? (
+                      <em>Updating…</em>
+                    ) : null}
+                  </header>
                   {limitWindows.length > 0 ? (
                     limitWindows.map((window) => (
                       <ComposerLimitRow key={window.id} window={window} />
@@ -25543,11 +25925,11 @@ function Composer({
                   ) : (
                     <small>
                       {providerUsage?.status === "loading"
-                        ? "Updating…"
-                        : "Unavailable"}
+                        ? "Reading your plan…"
+                        : "Your provider has not reported plan limits."}
                     </small>
                   )}
-                </div>
+                </section>
               ) : null}
             </div>
           </div>
@@ -25587,7 +25969,9 @@ function Composer({
           </button>
           {activePopover === "provider" && isModelRailPane ? (
             <ComposerModelRail
-              activeModelId={effectiveModelId ?? displayProvider?.selectedModelId}
+              activeModelId={
+                effectiveModelId ?? displayProvider?.selectedModelId
+              }
               activeProviderId={effectiveProviderId}
               id={`${popoverBaseId}-provider`}
               onConnect={(providerId) =>
@@ -26985,10 +27369,16 @@ function ChatTurn({
             renderAssistantInlineContent(text, onOpenBrowserUrl)
           }
           toolBudgetNotice={
-            providerStatus?.recoveryKind === "tool-budget"
+            providerStatus?.recoveryKind === "tool-budget" ||
+            providerStatus?.recoveryKind === "partial-answer"
               ? (providerStatus.recoveryMessage ??
                 providerStatus.error ??
                 undefined)
+              : undefined
+          }
+          toolBudgetNoticeTitle={
+            providerStatus?.recoveryKind === "partial-answer"
+              ? "Answer may be cut off"
               : undefined
           }
           onContinueAfterToolBudget={canContinue ? onContinueChat : undefined}
@@ -29118,66 +29508,6 @@ function IdeRailTabs({
           </button>
         );
       })}
-    </div>
-  );
-}
-
-/**
- * Legacy first-run step chrome for an empty Chat.
- * The activation checklist is gone: the composer placeholder and provider
- * picker carry the project/provider gates now.
- */
-function CleanMachineActivation({
-  onboarding,
-  onCompleteStep,
-  onSelectStep,
-  showLegacySteps = false,
-}: {
-  onboarding?: OnboardingState;
-  onCompleteStep?: (step: OnboardingState["activeStep"]) => void;
-  onSelectStep?: (step: OnboardingState["activeStep"]) => void;
-  showLegacySteps?: boolean;
-}) {
-  if (!showLegacySteps) {
-    return null;
-  }
-
-  const legacySteps: Array<{
-    id: OnboardingState["activeStep"];
-    label: string;
-  }> = [
-    { id: "welcome", label: "Welcome" },
-    { id: "workspace", label: "Project" },
-    { id: "provider", label: "Provider" },
-    { id: "approval", label: "Approvals" },
-    { id: "first-session", label: "First chat" },
-  ];
-
-  return (
-    <div className="gyro-clean-machine-path" aria-label="Get ready to chat">
-      <div className="gyro-onboarding-steps" aria-label="First run flow">
-        {legacySteps.map((step, index) => (
-          <button
-            className={[
-              onboarding?.activeStep === step.id || (!onboarding && index === 0)
-                ? "is-active"
-                : "",
-              onboarding?.completedSteps.includes(step.id) ? "is-complete" : "",
-            ].join(" ")}
-            key={step.id}
-            onClick={() => {
-              onSelectStep?.(step.id);
-              if (onboarding?.activeStep === step.id) {
-                onCompleteStep?.(step.id);
-              }
-            }}
-            type="button"
-          >
-            <span>{index + 1}</span>
-            <strong>{step.label}</strong>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

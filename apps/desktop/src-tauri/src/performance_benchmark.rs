@@ -508,14 +508,19 @@ mod tests {
             let effect_path = root.path().join(format!("effects-{after_edit}.txt"));
             fs::write(&effect_path, "").unwrap();
             let mut received_cursors = Vec::new();
-            let output =
-                run_provider_chat_with_retry_using(&store, &request, None, |cursor, attempt| {
+            let output = run_provider_chat_with_retry_using(
+                &store,
+                &request,
+                None,
+                |cursor, attempt| {
                     received_cursors.push(cursor.map(|value| value.session_id.clone()));
                     attempts += 1;
                     if after_edit || attempts > 1 {
                         let mut file = fs::OpenOptions::new().append(true).open(&effect_path)?;
                         use std::io::Write;
                         writeln!(file, "edit")?;
+                        // The edit reached the chat as an activity.
+                        attempt.published_output = true;
                     }
                     attempt.resume_cursor = Some(ProviderResumeCursor {
                         kind: "codex-session".into(),
@@ -530,6 +535,7 @@ mod tests {
                         billed_usage: None,
                         rate_limits: Vec::new(),
                         paused_at_tool_budget: false,
+                        answer_cut_off: false,
                         response: "done".into(),
                         resume_cursor: None,
                         retry_count: 0,
@@ -537,19 +543,24 @@ mod tests {
                         streamed_text: None,
                         output_summary: None,
                     })
-                })
-                .unwrap();
+                },
+                || None,
+            );
             let effects = fs::read_to_string(&effect_path).unwrap().lines().count();
-            assert_eq!(attempts, failures + 1);
-            assert_eq!(output.retry_count, failures as u32);
-            assert_eq!(effects, if after_edit { failures + 1 } else { 1 });
+            // A disconnect before any output retries once; after an edit the
+            // failure is reported instead, so the edit is never repeated.
+            let retries = output.as_ref().map_or(0, |output| output.retry_count);
+            assert_eq!(output.is_ok(), !after_edit);
+            assert_eq!(attempts, if after_edit { 1 } else { failures + 1 });
+            assert_eq!(effects, 1);
             let mut expected_cursors = vec![None];
-            expected_cursors
-                .extend((0..failures).map(|_| Some("observed-first-attempt".to_string())));
+            if !after_edit {
+                expected_cursors
+                    .extend((0..failures).map(|_| Some("observed-first-attempt".to_string())));
+            }
             assert_eq!(received_cursors, expected_cursors);
-            results.push(json!({"scenario":if !after_edit {"disconnect-before-edit"} else if failures == 1 {"disconnect-after-edit"} else {"repeated-disconnect-after-edit"},"attempts":attempts,"mutationCount":effects,"duplicateMutation":effects>1,"retries":output.retry_count,"observedCursorReused":true}));
+            results.push(json!({"scenario":if !after_edit {"disconnect-before-edit"} else if failures == 1 {"disconnect-after-edit"} else {"repeated-disconnect-after-edit"},"attempts":attempts,"mutationCount":effects,"duplicateMutation":effects>1,"retries":retries,"observedCursorReused":true}));
         }
-        // Verify the evidence collection, not the correctness of unsafe behavior.
         assert_eq!(results.len(), 3);
         println!(
             "GYRO_RETRY_FAULT_EVIDENCE={}",

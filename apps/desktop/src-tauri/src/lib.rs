@@ -11,11 +11,13 @@ mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
 pub(crate) use window_controls::apply_macos_traffic_light_position;
+mod kimi_usage;
 #[cfg(debug_assertions)]
 mod performance_benchmark;
 mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
+use kimi_usage::*;
 mod browser_knowledge;
 mod file_patch_counts;
 
@@ -215,6 +217,8 @@ const PROVIDER_CAPABILITY_RESOURCE_EVENT: &str = "gyro://provider-capability-res
 const PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT: &str =
     "gyro://provider-approval-notification-open";
 const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
+/// A plan-usage reading every open window should adopt, whoever asked for it.
+const PROVIDER_USAGE_UPDATED_EVENT: &str = "gyro://provider-usage-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
@@ -361,6 +365,15 @@ impl BrowserPreviewAdmission {
 impl Drop for BrowserPreviewAdmission {
     fn drop(&mut self) {
         ACTIVE_BROWSER_PREVIEWS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Deletes a temporary file when dropped.
+struct TempFileGuard(PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
     }
 }
 
@@ -580,6 +593,8 @@ impl Default for ProviderRunControl {
 /// have to tell one from a genuine failure. They match this rather than the
 /// whole sentence so the sentence stays free to say what actually happened.
 const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
+/// The stable phrase of a turn Gyro ended because the provider went silent.
+const PROVIDER_STALL_MARKER: &str = "the provider sent nothing for";
 
 /// The sentence a turn is closed with when Gyro exited while it was running.
 ///
@@ -599,6 +614,11 @@ const PROVIDER_INTERRUPTED_MARKER: &str =
 const PROVIDER_TOOL_BUDGET_NOTICE: &str =
     "Gyro stopped offering tools at this turn's round budget.";
 
+/// The notice attached to a turn whose answer was kept after the provider
+/// exited with an error before finishing it. Matched by its stable phrase.
+const PROVIDER_CUT_OFF_NOTICE: &str =
+    "The provider exited before it finished, so this answer may be cut off.";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderStopReason {
     User,
@@ -606,6 +626,10 @@ enum ProviderStopReason {
     CallTokenCeiling {
         spent: u64,
         ceiling: u64,
+    },
+    /// Gyro ended a run that went silent with no tool or approval pending.
+    Stalled {
+        silent_minutes: u64,
     },
 }
 
@@ -616,6 +640,12 @@ impl ProviderStopReason {
             Self::CallTokenCeiling { spent, ceiling } => format!(
                 "{PROVIDER_STOP_MARKER} Gyro: this turn spent {spent} tokens of new input and output, \
                  past the {ceiling} token per-call ceiling."
+            ),
+            // Deliberately without the stop marker: nobody chose to stop this
+            // turn, so it is reported as a failure the user can send again.
+            Self::Stalled { silent_minutes } => format!(
+                "Gyro ended this turn: {PROVIDER_STALL_MARKER} {silent_minutes} \
+                 minutes with no tool or approval pending."
             ),
         }
     }
@@ -1830,6 +1860,10 @@ struct ProviderResumeCursor {
 #[derive(Debug, Default)]
 struct ProviderRunAttempt {
     resume_cursor: Option<ProviderResumeCursor>,
+    /// Set once the attempt showed text or activity in the chat. From then on
+    /// the provider may have run tools, so a transient failure is reported
+    /// rather than retried: a second run could repeat an edit or a command.
+    published_output: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1884,6 +1918,9 @@ struct ProviderRunnerOutput {
     /// the reply is kept and saved; this only decides whether the completion
     /// notice says why the tool loop ended.
     paused_at_tool_budget: bool,
+    /// The answer was kept after the provider exited with an error before
+    /// finishing it, so it may be cut off. Saved as done, with a notice.
+    answer_cut_off: bool,
     resume_cursor: Option<ProviderResumeCursor>,
     retry_count: u32,
     resumed: bool,
@@ -5445,9 +5482,13 @@ fn run_provider_chat_blocking(
         Some(run_id),
         attempt_id,
         HarnessRunStatus::Done,
-        runner_output
-            .paused_at_tool_budget
-            .then_some(PROVIDER_TOOL_BUDGET_NOTICE),
+        if runner_output.paused_at_tool_budget {
+            Some(PROVIDER_TOOL_BUDGET_NOTICE)
+        } else if runner_output.answer_cut_off {
+            Some(PROVIDER_CUT_OFF_NOTICE)
+        } else {
+            None
+        },
     )
     .unwrap_or_else(|error| {
         eprintln!(
@@ -11788,13 +11829,39 @@ async fn get_session_usage_totals(session_id: String) -> Result<UsageTotals, Str
 
 #[tauri::command]
 async fn get_provider_usage(
+    app: tauri::AppHandle,
     provider_id: String,
     fresh: Option<bool>,
 ) -> Result<ProviderUsageSnapshot, String> {
     let fresh = fresh.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || get_provider_usage_blocking(&provider_id, fresh))
-        .await
-        .map_err(|error| format!("provider usage worker failed: {error}"))?
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        get_provider_usage_blocking(&provider_id, fresh)
+    })
+    .await
+    .map_err(|error| format!("provider usage worker failed: {error}"))??;
+    // Other windows share the account, so they take the same reading.
+    let _ = app.emit(PROVIDER_USAGE_UPDATED_EVENT, &snapshot);
+    Ok(snapshot)
+}
+
+/// Read the plan again because a running turn just touched it, and push the
+/// result to every window.
+///
+/// Claude Code announces a plan window at the start of each request but never
+/// says how full it is, so the announcement is the cue to ask the account API.
+/// The poll behind `fresh` coalesces bursts, so a tool-heavy turn announcing
+/// the window many times still costs about one request per ten seconds.
+fn publish_live_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
+    if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
+        return;
+    }
+    let app = app.clone();
+    let provider_id = provider_id.to_string();
+    std::thread::spawn(move || {
+        if let Ok(snapshot) = get_provider_usage_blocking(&provider_id, true) {
+            let _ = app.emit(PROVIDER_USAGE_UPDATED_EVENT, &snapshot);
+        }
+    });
 }
 
 /// The plan windows Gyro can state for a provider right now.
@@ -11827,7 +11894,15 @@ fn get_provider_usage_blocking(
             remember_provider_rate_limits(provider_id, &snapshot.windows, &snapshot.fetched_at);
             snapshot
         }
-        Err(error) => usage_refresh_fallback(stored_provider_usage(provider_id)?, error)?,
+        Err(error) => {
+            // The popover shows the stale reading and this reason; the log is
+            // what explains a poll that keeps failing only inside the app.
+            eprintln!(
+                "plan usage refresh for {provider_id} failed: {}",
+                gyro_core::security::redact_secrets(&error)
+            );
+            usage_refresh_fallback(stored_provider_usage(provider_id)?, error)?
+        }
     };
     snapshot
         .windows
@@ -12006,410 +12081,6 @@ fn provider_usage_windows_from_xai_billing(
     }]
 }
 
-/// Where Kimi Code writes the OAuth token for the managed account.
-///
-/// The CLI names each slot after the sign-in it belongs to: `kimi-code` is the
-/// default host's, and a self-hosted endpoint gets its own name. Gyro reads the
-/// default slot and falls back to the only other one present, so a custom
-/// endpoint still resolves without asking for a second sign-in.
-const KIMI_CREDENTIALS_DIR: &str = ".kimi-code/credentials";
-const KIMI_DEFAULT_CREDENTIALS_FILE: &str = "kimi-code.json";
-/// The account endpoint behind Kimi Code's own usage view.
-const KIMI_USAGE_URL: &str = "https://api.kimi.com/coding/v1/usages";
-
-/// Ask Kimi what the plan meters, the way Kimi Code asks it.
-///
-/// The CLI signs in once and keeps an OAuth token; its usage view is a plain
-/// `GET /usages` carrying that token. Gyro asks the same endpoint rather than
-/// standing up a second sign-in.
-///
-/// The route this replaces drove `kimi acp` and prompted `/usage`, which only
-/// ever reads back the throwaway probe session's own context occupancy — a
-/// number that says nothing about the plan, sitting under "Plan usage limits"
-/// claiming otherwise.
-fn fetch_kimi_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let token = kimi_oauth_access_token()?;
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(5))
-        .timeout_read(Duration::from_secs(10))
-        .build();
-    let payload: serde_json::Value = agent
-        .get(KIMI_USAGE_URL)
-        .set("Authorization", &format!("Bearer {token}"))
-        .set("Accept", "application/json")
-        .call()
-        .map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => {
-                "Kimi Code sign-in was rejected. Run `kimi login` to read your plan usage."
-                    .to_string()
-            }
-            // The endpoint belongs to the Kimi For Coding membership. An
-            // account without one is not broken; it has no plan to meter.
-            ureq::Error::Status(404, _) => {
-                "This Kimi account does not publish plan usage limits.".to_string()
-            }
-            ureq::Error::Status(status, _) => {
-                format!("Kimi could not report plan usage ({status}).")
-            }
-            other => format!("Kimi could not report plan usage: {other}"),
-        })?
-        .into_json()
-        .map_err(|error| format!("Kimi returned an unreadable usage response: {error}"))?;
-    let windows = provider_usage_windows_from_kimi_usages(&payload);
-    if windows.is_empty() {
-        return Err("Kimi did not report a plan usage window".into());
-    }
-    Ok(ProviderUsageSnapshot {
-        stale: false,
-        error: None,
-        provider_id: provider_id.into(),
-        windows,
-        fetched_at: chrono::Utc::now().to_rfc3339(),
-    })
-}
-
-/// Kimi's sign-in service, which mints an access token from the refresh token
-/// the CLI stored, and the client the CLI signs in as. The refresh grant is
-/// bound to that client, so Gyro presents the same one.
-const KIMI_OAUTH_TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
-const KIMI_OAUTH_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
-/// How close to expiry a stored access token counts as already spent.
-const KIMI_SIGN_IN_RENEWAL_MARGIN_MS: i64 = 60_000;
-
-/// What the stored Kimi sign-in can offer right now.
-enum KimiSignIn {
-    /// The stored access token still has life left in it.
-    Current(String),
-    /// It has not, but the refresh token beside it mints another.
-    Renewable(String),
-}
-
-/// Renewed sign-in material, as Kimi's token endpoint answers it.
-struct KimiSignInRenewal {
-    access_token: String,
-    refresh_token: String,
-    expires_in: i64,
-    scope: String,
-    token_type: String,
-}
-
-/// Read the Kimi Code OAuth access token this machine already holds, renewing
-/// it first where the stored one has run out.
-///
-/// Kimi's access tokens last a quarter of an hour, so the stored one is almost
-/// always spent by the time anything asks for it. The refresh token beside it
-/// is the durable half of the sign-in; renewing off that is the ordinary path
-/// here rather than a fallback, and it is what any `kimi` run does too.
-fn kimi_oauth_access_token() -> Result<String, String> {
-    let signed_out = || "Sign in to Kimi Code to read your plan usage.".to_string();
-    let path = kimi_credentials_path().ok_or_else(signed_out)?;
-    let raw = std::fs::read_to_string(&path).map_err(|_| signed_out())?;
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    match kimi_sign_in_at(&raw, now_ms)? {
-        KimiSignIn::Current(token) => Ok(token),
-        KimiSignIn::Renewable(refresh_token) => {
-            let renewal = kimi_renew_sign_in(&refresh_token)?;
-            let access_token = renewal.access_token.clone();
-            // Kimi rotates the refresh token on renewal, which would strand
-            // the CLI on one the service no longer honours. Handing the
-            // renewal back to the slot it came from keeps the single sign-in
-            // shared, exactly as another `kimi` run would leave it. A slot
-            // that cannot be written still leaves this reading good, so the
-            // usage view is not failed over a bookkeeping problem.
-            let _ = store_kimi_sign_in(&path, &renewal, now_ms);
-            Ok(access_token)
-        }
-    }
-}
-
-/// The credential slot this machine's Kimi sign-in wrote.
-fn kimi_credentials_path() -> Option<PathBuf> {
-    let directory = user_home_directory().ok()?.join(KIMI_CREDENTIALS_DIR);
-    let default = directory.join(KIMI_DEFAULT_CREDENTIALS_FILE);
-    if default.is_file() {
-        return Some(default);
-    }
-    // A sign-in against a custom host writes one differently named slot
-    // instead. Only a lone slot is unambiguous, so several are left to the
-    // default's absence.
-    let mut slots = std::fs::read_dir(&directory)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|kind| kind == "json"));
-    let only = slots.next()?;
-    slots.next().is_none().then_some(only)
-}
-
-/// Read the stored sign-in against a fixed clock.
-fn kimi_sign_in_at(raw: &str, now_ms: i64) -> Result<KimiSignIn, String> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(raw).map_err(|_| "Kimi Code credentials could not be read.")?;
-    // The CLI writes the server's own snake_case wire shape; other builds have
-    // nested it under `token` in camelCase, so each spelling is tried.
-    let record = parsed.get("token").unwrap_or(&parsed);
-    let field = |names: [&str; 2]| {
-        names
-            .into_iter()
-            .find_map(|name| record.get(name))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let expiry = ["expires_at", "expiresAt"]
-        .into_iter()
-        .find_map(|name| record.get(name))
-        .and_then(kimi_timestamp_ms);
-    // An unstamped token is treated as spent: renewing one that had life left
-    // costs a request, while trusting one that had none costs the reading.
-    let spent = match expiry {
-        Some(at) => at <= now_ms + KIMI_SIGN_IN_RENEWAL_MARGIN_MS,
-        None => true,
-    };
-    match (
-        spent,
-        field(["access_token", "accessToken"]),
-        field(["refresh_token", "refreshToken"]),
-    ) {
-        (false, Some(access_token), _) => Ok(KimiSignIn::Current(access_token)),
-        (_, _, Some(refresh_token)) => Ok(KimiSignIn::Renewable(refresh_token)),
-        (true, Some(_), None) => Err(
-            "Kimi Code's sign-in has lapsed. Run `kimi login` to read your plan usage.".to_string(),
-        ),
-        _ => Err("Kimi Code credentials do not include an access token.".to_string()),
-    }
-}
-
-/// Trade the refresh token for a fresh access token.
-fn kimi_renew_sign_in(refresh_token: &str) -> Result<KimiSignInRenewal, String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(5))
-        .timeout_read(Duration::from_secs(10))
-        .build();
-    let payload: serde_json::Value = agent
-        .post(KIMI_OAUTH_TOKEN_URL)
-        .set("Accept", "application/json")
-        .send_form(&[
-            ("client_id", KIMI_OAUTH_CLIENT_ID),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-        ])
-        .map_err(|error| match error {
-            // A refused grant is a sign-in that has ended, not a fault: the
-            // refresh token has been spent, revoked, or has outlived its own
-            // window. Only signing in again mints another.
-            ureq::Error::Status(400 | 401 | 403, _) => {
-                "Kimi Code's sign-in has lapsed. Run `kimi login` to read your plan usage."
-                    .to_string()
-            }
-            ureq::Error::Status(status, _) => {
-                format!("Kimi could not renew the sign-in ({status}).")
-            }
-            other => format!("Kimi could not renew the sign-in: {other}"),
-        })?
-        .into_json()
-        .map_err(|error| format!("Kimi returned an unreadable sign-in response: {error}"))?;
-    kimi_sign_in_renewal(&payload, refresh_token)
-}
-
-/// Read the token endpoint's answer.
-fn kimi_sign_in_renewal(
-    payload: &serde_json::Value,
-    previous_refresh_token: &str,
-) -> Result<KimiSignInRenewal, String> {
-    let text = |key: &str| {
-        payload
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    Ok(KimiSignInRenewal {
-        access_token: text("access_token")
-            .ok_or("Kimi's sign-in renewal did not include an access token.")?,
-        // A renewal that rotates nothing keeps the refresh token it was given.
-        refresh_token: text("refresh_token").unwrap_or_else(|| previous_refresh_token.to_string()),
-        // An unstated lifetime is no lifetime: the next reading renews again
-        // rather than trusting a span the service never promised.
-        expires_in: kimi_int(payload.get("expires_in"))
-            .unwrap_or_default()
-            .max(0),
-        scope: text("scope").unwrap_or_default(),
-        token_type: text("token_type").unwrap_or_else(|| "Bearer".to_string()),
-    })
-}
-
-/// Hand a renewed sign-in back to the slot the CLI reads.
-///
-/// Same wire shape, same private file, same write-to-temporary-then-rename the
-/// CLI itself uses, so a renewal Gyro made is indistinguishable from one made
-/// by `kimi` — and a half-written file never replaces a good one.
-fn store_kimi_sign_in(path: &Path, renewal: &KimiSignInRenewal, now_ms: i64) -> Result<(), String> {
-    let body = serde_json::json!({
-        "access_token": renewal.access_token,
-        "refresh_token": renewal.refresh_token,
-        "expires_at": now_ms / 1_000 + renewal.expires_in,
-        "scope": renewal.scope,
-        "token_type": renewal.token_type,
-        "expires_in": renewal.expires_in,
-    });
-    let mut text = serde_json::to_string_pretty(&body).map_err(to_string)?;
-    text.push('\n');
-    let directory = path
-        .parent()
-        .ok_or("Kimi credentials are not in a directory")?;
-    let temporary = directory.join(format!(".gyro-kimi-sign-in-{}.tmp", Uuid::new_v4()));
-    let written = (|| -> Result<(), String> {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary).map_err(to_string)?;
-        file.write_all(text.as_bytes()).map_err(to_string)?;
-        file.sync_all().map_err(to_string)?;
-        fs::rename(&temporary, path).map_err(to_string)
-    })();
-    if written.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    written
-}
-
-/// A moment Kimi may have written as epoch seconds, epoch millis, or a date.
-fn kimi_timestamp_ms(value: &serde_json::Value) -> Option<i64> {
-    if let Some(text) = value.as_str() {
-        return chrono::DateTime::parse_from_rfc3339(text)
-            .ok()
-            .map(|moment| moment.timestamp_millis());
-    }
-    let number = kimi_int(Some(value))?;
-    // Seconds and milliseconds are told apart by scale: an epoch in seconds
-    // stays ten digits until the year 5138.
-    Some(if number.abs() < 100_000_000_000 {
-        number * 1_000
-    } else {
-        number
-    })
-}
-
-/// A count Kimi may have sent as a number or as a string.
-fn kimi_int(value: Option<&serde_json::Value>) -> Option<i64> {
-    match value? {
-        serde_json::Value::Number(number) => number.as_f64().map(|value| value.trunc() as i64),
-        serde_json::Value::String(text) => text
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|value| value.trunc() as i64),
-        _ => None,
-    }
-}
-
-/// How many minutes a Kimi usage window spans.
-fn kimi_window_minutes(window: &serde_json::Value) -> Option<i64> {
-    let duration = kimi_int(window.get("duration"))?;
-    let unit = match window.get("timeUnit").and_then(serde_json::Value::as_str)? {
-        "TIME_UNIT_MINUTE" => 1,
-        "TIME_UNIT_HOUR" => 60,
-        "TIME_UNIT_DAY" => 1_440,
-        "TIME_UNIT_WEEK" => 10_080,
-        _ => return None,
-    };
-    (duration > 0).then_some(duration * unit)
-}
-
-/// One metered window, as Gyro shows it.
-fn kimi_usage_window(
-    id: String,
-    label: String,
-    detail: &serde_json::Value,
-) -> Option<ProviderRateLimitWindow> {
-    let used = kimi_int(detail.get("used"));
-    let limit = kimi_int(detail.get("limit"));
-    if used.is_none() && limit.is_none() {
-        return None;
-    }
-    // A window with no ceiling is metered but unbounded. The row still belongs
-    // in the list; the percentage it cannot honestly claim is left off.
-    let used_percent = match (used, limit) {
-        (Some(used), Some(limit)) if limit > 0 => Some(
-            (used as f64 / limit as f64 * 100.0)
-                .round()
-                .clamp(0.0, 100.0) as i32,
-        ),
-        _ => None,
-    };
-    Some(ProviderRateLimitWindow {
-        id,
-        label,
-        status: used_percent.map_or("unknown", plan_window_status).into(),
-        used_percent,
-        resets_at: detail
-            .get("resetTime")
-            .and_then(serde_json::Value::as_str)
-            .filter(|moment| !moment.is_empty())
-            .map(str::to_string),
-    })
-}
-
-/// Read Kimi's `/usages` answer into the windows Gyro shows.
-///
-/// Every window the plan meters arrives in `limits`, each one a `window` of
-/// `{duration, timeUnit}` beside a `detail` of `{used, limit, resetTime}`. The
-/// plan's headline allowance arrives separately as `usage`, with no window of
-/// its own — the CLI reads that one as weekly, and so does this.
-fn provider_usage_windows_from_kimi_usages(
-    payload: &serde_json::Value,
-) -> Vec<ProviderRateLimitWindow> {
-    let mut windows: Vec<(i64, ProviderRateLimitWindow)> = Vec::new();
-    let mut seen = HashSet::new();
-    for entry in payload
-        .get("limits")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-    {
-        let Some(minutes) = entry.get("window").and_then(kimi_window_minutes) else {
-            continue;
-        };
-        let name = entry
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .filter(|name| !name.is_empty());
-        let (mut id, mut label) = plan_window_identity(minutes);
-        // Two allowances can share a span — a per-model cap beside the plan's
-        // own. Where that happens the name is the only thing telling them
-        // apart, so the second one is named after it rather than dropped.
-        if seen.contains(&id) {
-            let Some(name) = name else { continue };
-            id = name.to_lowercase().replace(' ', "-");
-            label = name.to_string();
-        }
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let detail = entry.get("detail").unwrap_or(entry);
-        if let Some(window) = kimi_usage_window(id, label, detail) {
-            windows.push((minutes, window));
-        }
-    }
-    if !seen.contains("weekly") {
-        if let Some(window) = payload
-            .get("usage")
-            .and_then(|usage| kimi_usage_window("weekly".into(), "Weekly limit".into(), usage))
-        {
-            windows.push((10_080, window));
-        }
-    }
-    // The window a run hits first is the one worth reading first.
-    windows.sort_by_key(|(minutes, _)| *minutes);
-    windows.into_iter().map(|(_, window)| window).collect()
-}
 /// Where Claude Code keeps the OAuth token Gyro reuses to read plan usage.
 ///
 /// The keychain entry is written by `claude login` and refreshed by the CLI on
@@ -12574,6 +12245,16 @@ fn fetch_anthropic_provider_usage_once(
 fn provider_usage_windows_from_anthropic_usage(
     payload: &serde_json::Value,
 ) -> Vec<ProviderRateLimitWindow> {
+    let windows = anthropic_usage_windows_by_key(payload);
+    if windows.is_empty() {
+        anthropic_usage_windows_from_limits(payload)
+    } else {
+        windows
+    }
+}
+
+/// The long-standing shape: one object per window, keyed by its name.
+fn anthropic_usage_windows_by_key(payload: &serde_json::Value) -> Vec<ProviderRateLimitWindow> {
     [
         ("five_hour", "five-hour", "5-hour limit"),
         ("seven_day", "weekly", "Weekly limit"),
@@ -12604,6 +12285,44 @@ fn provider_usage_windows_from_anthropic_usage(
         })
     })
     .collect()
+}
+
+/// The newer `limits` list the same response also carries.
+///
+/// Only read when the keyed windows are missing, so a response that drops the
+/// old keys still yields a reading instead of "no plan usage window".
+fn anthropic_usage_windows_from_limits(
+    payload: &serde_json::Value,
+) -> Vec<ProviderRateLimitWindow> {
+    let Some(limits) = payload.get("limits").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    limits
+        .iter()
+        .filter_map(|limit| {
+            let (id, label) = match limit.get("kind").and_then(serde_json::Value::as_str)? {
+                "session" => ("five-hour", "5-hour limit"),
+                "weekly_all" => ("weekly", "Weekly limit"),
+                "weekly_opus" => ("weekly-opus", "Weekly · Opus"),
+                "weekly_sonnet" => ("weekly-sonnet", "Weekly · Sonnet"),
+                _ => return None,
+            };
+            let used_percent = limit
+                .get("percent")
+                .and_then(serde_json::Value::as_f64)
+                .map(|value| value.round().clamp(0.0, 100.0) as i32)?;
+            Some(ProviderRateLimitWindow {
+                id: id.into(),
+                label: label.into(),
+                status: plan_window_status(used_percent).into(),
+                used_percent: Some(used_percent),
+                resets_at: limit
+                    .get("resets_at")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect()
 }
 
 /// Replay a provider's last known windows, expired ones already dropped.
@@ -13523,11 +13242,23 @@ fn run_provider_chat_with_retry(
         anyhow::bail!(reason);
     }
     let started = Instant::now();
-    let result =
-        run_provider_chat_with_retry_using(store, request, binding, |resume_cursor, attempt| {
-            run_provider_chat_once(app, request, resume_cursor, attempt)
-        })
-        .map_err(|error| anyhow::anyhow!("{error:#}"));
+    let result = run_provider_chat_with_retry_using(
+        store,
+        request,
+        binding,
+        |resume_cursor, attempt| {
+            let shown = provider_timeline::item_count(app, &request.session_id);
+            let result = run_provider_chat_once(app, request, resume_cursor, attempt);
+            attempt.published_output |=
+                provider_timeline::item_count(app, &request.session_id) != shown;
+            result
+        },
+        || {
+            provider_chat_cancelled(app, &request.session_id)
+                .then(|| provider_stop_message(app, &request.session_id))
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("{error:#}"));
     timing::mark(TimingStage::ProviderComplete);
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     match result.as_ref() {
@@ -13561,11 +13292,31 @@ fn is_provider_cancellation(error: &str) -> bool {
     error.contains(PROVIDER_STOP_MARKER)
 }
 
+/// Wait out a retry delay in short steps, returning the stop message if the
+/// run is stopped meanwhile so a stopped turn never starts another attempt.
+fn wait_before_provider_retry(
+    delay: Duration,
+    stopped: &impl Fn() -> Option<String>,
+) -> Result<(), String> {
+    let deadline = Instant::now() + delay;
+    loop {
+        if let Some(message) = stopped() {
+            return Err(message);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Ok(());
+        }
+        std::thread::sleep((deadline - now).min(Duration::from_millis(50)));
+    }
+}
+
 fn run_provider_chat_with_retry_using<F>(
     store: &SessionStore,
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
     mut run_once: F,
+    stopped: impl Fn() -> Option<String>,
 ) -> anyhow::Result<ProviderRunnerOutput>
 where
     F: FnMut(
@@ -13614,6 +13365,7 @@ where
         // when a short backoff retry succeeds.
         Err(error)
             if is_transient_provider_error(&format!("{error:#}"))
+                && !attempt.published_output
                 && !matches!(
                     provider_adapter_for(&request.provider_id).kind,
                     ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
@@ -13622,13 +13374,24 @@ where
             let mut last_error = error;
             let mut last_attempt = attempt;
             for (retry_index, delay) in TRANSIENT_PROVIDER_RETRY_DELAYS.iter().enumerate() {
-                std::thread::sleep(*delay);
+                if let Err(stop) = wait_before_provider_retry(*delay, &stopped) {
+                    let stop = last_error.context(stop);
+                    persist_failed_provider_attempt(
+                        store,
+                        request,
+                        binding.as_ref(),
+                        &last_attempt,
+                        &stop,
+                    );
+                    return Err(stop);
+                }
                 let cursor = last_attempt
                     .resume_cursor
                     .clone()
                     .or_else(|| binding_cursor.clone());
                 last_attempt = ProviderRunAttempt {
                     resume_cursor: cursor.clone(),
+                    published_output: false,
                 };
                 match run_once(cursor.as_ref(), &mut last_attempt) {
                     Ok(mut output) => {
@@ -13638,6 +13401,7 @@ where
                     }
                     Err(retry_error)
                         if is_transient_provider_error(&format!("{retry_error:#}"))
+                            && !last_attempt.published_output
                             && retry_index + 1 < TRANSIENT_PROVIDER_RETRY_DELAYS.len() =>
                     {
                         last_error = retry_error;
@@ -13777,9 +13541,7 @@ fn run_provider_chat_once(
         ProviderAdapterKind::AnthropicClaude => {
             run_anthropic_claude_chat(app, request, resume_cursor, attempt)
         }
-        // The ACP runners only learn their session id from the completed run,
-        // so there is nothing to record before one finishes.
-        ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
+        ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor, attempt),
         ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
         ProviderAdapterKind::OpenAiCompatible => {
             openai_compatible_runner::run_openai_compatible_chat(app, request)
@@ -13960,6 +13722,7 @@ fn run_ollama_chat(
         request.clone(),
         cancellation.clone(),
         heartbeat_stop.clone(),
+        None,
     );
     let mut response = None;
     let mut paused_at_tool_budget = false;
@@ -14090,6 +13853,7 @@ fn run_ollama_chat(
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
             paused_at_tool_budget,
+            answer_cut_off: false,
             response: response.content,
             resume_cursor: None,
             retry_count: 0,
@@ -14244,6 +14008,7 @@ fn run_kimi_acp_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let runtime = acp_provider_runtime(&request.provider_id)
         .ok_or_else(|| anyhow::anyhow!("{} does not have an ACP runtime", request.provider_id))?;
@@ -14331,9 +14096,12 @@ fn run_kimi_acp_chat(
         request.clone(),
         cancellation.clone(),
         heartbeat_stop.clone(),
+        None,
     );
+    let opened_session = Arc::new(Mutex::new(None::<String>));
     let output = run_kimi_acp(
         KimiAcpRequest {
+            opened_session: Some(opened_session.clone()),
             credentials: CredentialPolicy::for_provider(&request.provider_id),
             provider_label: provider_label.into(),
             program: runtime.program.into(),
@@ -14478,7 +14246,26 @@ fn run_kimi_acp_chat(
     // emitting "still working" after completed/failed/cancelled.
     heartbeat_stop.store(true, Ordering::Relaxed);
     let _ = heartbeat.join();
-    let output = output?;
+    // Recorded before the error is propagated, as for Claude: a turn stopped
+    // after the agent opened its session can still be resumed next time.
+    attempt.resume_cursor = opened_session
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .map(|session_id| ProviderResumeCursor {
+            kind: runtime.cursor_kind.into(),
+            session_id,
+        });
+    // The ACP client reports a stop as its own "run cancelled" error. Name it
+    // the way every other runner does, or a stop is recorded as a failure and
+    // offered a retry.
+    let output = output.map_err(|error| {
+        if cancellation.is_cancelled() {
+            error.context(provider_stop_message(app, &request.session_id))
+        } else {
+            error
+        }
+    })?;
     let activities = activities
         .lock()
         .map_err(|_| anyhow::anyhow!("{provider_label} activity state is unavailable"))?
@@ -14493,6 +14280,7 @@ fn run_kimi_acp_chat(
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
         paused_at_tool_budget: false,
+        answer_cut_off: false,
         response: response.clone(),
         resume_cursor: Some(ProviderResumeCursor {
             kind: runtime.cursor_kind.into(),
@@ -14561,6 +14349,8 @@ fn run_openai_codex_chat(
     }
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
+    // Removed on every exit, including the error returns before the read.
+    let _output_file = TempFileGuard(output_path.clone());
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "codex-session");
     let history = if can_resume {
@@ -14626,10 +14416,7 @@ fn run_openai_codex_chat(
             "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again.",
         )
     })?;
-    let last_message_result =
-        read_bounded_optional_text_file(&output_path, MAX_CHAT_RESPONSE_BYTES);
-    let _ = fs::remove_file(&output_path);
-    let last_message = last_message_result?;
+    let last_message = read_bounded_optional_text_file(&output_path, MAX_CHAT_RESPONSE_BYTES)?;
     if output.status_success {
         let response = sanitize_provider_chat_response(last_message.trim());
         if !response.is_empty() {
@@ -14641,6 +14428,7 @@ fn run_openai_codex_chat(
                 billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
                 paused_at_tool_budget: false,
+                answer_cut_off: false,
                 response,
                 resume_cursor: provider_session_id
                     .clone()
@@ -14669,6 +14457,7 @@ fn run_openai_codex_chat(
                 billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
                 paused_at_tool_budget: false,
+                answer_cut_off: false,
                 response: stdout,
                 resume_cursor: provider_session_id
                     .clone()
@@ -14702,6 +14491,9 @@ fn run_openai_codex_chat(
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             paused_at_tool_budget: false,
+            // Codex writes its final message only once the answer is done, so
+            // an answer recovered from the stream alone may be cut off.
+            answer_cut_off: last_message.trim().is_empty(),
             response,
             resume_cursor: provider_session_id
                 .clone()
@@ -14809,6 +14601,7 @@ fn run_openai_codex_app_server_chat(
         request.clone(),
         cancellation,
         heartbeat_stop.clone(),
+        None,
     );
     let result = (|| -> anyhow::Result<ProviderRunnerOutput> {
         let mut stdin = child
@@ -15226,6 +15019,7 @@ fn run_openai_codex_app_server_chat(
             context_usage,
             rate_limits: Vec::new(),
             paused_at_tool_budget: false,
+            answer_cut_off: false,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "codex-session".into(),
@@ -16582,6 +16376,7 @@ fn run_anthropic_claude_chat(
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             paused_at_tool_budget: false,
+            answer_cut_off: false,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -16620,6 +16415,7 @@ fn run_anthropic_claude_chat(
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             paused_at_tool_budget: false,
+            answer_cut_off: true,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -17869,17 +17665,31 @@ fn codex_reasoning_effort_arg(
 ) -> Option<String> {
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
     let model = model_id?.trim().to_ascii_lowercase();
+    // The published catalog speaks for the model first, so a model added
+    // after this release runs with the levels it actually has.
+    if let Some(efforts) = model_catalog::catalog_reasoning_efforts("openai", Some(&model)) {
+        return efforts.contains(&effort).then_some(effort);
+    }
     let supported = match model.as_str() {
-        "gpt-6-astra" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+        "gpt-6-astra" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
             matches!(
                 effort.as_str(),
                 "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
             )
         }
+        "gpt-6-luna" => {
+            matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max")
+        }
         "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5" => {
             matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh")
         }
-        _ => false,
+        // Models the remote catalog adds after a release are unknown here.
+        // Codex validates the level itself, so any word from the shared
+        // vocabulary is forwarded rather than failing the run locally.
+        _ => matches!(
+            effort.as_str(),
+            "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        ),
     };
     supported.then_some(effort)
 }
@@ -17906,6 +17716,9 @@ fn grok_reasoning_effort_arg(
     reasoning_effort: Option<&str>,
 ) -> Option<String> {
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    if let Some(efforts) = model_catalog::catalog_reasoning_efforts("xai", model_id) {
+        return efforts.contains(&effort).then_some(effort);
+    }
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let supported = matches!(effort.as_str(), "low" | "medium" | "high")
         || (effort == "xhigh"
@@ -18765,6 +18578,17 @@ impl StreamingCommandState {
         std::mem::take(&mut self.pending_delta_chunks).join("")
     }
 
+    /// Whether the latest state of any tool call is still in flight.
+    fn has_running_tool(&self) -> bool {
+        let mut latest = HashMap::new();
+        for activity in &self.activities {
+            latest.insert(activity.id.as_str(), activity.status.as_str());
+        }
+        latest
+            .values()
+            .any(|status| matches!(*status, "running" | "queued"))
+    }
+
     fn has_pending_delta(&self) -> bool {
         !self.pending_delta_chunks.is_empty()
     }
@@ -18821,6 +18645,54 @@ impl StreamingCommandState {
 
 const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
 const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
+/// How long a run may be silent before its heartbeat says so.
+const PROVIDER_CHAT_QUIET_NOTICE: Duration = Duration::from_secs(5 * 60);
+
+/// What the heartbeat reads to tell a quiet run from a stalled one.
+struct ProviderStreamLiveness {
+    last_output: Mutex<Instant>,
+    /// A tool call is in flight, so silence is the tool working.
+    tool_running: AtomicBool,
+}
+
+impl ProviderStreamLiveness {
+    fn new() -> Self {
+        Self {
+            last_output: Mutex::new(Instant::now()),
+            tool_running: AtomicBool::new(false),
+        }
+    }
+
+    fn silent_for(&self) -> Duration {
+        self.last_output
+            .lock()
+            .map(|last| last.elapsed())
+            .unwrap_or_default()
+    }
+}
+
+/// Whether a silent run has stalled rather than waiting on something real.
+fn provider_run_stalled(silent_for: Duration, limit: Duration, waiting: bool) -> bool {
+    !waiting && silent_for >= limit
+}
+
+/// Whether this chat has a tool approval waiting on the user.
+fn provider_session_awaits_approval(app: &tauri::AppHandle, session_id: &str) -> bool {
+    let Ok(session_id) = Uuid::parse_str(session_id) else {
+        return false;
+    };
+    let provider = app
+        .state::<ProviderApprovalManager>()
+        .pending
+        .lock()
+        .is_ok_and(|pending| pending.values().any(|entry| entry.session_id == session_id));
+    provider
+        || app
+            .state::<ProviderCapabilityApprovalManager>()
+            .pending
+            .lock()
+            .is_ok_and(|pending| pending.values().any(|entry| entry.session_id == session_id))
+}
 
 /// Run a provider CLI, streaming its output into the live surfaces.
 ///
@@ -18836,14 +18708,16 @@ const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
 /// inferred from silence — only from process exit after the stdout buffers have
 /// been fully drained and the last text delta has been flushed.
 ///
-/// Process inactivity is intentionally off for chat: long tools can produce no
-/// stdout for far longer than a half-hour quiet window. Heartbeats keep the UI
-/// honest; max runtime and user cancel still end the turn.
+/// Process inactivity is off at the process level: long tools can produce no
+/// stdout for far longer than a half-hour quiet window. The heartbeat instead
+/// says when a run has gone quiet, and ends it as stalled only once it has been
+/// silent past `inactivity_timeout` with no tool running and no approval
+/// waiting on the user.
 fn run_streaming_command(
     command: Command,
     stdin_file: Option<&Path>,
     max_runtime: Duration,
-    _inactivity_timeout: Duration,
+    inactivity_timeout: Duration,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     observed_session_id: &mut Option<String>,
@@ -18878,19 +18752,27 @@ fn run_streaming_command(
     // the moment the process does — never after completed, and never as a
     // substitute for a real terminal status.
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let liveness = Arc::new(ProviderStreamLiveness::new());
     let heartbeat = spawn_provider_chat_heartbeat(
         app.clone(),
         request.clone(),
         run_control.cancellation.clone(),
         heartbeat_stop.clone(),
+        Some((liveness.clone(), inactivity_timeout)),
     );
     timing::cli_prompt_on_spawn();
     let outcome = gyro_core::run_command(execution, run_control.cancellation.clone(), |chunk| {
+        if let Ok(mut last_output) = liveness.last_output.lock() {
+            *last_output = Instant::now();
+        }
         if chunk.stream == ExecutionStream::Stdout {
             for line in stream_state.take_stdout_lines(&chunk.text) {
                 handle_provider_stdout_line(&line, app, request, &mut stream_state);
             }
             stream_state.flush_pending_delta(app, request, false);
+            liveness
+                .tool_running
+                .store(stream_state.has_running_tool(), Ordering::Relaxed);
         }
     });
     heartbeat_stop.store(true, Ordering::Relaxed);
@@ -18966,6 +18848,7 @@ fn spawn_provider_chat_heartbeat(
     request: ProviderChatRequest,
     cancellation: CancellationToken,
     stop: Arc<AtomicBool>,
+    liveness: Option<(Arc<ProviderStreamLiveness>, Duration)>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         loop {
@@ -18981,16 +18864,40 @@ fn spawn_provider_chat_heartbeat(
             if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
                 return;
             }
+            let label = request.provider_label.as_deref().unwrap_or("Provider");
+            let silent_for = liveness
+                .as_ref()
+                .map(|(liveness, _)| liveness.silent_for())
+                .unwrap_or_default();
+            if let Some((liveness, limit)) = &liveness {
+                let waiting = liveness.tool_running.load(Ordering::Relaxed)
+                    || provider_session_awaits_approval(&app, &request.session_id);
+                if provider_run_stalled(silent_for, *limit, waiting) {
+                    stop_provider_run(
+                        &app,
+                        &request.session_id,
+                        ProviderStopReason::Stalled {
+                            silent_minutes: silent_for.as_secs() / 60,
+                        },
+                    );
+                    return;
+                }
+            }
+            let message = if silent_for >= PROVIDER_CHAT_QUIET_NOTICE {
+                format!(
+                    "{label} is still working, with no output for {} min",
+                    silent_for.as_secs() / 60
+                )
+            } else {
+                format!("{label} is still working")
+            };
             emit_provider_chat_event(
                 &app,
                 &request,
                 "heartbeat",
                 Some(HarnessRunStatus::Running),
                 None,
-                Some(format!(
-                    "{} is still working",
-                    request.provider_label.as_deref().unwrap_or("Provider")
-                )),
+                Some(message),
                 None,
             );
         }
@@ -19003,7 +18910,8 @@ fn spawn_provider_chat_heartbeat(
 /// login is the usual cause. On a stop it is noise: being told to sign in again
 /// because the turn was stopped buries the one line that says what happened.
 fn provider_run_failure(error: anyhow::Error, hint: &str) -> anyhow::Error {
-    if error.to_string().contains(PROVIDER_STOP_MARKER) {
+    let message = error.to_string();
+    if message.contains(PROVIDER_STOP_MARKER) || message.contains(PROVIDER_STALL_MARKER) {
         return error;
     }
     anyhow::anyhow!("{hint} {error}")
@@ -19135,7 +19043,15 @@ fn handle_provider_stdout_value(
     }
     enforce_call_token_ceiling(app, request, stream_state);
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(value) {
+        // Once per window per turn: later announcements repeat the same news.
+        let first_mention = !stream_state
+            .rate_limits
+            .iter()
+            .any(|window| window.id == rate_limit.id);
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
+        if first_mention {
+            publish_live_provider_usage(app, &request.provider_id);
+        }
     }
     if provider_stream_opens_text_content_block(value) {
         // A new block means the previous one closed, so a title marker that
@@ -24245,13 +24161,69 @@ mod tests {
         for provider in ["deepseek", "ollama"] {
             let request = provider_chat_request_for(&session, temp.path(), provider);
             let mut attempts = 0;
-            let result = run_provider_chat_with_retry_using(&store, &request, None, |_, _| {
-                attempts += 1;
-                anyhow::bail!("connection reset by peer");
-            });
+            let result = run_provider_chat_with_retry_using(
+                &store,
+                &request,
+                None,
+                |_, _| {
+                    attempts += 1;
+                    anyhow::bail!("connection reset by peer");
+                },
+                || None,
+            );
             assert!(result.is_err());
             assert_eq!(attempts, 1, "must not replay {provider} tools");
         }
+    }
+
+    #[test]
+    fn transient_failures_after_visible_output_are_not_replayed() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "retry")
+            .unwrap();
+        let request = provider_chat_request_for(&session, temp.path(), "xai");
+        let mut attempts = 0;
+        let result = run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            None,
+            |_, attempt| {
+                attempts += 1;
+                attempt.published_output = true;
+                anyhow::bail!("connection reset by peer");
+            },
+            || None,
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, 1, "a turn that already ran tools must not rerun");
+    }
+
+    #[test]
+    fn stopping_during_a_retry_delay_starts_no_new_attempt() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "retry")
+            .unwrap();
+        let request = provider_chat_request_for(&session, temp.path(), "xai");
+        let mut attempts = 0;
+        let started = Instant::now();
+        let error = run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            None,
+            |_, _| {
+                attempts += 1;
+                anyhow::bail!("connection reset by peer");
+            },
+            || Some(ProviderStopReason::User.message()),
+        )
+        .unwrap_err();
+        assert_eq!(attempts, 1);
+        assert!(is_provider_cancellation(&error.to_string()));
+        assert!(started.elapsed() < Duration::from_millis(300));
     }
 
     #[test]
@@ -24263,8 +24235,11 @@ mod tests {
             .unwrap();
         let request = provider_chat_request_for(&session, temp.path(), "xai");
         let mut attempts = 0u32;
-        let output =
-            run_provider_chat_with_retry_using(&store, &request, None, |cursor, attempt| {
+        let output = run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            None,
+            |cursor, attempt| {
                 attempts += 1;
                 if attempts < 2 {
                     attempt.resume_cursor = Some(ProviderResumeCursor {
@@ -24281,6 +24256,7 @@ mod tests {
                     billed_usage: None,
                     rate_limits: Vec::new(),
                     paused_at_tool_budget: false,
+                    answer_cut_off: false,
                     response: "recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -24288,8 +24264,10 @@ mod tests {
                     streamed_text: None,
                     output_summary: None,
                 })
-            })
-            .unwrap();
+            },
+            || None,
+        )
+        .unwrap();
         assert_eq!(attempts, 2);
         assert_eq!(output.retry_count, 1);
         assert_eq!(output.response, "recovered");
@@ -26077,6 +26055,41 @@ while True:
     }
 
     #[test]
+    fn gpt_6_sol_and_luna_efforts_are_forwarded_to_codex() {
+        for model in ["gpt-6-sol", "gpt-6-luna"] {
+            assert_eq!(codex_model_arg(Some(model)), Some(model.into()));
+            for effort in ["low", "medium", "high", "xhigh", "max"] {
+                assert_eq!(
+                    codex_reasoning_effort_arg(Some(model), Some(effort)),
+                    Some(effort.into())
+                );
+            }
+        }
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-6-sol"), Some("ultra")),
+            Some("ultra".into())
+        );
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-6-luna"), Some("ultra")),
+            None
+        );
+    }
+
+    #[test]
+    fn catalog_models_unknown_to_this_release_forward_their_effort() {
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert_eq!(
+                codex_reasoning_effort_arg(Some("gpt-7-nova"), Some(effort)),
+                Some(effort.into())
+            );
+        }
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-7-nova"), Some("invalid")),
+            None
+        );
+    }
+
+    #[test]
     fn codex_chat_prompt_prefers_concise_answers() {
         let prompt = openai_codex_chat_prompt(
             "WHAT MODEL are you?",
@@ -27667,8 +27680,13 @@ while True:
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.5")),
-            Some(131_072)
+            Some(500_000)
         );
+        assert_eq!(
+            provider_model_context_window("openai", Some("gpt-5.6-sol")),
+            Some(272_000)
+        );
+        assert_eq!(provider_model_context_window("kimi", None), Some(262_144));
         for provider_id in ["openai", "anthropic", "kimi", "gemini", "xai"] {
             assert!(provider_model_context_window(provider_id, None).is_some());
         }
@@ -27692,7 +27710,7 @@ while True:
             Some("grok-4.5"),
         )
         .unwrap();
-        assert_eq!(reported.model_context_window, Some(131_072));
+        assert_eq!(reported.model_context_window, Some(500_000));
         assert_eq!(reported.input_tokens, Some(1_000));
     }
 
@@ -28189,6 +28207,72 @@ while True:
         assert!(is_transient_provider_error(PROVIDER_TOOL_BUDGET_NOTICE) == false);
     }
 
+    /// A stall is Gyro's call, not the user's: it reads as a failure with its
+    /// own advice, never as a stop and never as a network problem.
+    #[test]
+    fn a_stalled_run_is_reported_as_stalled_not_stopped() {
+        let error = ProviderStopReason::Stalled { silent_minutes: 30 }.message();
+        assert!(!is_provider_cancellation(&error));
+        assert!(!is_transient_provider_error(&error));
+        let (kind, message) = provider_failure_recovery(&error);
+        assert_eq!(kind, "stalled");
+        assert!(message.contains("Send again"), "unhelpful: {message}");
+        // The sign-in hint is for runs that died on their own.
+        let wrapped = provider_run_failure(anyhow::anyhow!("{error}"), "Sign in again.");
+        assert!(!wrapped.to_string().contains("Sign in"));
+    }
+
+    /// Silence ends a run only past the limit, and never while a tool or an
+    /// approval is what the run is waiting on.
+    #[test]
+    fn only_unexplained_silence_counts_as_a_stall() {
+        let limit = Duration::from_secs(30 * 60);
+        assert!(!provider_run_stalled(
+            Duration::from_secs(29 * 60),
+            limit,
+            false
+        ));
+        assert!(provider_run_stalled(limit, limit, false));
+        assert!(!provider_run_stalled(
+            Duration::from_secs(3 * 60 * 60),
+            limit,
+            true
+        ));
+    }
+
+    /// A tool counts as running by its latest state, not its first.
+    #[test]
+    fn a_finished_tool_is_not_counted_as_running() {
+        let activity = |id: &str, status: &str| ProviderActivity {
+            id: id.into(),
+            kind: "command".into(),
+            label: "Run".into(),
+            detail: None,
+            note: None,
+            file_counts: None,
+            status: status.into(),
+        };
+        let mut state = StreamingCommandState::new();
+        assert!(!state.has_running_tool());
+        state.activities.push(activity("a", "running"));
+        assert!(state.has_running_tool());
+        state.activities.push(activity("a", "done"));
+        assert!(!state.has_running_tool());
+        state.activities.push(activity("b", "queued"));
+        assert!(state.has_running_tool());
+    }
+
+    /// An answer kept after a non-zero exit completes the turn, flagged as
+    /// possibly cut off rather than as a failure.
+    #[test]
+    fn a_possibly_cut_off_answer_is_not_a_failure() {
+        let (kind, message) = provider_failure_recovery(PROVIDER_CUT_OFF_NOTICE);
+        assert_eq!(kind, "partial-answer");
+        assert!(message.contains("Continue"), "unhelpful: {message}");
+        assert!(!is_provider_cancellation(PROVIDER_CUT_OFF_NOTICE));
+        assert!(!is_transient_provider_error(PROVIDER_CUT_OFF_NOTICE));
+    }
+
     /// A stop is not a failure, and the two stops do not have the same fix.
     ///
     /// The ceiling stop is the one that matters: it used to arrive as a bare
@@ -28374,6 +28458,7 @@ while True:
                     billed_usage: None,
                     rate_limits: Vec::new(),
                     paused_at_tool_budget: false,
+                    answer_cut_off: false,
                     response: "Recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -28382,6 +28467,7 @@ while True:
                     output_summary: None,
                 })
             },
+            || None,
         )
         .unwrap();
 
@@ -28458,13 +28544,19 @@ while True:
 
         // The turn is stopped after Claude Code acknowledged the session, so
         // the run knows a resumable conversation exists.
-        let stop = run_provider_chat_with_retry_using(&store, &request, None, |_, attempt| {
-            attempt.resume_cursor = Some(ProviderResumeCursor {
-                kind: "claude-session".into(),
-                session_id: "claude-first-turn".into(),
-            });
-            anyhow::bail!("{}", ProviderStopReason::User.message())
-        })
+        let stop = run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            None,
+            |_, attempt| {
+                attempt.resume_cursor = Some(ProviderResumeCursor {
+                    kind: "claude-session".into(),
+                    session_id: "claude-first-turn".into(),
+                });
+                anyhow::bail!("{}", ProviderStopReason::User.message())
+            },
+            || None,
+        )
         .unwrap_err();
         assert!(is_provider_cancellation(&stop.to_string()));
 
@@ -28494,6 +28586,7 @@ while True:
                     billed_usage: None,
                     rate_limits: Vec::new(),
                     paused_at_tool_budget: false,
+                    answer_cut_off: false,
                     response: "Continued".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -28502,6 +28595,7 @@ while True:
                     output_summary: None,
                 })
             },
+            || None,
         )
         .unwrap();
         assert_eq!(resumed_from.as_deref(), Some("claude-first-turn"));
@@ -28520,9 +28614,13 @@ while True:
             .unwrap();
         let request = provider_chat_request_for(&session, temp.path(), "anthropic");
 
-        run_provider_chat_with_retry_using(&store, &request, None, |_, _attempt| {
-            anyhow::bail!("{}", ProviderStopReason::User.message())
-        })
+        run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            None,
+            |_, _attempt| anyhow::bail!("{}", ProviderStopReason::User.message()),
+            || None,
+        )
         .unwrap_err();
 
         assert!(store

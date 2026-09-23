@@ -391,6 +391,45 @@ function finishComposerContextUsage({
 const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
 
 /**
+ * How far apart two reset times can be and still name the same window.
+ *
+ * The account API says `13:59:59.836` where the chat stream says `14:00:00`;
+ * comparing whole seconds split them into two windows and lost the level.
+ */
+const SAME_RESET_TOLERANCE_MS = 60_000;
+
+/** A reading older than this is worth flagging even without an error. */
+const USAGE_READING_STALE_MS = 5 * 60_000;
+
+/**
+ * How current a plan-usage reading is, phrased for the meter footer.
+ *
+ * A reading kept from an earlier poll must never pass for a live one: the
+ * footer says how old it is, and `stale` marks it once it is old enough or the
+ * latest refresh failed.
+ */
+export function formatUsageFreshness(
+  fetchedAt: string | undefined,
+  now = Date.now(),
+  failed = false,
+): { label: string; stale: boolean } | undefined {
+  const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : Number.NaN;
+  if (!Number.isFinite(fetchedMs)) return undefined;
+  const ageMs = Math.max(0, now - fetchedMs);
+  const minutes = Math.floor(ageMs / 60_000);
+  const age =
+    ageMs < 60_000
+      ? "just now"
+      : minutes < 60
+        ? `${minutes} min ago`
+        : minutes < 24 * 60
+          ? `${Math.floor(minutes / 60)} hr ago`
+          : `${Math.floor(minutes / (24 * 60))} d ago`;
+  const stale = failed || ageMs >= USAGE_READING_STALE_MS;
+  return { label: `${stale ? "Last read" : "Updated"} ${age}`, stale };
+}
+
+/**
  * When a window resets, phrased the way a limit is actually read.
  *
  * A reset inside the day is a countdown — what matters is how long until work
@@ -536,8 +575,8 @@ export function composerLimitWindows(
     const sameReset =
       window.resetsAt &&
       previous?.resetsAt &&
-      Math.floor(Date.parse(window.resetsAt) / 1000) ===
-        Math.floor(Date.parse(previous.resetsAt) / 1000);
+      Math.abs(Date.parse(window.resetsAt) - Date.parse(previous.resetsAt)) <
+        SAME_RESET_TOLERANCE_MS;
     byId.set(window.id, {
       ...window,
       usedPercent:

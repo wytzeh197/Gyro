@@ -184,7 +184,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-5.6-sol",
         displayName: "GPT-5.6 Sol",
         description: "Frontier model for complex professional work.",
-        contextWindowTokens: 1_050_000,
+        // What Codex serves; the API window is larger.
+        contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
       },
@@ -192,7 +193,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-5.6-terra",
         displayName: "GPT-5.6 Terra",
         description: "Balances intelligence and cost for everyday work.",
-        contextWindowTokens: 1_050_000,
+        // What Codex serves; the API window is larger.
+        contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
       },
@@ -200,7 +202,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-5.6-luna",
         displayName: "GPT-5.6 Luna",
         description: "Fast, cost-sensitive model for lighter workloads.",
-        contextWindowTokens: 1_050_000,
+        // What Codex serves; the API window is larger.
+        contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
       },
@@ -208,7 +211,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-5.5",
         displayName: "GPT-5.5",
         description: "Flagship model for complex reasoning and coding.",
-        contextWindowTokens: 1_050_000,
+        // What Codex serves; the API window is larger.
+        contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
@@ -216,7 +220,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-5.4",
         displayName: "GPT-5.4",
         description: "Balanced coding model with lower cost.",
-        contextWindowTokens: 1_050_000,
+        // What Codex serves; the API window is larger.
+        contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
@@ -390,7 +395,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.5",
         displayName: "Grok 4.5",
         description: "xAI's coding-capable model through Grok Build.",
-        contextWindowTokens: 131_072,
+        contextWindowTokens: 500_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_REASONING_EFFORTS,
       },

@@ -270,6 +270,7 @@ pub(super) fn run_openai_compatible_chat(
         request.clone(),
         cancellation.clone(),
         heartbeat_stop.clone(),
+        None,
     );
     let mut response = None;
     let mut paused_at_tool_budget = false;
@@ -430,6 +431,7 @@ pub(super) fn run_openai_compatible_chat(
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
             paused_at_tool_budget,
+            answer_cut_off: false,
             response: response.content,
             resume_cursor: None,
             retry_count: 0,

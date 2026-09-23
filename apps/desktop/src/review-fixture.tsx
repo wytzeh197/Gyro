@@ -90,6 +90,7 @@ function Fixture() {
   const [selectedPath, select] = useState("src/chat.ts");
   return (
     <div
+      className="gyro-chat-companion-content"
       style={{
         width: "calc(100vw - 24px)",
         maxWidth: Number(params.get("width")) || 720,
@@ -111,6 +112,7 @@ function Fixture() {
         {params.get("mode") === "proposed" ? (
           <DiffReviewSurface
             compact
+            collapsibleFiles
             diffReview={{
               files,
               selectedPath,

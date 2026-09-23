@@ -148,6 +148,22 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "Send the next step, or raise `usageGuard.maxToolRounds` in config.json.",
         );
     }
+    // Same footing: the turn completed with an answer the provider may not
+    // have finished, so it gets a continue, not a failure.
+    if error.contains("may be cut off") {
+        return (
+            "partial-answer",
+            "Press Continue to have it pick up where it stopped.",
+        );
+    }
+    // Before the keyword branches, which would read a stall as a network or
+    // timeout problem with advice that does not fit.
+    if error.contains(PROVIDER_STALL_MARKER) {
+        return (
+            "stalled",
+            "The provider stopped responding, so Gyro ended the turn. Send again to continue.",
+        );
+    }
     // Checked next: a stop is not a failure, and every branch below reads it
     // as one. The ceiling case in particular must not be offered a plain retry,
     // which would run into the same ceiling and stop in the same place.

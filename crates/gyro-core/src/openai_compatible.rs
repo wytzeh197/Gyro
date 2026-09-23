@@ -27,8 +27,9 @@ const MODELS_PATH: &str = "models";
 // 5s Ollama budget reported healthy providers as unreachable.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-// A reasoning model can think for minutes before its first token.
-const CHAT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+// A reasoning model can think for minutes before its first token, so this is
+// the longest silence tolerated between bytes, not a limit on the whole answer.
+const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_DISCOVERED_MODELS: usize = 500;
 const MAX_ERROR_BODY_CHARS: usize = 400;
 
@@ -433,14 +434,24 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+/// One shared agent so every tool round of a turn reuses the pooled
+/// connection instead of paying a fresh TLS handshake to the gateway.
+///
+/// There is no overall deadline: a long answer that keeps streaming is healthy,
+/// and cutting it at a fixed wall clock dropped it. A stalled stream still ends
+/// at the idle limit, and Stop ends it at once.
 fn chat_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(CHAT_TIMEOUT)
-        .timeout_write(CHAT_TIMEOUT)
-        .timeout(CHAT_TIMEOUT)
-        .redirects(0)
-        .build()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::AgentBuilder::new()
+                .timeout_connect(CONNECT_TIMEOUT)
+                .timeout_read(CHAT_IDLE_TIMEOUT)
+                .timeout_write(CHAT_IDLE_TIMEOUT)
+                .redirects(0)
+                .build()
+        })
+        .clone()
 }
 
 fn openai_compat_http_error(error: ureq::Error) -> anyhow::Error {
