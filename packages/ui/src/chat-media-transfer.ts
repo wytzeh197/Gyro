@@ -17,9 +17,7 @@ export function isMediaDrag(transfer: MediaTransfer | null | undefined) {
     (transfer.types ?? []) as unknown as ArrayLike<string>,
   );
   if (types.includes("Files")) return true;
-  if (
-    Array.from(transfer.items ?? []).some((item) => item.kind === "file")
-  ) {
+  if (Array.from(transfer.items ?? []).some((item) => item.kind === "file")) {
     return true;
   }
   if (types.some((type) => /^image\//i.test(type))) return true;
@@ -40,11 +38,93 @@ export function chatMediaFiles(
       if (file) files.push(file);
     }
   }
-  return files.filter(
-    (file) =>
-      /^(?:image|video)\//.test(file.type) ||
-      /\.(?:png|jpe?g|webp|gif|heic|heif|tiff?|bmp|avif|mp4|m4v|mov|webm)$/i.test(
-        file.name,
-      ),
+  return oneFilePerImage(
+    files.filter(
+      (file) =>
+        /^(?:image|video)\//.test(file.type) ||
+        /\.(?:png|jpe?g|webp|gif|heic|heif|tiff?|bmp|avif|mp4|m4v|mov|webm)$/i.test(
+          file.name,
+        ),
+    ),
   );
+}
+
+const SENDABLE_IMAGE = /\.(?:png|jpe?g|webp)$/i;
+
+/** A copied screenshot or page image reaches the clipboard in several formats
+ * at once (`image.png` and `image.tiff`), and some sources list a file twice.
+ * Each is the same picture, so keep one per name, preferring a format the
+ * model accepts without conversion. */
+function oneFilePerImage(files: File[]): File[] {
+  const kept = new Map<string, File>();
+  for (const file of files) {
+    const isImage =
+      !/^video\//.test(file.type) &&
+      !/\.(?:mp4|m4v|mov|webm)$/i.test(file.name);
+    const key = isImage
+      ? "image:" + (file.name.replace(/\.[^.]*$/, "").toLowerCase() || "image")
+      : "video:" + file.name + ":" + file.size;
+    const current = kept.get(key);
+    if (!current) kept.set(key, file);
+    else if (
+      !SENDABLE_IMAGE.test(current.name) &&
+      SENDABLE_IMAGE.test(file.name)
+    ) {
+      kept.set(key, file);
+    }
+  }
+  return [...kept.values()];
+}
+
+/** Image bytes the attachment store accepts as-is: PNG, JPEG or WebP. */
+function isSendableImageHeader(head: Uint8Array) {
+  const at = (index: number) => head[index];
+  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) {
+    return true;
+  }
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return true;
+  const ascii = (from: number, to: number) =>
+    String.fromCharCode(...head.subarray(from, to));
+  return ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP";
+}
+
+/**
+ * HEIC photos, GIFs, TIFF screenshots and images too large to send failed at
+ * upload with an error most people never saw. The webview can decode them, so
+ * re-encode those as PNG (or JPEG when PNG is still over the limit) first.
+ * Anything it cannot decode is returned unchanged for the upload to reject.
+ */
+export async function sendableChatImage(
+  file: File,
+  maxBytes: number,
+): Promise<File> {
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (isSendableImageHeader(head) && file.size <= maxBytes) return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d")?.drawImage(image, 0, 0);
+    const encode = (type: string, quality?: number) =>
+      new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, type, quality),
+      );
+    let blob = await encode("image/png");
+    let extension = "png";
+    if (!blob || blob.size > maxBytes) {
+      blob = await encode("image/jpeg", 0.9);
+      extension = "jpg";
+    }
+    if (!blob) return file;
+    const base = file.name.replace(/\.[^.]*$/, "") || "image";
+    return new File([blob], `${base}.${extension}`, { type: blob.type });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

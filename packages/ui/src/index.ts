@@ -567,6 +567,7 @@ export {
 export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
 export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
+export { sendableChatImage } from "./chat-media-transfer";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,

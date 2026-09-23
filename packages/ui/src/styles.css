@@ -26506,7 +26506,7 @@ button.gyro-account-menu-row:hover,
   background: color-mix(in srgb, var(--gyro-surface) 94%, var(--gyro-text) 6%);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-bottom-color: var(--gyro-premium-hairline-soft);
-  border-radius: 16px 16px 8px 8px;
+  border-radius: 16px 16px 0 0;
   box-sizing: border-box;
   color: var(--gyro-text);
   margin-bottom: 0;
@@ -26650,10 +26650,11 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-danger);
 }
 
-/* Plan approval takes the composer's place: same shell, same corners, with the
-   plan it would build and the two answers. The composer stays mounted (hidden)
-   so a draft survives "Keep planning". */
-.gyro-composer-shell.has-overlay > :not(.gyro-plan-decision-card) {
+/* Plan approval and questions take the composer's place: same shell, same
+   corners, with the choice in it. The composer stays mounted (hidden) so a
+   draft survives "Keep planning" or a dismissed question. */
+.gyro-composer-shell.has-overlay
+  > :not(.gyro-plan-decision-card):not(.gyro-chat-question-popup) {
   display: none;
 }
 
@@ -30439,26 +30440,13 @@ button.gyro-account-menu-row:hover,
   border: 0;
 }
 
-/* Focus stops dimming the other chat. Both transcripts stay legible; the
-   active pane is marked at its top edge and the inactive one simply recedes. */
+/* Focus stops dimming the other chat. Both transcripts stay legible, and the
+   active pane carries no edge line: the inactive one simply recedes. */
 .gyro-chat-grid.has-multiple-panes
   .gyro-chat-grid-slot.is-occupied.is-subdued-pane::after,
 .gyro-chat-grid.has-multiple-panes
   .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
-  background: transparent;
-  content: "";
-  height: 2px;
-  inset: 0 0 auto;
-  pointer-events: none;
-  position: absolute;
-  transition: background-color var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
-  z-index: 200;
-}
-
-.gyro-chat-grid.has-multiple-panes
-  .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
-  background: var(--gyro-accent);
+  content: none;
 }
 
 /* The quiet half of the cue: an unfocused chat keeps its full contrast and
@@ -30637,13 +30625,6 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-surface.is-tiled
   .gyro-chat-composer-dock {
   padding-inline: clamp(12px, 4cqi, 24px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .gyro-chat-grid.has-multiple-panes
-    .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
-    transition: none;
-  }
 }
 
 /* Model focus: where the model is working, shown without moving the user. */

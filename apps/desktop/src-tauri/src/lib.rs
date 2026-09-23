@@ -6649,32 +6649,33 @@ fn validated_chat_media_type(
     is_video: bool,
     bytes: &[u8],
 ) -> Result<(&'static str, &'static str), String> {
+    // Images are typed by their bytes: pasted and downloaded images often carry
+    // a name that disagrees with their contents, and the stored file is renamed
+    // to the content type anyway.
+    if !is_video {
+        return if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            Ok(("image/png", "png"))
+        } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+            Ok(("image/jpeg", "jpg"))
+        } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+            Ok(("image/webp", "webp"))
+        } else {
+            Err("only PNG, JPEG, and WebP images are supported".into())
+        };
+    }
     let extension = Path::new(name)
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
     match extension.as_str() {
-        "png" if !is_video && bytes.starts_with(b"\x89PNG\r\n\x1a\n") => Ok(("image/png", "png")),
-        "jpg" | "jpeg" if !is_video && bytes.starts_with(&[0xff, 0xd8, 0xff]) => {
-            Ok(("image/jpeg", "jpg"))
-        }
-        "webp" if !is_video && bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => {
-            Ok(("image/webp", "webp"))
-        }
-        "mp4" | "m4v" if is_video && bytes.get(4..8) == Some(b"ftyp") => Ok(("video/mp4", "mp4")),
-        "mov" if is_video && is_quicktime_container(bytes) => Ok(("video/quicktime", "mov")),
-        "webm" if is_video && bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) => {
-            Ok(("video/webm", "webm"))
-        }
-        "png" | "jpg" | "jpeg" | "webp" if !is_video => {
-            Err("image contents do not match the selected file type".into())
-        }
-        "mp4" | "m4v" | "mov" | "webm" if is_video => {
+        "mp4" | "m4v" if bytes.get(4..8) == Some(b"ftyp") => Ok(("video/mp4", "mp4")),
+        "mov" if is_quicktime_container(bytes) => Ok(("video/quicktime", "mov")),
+        "webm" if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) => Ok(("video/webm", "webm")),
+        "mp4" | "m4v" | "mov" | "webm" => {
             Err("video contents do not match the selected file type".into())
         }
-        _ if is_video => Err("only MP4, M4V, MOV, and WebM videos are supported".into()),
-        _ => Err("only PNG, JPEG, and WebP images are supported".into()),
+        _ => Err("only MP4, M4V, MOV, and WebM videos are supported".into()),
     }
 }
 
@@ -25981,6 +25982,17 @@ while True:
             ("video/quicktime", "mov")
         );
         assert!(validated_chat_media_type("fake.mov", true, b"\0\0\0\x08junkjunk").is_err());
+        // A JPEG saved as .png, or a paste with no extension, is still a JPEG.
+        let jpeg = [0xff, 0xd8, 0xff, 0xe0];
+        assert_eq!(
+            validated_chat_media_type("photo.png", false, &jpeg).unwrap(),
+            ("image/jpeg", "jpg")
+        );
+        assert_eq!(
+            validated_chat_media_type("pasted", false, &jpeg).unwrap(),
+            ("image/jpeg", "jpg")
+        );
+        assert!(validated_chat_media_type("scan.tiff", false, b"II*\0").is_err());
     }
 
     #[test]

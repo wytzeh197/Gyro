@@ -126,6 +126,7 @@ import {
   updateSendingSessions,
   persistableChatGridState,
   sanitizeStoredIdeState,
+  sendableChatImage,
   sanitizeStoredChatGridState,
   selectedReasoningEffort,
   serializeGyroWorkspaceFile,
@@ -8520,10 +8521,15 @@ export function App() {
           }
         }
         if (prepared.length) {
-          setChatAttachments((current) => ({
-            ...current,
-            [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
-          }));
+          // Picking an image already in the draft stores the same file again.
+          setChatAttachments((current) => {
+            const draft = current[activeDraftKey] ?? [];
+            const seen = new Set(draft.map((item) => item.path));
+            const fresh = prepared.filter(
+              (item) => !seen.has(item.path) && Boolean(seen.add(item.path)),
+            );
+            return { ...current, [activeDraftKey]: [...draft, ...fresh] };
+          });
         }
         if (rejected.length) {
           notify("command-failed", "Attachment rejected", rejected.join("\n"));
@@ -8664,15 +8670,20 @@ export function App() {
       const prepared: ChatAttachment[] = [];
       const rejected: string[] = [];
       let limitExceeded = false;
-      for (const file of files) {
+      for (const dropped of files) {
         const kind =
-          file.type.startsWith("video/") || isSupportedChatVideoPath(file.name)
+          dropped.type.startsWith("video/") ||
+          isSupportedChatVideoPath(dropped.name)
             ? "video"
             : "image";
         if (remaining[kind] <= 0) {
           limitExceeded = true;
           continue;
         }
+        const file =
+          kind === "image"
+            ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+            : dropped;
         const name =
           file.name ||
           `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;

@@ -7776,7 +7776,6 @@ function anyMediaDropTarget() {
 }
 /** The composer currently under the pointer, and the last one it named. */
 let mediaDropTargetUnderPointer = "";
-let mediaDropArmedKey: string | undefined;
 /**
  * Drops a window listener already attached. Every mounted chat surface
  * registers the listener, and `stopPropagation` does not stop sibling
@@ -8516,27 +8515,28 @@ export function ChatSurface({
       event.preventDefault();
       event.stopPropagation();
       const point = { x: event.clientX, y: event.clientY };
-      // The pane the drag was last over is the honest answer when the pointer
-      // sits outside every chat rectangle, and the host is the last resort.
+      // In split view the chat under the pointer owns the drop. The pane the
+      // drag was last over answers when the pointer sits in a gutter or on the
+      // app chrome, and the host is the last resort. The previous drop's pane
+      // is never reused: preferring it sent every later image to the chat
+      // that took the first one, whichever chat was being hovered.
       const underPointer = mediaDropTargetUnderPointer;
       mediaDropTargetUnderPointer = "";
       const target =
-        mediaTargetsFor(mediaDropArmedKey).at(-1) ??
-        mediaTargetsFor(underPointer).at(-1) ??
         mediaDropTargetAt(point) ??
+        mediaTargetsFor(underPointer).at(-1) ??
         localMediaDrop ??
         NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
       // surface's own capture handler is still the one that can attach.
       if (target !== NO_MEDIA_DROP_TARGET) handledMediaDrops.add(event);
-      mediaDropArmedKey = target.paneKey || undefined;
       target.attach(files);
     };
     const onDragLeave = (event: DragEvent) => {
-      // Dragging out of the window used to leave the drop armed for the next
-      // drag in, which is how an image landed in the chat before last.
+      // Dragging out of the window must not leave a stale hovered chat for the
+      // next drag in, which is how an image landed in the chat before last.
       if (event.relatedTarget) return;
-      mediaDropArmedKey = undefined;
+      mediaDropTargetUnderPointer = "";
     };
     window.addEventListener("dragover", onDragOver, true);
     window.addEventListener("drop", onDrop, true);
@@ -9620,15 +9620,6 @@ export function ChatSurface({
         </div>
 
         <div className="gyro-chat-composer-dock">
-          {showQuestionPopup ? (
-            <ChatQuestionPopup
-              key={questionRequest.id}
-              request={questionRequest}
-              draft={localDraft}
-              onSend={onSend}
-              onDismiss={() => setDismissedQuestionId(questionRequest.id)}
-            />
-          ) : null}
           {isTranscriptAwayFromBottom ? (
             <button
               aria-label="Jump to latest message"
@@ -9671,6 +9662,14 @@ export function ChatSurface({
                   onDecision={handlePlanDecision}
                   onOpenPlan={onTogglePlanPanel}
                   plan={sessionPlan}
+                />
+              ) : showQuestionPopup ? (
+                <ChatQuestionPopup
+                  key={questionRequest.id}
+                  request={questionRequest}
+                  draft={localDraft}
+                  onSend={onSend}
+                  onDismiss={() => setDismissedQuestionId(questionRequest.id)}
                 />
               ) : undefined
             }
@@ -27451,7 +27450,13 @@ function ChatTurn({
             </div>
           </div>
         ) : null}
-        {keepAlives.map((watch) => (
+        {/* A server belongs under the finished answer, where it is still
+            meant to be running; mid-turn it is just a step, and one the
+            model stopped itself was never meant to stay on. */}
+        {(isRunning
+          ? []
+          : keepAlives.filter((watch) => watch.stopOrigin !== "model")
+        ).map((watch) => (
           <ChatKeepAlive
             key={watch.paneId}
             watch={watch}
