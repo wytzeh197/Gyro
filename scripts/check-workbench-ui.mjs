@@ -468,7 +468,7 @@ expect(
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)\n  .gyro-session-row.is-active::before",
     ) &&
-    styleSource.includes("inset: 3px auto 3px 0;") &&
+    styleSource.includes("transform: translateY(-50%);") &&
     styleSource.includes("width: 4px;"),
   "Grid focus should drive the selected sidebar chat, emphasize it with a substantial accent, and dim every inactive pane and row.",
 );
