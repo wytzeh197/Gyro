@@ -13,6 +13,11 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
             "invalid api key",
             "unauthorized",
             "insufficient_quota",
+            "status 402",
+            "http 402",
+            "payment required",
+            "balance exhausted",
+            "missing environment variable",
         ]
         .iter()
         .any(|cause| normalized.contains(cause))
@@ -138,6 +143,54 @@ pub(super) fn is_tool_budget_notice(error: &str) -> bool {
     error.contains("round budget")
 }
 
+fn is_plan_exhausted(normalized: &str) -> bool {
+    [
+        "status 402",
+        "http 402",
+        "\"http_status\":402",
+        "payment required",
+        "balance exhausted",
+        "insufficient_quota",
+        "credit balance is too low",
+        "out of credits",
+    ]
+    .iter()
+    .any(|cause| normalized.contains(cause))
+}
+
+/// A provider error as a person reads it.
+///
+/// Agents wrap API failures as `Internal error: {"http_status":402,"message":
+/// "…", "promptUsage":{…}}`. The message is the only part worth showing, and it
+/// keeps the status wording the recovery classifier matches on.
+pub(super) fn readable_provider_error(error: &str) -> String {
+    let Some(start) = error.find('{') else {
+        return error.to_string();
+    };
+    let end = error.rfind('}').map_or(error.len(), |end| end + 1);
+    let Some(message) = serde_json::from_str::<serde_json::Value>(&error[start..end])
+        .ok()
+        .and_then(|frame| {
+            frame
+                .get("message")
+                .or_else(|| frame.pointer("/error/message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+                .map(str::to_string)
+        })
+    else {
+        return error.to_string();
+    };
+    let prefix = error[..start].trim().trim_end_matches(':').trim();
+    let tail = error[end..].trim();
+    [prefix, message.as_str(), tail]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
 pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     let normalized = error.to_ascii_lowercase();
     // Checked first: the turn completed, so nothing below -- least of all the
@@ -196,6 +249,21 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
         return (
             "cli-contract",
             "This provider's CLI does not accept the command Gyro built, which usually means its version changed. Update Gyro and the provider CLI; retrying will not help.",
+        );
+    }
+    // Also definitive: an empty balance or an exhausted plan fails every resend
+    // the same way, and a resend can first spend a long tool loop reaching the
+    // same refusal (one Grok turn ran 71 model calls before its 402).
+    if is_plan_exhausted(&normalized) {
+        return (
+            "plan-exhausted",
+            "This provider's plan or credit balance is used up. Top it up or switch provider; retrying will fail the same way.",
+        );
+    }
+    if normalized.contains("missing environment variable") {
+        return (
+            "provider-config",
+            "The provider CLI's own configuration asks for an environment variable that is not set. Fix that CLI config or pick a different profile; retrying will not help.",
         );
     }
     if normalized.contains("offline")
@@ -315,5 +383,45 @@ pub(super) fn prepare_tool_call(
             messages.push(reply);
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    const GROK_402: &str = r#"Internal error: {"http_status":402,"message":"API error (status 402 Payment Required): Grok Build usage balance exhausted","promptUsage":{"inputTokens":18177618,"modelCalls":71}}"#;
+
+    #[test]
+    fn an_exhausted_balance_is_named_and_never_retried() {
+        assert_eq!(provider_failure_recovery(GROK_402).0, "plan-exhausted");
+        assert!(!is_transient_provider_error(GROK_402));
+        assert_eq!(
+            provider_failure_recovery("Error: insufficient_quota for this key").0,
+            "plan-exhausted"
+        );
+    }
+
+    #[test]
+    fn a_cli_config_gap_is_not_offered_a_retry() {
+        let error = "Missing environment variable: `DEEPSEEK_API_KEY`.";
+        assert_eq!(provider_failure_recovery(error).0, "provider-config");
+        assert!(!is_transient_provider_error(error));
+    }
+
+    #[test]
+    fn an_agent_json_error_reads_as_its_message() {
+        assert_eq!(
+            readable_provider_error(GROK_402),
+            "Internal error: API error (status 402 Payment Required): Grok Build usage balance exhausted"
+        );
+        assert_eq!(
+            readable_provider_error("connection reset by peer"),
+            "connection reset by peer"
+        );
+        assert_eq!(
+            readable_provider_error("bad frame {not json}"),
+            "bad frame {not json}"
+        );
     }
 }

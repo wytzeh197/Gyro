@@ -21,6 +21,12 @@ import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { resolveChatPaneClose } from "./chat-pane-close";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
+import {
+  pendingMediaAttachment,
+  settlePendingMedia,
+  trackPendingMedia,
+  withoutPendingMedia,
+} from "./pending-media-attachments";
 import { terminalOutputUpdate } from "./terminal-output";
 import { LiveTerminalPaneBody } from "./live-terminal-pane";
 import {
@@ -1567,7 +1573,6 @@ export function App() {
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
-    showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
     companionWidth: companion.dockWidth,
@@ -2379,7 +2384,7 @@ export function App() {
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_ATTACHMENTS_STORAGE_KEY,
-      JSON.stringify(chatAttachments),
+      JSON.stringify(withoutPendingMedia(chatAttachments)),
     );
   }, [chatAttachments]);
   useEffect(() => {
@@ -8678,7 +8683,11 @@ export function App() {
             existing.filter((item) => item.kind === "video").length,
         ),
       };
-      const prepared: ChatAttachment[] = [];
+      const queued: {
+        dropped: File;
+        kind: "image" | "video";
+        placeholder: ChatAttachment;
+      }[] = [];
       const rejected: string[] = [];
       let limitExceeded = false;
       for (const dropped of files) {
@@ -8691,6 +8700,21 @@ export function App() {
           limitExceeded = true;
           continue;
         }
+        remaining[kind] -= 1;
+        const placeholder = pendingMediaAttachment(dropped, kind);
+        queued.push({ dropped, kind, placeholder });
+      }
+      // The chip lands with the drop; the upload fills it in behind it.
+      if (queued.length) {
+        setChatAttachments((current) => ({
+          ...current,
+          [attachmentDraftKey]: [
+            ...(current[attachmentDraftKey] ?? []),
+            ...queued.map((item) => item.placeholder),
+          ],
+        }));
+      }
+      const upload = async (dropped: File, kind: "image" | "video") => {
         const file =
           kind === "image"
             ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
@@ -8704,7 +8728,7 @@ export function App() {
           rejected.push(
             `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
           );
-          continue;
+          return undefined;
         }
         try {
           const headers: Record<string, string> = {
@@ -8720,31 +8744,44 @@ export function App() {
             new Uint8Array(await file.arrayBuffer()),
             { headers },
           );
-          remaining[kind] -= 1;
-          prepared.push({
-            ...attachment,
-            previewUrl: convertFileSrc(attachment.path),
-          });
+          return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
           rejected.push(`${name}: ${String(error)}`);
+          return undefined;
         }
-      }
-      if (prepared.length) {
-        // Uploads are stored by content hash, so a repeated path is the same
-        // file arriving twice (a doubled drop event, or drop plus paste).
-        setChatAttachments((current) => {
-          const draft = current[attachmentDraftKey] ?? [];
-          const seen = new Set(draft.map((item) => item.path));
-          const fresh = prepared.filter((item) => {
-            if (seen.has(item.path)) return false;
-            seen.add(item.path);
-            return true;
-          });
-          return fresh.length
-            ? { ...current, [attachmentDraftKey]: [...draft, ...fresh] }
-            : current;
-        });
-      }
+      };
+      await Promise.all(
+        queued.map(({ dropped, kind, placeholder }) =>
+          trackPendingMedia(
+            placeholder,
+            upload(dropped, kind).then((attachment) => {
+              // Uploads are stored by content hash, so a repeated path is the
+              // same file arriving twice (a doubled drop event, or drop plus
+              // paste). A placeholder already sent or removed stays gone.
+              setChatAttachments((current) => {
+                const draft = current[attachmentDraftKey] ?? [];
+                if (!draft.some((item) => item.id === placeholder.id)) {
+                  return current;
+                }
+                const keep =
+                  attachment &&
+                  !draft.some((item) => item.path === attachment.path);
+                return {
+                  ...current,
+                  [attachmentDraftKey]: draft.flatMap((item) =>
+                    item.id !== placeholder.id
+                      ? [item]
+                      : keep
+                        ? [attachment]
+                        : [],
+                  ),
+                };
+              });
+              return attachment;
+            }),
+          ),
+        ),
+      );
       if (limitExceeded) {
         notify(
           "command-failed",
@@ -9261,11 +9298,11 @@ export function App() {
           openToolPanel("diff");
           break;
         case "compact-context": {
-          if (!activeSessionId || activeSession?.providerId !== "openai") {
+          if (!activeSessionId || !activeSession?.providerId) {
             notify(
               "command-failed",
               "Context compaction unavailable",
-              "This command is available for resumable OpenAI chats.",
+              "Select a provider and start the chat before compacting it.",
             );
             break;
           }
@@ -9289,7 +9326,7 @@ export function App() {
             "/compact",
             compactionTurnId,
             providersForConfig(config).find(
-              (provider) => provider.id === "openai",
+              (provider) => provider.id === activeSession.providerId,
             ),
           );
           optimisticEventsRef.current.set(
@@ -9598,8 +9635,12 @@ export function App() {
         return false;
       }
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
-      const turnAttachments =
+      const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
+      // An image dropped a moment ago may still be uploading.
+      const turnAttachments = draftAttachments.some((item) => item.pending)
+        ? await settlePendingMedia(draftAttachments)
+        : draftAttachments;
       const turnMode = overrideContext?.mode ?? activeChatMode;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
@@ -9672,6 +9713,29 @@ export function App() {
       }
       if (!targetSessionId && isStartingFirstTurn) {
         return false;
+      }
+      // Sending from the goal composer sets the goal and starts on it in one
+      // step. A new chat saves it once the session exists (below).
+      const newGoal = overrideContext?.goal;
+      if (
+        targetSessionId &&
+        newGoal?.text &&
+        isTauriRuntime() &&
+        (targetSessionId !== activeSessionId ||
+          newGoal.text !== activeSessionGoal?.text ||
+          activeSessionGoal?.status !== "active")
+      ) {
+        try {
+          await invoke<SessionEvent>("append_chat_context_event", {
+            sessionId: targetSessionId,
+            eventKind: "goal-updated",
+            message: "",
+            payload: { action: "set", text: newGoal.text, status: "active" },
+          });
+          void refreshEvents(targetSessionId);
+        } catch (error) {
+          notify("command-failed", "Goal not saved", String(error));
+        }
       }
       if (
         targetSessionId &&
@@ -10567,8 +10631,10 @@ export function App() {
 
   const startNewGoalChat = useCallback(
     (goal: string) => {
+      // The goal composer keeps its own text, so the chat draft stays put.
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
+        preserveDraft: true,
       });
     },
     [sendDraft],
@@ -11289,13 +11355,15 @@ export function App() {
     async (payload: Record<string, unknown>, message: string) => {
       if (!activeSessionId) {
         notify("command-failed", "No active session", "Start a chat first");
-        return;
+        return false;
       }
-      const event = createGoalSessionEvent(activeSessionId, message, payload);
       if (!isTauriRuntime()) {
+        const event = createGoalSessionEvent(activeSessionId, message, payload);
         setEvents((current) => [...current, event]);
-        return;
+        return true;
       }
+      // The backend checks the change and words the transcript line; a
+      // refusal is reported, never papered over with a local-only goal.
       try {
         await invoke<SessionEvent>("append_chat_context_event", {
           sessionId: activeSessionId,
@@ -11304,9 +11372,10 @@ export function App() {
           payload,
         });
         await refreshEvents(activeSessionId);
-      } catch {
-        setEvents((current) => [...current, event]);
-        notify("command-failed", "Goal update fallback", message);
+        return true;
+      } catch (error) {
+        notify("command-failed", "Goal not updated", String(error));
+        return false;
       }
     },
     [activeSessionId, notify, refreshEvents],
@@ -11941,8 +12010,7 @@ export function App() {
                 : `Goal updated: ${text}`;
       // A goal is the outcome, a mode is how the turn runs. Setting one no
       // longer cancels the other — the composer shows both.
-      await appendGoalEvent(payload, message);
-      return true;
+      return appendGoalEvent(payload, message);
     },
     [activeSessionGoal, activeSessionId, appendGoalEvent],
   );
@@ -15711,13 +15779,11 @@ export function App() {
           focusChatPane(pane);
           return changeGoal(action, value);
         }}
-        onStartGoalChat={
-          pane.kind === "draft"
-            ? (goal) =>
-                requestSend(goal, {
-                  goal: { text: goal, status: "active" },
-                })
-            : undefined
+        onStartGoalChat={(goal) =>
+          requestSend(goal, {
+            goal: { text: goal, status: "active" },
+            preserveDraft: true,
+          })
         }
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
         fileReview={
@@ -15905,7 +15971,7 @@ export function App() {
       planEditorRequest={planEditorRequest}
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
-      onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
+      onStartGoalChat={startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
@@ -16281,9 +16347,7 @@ export function App() {
                       setPlanEditorRequest(undefined)
                     }
                     onGoalAction={changeGoal}
-                    onStartGoalChat={
-                      activeSessionId ? undefined : startNewGoalChat
-                    }
+                    onStartGoalChat={startNewGoalChat}
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
@@ -16650,7 +16714,6 @@ export function App() {
           density={workbench.preferences.density}
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
-          showQuickActions={workbench.preferences.showQuickActions}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
@@ -16660,9 +16723,6 @@ export function App() {
           }
           onDensityChange={(density) =>
             dispatchWorkbench({ type: "set-density", density })
-          }
-          onQuickActionsVisibilityChange={(visible) =>
-            dispatchWorkbench({ type: "set-quick-actions-visible", visible })
           }
           onMenuBarVisibilityChange={(visible) =>
             dispatchWorkbench({ type: "set-menu-bar-visible", visible })
@@ -16970,7 +17030,7 @@ export function App() {
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
-          onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
+          onStartGoalChat={startNewGoalChat}
           onCancelGoalComposer={() => setIsGoalComposerActive(false)}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}

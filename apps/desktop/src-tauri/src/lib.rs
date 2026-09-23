@@ -1,11 +1,15 @@
 mod canvas_preview;
+mod conversation_history;
+use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod git_read;
 mod model_catalog;
 mod provider_activity;
 use provider_activity::*;
 mod provider_mcp;
 mod provider_reliability;
-use provider_reliability::{is_transient_provider_error, provider_failure_recovery};
+use provider_reliability::{
+    is_transient_provider_error, provider_failure_recovery, readable_provider_error,
+};
 mod openai_compatible_runner;
 mod provider_api_keys;
 mod window_controls;
@@ -14,6 +18,7 @@ pub(crate) use window_controls::apply_macos_traffic_light_position;
 mod kimi_usage;
 #[cfg(debug_assertions)]
 mod performance_benchmark;
+mod session_goal;
 mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
@@ -3613,9 +3618,9 @@ async fn run_provider_chat(
     result?
 }
 
-/// Ask a resumable Codex thread to compact its existing context. This uses the
-/// app-server's dedicated request instead of sending `/compact` as a normal
-/// prompt, so providers without that capability never receive a faux command.
+/// Compact a provider chat. Codex uses its native app-server request; other
+/// providers restart from a bounded local conversation checkpoint. The slash
+/// command is never sent to a model as a normal prompt.
 #[tauri::command]
 async fn compact_provider_chat(
     app: tauri::AppHandle,
@@ -4981,6 +4986,10 @@ fn run_provider_chat_blocking(
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    // The stored goal outranks the window's copy, which may predate a clear or
+    // a completion made elsewhere; the window's copy covers a failed save.
+    let events = store.read_events(session_id).map_err(to_string)?;
+    request.goal = session_goal::stored_session_goal(&events).or(request.goal.take());
     if request.suggest_title {
         if let Some(control) = app
             .state::<ProviderCancellationManager>()
@@ -5567,7 +5576,10 @@ fn compact_provider_chat_blocking(
         session_id: session_id.clone(),
         message: "/compact".into(),
         turn_id: Some(run_id.to_string()),
-        provider_id: "openai".into(),
+        provider_id: session
+            .provider_id
+            .clone()
+            .ok_or_else(|| "select a provider before compacting this chat".to_string())?,
         provider_label: None,
         model_id: session.model_id.clone(),
         model_label: session.model_label.clone(),
@@ -5586,16 +5598,18 @@ fn compact_provider_chat_blocking(
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     if request.provider_id != "openai" {
-        return Err("manual context compaction is not supported by this provider".into());
+        return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     }
-    let binding = store
+    let resume_cursor = store
         .get_provider_session_binding(session_uuid, &request.provider_id)
         .map_err(to_string)?
         .and_then(|binding| compatible_provider_session_binding(binding, &request))
-        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
-    let resume_cursor = provider_resume_cursor_from_binding(&binding)
-        .filter(|cursor| cursor.kind == "codex-session")
-        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
+        .as_ref()
+        .and_then(provider_resume_cursor_from_binding)
+        .filter(|cursor| cursor.kind == "codex-session");
+    let Some(resume_cursor) = resume_cursor else {
+        return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
+    };
     let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
     let running = codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
@@ -5641,6 +5655,41 @@ fn compact_provider_chat_blocking(
     let activity_events = store
         .append_system_events_with_turn_id(session_uuid, vec![entry])
         .map_err(to_string)?;
+    Ok(ProviderContextCompactionResponse { activity_events })
+}
+
+fn compact_local_provider_chat(
+    app: &tauri::AppHandle,
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+    session_id: Uuid,
+    run_id: Uuid,
+) -> Result<ProviderContextCompactionResponse, String> {
+    let events = store.read_events(session_id).map_err(to_string)?;
+    let summary = local_compaction_summary(&events).ok_or_else(|| {
+        "this chat needs a completed reply before context can be compacted".to_string()
+    })?;
+    let params = serde_json::json!({ "turnId": run_id.to_string() });
+    let running = codex_context_compaction_activity(&params, "running");
+    emit_provider_activity_event(app, request, &running, Some(0));
+
+    // A new provider session starts from the saved checkpoint on the next
+    // turn. If writing the checkpoint fails, the transcript still carries the
+    // original messages and the normal handoff path can reconstruct them.
+    store
+        .clear_provider_session_binding(session_id, &request.provider_id)
+        .map_err(to_string)?;
+    let mut completed = codex_context_compaction_activity(&params, "done");
+    completed.detail =
+        Some("Condensed the local chat history for this provider's next turn.".into());
+    let mut entry = provider_activity_event_entry(request, run_id, 0, &completed);
+    if let Some(payload) = entry.1.as_object_mut() {
+        payload.insert("contextSummary".into(), serde_json::Value::String(summary));
+    }
+    let activity_events = store
+        .append_system_events_with_turn_id(session_id, vec![entry])
+        .map_err(to_string)?;
+    emit_provider_activity_event(app, request, &completed, Some(0));
     Ok(ProviderContextCompactionResponse { activity_events })
 }
 
@@ -6282,19 +6331,7 @@ fn provider_context_message_with_capabilities_for_turn(
         );
     }
     if let Some(goal) = request.goal.as_ref() {
-        let text = goal.text.trim();
-        if !text.is_empty() {
-            if goal.status == "active" {
-                context.push(format!("Active Gyro session goal: {text}"));
-                context.push("If this turn fully achieves that goal, include one hidden line before the answer in this exact form: GYRO_GOAL_UPDATE: {\"status\":\"complete\"}. Only send it when the goal is actually met — Gyro marks the goal complete for the user, it does not ask again.".into());
-            } else {
-                // A met goal used to vanish from context entirely, so follow-up
-                // turns lost all knowledge of what the chat was for.
-                context.push(format!(
-                    "Gyro session goal (already met — do not redo that work): {text}"
-                ));
-            }
-        }
+        context.extend(session_goal::goal_context_lines(goal));
     }
     if let Some(plan) = request.plan.as_ref().and_then(plan_context_line) {
         context.push(plan);
@@ -6472,9 +6509,15 @@ async fn append_chat_context_event(
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
         let session_id = parse_uuid(&session_id)?;
-        let kind = match event_kind.as_str() {
-            "goal-updated" => SessionEventKind::GoalUpdated,
-            "chat-mode-changed" => SessionEventKind::ChatModeChanged,
+        let (kind, message, payload) = match event_kind.as_str() {
+            "goal-updated" => {
+                let current = session_goal::stored_session_goal(
+                    &store.read_events(session_id).map_err(to_string)?,
+                );
+                let (message, payload) = session_goal::goal_change(&payload, current.as_ref())?;
+                (SessionEventKind::GoalUpdated, message, payload)
+            }
+            "chat-mode-changed" => (SessionEventKind::ChatModeChanged, message, payload),
             _ => return Err("unsupported chat context event kind".into()),
         };
         store
@@ -11851,7 +11894,7 @@ async fn get_provider_usage(
 /// Claude Code announces a plan window at the start of each request but never
 /// says how full it is, so the announcement is the cue to ask the account API.
 /// The poll behind `fresh` coalesces bursts, so a tool-heavy turn announcing
-/// the window many times still costs about one request per ten seconds.
+/// the window many times still costs at most one request a minute.
 fn publish_live_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
     if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
         return;
@@ -12159,10 +12202,10 @@ fn claude_credentials_json() -> Option<String> {
     fs::read_to_string(path).ok()
 }
 
-/// How old a reading a post-turn refresh accepts. Short enough to include the
-/// turn just finished, long enough that parallel chats finishing together
-/// share one request.
-const ANTHROPIC_FRESH_USAGE_MAX_AGE: Duration = Duration::from_secs(10);
+/// Post-turn reads accept a minute-old reading; idle ones hold five. The account
+/// endpoint allows few requests per account, and a 45-second poll locked it out.
+const ANTHROPIC_FRESH_USAGE_MAX_AGE: Duration = Duration::from_secs(60);
+const ANTHROPIC_USAGE_HOLD: Duration = Duration::from_secs(300);
 
 /// Ask the Anthropic account API what the plan windows are actually at.
 ///
@@ -12176,7 +12219,7 @@ fn fetch_anthropic_provider_usage(
 ) -> Result<ProviderUsageSnapshot, String> {
     static POLL: OnceLock<Mutex<usage_poll::UsagePoll<ProviderUsageSnapshot>>> = OnceLock::new();
     let mut poll = POLL
-        .get_or_init(|| Mutex::new(usage_poll::UsagePoll::new()))
+        .get_or_init(|| Mutex::new(usage_poll::UsagePoll::holding(ANTHROPIC_USAGE_HOLD)))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let max_age = fresh.then_some(ANTHROPIC_FRESH_USAGE_MAX_AGE);
@@ -14275,9 +14318,12 @@ fn run_kimi_acp_chat(
     Ok(ProviderRunnerOutput {
         activities,
         context_usage: None,
-        // ACP publishes no token counts either, so the ledger estimates this
-        // call rather than claiming a measurement it was never given.
-        billed_usage: None,
+        // Grok reports what the prompt billed; agents that report nothing are
+        // estimated by the ledger rather than claimed as measured.
+        billed_usage: output
+            .usage
+            .as_ref()
+            .and_then(provider_billed_usage_from_acp),
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
         paused_at_tool_budget: false,
@@ -17771,7 +17817,7 @@ fn append_provider_status_event(
         object.insert(
             "error".into(),
             error
-                .map(gyro_core::sanitize_harness_text)
+                .map(|error| gyro_core::sanitize_harness_text(&readable_provider_error(error)))
                 .map(serde_json::Value::String)
                 .unwrap_or(serde_json::Value::Null),
         );
@@ -19877,69 +19923,6 @@ fn build_grok_acp_program_args(
 /// Recent user/assistant turns for agents that cannot reopen a provider session.
 fn acp_conversation_history_text(_app: &tauri::AppHandle, session_id: &str) -> Option<String> {
     acp_conversation_history_text_for_session(session_id)
-}
-
-/// Turns kept at full length before the transcript starts clipping harder.
-///
-/// Recent turns are what the model is actually continuing from, so they stay
-/// whole. Older ones only have to carry what was decided, and at the previous
-/// flat cap forty of them could put ~20K tokens in front of every prompt.
-const HISTORY_RECENT_TURNS: usize = 6;
-const HISTORY_RECENT_CHARS: usize = 2_000;
-const HISTORY_OLDER_CHARS: usize = 400;
-
-/// Load the local Gyro transcript for any model handoff or failed resume.
-fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
-    let session_uuid = parse_uuid(session_id).ok()?;
-    let store = open_store().ok()?;
-    // Scan the existing bounded event window before selecting conversation.
-    // Tool activity must not consume the 40-message history allowance.
-    let events = store.read_events(session_uuid).ok()?;
-    conversation_history_from_events(events)
-}
-
-fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
-    let mut lines = Vec::new();
-    for event in events {
-        let role = match event.kind {
-            SessionEventKind::UserMessage => "User",
-            SessionEventKind::AssistantMessage => "Assistant",
-            _ => continue,
-        };
-        let text = event.message.trim();
-        if text.is_empty() {
-            continue;
-        }
-        lines.push((role, text.to_string()));
-    }
-    // Drop the trailing user line — it is the message currently being sent and
-    // already lives in the main prompt. Dropped before the taper so it does not
-    // spend one of the full-length slots on text the prompt already carries.
-    if lines.last().is_some_and(|(role, _)| *role == "User") {
-        lines.pop();
-    }
-    if lines.len() > 40 {
-        lines.drain(..lines.len() - 40);
-    }
-    // Clip from the far end: the tail is the thread being continued, the head
-    // is background.
-    let recent_from = lines.len().saturating_sub(HISTORY_RECENT_TURNS);
-    let joined = lines
-        .into_iter()
-        .enumerate()
-        .map(|(index, (role, text))| {
-            let budget = if index >= recent_from {
-                HISTORY_RECENT_CHARS
-            } else {
-                HISTORY_OLDER_CHARS
-            };
-            let clipped: String = text.chars().take(budget).collect();
-            let elided = text.chars().nth(budget).is_some();
-            format!("{role}: {clipped}{}", if elided { " […]" } else { "" })
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    (!joined.trim().is_empty()).then_some(joined)
 }
 
 fn command_with_gui_path(command: &str) -> Command {
@@ -26146,49 +26129,6 @@ while True:
         assert!(usage.measured().is_none());
         usage.observe(Some(0), Some(0));
         assert!(usage.measured().is_none());
-    }
-
-    #[test]
-    fn handoff_history_keeps_messages_despite_tool_activity() {
-        let session = Uuid::new_v4();
-        let event =
-            |kind, text: &str| SessionEvent::new(session, kind, text, serde_json::json!({}));
-        let mut events = vec![
-            event(SessionEventKind::UserMessage, "Keep all tools available"),
-            event(SessionEventKind::AssistantMessage, "Understood"),
-        ];
-        for _ in 0..100 {
-            events.push(event(SessionEventKind::SystemEvent, "tool activity"));
-        }
-        events.push(event(SessionEventKind::UserMessage, "Current request"));
-        let history = conversation_history_from_events(events).unwrap();
-        assert!(history.contains("Keep all tools available"));
-        assert!(history.contains("Understood"));
-        assert!(!history.contains("tool activity"));
-        assert!(!history.contains("Current request"));
-    }
-
-    #[test]
-    fn handoff_history_keeps_its_message_and_character_limits() {
-        let session = Uuid::new_v4();
-        let events = (0..45)
-            .map(|index| {
-                SessionEvent::new(
-                    session,
-                    SessionEventKind::AssistantMessage,
-                    format!("message-{index:02} {}", "x".repeat(3_000)),
-                    serde_json::json!({}),
-                )
-            })
-            .collect();
-        let history = conversation_history_from_events(events).unwrap();
-        let messages: Vec<_> = history.split("\n\n").collect();
-        assert_eq!(messages.len(), 40);
-        assert!(messages[0].starts_with("Assistant: message-05"));
-        assert!(messages[39].starts_with("Assistant: message-44"));
-        assert!(messages[0].chars().count() < 450);
-        assert!(messages[39].chars().count() > 2_000);
-        assert!(messages[39].chars().count() < 2_050);
     }
 
     #[test]

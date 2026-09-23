@@ -1396,7 +1396,6 @@ export type WorkbenchAction =
       secondaryColor: string;
     }
   | { type: "set-density"; density: WorkbenchDensity }
-  | { type: "set-quick-actions-visible"; visible: boolean }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
@@ -1819,7 +1818,6 @@ export function workbenchReducer(
           mainColor: defaults.mainColor,
           secondaryColor: defaults.secondaryColor,
           density: defaults.density,
-          showQuickActions: defaults.showQuickActions,
           sidebarChatsCollapsed: defaults.sidebarChatsCollapsed,
           chatEnvironmentRailOpen: defaults.chatEnvironmentRailOpen,
           activeChatPanel: defaults.activeChatPanel,
@@ -1954,14 +1952,6 @@ export function workbenchReducer(
       return {
         ...state,
         preferences: { ...state.preferences, density: action.density },
-      };
-    case "set-quick-actions-visible":
-      return {
-        ...state,
-        preferences: {
-          ...state.preferences,
-          showQuickActions: action.visible,
-        },
       };
     case "set-menu-bar-visible":
       return {
@@ -4555,7 +4545,6 @@ function normalizeWorkbenchPreferences(
     dailyPaceWarning: preferences?.dailyPaceWarning !== false,
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
-    showQuickActions: preferences?.showQuickActions !== false,
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:

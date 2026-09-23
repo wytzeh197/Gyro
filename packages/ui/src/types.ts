@@ -341,6 +341,8 @@ export type ChatAttachment = {
   available?: boolean;
   stale?: boolean;
   previewUrl?: string;
+  /** Dropped media still uploading; the stored file replaces it when done. */
+  pending?: boolean;
   /** Redacted stored text of a terminal-output attachment, for the composer preview. */
   previewText?: string;
 };
@@ -888,11 +890,13 @@ export type ProviderChatStreamEvent = {
   /** Shared first-observation order across provider frames and broker calls. */
   timelineOrder?: number | null;
   timelineCreatedAt?: string | null;
-  timelineSegments?: {
-    start: number;
-    timelineOrder: number;
-    createdAt: string;
-  }[] | null;
+  timelineSegments?:
+    | {
+        start: number;
+        timelineOrder: number;
+        createdAt: string;
+      }[]
+    | null;
   phase: ProviderChatStreamPhase;
   contextUsage?: {
     inputTokens?: number;
@@ -1125,8 +1129,6 @@ export type WorkbenchPreferences = {
   mainColor: string;
   secondaryColor: string;
   density: WorkbenchDensity;
-  /** Whether new chats show the four starter prompt shortcuts. */
-  showQuickActions: boolean;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;

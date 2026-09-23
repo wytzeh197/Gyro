@@ -98,7 +98,9 @@ expect(
 
 expect(
   (() => {
-    const frame = cssRules(styles, ".gyro-browser-frame").at(-1) ?? "";
+    const frame =
+      [...styles.matchAll(/^\.gyro-browser-frame \{([^}]*)\}/gm)].at(-1)?.[1] ??
+      "";
     return (
       frame.includes("justify-content: stretch") &&
       frame.includes("background: var(--gyro-code-bg)")

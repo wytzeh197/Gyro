@@ -198,12 +198,6 @@
   --gyro-hero-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   --gyro-hero-shadow-focus: 0 2px 8px rgba(0, 0, 0, 0.14);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.015);
-  /* Start-card icon hues. One per opening, so the four cards read as four
-     kinds of work at a glance rather than four identical rectangles. */
-  --gyro-start-icon-explore: #7aa7ff;
-  --gyro-start-icon-build: var(--gyro-secondary-accent);
-  --gyro-start-icon-review: #70d39f;
-  --gyro-start-icon-fix: #e8b45f;
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
   --gyro-page-card: var(--gyro-surface);
@@ -1001,10 +995,6 @@
   --gyro-hero-shadow: 0 18px 42px rgba(32, 36, 42, 0.12);
   --gyro-hero-shadow-focus: 0 20px 46px rgba(32, 36, 42, 0.15);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.86);
-  --gyro-start-icon-explore: #356fd6;
-  --gyro-start-icon-build: var(--gyro-secondary-accent);
-  --gyro-start-icon-review: #197a4c;
-  --gyro-start-icon-fix: #9a5b0e;
 }
 
 * {
@@ -8702,12 +8692,6 @@ textarea:focus-visible {
   transition: box-shadow var(--gyro-premium-motion-fast) ease;
 }
 
-/* Keep keyboard focus visible on the search surface instead of drawing a
-   browser-style rectangle around the text inside it. */
-.gyro-command-palette.is-global-search > header:has(input:focus-visible) {
-  box-shadow: inset 0 -2px 0 var(--gyro-focus-ring);
-}
-
 .gyro-global-search-glyph {
   align-items: center;
   background: transparent;
@@ -8772,36 +8756,28 @@ textarea:focus-visible {
 }
 
 .gyro-global-search-group + .gyro-global-search-group {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .gyro-global-search-heading {
   align-items: center;
-  backdrop-filter: blur(12px);
-  background: color-mix(in srgb, var(--gyro-pane) 92%, transparent);
+  background: var(--gyro-surface-raised);
   color: var(--gyro-faint);
   display: flex;
-  font-size: 10px;
-  font-weight: 680;
-  gap: 7px;
-  letter-spacing: 0.04em;
-  padding: 10px 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.01em;
+  padding: 12px 10px 5px;
   position: sticky;
-  text-transform: uppercase;
   top: 0;
   z-index: 1;
 }
 
 .gyro-global-search-count {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border-radius: 999px;
-  color: var(--gyro-faint);
-  font-size: 9px;
-  font-weight: 640;
-  letter-spacing: 0;
-  min-width: 16px;
-  padding: 1px 5px;
-  text-align: center;
+  color: color-mix(in srgb, var(--gyro-faint) 70%, transparent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 .gyro-command-palette.is-global-search .gyro-command-list button {
@@ -8810,10 +8786,10 @@ textarea:focus-visible {
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
-  gap: 11px;
+  gap: 10px;
   grid-template-columns: 26px minmax(0, 1fr) auto;
-  min-height: 44px;
-  padding: 5px 10px;
+  min-height: 42px;
+  padding: 4px 10px;
   transition:
     background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
@@ -8821,12 +8797,7 @@ textarea:focus-visible {
 }
 
 .gyro-command-palette.is-global-search .gyro-command-list button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-premium-hairline-soft) 72%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   transform: none;
 }
 
@@ -8862,7 +8833,7 @@ textarea:focus-visible {
 
 .gyro-global-search-copy {
   display: grid;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
 }
 
@@ -11772,7 +11743,10 @@ textarea:focus-visible {
   border-radius: 20px;
   box-shadow: none;
   margin: 0;
-  min-height: 148px;
+  /* Sized by its content. The 148px floor held room for the context row that
+     used to sit inside the composer; with that row outside, it left an empty
+     strip under the controls. */
+  min-height: 0;
   overflow: visible;
   width: 100%;
 }
@@ -17438,7 +17412,6 @@ textarea,
   box-sizing: border-box;
   color: #f2f0ec;
   min-width: 0;
-  padding-right: 38px;
   position: relative;
   width: 100%;
 }
@@ -17570,13 +17543,12 @@ textarea,
   align-items: center;
   display: flex;
   gap: 6px;
+  margin-left: -6px;
+  margin-top: 4px;
   min-height: 28px;
   opacity: 0;
   padding-top: 0;
   pointer-events: none;
-  position: absolute;
-  right: 0;
-  top: -2px;
   transition:
     opacity var(--gyro-premium-motion) var(--gyro-premium-ease),
     transform var(--gyro-premium-motion) var(--gyro-premium-ease);
@@ -22559,123 +22531,7 @@ button.gyro-settings-row em::after {
   text-decoration: none;
 }
 
-/*
- * Start actions. These are compact, icon-led launchers rather than a second
- * layer of large cards, keeping the hero focused on the composer.
- */
-.gyro-chat-start-suggestions {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  max-width: var(--gyro-composer-width);
-  width: min(var(--gyro-composer-width), 100%);
-}
-
-.gyro-chat-start:has(.gyro-chat-start-suggestions) h1 {
-  margin-bottom: 0;
-}
-
-.gyro-chat-start-suggestion {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  display: flex;
-  font-size: 13px;
-  font-weight: 510;
-  gap: 8px;
-  line-height: 1.2;
-  min-height: var(--gyro-control-height);
-  padding: 4px 8px;
-  text-align: left;
-  transition:
-    background var(--gyro-premium-motion) var(--gyro-premium-ease),
-    border-color var(--gyro-premium-motion) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-}
-
-.gyro-chat-start-suggestion:hover {
-  background: color-mix(
-    in srgb,
-    var(--gyro-hero-composer) 94%,
-    var(--gyro-hero-text)
-  );
-  border-color: var(--gyro-hero-focus-border);
-  transform: translateY(-1px);
-}
-
-.gyro-chat-start-suggestion:focus-visible {
-  border-color: var(--gyro-hero-focus-border);
-  outline: 2px solid var(--gyro-premium-focus);
-  outline-offset: 1px;
-}
-
-.gyro-chat-start-suggestion span {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-chat-start-suggestion svg {
-  background: transparent;
-  border-radius: var(--gyro-radius-md);
-  flex: 0 0 auto;
-  padding: 0;
-  width: 16px;
-  height: 16px;
-}
-
-.gyro-chat-start-suggestion.is-explore svg {
-  color: var(--gyro-start-icon-explore);
-}
-
-.gyro-chat-start-suggestion.is-build svg {
-  color: var(--gyro-start-icon-build);
-}
-
-.gyro-chat-start-suggestion.is-review svg {
-  color: var(--gyro-start-icon-review);
-}
-
-.gyro-chat-start-suggestion.is-fix svg {
-  color: var(--gyro-start-icon-fix);
-}
-
-/*
- * Below the width where four cards still hold a readable label, and whenever a
- * rail panel or a tile has taken the column, the row folds to a 2x2 block
- * rather than orphaning a fourth card on its own line.
- */
-.gyro-chat-surface.has-environment .gyro-chat-start-suggestions,
-.gyro-chat-surface.is-tiled .gyro-chat-start-suggestions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 /* Preserve a thumb-friendly target when the actions fold into two columns. */
-.gyro-chat-surface.has-environment .gyro-chat-start-suggestion,
-.gyro-chat-surface.is-tiled .gyro-chat-start-suggestion {
-  min-height: 44px;
-}
-
-@media (max-width: 1100px) {
-  .gyro-chat-start-suggestions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .gyro-chat-start-suggestion {
-    min-height: var(--gyro-control-height);
-    background: transparent;
-    border: 0;
-    border-radius: var(--gyro-radius-sm);
-    padding: 4px 8px;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--gyro-muted);
-  }
-}
 
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider {
   background: var(--gyro-hero-composer);
@@ -29152,10 +29008,7 @@ button.gyro-account-menu-row:hover,
     gap: 12px;
     padding-block: 16px;
   }
-  .gyro-chat-surface.is-empty.is-tiled > .gyro-chat-start > .gyro-brand-logo,
-  .gyro-chat-surface.is-empty.is-tiled
-    > .gyro-chat-start
-    > .gyro-chat-start-suggestions {
+  .gyro-chat-surface.is-empty.is-tiled > .gyro-chat-start > .gyro-brand-logo {
     display: none;
   }
   .gyro-chat-surface.is-empty.is-tiled
@@ -36223,45 +36076,8 @@ textarea:focus-visible,
   user-select: text;
 }
 
-.gyro-chat-start:not(.is-mission) > .gyro-chat-start-suggestions {
-  gap: 8px;
-  margin-top: 16px;
-  max-width: 100%;
-  width: min(var(--gyro-composer-width), 100%);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.gyro-chat-start-suggestion {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  box-shadow: none;
-  color: var(--gyro-muted);
-  min-height: var(--gyro-control-height);
-  padding: 4px 8px;
-  transform: none;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.gyro-chat-start-suggestion:hover {
-  background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-surface));
-  border-color: var(--gyro-border-strong);
-  transform: none;
-}
-
-.gyro-chat-start-suggestion svg {
-  background: transparent;
-  border-radius: var(--gyro-radius-sm);
-  height: 16px;
-  padding: 0;
-  width: 16px;
-}
-
 .gyro-chat-start:not(.is-mission) > .gyro-composer-shell {
-  /* Keep the first prompt with its starter actions; only active chats dock. */
+  /* Keep the first prompt on the start screen; only active chats dock. */
   margin-top: 24px;
 }
 
@@ -36756,18 +36572,6 @@ textarea:focus-visible,
   filter: saturate(0.5);
 }
 
-@media (max-width: 1100px) {
-  .gyro-chat-start:not(.is-mission) > .gyro-chat-start-suggestions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    max-width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 16px;
-  }
-}
-
 @media (max-width: 760px) {
   .gyro-chat-start:not(.is-mission) {
     padding: 24px 18px 16px;
@@ -36902,13 +36706,10 @@ textarea:focus-visible,
   display: none;
 }
 
-.gyro-context-summary {
-  max-width: 100%;
-  font-size: 13px;
-  gap: 8px;
-}
-
 .gyro-composer-context-row > .gyro-composer-control {
+  align-items: center;
+  display: flex;
+  gap: 2px;
   max-width: 100%;
 }
 
@@ -36943,16 +36744,11 @@ textarea:focus-visible,
   min-width: 0;
 }
 
-.gyro-context-summary-item.is-mode {
-  color: var(--gyro-muted);
-  font-size: 12px;
-}
-
 .gyro-context-summary-item.is-branch {
   flex: 0 1 auto;
 }
 
-.gyro-context-summary svg {
+.gyro-context-summary-item svg {
   flex-shrink: 0;
 }
 
@@ -37066,64 +36862,6 @@ textarea:focus-visible,
 :root[data-density="comfortable"] .gyro-workspace-settings-list > label {
   min-height: 72px;
   padding-block: 16px;
-}
-
-:root[data-density="compact"]
-  .gyro-chat-start:not(.is-mission)
-  > .gyro-chat-start-suggestions {
-  gap: 8px;
-  margin-top: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 100%;
-}
-
-:root[data-density="comfortable"]
-  .gyro-chat-start:not(.is-mission)
-  > .gyro-chat-start-suggestions {
-  gap: 8px;
-  margin-top: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 100%;
-}
-
-:root[data-density="compact"] .gyro-chat-start-suggestion {
-  gap: 8px;
-  min-height: var(--gyro-control-height);
-  padding: 4px 8px;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  font-size: 13px;
-  color: var(--gyro-muted);
-}
-
-:root[data-density="comfortable"] .gyro-chat-start-suggestion {
-  gap: 8px;
-  min-height: var(--gyro-control-height);
-  padding: 4px 8px;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  font-size: 13px;
-  color: var(--gyro-muted);
-}
-
-:root[data-density="compact"] .gyro-chat-start-suggestion svg {
-  height: 16px;
-  padding: 0;
-  width: 16px;
-  background: transparent;
-}
-
-:root[data-density="comfortable"] .gyro-chat-start-suggestion svg {
-  height: 16px;
-  padding: 0;
-  width: 16px;
-  background: transparent;
 }
 
 :root[data-density="compact"] .gyro-composer-bar {
@@ -37861,24 +37599,20 @@ textarea:focus-visible,
   background: transparent;
   border: 0;
   box-shadow: none;
+  left: 0;
   margin-top: 0;
   min-height: 38px;
   padding: 5px 13px;
-  position: relative;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
 }
 
+/* The context row hangs under the card, so the card keeps room for it. */
 .gyro-chat-surface.is-empty
   > .gyro-chat-start:not(.is-mission)
-  > .gyro-composer-shell
-  > .gyro-composer-context-row::before {
-  background: var(--gyro-welcome-composer-divider);
-  content: "";
-  height: 1px;
-  left: 16px;
-  pointer-events: none;
-  position: absolute;
-  right: 16px;
-  top: 0;
+  > .gyro-composer-shell:has(> .gyro-composer-context-row) {
+  margin-bottom: 42px;
 }
 
 .gyro-chat-surface.is-empty
@@ -37992,24 +37726,6 @@ textarea:focus-visible,
 
   .gyro-sidebar-ai-chat .gyro-chat-composer-dock {
     padding-inline: 12px;
-  }
-
-  :root[data-density]
-    .gyro-sidebar-ai-chat
-    .gyro-chat-start:not(.is-mission)
-    > .gyro-chat-start-suggestions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px 8px;
-    margin-top: 12px;
-    width: min(300px, 100%);
-  }
-
-  :root[data-density] .gyro-sidebar-ai-chat .gyro-chat-start-suggestion {
-    font-size: 12px;
-    padding: 4px;
-    gap: 6px;
-    min-width: 0;
   }
 }
 
@@ -39361,9 +39077,186 @@ textarea:focus-visible,
   position: static;
   width: 100%;
   min-width: 0;
-  max-height: 240px;
+  max-width: none;
+  max-height: 320px;
   margin: 4px 0;
   box-shadow: none;
+}
+
+/* Branch menus: one mono line per branch, a filter for long lists, and the
+   New/Rename actions pinned as a footer instead of mixed into the list. */
+.gyro-composer-menu-search {
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  display: flex;
+  gap: 7px;
+  height: 30px;
+  margin-bottom: 3px;
+  padding: 0 8px;
+}
+
+.gyro-composer-menu-search:focus-within {
+  border-color: var(--gyro-border-strong);
+}
+
+.gyro-composer-menu-search input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--gyro-text);
+  flex: 1;
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  min-width: 0;
+  outline: 0;
+}
+
+.gyro-composer-menu-search input::placeholder {
+  color: var(--gyro-faint);
+}
+
+.gyro-composer-menu-empty {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-support);
+  padding: 6px 8px;
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch {
+  border-radius: var(--gyro-radius-sm);
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch.has-remove {
+  grid-template-columns: minmax(0, 1fr) 24px;
+  padding: 1px 4px 1px 8px;
+}
+
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch.has-remove
+  > .gyro-composer-menu-primary {
+  /* Worktree rows are never current, so they need no checkmark column. */
+  grid-template-columns: 16px minmax(0, 1fr);
+  width: 100%;
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch > svg:first-child,
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch
+  .gyro-composer-menu-primary
+  > svg:first-child {
+  color: var(--gyro-faint);
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch.is-active {
+  background: var(--gyro-accent-soft);
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch.is-active > svg,
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch.is-active
+  .gyro-composer-menu-primary
+  > svg {
+  color: var(--gyro-accent);
+}
+
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch
+  .gyro-composer-menu-item-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch strong {
+  color: var(--gyro-text);
+  display: flex;
+  font-family: var(--gyro-font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-menu-item span.gyro-branch-label-prefix,
+.gyro-composer-menu-item span.gyro-branch-label-leaf {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-menu-item span.gyro-branch-label-prefix {
+  color: var(--gyro-faint);
+  flex: 0 1000 auto;
+}
+
+.gyro-composer-menu-item span.gyro-branch-label-leaf {
+  flex: 0 1 auto;
+}
+
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch
+  .gyro-composer-menu-badge {
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  flex: none;
+  font-size: var(--gyro-font-micro);
+  padding: 0 5px;
+}
+
+.gyro-composer-menu-footer {
+  background: var(--gyro-surface-raised);
+  border-top: 1px solid var(--gyro-border-soft);
+  bottom: -5px;
+  padding-bottom: 5px;
+  position: sticky;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 3px;
+  padding-top: 5px;
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch-action {
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.gyro-composer-menu-footer
+  > .gyro-composer-menu-item.is-branch-action:only-child {
+  grid-column: 1 / -1;
+}
+
+.gyro-composer-popover
+  .gyro-composer-menu-item.is-branch-action:hover:not(:disabled) {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+
+.gyro-composer-popover .gyro-composer-menu-item.is-branch-action strong {
+  color: inherit;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
 }
 
 /* Thread and split chats own their overlays; usage details anchor to the
@@ -42314,7 +42207,8 @@ textarea:focus-visible,
   > .gyro-chat-environment-popover {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 14px;
+  /* Concentric with its 8px buttons: 8px + 1px border + 8px padding. */
+  border-radius: 17px;
   box-shadow: 0 12px 36px
     color-mix(in srgb, var(--gyro-heavy-shadow) 58%, transparent);
   padding: 8px;
@@ -42829,6 +42723,28 @@ textarea:focus-visible,
   color: var(--gyro-warn, #e8b45f);
 }
 
+/* Attached the moment it dropped; quietly breathes until the upload lands. */
+.gyro-composer-attachment.is-pending {
+  animation: gyro-attachment-pending 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes gyro-attachment-pending {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-composer-attachment.is-pending {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 .gyro-composer-attachment-preview {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
@@ -42870,7 +42786,8 @@ textarea:focus-visible,
   width: var(--gyro-model-rail-width);
   min-width: 0;
   max-width: none;
-  height: min(372px, calc(100vh - 96px));
+  /* Room for a provider's models plus their class headings without a scroll. */
+  height: min(432px, calc(100vh - 96px));
   padding: 0;
   gap: 0;
   border-radius: 19px;
@@ -43046,6 +42963,22 @@ textarea:focus-visible,
   padding: 0 6px 6px;
   overflow-y: auto;
   animation: gyro-model-rail-swap 140ms ease-out;
+}
+/* A class (Opus, Fable, GPT-6) heads the models that belong to it. */
+.gyro-model-rail-class {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.gyro-model-rail-class + .gyro-model-rail-class {
+  margin-top: 4px;
+}
+.gyro-model-rail-class-label {
+  padding: 5px 9px 2px;
+  color: var(--gyro-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 @keyframes gyro-model-rail-swap {
   from {
@@ -43223,44 +43156,6 @@ textarea:focus-visible,
   font-weight: 650;
 }
 
-.gyro-composer-context-source {
-  align-items: center;
-  border-radius: 999px;
-  color: var(--gyro-premium-muted);
-  display: inline-flex;
-  font-size: 11px;
-  gap: 5px;
-  line-height: 16px;
-}
-
-.gyro-composer-context-section .gyro-composer-context-source {
-  flex: 0 0 auto;
-  font-size: 10px;
-  line-height: 14px;
-}
-
-.gyro-composer-context-source::before {
-  background: currentColor;
-  border-radius: 999px;
-  content: "";
-  height: 6px;
-  opacity: 0.7;
-  width: 6px;
-}
-
-.gyro-composer-context-source.is-reported {
-  color: var(--gyro-success);
-}
-
-.gyro-composer-context-source.is-reported::before {
-  opacity: 1;
-}
-
-.gyro-composer-context-source.is-empty::before {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px currentColor;
-}
-
 .gyro-composer-context-model {
   font-size: 11px;
   margin: 0;
@@ -43302,7 +43197,6 @@ textarea:focus-visible,
   margin: 0;
 }
 
-.gyro-composer-context-note,
 .gyro-composer-limit-reset {
   color: var(--gyro-premium-muted);
   font-size: 11px;
@@ -43311,24 +43205,8 @@ textarea:focus-visible,
   line-height: 15px;
 }
 
-.gyro-composer-context-note {
-  font-size: 10px;
-  line-height: 14px;
-}
-
 .gyro-composer-limit-summary {
   gap: 10px;
-}
-
-.gyro-composer-limit-title > em {
-  color: var(--gyro-premium-muted);
-  font-size: 11px;
-  font-style: normal;
-  white-space: nowrap;
-}
-
-.gyro-composer-limit-title > em.is-stale {
-  color: var(--gyro-warn);
 }
 
 .gyro-composer-limit-row {
@@ -43387,9 +43265,7 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 
-:root[data-theme="light"] .gyro-composer-context-note,
 :root[data-theme="light"] .gyro-composer-limit-reset,
-:root[data-theme="light"] .gyro-composer-limit-title > em:not(.is-stale),
 :root[data-theme="light"] .gyro-composer-limit-heading b.is-unmeasured {
   color: var(--gyro-muted);
 }
@@ -43471,4 +43347,115 @@ textarea:focus-visible,
     grid-column: 2;
     grid-row: 2;
   }
+}
+
+/* Concentric corners. A rounded surface inside a rounded surface takes the
+   outer radius minus the gap between them (border + padding), so the two
+   curves run parallel instead of the inner one bulging toward the corner.
+   Each value is written as that sum so the relationship survives a token
+   change: inner = outer - border - padding. */
+:root .gyro-composer-popover > .gyro-composer-menu-item:not(.is-disclosure) {
+  /* 22px popover, 1px border, 5px padding. */
+  border-radius: calc(var(--gyro-radius-composer) - 1px - 5px);
+}
+:root
+  .gyro-composer-popover.gyro-context-picker
+  > .gyro-composer-menu-item:not(.is-disclosure) {
+  /* The context picker pads by 4px. */
+  border-radius: calc(var(--gyro-radius-composer) - 1px - 4px);
+}
+:root .gyro-composer-blocker,
+:root .gyro-sidebar-new-session-menu {
+  /* Sized from the 7px buttons inside: 7px + 1px border + 8px padding. */
+  border-radius: calc(var(--gyro-radius-sm) + 1px + 8px);
+}
+:root .gyro-chat-environment-popover > header > button {
+  /* In the 17px card's corner, 1px border + 8px inset: 17 - 9. */
+  border-radius: 8px;
+}
+:root .gyro-browser-preview.is-chat > .gyro-browser-frame {
+  /* The frame sits flush in the preview's bottom corners, so it takes the
+     preview's own radius there (no gap to subtract). */
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+:root .gyro-color-control .gyro-color-swatch {
+  /* 9px control, 1px border, 5px padding. */
+  border-radius: calc(var(--gyro-radius-md) - 1px - 5px);
+}
+:root .gyro-chat-question-popup > header > button {
+  /* A close control in a card's corner reads as a circle, which no corner
+     radius can mismatch. */
+  border-radius: 999px;
+}
+
+/* Project choices need room for names and paths, with actions kept separate. */
+:root .gyro-composer-popover.gyro-project-picker {
+  border-radius: 16px;
+  box-sizing: border-box;
+  gap: 2px;
+  max-width: min(292px, calc(100vw - 32px));
+  min-width: min(240px, calc(100vw - 32px));
+  padding: 6px;
+  width: min(292px, calc(100vw - 32px));
+}
+
+.gyro-project-picker .gyro-composer-popover-title {
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 620;
+  padding: 5px 8px 7px;
+}
+
+.gyro-project-picker .gyro-composer-popover-section-title {
+  border-top-color: var(--gyro-border-soft);
+  color: var(--gyro-faint);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  margin: 6px 2px 0;
+  padding: 8px 8px 3px;
+}
+
+:root .gyro-project-picker > .gyro-composer-menu-item:not(.is-disclosure) {
+  /* 16px panel, 1px border, 6px inset. */
+  border-radius: 9px;
+  gap: 9px;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  min-height: 38px;
+  padding: 6px 10px;
+}
+
+:root .gyro-project-picker > .gyro-composer-menu-item.has-remove {
+  grid-template-columns: minmax(0, 1fr) 26px;
+  padding: 3px 6px 3px 10px;
+}
+
+.gyro-project-picker .gyro-composer-menu-primary {
+  gap: 9px;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  min-height: 36px;
+  width: 100%;
+}
+
+.gyro-project-picker .gyro-composer-menu-item strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gyro-project-picker .gyro-composer-menu-item small {
+  color: var(--gyro-muted);
+  font-size: 11px;
+}
+
+.gyro-project-picker .gyro-composer-menu-item > svg:first-child,
+.gyro-project-picker .gyro-composer-menu-primary > svg:first-child {
+  color: var(--gyro-muted);
+}
+
+.gyro-project-picker .gyro-composer-menu-remove {
+  border-radius: 999px;
+  height: 26px;
+  width: 26px;
 }

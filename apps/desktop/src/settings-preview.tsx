@@ -132,7 +132,6 @@ function Preview() {
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
   const [density, setDensity] = useState<"compact" | "comfortable">("compact");
-  const [quick, setQuick] = useState(true);
   const [menu, setMenu] = useState(true);
   const [follow, setFollow] = useState<"off" | "peek" | "follow">("peek");
   const [config, setConfig] = useState<GyroConfig>(() => {
@@ -252,8 +251,6 @@ function Preview() {
         onThemeChange={setTheme}
         density={density}
         onDensityChange={setDensity}
-        showQuickActions={quick}
-        onQuickActionsVisibilityChange={setQuick}
         showMenuBarIcon={menu}
         onMenuBarVisibilityChange={setMenu}
         modelFollow={follow}

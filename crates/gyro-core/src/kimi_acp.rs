@@ -101,6 +101,10 @@ pub struct KimiAcpOutput {
     pub stop_reason: String,
     pub resumed: bool,
     pub duration_ms: u64,
+    /// The prompt's token usage as the agent reported it (Grok sends `usage`,
+    /// and `promptUsage` on some builds), summed over every model call the
+    /// turn made. Absent when the agent reports none.
+    pub usage: Option<Value>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -593,6 +597,11 @@ where
         stop_reason,
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
+        usage: result
+            .get("usage")
+            .or_else(|| result.get("promptUsage"))
+            .filter(|usage| usage.is_object())
+            .cloned(),
     })
 }
 

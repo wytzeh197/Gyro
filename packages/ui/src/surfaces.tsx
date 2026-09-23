@@ -34,7 +34,6 @@ import {
   Box,
   Blocks,
   Braces,
-  Bug,
   CalendarClock,
   Camera,
   Check,
@@ -66,12 +65,10 @@ import {
   GitBranchPlus,
   GitPullRequest,
   GitCommitHorizontal,
-  GitPullRequestArrow,
   Globe2,
   Globe,
   Goal,
   GripVertical,
-  Hammer,
   Hand,
   HardDrive,
   Hash,
@@ -118,11 +115,11 @@ import {
   ScrollText,
   Sparkles,
   Square,
+  SquarePen,
   SquareTerminal,
   Sun,
   Tablet,
   Tag,
-  Telescope,
   Terminal,
   TriangleAlert,
   Trash2,
@@ -216,7 +213,6 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
-  formatUsageFreshness,
   isManualCompaction,
   type ComposerContextUsage,
   type ComposerLimitWindow,
@@ -2163,6 +2159,19 @@ export function AppChrome({
             >
               <PanelLeft size={16} strokeWidth={1.5} />
             </button>
+            {/* With the sidebar hidden, its New Session button goes with it;
+                starting a chat should not require bringing the sidebar back. */}
+            {!isIdeSurface && activeDestination !== "settings" ? (
+              <button
+                aria-label="New session"
+                className="gyro-sidebar-restore-button gyro-sidebar-new-session-shortcut"
+                onClick={onCreateSession}
+                title="New session"
+                type="button"
+              >
+                <SquarePen size={16} strokeWidth={1.5} />
+              </button>
+            ) : null}
           </div>
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
@@ -7989,7 +7998,6 @@ type ChatSurfaceProps = {
   };
   workspaceMode?: WorkbenchMode;
   /** Whether empty chats show their starter prompt shortcuts. */
-  showQuickActions?: boolean;
   isEnvironmentRailOpen?: boolean;
   isToolPanelOpen?: boolean;
   isComposerSending?: boolean;
@@ -8113,48 +8121,6 @@ type ChatSurfaceProps = {
   onToggleToolPanel?: () => void;
 };
 
-/**
- * Start-screen openings.
- *
- * Four cards for the four reasons people open a coding agent, in the order
- * they tend to arrive in: read, build, review, fix. Picking one seeds the
- * composer and puts the caret at the end — the prompt stays the user's to
- * edit, so a card is a head start rather than a canned request.
- */
-const chatStartSuggestions: Array<{
-  id: string;
-  icon: IconComponent;
-  label: string;
-  prompt: string;
-}> = [
-  {
-    id: "explore",
-    icon: Telescope,
-    label: "Explore code",
-    prompt:
-      "Explore this project and explain how it fits together — entry points, the main modules, and how they talk to each other.",
-  },
-  {
-    id: "build",
-    icon: Hammer,
-    label: "Build a feature",
-    prompt: "Build ",
-  },
-  {
-    id: "review",
-    icon: GitPullRequestArrow,
-    label: "Review code",
-    prompt:
-      "Review the changes on this branch: correctness first, then anything worth simplifying.",
-  },
-  {
-    id: "fix",
-    icon: Bug,
-    label: "Fix issues",
-    prompt: "Find and fix ",
-  },
-];
-
 const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
   canvas: FileText,
   review: FileDiff,
@@ -8175,32 +8141,6 @@ function isChatCompanionTab(
   panel?: ChatSidePanelId,
 ): panel is ChatCompanionTabId {
   return isChatCompanionTabId(panel);
-}
-
-function ChatStartSuggestions({
-  onPick,
-}: {
-  onPick: (prompt: string) => void;
-}) {
-  return (
-    <div
-      aria-label="Ways to start"
-      className="gyro-chat-start-suggestions"
-      role="group"
-    >
-      {chatStartSuggestions.map(({ id, icon: Icon, label, prompt }) => (
-        <button
-          className={`gyro-chat-start-suggestion is-${id}`}
-          key={id}
-          onClick={() => onPick(prompt)}
-          type="button"
-        >
-          <Icon aria-hidden="true" size={17} />
-          <span>{label}</span>
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function ChatStartWorkspaceLabel({
@@ -8311,7 +8251,6 @@ export function ChatSurface({
   worktreeName,
   chatSwitcher,
   workspaceMode = "local",
-  showQuickActions = true,
   activeChatPanel,
   companionTabs,
   onOpenCompanionTab,
@@ -8426,27 +8365,6 @@ export function ChatSurface({
     },
     [handleDraftChange, isGoalComposerActive],
   );
-  const startSectionRef = useRef<HTMLElement | null>(null);
-  /**
-   * A start card seeds the composer instead of sending: fill the draft, then
-   * put the caret at the end so the next keystroke continues the sentence.
-   * Scoped to this pane's section — tiled chats each own a start screen.
-   */
-  const handleStartSuggestion = useCallback(
-    (prompt: string) => {
-      handleComposerDraftChange(prompt);
-      requestAnimationFrame(() => {
-        const field =
-          startSectionRef.current?.querySelector<HTMLTextAreaElement>(
-            "textarea",
-          );
-        if (!field) return;
-        field.focus();
-        field.setSelectionRange(field.value.length, field.value.length);
-      });
-    },
-    [handleComposerDraftChange],
-  );
   const cancelGoalComposer = useCallback(() => {
     onCancelGoalComposer?.();
   }, [onCancelGoalComposer]);
@@ -8454,8 +8372,11 @@ export function ChatSurface({
     if (isGoalComposerActive) {
       const goal = (goalDraft ?? sessionGoal?.text ?? "").trim();
       if (!goal) return;
-      if (onStartGoalChat) {
+      // A new goal is also the first message toward it: sending sets it and
+      // starts the work. Editing a goal already on the chat only saves it.
+      if (onStartGoalChat && !sessionGoal?.text) {
         onStartGoalChat(goal);
+        setGoalDraft(undefined);
         cancelGoalComposer();
         return;
       }
@@ -8878,18 +8799,19 @@ export function ChatSurface({
       transcriptEvents,
     ],
   );
-  // Manual compaction still runs only against a resumable Codex thread.
-  // The slash command stays listed so `/compact` can be found; the action
-  // explains itself when this chat cannot compact yet.
+  // A native Codex thread or a completed reply gives compaction something
+  // to preserve. Other providers restart from a bounded local checkpoint.
   const canCompactContext = useMemo(
     () =>
-      contextModel.providerId === "openai" &&
       transcriptEvents.some((event) => {
+        if (event.kind === "assistant-message" && event.message.trim()) {
+          return true;
+        }
         const payload = recordFromUnknown(event.payload);
         const cursor = recordFromUnknown(payload?.resumeCursor);
         return cursor?.kind === "codex-session";
       }),
-    [contextModel.providerId, transcriptEvents],
+    [transcriptEvents],
   );
   const transcriptState = useMemo(
     () => deriveTranscriptState(transcriptEvents),
@@ -9380,7 +9302,6 @@ export function ChatSurface({
         <section
           className={["gyro-chat-start"].filter(Boolean).join(" ")}
           aria-label="New Chat"
-          ref={startSectionRef}
           style={{ width: "min(860px, 100%)" }}
         >
           {
@@ -9466,7 +9387,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
-            startsGoalSession={Boolean(onStartGoalChat)}
+            startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
@@ -9477,9 +9398,6 @@ export function ChatSurface({
             onResumeUsage={onResumeUsage}
             stabilizeEmptyHeight={isTiled}
           />
-          {localDraft.trim().length > 0 || !showQuickActions ? null : (
-            <ChatStartSuggestions onPick={handleStartSuggestion} />
-          )}
         </section>
         {sidePanel}
       </div>
@@ -9715,7 +9633,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
-            startsGoalSession={Boolean(onStartGoalChat)}
+            startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
@@ -11789,22 +11707,11 @@ function ChatContextSection({
   workspacePath?: string;
 }) {
   const [activePopover, setActivePopover] = useState<
-    "context" | "project" | "workspace-mode" | "branch" | null
+    "project" | "workspace-mode" | "branch" | null
   >(null);
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(activePopover),
     () => setActivePopover(null),
-    undefined,
-    () => {
-      if (!activePopover || activePopover === "context") return false;
-      setActivePopover("context");
-      requestAnimationFrame(() =>
-        popoverScopeRef.current
-          ?.querySelector<HTMLElement>('[role="menuitem"]')
-          ?.focus(),
-      );
-      return true;
-    },
   );
   const popoverBaseId = useId();
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
@@ -11826,12 +11733,6 @@ function ChatContextSection({
       removeAction: `remove-saved-project:${encodeURIComponent(project.path)}`,
     }));
   const runAction = (action?: string) => {
-    if (action?.startsWith("context:")) {
-      const next = action.slice(8) as "project" | "workspace-mode" | "branch";
-      setActivePopover(next);
-      if (next === "branch") onAction?.("select-branch");
-      return;
-    }
     setActivePopover(null);
     if (action) {
       onAction?.(action);
@@ -11868,6 +11769,7 @@ function ChatContextSection({
             action: "select-workspace",
             icon: Folder,
             label: hasUserWorkspace ? "Change folder" : "Select folder",
+            sectionLabel: "Actions",
           },
           {
             action: "search-workspace",
@@ -11902,80 +11804,79 @@ function ChatContextSection({
               tooltip: workspaceModeTechnicalHint("worktree"),
             },
           ]
-        : activePopover === "branch"
-          ? branchPopoverItems({
-              branchCatalog,
-              branchName: branchLabel,
-              isDisabled: isSending,
-              isLoading: isBranchLoading,
-              workspaceMode,
-              workspacePath,
-            })
-          : [
-              {
-                action: "context:project",
-                icon: Folder,
-                label: "Project",
-                detail: projectLabel,
-              },
-              {
-                action: "context:workspace-mode",
-                icon: Laptop,
-                label: "Workspace mode",
-                detail: modeChipLabel,
-              },
-              {
-                action: "context:branch",
-                icon: GitBranch,
-                label: "Branch",
-                detail: branchLabel,
-              },
-            ];
+        : branchPopoverItems({
+            branchCatalog,
+            branchName: branchLabel,
+            isDisabled: isSending,
+            isLoading: isBranchLoading,
+            workspaceMode,
+            workspacePath,
+          });
   return (
     <section className="gyro-composer-context-row gyro-composer-reveal">
       <div className="gyro-composer-control" ref={popoverScopeRef}>
-        <button
-          className="gyro-composer-chip gyro-context-summary"
-          aria-label={`Workspace context: ${projectLabel}, ${modeChipLabel}, ${branchLabel}`}
-          title={`${workspacePath ?? projectLabel} / ${modeChipLabel} / ${branchLabel}`}
-          aria-haspopup="menu"
-          aria-expanded={Boolean(activePopover)}
-          aria-controls={activePopover ? `${popoverBaseId}-context` : undefined}
-          onClick={() =>
-            setActivePopover((current) => (current ? null : "context"))
-          }
-          type="button"
-        >
-          <span className="gyro-context-summary-item">
-            <Folder size={14} aria-hidden="true" />
-            <span>{projectLabel}</span>
-          </span>
-          <span className="gyro-context-summary-item is-mode">
-            <Laptop size={14} aria-hidden="true" />
-            <span>{modeChipLabel}</span>
-          </span>
-          <span className="gyro-context-summary-item is-branch">
-            <GitBranch size={14} aria-hidden="true" />
-            <span>{branchLabel}</span>
-          </span>
-          <ChevronDown size={13} aria-hidden="true" />
-        </button>
+        {(
+          [
+            [
+              "project",
+              Folder,
+              projectLabel,
+              "Project",
+              workspacePath ?? projectLabel,
+            ],
+            [
+              "workspace-mode",
+              Laptop,
+              modeChipLabel,
+              "Workspace mode",
+              modeChipLabel,
+            ],
+            ["branch", GitBranch, branchLabel, "Branch", branchLabel],
+          ] as const
+        ).map(([popover, Icon, label, name, title]) => (
+          <button
+            aria-controls={
+              activePopover === popover ? `${popoverBaseId}-context` : undefined
+            }
+            aria-expanded={activePopover === popover}
+            aria-haspopup="menu"
+            aria-label={`${name}: ${label}`}
+            className={`gyro-composer-chip gyro-context-summary-item is-${popover}`}
+            key={popover}
+            onClick={() => {
+              setActivePopover((current) =>
+                current === popover ? null : popover,
+              );
+              if (popover === "branch" && activePopover !== "branch") {
+                onAction?.("select-branch");
+              }
+            }}
+            title={title}
+            type="button"
+          >
+            <Icon size={14} aria-hidden="true" />
+            <span>{label}</span>
+            {popover === "branch" ? (
+              <ChevronDown size={13} aria-hidden="true" />
+            ) : null}
+          </button>
+        ))}
         {activePopover ? (
           <ComposerPopover
-            align="end"
+            className={
+              activePopover === "project" ? "gyro-project-picker" : undefined
+            }
             id={`${popoverBaseId}-context`}
             keepInBounds
             items={items}
             onAction={runAction}
             placement="up"
             title={
-              activePopover === "context"
-                ? "Workspace context"
-                : activePopover === "workspace-mode"
-                  ? "Workspace mode"
-                  : activePopover === "project"
-                    ? "Project"
-                    : "Branch"
+              activePopover === "workspace-mode"
+                ? "Workspace mode"
+                : activePopover === "project"
+                  ? "Project"
+                  : "Branch"
             }
           />
         ) : null}
@@ -19733,11 +19634,18 @@ export function CommandPaletteOverlay({
     const recentOrder = new Map(
       recentFilePaths.map((path, index) => [path, index]),
     );
+    // Show where a file sits inside the project, not the absolute path to it.
+    const root = projects.find((project) => project.current)?.path;
+    const rootPrefix = root ? `${root.replace(/\/+$/, "")}/` : undefined;
     return files
       .filter((file) => file.kind === "file")
       .slice(0, 10_000)
       .map<GlobalSearchEntry>((file, index) => {
-        const segments = file.path.split("/").filter(Boolean);
+        const relative =
+          rootPrefix && file.path.startsWith(rootPrefix)
+            ? file.path.slice(rootPrefix.length)
+            : file.path;
+        const segments = relative.split("/").filter(Boolean);
         const label = segments.at(-1) ?? file.path;
         const parent = segments.slice(0, -1).join("/") || "Workspace root";
         const recentIndex = recentOrder.get(file.path);
@@ -19756,7 +19664,7 @@ export function CommandPaletteOverlay({
           first.priority - second.priority ||
           first.label.localeCompare(second.label),
       );
-  }, [files, recentFilePaths]);
+  }, [files, projects, recentFilePaths]);
   const actionRanker = useGlobalSearchRanker(actionEntries);
   const fileRanker = useGlobalSearchRanker(fileEntries);
   const projectRanker = useGlobalSearchRanker(projectEntries);
@@ -20436,7 +20344,6 @@ type SettingsSurfaceProps = {
   mainColor?: string;
   secondaryColor?: string;
   density?: WorkbenchDensity;
-  showQuickActions?: boolean;
   showMenuBarIcon?: boolean;
   modelFollow?: ModelFollowMode;
   defaultWorkspaceMode?: WorkbenchMode;
@@ -20451,7 +20358,6 @@ type SettingsSurfaceProps = {
     secondaryColor: string,
   ) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
-  onQuickActionsVisibilityChange?: (visible: boolean) => void;
   onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
@@ -21066,7 +20972,6 @@ export function SettingsSurface({
   mainColor = "#0874df",
   secondaryColor = "#8b6fcb",
   density = "comfortable",
-  showQuickActions = true,
   showMenuBarIcon = true,
   modelFollow = "peek",
   defaultWorkspaceMode = "local",
@@ -21076,7 +20981,6 @@ export function SettingsSurface({
   onThemeChange,
   onAppearanceColorsChange,
   onDensityChange,
-  onQuickActionsVisibilityChange,
   onMenuBarVisibilityChange,
   onSectionChange,
   onConfigChange,
@@ -21314,18 +21218,6 @@ export function SettingsSurface({
                     { label: "Comfortable", value: "comfortable" },
                   ]}
                   onChange={(value) => onDensityChange?.(value)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Quick actions"
-                detail="Show starter prompts below an empty new-chat composer."
-              >
-                <SettingsSwitch
-                  checked={showQuickActions}
-                  label="Show quick actions"
-                  onChange={(visible) =>
-                    onQuickActionsVisibilityChange?.(visible)
-                  }
                 />
               </SettingsRow>
             </SettingsGroup>
@@ -23328,6 +23220,8 @@ type ComposerPopoverItem = {
   icon: IconComponent;
   kind?:
     | "back"
+    | "branch"
+    | "branch-action"
     | "disclosure"
     | "effort"
     | "model"
@@ -23441,53 +23335,89 @@ function branchPopoverItems({
       },
     ];
   }
+  const busy = isDisabled ? "Wait for the active turn to finish" : undefined;
   const createBranchItem: ComposerPopoverItem = {
     action: `create-branch-from:${encodeURIComponent(branchCatalog.current ?? "")}`,
     disabled: isDisabled,
-    detail: isDisabled
-      ? "Wait for the active turn to finish"
-      : branchCatalog.current
+    icon: Plus,
+    kind: "branch-action",
+    label: "New branch",
+    tooltip:
+      busy ??
+      (branchCatalog.current
         ? `Branch from ${branchCatalog.current}`
-        : "Branch from the current commit",
-    icon: GitBranchPlus,
-    label: "New branch…",
+        : "Branch from the current commit"),
   };
-  const branchItems = branchCatalog.branches.map((branch) => ({
-    action: `select-branch:${encodeURIComponent(branch)}`,
-    active: branch === branchCatalog.current,
-    disabled: isDisabled,
-    removeAction:
-      branch !== branchCatalog.current &&
-      branchCatalog.worktrees?.some((worktree) => worktree.branch === branch)
-        ? `remove-worktree:${encodeURIComponent(branch)}`
-        : undefined,
-    detail: isDisabled
-      ? "Wait for the active turn to finish"
-      : branch === branchCatalog.current
-        ? "Current workspace branch"
-        : branchCatalog.worktrees?.some(
-              (worktree) => worktree.branch === branch,
-            )
-          ? "Checked out in a linked worktree"
-          : "Switch branch; keep compatible local changes",
-    icon: GitBranch,
-    label: branch,
-  }));
+  // One line per branch: what each row does lives in its tooltip, and the
+  // current branch leads the list so it never scrolls out of view.
+  const branchItems = [...branchCatalog.branches]
+    .sort(
+      (a, b) =>
+        Number(b === branchCatalog.current) -
+        Number(a === branchCatalog.current),
+    )
+    .map((branch): ComposerPopoverItem => {
+      const inWorktree =
+        branch !== branchCatalog.current &&
+        Boolean(
+          branchCatalog.worktrees?.some(
+            (worktree) => worktree.branch === branch,
+          ),
+        );
+      return {
+        action: `select-branch:${encodeURIComponent(branch)}`,
+        active: branch === branchCatalog.current,
+        badge: inWorktree ? "worktree" : undefined,
+        disabled: isDisabled,
+        icon: GitBranch,
+        kind: "branch",
+        label: branch,
+        removeAction: inWorktree
+          ? `remove-worktree:${encodeURIComponent(branch)}`
+          : undefined,
+        tooltip:
+          busy ??
+          (branch === branchCatalog.current
+            ? "Current workspace branch"
+            : inWorktree
+              ? "Checked out in a linked worktree"
+              : "Switch branch; keep compatible local changes"),
+      };
+    });
   return [
+    ...branchItems,
     createBranchItem,
     ...(branchCatalog.current
       ? [
           {
             action: `rename-current-branch:${encodeURIComponent(branchCatalog.current)}`,
             disabled: isDisabled,
-            detail: branchCatalog.current,
             icon: Edit3,
-            label: "Rename current branch…",
+            kind: "branch-action" as const,
+            label: "Rename",
+            tooltip:
+              busy ?? `Rename current branch… (${branchCatalog.current})`,
           },
         ]
       : []),
-    ...branchItems,
   ];
+}
+
+/**
+ * Dim the folder part of `release/v0.1.0` and let it give way first when the
+ * row is narrow, so the part that tells branches apart stays readable.
+ */
+function BranchLabel({ name }: { name: string }) {
+  const slash = name.lastIndexOf("/");
+  if (slash < 0) return <>{name}</>;
+  return (
+    <>
+      <span className="gyro-branch-label-prefix">
+        {name.slice(0, slash + 1)}
+      </span>
+      <span className="gyro-branch-label-leaf">{name.slice(slash + 1)}</span>
+    </>
+  );
 }
 
 function ComposerPopover({
@@ -23510,6 +23440,22 @@ function ComposerPopover({
   title?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  // Long branch lists get a filter; short ones stay a plain menu.
+  const searchable = items.filter((item) => item.kind === "branch").length >= 6;
+  const needle = query.trim().toLowerCase();
+  const visibleItems = needle
+    ? items.filter(
+        (item) =>
+          item.kind !== "branch" || item.label.toLowerCase().includes(needle),
+      )
+    : items;
+  const listItems = visibleItems.filter(
+    (item) => item.kind !== "branch-action",
+  );
+  const footerItems = visibleItems.filter(
+    (item) => item.kind === "branch-action",
+  );
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!keepInBounds || !panel) return;
@@ -23588,114 +23534,109 @@ function ComposerPopover({
       {title ? (
         <div className="gyro-composer-popover-title">{title}</div>
       ) : null}
-      {items.map((item, index) => {
-        const Icon = item.icon;
-        const itemClassName = [
-          "gyro-composer-menu-item",
-          item.active ? "is-active" : "",
-          item.removeAction ? "has-remove" : "",
-          item.hideIcon ? "has-no-icon" : "",
-          item.disconnected ? "is-disconnected" : "",
-          item.kind ? `is-${item.kind}` : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const itemContent = (
+      {searchable ? (
+        <label className="gyro-composer-menu-search">
+          <Search aria-hidden="true" size={13} />
+          <input
+            aria-label="Find branch"
+            autoFocus
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Find branch…"
+            spellCheck={false}
+            type="search"
+            value={query}
+          />
+        </label>
+      ) : null}
+      {searchable &&
+      needle &&
+      !listItems.some((item) => item.kind === "branch") ? (
+        <div className="gyro-composer-menu-empty">No matching branches</div>
+      ) : null}
+      {listItems.map(renderItem)}
+      {footerItems.length ? (
+        <div className="gyro-composer-menu-footer" role="group">
+          {footerItems.map(renderItem)}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  function renderItem(item: ComposerPopoverItem, index: number) {
+    const Icon = item.icon;
+    const itemClassName = [
+      "gyro-composer-menu-item",
+      item.active ? "is-active" : "",
+      item.removeAction ? "has-remove" : "",
+      item.hideIcon ? "has-no-icon" : "",
+      item.disconnected ? "is-disconnected" : "",
+      item.kind ? `is-${item.kind}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const itemContent = (
+      <>
+        {item.hideIcon ? null : item.providerId ? (
+          <ProviderLogo label={item.label} providerId={item.providerId} />
+        ) : (
+          <Icon size={14} />
+        )}
+        <span>
+          <span className="gyro-composer-menu-item-title">
+            <strong>
+              {item.kind === "branch" ? (
+                <BranchLabel name={item.label} />
+              ) : (
+                item.label
+              )}
+            </strong>
+            {item.badge ? (
+              <em className="gyro-composer-menu-badge">{item.badge}</em>
+            ) : null}
+          </span>
+          {item.detail ? <small>{item.detail}</small> : null}
+        </span>
+        {item.kind === "setting" || item.kind === "disclosure" ? (
           <>
-            {item.hideIcon ? null : item.providerId ? (
-              <ProviderLogo label={item.label} providerId={item.providerId} />
-            ) : (
-              <Icon size={14} />
-            )}
-            <span>
-              <span className="gyro-composer-menu-item-title">
-                <strong>{item.label}</strong>
-                {item.badge ? (
-                  <em className="gyro-composer-menu-badge">{item.badge}</em>
-                ) : null}
-              </span>
-              {item.detail ? <small>{item.detail}</small> : null}
-            </span>
-            {item.kind === "setting" || item.kind === "disclosure" ? (
-              <>
-                {item.trailingLabel ? (
-                  <em className="gyro-composer-menu-trailing">
-                    {item.trailingLabel}
-                  </em>
-                ) : null}
-                {/* Settings rows drill into their own list; disclosure rows
-                    fold a section open in place, so they point differently.
-                    Both are navigation, so they carry the caret class that
-                    keeps them quiet — the accent belongs to the checkmark. */}
-                {item.kind === "disclosure" ? (
-                  item.caret === "up" ? (
-                    <ChevronUp className="gyro-composer-menu-caret" size={13} />
-                  ) : (
-                    <ChevronDown
-                      className="gyro-composer-menu-caret"
-                      size={13}
-                    />
-                  )
-                ) : (
-                  <ChevronRight
-                    className="gyro-composer-menu-caret"
-                    size={13}
-                  />
-                )}
-              </>
-            ) : item.trailingLabel ? (
+            {item.trailingLabel ? (
               <em className="gyro-composer-menu-trailing">
                 {item.trailingLabel}
               </em>
-            ) : item.active ? (
-              <Check size={13} />
-            ) : item.providerId && item.showChevron !== false ? (
+            ) : null}
+            {/* Settings rows drill into their own list; disclosure rows
+                    fold a section open in place, so they point differently.
+                    Both are navigation, so they carry the caret class that
+                    keeps them quiet — the accent belongs to the checkmark. */}
+            {item.kind === "disclosure" ? (
+              item.caret === "up" ? (
+                <ChevronUp className="gyro-composer-menu-caret" size={13} />
+              ) : (
+                <ChevronDown className="gyro-composer-menu-caret" size={13} />
+              )
+            ) : (
               <ChevronRight className="gyro-composer-menu-caret" size={13} />
-            ) : null}
+            )}
           </>
-        );
-        if (item.removeAction) {
-          return (
-            <Fragment key={`${item.label}-${index}`}>
-              {item.sectionLabel ? (
-                <div className="gyro-composer-popover-section-title">
-                  {item.sectionLabel}
-                </div>
-              ) : null}
-              <div className={itemClassName}>
-                <button
-                  className="gyro-composer-menu-primary"
-                  disabled={item.disabled}
-                  onClick={() => onAction(item.action, item)}
-                  role="menuitem"
-                  title={item.tooltip}
-                  type="button"
-                >
-                  {itemContent}
-                </button>
-                <button
-                  aria-label={`Remove ${item.label}`}
-                  className="gyro-composer-menu-remove"
-                  disabled={item.disabled}
-                  onClick={() => onAction(item.removeAction, item)}
-                  title="Remove"
-                  type="button"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </Fragment>
-          );
-        }
-        return (
-          <Fragment key={`${item.label}-${index}`}>
-            {item.sectionLabel ? (
-              <div className="gyro-composer-popover-section-title">
-                {item.sectionLabel}
-              </div>
-            ) : null}
+        ) : item.trailingLabel ? (
+          <em className="gyro-composer-menu-trailing">{item.trailingLabel}</em>
+        ) : item.active ? (
+          <Check size={13} />
+        ) : item.providerId && item.showChevron !== false ? (
+          <ChevronRight className="gyro-composer-menu-caret" size={13} />
+        ) : null}
+      </>
+    );
+    if (item.removeAction) {
+      return (
+        <Fragment key={`${item.label}-${index}`}>
+          {item.sectionLabel ? (
+            <div className="gyro-composer-popover-section-title">
+              {item.sectionLabel}
+            </div>
+          ) : null}
+          <div className={itemClassName}>
             <button
-              className={itemClassName}
+              className="gyro-composer-menu-primary"
               disabled={item.disabled}
               onClick={() => onAction(item.action, item)}
               role="menuitem"
@@ -23704,11 +23645,40 @@ function ComposerPopover({
             >
               {itemContent}
             </button>
-          </Fragment>
-        );
-      })}
-    </div>
-  );
+            <button
+              aria-label={`Remove ${item.label}`}
+              className="gyro-composer-menu-remove"
+              disabled={item.disabled}
+              onClick={() => onAction(item.removeAction, item)}
+              title="Remove"
+              type="button"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </Fragment>
+      );
+    }
+    return (
+      <Fragment key={`${item.label}-${index}`}>
+        {item.sectionLabel ? (
+          <div className="gyro-composer-popover-section-title">
+            {item.sectionLabel}
+          </div>
+        ) : null}
+        <button
+          className={itemClassName}
+          disabled={item.disabled}
+          onClick={() => onAction(item.action, item)}
+          role="menuitem"
+          title={item.tooltip}
+          type="button"
+        >
+          {itemContent}
+        </button>
+      </Fragment>
+    );
+  }
 }
 
 function providerAuthOwnerLabel(owner?: ProviderStatus["authOwner"]) {
@@ -24506,12 +24476,6 @@ function Composer({
       : contextUsage.usedTokens > 0
         ? "estimated"
         : "empty";
-  const usageClock = useLimitClock(Boolean(usageFetchedAt));
-  const usageFreshness = formatUsageFreshness(
-    usageFetchedAt,
-    usageClock,
-    Boolean(providerUsage?.stale || providerUsage?.error),
-  );
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
     const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
@@ -24619,7 +24583,9 @@ function Composer({
         (councilResolution?.seats.length ?? 0) >= 2 &&
         hasUserWorkspace
       : canSendChat(hasReadyProvider, workspacePath));
-  const canSubmitComposer = isGoalComposerActive || canSubmitChat;
+  // Starting a goal sends a message, so it needs everything a send needs.
+  const canSubmitComposer =
+    isGoalComposerActive && !startsGoalSession ? true : canSubmitChat;
   const needsProviderSetup =
     !boundToSession &&
     !providerConfigs.some((provider) =>
@@ -24797,10 +24763,10 @@ function Composer({
     {
       action: "compact-context",
       command: "/compact",
-      description: "Summarize earlier conversation",
+      description: "Condense earlier conversation",
       hint: canCompactContext
-        ? "This keeps the important context while making room for the rest of the chat."
-        : "Codex can compact this chat after the first reply. Other providers are not supported yet.",
+        ? "Keep a short record of earlier messages and make room for the rest of the chat."
+        : "Compact this chat after the first reply.",
       icon: Archive,
       label: "Compact context",
     },
@@ -25270,7 +25236,8 @@ function Composer({
           <div className="gyro-composer-attachments" aria-label="Attachments">
             {attachments.map((attachment) => (
               <div
-                className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}`}
+                className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}${attachment.pending ? " is-pending" : ""}`}
+                aria-busy={attachment.pending || undefined}
                 key={attachment.id}
                 title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}${attachment.stale ? " · the command ran again after this was captured" : ""}`}
               >
@@ -25509,7 +25476,7 @@ function Composer({
         aria-label={
           isGoalComposerActive
             ? startsGoalSession
-              ? "Start goal session"
+              ? "Set goal and send"
               : "Set session goal"
             : "Message Gyro"
         }
@@ -25534,7 +25501,7 @@ function Composer({
           setActivePopover(null);
           setIsSlashMenuDismissed(false);
         }}
-        maxLength={isGoalComposerActive ? 240 : maxDraftLength}
+        maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
         onChange={(event) => {
           setIsSlashHelpOpen(false);
           setIsSlashMenuDismissed(false);
@@ -25621,8 +25588,8 @@ function Composer({
             ? "Draft freely — send unlocks when Gyro finishes optimizing"
             : isGoalComposerActive
               ? startsGoalSession
-                ? "Describe the outcome and press Send to start"
-                : "Define the outcome, then save the goal"
+                ? "What should this chat achieve? Send to set the goal and start"
+                : "Edit the goal, then save it"
               : chatMode === "council"
                 ? "Ask for architecture, review, or alternatives — models answer in parallel"
                 : !canSubmitChat
@@ -25851,16 +25818,6 @@ function Composer({
                       {contextUsage.modelLabel}
                     </span>
                   </div>
-                  <span
-                    className={`gyro-composer-context-source is-${contextSource}`}
-                    title={contextUsage.detail}
-                  >
-                    {contextSource === "reported"
-                      ? "Measured"
-                      : contextSource === "empty"
-                        ? "Not started"
-                        : "Estimated"}
-                  </span>
                 </header>
                 <div
                   className="gyro-composer-context-value"
@@ -25890,13 +25847,6 @@ function Composer({
                 >
                   <span style={{ width: `${contextUsage.percent}%` }} />
                 </div>
-                {contextSource !== "reported" ? (
-                  <small className="gyro-composer-context-note">
-                    {contextSource === "empty"
-                      ? "Measured once the model replies"
-                      : "Provider count pending"}
-                  </small>
-                ) : null}
               </section>
               {limitWindows.length > 0 || providerUsage ? (
                 <section
@@ -25905,17 +25855,6 @@ function Composer({
                 >
                   <header className="gyro-composer-limit-title">
                     <span>Plan usage</span>
-                    {usageFreshness ? (
-                      <em
-                        className={
-                          usageFreshness.stale ? "is-stale" : undefined
-                        }
-                      >
-                        {usageFreshness.label}
-                      </em>
-                    ) : providerUsage?.status === "loading" ? (
-                      <em>Updating…</em>
-                    ) : null}
                   </header>
                   {limitWindows.length > 0 ? (
                     limitWindows.map((window) => (
@@ -26046,7 +25985,7 @@ function Composer({
               ? "Stop response"
               : isGoalComposerActive
                 ? startsGoalSession
-                  ? "Start goal session"
+                  ? "Set goal and send"
                   : "Save goal"
                 : isSending
                   ? "Queue message"
@@ -26119,7 +26058,7 @@ function Composer({
               ? "Stop response"
               : isGoalComposerActive
                 ? startsGoalSession
-                  ? "Start goal session"
+                  ? "Set goal and send"
                   : "Save goal"
                 : isCliUpdating
                   ? "Wait for the CLI update to finish"
@@ -27282,7 +27221,8 @@ function ChatTurn({
   // the run model deliberately does not carry.
   const canRetry =
     runModel.phase.name === "interrupted" ||
-    providerStatus?.status === "failed";
+    (providerStatus?.status === "failed" &&
+      !providerRetryCannotHelp(providerStatus.recoveryKind));
   const canReconnect = Boolean(
     providerStatus &&
     providerStatus.status !== "cancelled" &&
@@ -28784,6 +28724,19 @@ function isStreamingAssistantEvent(event: SessionEvent) {
 // button but not the same word: the first is a repair, the second is setup.
 export function providerNeedsSignIn(recoveryKind: string | undefined) {
   return recoveryKind === "login-expired" || recoveryKind === "authentication";
+}
+
+/**
+ * Failures a resend cannot fix: an empty balance, a CLI config Gyro cannot
+ * satisfy, or a CLI that rejects the command. Offering Retry there only spends
+ * another run reaching the same refusal.
+ */
+export function providerRetryCannotHelp(recoveryKind: string | undefined) {
+  return (
+    recoveryKind === "plan-exhausted" ||
+    recoveryKind === "provider-config" ||
+    recoveryKind === "cli-contract"
+  );
 }
 
 function providerSignInLabel(recoveryKind: string | undefined) {

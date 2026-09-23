@@ -47,6 +47,7 @@ const context = {
   activeSessionId: "existing",
   workspacePath: "/project",
   activeDraftKey: draftKey,
+  chatGrid: { layouts: {} },
   chatProjectKey: (path) => path,
   suppressSessionAutoSelectRef: { current: false },
   activeSessionIdRef: { current: "existing" },

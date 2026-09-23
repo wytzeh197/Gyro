@@ -12,41 +12,84 @@ const action = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 
-for (const outcome of ["success", "failure", "cancelled", "append-failure"]) {
+for (const [providerId, outcome] of [
+  "openai",
+  "anthropic",
+  "gemini",
+  "xai",
+  "ollama",
+].flatMap((provider) =>
+  ["success", "failure", "cancelled", "append-failure"].map((result) => [
+    provider,
+    result,
+  ]),
+)) {
   const busy = new Set();
   const statuses = [];
   const calls = [];
   let finish;
-  const pending = new Promise((resolve, reject) => { finish = { resolve, reject }; });
+  const pending = new Promise((resolve, reject) => {
+    finish = { resolve, reject };
+  });
   const context = {
-    activeSessionId: "chat", activeSession: { providerId: "openai" },
+    activeSessionId: "chat",
+    activeSession: { providerId },
     sendingSessionIdsRef: { current: busy },
-    notify() {}, isTauriRuntime: () => true,
-    crypto: { randomUUID: () => "compact-turn" }, config: {},
-    setSessionSending: (id, sending) => sending ? busy.add(id) : busy.delete(id),
-    createOptimisticTurnEvents: () => [], providersForConfig: () => [],
+    notify() {},
+    isTauriRuntime: () => true,
+    crypto: { randomUUID: () => "compact-turn" },
+    config: {},
+    setSessionSending: (id, sending) =>
+      sending ? busy.add(id) : busy.delete(id),
+    createOptimisticTurnEvents: () => [],
+    providersForConfig: () => [],
     optimisticEventsRef: { current: new Map() },
     mergePersistedAndOptimisticEvents: (a, b) => [...a, ...b],
     setEventsForSession() {},
-    updateOptimisticProviderStatus: (_ref, _set, _id, _turn, status) => statuses.push(status),
+    updateOptimisticProviderStatus: (_ref, _set, _id, _turn, status) =>
+      statuses.push(status),
     isProviderStop: (error) => error.includes("chat cancelled by"),
     refreshEvents: async () => {},
     invoke: async (command) => {
       calls.push(command);
-      if (outcome === "append-failure" && command === "append_user_message") throw Error("write failed");
+      if (outcome === "append-failure" && command === "append_user_message")
+        throw Error("write failed");
       if (command === "compact_provider_chat") return pending;
     },
   };
-  const run = new Function(...Object.keys(context), `${action}; return run;`)(...Object.values(context));
+  const run = new Function(...Object.keys(context), `${action}; return run;`)(
+    ...Object.values(context),
+  );
   run();
   assert(busy.has("chat"), "busy must be set before the first native await");
   run();
-  assert.equal(calls.filter((c) => c === "append_user_message").length, 1, "a second compaction cannot race the first");
+  assert.equal(
+    calls.filter((c) => c === "append_user_message").length,
+    1,
+    "a second compaction cannot race the first",
+  );
   await new Promise(setImmediate);
   if (outcome === "success") finish.resolve({});
-  else if (outcome !== "append-failure") finish.reject(Error(outcome === "cancelled" ? "chat cancelled by user" : "compaction failed"));
+  else if (outcome !== "append-failure")
+    finish.reject(
+      Error(
+        outcome === "cancelled"
+          ? "chat cancelled by user"
+          : "compaction failed",
+      ),
+    );
   await new Promise(setImmediate);
-  assert(!busy.has("chat"), "every terminal outcome must release the send slot");
-  assert.equal(statuses.at(-1), outcome === "success" ? "done" : outcome === "cancelled" ? "cancelled" : "failed");
+  assert(
+    !busy.has("chat"),
+    "every terminal outcome must release the send slot",
+  );
+  assert.equal(
+    statuses.at(-1),
+    outcome === "success"
+      ? "done"
+      : outcome === "cancelled"
+        ? "cancelled"
+        : "failed",
+  );
 }
-console.log("Context compaction lifecycle: 4 outcomes passed");
+console.log("Context compaction lifecycle: 5 providers × 4 outcomes passed");

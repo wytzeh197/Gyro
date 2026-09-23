@@ -1877,10 +1877,6 @@ state = workbenchReducer(state, {
   density: "comfortable",
 });
 state = workbenchReducer(state, {
-  type: "set-quick-actions-visible",
-  visible: false,
-});
-state = workbenchReducer(state, {
   type: "set-daily-pace-warning",
   enabled: false,
 });
@@ -1897,10 +1893,6 @@ expect(state.preferences.theme === "light", "Theme reducer did not update.");
 expect(
   state.preferences.density === "comfortable",
   "Density reducer did not update.",
-);
-expect(
-  state.preferences.showQuickActions === false,
-  "Quick actions visibility reducer did not update.",
 );
 expect(
   state.preferences.dailyPaceWarning === false,
@@ -5420,9 +5412,11 @@ expect(
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
     chatSurfaceSource.includes("onStartGoalChat(goal)") &&
+    // A new goal is set and sent in one step; editing one only saves it.
     chatSurfaceSource.includes(
-      "startsGoalSession={Boolean(onStartGoalChat)}",
+      "startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}",
     ) &&
+    chatSurfaceSource.includes("if (onStartGoalChat && !sessionGoal?.text)") &&
     chatSurfaceSource.includes(
       'if (!onGoalAction) throw new Error("Goal saving unavailable")',
     ) &&
@@ -6006,7 +6000,7 @@ expect(
     surfaceSource.includes("Choose folder") &&
     surfaceSource.includes("canSendChat(hasReadyProvider, workspacePath)") &&
     surfaceSource.includes(
-      "const canSubmitComposer = isGoalComposerActive || canSubmitChat",
+      "isGoalComposerActive && !startsGoalSession ? true : canSubmitChat",
     ) &&
     surfaceSource.includes(
       "if (canSubmitComposer && draft.trim().length > 0)",
@@ -6028,7 +6022,8 @@ expect(
     surfaceSource.includes("Change folder") &&
     // Workspace-mode picker: card rows with full copy, badge (not trailing
     // "Recommended" that collides with truncated labels in a narrow menu).
-    surfaceSource.includes('action: "context:workspace-mode"') &&
+    // Whitespace-tolerant: Prettier wraps the tuple once it outgrows a line.
+    /\[\s*"workspace-mode",\s*Laptop,\s*modeChipLabel/.test(surfaceSource) &&
     surfaceSource.includes('kind: "workspace-mode"') &&
     // Labels + optional Recommended only — no redundant title or detail rows.
     !surfaceSource.includes('title="Where the agent works"') &&
@@ -6220,7 +6215,7 @@ expect(
     tauriSource.includes("derive_session_summary") &&
     typeSource.includes("summaryUpdatedAt?: string") &&
     surfaceSource.includes('"Set session goal"') &&
-    surfaceSource.includes('"Start goal session"') &&
+    surfaceSource.includes('"Set goal and send"') &&
     surfaceSource.includes('role="log"') &&
     surfaceSource.includes('aria-live="polite"') &&
     surfaceSource.includes("session.summary") &&
@@ -6343,13 +6338,15 @@ expect(
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 // Model rail: provider marks down the left, the previewed provider's models
-// beside them, so any model is one pointer trip away instead of a drill-down.
+// beside them once a mark is clicked, instead of a drill-down.
 expect(
   modelRailSource.includes("export function ComposerModelRail") &&
     modelRailSource.includes('role="tablist"') &&
     modelRailSource.includes('aria-orientation="vertical"') &&
     modelRailSource.includes('role="menuitemradio"') &&
-    modelRailSource.includes("HOVER_PREVIEW_MS") &&
+    // Models change on click or arrow keys only; hovering a mark is inert.
+    modelRailSource.includes("onClick={() => setPreviewId(provider.id)}") &&
+    !modelRailSource.includes("onPointerEnter") &&
     // Disconnected providers stay on the rail and offer Connect, never a
     // dead "Unavailable" row.
     modelRailSource.includes("onConnect(preview.id)") &&
@@ -6671,8 +6668,10 @@ expect(
     appSource.includes("runIdeTask(testTask)") &&
     desktopRustSource.includes("async fn compact_provider_chat") &&
     desktopRustSource.includes('"thread/compact/start"') &&
-    desktopRustSource.includes("run_openai_codex_context_compaction"),
-  "Slash commands should discover and route workspace actions, while manual compaction remains Codex-only and visible through its lifecycle.",
+    desktopRustSource.includes("run_openai_codex_context_compaction") &&
+    desktopRustSource.includes("compact_local_provider_chat") &&
+    desktopRustSource.includes("contextSummary"),
+  "Slash commands should route compaction through native Codex or a local checkpoint for other providers.",
 );
 const compactAction = appSource.slice(
   appSource.indexOf('case "compact-context":'),
@@ -7821,7 +7820,6 @@ expect(
     styleSource.includes(
       ':root[data-density="comfortable"] .gyro-sidebar-action',
     ) &&
-    styleSource.includes(".gyro-chat-start-suggestion") &&
     styleSource.includes(".gyro-composer-context-row") &&
     styleSource.includes("--gyro-ide-tab-height: 30px") &&
     styleSource.includes("--gyro-ide-tab-height: 38px") &&
