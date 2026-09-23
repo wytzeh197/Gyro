@@ -11864,7 +11864,11 @@ function ChatContextSection({
         {activePopover ? (
           <ComposerPopover
             className={
-              activePopover === "project" ? "gyro-project-picker" : undefined
+              activePopover === "project"
+                ? "gyro-project-picker"
+                : activePopover === "branch"
+                  ? "gyro-chat-context-branch-picker"
+                  : undefined
             }
             id={`${popoverBaseId}-context`}
             keepInBounds

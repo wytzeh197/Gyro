@@ -29098,6 +29098,14 @@ button.gyro-account-menu-row:hover,
   scrollbar-width: thin;
 }
 
+/* The chat context branch menu needs room for release names and both actions. */
+.gyro-composer-popover.gyro-chat-context-branch-picker {
+  box-sizing: border-box;
+  max-width: min(312px, calc(100vw - 32px));
+  min-width: min(184px, calc(100vw - 32px));
+  width: min(312px, calc(100vw - 32px));
+}
+
 /* Light mode context details and a compact, always-visible usage track. */
 .gyro-composer-context-bar {
   background: color-mix(in srgb, var(--gyro-muted) 20%, transparent);
