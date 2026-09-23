@@ -425,6 +425,11 @@ export function chatGridReducer(
       const existing = current.slots[existingIndex];
       next = { ...current, focusedPaneId: existing?.paneId };
     } else {
+      // Pane ids are React keys and the focus handle. An incoming pane that
+      // reuses an id already on screen — a sent draft keeps its draft pane id —
+      // would either merge into the chat it replaces or share focus with
+      // another cell, so give it an id nothing in the layout uses.
+      const incoming = chatPaneWithFreeId(action.pane, current.slots);
       const focusedIndex = current.slots.findIndex(
         (pane) => pane?.paneId === current.focusedPaneId,
       );
@@ -448,7 +453,7 @@ export function chatGridReducer(
             targetPosition + (action.insertPosition === "after" ? 1 : 0),
           ),
         );
-        occupied.splice(insertionIndex, 0, action.pane);
+        occupied.splice(insertionIndex, 0, incoming);
         const slots: Array<ChatPaneRef | null> = occupied.slice(
           0,
           CHAT_GRID_MAX_SLOTS,
@@ -457,7 +462,7 @@ export function chatGridReducer(
         next = {
           ...current,
           slots,
-          focusedPaneId: action.pane.paneId,
+          focusedPaneId: incoming.paneId,
           splitDirection:
             occupied.length === 2
               ? (action.splitDirection ?? "horizontal")
@@ -487,11 +492,11 @@ export function chatGridReducer(
         if (displacedIndex !== undefined) {
           slots[displacedIndex] = slots[targetIndex] ?? null;
         }
-        slots[targetIndex] = action.pane;
+        slots[targetIndex] = incoming;
         next = {
           ...current,
           slots,
-          focusedPaneId: action.pane.paneId,
+          focusedPaneId: incoming.paneId,
           arrangement: action.arrangement ?? current.arrangement,
         };
       }
@@ -620,6 +625,21 @@ function chatLayoutWithUniquePanes(
     splitDirection: occupied.length === 2 ? layout.splitDirection : undefined,
     arrangement: occupied.length > 1 ? layout.arrangement : undefined,
   });
+}
+
+function chatPaneWithFreeId(
+  pane: ChatPaneRef,
+  slots: Array<ChatPaneRef | null>,
+): ChatPaneRef {
+  const taken = new Set(
+    slots
+      .filter((slot): slot is ChatPaneRef => Boolean(slot))
+      .map((slot) => slot.paneId),
+  );
+  if (!taken.has(pane.paneId)) return pane;
+  let suffix = 2;
+  while (taken.has(`${pane.paneId}:${suffix}`)) suffix += 1;
+  return { ...pane, paneId: `${pane.paneId}:${suffix}` };
 }
 
 function normalizedChatSlotIndex(value?: number) {
@@ -2988,7 +3008,11 @@ export function workbenchReducer(
         },
       };
     case "github-set-run-logs":
-      if (action.runId !== undefined && state.ide.github.selectedRunId !== action.runId) return state;
+      if (
+        action.runId !== undefined &&
+        state.ide.github.selectedRunId !== action.runId
+      )
+        return state;
       return {
         ...state,
         ide: {

@@ -6670,17 +6670,28 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // A project has one unsent draft; if it is already open in a pane, focus
+      // it there rather than opening it twice. A new
+      // pane gets an id of its own: a sent draft keeps its pane id, so a
+      // shared `draft:<project>` id made the next new chat collide with the
+      // old one — same React key, shared focus, merged split panes.
+      const openDraftPane = chatGrid.layouts[projectKey]?.slots.find(
+        (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
+      );
+      const paneId =
+        openDraftPane?.paneId ?? `draft:${projectKey}:${Date.now()}`;
       // The solo surface is reused between sessions. A fresh draft must not
       // inherit its previous chat's dock, or a previously opened draft's dock.
       dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
-      dispatchCompanion({ type: "forget-pane", paneId: `draft:${projectKey}` });
+      dispatchCompanion({ type: "forget-pane", paneId });
       dispatchWorkbench({ type: "set-chat-panel" });
+      // In split view the new chat opens in the selected pane, replacing it.
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
         mode: "replace",
         pane: {
-          paneId: `draft:${projectKey}`,
+          paneId,
           kind: "draft",
           draftKey,
           workspacePath: projectPath ?? "",
@@ -6703,7 +6714,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, workspacePath],
+    [activeSession?.workspacePath, chatGrid.layouts, workspacePath],
   );
 
   /**
