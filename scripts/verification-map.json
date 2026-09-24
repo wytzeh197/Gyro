@@ -1,0 +1,104 @@
+{
+  "check-architecture-boundaries.mjs": {
+    "kind": "source-text",
+    "reason": "Repository shape (line ceilings, no provider SDK imports in UI modules) can only be read from files; there is no runtime behaviour to execute."
+  },
+  "check-browser-capability.mjs": {
+    "kind": "source-text",
+    "reason": "The browser capability contract lives in Rust tables that Node cannot execute; this guard pins the table arms, the product-knowledge JSON and the loopback fixture together so Rust, docs and fixture cannot drift apart."
+  },
+  "check-browser-host-bounds.mjs": { "kind": "behavioral" },
+  "check-browser-host-visibility.mjs": { "kind": "behavioral" },
+  "check-browser-navigation.mjs": { "kind": "behavioral" },
+  "check-browser-observation-cost.mjs": { "kind": "behavioral" },
+  "check-browser-reveal.mjs": { "kind": "behavioral" },
+  "check-canvas-preview-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Drives a real Chromium browser against the Canvas preview; run through scripts/run-canvas-preview-browser.mjs, which boots the dev server when it is not already up."
+  },
+  "check-chat-canvas.mjs": { "kind": "behavioral" },
+  "check-chat-close-target.mjs": { "kind": "behavioral" },
+  "check-chat-companion.mjs": { "kind": "behavioral" },
+  "check-chat-hardening.mjs": { "kind": "behavioral" },
+  "check-chat-keep-alive.mjs": { "kind": "behavioral" },
+  "check-chat-media-transfer.mjs": { "kind": "behavioral" },
+  "check-chat-message-queue.mjs": { "kind": "behavioral" },
+  "check-chat-pane-close.mjs": { "kind": "behavioral" },
+  "check-chat-persistence.mjs": { "kind": "behavioral" },
+  "check-chat-questions.mjs": { "kind": "behavioral" },
+  "check-chat-run.mjs": { "kind": "behavioral" },
+  "check-chat-side-panel.mjs": {
+    "kind": "source-text",
+    "reason": "The rail's defects were layout failures - the wrong track, the wrong specificity, a control group that cannot wrap; its assertions are written against source markup and CSS because that is the closest check to the painted result short of a full workbench run."
+  },
+  "check-chat-split-new-session.mjs": { "kind": "behavioral" },
+  "check-chat-timeline.mjs": { "kind": "behavioral" },
+  "check-clean-machine-path.mjs": { "kind": "behavioral" },
+  "check-cli-release-packaging.mjs": { "kind": "behavioral" },
+  "check-code-intelligence.mjs": {
+    "kind": "behavioral",
+    "note": "UI-side parity executes the shipped label map and tool mapping; the Rust descriptor arms remain source-text because Node cannot execute the crate."
+  },
+  "check-command-blocking.mjs": {
+    "kind": "source-text",
+    "reason": "Tauri's async/blocking contract is a property of the Rust sources; the guard statically proves disk work sits on spawn_blocking, which executing would require a live runtime latency probe."
+  },
+  "check-composer-context-usage.mjs": { "kind": "behavioral" },
+  "check-context-compaction.mjs": { "kind": "behavioral" },
+  "check-council-freeze.mjs": { "kind": "behavioral" },
+  "check-desktop-dev.mjs": { "kind": "behavioral" },
+  "check-dev-env.mjs": { "kind": "behavioral" },
+  "check-download-site-build.mjs": { "kind": "behavioral" },
+  "check-download-site-runtime.mjs": { "kind": "behavioral" },
+  "check-download-site.mjs": { "kind": "behavioral" },
+  "check-environment-actions.mjs": { "kind": "behavioral" },
+  "check-file-review.mjs": { "kind": "behavioral" },
+  "check-github-reliability.mjs": { "kind": "behavioral" },
+  "check-global-search.mjs": { "kind": "behavioral" },
+  "check-goal-plan.mjs": { "kind": "behavioral" },
+  "check-guard-registry.mjs": {
+    "kind": "source-text",
+    "reason": "Meta-guard: runner reachability and verification-map coverage are properties of the repository's own text; there is nothing to execute."
+  },
+  "check-language-server-registry.mjs": {
+    "kind": "behavioral",
+    "note": "The UI half executes the merged languageDefinitions table; the Rust allowlist half stays extracted from source because the crate cannot run in Node."
+  },
+  "check-menu-bar-state.mjs": { "kind": "behavioral" },
+  "check-model-catalog.mjs": { "kind": "behavioral" },
+  "check-model-catalog-cadence.mjs": { "kind": "behavioral" },
+  "check-model-classes.mjs": { "kind": "behavioral" },
+  "check-model-file-visibility.mjs": { "kind": "behavioral" },
+  "check-page-reliability.mjs": { "kind": "behavioral" },
+  "check-plan-document.mjs": { "kind": "behavioral" },
+  "check-provider-benchmark-summary.mjs": { "kind": "behavioral" },
+  "check-provider-capability-manifest.mjs": { "kind": "behavioral" },
+  "check-provider-identity.mjs": { "kind": "behavioral" },
+  "check-provider-stream-ordering.mjs": { "kind": "behavioral" },
+  "check-release-config.mjs": {
+    "kind": "source-text",
+    "reason": "Release configuration is data - signing identity, updater endpoints, version surfaces, workflow stages; the packaged-artifact half of this contract runs in release CI (verify-macos-release.mjs)."
+  },
+  "check-review-scope.mjs": { "kind": "behavioral" },
+  "check-session-listing.mjs": { "kind": "behavioral" },
+  "check-source-control-review.mjs": { "kind": "behavioral" },
+  "check-startup-performance.mjs": { "kind": "behavioral" },
+  "check-surface-boundaries.mjs": { "kind": "behavioral" },
+  "check-syntax-highlighting.mjs": { "kind": "behavioral" },
+  "check-terminal-failure.mjs": { "kind": "behavioral" },
+  "check-terminal-layout.mjs": { "kind": "behavioral" },
+  "check-terminal-output.mjs": { "kind": "behavioral" },
+  "check-terminal-profiles.mjs": { "kind": "behavioral" },
+  "check-turn-timing.mjs": { "kind": "behavioral" },
+  "check-turn-tokens.mjs": { "kind": "behavioral" },
+  "check-ui-tokens.mjs": {
+    "kind": "source-text",
+    "reason": "Token coherence (definitions vs usage across styles.css, editor CSS and TS) is a cascade property; rendered-output assertions would need a browser and would still not pin specificity the way the text rules do."
+  },
+  "check-unread-completed-chats.mjs": { "kind": "behavioral" },
+  "check-usage-ledger.mjs": { "kind": "behavioral" },
+  "check-workbench-ui.mjs": { "kind": "behavioral" },
+  "check-workflow-upgrades.mjs": { "kind": "behavioral" },
+  "check-workspace-capability-sync.mjs": { "kind": "behavioral" },
+  "check-workspace-explorer.mjs": { "kind": "behavioral" }
+}

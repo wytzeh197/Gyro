@@ -184,6 +184,10 @@ function providerOutcome(
         continue;
       }
       const session = sessionById.get(sessionId);
+      // A session another chat's turn started — a research sub-agent run — is
+      // not a chat the user started, so finishing it is not a chat outcome:
+      // the turn waiting on it reports its own.
+      if (session?.parentSessionId) continue;
       const finishedAt =
         stringFromRecord(payload, "completedAt") ?? event.createdAt;
       const outcome: MenuBarOutcome = {

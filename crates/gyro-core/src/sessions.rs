@@ -25,7 +25,10 @@ const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 3;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 4;
+/// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
+/// the write path cannot create — cannot spin forever.
+const MAX_SUBAGENT_SESSION_TREE: usize = 256;
 const MAX_WORKSPACE_IDENTITY_ROOTS: usize = 20;
 
 /// One page of session history read from the JSONL log.
@@ -177,6 +180,13 @@ pub struct Session {
     pub workspace_path: PathBuf,
     pub workspace_identity: WorkspaceIdentity,
     pub origin: SessionOrigin,
+    /// The chat whose turn started this session, when the user did not start
+    /// it: a research sub-agent runs in a session of its own so its transcript
+    /// stays auditable, but that session belongs to the turn that started it.
+    /// It is not listed as a chat of its own, "the latest chat" skips it, and
+    /// deleting the chat that started it takes it away too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<Uuid>,
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
     pub worktree_name: Option<String>,
@@ -463,6 +473,40 @@ impl SessionStore {
         title: impl Into<String>,
         context: CreateSessionContext,
     ) -> Result<Session> {
+        self.insert_session(workspace_path, origin, title, context, None)
+    }
+
+    /// Starts a session a chat's turn owns rather than the user.
+    ///
+    /// A research sub-agent runs in a session of its own so its transcript is
+    /// auditable, but that session is not a chat of its own: the chat list
+    /// leaves it out, `latest_session` skips it, and deleting the chat that
+    /// started it takes it away too.
+    pub fn create_subagent_session(
+        &self,
+        workspace_path: impl AsRef<Path>,
+        origin: SessionOrigin,
+        title: impl Into<String>,
+        context: CreateSessionContext,
+        parent_session_id: Uuid,
+    ) -> Result<Session> {
+        self.insert_session(
+            workspace_path,
+            origin,
+            title,
+            context,
+            Some(parent_session_id),
+        )
+    }
+
+    fn insert_session(
+        &self,
+        workspace_path: impl AsRef<Path>,
+        origin: SessionOrigin,
+        title: impl Into<String>,
+        context: CreateSessionContext,
+        parent_session_id: Option<Uuid>,
+    ) -> Result<Session> {
         let now = Utc::now();
         let id = Uuid::new_v4();
         let title = normalize_session_title(title)?;
@@ -480,6 +524,7 @@ impl SessionStore {
             ),
             workspace_path,
             origin,
+            parent_session_id,
             workspace_mode: context.workspace_mode,
             branch: context.branch,
             worktree_name: context.worktree_name,
@@ -497,8 +542,8 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into sessions
-             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path, workspace_identity_json)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path, workspace_identity_json, parent_session_id)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 session.id.to_string(),
                 session.title,
@@ -516,6 +561,7 @@ impl SessionStore {
                 session.updated_at.to_rfc3339(),
                 session.events_path.to_string_lossy(),
                 serde_json::to_string(&session.workspace_identity)?,
+                session.parent_session_id.map(|id| id.to_string()),
             ],
         )?;
 
@@ -546,7 +592,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 row_to_session,
@@ -589,12 +635,16 @@ impl SessionStore {
             .ok_or_else(|| anyhow!("session disappeared after Workspace update"))
     }
 
+    /// The newest chat the user started.
+    ///
+    /// A session another chat's turn started — a research sub-agent run — is
+    /// not a chat the user can resume, so it never answers "the latest chat".
     pub fn latest_session(&self) -> Result<Option<Session>> {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
-                 from sessions order by updated_at desc limit 1",
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 from sessions where parent_session_id is null order by updated_at desc limit 1",
                 [],
                 row_to_session,
             )
@@ -611,11 +661,11 @@ impl SessionStore {
     pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
         let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
              from sessions order by updated_at desc limit ?1"
         } else {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
              from sessions order by updated_at desc"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -680,7 +730,53 @@ impl SessionStore {
         self.get_session(session_id)
     }
 
+    /// Deletes a chat and the sub-agent sessions its turns started.
+    ///
+    /// A sub-agent run is kept for audit but is not a chat of its own, so once
+    /// the chat that started it is gone it would be invisible junk. The whole
+    /// tree goes: a chat opened from a call card can run research of its own,
+    /// and that session would otherwise be orphaned the same way. One that
+    /// cannot be removed does not fail the delete the user did ask for.
     pub fn delete_session(&self, session_id: Uuid) -> Result<bool> {
+        let deleted = self.delete_session_only(session_id)?;
+        let mut pending = self.child_session_ids(session_id)?;
+        let mut removed = 0usize;
+        while let Some(child) = pending.pop() {
+            if removed >= MAX_SUBAGENT_SESSION_TREE {
+                eprintln!(
+                    "stopped removing sub-agent sessions after {MAX_SUBAGENT_SESSION_TREE} of them"
+                );
+                break;
+            }
+            removed += 1;
+            match self.delete_session_only(child) {
+                Ok(_) => {
+                    if let Ok(grandchildren) = self.child_session_ids(child) {
+                        pending.extend(grandchildren);
+                    }
+                }
+                Err(error) => eprintln!("could not remove sub-agent session {child}: {error}"),
+            }
+        }
+        Ok(deleted)
+    }
+
+    /// The sessions this chat's turns started, whatever they were called.
+    fn child_session_ids(&self, session_id: Uuid) -> Result<Vec<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("select id from sessions where parent_session_id = ?1")?;
+        let rows = stmt.query_map(params![session_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut children = Vec::new();
+        for row in rows {
+            children.push(Uuid::parse_str(&row?)?);
+        }
+        Ok(children)
+    }
+
+    fn delete_session_only(&self, session_id: Uuid) -> Result<bool> {
         let Some(session) = self.get_session(session_id)? else {
             let orphaned_events = self.session_events_path(session_id)?;
             if let Err(error) = std::fs::remove_file(&orphaned_events) {
@@ -1612,6 +1708,9 @@ impl SessionStore {
         self.ensure_column("summary", "summary text")?;
         self.ensure_column("summary_updated_at", "summary_updated_at text")?;
         self.ensure_column("workspace_identity_json", "workspace_identity_json text")?;
+        // A session a turn started records the chat that started it; sessions
+        // that predate the column are the user's own chats, so null is right.
+        self.ensure_column("parent_session_id", "parent_session_id text")?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -1639,6 +1738,7 @@ impl SessionStore {
                summary text,
                summary_updated_at text,
                workspace_identity_json text,
+               parent_session_id text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -1646,6 +1746,9 @@ impl SessionStore {
 
              create index if not exists idx_sessions_updated_at
              on sessions(updated_at desc);
+
+             create index if not exists idx_sessions_parent_session_id
+             on sessions(parent_session_id);
 
              create index if not exists idx_sessions_workspace_path
              on sessions(workspace_path);
@@ -2285,6 +2388,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let summary: Option<String> = row.get(15)?;
     let summary_updated_at: Option<String> = row.get(16)?;
     let workspace_identity_json: Option<String> = row.get(17)?;
+    let parent_session_id: Option<String> = row.get(18)?;
     let workspace_path = PathBuf::from(workspace_path);
     let workspace_mode = SessionWorkspaceMode::from_str(&workspace_mode);
     let workspace_identity = workspace_identity_json
@@ -2298,6 +2402,9 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         workspace_path,
         workspace_identity,
         origin: SessionOrigin::from_str(&origin),
+        parent_session_id: parent_session_id
+            .map(|value| Uuid::parse_str(&value).map_err(parse_error))
+            .transpose()?,
         workspace_mode,
         branch,
         worktree_name,
@@ -2471,6 +2578,96 @@ mod tests {
         assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
         assert_eq!(events[1].message, "hello");
         assert!(store.latest_session().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_subagent_session_records_the_chat_that_started_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "ask the model")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: where do the sidebar chats come from?",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+
+        assert_eq!(child.parent_session_id, Some(parent.id));
+        assert_eq!(parent.parent_session_id, None);
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let reopened = SessionStore::open(paths).unwrap();
+        let persisted = reopened.get_session(child.id).unwrap().unwrap();
+        assert_eq!(persisted.parent_session_id, Some(parent.id));
+    }
+
+    #[test]
+    fn the_latest_chat_skips_a_subagent_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "the chat I opened")
+            .unwrap();
+        store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: am I the latest chat?",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+
+        // The child is the newest row, but "the latest chat" means the chat the
+        // user started.
+        let latest = store.latest_session().unwrap().unwrap();
+        assert_eq!(latest.id, parent.id);
+    }
+
+    #[test]
+    fn deleting_a_chat_deletes_the_subagent_sessions_it_started() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "delete me")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: kept only while the chat lives",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        let unrelated = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "leave me alone")
+            .unwrap();
+        // A sub-agent chat can be opened from its call card and run research of
+        // its own, so the tree is removed a level at a time rather than just the
+        // first one.
+        let grandchild = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: one level further",
+                CreateSessionContext::default(),
+                child.id,
+            )
+            .unwrap();
+        let child_log = child.events_path.clone();
+
+        assert!(store.delete_session(parent.id).unwrap());
+
+        assert!(store.get_session(parent.id).unwrap().is_none());
+        assert!(store.get_session(child.id).unwrap().is_none());
+        assert!(store.get_session(grandchild.id).unwrap().is_none());
+        assert!(!child_log.exists());
+        assert!(store.get_session(unrelated.id).unwrap().is_some());
     }
 
     #[cfg(unix)]

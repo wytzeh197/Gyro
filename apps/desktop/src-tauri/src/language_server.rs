@@ -191,6 +191,11 @@ struct LanguageServerProcess {
     root: PathBuf,
     language_id: String,
     command: String,
+    /// Whether this server has ever answered with a real semantic result.
+    /// A cold rust-analyzer answers promptly with an empty list instead of
+    /// timing out and sends no readiness notification, so an empty answer
+    /// from a server that has never produced a result is "still loading".
+    answered_nonempty: bool,
 }
 
 impl Drop for LanguageServerProcess {
@@ -344,6 +349,7 @@ impl LanguageServerManager {
             root: root.to_path_buf(),
             language_id: language_id.to_string(),
             command: command_text.to_string(),
+            answered_nonempty: false,
         };
         let root_uri = workspace_file_uri(root);
         write_lsp_message(
@@ -505,14 +511,36 @@ impl LanguageServerManager {
         match receive_lsp_response(&mut process, request_id, LSP_FILE_REQUEST_TIMEOUT) {
             Ok((response, _messages)) => {
                 if let Some(error) = response.get("error") {
+                    // -32801 "content modified" is rust-analyzer's retryable
+                    // signal that the workspace moved under the request — it
+                    // answers this while it is still loading — so it joins
+                    // Indexing rather than failing the call.
+                    if error.get("code").and_then(|value| value.as_i64()) == Some(-32801) {
+                        return Ok(LspFileOutcome::Indexing {
+                            retry_after_ms: LSP_INDEXING_RETRY_AFTER_MS,
+                        });
+                    }
                     anyhow::bail!("language server rejected the request: {error}");
                 }
-                Ok(LspFileOutcome::Result(
-                    response
-                        .get("result")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null),
-                ))
+                let result = response
+                    .get("result")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                // rust-analyzer answers promptly while it is still loading the
+                // crate graph — with an empty result, not a timeout, and with
+                // no readiness notification to wait on — so an empty answer is
+                // only believed once this server has shown it can resolve
+                // something in the workspace.
+                if lsp_result_is_empty(&result) {
+                    if !process.answered_nonempty {
+                        return Ok(LspFileOutcome::Indexing {
+                            retry_after_ms: LSP_INDEXING_RETRY_AFTER_MS,
+                        });
+                    }
+                } else {
+                    process.answered_nonempty = true;
+                }
+                Ok(LspFileOutcome::Result(result))
             }
             // A cold server (rust-analyzer on first touch) indexes for a while
             // before it can answer. Report that instead of letting the model
@@ -929,6 +957,16 @@ fn handle_lsp_server_message(
     )
 }
 
+/// An empty answer: no definition, no reference, no symbol. Distinguishes the
+/// shapes the protocol actually returns (`null`, `[]`) from real results.
+fn lsp_result_is_empty(result: &serde_json::Value) -> bool {
+    match result {
+        serde_json::Value::Null => true,
+        serde_json::Value::Array(items) => items.is_empty(),
+        _ => false,
+    }
+}
+
 fn workspace_file_uri(path: &Path) -> String {
     let value = path.to_string_lossy();
     let mut encoded = String::with_capacity(value.len() + 8);
@@ -1119,14 +1157,15 @@ mod tests {
             "[package]\nname = \"lsp-nav\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
-        std::fs::write(
-            workspace.path().join("src/lib.rs"),
-            "pub fn helper() -> u32 { 1 }\n\npub fn caller() -> u32 { helper() }\n",
-        )
-        .unwrap();
+        let source = "pub fn helper() -> u32 { 1 }\n\npub fn caller() -> u32 { helper() }\n";
+        std::fs::write(workspace.path().join("src/lib.rs"), source).unwrap();
         let manager = LanguageServerManager::default();
         let root = workspace.path().to_path_buf();
         let file = root.join("src/lib.rs").canonicalize().unwrap();
+        // The cursor must sit on the call itself (1-based scalar column):
+        // one column to the left lands on the brace and resolves to nothing.
+        let call_line = source.lines().nth(2).unwrap();
+        let column = call_line.find("helper()").unwrap() as u64 + 1;
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             let outcome = manager
@@ -1134,10 +1173,7 @@ mod tests {
                     &root,
                     "src/lib.rs",
                     &file,
-                    LspFileRequest::Definition {
-                        line: 3,
-                        column: 24,
-                    },
+                    LspFileRequest::Definition { line: 3, column },
                 )
                 .unwrap();
             match outcome {
@@ -1161,5 +1197,15 @@ mod tests {
         for server_id in manager.server_ids() {
             manager.stop(&server_id).unwrap();
         }
+    }
+
+    #[test]
+    fn empty_semantic_answers_are_recognized_by_shape() {
+        assert!(lsp_result_is_empty(&serde_json::Value::Null));
+        assert!(lsp_result_is_empty(&serde_json::json!([])));
+        assert!(!lsp_result_is_empty(&serde_json::json!([
+            { "uri": "file:///workspace/src/lib.rs" }
+        ])));
+        assert!(!lsp_result_is_empty(&serde_json::json!({ "contents": "hover" })));
     }
 }

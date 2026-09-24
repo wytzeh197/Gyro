@@ -229,7 +229,16 @@ export type ProjectCapabilityPolicy = {
 
 export type CapabilityResourceRef = {
   id: string;
-  kind: "workspace" | "ide" | "terminal" | "browser" | "proposal" | "output";
+  // `chat` is a sub-agent transcript: the research run keeps its reading in a
+  // session of its own, and the call card opens it from there.
+  kind:
+    | "workspace"
+    | "ide"
+    | "terminal"
+    | "browser"
+    | "proposal"
+    | "output"
+    | "chat";
   label: string;
 };
 
@@ -1820,6 +1829,12 @@ export type Session = {
     worktreeRootId?: string;
   };
   origin: SessionOrigin;
+  /**
+   * The chat whose turn started this session, when the user did not start it:
+   * a research sub-agent keeps its transcript in a session of its own, but
+   * that session is not listed as a chat of its own.
+   */
+  parentSessionId?: string;
   workspaceMode?: WorkbenchMode;
   branch?: string;
   worktreeName?: string;

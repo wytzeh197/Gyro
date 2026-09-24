@@ -1,29 +1,29 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { languageDefinitions } from "../packages/ui/src/editor/languages/definitions.ts";
 
 const root = new URL("../", import.meta.url);
 const rust = await readFile(
   new URL("apps/desktop/src-tauri/src/language_server.rs", root),
   "utf8",
 );
-const typescript = await readFile(
-  new URL("packages/ui/src/editor/languages/definitions.ts", root),
-  "utf8",
-);
 
-// The editor keeps the UI copy of the language-server registry; only the
+// The editor's registry is executed here, not pattern-matched: the module
+// merges its enhancements table into languageDefinitions at import time, so
+// reading the live definitions is what the editor actually ships. Only the
 // entries that name an lsp command participate in this contract.
 const uiPairs = new Set();
-for (const match of typescript.matchAll(
-  /(\w[\w-]*):\s*\{[^}]*?lsp:\s*\{\s*(?:languageId:\s*"([^"]+)",\s*)?command:\s*"([^"]+)"\s*\}/g,
-)) {
-  const [, id, languageId, command] = match;
-  uiPairs.add(`${languageId ?? id}\u0000${command}`);
+for (const definition of languageDefinitions) {
+  if (!definition.lsp) continue;
+  uiPairs.add(
+    `${definition.lsp.languageId ?? definition.id}\u0000${definition.lsp.command}`,
+  );
 }
 assert.ok(uiPairs.size > 0, "definitions.ts no longer declares any lsp command");
 
 // Rust owns what the capabilities may start, so both of its tables must agree
-// with the editor list.
+// with the editor list. The crate cannot be executed from Node, so the Rust
+// side stays extracted from source.
 const rustPairs = new Set();
 for (const table of rust.matchAll(
   /const LANGUAGE_SERVER_BY_(?:SUFFIX|FILENAME)[^=]*= &\[([\s\S]*?)\];/g,

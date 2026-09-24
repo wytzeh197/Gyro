@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+import ts from "typescript";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
@@ -92,20 +94,68 @@ for (const id of [
     `${id} is missing from the renderer CapabilityId union`,
   );
 }
-for (const label of [
-  '"code-definition": "Go to definition"',
-  '"code-references": "Find references"',
-  '"code-hover": "Hover info"',
-  '"code-symbols": "File symbols"',
+// The labels and the tool mapping are executed from the shipped
+// implementations rather than pattern-matched: a refactor that keeps the
+// strings but drops the behaviour cannot pass.
+function executeFunction(source, fileName, functionName, argument) {
+  const ast = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  let declaration;
+  const visit = (node) => {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name?.getText(ast) === functionName
+    ) {
+      declaration ??= node.getText(ast);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(declaration, `${fileName} no longer declares ${functionName}`);
+  const code = ts.transpileModule(
+    `${declaration}; globalThis.run = ${functionName};`,
+    {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.None,
+      },
+    },
+  ).outputText;
+  const context = {};
+  vm.runInNewContext(code, context);
+  return context.run(argument);
+}
+for (const [id, label] of [
+  ["code-definition", "Go to definition"],
+  ["code-references", "Find references"],
+  ["code-hover", "Hover info"],
+  ["code-symbols", "File symbols"],
 ]) {
-  assert.ok(chatRun.includes(label), `${label} is missing from chat-run.ts`);
+  assert.equal(
+    executeFunction(chatRun, "chat-run.ts", "humanizeCapabilityId", id),
+    label,
+    `chat-run.ts no longer labels ${id} "${label}"`,
+  );
 }
 assert.ok(
   chatRun.includes('capabilityId.startsWith("code-")'),
   "code capabilities have no activity beat",
 );
-assert.ok(
-  catalog.includes('capabilityId.startsWith("code-")'),
+assert.deepEqual(
+  [
+    ...executeFunction(
+      catalog,
+      "provider-catalog.ts",
+      "allowedToolsFromCapabilityIds",
+      ["code-definition", "code-symbols"],
+    ),
+  ],
+  ["files"],
   "code capabilities do not map to the files tool",
 );
 

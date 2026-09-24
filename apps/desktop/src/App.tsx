@@ -43,6 +43,10 @@ import { createGithubRefreshController } from "./github-refresh";
 import { useProviderUsage } from "./use-provider-usage";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { resolveChatPaneClose } from "./chat-pane-close";
+import {
+  normalizeProjectPath,
+  visibleSessionsForProjects,
+} from "./session-listing";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
@@ -11115,6 +11119,15 @@ export function App() {
       if (action === "show-capability") {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
+        if (activity.resource.kind === "chat") {
+          // A research sub-agent keeps its transcript in a chat of its own.
+          // That chat is not listed among the user's chats, so the call that
+          // ran it is what opens it — and the session list may not know about
+          // it yet.
+          const chatSessionId = activity.resource.id;
+          void refreshSessions().then(() => selectSession(chatSessionId));
+          return;
+        }
         selectSession(event.sessionId);
         const session = sessions.find((item) => item.id === event.sessionId);
         if (session) setWorkspacePath(session.workspacePath);
@@ -11338,6 +11351,7 @@ export function App() {
       capabilityResourceDataByCallId,
       connectProvider,
       notify,
+      refreshSessions,
       selectSession,
       sendDraft,
       sessions,
@@ -17996,10 +18010,6 @@ function loadRecentProjectPaths(): string[] {
   }
 }
 
-function normalizeProjectPath(path?: string) {
-  return path?.trim().replace(/\/+$/, "") ?? "";
-}
-
 function chatPaneForSession(session: Session): ChatPaneRef {
   return {
     paneId: `session:${session.id}`,
@@ -18007,16 +18017,6 @@ function chatPaneForSession(session: Session): ChatPaneRef {
     sessionId: session.id,
     workspacePath: session.workspacePath,
   };
-}
-
-function visibleSessionsForProjects(
-  sessions: Session[],
-  removedProjectPaths: string[],
-) {
-  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
-  return sessions.filter(
-    (session) => !removed.has(normalizeProjectPath(session.workspacePath)),
-  );
 }
 
 function readBoundedLocalStorage(key: string, maxChars: number) {

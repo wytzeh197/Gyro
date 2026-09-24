@@ -1008,6 +1008,13 @@ const languageServerRustSource = readRepoFile(
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
 );
+const subagentRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/subagent_capability.rs",
+);
+const sessionListingSource = readRepoFile(
+  "apps/desktop/src/session-listing.ts",
+);
+const menuBarStateSource = readRepoFile("apps/desktop/src/menu-bar-state.ts");
 const updateStateSource = readRepoFile("packages/ui/src/update-state.ts");
 const updateControllerSource = readRepoFile(
   "apps/desktop/src/update-controller.ts",
@@ -6099,6 +6106,48 @@ expect(
     coreSessionsSource.includes("GoalUpdated") &&
     coreSessionsSource.includes("ChatModeChanged"),
   "Chat should persist goals, plans, modes, drafts, attachments, and real provider cancellation.",
+);
+// A research sub-agent is a real provider run in its own session, and every
+// provider run is dispatched against a control in the cancellation manager:
+// the capability context is bound through it, the broker checks it before each
+// tool call, a waiting approval abandons itself when it stops, and timeline and
+// usage events read their sequence from it. Without a control of its own the
+// child dies before its first token with "provider run is no longer active".
+// The child's control also watches the parent chat's stop token, so stopping
+// the chat that asked for research stops the research instead of leaving it
+// spending in the background while the parent waits on a tool result nobody is
+// waiting for any more.
+expect(
+  tauriSource.includes(
+    "CapabilityId::ResearchRun => subagent_capability::execute",
+  ) &&
+    subagentRustSource.includes("ChildRunControl::claim(") &&
+    subagentRustSource.includes("claim_child_run_control(") &&
+    subagentRustSource.includes("release_child_run_control(") &&
+    subagentRustSource.includes("ParentStopWatcher::start(") &&
+    subagentRustSource.includes("ProviderCancellationManager") &&
+    subagentRustSource.includes("MAX_CONCURRENT_PROVIDER_RUNS") &&
+    subagentRustSource.includes("drop(run);"),
+  "A research sub-agent should claim its own provider run control, watch its parent chat's stop, and release the control when the child turn ends.",
+);
+// A sub-agent run belongs to the chat that started it. The child session
+// records the chat that started it; the store keeps it out of "the latest
+// chat", which is what resume and startup mean, and takes it away when the
+// chat is deleted; the chat list leaves it out; the menu bar does not report
+// its completion as a chat of its own; and the call card that reports the
+// research is the way the transcript is opened.
+expect(
+  subagentRustSource.includes("create_subagent_session(") &&
+    coreSessionsSource.includes("create_subagent_session(") &&
+    coreSessionsSource.includes("parent_session_id") &&
+    coreSessionsSource.includes("where parent_session_id = ?1") &&
+    coreSessionsSource.includes("where parent_session_id is null") &&
+    sessionListingSource.includes("parentSessionId") &&
+    sessionListingSource.includes("visibleSessionsForProjects") &&
+    appSource.includes('from "./session-listing"') &&
+    appSource.includes('activity.resource.kind === "chat"') &&
+    menuBarStateSource.includes("session?.parentSessionId"),
+  "A research sub-agent should record the chat that started it, stay out of the chat list, the latest-chat lookup and the menu bar, and be opened from the call card.",
 );
 expect(
   coreSessionsSource.includes(
