@@ -193,6 +193,7 @@ export function estimateComposerContextUsage(
   // the turn spent, so a run that carries a window and no counts still has to
   // size the meter correctly while the estimate fills in the usage.
   let reportedContextWindow: number | undefined;
+  let compactedSummaryCharacters = 0;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -204,6 +205,8 @@ export function estimateComposerContextUsage(
     // the compaction did not report its own, the estimate starts over here.
     if (!usage && !reportedUsage && isManualCompaction(events, event)) {
       reportedEventIndex = index;
+      compactedSummaryCharacters =
+        stringValue(payload, "contextSummary")?.length ?? 0;
       break;
     }
     if (!usage) continue;
@@ -267,7 +270,7 @@ export function estimateComposerContextUsage(
           eventPayload(events[reportedEventIndex]!)?.contextCharacterBaseline,
         )
       : undefined;
-  let estimatedCharacters = draft.length;
+  let estimatedCharacters = draft.length + compactedSummaryCharacters;
   for (
     let index = checkpoint
       ? 0
@@ -397,37 +400,6 @@ const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
  * comparing whole seconds split them into two windows and lost the level.
  */
 const SAME_RESET_TOLERANCE_MS = 60_000;
-
-/** A reading older than this is worth flagging even without an error. */
-const USAGE_READING_STALE_MS = 5 * 60_000;
-
-/**
- * How current a plan-usage reading is, phrased for the meter footer.
- *
- * A reading kept from an earlier poll must never pass for a live one: the
- * footer says how old it is, and `stale` marks it once it is old enough or the
- * latest refresh failed.
- */
-export function formatUsageFreshness(
-  fetchedAt: string | undefined,
-  now = Date.now(),
-  failed = false,
-): { label: string; stale: boolean } | undefined {
-  const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : Number.NaN;
-  if (!Number.isFinite(fetchedMs)) return undefined;
-  const ageMs = Math.max(0, now - fetchedMs);
-  const minutes = Math.floor(ageMs / 60_000);
-  const age =
-    ageMs < 60_000
-      ? "just now"
-      : minutes < 60
-        ? `${minutes} min ago`
-        : minutes < 24 * 60
-          ? `${Math.floor(minutes / 60)} hr ago`
-          : `${Math.floor(minutes / (24 * 60))} d ago`;
-  const stale = failed || ageMs >= USAGE_READING_STALE_MS;
-  return { label: `${stale ? "Last read" : "Updated"} ${age}`, stale };
-}
 
 /**
  * When a window resets, phrased the way a limit is actually read.

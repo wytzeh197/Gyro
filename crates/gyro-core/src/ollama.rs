@@ -437,7 +437,7 @@ fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
         description: if supports_tools {
             format!("{fallback_description} Advertises function calling for governed Gyro tools.")
         } else {
-            format!("{fallback_description} Chat only: tool support was not verified.")
+            format!("{fallback_description} Uses Gyro's structured Workspace bridge because native function calling was not verified.")
         },
         parameter_size: tag.details.parameter_size,
         quantization_level: tag.details.quantization_level,

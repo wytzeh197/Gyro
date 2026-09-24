@@ -425,6 +425,11 @@ export function chatGridReducer(
       const existing = current.slots[existingIndex];
       next = { ...current, focusedPaneId: existing?.paneId };
     } else {
+      // Pane ids are React keys and the focus handle. An incoming pane that
+      // reuses an id already on screen — a sent draft keeps its draft pane id —
+      // would either merge into the chat it replaces or share focus with
+      // another cell, so give it an id nothing in the layout uses.
+      const incoming = chatPaneWithFreeId(action.pane, current.slots);
       const focusedIndex = current.slots.findIndex(
         (pane) => pane?.paneId === current.focusedPaneId,
       );
@@ -448,7 +453,7 @@ export function chatGridReducer(
             targetPosition + (action.insertPosition === "after" ? 1 : 0),
           ),
         );
-        occupied.splice(insertionIndex, 0, action.pane);
+        occupied.splice(insertionIndex, 0, incoming);
         const slots: Array<ChatPaneRef | null> = occupied.slice(
           0,
           CHAT_GRID_MAX_SLOTS,
@@ -457,7 +462,7 @@ export function chatGridReducer(
         next = {
           ...current,
           slots,
-          focusedPaneId: action.pane.paneId,
+          focusedPaneId: incoming.paneId,
           splitDirection:
             occupied.length === 2
               ? (action.splitDirection ?? "horizontal")
@@ -487,11 +492,11 @@ export function chatGridReducer(
         if (displacedIndex !== undefined) {
           slots[displacedIndex] = slots[targetIndex] ?? null;
         }
-        slots[targetIndex] = action.pane;
+        slots[targetIndex] = incoming;
         next = {
           ...current,
           slots,
-          focusedPaneId: action.pane.paneId,
+          focusedPaneId: incoming.paneId,
           arrangement: action.arrangement ?? current.arrangement,
         };
       }
@@ -620,6 +625,21 @@ function chatLayoutWithUniquePanes(
     splitDirection: occupied.length === 2 ? layout.splitDirection : undefined,
     arrangement: occupied.length > 1 ? layout.arrangement : undefined,
   });
+}
+
+function chatPaneWithFreeId(
+  pane: ChatPaneRef,
+  slots: Array<ChatPaneRef | null>,
+): ChatPaneRef {
+  const taken = new Set(
+    slots
+      .filter((slot): slot is ChatPaneRef => Boolean(slot))
+      .map((slot) => slot.paneId),
+  );
+  if (!taken.has(pane.paneId)) return pane;
+  let suffix = 2;
+  while (taken.has(`${pane.paneId}:${suffix}`)) suffix += 1;
+  return { ...pane, paneId: `${pane.paneId}:${suffix}` };
 }
 
 function normalizedChatSlotIndex(value?: number) {
@@ -1376,7 +1396,6 @@ export type WorkbenchAction =
       secondaryColor: string;
     }
   | { type: "set-density"; density: WorkbenchDensity }
-  | { type: "set-quick-actions-visible"; visible: boolean }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
@@ -1570,7 +1589,7 @@ export type WorkbenchAction =
     }
   | { type: "rename-terminal-pane"; paneId: string; title: string }
   | { type: "select-task"; taskId: string }
-  | { type: "create-task"; task: Task }
+  | { type: "create-task"; task: Task; replaces?: string }
   | { type: "move-task"; taskId: string; status: TaskStatus; event: string }
   | { type: "dispatch-task"; taskId: string; pane: TerminalPane }
   | { type: "set-automations"; automations: Automation[] }
@@ -1799,7 +1818,6 @@ export function workbenchReducer(
           mainColor: defaults.mainColor,
           secondaryColor: defaults.secondaryColor,
           density: defaults.density,
-          showQuickActions: defaults.showQuickActions,
           sidebarChatsCollapsed: defaults.sidebarChatsCollapsed,
           chatEnvironmentRailOpen: defaults.chatEnvironmentRailOpen,
           activeChatPanel: defaults.activeChatPanel,
@@ -1934,14 +1952,6 @@ export function workbenchReducer(
       return {
         ...state,
         preferences: { ...state.preferences, density: action.density },
-      };
-    case "set-quick-actions-visible":
-      return {
-        ...state,
-        preferences: {
-          ...state.preferences,
-          showQuickActions: action.visible,
-        },
       };
     case "set-menu-bar-visible":
       return {
@@ -2988,7 +2998,11 @@ export function workbenchReducer(
         },
       };
     case "github-set-run-logs":
-      if (action.runId !== undefined && state.ide.github.selectedRunId !== action.runId) return state;
+      if (
+        action.runId !== undefined &&
+        state.ide.github.selectedRunId !== action.runId
+      )
+        return state;
       return {
         ...state,
         ide: {
@@ -3492,14 +3506,27 @@ export function workbenchReducer(
       return {
         ...state,
         selectedTaskId: action.task.id,
-        tasks: [action.task, ...state.tasks],
+        tasks: [
+          action.task,
+          ...state.tasks.filter(
+            (task) => task.id !== action.task.id && task.id !== action.replaces,
+          ),
+        ],
       };
     case "move-task":
       return {
         ...state,
         tasks: state.tasks.map((task) =>
           task.id === action.taskId
-            ? { ...task, lastEvent: action.event, status: action.status }
+            ? {
+                ...task,
+                lastEvent: action.event,
+                status: action.status,
+                completedAt:
+                  action.status === "complete"
+                    ? new Date().toISOString()
+                    : undefined,
+              }
             : task,
         ),
       };
@@ -3659,24 +3686,14 @@ export function workbenchReducer(
             ...state.diffReview.files,
             {
               path: action.path,
-              additions: 1,
-              deletions: 1,
+              additions: 0,
+              deletions: 0,
+              countsKnown: false,
               source: action.source ?? "agent-generated",
               state: "pending" as const,
               turnId: action.turnId,
               comments: 0,
-              lines: [
-                {
-                  number: 1,
-                  kind: "removed" as const,
-                  content: "- pending proposed edit",
-                },
-                {
-                  number: 1,
-                  kind: "added" as const,
-                  content: "+ approval-gated proposed edit",
-                },
-              ],
+              lines: [],
             },
           ];
 
@@ -4531,7 +4548,6 @@ function normalizeWorkbenchPreferences(
     dailyPaceWarning: preferences?.dailyPaceWarning !== false,
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
-    showQuickActions: preferences?.showQuickActions !== false,
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:
@@ -5053,7 +5069,7 @@ function defaultGitReviewActions(): GitReviewAction[] {
     {
       id: "commit",
       label: "Commit",
-      detail: "Commit approved files",
+      detail: "Commit staged files",
       status: "blocked",
     },
     {

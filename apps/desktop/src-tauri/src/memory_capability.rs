@@ -96,7 +96,8 @@ pub(super) fn execute(
             let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
                 && capability_full_access_enabled(&config);
             let store = open_store().map_err(anyhow::Error::msg)?;
-            let proposal = create_file_mutation_proposal_in_store(
+            let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
+            let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
                 &store,
                 FileMutationProposalRequest {
                     session_id: bound.session_id.clone(),
@@ -106,6 +107,7 @@ pub(super) fn execute(
                     expected_hash,
                 },
                 apply_immediately,
+                Some(&root_id),
             )?;
             emit_proposal_events(app, bound, &proposal);
             let entries = memory_entries(&proposal.content);

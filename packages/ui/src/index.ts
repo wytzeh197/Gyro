@@ -557,7 +557,6 @@ export {
   ProvidersSurface,
   SettingsSurface,
   SettingsPanel,
-  TaskBoardSurface,
   TerminalTerminateConfirmOverlay,
   TerminalPanel,
   ToolsSurface,
@@ -567,6 +566,7 @@ export {
 export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
 export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
+export { sendableChatImage } from "./chat-media-transfer";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
@@ -625,3 +625,14 @@ export type {
   KeepAliveWatch,
 } from "./chat-keep-alive";
 export { ChatKeepAlive } from "./chat-keep-alive-view";
+export { chatTaskFromSession } from "./chat-tasks.ts";
+
+export { restoreCompanionPanes } from "./chat-companion.ts";
+export {
+  PullRequestForm,
+  type PullRequestDraft,
+} from "./pull-request-form.tsx";
+
+export type { CalendarSchedule } from "./types.ts";
+
+export { ComposerContextCandidates } from "./composer-context.ts";

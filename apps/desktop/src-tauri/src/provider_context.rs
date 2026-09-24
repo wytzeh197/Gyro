@@ -73,6 +73,42 @@ pub(super) fn provider_context_usage_from_app_server(
     })
 }
 
+/// What an ACP prompt billed, from the `usage` object on its response.
+///
+/// Grok reports camelCase counts with cached reads inside `inputTokens`, the
+/// same convention the ledger uses. The counts cover every model call in the
+/// turn, so they are billing, never the context window's occupancy.
+pub(super) fn provider_billed_usage_from_acp(usage: &Value) -> Option<ProviderContextUsage> {
+    let field = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| usage.get(*key).and_then(Value::as_u64))
+    };
+    let input_tokens = field(&["inputTokens", "input_tokens"])?;
+    let cached = field(&[
+        "cachedReadTokens",
+        "cached_read_tokens",
+        "cachedInputTokens",
+    ])
+    .unwrap_or_default()
+        + field(&[
+            "cacheCreationTokens",
+            "cachedWriteTokens",
+            "cached_write_tokens",
+        ])
+        .unwrap_or_default();
+    let output_tokens = field(&["outputTokens", "output_tokens"]).unwrap_or_default();
+    Some(ProviderContextUsage {
+        input_tokens: Some(input_tokens),
+        cached_input_tokens: (cached > 0).then_some(cached.min(input_tokens)),
+        output_tokens: Some(output_tokens),
+        reasoning_output_tokens: field(&["reasoningTokens", "thoughtTokens", "reasoning_tokens"]),
+        total_tokens: Some(
+            field(&["totalTokens", "total_tokens"]).unwrap_or(input_tokens + output_tokens),
+        ),
+        model_context_window: None,
+    })
+}
+
 pub(super) fn provider_context_usage_from_codex_exec(
     value: &Value,
 ) -> Option<ProviderContextUsage> {
@@ -198,5 +234,30 @@ pub(super) fn provider_context_usage_with_window(
             model_context_window: Some(window),
             ..ProviderContextUsage::default()
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grok_prompt_usage_is_billed_with_cached_reads_inside_input() {
+        let usage = provider_billed_usage_from_acp(&serde_json::json!({
+            "inputTokens": 18_177_618u64,
+            "cachedReadTokens": 18_036_352u64,
+            "cacheCreationTokens": 0,
+            "outputTokens": 35_877,
+            "reasoningTokens": 33_992,
+            "totalTokens": 18_213_495u64
+        }))
+        .unwrap();
+        assert_eq!(usage.input_tokens, Some(18_177_618));
+        assert_eq!(usage.cached_input_tokens, Some(18_036_352));
+        assert_eq!(usage.output_tokens, Some(35_877));
+        assert_eq!(usage.reasoning_output_tokens, Some(33_992));
+        assert_eq!(usage.total_tokens, Some(18_213_495));
+        assert_eq!(usage.model_context_window, None);
+        assert!(provider_billed_usage_from_acp(&serde_json::json!({"outputTokens": 3})).is_none());
     }
 }

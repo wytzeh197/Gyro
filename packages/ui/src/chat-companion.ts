@@ -109,7 +109,8 @@ export const CHAT_COMPANION_OVERLAY_BELOW = 720;
 /** Split only when the transcript and the dock can both stay readable. */
 export function shouldOverlayChatCompanion(availableWidth?: number) {
   return (
-    availableWidth !== undefined && availableWidth < CHAT_COMPANION_OVERLAY_BELOW
+    availableWidth !== undefined &&
+    availableWidth < CHAT_COMPANION_OVERLAY_BELOW
   );
 }
 
@@ -455,4 +456,40 @@ export function withoutSideChatSessions<T extends { id: string }>(
   const hidden = new Set(sideChatSessionIds);
   if (!hidden.size) return sessions;
   return sessions.filter((session) => !hidden.has(session.id));
+}
+
+/** Persist only tool layout; transient side chats and process identities never survive restart. */
+export function restoreCompanionPanes(
+  raw: string | undefined,
+): ChatCompanionState["panes"] {
+  try {
+    const parsed: unknown = JSON.parse(raw ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    const result: ChatCompanionState["panes"] = {};
+    for (const [key, value] of Object.entries(parsed).slice(0, 100)) {
+      if (!value || typeof value !== "object" || !Array.isArray(value.openTabs))
+        continue;
+      const openTabs = [
+        ...new Set<ChatCompanionTabId>(
+          value.openTabs.filter(
+            (tab: unknown) =>
+              typeof tab === "string" &&
+              isChatCompanionTabId(tab) &&
+              tab !== "side-chat",
+          ),
+        ),
+      ];
+      result[key] = {
+        openTabs,
+        isOpen: Boolean(value.isOpen),
+        activeTab: openTabs.includes(value.activeTab)
+          ? value.activeTab
+          : openTabs[0],
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }

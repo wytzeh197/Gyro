@@ -24,6 +24,7 @@ export type ReviewFile = {
   additions?: number;
   deletions?: number;
   staged?: boolean;
+  patches?: string[];
 };
 
 export type ReviewScopeListing = {
@@ -53,7 +54,7 @@ export function reviewScopeFromSourceControl(
 export function reviewScopeTitle(scope: ReviewScope) {
   switch (scope.kind) {
     case "proposed":
-      return "Proposed edits";
+      return "Recorded file changes";
     case "working-tree":
       return "Uncommitted changes";
     case "branch":
@@ -71,7 +72,8 @@ export function reviewScopeEmptyCopy(scope: ReviewScope): {
     case "proposed":
       return {
         title: "No changes to review",
-        detail: "Proposed file edits will appear here before approval.",
+        detail:
+          "Recorded file changes appear here. Edit approval happens in chat.",
       };
     case "working-tree":
       return {
@@ -81,7 +83,8 @@ export function reviewScopeEmptyCopy(scope: ReviewScope): {
     case "branch":
       return {
         title: "No changes compared to main",
-        detail: "This branch matches main. Uncommitted files are listed under source control.",
+        detail:
+          "This branch matches main. Uncommitted files are listed under source control.",
       };
     case "turn":
       return {
@@ -104,6 +107,7 @@ export function filesForReviewScope(
       path: string;
       additions?: number;
       deletions?: number;
+      patches?: string[];
     }>;
   } = {},
 ): ReviewScopeListing {
@@ -115,6 +119,7 @@ export function filesForReviewScope(
       path: file.path,
       additions: file.additions,
       deletions: file.deletions,
+      ...(file.patches ? { patches: file.patches } : {}),
     }));
     if (files.length === 0) {
       return {

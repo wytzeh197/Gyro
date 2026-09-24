@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Component;
@@ -24,7 +25,8 @@ const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 2;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 3;
+const MAX_WORKSPACE_IDENTITY_ROOTS: usize = 20;
 
 /// One page of session history read from the JSONL log.
 ///
@@ -62,7 +64,7 @@ impl SessionOrigin {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionWorkspaceMode {
     Local,
@@ -173,6 +175,7 @@ pub struct Session {
     pub id: Uuid,
     pub title: String,
     pub workspace_path: PathBuf,
+    pub workspace_identity: WorkspaceIdentity,
     pub origin: SessionOrigin,
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
@@ -187,6 +190,106 @@ pub struct Session {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRootIdentity {
+    pub id: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceIdentity {
+    pub schema: String,
+    pub revision: u64,
+    pub roots: Vec<WorkspaceRootIdentity>,
+    pub active_root_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_root_id: Option<String>,
+}
+
+impl WorkspaceIdentity {
+    pub const SCHEMA: &'static str = "gyro.workspace.v2";
+
+    pub fn for_session(path: &Path, mode: SessionWorkspaceMode) -> Self {
+        let id = workspace_root_id(path);
+        Self {
+            schema: Self::SCHEMA.into(),
+            revision: 1,
+            roots: vec![WorkspaceRootIdentity {
+                id: id.clone(),
+                path: path.to_path_buf(),
+            }],
+            active_root_id: id.clone(),
+            worktree_root_id: (mode == SessionWorkspaceMode::Worktree).then_some(id),
+        }
+    }
+
+    pub fn root(&self, id: &str) -> Option<&Path> {
+        self.roots
+            .iter()
+            .find(|root| root.id == id)
+            .map(|root| root.path.as_path())
+    }
+
+    pub fn updated(
+        &self,
+        primary: &Path,
+        mode: SessionWorkspaceMode,
+        paths: &[PathBuf],
+        active_root: &Path,
+    ) -> Result<Self> {
+        if paths.is_empty() || paths.len() > MAX_WORKSPACE_IDENTITY_ROOTS {
+            return Err(anyhow!("workspace must contain between 1 and 20 roots"));
+        }
+        let primary = primary.canonicalize()?;
+        let active_root = active_root.canonicalize()?;
+        let mut roots = Vec::with_capacity(paths.len());
+        for path in paths {
+            let canonical = path.canonicalize()?;
+            if !canonical.is_dir() {
+                return Err(anyhow!("workspace root must be a directory"));
+            }
+            if roots
+                .iter()
+                .any(|root: &WorkspaceRootIdentity| root.path == canonical)
+            {
+                return Err(anyhow!("workspace roots must be distinct"));
+            }
+            roots.push(WorkspaceRootIdentity {
+                id: workspace_root_id(&canonical),
+                path: canonical,
+            });
+        }
+        if roots[0].path != primary {
+            return Err(anyhow!("the session's primary root cannot change"));
+        }
+        let active_root_id = roots
+            .iter()
+            .find(|root| root.path == active_root)
+            .map(|root| root.id.clone())
+            .ok_or_else(|| anyhow!("active root must belong to the workspace"))?;
+        let worktree_root_id =
+            (mode == SessionWorkspaceMode::Worktree).then(|| roots[0].id.clone());
+        Ok(Self {
+            schema: Self::SCHEMA.into(),
+            revision: self.revision.saturating_add(1),
+            roots,
+            active_root_id,
+            worktree_root_id,
+        })
+    }
+}
+
+fn workspace_root_id(path: &Path) -> String {
+    let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+    let suffix = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("root-{suffix}")
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -371,6 +474,10 @@ impl SessionStore {
         let session = Session {
             id,
             title,
+            workspace_identity: WorkspaceIdentity::for_session(
+                &workspace_path,
+                context.workspace_mode,
+            ),
             workspace_path,
             origin,
             workspace_mode: context.workspace_mode,
@@ -390,8 +497,8 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into sessions
-             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path, workspace_identity_json)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 session.id.to_string(),
                 session.title,
@@ -407,7 +514,8 @@ impl SessionStore {
                 session.reasoning_effort,
                 session.created_at.to_rfc3339(),
                 session.updated_at.to_rfc3339(),
-                session.events_path.to_string_lossy()
+                session.events_path.to_string_lossy(),
+                serde_json::to_string(&session.workspace_identity)?,
             ],
         )?;
 
@@ -419,6 +527,7 @@ impl SessionStore {
                 "origin": session.origin.as_str(),
                 "workspaceMode": session.workspace_mode.as_str(),
                 "workspacePath": session.workspace_path,
+                "workspaceIdentity": session.workspace_identity,
                 "branch": session.branch,
                 "worktreeName": session.worktree_name,
                 "providerId": session.provider_id,
@@ -437,7 +546,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 row_to_session,
@@ -446,11 +555,45 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    pub fn set_workspace_identity(
+        &self,
+        session_id: Uuid,
+        roots: &[PathBuf],
+        active_root: &Path,
+    ) -> Result<Session> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("session not found"))?;
+        let identity = session.workspace_identity.updated(
+            &session.workspace_path,
+            session.workspace_mode,
+            roots,
+            active_root,
+        )?;
+        if identity.roots == session.workspace_identity.roots
+            && identity.active_root_id == session.workspace_identity.active_root_id
+        {
+            return Ok(session);
+        }
+        self.conn.execute(
+            "update sessions set workspace_identity_json = ?1 where id = ?2",
+            params![serde_json::to_string(&identity)?, session_id.to_string()],
+        )?;
+        self.append_event(
+            session_id,
+            SessionEventKind::SystemEvent,
+            "Workspace roots changed",
+            serde_json::json!({ "workspaceIdentity": identity }),
+        )?;
+        self.get_session(session_id)?
+            .ok_or_else(|| anyhow!("session disappeared after Workspace update"))
+    }
+
     pub fn latest_session(&self) -> Result<Option<Session>> {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
                  from sessions order by updated_at desc limit 1",
                 [],
                 row_to_session,
@@ -468,11 +611,11 @@ impl SessionStore {
     pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
         let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
              from sessions order by updated_at desc limit ?1"
         } else {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
              from sessions order by updated_at desc"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -603,9 +746,38 @@ impl SessionStore {
         expected_hash: Option<String>,
         base_exists: bool,
     ) -> Result<MutationProposal> {
+        self.create_mutation_proposal_at_root(
+            session_id,
+            turn_id,
+            None,
+            path,
+            content,
+            expected_hash,
+            base_exists,
+        )
+    }
+
+    pub fn create_mutation_proposal_at_root(
+        &self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+        root_id: Option<&str>,
+        path: impl Into<String>,
+        content: impl Into<String>,
+        expected_hash: Option<String>,
+        base_exists: bool,
+    ) -> Result<MutationProposal> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let workspace_path = match root_id {
+            Some(id) => session
+                .workspace_identity
+                .root(id)
+                .ok_or_else(|| anyhow!("workspace root is not in this session"))?
+                .to_path_buf(),
+            None => session.workspace_path,
+        };
         let path = normalize_mutation_path(path.into())?;
         let content = content.into();
         if content.len() > MAX_MUTATION_PROPOSAL_CONTENT_BYTES {
@@ -624,7 +796,7 @@ impl SessionStore {
             id: Uuid::new_v4(),
             session_id,
             turn_id,
-            workspace_path: session.workspace_path,
+            workspace_path,
             path,
             operation: if base_exists {
                 MutationProposalOperation::Update
@@ -1439,6 +1611,7 @@ impl SessionStore {
         self.ensure_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_column("summary", "summary text")?;
         self.ensure_column("summary_updated_at", "summary_updated_at text")?;
+        self.ensure_column("workspace_identity_json", "workspace_identity_json text")?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -1465,6 +1638,7 @@ impl SessionStore {
                reasoning_effort text,
                summary text,
                summary_updated_at text,
+               workspace_identity_json text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -2110,13 +2284,21 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let reasoning_effort: Option<String> = row.get(14)?;
     let summary: Option<String> = row.get(15)?;
     let summary_updated_at: Option<String> = row.get(16)?;
+    let workspace_identity_json: Option<String> = row.get(17)?;
+    let workspace_path = PathBuf::from(workspace_path);
+    let workspace_mode = SessionWorkspaceMode::from_str(&workspace_mode);
+    let workspace_identity = workspace_identity_json
+        .map(|json| serde_json::from_str::<WorkspaceIdentity>(&json).map_err(parse_error))
+        .transpose()?
+        .unwrap_or_else(|| WorkspaceIdentity::for_session(&workspace_path, workspace_mode));
 
     Ok(Session {
         id: Uuid::parse_str(&id).map_err(parse_error)?,
         title,
-        workspace_path: PathBuf::from(workspace_path),
+        workspace_path,
+        workspace_identity,
         origin: SessionOrigin::from_str(&origin),
-        workspace_mode: SessionWorkspaceMode::from_str(&workspace_mode),
+        workspace_mode,
         branch,
         worktree_name,
         provider_id,
@@ -2969,6 +3151,60 @@ mod tests {
         assert_eq!(stored.workspace_mode, SessionWorkspaceMode::Worktree);
         assert_eq!(stored.branch, "gyro/test-worktree");
         assert_eq!(stored.worktree_name.as_deref(), Some("gyro-test-worktree"));
+        assert_eq!(
+            stored.workspace_identity.worktree_root_id.as_deref(),
+            Some(stored.workspace_identity.roots[0].id.as_str())
+        );
+    }
+
+    #[test]
+    fn persists_workspace_roots_and_recovers_legacy_single_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let primary = temp.path().join("primary");
+        let second = temp.path().join("second");
+        std::fs::create_dir_all(&primary).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(&primary, SessionOrigin::Desktop, "multi-root")
+            .unwrap();
+        let updated = store
+            .set_workspace_identity(session.id, &[primary.clone(), second.clone()], &second)
+            .unwrap();
+        assert_eq!(updated.workspace_identity.roots.len(), 2);
+        assert_eq!(
+            updated
+                .workspace_identity
+                .root(&updated.workspace_identity.active_root_id),
+            Some(second.canonicalize().unwrap().as_path())
+        );
+        assert!(store
+            .set_workspace_identity(session.id, &[second.clone(), primary.clone()], &second)
+            .is_err());
+        drop(store);
+        let reopened = SessionStore::open(paths).unwrap();
+        assert_eq!(
+            reopened
+                .get_session(session.id)
+                .unwrap()
+                .unwrap()
+                .workspace_identity,
+            updated.workspace_identity
+        );
+        reopened
+            .conn
+            .execute(
+                "update sessions set workspace_identity_json = null where id = ?1",
+                params![session.id.to_string()],
+            )
+            .unwrap();
+        let legacy = reopened.get_session(session.id).unwrap().unwrap();
+        assert_eq!(legacy.workspace_identity.roots.len(), 1);
+        assert_eq!(
+            legacy.workspace_identity.roots[0].path,
+            primary.canonicalize().unwrap()
+        );
     }
 
     #[test]

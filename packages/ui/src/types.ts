@@ -13,7 +13,6 @@ export type AppDestination =
   | "workspace"
   | "tools"
   | "settings"
-  | "tasks"
   | "automations"
   | "providers"
   | "onboarding";
@@ -94,6 +93,7 @@ export type CapabilityId =
   | "workspace-search"
   | "workspace-read"
   | "workspace-read-range"
+  | "workspace-read-editor"
   | "workspace-diagnostics"
   | "workspace-git-status"
   | "workspace-diff"
@@ -187,13 +187,15 @@ export type WorkspaceContextSnapshot = {
   activePath?: string;
   activeView?: IdeViewId;
   visibleTabs: string[];
-  selection?: EditorSelection;
+  selection?: EditorSelection & { truncated?: boolean };
   buffers: Array<{
     path: string;
     dirty: boolean;
     contentHash?: string;
     diskHash?: string;
     content?: string;
+    documentVersion?: string;
+    truncated?: boolean;
   }>;
   diagnostics: ProblemDiagnostic[];
   testFailures: TestTreeItem[];
@@ -341,6 +343,8 @@ export type ChatAttachment = {
   available?: boolean;
   stale?: boolean;
   previewUrl?: string;
+  /** Dropped media still uploading; the stored file replaces it when done. */
+  pending?: boolean;
   /** Redacted stored text of a terminal-output attachment, for the composer preview. */
   previewText?: string;
 };
@@ -416,6 +420,10 @@ export type TerminalPane = {
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
 
 export type Task = {
+  completedAt?: string;
+  sessionId?: string;
+  prompt?: string;
+  workspacePath?: string;
   id: string;
   title: string;
   status: TaskStatus;
@@ -435,7 +443,14 @@ export type Task = {
 export type AutomationStatus = "current" | "paused" | "completed";
 
 export type AutomationSchedule =
-  "manual" | "hourly" | "daily" | "weekly" | "heartbeat";
+  | "manual"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "heartbeat"
+  | "once"
+  | "daily-at"
+  | "weekly-at";
 
 export type AutomationRunStatus =
   "queued" | "running" | "passed" | "failed" | "stopped";
@@ -443,6 +458,7 @@ export type AutomationRunStatus =
 export type AutomationTriageState = "none" | "needs-review" | "archived";
 
 export type AutomationRun = {
+  sessionId?: string;
   id: string;
   status: AutomationRunStatus;
   startedAt: string;
@@ -451,7 +467,15 @@ export type AutomationRun = {
   stopConditionMet?: boolean;
 };
 
+export type CalendarSchedule = {
+  timezone: string;
+  time: string;
+  date?: string;
+  weekday?: number;
+};
+
 export type AutomationExecutionContext = {
+  calendar?: CalendarSchedule;
   workspacePath?: string;
   providerId?: string;
   providerLabel?: string;
@@ -539,6 +563,7 @@ export type DiffLine = {
 };
 
 export type DiffFile = {
+  countsKnown?: boolean;
   path: string;
   additions: number;
   deletions: number;
@@ -888,11 +913,13 @@ export type ProviderChatStreamEvent = {
   /** Shared first-observation order across provider frames and broker calls. */
   timelineOrder?: number | null;
   timelineCreatedAt?: string | null;
-  timelineSegments?: {
-    start: number;
-    timelineOrder: number;
-    createdAt: string;
-  }[] | null;
+  timelineSegments?:
+    | {
+        start: number;
+        timelineOrder: number;
+        createdAt: string;
+      }[]
+    | null;
   phase: ProviderChatStreamPhase;
   contextUsage?: {
     inputTokens?: number;
@@ -1125,8 +1152,6 @@ export type WorkbenchPreferences = {
   mainColor: string;
   secondaryColor: string;
   density: WorkbenchDensity;
-  /** Whether new chats show the four starter prompt shortcuts. */
-  showQuickActions: boolean;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
@@ -1787,6 +1812,13 @@ export type Session = {
   id: string;
   title: string;
   workspacePath: string;
+  workspaceIdentity?: {
+    schema: "gyro.workspace.v2";
+    revision: number;
+    roots: Array<{ id: string; path: string }>;
+    activeRootId: string;
+    worktreeRootId?: string;
+  };
   origin: SessionOrigin;
   workspaceMode?: WorkbenchMode;
   branch?: string;

@@ -1,5 +1,21 @@
 use super::*;
 
+pub(super) fn bound_workspace_root_id(
+    store: &SessionStore,
+    bound: &BoundProviderCapabilityContext,
+) -> anyhow::Result<String> {
+    let session = store
+        .get_session(Uuid::parse_str(&bound.session_id)?)?
+        .ok_or_else(|| anyhow::anyhow!("owning session is unavailable"))?;
+    session
+        .workspace_identity
+        .roots
+        .iter()
+        .find(|root| root.path == bound.workspace)
+        .map(|root| root.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("selected workspace root is no longer in this session"))
+}
+
 pub(super) fn create_file_mutation_proposal_impl(
     request: FileMutationProposalRequest,
 ) -> anyhow::Result<MutationProposal> {
@@ -12,6 +28,15 @@ pub(super) fn create_file_mutation_proposal_in_store(
     request: FileMutationProposalRequest,
     apply_immediately: bool,
 ) -> anyhow::Result<MutationProposal> {
+    create_file_mutation_proposal_at_root(store, request, apply_immediately, None)
+}
+
+pub(super) fn create_file_mutation_proposal_at_root(
+    store: &SessionStore,
+    request: FileMutationProposalRequest,
+    apply_immediately: bool,
+    root_id: Option<&str>,
+) -> anyhow::Result<MutationProposal> {
     let session_id = Uuid::parse_str(&request.session_id)?;
     let turn_id = request
         .turn_id
@@ -21,7 +46,14 @@ pub(super) fn create_file_mutation_proposal_in_store(
     let session = store
         .get_session(session_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown session {session_id}"))?;
-    let root = session.workspace_path.canonicalize()?;
+    let root = match root_id {
+        Some(id) => session
+            .workspace_identity
+            .root(id)
+            .ok_or_else(|| anyhow::anyhow!("workspace root is not in this session"))?
+            .canonicalize()?,
+        None => session.workspace_path.canonicalize()?,
+    };
     let candidate = validated_workspace_file_target(&root, &request.path)?;
     if candidate.is_dir() {
         anyhow::bail!("mutation proposal path is a directory");
@@ -56,9 +88,10 @@ pub(super) fn create_file_mutation_proposal_in_store(
         }
         None
     };
-    let proposal = store.create_mutation_proposal(
+    let proposal = store.create_mutation_proposal_at_root(
         session_id,
         turn_id,
+        root_id,
         &request.path,
         request.content,
         expected_hash,
@@ -178,5 +211,87 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.kind == SessionEventKind::ApprovalRequested));
+    }
+
+    #[test]
+    fn reviewed_edit_targets_the_selected_secondary_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        fs::create_dir_all(&primary).unwrap();
+        fs::create_dir_all(&secondary).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(&primary, SessionOrigin::Desktop, "multi-root edit")
+            .unwrap();
+        let session = store
+            .set_workspace_identity(
+                session.id,
+                &[primary.clone(), secondary.clone()],
+                &secondary,
+            )
+            .unwrap();
+        let root_id = session.workspace_identity.active_root_id.clone();
+        let proposal = create_file_mutation_proposal_at_root(
+            &store,
+            FileMutationProposalRequest {
+                session_id: session.id.to_string(),
+                turn_id: Some(Uuid::new_v4().to_string()),
+                path: "test.txt".into(),
+                content: "secondary content".into(),
+                expected_hash: None,
+            },
+            false,
+            Some(&root_id),
+        )
+        .unwrap();
+        assert_eq!(proposal.workspace_path, secondary.canonicalize().unwrap());
+        decide_mutation_proposal(&store, proposal.id, MutationDecision::Approve).unwrap();
+        assert_eq!(
+            fs::read_to_string(secondary.join("test.txt")).unwrap(),
+            "secondary content"
+        );
+        assert!(!primary.join("test.txt").exists());
+    }
+
+    #[test]
+    fn pending_edit_cannot_apply_after_its_root_is_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        fs::create_dir_all(&primary).unwrap();
+        fs::create_dir_all(&secondary).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(&primary, SessionOrigin::Desktop, "removed root")
+            .unwrap();
+        let session = store
+            .set_workspace_identity(
+                session.id,
+                &[primary.clone(), secondary.clone()],
+                &secondary,
+            )
+            .unwrap();
+        let proposal = create_file_mutation_proposal_at_root(
+            &store,
+            FileMutationProposalRequest {
+                session_id: session.id.to_string(),
+                turn_id: None,
+                path: "test.txt".into(),
+                content: "not applied".into(),
+                expected_hash: None,
+            },
+            false,
+            Some(&session.workspace_identity.active_root_id),
+        )
+        .unwrap();
+        store
+            .set_workspace_identity(session.id, &[primary.clone()], &primary)
+            .unwrap();
+        let error = decide_mutation_proposal(&store, proposal.id, MutationDecision::Approve)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("root was removed"), "{error}");
+        assert!(!secondary.join("test.txt").exists());
     }
 }

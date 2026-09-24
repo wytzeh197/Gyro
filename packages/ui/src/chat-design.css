@@ -36,8 +36,8 @@
   --gyro-chat-dock-solid: var(--gyro-app);
 }
 
-/* Only the composer is solid. The live changes pill, queue, and plan card
-   float over the transcript, which runs down behind them to the composer;
+/* Only the composer is solid. The live changes pill and queue float over the
+   transcript, which runs down behind them to the composer;
    a short fade keeps text from meeting the composer's edge. Until the dock
    is measured the whole dock stays solid. */
 :root[data-theme]

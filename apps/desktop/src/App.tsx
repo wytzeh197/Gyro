@@ -1,3 +1,27 @@
+import {
+  turnIdFromSessionEvent,
+  deriveSessionPlan,
+  deriveSessionGoal,
+  deriveChatMode,
+  chatModeEventMessage,
+  createChatModeSessionEvent,
+  normalizePlanItem,
+  normalizePlanStatus,
+  recordFromUnknown,
+  stringFromRecord,
+  numberFromUnknown,
+  planStatusVerb,
+  createPlanSessionEvent,
+  createGoalSessionEvent,
+  createEditorSessionEvent,
+  slugify,
+} from "./session-context-events";
+import { ComposerContextCandidates } from "@gyro-dev/ui";
+import {
+  restoreCompanionPanes,
+  PullRequestForm,
+  type PullRequestDraft,
+} from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
@@ -21,6 +45,12 @@ import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { resolveChatPaneClose } from "./chat-pane-close";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
+import {
+  pendingMediaAttachment,
+  settlePendingMedia,
+  trackPendingMedia,
+  withoutPendingMedia,
+} from "./pending-media-attachments";
 import { terminalOutputUpdate } from "./terminal-output";
 import { LiveTerminalPaneBody } from "./live-terminal-pane";
 import {
@@ -69,7 +99,6 @@ import {
   providerNeedsSignIn,
   ProvidersSurface,
   SettingsSurface,
-  TaskBoardSurface,
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
@@ -126,6 +155,7 @@ import {
   updateSendingSessions,
   persistableChatGridState,
   sanitizeStoredIdeState,
+  sendableChatImage,
   sanitizeStoredChatGridState,
   selectedReasoningEffort,
   serializeGyroWorkspaceFile,
@@ -207,7 +237,6 @@ import {
   type Task,
   type CustomTaskDraft,
   type TaskDefinition,
-  type TaskStatus,
   type TestTreeItem,
   type TerminalPaneStatus,
   type TerminalPane,
@@ -383,6 +412,10 @@ type TurnSourceControlBaselines = Record<
 
 type ChatTurnContextSnapshot = {
   mode?: ChatMode;
+  /** Captured when a send must focus another chat pane first. */
+  draftModeKey?: string;
+  draftModeRevision?: number;
+  consumeDraftMode?: boolean;
   goal?: SessionGoal;
   plan?: SessionPlan;
   attachments?: ChatAttachment[];
@@ -498,6 +531,7 @@ const EMPTY_CONFIG: GyroConfig = {
 
 const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
 const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
+const CHAT_TASK_METADATA_KEY = "gyro.chat-task-metadata.v1";
 const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
@@ -519,6 +553,7 @@ function storedThemeMode(value: unknown): ThemeMode | undefined {
     : undefined;
 }
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
+const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 /** Set once the first launch has asked macOS for its folder grants. */
@@ -864,6 +899,11 @@ export function App() {
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
     loadChatDrafts(),
   );
+  const [chatDraftModes, setChatDraftModes] = useState<
+    Record<string, ChatMode>
+  >(() => loadChatDraftModes());
+  const chatDraftModesRef = useRef(chatDraftModes);
+  const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -876,8 +916,6 @@ export function App() {
   >({});
   const [pendingNewChatGoal, setPendingNewChatGoal] = useState<SessionGoal>();
   const [isGoalComposerActive, setIsGoalComposerActive] = useState(false);
-  const [pendingNewChatMode, setPendingNewChatMode] =
-    useState<ChatMode>("normal");
   const [pendingNewChatPlan, setPendingNewChatPlan] = useState<SessionPlan>({
     title: "Plan",
     items: [],
@@ -1007,7 +1045,27 @@ export function App() {
         widths.panelWidth,
       ),
       focusedPaneId: SOLO_CHAT_PANE_ID,
+      panes: restoreCompanionPanes(
+        readBoundedLocalStorage("gyro.companion-layout.v1", 100_000),
+      ),
     }),
+  );
+  useEffect(() => {
+    safeSetLocalStorage(
+      "gyro.companion-layout.v1",
+      JSON.stringify(restoreCompanionPanes(JSON.stringify(companion.panes))),
+    );
+  }, [companion.panes]);
+  const [pullRequestDraft, setPullRequestDraft] = useState<PullRequestDraft>();
+  const pullRequestResolver =
+    useRef<(draft: PullRequestDraft | undefined) => void>();
+  const requestPullRequest = useCallback(
+    (draft: PullRequestDraft) =>
+      new Promise<PullRequestDraft | undefined>((resolve) => {
+        pullRequestResolver.current = resolve;
+        setPullRequestDraft(draft);
+      }),
+    [],
   );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
@@ -1182,16 +1240,23 @@ export function App() {
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
-    () =>
-      workspaceFolderPaths(
+    () => {
+      const configured = workspaceFolderPaths(
         activeWorkspaceRoot,
         workbench.preferences.workspaceFolders,
         activeWorkspaceRoot
           ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
               ?.primaryFolder
           : undefined,
-      ),
+      );
+      if (!activeWorkspaceRoot || activeWorkspaceRoot in workbench.preferences.workspaceFolders) {
+        return configured;
+      }
+      const persisted = activeSession?.workspaceIdentity?.roots.map((root) => root.path);
+      return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
+    },
     [
+      activeSession?.workspaceIdentity,
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
       workbench.preferences.projectDetails,
@@ -1201,6 +1266,12 @@ export function App() {
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  useEffect(() => {
+    const identity = activeSession?.workspaceIdentity;
+    const active = identity?.roots.find((root) => root.id === identity.activeRootId);
+    if (active) setSelectedWorkspaceRoot(active.path);
+  }, [activeSession?.id, activeSession?.workspaceIdentity?.activeRootId]);
+
   const workspaceTrusted = isWorkspaceTrusted(
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
@@ -1566,7 +1637,6 @@ export function App() {
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
-    showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
     companionWidth: companion.dockWidth,
@@ -1721,19 +1791,17 @@ export function App() {
     void refreshUsageSafety();
   }, [activeSessionCallCount, refreshUsageSafety]);
 
-  const storedActiveChatMode = activeSessionId
-    ? persistedActiveChatMode
-    : pendingNewChatMode;
-  // A session left in council mode before the freeze reads as normal, so the
-  // composer never shows council UI for a run that cannot start.
-  const activeChatMode =
-    COUNCIL_COMING_SOON && storedActiveChatMode === "council"
-      ? "normal"
-      : storedActiveChatMode;
   const activeDraftKey =
     activeChatPane?.kind === "draft"
       ? activeChatPane.draftKey
       : (activeSessionId ?? NEW_CHAT_DRAFT_KEY);
+  // The chip describes the next message. Historical mode events describe
+  // submitted turns and must never select a mode for an unsent draft.
+  const selectedDraftMode = chatDraftModes[activeDraftKey] ?? "normal";
+  const activeChatMode =
+    COUNCIL_COMING_SOON && selectedDraftMode === "council"
+      ? "normal"
+      : selectedDraftMode;
   const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
   const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
   const activeQueuedChatMessages = activeSessionId
@@ -1924,6 +1992,49 @@ export function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !activeSession || !workspaceActionRoot ||
+        activeSession.eventsPath.startsWith("preview://")) return;
+    const identity = activeSession.workspaceIdentity;
+    const sameRoots = identity?.roots.length === workspaceRoots.length &&
+      identity.roots.every((root, index) => root.path === workspaceRoots[index]);
+    if (sameRoots && identity?.activeRootId === identity.roots.find(
+      (root) => root.path === workspaceActionRoot,
+    )?.id) return;
+    const timer = window.setTimeout(() => {
+      void invoke<Session>("set_session_workspace_identity", {
+        request: {
+          sessionId: activeSession.id,
+          roots: workspaceRoots,
+          activeRoot: workspaceActionRoot,
+        },
+      }).then((updated) => {
+        const persistedRoots = updated.workspaceIdentity?.roots.map((root) => root.path);
+        if (persistedRoots && persistedRoots.some((path, index) => path !== workspaceRoots[index])) {
+          dispatchWorkbench({
+            type: "set-workspace-folders",
+            workspacePath: updated.workspacePath,
+            paths: persistedRoots.slice(1),
+          });
+          const active = updated.workspaceIdentity?.roots.find(
+            (root) => root.id === updated.workspaceIdentity?.activeRootId,
+          );
+          if (active) setSelectedWorkspaceRoot(active.path);
+        }
+        setSessions((current) => current.map((session) =>
+          session.id === updated.id &&
+          (session.workspaceIdentity?.revision ?? 0) <
+            (updated.workspaceIdentity?.revision ?? 0)
+            ? { ...session, workspaceIdentity: updated.workspaceIdentity }
+            : session,
+        ));
+      }).catch((error) => {
+        notify("command-failed", "Workspace roots could not be saved", String(error));
+      });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [activeSession, notify, workspaceActionRoot, workspaceRoots]);
 
   const loadExplorerDirectory = useCallback(
     async (path: string) => {
@@ -2377,8 +2488,14 @@ export function App() {
   }, [chatDrafts]);
   useEffect(() => {
     safeSetLocalStorage(
+      CHAT_DRAFT_MODES_STORAGE_KEY,
+      JSON.stringify(chatDraftModes),
+    );
+  }, [chatDraftModes]);
+  useEffect(() => {
+    safeSetLocalStorage(
       CHAT_ATTACHMENTS_STORAGE_KEY,
-      JSON.stringify(chatAttachments),
+      JSON.stringify(withoutPendingMedia(chatAttachments)),
     );
   }, [chatAttachments]);
   useEffect(() => {
@@ -4383,20 +4500,43 @@ export function App() {
     workspaceRoots,
   ]);
 
+  // Keep live editor text in the in-memory capability broker only. The turn
+  // snapshot and session event continue to contain project signals, never an
+  // unsaved buffer. Reading this evidence requires WorkspaceReadEditor approval.
+  const liveEditorEvidence = useMemo(
+    () =>
+      workspaceContextSnapshot
+        ? workspaceContextWithLiveEditor(
+            workspaceContextSnapshot,
+            selectedFile,
+            workbench.ide.buffers[selectedFile ?? ""],
+            workbench.ide.selection,
+            workbench.ide.tabs.map((tab) => tab.path),
+          )
+        : undefined,
+    [
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.selection,
+      workbench.ide.tabs,
+      workspaceContextSnapshot,
+    ],
+  );
+
   useEffect(() => {
-    const root = workspaceContextSnapshot?.workspaceKey;
+    const root = liveEditorEvidence?.workspaceKey;
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
         workspacePath: root,
-        diagnostics: workspaceContextSnapshot?.diagnostics ?? [],
-        context: workspaceContextSnapshot,
+        diagnostics: liveEditorEvidence?.diagnostics ?? [],
+        context: liveEditorEvidence,
       },
     }).catch(() => {
       // A background evidence refresh must not produce an unhandled rejection.
       // Sending a turn awaits this same update and exposes any persistent error.
     });
-  }, [workspaceContextSnapshot]);
+  }, [liveEditorEvidence]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -6096,11 +6236,14 @@ export function App() {
             return;
           }
           case "open-pr": {
-            const title = window.prompt(
-              "Pull request title",
-              workbench.diffReview.commitMessage.trim() || branch || "",
-            );
-            if (!title?.trim()) {
+            const draft = await requestPullRequest({
+              title: workbench.diffReview.commitMessage.trim() || branch || "",
+              body: "",
+              base: "",
+              head: branch || "",
+              draft: true,
+            });
+            if (!draft) {
               settle("failed", "Pull request cancelled");
               return;
             }
@@ -6109,8 +6252,9 @@ export function App() {
               {
                 request: {
                   workspacePath: root,
-                  title: title.trim(),
-                  draft: false,
+                  ...draft,
+                  base: draft.base.trim() || undefined,
+                  head: draft.head.trim() || undefined,
                 },
               },
             );
@@ -6128,6 +6272,7 @@ export function App() {
       refreshGithub,
       refreshIdeServices,
       requestBranchName,
+      requestPullRequest,
       workbench.diffReview.commitMessage,
       workbench.ide.sourceControl,
       workbench.preferences.workspaceTrust,
@@ -6669,17 +6814,28 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // A project has one unsent draft; if it is already open in a pane, focus
+      // it there rather than opening it twice. A new
+      // pane gets an id of its own: a sent draft keeps its pane id, so a
+      // shared `draft:<project>` id made the next new chat collide with the
+      // old one — same React key, shared focus, merged split panes.
+      const openDraftPane = chatGrid.layouts[projectKey]?.slots.find(
+        (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
+      );
+      const paneId =
+        openDraftPane?.paneId ?? `draft:${projectKey}:${Date.now()}`;
       // The solo surface is reused between sessions. A fresh draft must not
       // inherit its previous chat's dock, or a previously opened draft's dock.
       dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
-      dispatchCompanion({ type: "forget-pane", paneId: `draft:${projectKey}` });
+      dispatchCompanion({ type: "forget-pane", paneId });
       dispatchWorkbench({ type: "set-chat-panel" });
+      // In split view the new chat opens in the selected pane, replacing it.
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
         mode: "replace",
         pane: {
-          paneId: `draft:${projectKey}`,
+          paneId,
           kind: "draft",
           draftKey,
           workspacePath: projectPath ?? "",
@@ -6702,7 +6858,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, workspacePath],
+    [activeSession?.workspacePath, chatGrid.layouts, workspacePath],
   );
 
   /**
@@ -8435,7 +8591,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: ChatAttachmentPickerKind) => {
+    async (kind: ChatAttachmentPickerKind, explicitPath?: string) => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -8453,12 +8609,14 @@ export function App() {
         return;
       }
       try {
-        const selected = await open({
-          directory: false,
-          multiple: kind !== "workspace-file",
-          title: chatAttachmentPickerTitle(kind),
-          filters: chatAttachmentPickerFilters(kind),
-        });
+        const selected =
+          explicitPath ??
+          (await open({
+            directory: false,
+            multiple: kind !== "workspace-file",
+            title: chatAttachmentPickerTitle(kind),
+            filters: chatAttachmentPickerFilters(kind),
+          }));
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
         const existing = chatAttachments[activeDraftKey] ?? [];
@@ -8520,10 +8678,15 @@ export function App() {
           }
         }
         if (prepared.length) {
-          setChatAttachments((current) => ({
-            ...current,
-            [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
-          }));
+          // Picking an image already in the draft stores the same file again.
+          setChatAttachments((current) => {
+            const draft = current[activeDraftKey] ?? [];
+            const seen = new Set(draft.map((item) => item.path));
+            const fresh = prepared.filter(
+              (item) => !seen.has(item.path) && Boolean(seen.add(item.path)),
+            );
+            return { ...current, [activeDraftKey]: [...draft, ...fresh] };
+          });
         }
         if (rejected.length) {
           notify("command-failed", "Attachment rejected", rejected.join("\n"));
@@ -8574,65 +8737,69 @@ export function App() {
 
   // The composer only offers Editor when an open project file can be captured.
   const canAttachEditorSnapshot = Boolean(workspacePath && selectedFile);
-  const attachEditorSnapshot = useCallback(async () => {
-    if (!isTauriRuntime() || !workspacePath || !selectedFile) {
-      notify(
-        "command-failed",
-        "No editor to capture",
-        "Open a project file in Workspace first",
-      );
-      return;
-    }
-    const buffer = workbench.ide.buffers[selectedFile];
-    const content =
-      buffer?.content ??
-      (selectedFileContent?.path === selectedFile
-        ? selectedFileContent.content
-        : undefined);
-    if (content === undefined || content.length === 0) {
-      notify(
-        "command-failed",
-        "Editor snapshot is empty",
-        "Open a text file with content before adding this context",
-      );
-      return;
-    }
-    try {
-      const attachment = await invoke<ChatAttachment>(
-        "prepare_chat_attachment",
-        {
-          request: {
-            sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
-            path: "",
-            workspacePath,
-            kind: "ide-snapshot",
-            name: `${workspaceName(selectedFile)}.snapshot.txt`,
-            relativePath: selectedFile,
-            bytes: Array.from(new TextEncoder().encode(content)),
+  const attachEditorSnapshot = useCallback(
+    async (path = selectedFile) => {
+      if (!isTauriRuntime() || !workspacePath || !path) {
+        notify(
+          "command-failed",
+          "No editor to capture",
+          "Open a project file in Workspace first",
+        );
+        return;
+      }
+      const buffer = workbench.ide.buffers[path];
+      let content =
+        buffer?.content ??
+        (selectedFileContent?.path === path
+          ? selectedFileContent.content
+          : undefined);
+      try {
+        if (content === undefined) {
+          const loaded = await invoke<WorkspaceFileContent>(
+            "read_workspace_file_full",
+            { path, workspacePath },
+          );
+          if (loaded.truncated)
+            throw new Error("The file is too large for an editor snapshot");
+          content = loaded.content;
+        }
+        const attachment = await invoke<ChatAttachment>(
+          "prepare_chat_attachment",
+          {
+            request: {
+              sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+              path: "",
+              workspacePath,
+              kind: "ide-snapshot",
+              name: `${workspaceName(path)}.snapshot.txt`,
+              relativePath: relativeFilePath(path, workspacePath),
+              bytes: Array.from(new TextEncoder().encode(content)),
+            },
           },
-        },
-      );
-      setChatAttachments((current) => ({
-        ...current,
-        [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
-      }));
-      notify(
-        "terminal",
-        "Editor snapshot attached",
-        `${selectedFile}${buffer?.status === "dirty" ? " · unsaved changes included" : ""}`,
-      );
-    } catch (error) {
-      notify("command-failed", "Editor snapshot rejected", String(error));
-    }
-  }, [
-    activeDraftKey,
-    activeSessionId,
-    notify,
-    selectedFile,
-    selectedFileContent,
-    workbench.ide.buffers,
-    workspacePath,
-  ]);
+        );
+        setChatAttachments((current) => ({
+          ...current,
+          [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
+        }));
+        notify(
+          "terminal",
+          "Editor snapshot attached",
+          `${path}${buffer?.status === "dirty" ? " · unsaved changes included" : ""}`,
+        );
+      } catch (error) {
+        notify("command-failed", "Editor snapshot rejected", String(error));
+      }
+    },
+    [
+      activeDraftKey,
+      activeSessionId,
+      notify,
+      selectedFile,
+      selectedFileContent,
+      workbench.ide.buffers,
+      workspacePath,
+    ],
+  );
 
   const attachDroppedMedia = useCallback(
     async (
@@ -8661,18 +8828,42 @@ export function App() {
             existing.filter((item) => item.kind === "video").length,
         ),
       };
-      const prepared: ChatAttachment[] = [];
+      const queued: {
+        dropped: File;
+        kind: "image" | "video";
+        placeholder: ChatAttachment;
+      }[] = [];
       const rejected: string[] = [];
       let limitExceeded = false;
-      for (const file of files) {
+      for (const dropped of files) {
         const kind =
-          file.type.startsWith("video/") || isSupportedChatVideoPath(file.name)
+          dropped.type.startsWith("video/") ||
+          isSupportedChatVideoPath(dropped.name)
             ? "video"
             : "image";
         if (remaining[kind] <= 0) {
           limitExceeded = true;
           continue;
         }
+        remaining[kind] -= 1;
+        const placeholder = pendingMediaAttachment(dropped, kind);
+        queued.push({ dropped, kind, placeholder });
+      }
+      // The chip lands with the drop; the upload fills it in behind it.
+      if (queued.length) {
+        setChatAttachments((current) => ({
+          ...current,
+          [attachmentDraftKey]: [
+            ...(current[attachmentDraftKey] ?? []),
+            ...queued.map((item) => item.placeholder),
+          ],
+        }));
+      }
+      const upload = async (dropped: File, kind: "image" | "video") => {
+        const file =
+          kind === "image"
+            ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+            : dropped;
         const name =
           file.name ||
           `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
@@ -8682,7 +8873,7 @@ export function App() {
           rejected.push(
             `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
           );
-          continue;
+          return undefined;
         }
         try {
           const headers: Record<string, string> = {
@@ -8698,31 +8889,44 @@ export function App() {
             new Uint8Array(await file.arrayBuffer()),
             { headers },
           );
-          remaining[kind] -= 1;
-          prepared.push({
-            ...attachment,
-            previewUrl: convertFileSrc(attachment.path),
-          });
+          return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
           rejected.push(`${name}: ${String(error)}`);
+          return undefined;
         }
-      }
-      if (prepared.length) {
-        // Uploads are stored by content hash, so a repeated path is the same
-        // file arriving twice (a doubled drop event, or drop plus paste).
-        setChatAttachments((current) => {
-          const draft = current[attachmentDraftKey] ?? [];
-          const seen = new Set(draft.map((item) => item.path));
-          const fresh = prepared.filter((item) => {
-            if (seen.has(item.path)) return false;
-            seen.add(item.path);
-            return true;
-          });
-          return fresh.length
-            ? { ...current, [attachmentDraftKey]: [...draft, ...fresh] }
-            : current;
-        });
-      }
+      };
+      await Promise.all(
+        queued.map(({ dropped, kind, placeholder }) =>
+          trackPendingMedia(
+            placeholder,
+            upload(dropped, kind).then((attachment) => {
+              // Uploads are stored by content hash, so a repeated path is the
+              // same file arriving twice (a doubled drop event, or drop plus
+              // paste). A placeholder already sent or removed stays gone.
+              setChatAttachments((current) => {
+                const draft = current[attachmentDraftKey] ?? [];
+                if (!draft.some((item) => item.id === placeholder.id)) {
+                  return current;
+                }
+                const keep =
+                  attachment &&
+                  !draft.some((item) => item.path === attachment.path);
+                return {
+                  ...current,
+                  [attachmentDraftKey]: draft.flatMap((item) =>
+                    item.id !== placeholder.id
+                      ? [item]
+                      : keep
+                        ? [attachment]
+                        : [],
+                  ),
+                };
+              });
+              return attachment;
+            }),
+          ),
+        ),
+      );
       if (limitExceeded) {
         notify(
           "command-failed",
@@ -8744,57 +8948,32 @@ export function App() {
   // dragging sessions from the sidebar into the chat grid — works.
 
   const changeChatMode = useCallback(
-    async (mode: ChatMode) => {
-      if (!activeSessionId) {
-        setPendingNewChatMode(mode);
+    (mode: ChatMode, draftKey = activeDraftKey) => {
+      if ((chatDraftModesRef.current[draftKey] ?? "normal") === mode)
         return true;
-      }
+      const next = { ...chatDraftModesRef.current };
+      if (mode === "normal") delete next[draftKey];
+      else next[draftKey] = mode;
+      chatDraftModesRef.current = next;
+      chatDraftModeRevisionsRef.current[draftKey] =
+        (chatDraftModeRevisionsRef.current[draftKey] ?? 0) + 1;
+      setChatDraftModes(next);
+      return true;
+    },
+    [activeDraftKey],
+  );
 
-      // A goal is the outcome, a mode is how the turn runs: neither cancels
-      // the other. Entering Plan mode used to delete the goal outright.
-      if (activeChatMode === mode) return true;
-
-      const modeMessage =
-        mode === "plan"
-          ? "Plan mode enabled"
-          : mode === "council"
-            ? "Council mode enabled"
-            : "Normal mode enabled";
-      if (!isTauriRuntime()) {
-        const now = new Date().toISOString();
-        setEvents((current) => [
-          ...current,
-          {
-            id: `chat-mode-${Date.now()}`,
-            sessionId: activeSessionId,
-            createdAt: now,
-            kind: "chat-mode-changed" as const,
-            message: modeMessage,
-            payload: { mode },
-          },
-        ]);
-        return true;
-      }
-
-      try {
-        await invoke<SessionEvent>("append_chat_context_event", {
-          sessionId: activeSessionId,
-          eventKind: "chat-mode-changed",
-          message: modeMessage,
-          payload: { mode },
-        });
-        await refreshEvents(activeSessionId);
-        return true;
-      } catch (error) {
-        notify("command-failed", "Mode change failed", String(error));
-        return false;
+  const consumeDraftMode = useCallback(
+    (draftKey: string, revision: number) => {
+      if (chatDraftModeRevisionsRef.current[draftKey] === revision) {
+        changeChatMode("normal", draftKey);
       }
     },
-    [activeChatMode, activeSessionId, notify, refreshEvents],
+    [changeChatMode],
   );
 
   const handleComposerAction = useCallback(
-    (action: string) => {
+    (action: string, draftKey = activeDraftKey) => {
       if (isShellOptimizing) {
         const allowedWhileOptimizing =
           action.startsWith("select-provider:") ||
@@ -8950,6 +9129,19 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("attach-workspace-path:")) {
+        void selectChatAttachment(
+          "workspace-file",
+          decodeURIComponent(action.slice("attach-workspace-path:".length)),
+        );
+        return;
+      }
+      if (action.startsWith("attach-open-tab:")) {
+        void attachEditorSnapshot(
+          decodeURIComponent(action.slice("attach-open-tab:".length)),
+        );
+        return;
+      }
       if (action === "new-chat-select-workspace") {
         void selectChatWorkspace();
         return;
@@ -9144,7 +9336,7 @@ export function App() {
                 ? "council"
                 : "normal";
             // A half-typed goal survives a mode change.
-            void changeChatMode(mode);
+            changeChatMode(mode, draftKey);
           }
           break;
         case "search-workspace":
@@ -9239,11 +9431,11 @@ export function App() {
           openToolPanel("diff");
           break;
         case "compact-context": {
-          if (!activeSessionId || activeSession?.providerId !== "openai") {
+          if (!activeSessionId || !activeSession?.providerId) {
             notify(
               "command-failed",
               "Context compaction unavailable",
-              "This command is available for resumable OpenAI chats.",
+              "Select a provider and start the chat before compacting it.",
             );
             break;
           }
@@ -9267,7 +9459,7 @@ export function App() {
             "/compact",
             compactionTurnId,
             providersForConfig(config).find(
-              (provider) => provider.id === "openai",
+              (provider) => provider.id === activeSession.providerId,
             ),
           );
           optimisticEventsRef.current.set(
@@ -9344,6 +9536,7 @@ export function App() {
     [
       attachEditorSnapshot,
       attachBrowserSnapshot,
+      activeDraftKey,
       activeChatMode,
       activeSession?.workspacePath,
       checkProviderReadiness,
@@ -9575,13 +9768,36 @@ export function App() {
         );
         return false;
       }
+      // Fix the mode at the click, before pending media or provider checks can
+      // await. A later chip change belongs to the following draft.
+      const draftModeKey = overrideContext?.draftModeKey ?? activeDraftKey;
+      const draftModeRevision =
+        overrideContext?.draftModeRevision ??
+        chatDraftModeRevisionsRef.current[draftModeKey] ??
+        0;
+      const selectedMode = chatDraftModesRef.current[draftModeKey] ?? "normal";
+      const turnMode =
+        overrideContext?.mode ??
+        (COUNCIL_COMING_SOON && selectedMode === "council"
+          ? "normal"
+          : selectedMode);
+      const consumeSelectedMode =
+        overrideContext?.consumeDraftMode ??
+        (overrideContext?.mode === undefined &&
+          !overrideContext?.preserveDraft);
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
-      const turnAttachments =
+      const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
-      const turnMode = overrideContext?.mode ?? activeChatMode;
+      // An image dropped a moment ago may still be uploading.
+      const turnAttachments = draftAttachments.some((item) => item.pending)
+        ? await settlePendingMedia(draftAttachments)
+        : draftAttachments;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
-      const turnGoal = overrideContext?.goal ?? activeSessionGoal;
+      const turnGoal =
+        overrideContext && "goal" in overrideContext
+          ? overrideContext.goal
+          : activeSessionGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
       const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
       const targetSession = targetSessionId
@@ -9650,6 +9866,29 @@ export function App() {
       }
       if (!targetSessionId && isStartingFirstTurn) {
         return false;
+      }
+      // Sending from the goal composer sets the goal and starts on it in one
+      // step. A new chat saves it once the session exists (below).
+      const newGoal = overrideContext?.goal;
+      if (
+        targetSessionId &&
+        newGoal?.text &&
+        isTauriRuntime() &&
+        (targetSessionId !== activeSessionId ||
+          newGoal.text !== activeSessionGoal?.text ||
+          activeSessionGoal?.status !== "active")
+      ) {
+        try {
+          await invoke<SessionEvent>("append_chat_context_event", {
+            sessionId: targetSessionId,
+            eventKind: "goal-updated",
+            message: "",
+            payload: { action: "set", text: newGoal.text, status: "active" },
+          });
+          void refreshEvents(targetSessionId);
+        } catch (error) {
+          notify("command-failed", "Goal not saved", String(error));
+        }
       }
       if (
         targetSessionId &&
@@ -9723,6 +9962,9 @@ export function App() {
         if (!overrideContext?.preserveDraft) {
           resetChatDraft();
         }
+        if (consumeSelectedMode) {
+          consumeDraftMode(draftModeKey, draftModeRevision);
+        }
         notify(
           "terminal",
           "Message queued",
@@ -9787,6 +10029,19 @@ export function App() {
         ]);
       });
       const isRetry = Boolean(targetSessionId && retryTurnId);
+      const restoreUnsentMode = (sessionKey: string) => {
+        if (
+          !consumeSelectedMode ||
+          turnMode === "normal" ||
+          persistedChatTurnIdsRef.current.has(turnId) ||
+          chatDraftModeRevisionsRef.current[draftModeKey] !==
+            draftModeRevision + 1 ||
+          (chatDraftModesRef.current[sessionKey] ?? "normal") !== "normal"
+        ) {
+          return;
+        }
+        changeChatMode(turnMode, sessionKey);
+      };
       const shouldSuggestTitle =
         !isRetry &&
         shouldSuggestSessionTitle(
@@ -9824,10 +10079,18 @@ export function App() {
           selectedProvider,
           turnAttachments,
         );
+        if (!isTauriRuntime() && turnMode !== "normal") {
+          optimisticEvents.unshift(
+            createChatModeSessionEvent(session.id, turnMode, turnId),
+          );
+        }
         let sendingSessionId = session.id;
         optimisticEventsRef.current.set(session.id, optimisticEvents);
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
+        if (consumeSelectedMode) {
+          consumeDraftMode(draftModeKey, draftModeRevision);
+        }
         setWorkspacePath(session.workspacePath);
         setFiles(
           session.workspacePath
@@ -10003,11 +10266,8 @@ export function App() {
               await invoke<SessionEvent>("append_chat_context_event", {
                 sessionId: persistedSession.id,
                 eventKind: "chat-mode-changed",
-                message:
-                  turnMode === "council"
-                    ? "Council mode enabled"
-                    : "Plan mode enabled",
-                payload: { mode: turnMode },
+                message: chatModeEventMessage(turnMode),
+                payload: { mode: turnMode, turnId },
               }),
             );
           }
@@ -10044,12 +10304,25 @@ export function App() {
             message,
             turnId,
           });
+          if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== persistedSession.workspacePath) {
+            await invoke("update_capability_ide_evidence", {
+              request: {
+                workspacePath: liveEditorEvidence.workspaceKey,
+                diagnostics: liveEditorEvidence.diagnostics,
+                context: liveEditorEvidence,
+              },
+            });
+          }
           if (turnWorkspaceContext) {
             await invoke("update_capability_ide_evidence", {
               request: {
                 workspacePath: persistedSession.workspacePath,
                 diagnostics: turnWorkspaceContext.diagnostics,
-                context: turnWorkspaceContext,
+                context:
+                  liveEditorEvidence?.workspaceKey ===
+                  persistedSession.workspacePath
+                    ? liveEditorEvidence
+                    : turnWorkspaceContext,
               },
             });
           }
@@ -10115,7 +10388,6 @@ export function App() {
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
           setPendingNewChatGoal(undefined);
-          setPendingNewChatMode("normal");
           setPendingNewChatPlan({ title: "Plan", items: [] });
           optimisticEventsRef.current.delete(persistedSession.id);
           // Refresh plan windows after every completed turn so Claude stream
@@ -10129,6 +10401,7 @@ export function App() {
             void refreshProviderLedger(usageProviderId);
           }
         } catch (error) {
+          restoreUnsentMode(optimisticSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
           if (
@@ -10212,6 +10485,9 @@ export function App() {
       // A validated new send explicitly resumes this chat's pending queue.
       stoppedChatSessionsRef.current.delete(targetSessionId);
       setSessionSending(targetSessionId, true);
+      if (consumeSelectedMode) {
+        consumeDraftMode(draftModeKey, draftModeRevision);
+      }
       if (!isBackgroundSend) {
         dispatchWorkbench({ type: "set-chat-panel" });
       }
@@ -10226,6 +10502,14 @@ export function App() {
         }
       }
       if (!isTauriRuntime()) {
+        if (!isRetry) {
+          setEventsForSession(targetSessionId, (current) =>
+            limitSessionEventsForUi([
+              ...current,
+              createChatModeSessionEvent(targetSessionId, turnMode, turnId),
+            ]),
+          );
+        }
         updateOptimisticProviderStatus(
           optimisticEventsRef,
           (value) => setEventsForSession(targetSessionId, value),
@@ -10241,6 +10525,18 @@ export function App() {
       try {
         await waitForNextPaint();
         if (!isRetry) {
+          const modeEvent = await invoke<SessionEvent>(
+            "append_chat_context_event",
+            {
+              sessionId: targetSessionId,
+              eventKind: "chat-mode-changed",
+              message: chatModeEventMessage(turnMode),
+              payload: { mode: turnMode, turnId },
+            },
+          );
+          setEventsForSession(targetSessionId, (current) =>
+            limitSessionEventsForUi([...current, modeEvent]),
+          );
           await invoke<SessionEvent>("append_user_message", {
             attachments: turnAttachments,
             sessionId: targetSessionId,
@@ -10249,12 +10545,24 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
         }
+        if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== chatWorkspacePath) {
+          await invoke("update_capability_ide_evidence", {
+            request: {
+              workspacePath: liveEditorEvidence.workspaceKey,
+              diagnostics: liveEditorEvidence.diagnostics,
+              context: liveEditorEvidence,
+            },
+          });
+        }
         if (turnWorkspaceContext) {
           await invoke("update_capability_ide_evidence", {
             request: {
               workspacePath: chatWorkspacePath,
               diagnostics: turnWorkspaceContext.diagnostics,
-              context: turnWorkspaceContext,
+              context:
+                liveEditorEvidence?.workspaceKey === chatWorkspacePath
+                  ? liveEditorEvidence
+                  : turnWorkspaceContext,
             },
           });
         }
@@ -10324,6 +10632,7 @@ export function App() {
           void refreshProviderLedger(usageProviderId);
         }
       } catch (error) {
+        restoreUnsentMode(targetSessionId);
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
         if (
@@ -10367,7 +10676,8 @@ export function App() {
       activeDraftKey,
       activeChatAttachments,
       activeChatDraft,
-      activeChatMode,
+      changeChatMode,
+      consumeDraftMode,
       isBranchLoading,
       activeSessionGoal,
       activeSessionPlan,
@@ -10391,6 +10701,7 @@ export function App() {
       setEventsForSession,
       updateSessionTitle,
       workbench.ide.sourceControl,
+      liveEditorEvidence,
       workbench.providerStatuses,
       workbench.workspaceMode,
       workspacePath,
@@ -10419,13 +10730,13 @@ export function App() {
       }
 
       if (action.type === "continue-as-run") {
-        await changeChatMode("normal");
+        changeChatMode("normal");
         const message = [
           "Implement the Council recommendation below. Prefer the adoption steps and call out any risks before mutating files.",
           "",
           action.markdown.trim(),
         ].join("\n");
-        void sendDraft(message);
+        void sendDraft(message, { mode: "normal" });
         notify(
           "terminal",
           "Continuing from Council",
@@ -10450,7 +10761,7 @@ export function App() {
             });
           }
         }
-        await changeChatMode("normal");
+        changeChatMode("normal");
         const body =
           action.fullText?.trim() || action.seat.outputPreview?.trim() || "";
         const message = [
@@ -10545,8 +10856,11 @@ export function App() {
 
   const startNewGoalChat = useCallback(
     (goal: string) => {
+      // The goal composer keeps its own text, so the chat draft stays put.
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
+        preserveDraft: true,
+        consumeDraftMode: true,
       });
     },
     [sendDraft],
@@ -10560,8 +10874,17 @@ export function App() {
   }, [activeChatPane?.paneId, sendDraft]);
 
   const handlePlanDecision = useCallback(
-    async (decision: "approve" | "reject") => {
+    async (
+      decision: "approve" | "reject",
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        plan: SessionPlan;
+        goal?: SessionGoal;
+      },
+    ) => {
       if (decision === "reject") {
+        changeChatMode("plan", target?.draftKey ?? activeDraftKey);
         notify(
           "terminal",
           "Plan kept",
@@ -10571,21 +10894,26 @@ export function App() {
       }
       // A plan the model wrote as prose but never emitted as a checklist is
       // still a plan the user can approve.
-      if (activeSessionPlan.items.length === 0 && !activeSessionPlan.content) {
-        return false;
-      }
-      const modeChanged = await changeChatMode("normal");
-      if (!modeChanged) {
+      const plan = target?.plan ?? activeSessionPlan;
+      if (plan.items.length === 0 && !plan.content) {
         return false;
       }
       return sendDraft("Implement the approved plan.", {
-        goal: activeSessionGoal,
+        goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
-        plan: activeSessionPlan,
+        plan,
         preserveDraft: true,
+        sessionId: target?.sessionId,
       });
     },
-    [activeSessionGoal, activeSessionPlan, changeChatMode, notify, sendDraft],
+    [
+      activeDraftKey,
+      activeSessionGoal,
+      activeSessionPlan,
+      changeChatMode,
+      notify,
+      sendDraft,
+    ],
   );
 
   useEffect(() => {
@@ -10740,6 +11068,7 @@ export function App() {
           (attachment) => ({ ...attachment }),
         ),
       }));
+      changeChatMode(selected.context.mode ?? "normal", activeDraftKey);
       setChatMessageQueues((current) => {
         const remaining = (current[activeSessionId] ?? []).filter(
           (item) => item.id !== messageId,
@@ -10757,7 +11086,13 @@ export function App() {
         "The message is back in the composer.",
       );
     },
-    [activeDraftKey, activeSessionId, chatMessageQueues, notify],
+    [
+      activeDraftKey,
+      activeSessionId,
+      changeChatMode,
+      chatMessageQueues,
+      notify,
+    ],
   );
 
   const handleProviderStatusAction = useCallback(
@@ -11267,13 +11602,15 @@ export function App() {
     async (payload: Record<string, unknown>, message: string) => {
       if (!activeSessionId) {
         notify("command-failed", "No active session", "Start a chat first");
-        return;
+        return false;
       }
-      const event = createGoalSessionEvent(activeSessionId, message, payload);
       if (!isTauriRuntime()) {
+        const event = createGoalSessionEvent(activeSessionId, message, payload);
         setEvents((current) => [...current, event]);
-        return;
+        return true;
       }
+      // The backend checks the change and words the transcript line; a
+      // refusal is reported, never papered over with a local-only goal.
       try {
         await invoke<SessionEvent>("append_chat_context_event", {
           sessionId: activeSessionId,
@@ -11282,9 +11619,10 @@ export function App() {
           payload,
         });
         await refreshEvents(activeSessionId);
-      } catch {
-        setEvents((current) => [...current, event]);
-        notify("command-failed", "Goal update fallback", message);
+        return true;
+      } catch (error) {
+        notify("command-failed", "Goal not updated", String(error));
+        return false;
       }
     },
     [activeSessionId, notify, refreshEvents],
@@ -11919,8 +12257,7 @@ export function App() {
                 : `Goal updated: ${text}`;
       // A goal is the outcome, a mode is how the turn runs. Setting one no
       // longer cancels the other — the composer shows both.
-      await appendGoalEvent(payload, message);
-      return true;
+      return appendGoalEvent(payload, message);
     },
     [activeSessionGoal, activeSessionId, appendGoalEvent],
   );
@@ -13009,118 +13346,28 @@ export function App() {
     workbench.browserPreview.nativeHost,
   ]);
 
-  const createTask = useCallback(() => {
-    const metadata = workspaceRunMetadata(
-      workbench.workspaceMode,
-      "new-agent-task",
-    );
-    const task: Task = {
-      id: `task-${Date.now()}`,
-      title: "New agent task",
-      status: "todo",
-      repo: "gyro",
-      agent: "Codex",
-      branch: metadata.branch,
-      workspaceMode: metadata.workspaceMode,
-      worktreeName: metadata.worktreeName,
-      lastEvent:
-        metadata.workspaceMode === "worktree"
-          ? "queued for isolated worktree"
-          : "created locally",
-      diffStatus: "none",
-      testStatus: "not run",
-      timeRunning: "0m",
-      attentionNeeded: false,
-    };
-    dispatchWorkbench({ type: "create-task", task });
-    notify(
-      "terminal",
-      "Task created",
-      metadata.workspaceMode === "worktree"
-        ? `${task.title} · ${metadata.worktreeName}`
-        : task.title,
-    );
-  }, [notify, workbench.workspaceMode]);
-
-  const dispatchTask = useCallback(
-    async (taskId: string) => {
-      if (!checkProviderReadiness("task", "openai")) {
-        return;
-      }
-      const task = workbench.tasks.find((item) => item.id === taskId);
-      if (!task) {
-        notify("command-failed", "Task not found", taskId);
-        return;
-      }
-      if (task.terminalPaneId) {
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "terminal-grid",
-        });
-        dispatchWorkbench({
-          type: "select-terminal-pane",
-          paneId: task.terminalPaneId,
-        });
-        return;
-      }
-      const profile = getCommandProfile(commandProfiles, "codex");
-      const metadata = task;
-      const pane = createTerminalPane(
-        `pane-task-${Date.now()}`,
-        profile,
-        "waiting",
-        {
-          workspaceMode: metadata.workspaceMode,
-          branch: metadata.branch,
-          worktreeName: metadata.worktreeName,
-        },
-      );
-      dispatchWorkbench({ type: "dispatch-task", taskId, pane });
-      const started = await launchTerminalPane({
-        paneId: pane.id,
-        profile: {
-          ...profile,
-          args: [...profile.args, task.title],
-        },
-        startingOutput: `Starting ${profile.displayName}: ${task.title}`,
-        reveal: false,
-      });
-      if (!started) {
-        dispatchWorkbench({
-          type: "move-task",
-          taskId,
-          status: "in-review",
-          event: "agent failed to start",
-        });
-        notify("command-failed", "Task dispatch failed", task.title);
-        return;
-      }
-      notify(
-        "terminal",
-        "Task running",
-        metadata.workspaceMode === "worktree"
-          ? `Agent started for ${metadata.worktreeName}`
-          : "Agent started in terminal pane",
-      );
-    },
-    [
-      checkProviderReadiness,
-      commandProfiles,
-      launchTerminalPane,
-      notify,
-      workbench.tasks,
-      workbench.workspaceMode,
-    ],
-  );
-
+  useEffect(() => {
+    const realTasks = workbench.tasks.filter((task) => task.sessionId);
+    if (!realTasks.length) return;
+    const metadata = loadChatTaskMetadata();
+    for (const task of realTasks) metadata[task.sessionId!] = task;
+    safeSetLocalStorage(CHAT_TASK_METADATA_KEY, JSON.stringify(metadata));
+  }, [workbench.tasks]);
   const createAutomation = useCallback(
     async (details: {
+      workspacePath?: string;
+      providerId?: string;
+      modelId?: string;
+      workspaceMode?: "local" | "worktree";
       title: string;
       prompt: string;
       schedule: Automation["schedule"];
+      calendar?: import("@gyro-dev/ui").CalendarSchedule;
       stopCondition?: string;
     }): Promise<boolean> => {
-      const root = workspaceRootForPath(workspaceRoots, selectedFile);
+      const root =
+        details.workspacePath?.trim() ||
+        workspaceRootForPath(workspaceRoots, selectedFile);
       if (!root) {
         notify(
           "command-failed",
@@ -13130,10 +13377,13 @@ export function App() {
         return false;
       }
       const providerConfigs = providersForConfig(config);
-      const provider =
-        providerConfigs.find(
-          (item) => item.id === config.selectedProviderId && item.enabled,
-        ) ?? providerConfigs.find((item) => item.enabled);
+      const provider = details.providerId
+        ? providerConfigs.find(
+            (item) => item.id === details.providerId && item.enabled,
+          )
+        : (providerConfigs.find(
+            (item) => item.id === config.selectedProviderId && item.enabled,
+          ) ?? providerConfigs.find((item) => item.enabled));
       if (!provider || !isProviderExecutable(provider.id)) {
         notify(
           "provider",
@@ -13154,10 +13404,18 @@ export function App() {
         );
         return false;
       }
+      if (
+        details.modelId &&
+        !provider.models.some((model) => model.id === details.modelId)
+      )
+        throw new Error("Choose an available model");
       const draft = createAutomationDraft(
-        workbench.workspaceMode,
+        details.workspaceMode ?? workbench.workspaceMode,
         root,
-        provider,
+        {
+          ...provider,
+          selectedModelId: details.modelId ?? provider.selectedModelId,
+        },
         details,
       );
 
@@ -13169,13 +13427,9 @@ export function App() {
           dispatchWorkbench({ type: "upsert-automation", automation });
           notify("terminal", "Automation created", automation.title);
           return true;
-        } catch {
-          notify(
-            "command-failed",
-            "Automation create failed",
-            "No automation was saved",
-          );
-          return false;
+        } catch (error) {
+          notify("command-failed", "Automation create failed", String(error));
+          throw error;
         }
       }
 
@@ -13256,12 +13510,8 @@ export function App() {
                 : "Automation resumed",
             updated.title,
           );
-        } catch {
-          notify(
-            "command-failed",
-            "Automation status failed",
-            automation?.title ?? automationId,
-          );
+        } catch (error) {
+          notify("command-failed", "Automation status failed", String(error));
         }
         return;
       }
@@ -13647,9 +13897,6 @@ export function App() {
             theme: resolvedTheme === "dark" ? "light" : "dark",
           });
           break;
-        case "create-task":
-          createTask();
-          break;
         case "open-automations":
           dispatchWorkbench({
             type: "select-destination",
@@ -13673,7 +13920,6 @@ export function App() {
     [
       addTerminalPane,
       addWorkspaceFolder,
-      createTask,
       handleBrowserNavigate,
       notify,
       openWorkspace,
@@ -14986,7 +15232,7 @@ export function App() {
         dispatchWorkbench({
           type: "set-diff-review-state",
           state: "approved",
-          action: "all changes approved",
+          action: "all files marked reviewed",
         })
       }
       onAcceptDiffFile={(path) =>
@@ -14994,7 +15240,7 @@ export function App() {
           type: "set-diff-file-state",
           path,
           state: "accepted",
-          action: `${path} accepted`,
+          action: `${path} marked reviewed`,
         })
       }
       onAddTerminalPane={addTerminalPane}
@@ -15056,7 +15302,7 @@ export function App() {
         dispatchWorkbench({
           type: "set-diff-review-state",
           state: "rejected",
-          action: "all changes rejected",
+          action: "all files flagged for follow-up",
         })
       }
       onRejectDiffFile={(path) =>
@@ -15064,7 +15310,7 @@ export function App() {
           type: "set-diff-file-state",
           path,
           state: "rejected",
-          action: `${path} rejected`,
+          action: `${path} flagged for follow-up`,
         })
       }
       onRenameTerminalPane={renameTerminalPane}
@@ -15136,14 +15382,14 @@ export function App() {
       dispatchWorkbench({
         type: "set-diff-review-state",
         state: "approved",
-        action: "all changes approved",
+        action: "all files marked reviewed",
       }),
     onAcceptFile: (path) =>
       dispatchWorkbench({
         type: "set-diff-file-state",
         path,
         state: "accepted",
-        action: `${path} accepted`,
+        action: `${path} marked reviewed`,
       }),
     onComment: (path) => dispatchWorkbench({ type: "add-diff-comment", path }),
     onOpenInEditor: (path) => {
@@ -15154,14 +15400,14 @@ export function App() {
       dispatchWorkbench({
         type: "set-diff-review-state",
         state: "rejected",
-        action: "all changes rejected",
+        action: "all files flagged for follow-up",
       }),
     onRejectFile: (path) =>
       dispatchWorkbench({
         type: "set-diff-file-state",
         path,
         state: "rejected",
-        action: `${path} rejected`,
+        action: `${path} flagged for follow-up`,
       }),
     onRunGitAction: (actionId) => void runGitReviewAction(actionId),
     onSelectFile: (path) =>
@@ -15445,8 +15691,13 @@ export function App() {
       pane.kind === "session"
         ? deriveSessionGoal(paneEvents, pane.sessionId)
         : pendingNewChatGoal;
+    const paneSelectedMode = chatDraftModes[paneDraftKey] ?? "normal";
     const paneMode =
-      pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
+      COUNCIL_COMING_SOON && paneSelectedMode === "council"
+        ? "normal"
+        : paneSelectedMode;
+    const paneSubmittedMode =
+      pane.kind === "session" ? deriveChatMode(paneEvents) : "normal";
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     // Plan still takes the rail on its own; the dock's tab shows through when
@@ -15473,7 +15724,20 @@ export function App() {
         void sendDraft(message, context);
         return;
       }
-      pendingPaneSendRef.current = { paneId: pane.paneId, message, context };
+      pendingPaneSendRef.current = {
+        paneId: pane.paneId,
+        message,
+        context: {
+          ...context,
+          mode: context?.mode ?? paneMode,
+          draftModeKey: paneDraftKey,
+          draftModeRevision:
+            chatDraftModeRevisionsRef.current[paneDraftKey] ?? 0,
+          consumeDraftMode:
+            context?.consumeDraftMode ??
+            (context?.mode === undefined && !context?.preserveDraft),
+        },
+      };
       focusChatPane(pane);
     };
     const togglePanePanel = (panel: ChatSidePanelId) => {
@@ -15584,6 +15848,7 @@ export function App() {
         onResumeUsage={() => void resumeUsage()}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
+        submittedChatMode={paneSubmittedMode}
         diffReview={workbench.diffReview}
         draftResetToken={draftResetToken}
         draft={chatDrafts[paneDraftKey] ?? ""}
@@ -15619,7 +15884,7 @@ export function App() {
         }}
         onComposerAction={(action) => {
           focusChatPane(pane);
-          handleComposerAction(action);
+          handleComposerAction(action, paneDraftKey);
         }}
         onDraftChange={(value) =>
           setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
@@ -15681,7 +15946,12 @@ export function App() {
         }}
         onPlanDecision={async (decision) => {
           focusChatPane(pane);
-          return handlePlanDecision(decision);
+          return handlePlanDecision(decision, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            plan: panePlan,
+            goal: paneGoal,
+          });
         }}
         planEditorRequest={isFocused ? planEditorRequest : undefined}
         onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
@@ -15689,13 +15959,12 @@ export function App() {
           focusChatPane(pane);
           return changeGoal(action, value);
         }}
-        onStartGoalChat={
-          pane.kind === "draft"
-            ? (goal) =>
-                requestSend(goal, {
-                  goal: { text: goal, status: "active" },
-                })
-            : undefined
+        onStartGoalChat={(goal) =>
+          requestSend(goal, {
+            goal: { text: goal, status: "active" },
+            preserveDraft: true,
+            consumeDraftMode: true,
+          })
         }
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
         fileReview={
@@ -15837,6 +16106,7 @@ export function App() {
       }
       attachments={activeChatAttachments}
       chatMode={activeChatMode}
+      submittedChatMode={persistedActiveChatMode}
       diffReview={workbench.diffReview}
       draftResetToken={draftResetToken}
       draft={activeChatDraft}
@@ -15883,7 +16153,7 @@ export function App() {
       planEditorRequest={planEditorRequest}
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
-      onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
+      onStartGoalChat={startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
@@ -16206,6 +16476,7 @@ export function App() {
                     }
                     attachments={activeChatAttachments}
                     chatMode={activeChatMode}
+                    submittedChatMode={persistedActiveChatMode}
                     diffReview={workbench.diffReview}
                     draftResetToken={draftResetToken}
                     draft={activeChatDraft}
@@ -16259,9 +16530,7 @@ export function App() {
                       setPlanEditorRequest(undefined)
                     }
                     onGoalAction={changeGoal}
-                    onStartGoalChat={
-                      activeSessionId ? undefined : startNewGoalChat
-                    }
+                    onStartGoalChat={startNewGoalChat}
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
@@ -16354,7 +16623,7 @@ export function App() {
                   dispatchWorkbench({
                     type: "set-diff-review-state",
                     state: "approved",
-                    action: "all changes approved",
+                    action: "all files marked reviewed",
                   })
                 }
                 onAcceptDiffFile={(path) =>
@@ -16362,7 +16631,7 @@ export function App() {
                     type: "set-diff-file-state",
                     path,
                     state: "accepted",
-                    action: `${path} accepted`,
+                    action: `${path} marked reviewed`,
                   })
                 }
                 onAddTerminalPane={addTerminalPane}
@@ -16406,7 +16675,7 @@ export function App() {
                   dispatchWorkbench({
                     type: "set-diff-review-state",
                     state: "rejected",
-                    action: "all changes rejected",
+                    action: "all files flagged for follow-up",
                   })
                 }
                 onRejectDiffFile={(path) =>
@@ -16414,7 +16683,7 @@ export function App() {
                     type: "set-diff-file-state",
                     path,
                     state: "rejected",
-                    action: `${path} rejected`,
+                    action: `${path} flagged for follow-up`,
                   })
                 }
                 onRenameTerminalPane={renameTerminalPane}
@@ -16628,7 +16897,6 @@ export function App() {
           density={workbench.preferences.density}
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
-          showQuickActions={workbench.preferences.showQuickActions}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
@@ -16638,9 +16906,6 @@ export function App() {
           }
           onDensityChange={(density) =>
             dispatchWorkbench({ type: "set-density", density })
-          }
-          onQuickActionsVisibilityChange={(visible) =>
-            dispatchWorkbench({ type: "set-quick-actions-visible", visible })
           }
           onMenuBarVisibilityChange={(visible) =>
             dispatchWorkbench({ type: "set-menu-bar-visible", visible })
@@ -16797,33 +17062,52 @@ export function App() {
             ).length
           }
           onSelectDestination={selectDestination}
-          taskCount={workbench.tasks.length}
-        />
-      ) : null}
-      {activeDestination === "tasks" ? (
-        <TaskBoardSurface
-          onCreateTask={createTask}
-          onDispatchTask={dispatchTask}
-          onMoveTask={(taskId, status: TaskStatus) =>
-            dispatchWorkbench({
-              type: "move-task",
-              taskId,
-              status,
-              event: `moved to ${status}`,
-            })
-          }
-          onSelectTask={(taskId) =>
-            dispatchWorkbench({ type: "select-task", taskId })
-          }
-          selectedTaskId={workbench.selectedTaskId}
-          tasks={workbench.tasks}
         />
       ) : null}
       {activeDestination === "automations" ? (
         <AutomationsSurface
+          providerChoices={providersForConfig(config)
+            .filter(
+              (provider) =>
+                provider.enabled && isProviderExecutable(provider.id),
+            )
+            .map((provider) => ({
+              id: provider.id,
+              label: provider.displayName,
+              ready: isProviderRuntimeUsable(
+                provider,
+                workbench.providerStatuses.find(
+                  (item) => item.id === provider.id,
+                ),
+              ),
+              models: provider.models.map((model) => ({
+                id: model.id,
+                label: model.displayName,
+              })),
+            }))}
+          onChooseProject={async () => {
+            const path = await open({
+              directory: true,
+              multiple: false,
+              title: "Choose automation project",
+            });
+            return typeof path === "string" ? path : undefined;
+          }}
           automations={workbench.automations}
           createRequestToken={automationCreateRequestToken}
           creationWorkspace={workspaceRootForPath(workspaceRoots, selectedFile)}
+          creationWorkspaceMode={workbench.workspaceMode}
+          creationModel={(() => {
+            const providers = providersForConfig(config);
+            const provider =
+              providers.find(
+                (item) => item.id === config.selectedProviderId && item.enabled,
+              ) ?? providers.find((item) => item.enabled);
+            return provider
+              ? (getProviderModel(provider)?.displayName ??
+                  provider.selectedModelId)
+              : undefined;
+          })()}
           creationProvider={(() => {
             const providers = providersForConfig(config);
             const provider =
@@ -16841,6 +17125,58 @@ export function App() {
           })()}
           onArchiveAutomation={archiveAutomation}
           onCreateAutomation={createAutomation}
+          onOpenSession={(id) => {
+            void refreshSessions().then(() => selectSession(id));
+          }}
+          onEditAutomation={async (id, details) => {
+            const existing = workbench.automations.find(
+              (item) => item.id === id,
+            );
+            if (!existing || !isTauriRuntime()) return false;
+            const provider = providersForConfig(config).find(
+              (item) => item.id === details.providerId && item.enabled,
+            );
+            if (
+              !provider ||
+              !isProviderExecutable(provider.id) ||
+              !isProviderRuntimeUsable(
+                provider,
+                workbench.providerStatuses.find(
+                  (item) => item.id === provider.id,
+                ),
+              )
+            )
+              throw new Error("Connect the selected provider before saving");
+            if (
+              !details.workspacePath?.trim() ||
+              !provider.models.some((model) => model.id === details.modelId)
+            )
+              throw new Error("Choose a project and available model");
+            const draft = createAutomationDraft(
+              details.workspaceMode ?? "local",
+              details.workspacePath,
+              { ...provider, selectedModelId: details.modelId! },
+              details,
+            );
+            if (
+              existing.execution?.workspacePath === details.workspacePath &&
+              existing.workspaceMode === details.workspaceMode
+            ) {
+              draft.branch = existing.branch;
+              draft.worktreeName = existing.worktreeName;
+            }
+            try {
+              const automation = await invoke<Automation>("edit_automation", {
+                automationId: id,
+                draft,
+              });
+              dispatchWorkbench({ type: "upsert-automation", automation });
+              return true;
+            } catch (error) {
+              notify("command-failed", "Automation edit failed", String(error));
+              throw error;
+            }
+          }}
           onCreateRequestHandled={() => setAutomationCreateRequestToken(0)}
           onOpenWorkspace={() =>
             dispatchWorkbench({
@@ -16914,6 +17250,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
+          submittedChatMode={persistedActiveChatMode}
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
           events={[]}
@@ -16948,7 +17285,7 @@ export function App() {
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
-          onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
+          onStartGoalChat={startNewGoalChat}
           onCancelGoalComposer={() => setIsGoalComposerActive(false)}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -17031,6 +17368,16 @@ export function App() {
           onStopAndClose={confirmStopAndCloseChat}
         />
       ) : null}
+      {pullRequestDraft ? (
+        <PullRequestForm
+          initial={pullRequestDraft}
+          onClose={(draft) => {
+            setPullRequestDraft(undefined);
+            pullRequestResolver.current?.(draft);
+            pullRequestResolver.current = undefined;
+          }}
+        />
+      ) : null}
       {isCommandPaletteOpen ? (
         <CommandPaletteOverlay
           onClose={closeGlobalSearch}
@@ -17073,13 +17420,34 @@ export function App() {
     <TerminalAttachmentActionsContext.Provider
       value={terminalAttachmentActions}
     >
-      {appChrome}
+      <ComposerContextCandidates.Provider
+        value={[
+          ...visibleWorkspaceFiles
+            .filter((file) => file.kind === "file")
+            .map((file) => ({
+              path: file.path,
+              label: file.relativePath ?? file.path,
+              workspacePath: file.workspacePath,
+              kind: "file" as const,
+            })),
+          ...workbench.ide.tabs.map((tab) => ({
+            path: tab.path,
+            label: tab.path,
+            workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
+            kind: "open-tab" as const,
+          })),
+        ]}
+      >
+        {appChrome}
+      </ComposerContextCandidates.Provider>
     </TerminalAttachmentActionsContext.Provider>
   );
 }
 
 function loadInitialWorkbenchState(): WorkbenchState {
-  const base = createInitialWorkbenchState();
+  const base = createInitialWorkbenchState({
+    tasks: Object.values(loadChatTaskMetadata()),
+  });
   const legacyTheme = storedThemeMode(
     readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
   );
@@ -17150,7 +17518,14 @@ function loadInitialWorkbenchState(): WorkbenchState {
     );
 
     const terminalPanes = sanitizeStoredTerminalPanes(parsed.terminalPanes);
-    const tasks = sanitizeStoredTasks(parsed.tasks);
+    const legacyTasks = sanitizeStoredTasks(parsed.tasks);
+    const metadata = loadChatTaskMetadata();
+    const tasks = [
+      ...Object.values(metadata),
+      ...legacyTasks.filter(
+        (task) => !task.sessionId || !metadata[task.sessionId],
+      ),
+    ];
     const automations = sanitizeStoredAutomations(parsed.automations);
     const diffReview = sanitizeStoredDiffReview(parsed.diffReview, base);
     const browserPreview = sanitizeStoredBrowserPreview(
@@ -17247,11 +17622,11 @@ function normalizeStoredDestination(
   destination: unknown,
   fallback: AppDestination,
 ): AppDestination {
+  if (destination === "tasks") return "automations";
   if (
     destination === "workspace" ||
     destination === "tools" ||
     destination === "settings" ||
-    destination === "tasks" ||
     destination === "automations" ||
     destination === "providers" ||
     destination === "onboarding"
@@ -17303,6 +17678,28 @@ function sanitizeStoredTerminalPanes(
   return panes.filter((pane) => !demoPaneIds.has(pane.id));
 }
 
+function loadChatTaskMetadata(): Record<string, Task> {
+  try {
+    const value: unknown = JSON.parse(
+      readBoundedLocalStorage(CHAT_TASK_METADATA_KEY, 2_000_000) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        ([id, task]) =>
+          task &&
+          typeof task === "object" &&
+          task.sessionId === id &&
+          task.id === id &&
+          typeof task.title === "string" &&
+          typeof task.prompt === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function sanitizeStoredTasks(
   tasks: Partial<WorkbenchState>["tasks"],
 ): WorkbenchState["tasks"] {
@@ -17341,6 +17738,11 @@ function sanitizeStoredDiffReview(
   return {
     ...base.diffReview,
     ...diffReview,
+    files: (diffReview.files ?? []).map((file) =>
+      file.countsKnown === undefined
+        ? { ...file, additions: 0, deletions: 0, countsKnown: false, lines: [] }
+        : file,
+    ),
     collapsedDirectories: Array.isArray(diffReview.collapsedDirectories)
       ? diffReview.collapsedDirectories
       : base.diffReview.collapsedDirectories,
@@ -17473,6 +17875,26 @@ function loadChatDrafts(): Record<string, string> {
           typeof entry[0] === "string" &&
           typeof entry[1] === "string" &&
           entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadChatDraftModes(): Record<string, ChatMode> {
+  const stored = readBoundedLocalStorage(CHAT_DRAFT_MODES_STORAGE_KEY, 64_000);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, ChatMode] =>
+          typeof entry[0] === "string" &&
+          (entry[1] === "plan" || entry[1] === "council"),
       ),
     );
   } catch {
@@ -18215,7 +18637,9 @@ function capabilityApprovalFromSessionEvent(
     status: "waiting",
     scopeKind,
     scopeValue,
-    choices: ["deny", "allow-once", "allow-project"],
+    choices: capabilityId === "workspace-read-editor"
+      ? ["deny", "allow-once"]
+      : ["deny", "allow-once", "allow-project"],
   };
 }
 
@@ -18283,21 +18707,6 @@ function pathFromSessionEvent(
     );
   })();
   return workspaceRelativeFilePath(rawPath, workspacePath);
-}
-
-function turnIdFromSessionEvent(event: SessionEvent): string | undefined {
-  if (event.turnId) {
-    return event.turnId;
-  }
-  if (
-    typeof event.payload === "object" &&
-    event.payload &&
-    "turnId" in event.payload &&
-    typeof event.payload.turnId === "string"
-  ) {
-    return event.payload.turnId;
-  }
-  return undefined;
 }
 
 function deriveActiveTurn(
@@ -18479,385 +18888,6 @@ function areWorkbenchTurnsEqual(
   );
 }
 
-function deriveSessionPlan(
-  events: SessionEvent[],
-  sessionId?: string,
-): SessionPlan {
-  const assistantContentByTurnId = new Map<string, string>();
-  const normalTurnIds = new Set<string>();
-  for (const event of events) {
-    const payload = recordFromUnknown(event.payload);
-    const turnId = turnIdFromSessionEvent(event);
-    if (turnId && stringFromRecord(payload, "chatMode") === "normal") {
-      normalTurnIds.add(turnId);
-    }
-  }
-  for (const event of events) {
-    if (event.kind !== "assistant-message" || !event.message.trim()) {
-      continue;
-    }
-    const turnId = turnIdFromSessionEvent(event);
-    if (turnId) {
-      assistantContentByTurnId.set(turnId, event.message.trim());
-    }
-  }
-  let plan: SessionPlan = {
-    sessionId,
-    title: "Plan",
-    items: [],
-  };
-
-  for (const event of events) {
-    if (event.kind !== "plan-updated") {
-      continue;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const action = stringFromRecord(payload, "action") ?? "replace";
-    const sourceTurnId =
-      turnIdFromSessionEvent(event) ?? stringFromRecord(payload, "turnId");
-    // Older ACP runs persisted execution checklists as plan replacements.
-    // Do not turn their entire normal-mode response into a Plan document.
-    if (
-      action === "replace" &&
-      sourceTurnId &&
-      normalTurnIds.has(sourceTurnId) &&
-      !stringFromRecord(payload, "content") &&
-      !stringFromRecord(payload, "markdown")
-    ) {
-      continue;
-    }
-    if (!plan.createdAt) {
-      plan = { ...plan, createdAt: event.createdAt };
-    }
-    const providerId = stringFromRecord(payload, "providerId");
-    const title = stringFromRecord(payload, "title");
-    const content =
-      stringFromRecord(payload, "content") ??
-      stringFromRecord(payload, "markdown") ??
-      (action === "replace" && sourceTurnId
-        ? assistantContentByTurnId.get(sourceTurnId)
-        : undefined);
-    if (title) {
-      plan = { ...plan, title };
-    }
-    if (content) {
-      plan = { ...plan, content };
-    }
-    if (sourceTurnId && (action === "replace" || !plan.sourceTurnId)) {
-      plan = { ...plan, sourceTurnId };
-    }
-    if (providerId) {
-      plan = { ...plan, providerId };
-    }
-
-    if (action === "clear") {
-      plan = {
-        ...plan,
-        content: undefined,
-        items: [],
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const payloadItems = Array.isArray(payload?.items)
-      ? payload.items
-      : undefined;
-    if (payloadItems && (action === "add-item" || action === "append")) {
-      plan = {
-        ...plan,
-        items: [
-          ...plan.items,
-          ...payloadItems.map((item, index) =>
-            normalizePlanItem(item, event, plan.items.length + index),
-          ),
-        ],
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    // Progress reports name only the ids that moved, so a turn that finishes
-    // three steps stays one marker line and never restates the plan.
-    if (payloadItems && action === "update-items") {
-      const updates = new Map(
-        payloadItems
-          .map((item) => recordFromUnknown(item))
-          .filter((record): record is Record<string, unknown> =>
-            Boolean(record),
-          )
-          .map((record) => [stringFromRecord(record, "id"), record] as const)
-          .filter(([id]) => Boolean(id)),
-      );
-      plan = {
-        ...plan,
-        items: plan.items.map((item) => {
-          const update = updates.get(item.id);
-          if (!update) {
-            return item;
-          }
-          return {
-            ...item,
-            detail: stringFromRecord(update, "detail") ?? item.detail,
-            status: normalizePlanStatus(update.status ?? item.status),
-            title:
-              stringFromRecord(update, "title") ??
-              stringFromRecord(update, "label") ??
-              item.title,
-            updatedAt: event.createdAt,
-          };
-        }),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    if (action === "replace" || payloadItems) {
-      plan = {
-        ...plan,
-        items: (payloadItems ?? []).map((item, index) =>
-          normalizePlanItem(item, event, index),
-        ),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const payloadItem = payload?.item;
-    if (!payloadItem) {
-      plan = { ...plan, updatedAt: event.createdAt };
-      continue;
-    }
-
-    const nextItemRecord = recordFromUnknown(payloadItem);
-    const explicitTitle =
-      stringFromRecord(nextItemRecord, "title") ??
-      stringFromRecord(nextItemRecord, "label");
-    const explicitDetail = stringFromRecord(nextItemRecord, "detail");
-    const nextItem = normalizePlanItem(payloadItem, event, plan.items.length);
-    if (action === "remove-item") {
-      plan = {
-        ...plan,
-        items: plan.items.filter((item) => item.id !== nextItem.id),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const existingItem = plan.items.find((item) => item.id === nextItem.id);
-    const items = existingItem
-      ? plan.items.map((item) =>
-          item.id === nextItem.id
-            ? {
-                ...item,
-                ...nextItem,
-                createdAt: item.createdAt,
-                detail: explicitDetail ?? item.detail,
-                title: explicitTitle ?? item.title,
-              }
-            : item,
-        )
-      : [...plan.items, nextItem];
-    plan = { ...plan, items, updatedAt: event.createdAt };
-  }
-
-  return plan;
-}
-
-function deriveSessionGoal(
-  events: SessionEvent[],
-  sessionId?: string,
-): SessionGoal | undefined {
-  let goal: SessionGoal | undefined;
-  for (const event of events) {
-    if (event.kind !== "goal-updated") {
-      continue;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const action = stringFromRecord(payload, "action") ?? "set";
-    if (action === "clear") {
-      goal = undefined;
-      continue;
-    }
-    const text = stringFromRecord(payload, "text") ?? goal?.text;
-    if (!text) {
-      continue;
-    }
-    goal = {
-      sessionId,
-      text,
-      status:
-        stringFromRecord(payload, "status") === "complete"
-          ? "complete"
-          : "active",
-      sourceTurnId:
-        stringFromRecord(payload, "sourceTurnId") ?? goal?.sourceTurnId,
-      createdAt: goal?.createdAt ?? event.createdAt,
-      updatedAt: event.createdAt,
-    };
-  }
-  return goal;
-}
-
-function deriveChatMode(events: SessionEvent[]): ChatMode {
-  let mode: ChatMode = "normal";
-  for (const event of events) {
-    if (event.kind !== "chat-mode-changed") {
-      continue;
-    }
-    const value = stringFromRecord(recordFromUnknown(event.payload), "mode");
-    mode =
-      value === "plan" ? "plan" : value === "council" ? "council" : "normal";
-  }
-  return mode;
-}
-
-function normalizePlanItem(
-  value: unknown,
-  event: SessionEvent,
-  index: number,
-): SessionPlanItem {
-  const record = recordFromUnknown(value);
-  const title =
-    stringFromRecord(record, "title") ??
-    stringFromRecord(record, "label") ??
-    `Checklist item ${index + 1}`;
-  const sourceTurnId =
-    stringFromRecord(record, "sourceTurnId") ??
-    turnIdFromSessionEvent(event) ??
-    stringFromRecord(record, "turnId");
-  const id =
-    stringFromRecord(record, "id") ??
-    `${event.id}-${slugify(title) || `item-${index + 1}`}`;
-  return {
-    id,
-    title,
-    detail: stringFromRecord(record, "detail"),
-    status: normalizePlanStatus(record?.status),
-    sourceTurnId,
-    providerId:
-      stringFromRecord(record, "providerId") ??
-      stringFromRecord(recordFromUnknown(event.payload), "providerId"),
-    createdAt: stringFromRecord(record, "createdAt") ?? event.createdAt,
-    updatedAt: stringFromRecord(record, "updatedAt") ?? event.createdAt,
-  };
-}
-
-function normalizePlanStatus(value: unknown): SessionPlanItemStatus {
-  if (
-    value === "todo" ||
-    value === "in-progress" ||
-    value === "complete" ||
-    value === "blocked"
-  ) {
-    return value;
-  }
-  if (value === "done") {
-    return "complete";
-  }
-  if (value === "doing" || value === "running") {
-    return "in-progress";
-  }
-  return "todo";
-}
-
-function recordFromUnknown(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function stringFromRecord(
-  record: Record<string, unknown> | undefined,
-  key: string,
-) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function numberFromUnknown(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function planStatusVerb(status: SessionPlanItemStatus) {
-  switch (status) {
-    case "in-progress":
-      return "started";
-    case "complete":
-      return "completed";
-    case "blocked":
-      return "blocked";
-    case "todo":
-    default:
-      return "reopened";
-  }
-}
-
-function createPlanSessionEvent(
-  sessionId: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  const now = new Date().toISOString();
-  const turnId =
-    typeof payload.turnId === "string" ? payload.turnId : undefined;
-  return {
-    id: `plan-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    turnId,
-    createdAt: now,
-    kind: "plan-updated",
-    message,
-    payload,
-  };
-}
-
-function createGoalSessionEvent(
-  sessionId: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  return {
-    id: `goal-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    createdAt: new Date().toISOString(),
-    kind: "goal-updated",
-    message,
-    payload,
-  };
-}
-
-function createEditorSessionEvent(
-  sessionId: string,
-  eventKind: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  return {
-    id: `editor-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    createdAt: new Date().toISOString(),
-    kind:
-      eventKind === "ai-edit-proposed" ? "file-edit-proposed" : "system-event",
-    message,
-    payload: {
-      kind: eventKind,
-      surface: "desktop-ide",
-      data: payload,
-    },
-  };
-}
-
 function workspaceContentToEditorBuffer(
   content: WorkspaceFileContent,
 ): EditorBuffer {
@@ -18999,6 +19029,52 @@ function workspaceContextRelativePath(path: string, root: string) {
   return normalizedPath.startsWith(prefix)
     ? normalizedPath.slice(prefix.length)
     : normalizedPath;
+}
+
+function workspaceContextWithLiveEditor(
+  context: WorkspaceContextSnapshot,
+  activePath: string | undefined,
+  buffer: EditorBuffer | undefined,
+  selection: EditorSelection | undefined,
+  tabs: string[],
+): WorkspaceContextSnapshot {
+  const root = context.workspaceKey.replace(/\/+$/, "");
+  const belongsToRoot = (path: string) => path.startsWith(`${root}/`);
+  const visibleTabs = tabs
+    .filter(belongsToRoot)
+    .slice(0, 64)
+    .map((path) => workspaceContextRelativePath(path, root));
+  if (!activePath || !belongsToRoot(activePath) || !buffer) {
+    return { ...context, visibleTabs };
+  }
+  const path = workspaceContextRelativePath(activePath, root);
+  const maxText = 48_000;
+  const clipped = (value: string) => value.slice(0, maxText);
+  return {
+    ...context,
+    revision: Date.now(),
+    activePath: path,
+    visibleTabs,
+    selection:
+      selection?.path === activePath
+        ? {
+            ...selection,
+            path,
+            text: clipped(selection.text),
+            truncated: selection.text.length > maxText,
+          }
+        : undefined,
+    buffers: [
+      {
+        path,
+        dirty: buffer.content !== buffer.savedContent,
+        content: clipped(buffer.content),
+        truncated: buffer.content.length > maxText,
+        diskHash: buffer.contentHash,
+        documentVersion: buffer.updatedAt,
+      },
+    ],
+  };
 }
 
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
@@ -19912,10 +19988,16 @@ function createAutomationDraft(
     title: string;
     prompt: string;
     schedule: Automation["schedule"];
+    calendar?: import("@gyro-dev/ui").CalendarSchedule;
     stopCondition?: string;
   },
 ): AutomationDraft {
   const metadata = workspaceRunMetadata(mode, details.title);
+  if (mode === "worktree") {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    metadata.branch = `${metadata.branch}-${suffix}`;
+    metadata.worktreeName = `${metadata.worktreeName}-${suffix}`;
+  }
   const model = getProviderModel(provider);
   return {
     title: details.title,
@@ -19928,6 +20010,7 @@ function createAutomationDraft(
     worktreeName: metadata.worktreeName,
     stopCondition: details.stopCondition,
     execution: {
+      calendar: details.calendar,
       workspacePath,
       providerId: provider.id,
       providerLabel: provider.displayName,
@@ -19958,14 +20041,7 @@ function createPreviewAutomation(draft: AutomationDraft): Automation {
     triageState: "none",
     lastResult: "Waiting for first local run",
     unreadResults: 0,
-    runHistory: [
-      {
-        id: `run-draft-${Date.now()}`,
-        status: "queued",
-        startedAt: now,
-        summary: "Automation created locally",
-      },
-    ],
+    runHistory: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -19986,15 +20062,6 @@ function workspaceRunMetadata(
     worktreeName: `gyro-${slug}`,
     workingDirectory,
   };
-}
-
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
 }
 
 function createOptimisticTurnEvents(

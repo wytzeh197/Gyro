@@ -9,7 +9,6 @@ import {
   composerLimitWindows,
   estimateComposerContextUsage,
   formatLimitReset,
-  formatUsageFreshness,
   providerResetSummary,
 } from "../packages/ui/src/context-usage.ts";
 
@@ -143,6 +142,34 @@ assert.equal(billingTotal.source, "estimated");
 assert.equal(billingTotal.windowLabel, "200K");
 assert.equal(billingTotal.usedLabel, "500");
 assert.equal(billingTotal.remainingLabel, "200K");
+
+// A local checkpoint replaces the old provider thread. Its saved text still
+// occupies context, and the stale pre-compaction reading must not win.
+const checkpoint = estimateComposerContextUsage(
+  [
+    event("a", "assistant-message", "old", {
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+      contextUsage: { inputTokens: 80_000, outputTokens: 1_000 },
+    }),
+    {
+      ...event("b", "system-event", "Compacted context", {
+        kind: "provider-activity",
+        activityKind: "context",
+        activityId: "context-compaction-checkpoint",
+        status: "done",
+        contextSummary: "S".repeat(4_000),
+      }),
+      turnId: "compact-turn",
+    },
+    event("c", "user-message", "next"),
+  ],
+  "",
+  { providerId: "anthropic", modelId: "claude-opus-5" },
+);
+assert.equal(checkpoint.source, "estimated");
+assert.ok(checkpoint.usedTokens >= 1_000);
+assert.ok(checkpoint.usedTokens < 2_000);
 
 // A nearly untouched 1M window must not report more headroom than the window
 // holds. Rounding the remainder to the nearest thousand reads "1000K", a unit
@@ -362,22 +389,6 @@ const roundedReset = composerLimitWindows(
   now,
 );
 assert.equal(roundedReset[0].percent, 8);
-
-// An old or failed reading says so instead of passing for a live one.
-const freshnessNow = Date.parse("2026-07-27T10:00:00.000Z");
-assert.deepEqual(
-  formatUsageFreshness("2026-07-27T09:59:40.000Z", freshnessNow),
-  { label: "Updated just now", stale: false },
-);
-assert.deepEqual(
-  formatUsageFreshness("2026-07-26T20:00:00.000Z", freshnessNow),
-  { label: "Last read 14 hr ago", stale: true },
-);
-assert.equal(
-  formatUsageFreshness("2026-07-27T09:58:00.000Z", freshnessNow, true)?.stale,
-  true,
-);
-assert.equal(formatUsageFreshness(undefined, freshnessNow), undefined);
 
 // Limits belong to the provider, not the thread: another provider's windows
 // never carry over, and no default pair is invented.

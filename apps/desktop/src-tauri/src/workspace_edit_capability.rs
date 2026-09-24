@@ -28,6 +28,7 @@ pub(super) fn execute(
     let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
         arguments, "path",
     )?)?;
+    assert_editor_document_version(app, bound, &path, arguments)?;
     assert_no_unsaved_editor_changes(app, bound, &path)?;
     let candidate =
         gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(&path))?;
@@ -68,7 +69,8 @@ pub(super) fn execute(
     };
 
     let store = open_store().map_err(anyhow::Error::msg)?;
-    let proposal = create_file_mutation_proposal_in_store(
+    let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
+    let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
         &store,
         FileMutationProposalRequest {
             session_id: bound.session_id.clone(),
@@ -78,6 +80,7 @@ pub(super) fn execute(
             expected_hash,
         },
         apply_immediately,
+        Some(&root_id),
     )?;
     emit_proposal_events(app, bound, &proposal);
     let resource = CapabilityResourceRef {
@@ -249,6 +252,44 @@ pub(super) fn assert_no_unsaved_editor_changes(
     Ok(())
 }
 
+fn assert_editor_document_version(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    path: &str,
+    arguments: &Value,
+) -> anyhow::Result<()> {
+    let Some(expected) = arguments.get("documentVersion") else {
+        return Ok(());
+    };
+    let expected = expected
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("documentVersion must be text"))?;
+    let latest = app
+        .state::<CapabilityIdeEvidenceManager>()
+        .by_workspace
+        .lock()
+        .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+        .get(&bound.workspace_key)
+        .cloned()
+        .unwrap_or_else(|| bound.workspace_context.clone());
+    anyhow::ensure!(
+        editor_document_version_matches(&latest, path, expected),
+        "editor document version changed; review the current buffer and retry"
+    );
+    Ok(())
+}
+
+fn editor_document_version_matches(
+    context: &WorkspaceContextSnapshot,
+    path: &str,
+    expected: &str,
+) -> bool {
+    context.buffers.iter().any(|buffer| {
+        buffer.get("path").and_then(Value::as_str) == Some(path)
+            && buffer.get("documentVersion").and_then(Value::as_str) == Some(expected)
+    })
+}
+
 /// Surface the proposal to the chat that made it. The store keeps the durable
 /// record; these events are what the Workspace review rail reacts to. Shared
 /// with the memory tools, which queue proposals through the same lane.
@@ -283,6 +324,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 "path": { "type": "string" },
                 "content": { "type": "string" },
                 "expectedHash": { "type": "string" }
+                ,"documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
             }),
             vec!["path", "content"],
         ),
@@ -304,7 +346,8 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 "expectedHash": {
                     "type": "string",
                     "description": "Optional guard: fail unless the file still hashes to this value. Prefer re-reading the file instead."
-                }
+                },
+                "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
             }),
             vec!["path", "oldString", "newString"],
         ),
@@ -479,5 +522,26 @@ mod tests {
         let (_, required) = schema(CapabilityId::WorkspaceProposeEdit).unwrap();
         assert_eq!(required, vec!["path", "content"]);
         assert!(schema(CapabilityId::WorkspaceList).is_none());
+    }
+
+    #[test]
+    fn editor_document_version_rejects_changed_or_missing_buffers() {
+        let mut context = WorkspaceContextSnapshot::empty("/tmp/workspace");
+        context.buffers = vec![json!({"path":"src/main.rs", "documentVersion":"v2"})];
+        assert!(editor_document_version_matches(
+            &context,
+            "src/main.rs",
+            "v2"
+        ));
+        assert!(!editor_document_version_matches(
+            &context,
+            "src/main.rs",
+            "v1"
+        ));
+        assert!(!editor_document_version_matches(
+            &context,
+            "src/other.rs",
+            "v2"
+        ));
     }
 }

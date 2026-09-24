@@ -101,6 +101,10 @@ pub struct KimiAcpOutput {
     pub stop_reason: String,
     pub resumed: bool,
     pub duration_ms: u64,
+    /// The prompt's token usage as the agent reported it (Grok sends `usage`,
+    /// and `promptUsage` on some builds), summed over every model call the
+    /// turn made. Absent when the agent reports none.
+    pub usage: Option<Value>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -464,7 +468,7 @@ where
         }
     }
 
-    // Grok takes model/effort as process flags (Synara style). In-session
+    // Grok takes model/effort as process flags. In-session
     // session/set_model and session/set_config_option often return Method not
     // found and must not fail the turn.
     let skip_in_session_config = is_grok_acp_program(&request.program);
@@ -593,6 +597,11 @@ where
         stop_reason,
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
+        usage: result
+            .get("usage")
+            .or_else(|| result.get("promptUsage"))
+            .filter(|usage| usage.is_object())
+            .cloned(),
     })
 }
 
@@ -676,7 +685,7 @@ where
     });
 
     // Order: resume when advertised (Kimi-shaped), else load when advertised
-    // (Grok/Synara-shaped). When neither capability is advertised, try both
+    // (Grok-shaped). When neither capability is advertised, try both
     // before falling back — some CLIs omit flags but still implement one.
     let mut methods: Vec<&str> = Vec::new();
     if supports_resume {

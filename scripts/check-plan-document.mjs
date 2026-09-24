@@ -4,15 +4,15 @@ import vm from "node:vm";
 import ts from "typescript";
 
 const source = readFileSync(
-  new URL("../apps/desktop/src/App.tsx", import.meta.url),
+  new URL("../apps/desktop/src/session-context-events.ts", import.meta.url),
   "utf8",
 );
 const ast = ts.createSourceFile(
-  "App.tsx",
+  "session-context-events.ts",
   source,
   ts.ScriptTarget.Latest,
   true,
-  ts.ScriptKind.TSX,
+  ts.ScriptKind.TS,
 );
 const names = new Set([
   "deriveSessionPlan",
@@ -29,12 +29,17 @@ const functions = ast.statements.filter(
 assert.equal(functions.length, names.size);
 const context = {};
 vm.runInNewContext(
-  ts.transpileModule(functions.map((node) => node.getText(ast)).join("\n"), {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.None,
+  ts.transpileModule(
+    functions
+      .map((node) => node.getText(ast).replace(/^export /, ""))
+      .join("\n"),
+    {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.None,
+      },
     },
-  }).outputText,
+  ).outputText,
   context,
 );
 const event = (kind, payload, message = "", turnId = "turn-1") => ({

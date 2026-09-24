@@ -86,6 +86,7 @@ struct PreparedProviderMutation {
     expected_hash: Option<String>,
     desired_content: Option<Vec<u8>>,
     line_counts: (usize, usize),
+    patch: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -98,6 +99,8 @@ pub struct ProviderMutationResult {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderFileLineCounts {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
     pub path: String,
     pub additions: usize,
     pub deletions: usize,
@@ -242,6 +245,26 @@ where
                     proposal.status.as_str()
                 ));
             }
+            let session = store
+                .get_session(proposal.session_id)?
+                .ok_or_else(|| anyhow!("owning session was removed"))?;
+            if !session
+                .workspace_identity
+                .roots
+                .iter()
+                .any(|root| root.path == proposal.workspace_path)
+            {
+                let detail = "workspace root was removed from this session; review a new proposal"
+                    .to_string();
+                let proposal = store.resolve_mutation_proposal_status(
+                    proposal_id,
+                    MutationProposalStatus::Failed,
+                    Some(detail.clone()),
+                )?;
+                let _event =
+                    append_mutation_decision_event(store, &proposal, Some(detail.clone()))?;
+                return Err(anyhow!("could not apply {}: {detail}", proposal.path));
+            }
             if mutation_approval_expired(proposal.created_at, Utc::now()) {
                 let detail = "approval expired; review a new proposal".to_string();
                 let proposal = store.resolve_mutation_proposal_status(
@@ -313,6 +336,7 @@ pub fn mutation_approval_payload(
         "turnId": proposal.turn_id,
         "operation": proposal.operation,
         "path": proposal.path,
+        "workspacePath": proposal.workspace_path,
         "scope": "workspace-file",
         "risk": "Writes one file inside the selected project",
         "effect": match proposal.operation {
@@ -336,12 +360,12 @@ fn append_mutation_decision_event_with_counts(
     store: &SessionStore,
     proposal: &MutationProposal,
     error: Option<String>,
-    counts: Option<(usize, usize)>,
+    counts: Option<(usize, usize, Option<String>)>,
 ) -> Result<SessionEvent> {
     let mut payload = mutation_approval_payload(proposal, error);
-    if let Some((additions, deletions)) = counts {
+    if let Some((additions, deletions, patch)) = counts {
         payload["fileChanges"] = serde_json::json!([{
-            "path": proposal.path, "additions": additions, "deletions": deletions
+            "path": proposal.path, "additions": additions, "deletions": deletions, "patch": patch
         }]);
     }
     store.append_event_with_turn_id(
@@ -414,7 +438,7 @@ fn recover_claimed_mutation_proposals(store: &SessionStore) -> Result<usize> {
 fn apply_mutation_proposal<F>(
     proposal: &MutationProposal,
     is_cancelled: &mut F,
-) -> Result<(PathBuf, (usize, usize))>
+) -> Result<(PathBuf, (usize, usize, Option<String>))>
 where
     F: FnMut() -> bool,
 {
@@ -437,7 +461,7 @@ where
         let current_hash = content_hash(&current);
         if current_hash == desired_hash {
             ensure_mutation_not_cancelled(is_cancelled)?;
-            return Ok((candidate, (0, 0)));
+            return Ok((candidate, (0, 0, None)));
         }
         if !proposal.base_exists {
             return Err(anyhow!("a file now exists at the approved create path"));
@@ -456,7 +480,17 @@ where
 
     let counts = changed_line_counts(&original, proposal.content.as_bytes());
     atomic_write_workspace_file(&candidate, proposal.content.as_bytes(), is_cancelled)?;
-    Ok((candidate, counts))
+    let patch = captured_patch(&original, proposal.content.as_bytes());
+    Ok((candidate, (counts.0, counts.1, patch)))
+}
+
+fn captured_patch(before: &[u8], after: &[u8]) -> Option<String> {
+    let patch = diffy::create_patch(
+        std::str::from_utf8(before).ok()?,
+        std::str::from_utf8(after).ok()?,
+    )
+    .to_string();
+    (patch.len() <= 256 * 1024).then_some(patch)
 }
 
 fn ensure_mutation_not_cancelled<F>(is_cancelled: &mut F) -> Result<()>
@@ -1018,6 +1052,7 @@ fn provider_mutation_result(
             .iter()
             .map(|change| ProviderFileLineCounts {
                 path: change.relative_path.clone(),
+                patch: change.patch.clone(),
                 additions: change.line_counts.0,
                 deletions: change.line_counts.1,
             })
@@ -1058,7 +1093,18 @@ fn push_provider_mutation(
     };
     let line_counts =
         changed_line_counts(&original, desired_content.as_deref().unwrap_or_default());
+    let patch = match (
+        std::str::from_utf8(&original),
+        std::str::from_utf8(desired_content.as_deref().unwrap_or_default()),
+    ) {
+        (Ok(before), Ok(after)) => {
+            let patch = diffy::create_patch(before, after).to_string();
+            (patch.len() <= 256 * 1024).then_some(patch)
+        }
+        _ => None,
+    };
     prepared.push(PreparedProviderMutation {
+        patch,
         line_counts,
         relative_path,
         target,
@@ -1916,8 +1962,14 @@ mod tests {
             "approved\n"
         );
         assert_eq!(result.event.payload["schema"], "gyro.mutation.v1");
+        assert!(result.event.payload["fileChanges"][0]["patch"]
+            .as_str()
+            .unwrap()
+            .contains("+approved"));
+        let mut counts = result.event.payload["fileChanges"].clone();
+        counts[0].as_object_mut().unwrap().remove("patch");
         assert_eq!(
-            result.event.payload["fileChanges"],
+            counts,
             serde_json::json!([
                 { "path": "created.txt", "additions": 1, "deletions": 0 }
             ])
@@ -2113,8 +2165,16 @@ mod tests {
             result.changed_paths,
             vec!["add.txt", "update.txt", "delete.txt"]
         );
+        assert!(result.file_changes.iter().all(|change| change
+            .patch
+            .as_ref()
+            .is_some_and(|patch| patch.contains("@@"))));
+        let mut counts = serde_json::to_value(&result.file_changes).unwrap();
+        for change in counts.as_array_mut().unwrap() {
+            change.as_object_mut().unwrap().remove("patch");
+        }
         assert_eq!(
-            serde_json::to_value(&result.file_changes).unwrap(),
+            counts,
             serde_json::json!([
                 { "path": "add.txt", "additions": 1, "deletions": 0 },
                 { "path": "update.txt", "additions": 1, "deletions": 1 },

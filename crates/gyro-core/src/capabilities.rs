@@ -22,6 +22,7 @@ pub enum CapabilityId {
     WorkspaceSearch,
     WorkspaceRead,
     WorkspaceReadRange,
+    WorkspaceReadEditor,
     WorkspaceDiagnostics,
     WorkspaceGitStatus,
     WorkspaceDiff,
@@ -83,6 +84,7 @@ impl CapabilityId {
             Self::WorkspaceSearch => "workspace.search",
             Self::WorkspaceRead => "workspace.read",
             Self::WorkspaceReadRange => "workspace.read_range",
+            Self::WorkspaceReadEditor => "workspace.read_editor",
             Self::WorkspaceDiagnostics => "workspace.diagnostics",
             Self::WorkspaceGitStatus => "workspace.git_status",
             Self::WorkspaceDiff => "workspace.diff",
@@ -144,6 +146,7 @@ impl CapabilityId {
             Self::WorkspaceSearch => "gyro_workspace_search",
             Self::WorkspaceRead => "gyro_workspace_read",
             Self::WorkspaceReadRange => "gyro_workspace_read_range",
+            Self::WorkspaceReadEditor => "gyro_workspace_read_editor",
             Self::WorkspaceDiagnostics => "gyro_workspace_diagnostics",
             Self::WorkspaceGitStatus => "gyro_workspace_git_status",
             Self::WorkspaceDiff => "gyro_workspace_diff",
@@ -653,7 +656,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceContext,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect the diagnostics, failing tests, and active output channel in Gyro Workspace. The user's open file, tab list, selection, and unsaved buffer are deliberately not reported here.",
+        description: "Inspect Workspace roots and their root IDs, diagnostics, failing tests, and active output. Editor text is withheld; use gyro_workspace_read_editor with approval when live text is needed.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceCheck,
@@ -678,7 +681,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadRange,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read an exact bounded line range from a text file in the current Gyro project.",
+        description: "Read an exact bounded line range from a saved text file in the current Gyro project.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceReadEditor,
+        class: CapabilityClass::WorkspaceSensitiveRead,
+        description: "Read the current editor selection or unsaved buffer for one workspace file. Gyro asks the user to approve this live-text disclosure every time; pass path and optionally selectionOnly.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiagnostics,
@@ -961,21 +969,34 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 /// chat runner at all, so there is nowhere to attach tools.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
     let descriptor = crate::provider_registry::provider_descriptor(provider_id);
-    let available = descriptor.is_some_and(|provider| {
-        provider.execution_kind != crate::provider_registry::ProviderExecutionKind::ReadinessOnly
-    });
+    let custom = crate::provider_registry::is_custom_provider_id(provider_id);
+    let available = custom
+        || descriptor.is_some_and(|provider| {
+            provider.execution_kind
+                != crate::provider_registry::ProviderExecutionKind::ReadinessOnly
+        });
     ProviderCapabilitySupport {
         schema: PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1.into(),
         provider_id: provider_id.into(),
         available,
-        execution_kind: descriptor.map(|provider| provider.execution_kind),
+        execution_kind: descriptor
+            .map(|provider| provider.execution_kind)
+            .or_else(|| {
+                custom
+                    .then_some(crate::provider_registry::ProviderExecutionKind::OpenAiCompatibleApi)
+            }),
         support_tier: descriptor.map_or(
-            crate::provider_registry::ProviderSupportTier::ReadinessOnly,
+            if custom {
+                crate::provider_registry::ProviderSupportTier::Experimental
+            } else {
+                crate::provider_registry::ProviderSupportTier::ReadinessOnly
+            },
             |provider| provider.support_tier,
         ),
-        supports_approvals: descriptor.is_some_and(|provider| provider.supports_approvals),
+        supports_approvals: custom
+            || descriptor.is_some_and(|provider| provider.supports_approvals),
         supports_images: descriptor.is_some_and(|provider| provider.supports_images),
-        supports_resume: descriptor.is_some_and(|provider| provider.supports_resume),
+        supports_resume: custom || descriptor.is_some_and(|provider| provider.supports_resume),
         supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
         capabilities: if available {
             CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect()
@@ -1228,6 +1249,7 @@ mod tests {
             "ollama",
             "cursor",
             "opencode",
+            "custom:local-gateway",
         ] {
             let support = provider_capability_support(provider_id);
             assert_eq!(support.schema, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1);

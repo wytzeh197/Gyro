@@ -21,6 +21,32 @@ import {
   orderedChatTimelineEvents,
 } from "../packages/ui/src/chat-timeline.ts";
 
+// A transient editor preview must survive a persisted approval page refresh
+// without being written to the durable event itself.
+const storedEditorApproval = {
+  id: "editor-approval",
+  sessionId: "editor-session",
+  createdAt: new Date(0).toISOString(),
+  kind: "approval-requested",
+  message: "Approve editor read",
+  payload: { kind: "capability-approval" },
+};
+const liveEditorApproval = {
+  ...storedEditorApproval,
+  payload: {
+    ...storedEditorApproval.payload,
+    editorPreview: { path: "src/main.ts", content: "unsaved text" },
+  },
+};
+assert.equal(
+  mergePersistedAndOptimisticEvents(
+    [storedEditorApproval],
+    [liveEditorApproval],
+  )[0].payload.editorPreview.content,
+  "unsaved text",
+);
+assert.equal(storedEditorApproval.payload.editorPreview, undefined);
+
 // Every catalog model (plus dynamically configured models) gets the same
 // ordering contract. This exercises normalized stream formats, not remote APIs.
 const timelineModels = [

@@ -6,13 +6,23 @@ pub(crate) struct UsagePoll<T> {
     /// When the reading was taken, when it expires, and what it was.
     cached: Option<(Instant, Instant, Result<T, String>)>,
     failures: u32,
+    /// How long a good reading answers every caller before the next request.
+    hold: Duration,
 }
 
 impl<T: Clone> UsagePoll<T> {
     pub(crate) fn new() -> Self {
+        Self::holding(Duration::from_secs(45))
+    }
+
+    /// A poll whose good readings last `hold`: for account endpoints with a
+    /// tight per-account quota, where asking every 45 seconds from each open
+    /// window is what gets the account locked out of its own usage.
+    pub(crate) fn holding(hold: Duration) -> Self {
         Self {
             cached: None,
             failures: 0,
+            hold,
         }
     }
 
@@ -48,7 +58,7 @@ impl<T: Clone> UsagePoll<T> {
         let result = fetch(&mut cooldown);
         if result.is_ok() {
             self.failures = 0;
-            cooldown = Duration::from_secs(45);
+            cooldown = self.hold;
         } else {
             self.failures = self.failures.saturating_add(1);
         }
@@ -150,6 +160,23 @@ mod tests {
             poll.read(now + Duration::from_secs(135), |_| Ok(12)),
             Ok(12)
         );
+    }
+
+    #[test]
+    fn a_held_reading_answers_until_its_hold_or_a_fresh_read_lapses() {
+        let mut poll = UsagePoll::holding(Duration::from_secs(300));
+        let now = Instant::now();
+        assert_eq!(poll.read(now, |_| Ok(4)), Ok(4));
+        assert_eq!(
+            poll.read(now + Duration::from_secs(299), |_| panic!("early poll")),
+            Ok(4)
+        );
+        let fresh = Some(Duration::from_secs(60));
+        assert_eq!(
+            poll.read_within(now + Duration::from_secs(61), fresh, |_| Ok(5)),
+            Ok(5)
+        );
+        assert_eq!(poll.read(now + Duration::from_secs(361), |_| Ok(6)), Ok(6));
     }
 
     #[test]

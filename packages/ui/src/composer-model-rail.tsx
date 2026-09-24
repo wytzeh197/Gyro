@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { groupModelsByClass } from "./model-classes";
 
 export type ModelRailProvider = {
   id: string;
@@ -30,13 +31,11 @@ function contextLabel(tokens?: number) {
   return `${Math.round(tokens / 1000)}K`;
 }
 
-/** Hover long enough to mean it before the list swaps under the pointer. */
-const HOVER_PREVIEW_MS = 140;
-
 /**
  * Providers down a rail of their own marks, the previewed provider's models
- * beside it. Switching provider and model is one pointer trip, and the rail
- * keeps its order so a logo is always where the hand remembers it.
+ * beside it. A provider's models show only once its mark is clicked (or
+ * arrowed to), so sweeping the pointer across the rail never swaps the list,
+ * and the rail keeps its order so a logo is always where the hand remembers it.
  */
 export function ComposerModelRail({
   id,
@@ -74,9 +73,6 @@ export function ComposerModelRail({
   const panelRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const hoverTimer = useRef<number>(undefined);
-
-  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
 
   // Land on the model in use so Enter re-confirms and arrows start from it.
   useEffect(() => {
@@ -111,14 +107,6 @@ export function ComposerModelRail({
       window.removeEventListener("resize", position);
     };
   }, [placement]);
-
-  const previewSoon = (providerId: string) => {
-    window.clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(
-      () => setPreviewId(providerId),
-      HOVER_PREVIEW_MS,
-    );
-  };
 
   const focusIn = (container: HTMLElement | null, selector: string) =>
     Array.from(container?.querySelectorAll<HTMLElement>(selector) ?? []);
@@ -168,7 +156,9 @@ export function ComposerModelRail({
       <button
         aria-controls={`${id}-models`}
         aria-label={
-          provider.connected ? provider.label : `${provider.label}, not connected`
+          provider.connected
+            ? provider.label
+            : `${provider.label}, not connected`
         }
         aria-selected={selected}
         className={[
@@ -181,19 +171,51 @@ export function ComposerModelRail({
           .join(" ")}
         data-provider-id={provider.id}
         key={provider.id}
-        onClick={() => {
-          window.clearTimeout(hoverTimer.current);
-          setPreviewId(provider.id);
-        }}
-        onFocus={() => setPreviewId(provider.id)}
-        onPointerEnter={() => previewSoon(provider.id)}
-        onPointerLeave={() => window.clearTimeout(hoverTimer.current)}
+        onClick={() => setPreviewId(provider.id)}
         role="tab"
         tabIndex={selected ? 0 : -1}
         title={provider.label}
         type="button"
       >
         {renderLogo(provider)}
+      </button>
+    );
+  };
+
+  // Each class keeps its models together (every Opus by Opus), in the order
+  // the class first appears in the provider's catalog.
+  const previewClasses = groupModelsByClass(
+    preview?.models ?? [],
+    (model) => model.displayName,
+  );
+  const modelRow = (model: ModelRailProvider["models"][number]) => {
+    if (!preview) return null;
+    const checked =
+      preview.id === activeProviderId && model.id === activeModelId;
+    const context = contextLabel(model.contextWindowTokens);
+    return (
+      <button
+        aria-checked={checked}
+        className={`gyro-model-rail-model${checked ? " is-active" : ""}`}
+        key={model.id}
+        onClick={() => onSelectModel(preview.id, model.id)}
+        role="menuitemradio"
+        tabIndex={checked ? 0 : -1}
+        title={model.description}
+        type="button"
+      >
+        <span className="gyro-model-rail-model-name">{model.displayName}</span>
+        {context ? (
+          <span
+            className="gyro-model-rail-context"
+            title={`${model.contextWindowTokens?.toLocaleString()} token context`}
+          >
+            {context}
+          </span>
+        ) : null}
+        <span aria-hidden="true" className="gyro-model-rail-check">
+          {checked ? <Check size={14} /> : null}
+        </span>
       </button>
     );
   };
@@ -273,39 +295,26 @@ export function ComposerModelRail({
                 ref={listRef}
                 role="menu"
               >
-                {preview.models.map((model) => {
-                  const checked =
-                    preview.id === activeProviderId &&
-                    model.id === activeModelId;
-                  const context = contextLabel(model.contextWindowTokens);
-                  return (
-                    <button
-                      aria-checked={checked}
-                      className={`gyro-model-rail-model${checked ? " is-active" : ""}`}
-                      key={model.id}
-                      onClick={() => onSelectModel(preview.id, model.id)}
-                      role="menuitemradio"
-                      tabIndex={checked ? 0 : -1}
-                      title={model.description}
-                      type="button"
-                    >
-                      <span className="gyro-model-rail-model-name">
-                        {model.displayName}
-                      </span>
-                      {context ? (
+                {previewClasses.headed
+                  ? previewClasses.groups.map((modelClass) => (
+                      <div
+                        aria-labelledby={`${id}-class-${modelClass.id}`}
+                        className="gyro-model-rail-class"
+                        key={modelClass.id}
+                        role="group"
+                      >
                         <span
-                          className="gyro-model-rail-context"
-                          title={`${model.contextWindowTokens?.toLocaleString()} token context`}
+                          className="gyro-model-rail-class-label"
+                          id={`${id}-class-${modelClass.id}`}
                         >
-                          {context}
+                          {modelClass.label}
                         </span>
-                      ) : null}
-                      <span aria-hidden="true" className="gyro-model-rail-check">
-                        {checked ? <Check size={14} /> : null}
-                      </span>
-                    </button>
-                  );
-                })}
+                        {modelClass.models.map(modelRow)}
+                      </div>
+                    ))
+                  : previewClasses.groups.flatMap((modelClass) =>
+                      modelClass.models.map(modelRow),
+                    )}
               </div>
             ) : preview.connected ? (
               <div className="gyro-model-rail-empty" ref={listRef}>

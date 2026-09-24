@@ -165,7 +165,7 @@ export function SidebarProjectCard({
             <div className="gyro-project-card-count">
               <MessageCircle size={17} />
               <span>
-                {taskCount} {taskCount === 1 ? "task" : "tasks"}
+                {taskCount} {taskCount === 1 ? "chat" : "chats"}
                 <span className="gyro-project-count-dot"> · </span>
                 {activeCount} active
               </span>

@@ -148,6 +148,7 @@ const contextDependencies = {
   workspaceRootForPath: (roots, path) =>
     path && roots.find((root) => path === root || path.startsWith(`${root}/`)),
   workspaceContextRelativePath: (path, root) => path.replace(`${root}/`, ""),
+  workspaceContextWithLiveEditor: (context) => context,
   workspaceFailedTests: () => [],
   workbench: {
     ide: {
@@ -158,6 +159,9 @@ const contextDependencies = {
         { path: "/project/b/main.ts", message: "Project B" },
       ],
       testTree: [],
+      buffers: {},
+      selection: undefined,
+      tabs: [],
     },
   },
   isTauriRuntime: () => true,

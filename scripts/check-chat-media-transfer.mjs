@@ -25,6 +25,22 @@ const unknown = new File(["image"], "picture.unknown", {
   type: "image/unknown",
 });
 assert.deepEqual(chatMediaFiles({ files: [unknown], items: [] }), [unknown]);
+// A copied screenshot arrives as PNG and TIFF of the same picture; attaching
+// both put the image in the draft twice. One copy survives, the sendable one.
+const clipPng = new File(["png"], "image.png", { type: "image/png" });
+const clipTiff = new File(["tiff"], "image.tiff", { type: "image/tiff" });
+assert.deepEqual(chatMediaFiles({ files: [clipTiff, clipPng], items: [] }), [
+  clipPng,
+]);
+assert.deepEqual(
+  chatMediaFiles({ files: [], items: [item(clipPng), item(clipPng)] }),
+  [clipPng],
+);
+const other = new File(["other"], "diagram.png", { type: "image/png" });
+assert.deepEqual(chatMediaFiles({ files: [clipPng, other], items: [] }), [
+  clipPng,
+  other,
+]);
 // A drag is only droppable where the drag-over was cancelled, so the shapes a
 // drag source actually advertises decide whether an image can be dropped at
 // all. WebKit's DOMStringList has no `includes`; only `length`/`item` count.
@@ -47,4 +63,4 @@ assert.equal(isMediaDrag(drop(types("application/x-gyro-chat-pane"))), false);
 assert.equal(isMediaDrag(drop(types(), [{ kind: "file" }])), true);
 assert.equal(isMediaDrag(null), false);
 
-console.log("Chat media transfer: 11 checks passed");
+console.log("Chat media transfer: 14 checks passed");
