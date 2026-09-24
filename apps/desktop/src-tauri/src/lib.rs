@@ -2676,6 +2676,25 @@ fn create_automation_blocking(draft: CreateAutomationRequest) -> Result<Automati
 }
 
 #[tauri::command]
+async fn edit_automation(
+    app: tauri::AppHandle,
+    automation_id: String,
+    draft: CreateAutomationRequest,
+) -> Result<Automation, String> {
+    let id = parse_uuid(&automation_id)?;
+    let automation = tauri::async_runtime::spawn_blocking(move || {
+        open_automation_store()?
+            .edit_automation(id, draft)
+            .map_err(to_string)
+    })
+    .await
+    .map_err(to_string)??;
+    emit_automation_update(&app, &automation);
+    app.state::<AutomationSchedulerControl>().wake();
+    Ok(automation)
+}
+
+#[tauri::command]
 async fn set_automation_status(
     app: tauri::AppHandle,
     automation_id: String,
@@ -3244,7 +3263,17 @@ fn execute_claimed_automation(
             },
         )
         .map_err(to_string)?;
-    emit_automation_update(app, automation);
+    let linked = open_automation_store()?
+        .link_run_session(
+            automation.id,
+            automation
+                .lease_owner
+                .as_deref()
+                .ok_or("automation has no lease")?,
+            session.id,
+        )
+        .map_err(to_string)?;
+    emit_automation_update(app, &linked);
     let message = automation_provider_prompt(automation);
     let user_event = store
         .append_user_turn_message(
@@ -3296,8 +3325,22 @@ fn execute_claimed_automation(
         workspace_context: None,
         workspace_check: None,
     };
-    let result = run_provider_chat_blocking(app.clone(), request, UsageOrigin::Automation)
-        .map(|response| response.assistant_event.message);
+    // Register cancellation first, then re-read persisted state. A pause between
+    // claiming the lease and registering this session must still prevent dispatch.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let latest = open_automation_store()?
+            .get_automation(automation.id)
+            .map_err(to_string)?
+            .ok_or_else(|| "automation no longer exists".to_string())?;
+        if latest.status != AutomationStatus::Current
+            || latest.lease_owner != automation.lease_owner
+        {
+            return Err("chat cancelled before automation dispatch".to_string());
+        }
+        run_provider_chat_blocking(app.clone(), request, UsageOrigin::Automation)
+            .map(|response| response.assistant_event.message)
+    }))
+    .unwrap_or_else(|_| Err("automation execution panicked and was safely contained".into()));
     app.state::<AutomationSchedulerControl>()
         .unregister(automation.id);
     if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
@@ -9175,7 +9218,18 @@ async fn github_pull_requests(
 ) -> Result<Vec<gyro_core::GithubPullRequest>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-        gyro_core::list_pull_requests(&root, request.limit.unwrap_or(20)).map_err(to_string)
+        let mut requests =
+            gyro_core::list_pull_requests(&root, request.limit.unwrap_or(20)).map_err(to_string)?;
+        if let Some(branch) = git_current_branch(&root) {
+            if !requests.iter().any(|request| request.head_ref == branch) {
+                if let Some(current) =
+                    gyro_core::pull_request_for_branch(&root, &branch).map_err(to_string)?
+                {
+                    requests.insert(0, current);
+                }
+            }
+        }
+        Ok(requests)
     })
     .await
     .map_err(|error| format!("github pull requests worker failed: {error}"))?
@@ -13941,7 +13995,7 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
         "xai" => Some(AcpProviderRuntime {
             label: "xAI",
             program: "grok",
-            // Synara-compatible agent entry: --no-leader keeps Grok in ACP
+            // Grok ACP agent entry: --no-leader keeps Grok in ACP
             // client mode. Model/effort are appended dynamically when set.
             args: &[
                 "--no-auto-update",
@@ -19896,7 +19950,7 @@ fn is_stale_resume_sentence(sentence: &str) -> bool {
     resume_identity && missing_identity
 }
 
-/// Build Grok ACP spawn args the way Synara does: model/effort at process start.
+/// Build Grok ACP spawn args with model/effort at process start.
 fn build_grok_acp_program_args(
     model_id: Option<&str>,
     reasoning_effort: Option<&str>,
@@ -22673,7 +22727,9 @@ pub fn run_entrypoint() {
 pub fn run() {
     let mut context = tauri::generate_context!();
     #[cfg(debug_assertions)]
-    if std::env::var_os("GYRO_TEST_DATA_DIR").is_some() {
+    if std::env::var_os("GYRO_TEST_DATA_DIR").is_some()
+        && std::env::var_os("GYRO_TEST_PERSIST_UI").as_deref() != Some(std::ffi::OsStr::new("1"))
+    {
         for window in &mut context.config_mut().app.windows {
             window.incognito = true;
         }
@@ -22791,6 +22847,7 @@ pub fn run() {
             complete_automation_lease,
             close_terminal_pane,
             create_automation,
+            edit_automation,
             create_desktop_session,
             create_file_mutation_proposal,
             create_terminal_pane,
@@ -27409,7 +27466,7 @@ while True:
     }
 
     #[test]
-    fn grok_acp_args_match_synara_shape() {
+    fn grok_acp_args_use_process_model_and_effort() {
         let args = build_grok_acp_program_args(Some("grok-4.6"), Some("xhigh"));
         let as_str: Vec<String> = args
             .iter()
@@ -30875,6 +30932,7 @@ while True:
                 stop_condition: None,
                 next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
                 execution: gyro_core::AutomationExecutionContext {
+                    calendar: None,
                     workspace_path: Some("/secret/workspace".into()),
                     ..Default::default()
                 },

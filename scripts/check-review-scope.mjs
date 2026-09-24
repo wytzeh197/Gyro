@@ -73,10 +73,7 @@ const repo = (overrides) => ({
   });
   assert.equal(listing.files.length, 1);
   assert.equal(listing.files[0].path, "apps/desktop/src-tauri/src/lib.rs");
-  assert.equal(
-    reviewComparisonForScope({ kind: "branch" }),
-    "branch",
-  );
+  assert.equal(reviewComparisonForScope({ kind: "branch" }), "branch");
 }
 
 {
@@ -94,9 +91,20 @@ const repo = (overrides) => ({
     { kind: "turn", turnId: "turn_old" },
     {
       sourceControl: repo({
-        comparedToMain: { additions: 268, deletions: 46, partial: false, files: [
-          { path: "unrelated.rs", state: "modified", staged: false, additions: 1, deletions: 0 },
-        ] },
+        comparedToMain: {
+          additions: 268,
+          deletions: 46,
+          partial: false,
+          files: [
+            {
+              path: "unrelated.rs",
+              state: "modified",
+              staged: false,
+              additions: 1,
+              deletions: 0,
+            },
+          ],
+        },
       }),
       turnFiles: [],
     },
@@ -122,7 +130,7 @@ const repo = (overrides) => ({
   assert.match(listing.limitation ?? "", /list files compared to main/i);
 }
 
-assert.equal(reviewScopeTitle({ kind: "proposed" }), "Proposed edits");
+assert.equal(reviewScopeTitle({ kind: "proposed" }), "Recorded file changes");
 assert.equal(
   reviewScopeEmptyCopy({ kind: "proposed" }).title,
   "No changes to review",
@@ -144,7 +152,10 @@ assert.equal(
 +later
 `);
   assert.equal(hunks.length, 2);
-  assert.equal(hunks[0].lines.some((line) => line.kind === "added"), true);
+  assert.equal(
+    hunks[0].lines.some((line) => line.kind === "added"),
+    true,
+  );
 }
 
 assert.equal(shouldUsePlainDiff("short\n", "also short\n"), false);

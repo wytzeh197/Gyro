@@ -32,7 +32,12 @@ export function GitComparisonReview({
 }: {
   scope: ReviewScope;
   sourceControl?: SourceControlState;
-  turnFiles?: Array<{ path: string; additions?: number; deletions?: number }>;
+  turnFiles?: Array<{
+    path: string;
+    additions?: number;
+    deletions?: number;
+    patches?: string[];
+  }>;
   workspacePath?: string;
   onLoadDiff?: (
     file: ReviewFile,
@@ -131,7 +136,9 @@ export function GitComparisonReview({
       </aside>
       <section className="gyro-comparison-main" aria-label="Diff review">
         {selected ? (
-          <ComparisonDiffPane
+          <ScopedDiffPane
+            key={`${scope.kind}:${scope.kind === "turn" ? scope.turnId : ""}:${selected.path}`}
+            historical={scope.kind === "turn"}
             comparison={reviewComparisonForScope(scope, selected)}
             file={selected}
             onLoadDiff={onLoadDiff}
@@ -146,6 +153,55 @@ export function GitComparisonReview({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function ScopedDiffPane({
+  historical,
+  ...props
+}: Parameters<typeof ComparisonDiffPane>[0] & { historical: boolean }) {
+  const [showCurrent, setShowCurrent] = useState(false);
+  if (!historical) return <ComparisonDiffPane {...props} />;
+  return (
+    <div className="gyro-comparison-diff-pane">
+      <div className="gyro-diff-review-toolbar">
+        <strong>
+          {showCurrent
+            ? "Current working tree comparison"
+            : "Recorded changes from this turn"}
+        </strong>
+        <button type="button" onClick={() => setShowCurrent(!showCurrent)}>
+          {showCurrent ? "Back to recorded turn" : "Compare current file"}
+        </button>
+      </div>
+      {showCurrent ? (
+        <ComparisonDiffPane {...props} />
+      ) : props.file.patches?.length ? (
+        props.file.patches.map((patch, index) => (
+          <PlainDiffView
+            key={index}
+            diff={patch}
+            notice={`Recorded edit ${index + 1} of ${props.file.patches!.length}`}
+          />
+        ))
+      ) : (
+        <div className="gyro-diff-empty-state">
+          <strong>Historical diff unavailable</strong>
+          <span>
+            This turn recorded the file and its counts, but no patch was saved.
+            The current working tree may have changed since then.
+          </span>
+          {props.onOpenFile ? (
+            <button
+              type="button"
+              onClick={() => props.onOpenFile?.(props.file.path)}
+            >
+              Open current file
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

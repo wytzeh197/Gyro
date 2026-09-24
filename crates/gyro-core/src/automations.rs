@@ -3,7 +3,7 @@ use crate::{
     sessions::SessionWorkspaceMode,
 };
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -42,6 +42,9 @@ pub enum AutomationSchedule {
     Daily,
     Weekly,
     Heartbeat,
+    Once,
+    DailyAt,
+    WeeklyAt,
 }
 
 impl AutomationSchedule {
@@ -52,6 +55,9 @@ impl AutomationSchedule {
             Self::Daily => "daily",
             Self::Weekly => "weekly",
             Self::Heartbeat => "heartbeat",
+            Self::Once => "once",
+            Self::DailyAt => "daily-at",
+            Self::WeeklyAt => "weekly-at",
         }
     }
 
@@ -61,6 +67,9 @@ impl AutomationSchedule {
             "daily" => Self::Daily,
             "weekly" => Self::Weekly,
             "heartbeat" => Self::Heartbeat,
+            "once" => Self::Once,
+            "daily-at" => Self::DailyAt,
+            "weekly-at" => Self::WeeklyAt,
             _ => Self::Manual,
         }
     }
@@ -78,7 +87,19 @@ pub enum AutomationRunStatus {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CalendarSchedule {
+    pub timezone: String,
+    pub time: String,
+    pub date: Option<String>,
+    /// Monday = 0, Sunday = 6.
+    pub weekday: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutomationExecutionContext {
+    #[serde(default)]
+    pub calendar: Option<CalendarSchedule>,
     pub workspace_path: Option<String>,
     pub provider_id: Option<String>,
     pub provider_label: Option<String>,
@@ -116,6 +137,8 @@ impl AutomationTriageState {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRun {
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
     pub id: Uuid,
     pub status: AutomationRunStatus,
     pub started_at: DateTime<Utc>,
@@ -232,17 +255,11 @@ impl AutomationStore {
 
         let now = Utc::now();
         let id = Uuid::new_v4();
+        validate_calendar(&draft.schedule, draft.execution.calendar.as_ref(), now)?;
         let next_run_at = draft
             .next_run_at
-            .or_else(|| next_automation_run_after(&draft.schedule, now));
-        let run_history = vec![AutomationRun {
-            id: Uuid::new_v4(),
-            status: AutomationRunStatus::Queued,
-            started_at: now,
-            finished_at: None,
-            summary: "Automation created locally".into(),
-            stop_condition_met: None,
-        }];
+            .or_else(|| next_run_for(&draft.schedule, &draft.execution, now));
+        let run_history = vec![];
         let automation = Automation {
             id,
             title,
@@ -275,18 +292,109 @@ impl AutomationStore {
             .ok_or_else(|| anyhow!("automation was not persisted"))
     }
 
+    pub fn edit_automation(&self, id: Uuid, draft: CreateAutomationRequest) -> Result<Automation> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let mut automation = self
+            .get_automation(id)?
+            .ok_or_else(|| anyhow!("automation not found"))?;
+        if automation.lease_owner.is_some() {
+            return Err(anyhow!("wait for the active run before editing"));
+        }
+        if draft.title.trim().is_empty() || draft.prompt.trim().is_empty() {
+            return Err(anyhow!("title and prompt are required"));
+        }
+        let now = Utc::now();
+        let schedule_changed = automation.schedule != draft.schedule
+            || automation.execution.calendar != draft.execution.calendar;
+        // An unchanged one-time schedule may already have run. Editing its text
+        // must preserve its history and completed state.
+        if schedule_changed {
+            validate_calendar(&draft.schedule, draft.execution.calendar.as_ref(), now)?;
+        }
+        automation.title = draft.title.trim().into();
+        automation.prompt = draft.prompt.trim().into();
+        automation.schedule = draft.schedule;
+        automation.execution = draft.execution;
+        automation.project = draft.project;
+        automation.provider = draft.provider;
+        automation.workspace_mode = draft.workspace_mode;
+        automation.branch = draft.branch;
+        automation.worktree_name = draft.worktree_name;
+        automation.stop_condition = draft
+            .stop_condition
+            .filter(|value| !value.trim().is_empty());
+        if schedule_changed && automation.status == AutomationStatus::Current {
+            automation.next_run_at = next_run_for(&automation.schedule, &automation.execution, now);
+        }
+        automation.updated_at = now;
+        self.update_automation(&automation)?;
+        transaction.commit()?;
+        Ok(automation)
+    }
+
+    pub fn link_run_session(
+        &self,
+        id: Uuid,
+        lease_owner: &str,
+        session_id: Uuid,
+    ) -> Result<Automation> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let mut automation = self
+            .get_automation(id)?
+            .ok_or_else(|| anyhow!("automation not found"))?;
+        if automation.lease_owner.as_deref() != Some(lease_owner) {
+            return Err(anyhow!("automation lease changed"));
+        }
+        let run = automation
+            .run_history
+            .iter_mut()
+            .find(|run| run.status == AutomationRunStatus::Running && run.finished_at.is_none())
+            .ok_or_else(|| anyhow!("running automation receipt missing"))?;
+        run.session_id = Some(session_id);
+        self.conn.execute(
+            "update automations set run_history = ?1 where id = ?2 and lease_owner = ?3",
+            params![
+                serde_json::to_string(&automation.run_history)?,
+                id.to_string(),
+                lease_owner
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(automation)
+    }
+
     pub fn set_automation_status(
         &self,
         automation_id: Uuid,
         status: AutomationStatus,
     ) -> Result<Option<Automation>> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let Some(automation) = self.get_automation(automation_id)? else {
             return Ok(None);
         };
+        if status == AutomationStatus::Current
+            && automation.status != AutomationStatus::Current
+            && automation.schedule == AutomationSchedule::Once
+        {
+            validate_calendar(
+                &automation.schedule,
+                automation.execution.calendar.as_ref(),
+                Utc::now(),
+            )?;
+        }
         let next_run_at = match status {
             AutomationStatus::Current => automation
                 .next_run_at
-                .or_else(|| next_automation_run_after(&automation.schedule, Utc::now())),
+                .or_else(|| next_run_for(&automation.schedule, &automation.execution, Utc::now())),
             AutomationStatus::Paused | AutomationStatus::Completed => None,
         };
         let (lease_owner, lease_expires_at) = match status {
@@ -311,6 +419,7 @@ impl AutomationStore {
                 automation_id.to_string(),
             ],
         )?;
+        transaction.commit()?;
         self.get_automation(automation_id)
     }
 
@@ -319,9 +428,16 @@ impl AutomationStore {
         automation_id: Uuid,
         summary: impl Into<String>,
     ) -> Result<Option<Automation>> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let Some(mut automation) = self.get_automation(automation_id)? else {
             return Ok(None);
         };
+        if automation.lease_owner.is_some() {
+            return Err(anyhow!("use the owning scheduler to finish an active run"));
+        }
         let summary = summary.into().trim().to_string();
         if summary.is_empty() {
             return Err(anyhow!("automation run summary cannot be empty"));
@@ -336,6 +452,7 @@ impl AutomationStore {
         );
 
         self.update_automation(&automation)?;
+        transaction.commit()?;
         self.get_automation(automation_id)
     }
 
@@ -376,6 +493,10 @@ impl AutomationStore {
         lease_seconds: i64,
         now: DateTime<Utc>,
     ) -> Result<Option<Automation>> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let lease_owner = lease_owner.into().trim().to_string();
         if lease_owner.is_empty() {
             return Err(anyhow!("automation lease owner cannot be empty"));
@@ -435,6 +556,7 @@ impl AutomationStore {
             )?;
             return Ok(None);
         }
+        transaction.commit()?;
         Ok(claimed)
     }
 
@@ -518,6 +640,10 @@ impl AutomationStore {
     }
 
     pub fn recover_expired_automation_leases(&self, now: DateTime<Utc>) -> Result<usize> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let expired = self
             .list_automations()?
             .into_iter()
@@ -573,6 +699,7 @@ impl AutomationStore {
                 ],
             )?;
         }
+        transaction.commit()?;
         Ok(recovered)
     }
 
@@ -614,6 +741,10 @@ impl AutomationStore {
         summary: impl Into<String>,
         stop_condition_met: Option<bool>,
     ) -> Result<Option<Automation>> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let Some(mut automation) = self.get_automation(automation_id)? else {
             return Ok(None);
         };
@@ -685,6 +816,7 @@ impl AutomationStore {
         if changed == 0 {
             return Err(anyhow!("automation lease changed before completion"));
         }
+        transaction.commit()?;
         self.get_automation(automation_id)
     }
 
@@ -705,6 +837,7 @@ impl AutomationStore {
         automation.run_history.insert(
             0,
             AutomationRun {
+                session_id: None,
                 id: Uuid::new_v4(),
                 status: AutomationRunStatus::Running,
                 started_at,
@@ -733,6 +866,10 @@ impl AutomationStore {
         automation_id: Uuid,
         triage_state: AutomationTriageState,
     ) -> Result<Option<Automation>> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let Some(mut automation) = self.get_automation(automation_id)? else {
             return Ok(None);
         };
@@ -742,6 +879,7 @@ impl AutomationStore {
         }
         automation.updated_at = Utc::now();
         self.update_automation(&automation)?;
+        transaction.commit()?;
         self.get_automation(automation_id)
     }
 
@@ -929,12 +1067,101 @@ fn blank_to_default(value: String, fallback: &str) -> String {
     }
 }
 
+fn validate_calendar(
+    schedule: &AutomationSchedule,
+    calendar: Option<&CalendarSchedule>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    if !matches!(
+        schedule,
+        AutomationSchedule::Once | AutomationSchedule::DailyAt | AutomationSchedule::WeeklyAt
+    ) {
+        return Ok(());
+    }
+    let calendar = calendar.ok_or_else(|| anyhow!("calendar schedule is required"))?;
+    calendar
+        .timezone
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| anyhow!("use an IANA time zone, such as Europe/Amsterdam"))?;
+    NaiveTime::parse_from_str(&calendar.time, "%H:%M").context("time must be HH:MM")?;
+    if *schedule == AutomationSchedule::WeeklyAt && calendar.weekday.is_none_or(|day| day > 6) {
+        return Err(anyhow!("choose a weekday"));
+    }
+    if *schedule == AutomationSchedule::Once {
+        NaiveDate::parse_from_str(calendar.date.as_deref().unwrap_or(""), "%Y-%m-%d")
+            .context("choose a date")?;
+        if calendar_next_run(schedule, calendar, now).is_none() {
+            return Err(anyhow!("one-time schedule must be in the future"));
+        }
+    }
+    Ok(())
+}
+
+fn next_run_for(
+    schedule: &AutomationSchedule,
+    execution: &AutomationExecutionContext,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    if matches!(
+        schedule,
+        AutomationSchedule::Once | AutomationSchedule::DailyAt | AutomationSchedule::WeeklyAt
+    ) {
+        calendar_next_run(schedule, execution.calendar.as_ref()?, now)
+    } else {
+        next_automation_run_after(schedule, now)
+    }
+}
+
+/// Gaps move to the first valid minute that day; repeated times use the earlier instant.
+fn calendar_next_run(
+    schedule: &AutomationSchedule,
+    calendar: &CalendarSchedule,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let zone: chrono_tz::Tz = calendar.timezone.parse().ok()?;
+    let time = NaiveTime::parse_from_str(&calendar.time, "%H:%M").ok()?;
+    let first = if *schedule == AutomationSchedule::Once {
+        NaiveDate::parse_from_str(calendar.date.as_deref()?, "%Y-%m-%d").ok()?
+    } else {
+        now.with_timezone(&zone).date_naive()
+    };
+    for offset in 0..=8 {
+        if *schedule == AutomationSchedule::Once && offset > 0 {
+            break;
+        }
+        let date = first.checked_add_signed(Duration::days(offset))?;
+        if *schedule == AutomationSchedule::WeeklyAt
+            && Some(date.weekday().num_days_from_monday()) != calendar.weekday
+        {
+            continue;
+        }
+        let local = date.and_time(time);
+        for minute in 0..=180 {
+            let adjusted = local.checked_add_signed(Duration::minutes(minute))?;
+            if adjusted.date() != date {
+                break;
+            }
+            if let Some(candidate) = zone.from_local_datetime(&adjusted).earliest() {
+                let candidate = candidate.with_timezone(&Utc);
+                if candidate > now {
+                    return Some(candidate);
+                }
+                break;
+            }
+        }
+    }
+    None
+}
+
 fn next_automation_run_after(
     schedule: &AutomationSchedule,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
     match schedule {
-        AutomationSchedule::Manual => None,
+        AutomationSchedule::Manual
+        | AutomationSchedule::Once
+        | AutomationSchedule::DailyAt
+        | AutomationSchedule::WeeklyAt => None,
         AutomationSchedule::Hourly | AutomationSchedule::Heartbeat => {
             Some(now + Duration::hours(1))
         }
@@ -950,7 +1177,10 @@ fn apply_automation_run(
     now: DateTime<Utc>,
     stop_condition_met: Option<bool>,
 ) {
-    if run_status == AutomationRunStatus::Passed && stop_condition_met == Some(true) {
+    if automation.status == AutomationStatus::Current
+        && run_status == AutomationRunStatus::Passed
+        && (stop_condition_met == Some(true) || automation.schedule == AutomationSchedule::Once)
+    {
         automation.status = AutomationStatus::Completed;
     }
     automation.last_run_at = Some(now);
@@ -959,7 +1189,7 @@ fn apply_automation_run(
         AutomationStatus::Current => match run_status {
             AutomationRunStatus::Failed => Some(now + automation_retry_delay(automation)),
             AutomationRunStatus::Stopped => None,
-            _ => next_automation_run_after(&automation.schedule, now),
+            _ => next_run_for(&automation.schedule, &automation.execution, now),
         },
         AutomationStatus::Paused | AutomationStatus::Completed => None,
     };
@@ -981,6 +1211,7 @@ fn apply_automation_run(
         automation.run_history.insert(
             0,
             AutomationRun {
+                session_id: None,
                 id: Uuid::new_v4(),
                 status: run_status,
                 started_at: now,
@@ -1048,6 +1279,7 @@ mod tests {
                 stop_condition: Some("Stop after green twice".into()),
                 next_run_at: None,
                 execution: AutomationExecutionContext {
+                    calendar: None,
                     workspace_path: Some("/tmp/Gyro".into()),
                     provider_id: Some("openai".into()),
                     provider_label: Some("OpenAI".into()),
@@ -1061,7 +1293,7 @@ mod tests {
         assert_eq!(automation.title, "Heartbeat");
         assert_eq!(automation.status, AutomationStatus::Current);
         assert_eq!(automation.triage_state, AutomationTriageState::None);
-        assert_eq!(automation.run_history.len(), 1);
+        assert!(automation.run_history.is_empty());
         assert_eq!(store.list_automations().unwrap().len(), 1);
         assert_eq!(automation.execution.provider_id.as_deref(), Some("openai"));
 
@@ -1485,5 +1717,350 @@ mod tests {
             .record_automation_run(Uuid::new_v4(), "missing")
             .unwrap()
             .is_none());
+    }
+    #[test]
+    fn calendar_schedules_follow_wall_clock_and_dst() {
+        let mut calendar = CalendarSchedule {
+            timezone: "Europe/Amsterdam".into(),
+            time: "02:30".into(),
+            date: None,
+            weekday: Some(0),
+        };
+        let utc = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        assert_eq!(
+            calendar_next_run(
+                &AutomationSchedule::DailyAt,
+                &calendar,
+                utc("2026-03-28T23:00:00Z")
+            ),
+            Some(utc("2026-03-29T01:00:00Z"))
+        );
+        assert_eq!(
+            calendar_next_run(
+                &AutomationSchedule::DailyAt,
+                &calendar,
+                utc("2026-10-24T22:00:00Z")
+            ),
+            Some(utc("2026-10-25T00:30:00Z"))
+        );
+        // The second occurrence of 02:30 must not run again.
+        assert_eq!(
+            calendar_next_run(
+                &AutomationSchedule::DailyAt,
+                &calendar,
+                utc("2026-10-25T00:31:00Z")
+            ),
+            Some(utc("2026-10-26T01:30:00Z"))
+        );
+        calendar.time = "09:00".into();
+        assert_eq!(
+            calendar_next_run(
+                &AutomationSchedule::WeeklyAt,
+                &calendar,
+                utc("2026-09-24T12:00:00Z")
+            ),
+            Some(utc("2026-09-28T07:00:00Z"))
+        );
+        calendar.date = Some("2026-09-25".into());
+        assert_eq!(
+            calendar_next_run(
+                &AutomationSchedule::Once,
+                &calendar,
+                utc("2026-09-24T12:00:00Z")
+            ),
+            Some(utc("2026-09-25T07:00:00Z"))
+        );
+        assert!(validate_calendar(
+            &AutomationSchedule::Once,
+            Some(&calendar),
+            utc("2026-09-26T00:00:00Z")
+        )
+        .is_err());
+        calendar.timezone = "Invalid/Zone".into();
+        assert!(
+            validate_calendar(&AutomationSchedule::DailyAt, Some(&calendar), Utc::now()).is_err()
+        );
+        // Pre-upgrade execution metadata requires no migration and intervals retain their meaning.
+        let old: AutomationExecutionContext = serde_json::from_str("{}").unwrap();
+        assert!(old.calendar.is_none());
+        let now = utc("2026-03-28T12:00:00Z");
+        assert_eq!(
+            next_run_for(&AutomationSchedule::Daily, &old, now),
+            Some(now + Duration::days(1))
+        );
+    }
+    #[test]
+    fn editing_preserves_history_and_actual_runs_link_to_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            AutomationStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let mut draft = CreateAutomationRequest {
+            title: "Audit".into(),
+            prompt: "Inspect files".into(),
+            schedule: AutomationSchedule::Manual,
+            project: "Test".into(),
+            provider: "Codex".into(),
+            branch: "main".into(),
+            workspace_mode: SessionWorkspaceMode::Local,
+            worktree_name: None,
+            stop_condition: None,
+            next_run_at: None,
+            execution: AutomationExecutionContext::default(),
+        };
+        let mut automation = store.create_automation(draft.clone()).unwrap();
+        assert!(automation.run_history.is_empty());
+        // Keep legacy synthetic receipts intact in storage; the display hides them.
+        automation.run_history.push(AutomationRun {
+            id: Uuid::new_v4(),
+            session_id: None,
+            status: AutomationRunStatus::Queued,
+            started_at: Utc::now(),
+            finished_at: None,
+            summary: "Automation created locally".into(),
+            stop_condition_met: None,
+        });
+        store.update_automation(&automation).unwrap();
+        draft.title = "Updated audit".into();
+        draft.project = "Changed project".into();
+        draft.provider = "OpenAI".into();
+        draft.execution.workspace_path = Some(temp.path().display().to_string());
+        draft.execution.provider_id = Some("openai".into());
+        draft.execution.model_id = Some("selected-model".into());
+        draft.workspace_mode = SessionWorkspaceMode::Worktree;
+        draft.worktree_name = Some("unique-worktree".into());
+        draft.branch = "gyro/unique-worktree".into();
+        let edited = store.edit_automation(automation.id, draft.clone()).unwrap();
+        assert_eq!(edited.title, "Updated audit");
+        assert_eq!(edited.execution.model_id.as_deref(), Some("selected-model"));
+        assert_eq!(edited.execution.provider_id.as_deref(), Some("openai"));
+        assert_eq!(
+            edited.execution.workspace_path,
+            draft.execution.workspace_path
+        );
+        assert_eq!(edited.project, "Changed project");
+        assert_eq!(edited.workspace_mode, SessionWorkspaceMode::Worktree);
+        assert_eq!(edited.worktree_name.as_deref(), Some("unique-worktree"));
+        assert_eq!(edited.branch, "gyro/unique-worktree");
+        assert_eq!(edited.run_history.len(), 1);
+        store.queue_automation_now(automation.id).unwrap();
+        let claimed = store
+            .claim_due_automation("test-owner", 300)
+            .unwrap()
+            .unwrap();
+        assert!(store.edit_automation(automation.id, draft).is_err());
+        let session_id = Uuid::new_v4();
+        assert!(store
+            .link_run_session(claimed.id, "wrong-owner", session_id)
+            .is_err());
+        store
+            .link_run_session(claimed.id, "test-owner", session_id)
+            .unwrap();
+        let finished = store
+            .complete_automation_lease(claimed.id, "test-owner", "Done")
+            .unwrap()
+            .unwrap();
+        assert_eq!(finished.run_history[0].session_id, Some(session_id));
+        assert_eq!(finished.run_history[0].status, AutomationRunStatus::Passed);
+        assert_eq!(
+            finished.run_history[1].summary,
+            "Automation created locally"
+        );
+    }
+    #[test]
+    fn past_one_time_schedule_can_be_edited_but_must_be_rescheduled_to_resume() {
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            AutomationStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let calendar = CalendarSchedule {
+            timezone: "UTC".into(),
+            time: "09:00".into(),
+            date: Some(
+                (Utc::now() + Duration::days(2))
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+            weekday: None,
+        };
+        let mut draft = CreateAutomationRequest {
+            title: "One-time review".into(),
+            prompt: "Review files".into(),
+            schedule: AutomationSchedule::Once,
+            project: "Test".into(),
+            provider: "Codex".into(),
+            branch: "main".into(),
+            workspace_mode: SessionWorkspaceMode::Local,
+            worktree_name: None,
+            stop_condition: None,
+            next_run_at: None,
+            execution: AutomationExecutionContext {
+                calendar: Some(calendar),
+                ..Default::default()
+            },
+        };
+        let mut automation = store.create_automation(draft.clone()).unwrap();
+        automation.execution.calendar.as_mut().unwrap().date = Some("2020-01-01".into());
+        automation.status = AutomationStatus::Completed;
+        automation.next_run_at = None;
+        store.update_automation(&automation).unwrap();
+        draft.execution.calendar = automation.execution.calendar.clone();
+        draft.title = "Renamed completed review".into();
+        let edited = store.edit_automation(automation.id, draft.clone()).unwrap();
+        assert_eq!(edited.status, AutomationStatus::Completed);
+        assert_eq!(edited.title, "Renamed completed review");
+        assert!(edited.next_run_at.is_none());
+        assert!(store
+            .set_automation_status(automation.id, AutomationStatus::Current)
+            .is_err());
+        assert_eq!(
+            store.get_automation(automation.id).unwrap().unwrap().status,
+            AutomationStatus::Completed
+        );
+        draft.execution.calendar.as_mut().unwrap().date = Some(
+            (Utc::now() + Duration::days(3))
+                .format("%Y-%m-%d")
+                .to_string(),
+        );
+        store.edit_automation(automation.id, draft).unwrap();
+        let resumed = store
+            .set_automation_status(automation.id, AutomationStatus::Current)
+            .unwrap()
+            .unwrap();
+        assert!(resumed.next_run_at.unwrap() > Utc::now());
+        assert!(resumed.run_history.is_empty());
+    }
+
+    fn reliability_draft() -> CreateAutomationRequest {
+        CreateAutomationRequest {
+            title: "Reliability check".into(),
+            prompt: "Inspect project".into(),
+            schedule: AutomationSchedule::Hourly,
+            project: "Test".into(),
+            provider: "Codex".into(),
+            branch: "main".into(),
+            workspace_mode: SessionWorkspaceMode::Local,
+            worktree_name: None,
+            stop_condition: None,
+            next_run_at: Some(Utc::now() - Duration::minutes(1)),
+            execution: AutomationExecutionContext::default(),
+        }
+    }
+
+    #[test]
+    fn claim_rolls_back_when_run_receipt_cannot_be_written() {
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            AutomationStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let automation = store.create_automation(reliability_draft()).unwrap();
+        store.conn.execute_batch("CREATE TRIGGER fail_receipt BEFORE UPDATE OF run_history ON automations BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;").unwrap();
+        assert!(store.claim_due_automation("worker", 300).is_err());
+        let persisted = store.get_automation(automation.id).unwrap().unwrap();
+        assert!(persisted.lease_owner.is_none());
+        assert!(persisted.run_history.is_empty());
+        store
+            .conn
+            .execute_batch("DROP TRIGGER fail_receipt;")
+            .unwrap();
+        assert!(store.claim_due_automation("retry", 300).unwrap().is_some());
+    }
+
+    #[test]
+    fn competing_schedulers_create_exactly_one_run_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store.create_automation(reliability_draft()).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|index| {
+                let paths = paths.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let worker = AutomationStore::open(paths).unwrap();
+                    barrier.wait();
+                    worker
+                        .claim_due_automation(format!("worker-{index}"), 300)
+                        .unwrap()
+                        .is_some()
+                })
+            })
+            .collect();
+        let winners = handles
+            .into_iter()
+            .filter_map(|handle| handle.join().unwrap().then_some(()))
+            .count();
+        assert_eq!(winners, 1);
+        assert_eq!(
+            store
+                .get_automation(automation.id)
+                .unwrap()
+                .unwrap()
+                .run_history
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn late_success_preserves_pause_and_linked_history_across_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store.create_automation(reliability_draft()).unwrap();
+        store.claim_due_automation("worker", 300).unwrap().unwrap();
+        let session_id = Uuid::new_v4();
+        store
+            .link_run_session(automation.id, "worker", session_id)
+            .unwrap();
+        assert!(store
+            .record_automation_run(automation.id, "unowned completion")
+            .is_err());
+        store
+            .triage_automation(automation.id, AutomationTriageState::Archived)
+            .unwrap();
+        assert_eq!(
+            store
+                .get_automation(automation.id)
+                .unwrap()
+                .unwrap()
+                .lease_owner
+                .as_deref(),
+            Some("worker")
+        );
+        store
+            .set_automation_status(automation.id, AutomationStatus::Paused)
+            .unwrap();
+        store
+            .finish_automation_lease_with_stop_condition(
+                automation.id,
+                "worker",
+                AutomationRunStatus::Passed,
+                "Finished while pause was requested",
+                Some(true),
+            )
+            .unwrap();
+        drop(store);
+        let reopened = AutomationStore::open(paths).unwrap();
+        let persisted = reopened.get_automation(automation.id).unwrap().unwrap();
+        assert_eq!(persisted.status, AutomationStatus::Paused);
+        assert!(persisted.next_run_at.is_none());
+        assert!(persisted.lease_owner.is_none());
+        assert_eq!(persisted.run_history[0].session_id, Some(session_id));
+        assert_eq!(persisted.run_history[0].status, AutomationRunStatus::Passed);
+        assert!(reopened
+            .complete_automation_lease(automation.id, "worker", "duplicate completion")
+            .is_err());
+        assert_eq!(
+            reopened
+                .get_automation(automation.id)
+                .unwrap()
+                .unwrap()
+                .run_history
+                .len(),
+            1
+        );
     }
 }

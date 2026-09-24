@@ -1,3 +1,9 @@
+import { ComposerContextCandidates } from "@gyro-dev/ui";
+import {
+  restoreCompanionPanes,
+  PullRequestForm,
+  type PullRequestDraft,
+} from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
@@ -75,7 +81,6 @@ import {
   providerNeedsSignIn,
   ProvidersSurface,
   SettingsSurface,
-  TaskBoardSurface,
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
@@ -214,7 +219,6 @@ import {
   type Task,
   type CustomTaskDraft,
   type TaskDefinition,
-  type TaskStatus,
   type TestTreeItem,
   type TerminalPaneStatus,
   type TerminalPane,
@@ -505,6 +509,7 @@ const EMPTY_CONFIG: GyroConfig = {
 
 const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
 const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
+const CHAT_TASK_METADATA_KEY = "gyro.chat-task-metadata.v1";
 const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
@@ -1014,7 +1019,27 @@ export function App() {
         widths.panelWidth,
       ),
       focusedPaneId: SOLO_CHAT_PANE_ID,
+      panes: restoreCompanionPanes(
+        readBoundedLocalStorage("gyro.companion-layout.v1", 100_000),
+      ),
     }),
+  );
+  useEffect(() => {
+    safeSetLocalStorage(
+      "gyro.companion-layout.v1",
+      JSON.stringify(restoreCompanionPanes(JSON.stringify(companion.panes))),
+    );
+  }, [companion.panes]);
+  const [pullRequestDraft, setPullRequestDraft] = useState<PullRequestDraft>();
+  const pullRequestResolver =
+    useRef<(draft: PullRequestDraft | undefined) => void>();
+  const requestPullRequest = useCallback(
+    (draft: PullRequestDraft) =>
+      new Promise<PullRequestDraft | undefined>((resolve) => {
+        pullRequestResolver.current = resolve;
+        setPullRequestDraft(draft);
+      }),
+    [],
   );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
@@ -6102,11 +6127,14 @@ export function App() {
             return;
           }
           case "open-pr": {
-            const title = window.prompt(
-              "Pull request title",
-              workbench.diffReview.commitMessage.trim() || branch || "",
-            );
-            if (!title?.trim()) {
+            const draft = await requestPullRequest({
+              title: workbench.diffReview.commitMessage.trim() || branch || "",
+              body: "",
+              base: "",
+              head: branch || "",
+              draft: true,
+            });
+            if (!draft) {
               settle("failed", "Pull request cancelled");
               return;
             }
@@ -6115,8 +6143,9 @@ export function App() {
               {
                 request: {
                   workspacePath: root,
-                  title: title.trim(),
-                  draft: false,
+                  ...draft,
+                  base: draft.base.trim() || undefined,
+                  head: draft.head.trim() || undefined,
                 },
               },
             );
@@ -6134,6 +6163,7 @@ export function App() {
       refreshGithub,
       refreshIdeServices,
       requestBranchName,
+      requestPullRequest,
       workbench.diffReview.commitMessage,
       workbench.ide.sourceControl,
       workbench.preferences.workspaceTrust,
@@ -8452,7 +8482,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: ChatAttachmentPickerKind) => {
+    async (kind: ChatAttachmentPickerKind, explicitPath?: string) => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -8470,12 +8500,14 @@ export function App() {
         return;
       }
       try {
-        const selected = await open({
-          directory: false,
-          multiple: kind !== "workspace-file",
-          title: chatAttachmentPickerTitle(kind),
-          filters: chatAttachmentPickerFilters(kind),
-        });
+        const selected =
+          explicitPath ??
+          (await open({
+            directory: false,
+            multiple: kind !== "workspace-file",
+            title: chatAttachmentPickerTitle(kind),
+            filters: chatAttachmentPickerFilters(kind),
+          }));
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
         const existing = chatAttachments[activeDraftKey] ?? [];
@@ -8596,65 +8628,69 @@ export function App() {
 
   // The composer only offers Editor when an open project file can be captured.
   const canAttachEditorSnapshot = Boolean(workspacePath && selectedFile);
-  const attachEditorSnapshot = useCallback(async () => {
-    if (!isTauriRuntime() || !workspacePath || !selectedFile) {
-      notify(
-        "command-failed",
-        "No editor to capture",
-        "Open a project file in Workspace first",
-      );
-      return;
-    }
-    const buffer = workbench.ide.buffers[selectedFile];
-    const content =
-      buffer?.content ??
-      (selectedFileContent?.path === selectedFile
-        ? selectedFileContent.content
-        : undefined);
-    if (content === undefined || content.length === 0) {
-      notify(
-        "command-failed",
-        "Editor snapshot is empty",
-        "Open a text file with content before adding this context",
-      );
-      return;
-    }
-    try {
-      const attachment = await invoke<ChatAttachment>(
-        "prepare_chat_attachment",
-        {
-          request: {
-            sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
-            path: "",
-            workspacePath,
-            kind: "ide-snapshot",
-            name: `${workspaceName(selectedFile)}.snapshot.txt`,
-            relativePath: selectedFile,
-            bytes: Array.from(new TextEncoder().encode(content)),
+  const attachEditorSnapshot = useCallback(
+    async (path = selectedFile) => {
+      if (!isTauriRuntime() || !workspacePath || !path) {
+        notify(
+          "command-failed",
+          "No editor to capture",
+          "Open a project file in Workspace first",
+        );
+        return;
+      }
+      const buffer = workbench.ide.buffers[path];
+      let content =
+        buffer?.content ??
+        (selectedFileContent?.path === path
+          ? selectedFileContent.content
+          : undefined);
+      try {
+        if (content === undefined) {
+          const loaded = await invoke<WorkspaceFileContent>(
+            "read_workspace_file_full",
+            { path, workspacePath },
+          );
+          if (loaded.truncated)
+            throw new Error("The file is too large for an editor snapshot");
+          content = loaded.content;
+        }
+        const attachment = await invoke<ChatAttachment>(
+          "prepare_chat_attachment",
+          {
+            request: {
+              sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+              path: "",
+              workspacePath,
+              kind: "ide-snapshot",
+              name: `${workspaceName(path)}.snapshot.txt`,
+              relativePath: relativeFilePath(path, workspacePath),
+              bytes: Array.from(new TextEncoder().encode(content)),
+            },
           },
-        },
-      );
-      setChatAttachments((current) => ({
-        ...current,
-        [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
-      }));
-      notify(
-        "terminal",
-        "Editor snapshot attached",
-        `${selectedFile}${buffer?.status === "dirty" ? " · unsaved changes included" : ""}`,
-      );
-    } catch (error) {
-      notify("command-failed", "Editor snapshot rejected", String(error));
-    }
-  }, [
-    activeDraftKey,
-    activeSessionId,
-    notify,
-    selectedFile,
-    selectedFileContent,
-    workbench.ide.buffers,
-    workspacePath,
-  ]);
+        );
+        setChatAttachments((current) => ({
+          ...current,
+          [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
+        }));
+        notify(
+          "terminal",
+          "Editor snapshot attached",
+          `${path}${buffer?.status === "dirty" ? " · unsaved changes included" : ""}`,
+        );
+      } catch (error) {
+        notify("command-failed", "Editor snapshot rejected", String(error));
+      }
+    },
+    [
+      activeDraftKey,
+      activeSessionId,
+      notify,
+      selectedFile,
+      selectedFileContent,
+      workbench.ide.buffers,
+      workspacePath,
+    ],
+  );
 
   const attachDroppedMedia = useCallback(
     async (
@@ -9009,6 +9045,19 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("attach-workspace-path:")) {
+        void selectChatAttachment(
+          "workspace-file",
+          decodeURIComponent(action.slice("attach-workspace-path:".length)),
+        );
+        return;
+      }
+      if (action.startsWith("attach-open-tab:")) {
+        void attachEditorSnapshot(
+          decodeURIComponent(action.slice("attach-open-tab:".length)),
+        );
+        return;
+      }
       if (action === "new-chat-select-workspace") {
         void selectChatWorkspace();
         return;
@@ -13099,118 +13148,28 @@ export function App() {
     workbench.browserPreview.nativeHost,
   ]);
 
-  const createTask = useCallback(() => {
-    const metadata = workspaceRunMetadata(
-      workbench.workspaceMode,
-      "new-agent-task",
-    );
-    const task: Task = {
-      id: `task-${Date.now()}`,
-      title: "New agent task",
-      status: "todo",
-      repo: "gyro",
-      agent: "Codex",
-      branch: metadata.branch,
-      workspaceMode: metadata.workspaceMode,
-      worktreeName: metadata.worktreeName,
-      lastEvent:
-        metadata.workspaceMode === "worktree"
-          ? "queued for isolated worktree"
-          : "created locally",
-      diffStatus: "none",
-      testStatus: "not run",
-      timeRunning: "0m",
-      attentionNeeded: false,
-    };
-    dispatchWorkbench({ type: "create-task", task });
-    notify(
-      "terminal",
-      "Task created",
-      metadata.workspaceMode === "worktree"
-        ? `${task.title} · ${metadata.worktreeName}`
-        : task.title,
-    );
-  }, [notify, workbench.workspaceMode]);
-
-  const dispatchTask = useCallback(
-    async (taskId: string) => {
-      if (!checkProviderReadiness("task", "openai")) {
-        return;
-      }
-      const task = workbench.tasks.find((item) => item.id === taskId);
-      if (!task) {
-        notify("command-failed", "Task not found", taskId);
-        return;
-      }
-      if (task.terminalPaneId) {
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "terminal-grid",
-        });
-        dispatchWorkbench({
-          type: "select-terminal-pane",
-          paneId: task.terminalPaneId,
-        });
-        return;
-      }
-      const profile = getCommandProfile(commandProfiles, "codex");
-      const metadata = task;
-      const pane = createTerminalPane(
-        `pane-task-${Date.now()}`,
-        profile,
-        "waiting",
-        {
-          workspaceMode: metadata.workspaceMode,
-          branch: metadata.branch,
-          worktreeName: metadata.worktreeName,
-        },
-      );
-      dispatchWorkbench({ type: "dispatch-task", taskId, pane });
-      const started = await launchTerminalPane({
-        paneId: pane.id,
-        profile: {
-          ...profile,
-          args: [...profile.args, task.title],
-        },
-        startingOutput: `Starting ${profile.displayName}: ${task.title}`,
-        reveal: false,
-      });
-      if (!started) {
-        dispatchWorkbench({
-          type: "move-task",
-          taskId,
-          status: "in-review",
-          event: "agent failed to start",
-        });
-        notify("command-failed", "Task dispatch failed", task.title);
-        return;
-      }
-      notify(
-        "terminal",
-        "Task running",
-        metadata.workspaceMode === "worktree"
-          ? `Agent started for ${metadata.worktreeName}`
-          : "Agent started in terminal pane",
-      );
-    },
-    [
-      checkProviderReadiness,
-      commandProfiles,
-      launchTerminalPane,
-      notify,
-      workbench.tasks,
-      workbench.workspaceMode,
-    ],
-  );
-
+  useEffect(() => {
+    const realTasks = workbench.tasks.filter((task) => task.sessionId);
+    if (!realTasks.length) return;
+    const metadata = loadChatTaskMetadata();
+    for (const task of realTasks) metadata[task.sessionId!] = task;
+    safeSetLocalStorage(CHAT_TASK_METADATA_KEY, JSON.stringify(metadata));
+  }, [workbench.tasks]);
   const createAutomation = useCallback(
     async (details: {
+      workspacePath?: string;
+      providerId?: string;
+      modelId?: string;
+      workspaceMode?: "local" | "worktree";
       title: string;
       prompt: string;
       schedule: Automation["schedule"];
+      calendar?: import("@gyro-dev/ui").CalendarSchedule;
       stopCondition?: string;
     }): Promise<boolean> => {
-      const root = workspaceRootForPath(workspaceRoots, selectedFile);
+      const root =
+        details.workspacePath?.trim() ||
+        workspaceRootForPath(workspaceRoots, selectedFile);
       if (!root) {
         notify(
           "command-failed",
@@ -13220,10 +13179,13 @@ export function App() {
         return false;
       }
       const providerConfigs = providersForConfig(config);
-      const provider =
-        providerConfigs.find(
-          (item) => item.id === config.selectedProviderId && item.enabled,
-        ) ?? providerConfigs.find((item) => item.enabled);
+      const provider = details.providerId
+        ? providerConfigs.find(
+            (item) => item.id === details.providerId && item.enabled,
+          )
+        : (providerConfigs.find(
+            (item) => item.id === config.selectedProviderId && item.enabled,
+          ) ?? providerConfigs.find((item) => item.enabled));
       if (!provider || !isProviderExecutable(provider.id)) {
         notify(
           "provider",
@@ -13244,10 +13206,18 @@ export function App() {
         );
         return false;
       }
+      if (
+        details.modelId &&
+        !provider.models.some((model) => model.id === details.modelId)
+      )
+        throw new Error("Choose an available model");
       const draft = createAutomationDraft(
-        workbench.workspaceMode,
+        details.workspaceMode ?? workbench.workspaceMode,
         root,
-        provider,
+        {
+          ...provider,
+          selectedModelId: details.modelId ?? provider.selectedModelId,
+        },
         details,
       );
 
@@ -13259,13 +13229,9 @@ export function App() {
           dispatchWorkbench({ type: "upsert-automation", automation });
           notify("terminal", "Automation created", automation.title);
           return true;
-        } catch {
-          notify(
-            "command-failed",
-            "Automation create failed",
-            "No automation was saved",
-          );
-          return false;
+        } catch (error) {
+          notify("command-failed", "Automation create failed", String(error));
+          throw error;
         }
       }
 
@@ -13346,12 +13312,8 @@ export function App() {
                 : "Automation resumed",
             updated.title,
           );
-        } catch {
-          notify(
-            "command-failed",
-            "Automation status failed",
-            automation?.title ?? automationId,
-          );
+        } catch (error) {
+          notify("command-failed", "Automation status failed", String(error));
         }
         return;
       }
@@ -13737,9 +13699,6 @@ export function App() {
             theme: resolvedTheme === "dark" ? "light" : "dark",
           });
           break;
-        case "create-task":
-          createTask();
-          break;
         case "open-automations":
           dispatchWorkbench({
             type: "select-destination",
@@ -13763,7 +13722,6 @@ export function App() {
     [
       addTerminalPane,
       addWorkspaceFolder,
-      createTask,
       handleBrowserNavigate,
       notify,
       openWorkspace,
@@ -15076,7 +15034,7 @@ export function App() {
         dispatchWorkbench({
           type: "set-diff-review-state",
           state: "approved",
-          action: "all changes approved",
+          action: "all files marked reviewed",
         })
       }
       onAcceptDiffFile={(path) =>
@@ -15084,7 +15042,7 @@ export function App() {
           type: "set-diff-file-state",
           path,
           state: "accepted",
-          action: `${path} accepted`,
+          action: `${path} marked reviewed`,
         })
       }
       onAddTerminalPane={addTerminalPane}
@@ -15146,7 +15104,7 @@ export function App() {
         dispatchWorkbench({
           type: "set-diff-review-state",
           state: "rejected",
-          action: "all changes rejected",
+          action: "all files flagged for follow-up",
         })
       }
       onRejectDiffFile={(path) =>
@@ -15154,7 +15112,7 @@ export function App() {
           type: "set-diff-file-state",
           path,
           state: "rejected",
-          action: `${path} rejected`,
+          action: `${path} flagged for follow-up`,
         })
       }
       onRenameTerminalPane={renameTerminalPane}
@@ -15226,14 +15184,14 @@ export function App() {
       dispatchWorkbench({
         type: "set-diff-review-state",
         state: "approved",
-        action: "all changes approved",
+        action: "all files marked reviewed",
       }),
     onAcceptFile: (path) =>
       dispatchWorkbench({
         type: "set-diff-file-state",
         path,
         state: "accepted",
-        action: `${path} accepted`,
+        action: `${path} marked reviewed`,
       }),
     onComment: (path) => dispatchWorkbench({ type: "add-diff-comment", path }),
     onOpenInEditor: (path) => {
@@ -15244,14 +15202,14 @@ export function App() {
       dispatchWorkbench({
         type: "set-diff-review-state",
         state: "rejected",
-        action: "all changes rejected",
+        action: "all files flagged for follow-up",
       }),
     onRejectFile: (path) =>
       dispatchWorkbench({
         type: "set-diff-file-state",
         path,
         state: "rejected",
-        action: `${path} rejected`,
+        action: `${path} flagged for follow-up`,
       }),
     onRunGitAction: (actionId) => void runGitReviewAction(actionId),
     onSelectFile: (path) =>
@@ -16440,7 +16398,7 @@ export function App() {
                   dispatchWorkbench({
                     type: "set-diff-review-state",
                     state: "approved",
-                    action: "all changes approved",
+                    action: "all files marked reviewed",
                   })
                 }
                 onAcceptDiffFile={(path) =>
@@ -16448,7 +16406,7 @@ export function App() {
                     type: "set-diff-file-state",
                     path,
                     state: "accepted",
-                    action: `${path} accepted`,
+                    action: `${path} marked reviewed`,
                   })
                 }
                 onAddTerminalPane={addTerminalPane}
@@ -16492,7 +16450,7 @@ export function App() {
                   dispatchWorkbench({
                     type: "set-diff-review-state",
                     state: "rejected",
-                    action: "all changes rejected",
+                    action: "all files flagged for follow-up",
                   })
                 }
                 onRejectDiffFile={(path) =>
@@ -16500,7 +16458,7 @@ export function App() {
                     type: "set-diff-file-state",
                     path,
                     state: "rejected",
-                    action: `${path} rejected`,
+                    action: `${path} flagged for follow-up`,
                   })
                 }
                 onRenameTerminalPane={renameTerminalPane}
@@ -16879,33 +16837,52 @@ export function App() {
             ).length
           }
           onSelectDestination={selectDestination}
-          taskCount={workbench.tasks.length}
-        />
-      ) : null}
-      {activeDestination === "tasks" ? (
-        <TaskBoardSurface
-          onCreateTask={createTask}
-          onDispatchTask={dispatchTask}
-          onMoveTask={(taskId, status: TaskStatus) =>
-            dispatchWorkbench({
-              type: "move-task",
-              taskId,
-              status,
-              event: `moved to ${status}`,
-            })
-          }
-          onSelectTask={(taskId) =>
-            dispatchWorkbench({ type: "select-task", taskId })
-          }
-          selectedTaskId={workbench.selectedTaskId}
-          tasks={workbench.tasks}
         />
       ) : null}
       {activeDestination === "automations" ? (
         <AutomationsSurface
+          providerChoices={providersForConfig(config)
+            .filter(
+              (provider) =>
+                provider.enabled && isProviderExecutable(provider.id),
+            )
+            .map((provider) => ({
+              id: provider.id,
+              label: provider.displayName,
+              ready: isProviderRuntimeUsable(
+                provider,
+                workbench.providerStatuses.find(
+                  (item) => item.id === provider.id,
+                ),
+              ),
+              models: provider.models.map((model) => ({
+                id: model.id,
+                label: model.displayName,
+              })),
+            }))}
+          onChooseProject={async () => {
+            const path = await open({
+              directory: true,
+              multiple: false,
+              title: "Choose automation project",
+            });
+            return typeof path === "string" ? path : undefined;
+          }}
           automations={workbench.automations}
           createRequestToken={automationCreateRequestToken}
           creationWorkspace={workspaceRootForPath(workspaceRoots, selectedFile)}
+          creationWorkspaceMode={workbench.workspaceMode}
+          creationModel={(() => {
+            const providers = providersForConfig(config);
+            const provider =
+              providers.find(
+                (item) => item.id === config.selectedProviderId && item.enabled,
+              ) ?? providers.find((item) => item.enabled);
+            return provider
+              ? (getProviderModel(provider)?.displayName ??
+                  provider.selectedModelId)
+              : undefined;
+          })()}
           creationProvider={(() => {
             const providers = providersForConfig(config);
             const provider =
@@ -16923,6 +16900,58 @@ export function App() {
           })()}
           onArchiveAutomation={archiveAutomation}
           onCreateAutomation={createAutomation}
+          onOpenSession={(id) => {
+            void refreshSessions().then(() => selectSession(id));
+          }}
+          onEditAutomation={async (id, details) => {
+            const existing = workbench.automations.find(
+              (item) => item.id === id,
+            );
+            if (!existing || !isTauriRuntime()) return false;
+            const provider = providersForConfig(config).find(
+              (item) => item.id === details.providerId && item.enabled,
+            );
+            if (
+              !provider ||
+              !isProviderExecutable(provider.id) ||
+              !isProviderRuntimeUsable(
+                provider,
+                workbench.providerStatuses.find(
+                  (item) => item.id === provider.id,
+                ),
+              )
+            )
+              throw new Error("Connect the selected provider before saving");
+            if (
+              !details.workspacePath?.trim() ||
+              !provider.models.some((model) => model.id === details.modelId)
+            )
+              throw new Error("Choose a project and available model");
+            const draft = createAutomationDraft(
+              details.workspaceMode ?? "local",
+              details.workspacePath,
+              { ...provider, selectedModelId: details.modelId! },
+              details,
+            );
+            if (
+              existing.execution?.workspacePath === details.workspacePath &&
+              existing.workspaceMode === details.workspaceMode
+            ) {
+              draft.branch = existing.branch;
+              draft.worktreeName = existing.worktreeName;
+            }
+            try {
+              const automation = await invoke<Automation>("edit_automation", {
+                automationId: id,
+                draft,
+              });
+              dispatchWorkbench({ type: "upsert-automation", automation });
+              return true;
+            } catch (error) {
+              notify("command-failed", "Automation edit failed", String(error));
+              throw error;
+            }
+          }}
           onCreateRequestHandled={() => setAutomationCreateRequestToken(0)}
           onOpenWorkspace={() =>
             dispatchWorkbench({
@@ -17113,6 +17142,16 @@ export function App() {
           onStopAndClose={confirmStopAndCloseChat}
         />
       ) : null}
+      {pullRequestDraft ? (
+        <PullRequestForm
+          initial={pullRequestDraft}
+          onClose={(draft) => {
+            setPullRequestDraft(undefined);
+            pullRequestResolver.current?.(draft);
+            pullRequestResolver.current = undefined;
+          }}
+        />
+      ) : null}
       {isCommandPaletteOpen ? (
         <CommandPaletteOverlay
           onClose={closeGlobalSearch}
@@ -17155,13 +17194,34 @@ export function App() {
     <TerminalAttachmentActionsContext.Provider
       value={terminalAttachmentActions}
     >
-      {appChrome}
+      <ComposerContextCandidates.Provider
+        value={[
+          ...visibleWorkspaceFiles
+            .filter((file) => file.kind === "file")
+            .map((file) => ({
+              path: file.path,
+              label: file.relativePath ?? file.path,
+              workspacePath: file.workspacePath,
+              kind: "file" as const,
+            })),
+          ...workbench.ide.tabs.map((tab) => ({
+            path: tab.path,
+            label: tab.path,
+            workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
+            kind: "open-tab" as const,
+          })),
+        ]}
+      >
+        {appChrome}
+      </ComposerContextCandidates.Provider>
     </TerminalAttachmentActionsContext.Provider>
   );
 }
 
 function loadInitialWorkbenchState(): WorkbenchState {
-  const base = createInitialWorkbenchState();
+  const base = createInitialWorkbenchState({
+    tasks: Object.values(loadChatTaskMetadata()),
+  });
   const legacyTheme = storedThemeMode(
     readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
   );
@@ -17232,7 +17292,14 @@ function loadInitialWorkbenchState(): WorkbenchState {
     );
 
     const terminalPanes = sanitizeStoredTerminalPanes(parsed.terminalPanes);
-    const tasks = sanitizeStoredTasks(parsed.tasks);
+    const legacyTasks = sanitizeStoredTasks(parsed.tasks);
+    const metadata = loadChatTaskMetadata();
+    const tasks = [
+      ...Object.values(metadata),
+      ...legacyTasks.filter(
+        (task) => !task.sessionId || !metadata[task.sessionId],
+      ),
+    ];
     const automations = sanitizeStoredAutomations(parsed.automations);
     const diffReview = sanitizeStoredDiffReview(parsed.diffReview, base);
     const browserPreview = sanitizeStoredBrowserPreview(
@@ -17329,11 +17396,11 @@ function normalizeStoredDestination(
   destination: unknown,
   fallback: AppDestination,
 ): AppDestination {
+  if (destination === "tasks") return "automations";
   if (
     destination === "workspace" ||
     destination === "tools" ||
     destination === "settings" ||
-    destination === "tasks" ||
     destination === "automations" ||
     destination === "providers" ||
     destination === "onboarding"
@@ -17385,6 +17452,28 @@ function sanitizeStoredTerminalPanes(
   return panes.filter((pane) => !demoPaneIds.has(pane.id));
 }
 
+function loadChatTaskMetadata(): Record<string, Task> {
+  try {
+    const value: unknown = JSON.parse(
+      readBoundedLocalStorage(CHAT_TASK_METADATA_KEY, 2_000_000) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        ([id, task]) =>
+          task &&
+          typeof task === "object" &&
+          task.sessionId === id &&
+          task.id === id &&
+          typeof task.title === "string" &&
+          typeof task.prompt === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function sanitizeStoredTasks(
   tasks: Partial<WorkbenchState>["tasks"],
 ): WorkbenchState["tasks"] {
@@ -17423,6 +17512,11 @@ function sanitizeStoredDiffReview(
   return {
     ...base.diffReview,
     ...diffReview,
+    files: (diffReview.files ?? []).map((file) =>
+      file.countsKnown === undefined
+        ? { ...file, additions: 0, deletions: 0, countsKnown: false, lines: [] }
+        : file,
+    ),
     collapsedDirectories: Array.isArray(diffReview.collapsedDirectories)
       ? diffReview.collapsedDirectories
       : base.diffReview.collapsedDirectories,
@@ -19994,10 +20088,16 @@ function createAutomationDraft(
     title: string;
     prompt: string;
     schedule: Automation["schedule"];
+    calendar?: import("@gyro-dev/ui").CalendarSchedule;
     stopCondition?: string;
   },
 ): AutomationDraft {
   const metadata = workspaceRunMetadata(mode, details.title);
+  if (mode === "worktree") {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    metadata.branch = `${metadata.branch}-${suffix}`;
+    metadata.worktreeName = `${metadata.worktreeName}-${suffix}`;
+  }
   const model = getProviderModel(provider);
   return {
     title: details.title,
@@ -20010,6 +20110,7 @@ function createAutomationDraft(
     worktreeName: metadata.worktreeName,
     stopCondition: details.stopCondition,
     execution: {
+      calendar: details.calendar,
       workspacePath,
       providerId: provider.id,
       providerLabel: provider.displayName,
@@ -20040,14 +20141,7 @@ function createPreviewAutomation(draft: AutomationDraft): Automation {
     triageState: "none",
     lastResult: "Waiting for first local run",
     unreadResults: 0,
-    runHistory: [
-      {
-        id: `run-draft-${Date.now()}`,
-        status: "queued",
-        startedAt: now,
-        summary: "Automation created locally",
-      },
-    ],
+    runHistory: [],
     createdAt: now,
     updatedAt: now,
   };

@@ -1589,7 +1589,7 @@ export type WorkbenchAction =
     }
   | { type: "rename-terminal-pane"; paneId: string; title: string }
   | { type: "select-task"; taskId: string }
-  | { type: "create-task"; task: Task }
+  | { type: "create-task"; task: Task; replaces?: string }
   | { type: "move-task"; taskId: string; status: TaskStatus; event: string }
   | { type: "dispatch-task"; taskId: string; pane: TerminalPane }
   | { type: "set-automations"; automations: Automation[] }
@@ -3506,14 +3506,27 @@ export function workbenchReducer(
       return {
         ...state,
         selectedTaskId: action.task.id,
-        tasks: [action.task, ...state.tasks],
+        tasks: [
+          action.task,
+          ...state.tasks.filter(
+            (task) => task.id !== action.task.id && task.id !== action.replaces,
+          ),
+        ],
       };
     case "move-task":
       return {
         ...state,
         tasks: state.tasks.map((task) =>
           task.id === action.taskId
-            ? { ...task, lastEvent: action.event, status: action.status }
+            ? {
+                ...task,
+                lastEvent: action.event,
+                status: action.status,
+                completedAt:
+                  action.status === "complete"
+                    ? new Date().toISOString()
+                    : undefined,
+              }
             : task,
         ),
       };
@@ -3673,24 +3686,14 @@ export function workbenchReducer(
             ...state.diffReview.files,
             {
               path: action.path,
-              additions: 1,
-              deletions: 1,
+              additions: 0,
+              deletions: 0,
+              countsKnown: false,
               source: action.source ?? "agent-generated",
               state: "pending" as const,
               turnId: action.turnId,
               comments: 0,
-              lines: [
-                {
-                  number: 1,
-                  kind: "removed" as const,
-                  content: "- pending proposed edit",
-                },
-                {
-                  number: 1,
-                  kind: "added" as const,
-                  content: "+ approval-gated proposed edit",
-                },
-              ],
+              lines: [],
             },
           ];
 
@@ -5066,7 +5069,7 @@ function defaultGitReviewActions(): GitReviewAction[] {
     {
       id: "commit",
       label: "Commit",
-      detail: "Commit approved files",
+      detail: "Commit staged files",
       status: "blocked",
     },
     {

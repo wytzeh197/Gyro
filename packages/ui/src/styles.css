@@ -22489,7 +22489,7 @@ button.gyro-settings-row em::after {
   }
 }
 
-/* Synara-level hero composer polish */
+/* Hero composer polish */
 .gyro-chat-start {
   grid-template-columns: minmax(0, 1fr);
   justify-content: center;
@@ -29060,7 +29060,7 @@ button.gyro-account-menu-row:hover,
   }
 }
 /* Keep navigation aligned with the macOS controls. Native traffic lights are
-   14px dots at (16, 16); 90px of padding leaves the same gutter Synara uses
+   14px dots at (16, 16); 90px of padding leaves a consistent gutter
    from the cluster's trailing edge to the sidebar toggle. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;

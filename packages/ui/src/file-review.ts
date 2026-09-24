@@ -306,3 +306,34 @@ export function latestFileReviewTurn(
   }
   return { turnId: latestTurnId, files: [...files.values()] };
 }
+
+/** Only applied receipts can supply a historical patch. Never read the live repo. */
+export function turnReviewPatches(
+  events: readonly SessionEvent[],
+  path: string,
+): string[] {
+  const patches: string[] = [];
+  const seen = new Set<string>();
+  for (const event of events) {
+    const payload = record(event.payload);
+    if (
+      !["gyro.mutation.v1", "gyro.provider-approval.v1"].includes(
+        text(payload, "schema") ?? "",
+      ) ||
+      text(payload, "status") !== "applied" ||
+      !Array.isArray(payload.fileChanges)
+    )
+      continue;
+    for (const change of payload.fileChanges) {
+      const entry = record(change);
+      const patch = text(entry, "patch");
+      if (text(entry, "path") !== path || !patch) continue;
+      const key = `${payload.proposalId ?? payload.approvalId ?? event.id}:${path}`;
+      if (!seen.has(key)) {
+        patches.push(patch);
+        seen.add(key);
+      }
+    }
+  }
+  return patches;
+}

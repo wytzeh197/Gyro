@@ -1,3 +1,10 @@
+import "./scheduled-work.css";
+import { automationScheduleLabel } from "./scheduled-work.ts";
+import {
+  ComposerContextCandidates,
+  contextMentionCandidates,
+} from "./composer-context.ts";
+import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
 import { latestChatQuestions } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
@@ -4037,11 +4044,13 @@ function WorkspaceSidebarContent({
       );
     }
   }, [files, selectedExplorerPath, visibleFiles]);
-  const isCliSidebar = activeWorkspaceLayout === "terminal-grid";
-  const isSessionsSidebar =
-    activeDestination === "workspace" && activeWorkspaceLayout !== "code";
+  const isCliSidebar =
+    activeDestination === "workspace" &&
+    activeWorkspaceLayout === "terminal-grid";
   const isIdeSidebar =
     activeDestination === "workspace" && activeWorkspaceLayout === "code";
+  // Secondary pages retain chat navigation, even when opened from the IDE.
+  const isSessionsSidebar = !isIdeSidebar;
   const toggleProject = (projectKey: string) => {
     setCollapsedProjectIds((current) =>
       current.includes(projectKey)
@@ -4269,10 +4278,7 @@ function WorkspaceSidebarContent({
             <SidebarModeRow
               icon={<MessageSquare size={15} strokeWidth={1.5} />}
               label="Sessions"
-              isActive={
-                activeDestination === "workspace" &&
-                activeWorkspaceLayout !== "code"
-              }
+              isActive={isSessionsSidebar}
               onClick={onSelectSessions}
             />
             <SidebarModeRow
@@ -5901,6 +5907,20 @@ function WorkspaceSidebarContent({
               <kbd className="gyro-sidebar-shortcut">
                 {primaryGlobalSearchShortcut("global")}
               </kbd>
+            </button>
+            <button
+              aria-current={
+                activeDestination === "automations" ? "page" : undefined
+              }
+              className={`gyro-sidebar-action${activeDestination === "automations" ? " is-active" : ""}`}
+              onClick={() => {
+                setNewSessionMenuView("closed");
+                onSelectDestination("automations");
+              }}
+              type="button"
+            >
+              <CalendarClock size={15} />
+              <span>Automations</span>
             </button>
           </div>
 
@@ -8327,8 +8347,14 @@ export function ChatSurface({
   const [reviewScope, setReviewScope] = useState<ReviewScope>({
     kind: "proposed",
   });
-  const [reviewTurnFiles, setReviewTurnFiles] =
-    useState<Array<{ path: string; additions?: number; deletions?: number }>>();
+  const [reviewTurnFiles, setReviewTurnFiles] = useState<
+    Array<{
+      path: string;
+      additions?: number;
+      deletions?: number;
+      patches?: string[];
+    }>
+  >();
   /**
    * Whether the transcript should keep itself at the bottom as it grows.
    *
@@ -8957,7 +8983,12 @@ export function ChatSurface({
             onLoadChangeDiff={onLoadChangeDiff}
             onOpenChanges={(path, files) => {
               setReviewScope({ kind: "turn", turnId: turn.id });
-              setReviewTurnFiles(files);
+              setReviewTurnFiles(
+                (files ?? []).map((file) => ({
+                  ...file,
+                  patches: turnReviewPatches(turn.timelineEvents, file.path),
+                })),
+              );
               if (path) railDiffTools?.onSelectFile?.(path);
               if (onSelectChatPanel) {
                 onSelectChatPanel("review");
@@ -10325,6 +10356,7 @@ function ChatSidePanel({
   diffReview?: DiffReview;
   reviewScope?: ReviewScope;
   reviewTurnFiles?: Array<{
+    patches?: string[];
     path: string;
     additions?: number;
     deletions?: number;
@@ -16112,12 +16144,10 @@ export {
 };
 
 export function ToolsSurface({
-  taskCount,
   automationCount,
   connectedProviderCount,
   onSelectDestination,
 }: {
-  taskCount: number;
   automationCount: number;
   connectedProviderCount: number;
   onSelectDestination: (destination: AppDestination) => void;
@@ -16136,24 +16166,9 @@ export function ToolsSurface({
               <p>Plan work, schedule runs, and manage your agent stack.</p>
             </div>
           </div>
-          <span className="gyro-surface-page-badge">3 surfaces</span>
+          <span className="gyro-surface-page-badge">2 surfaces</span>
         </header>
         <div className="gyro-tools-grid">
-          <button
-            className="gyro-tools-card"
-            onClick={() => onSelectDestination("tasks")}
-            type="button"
-          >
-            <span className="gyro-tools-card-icon">
-              <Activity size={18} />
-            </span>
-            <span className="gyro-tools-card-copy">
-              <strong>Tasks</strong>
-              <small>Plan and dispatch focused agent work.</small>
-            </span>
-            <span className="gyro-tools-card-meta">{taskCount} queued</span>
-            <ChevronRight className="gyro-tools-card-arrow" size={15} />
-          </button>
           <button
             className="gyro-tools-card"
             onClick={() => onSelectDestination("automations")}
@@ -16194,176 +16209,21 @@ export function ToolsSurface({
   );
 }
 
-export function TaskBoardSurface({
-  tasks = [],
-  selectedTaskId,
-  onCreateTask,
-  onDispatchTask,
-  onMoveTask,
-  onSelectTask,
-}: {
-  tasks?: Task[];
-  selectedTaskId?: string;
-  onCreateTask?: () => void;
-  onDispatchTask?: (taskId: string) => void;
-  onMoveTask?: (taskId: string, status: TaskStatus) => void;
-  onSelectTask?: (taskId: string) => void;
-}) {
-  const visibleTasks = tasks.length > 0 ? tasks : [];
-  const columns: Array<{ status: TaskStatus; title: string; tasks: Task[] }> = [
-    {
-      status: "todo",
-      title: "Todo",
-      tasks: visibleTasks.filter((task) => task.status === "todo"),
-    },
-    {
-      status: "in-progress",
-      title: "In Progress",
-      tasks: visibleTasks.filter((task) => task.status === "in-progress"),
-    },
-    {
-      status: "in-review",
-      title: "In Review",
-      tasks: visibleTasks.filter((task) => task.status === "in-review"),
-    },
-    {
-      status: "complete",
-      title: "Complete",
-      tasks: visibleTasks.filter((task) => task.status === "complete"),
-    },
-  ];
-  const statusOptions: Array<{
-    status: TaskStatus;
-    label: string;
-    icon: IconComponent;
-  }> = [
-    { status: "todo", label: "Move to todo", icon: CircleDashed },
-    { status: "in-progress", label: "Start task", icon: Play },
-    { status: "in-review", label: "Move to review", icon: Search },
-    { status: "complete", label: "Complete task", icon: Check },
-  ];
-
-  return (
-    <div className="gyro-board-surface">
-      <header className="gyro-board-toolbar gyro-surface-page-header">
-        <div className="gyro-surface-page-title">
-          <span className="gyro-surface-page-icon" aria-hidden="true">
-            <ListChecks size={18} />
-          </span>
-          <div>
-            <span className="gyro-surface-page-eyebrow">Workspace plan</span>
-            <h1>Tasks</h1>
-            <p>Dispatch focused work into app-hosted agent sessions.</p>
-          </div>
-        </div>
-        <div className="gyro-board-actions">
-          <button
-            className="gyro-secondary-button"
-            disabled={!selectedTaskId}
-            onClick={() => selectedTaskId && onDispatchTask?.(selectedTaskId)}
-            type="button"
-          >
-            <Terminal size={15} />
-            Dispatch agent
-          </button>
-          <button
-            className="gyro-primary-button"
-            onClick={onCreateTask}
-            type="button"
-          >
-            <Plus size={15} />
-            Create task
-          </button>
-        </div>
-      </header>
-      <div className="gyro-kanban-grid">
-        {columns.map((column) => (
-          <section className="gyro-kanban-column" key={column.title}>
-            <header>
-              <strong>{column.title}</strong>
-              <span>{column.tasks.length}</span>
-            </header>
-            <div className="gyro-kanban-list">
-              {column.tasks.length === 0 ? (
-                <div className="gyro-empty-row">No tasks in this lane</div>
-              ) : null}
-              {column.tasks.map((task) => (
-                <article
-                  className={[
-                    "gyro-task-card",
-                    task.attentionNeeded ? "needs-attention" : "",
-                    task.id === selectedTaskId ? "is-active" : "",
-                  ].join(" ")}
-                  key={task.id}
-                  onClick={() => onSelectTask?.(task.id)}
-                >
-                  <div className="gyro-task-card-head">
-                    <strong>{task.title}</strong>
-                    <div className="gyro-task-badges">
-                      <span className={`is-${task.workspaceMode}`}>
-                        {task.workspaceMode}
-                      </span>
-                      {task.attentionNeeded ? <span>attention</span> : null}
-                    </div>
-                  </div>
-                  <div className="gyro-task-meta-grid">
-                    <span>{task.repo}</span>
-                    <span>{task.agent}</span>
-                    <span>{task.branch}</span>
-                    <span>{task.worktreeName ?? task.timeRunning}</span>
-                  </div>
-                  <div className="gyro-task-event">{task.lastEvent}</div>
-                  <div className="gyro-task-foot">
-                    <small>{task.diffStatus}</small>
-                    <small>{task.testStatus}</small>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDispatchTask?.(task.id);
-                      }}
-                      type="button"
-                    >
-                      {task.terminalPaneId ? "Open pane" : "Start"}
-                    </button>
-                  </div>
-                  <div className="gyro-task-transition-row">
-                    {statusOptions.map(
-                      ({ status, label, icon: StatusIcon }) => (
-                        <button
-                          aria-label={label}
-                          className={status === task.status ? "is-active" : ""}
-                          key={status}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onMoveTask?.(task.id, status);
-                          }}
-                          title={label}
-                          type="button"
-                        >
-                          <StatusIcon size={13} />
-                        </button>
-                      ),
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function AutomationsSurface({
   automations = [],
+  providerChoices = [],
+  onChooseProject,
   selectedAutomationId,
   createRequestToken = 0,
   creationWorkspace,
   creationProvider,
+  creationModel,
+  creationWorkspaceMode,
   onCreateRequestHandled,
   onArchiveAutomation,
   onCreateAutomation,
+  onEditAutomation,
+  onOpenSession,
   onOpenWorkspace,
   onOpenProviders,
   onRunAutomation,
@@ -16371,32 +16231,106 @@ export function AutomationsSurface({
   onToggleAutomation,
 }: {
   automations?: Automation[];
+  providerChoices?: Array<{
+    id: string;
+    label: string;
+    ready: boolean;
+    models: Array<{ id: string; label: string }>;
+  }>;
+  onChooseProject?: () => Promise<string | undefined>;
   selectedAutomationId?: string;
   createRequestToken?: number;
   creationWorkspace?: string;
   creationProvider?: string;
+  creationModel?: string;
+  creationWorkspaceMode?: string;
   onCreateRequestHandled?: () => void;
   onArchiveAutomation?: (automationId: string) => void;
   onCreateAutomation?: (details: {
+    workspacePath?: string;
+    providerId?: string;
+    modelId?: string;
+    workspaceMode?: "local" | "worktree";
     title: string;
     prompt: string;
     schedule: Automation["schedule"];
     stopCondition?: string;
+    calendar?: import("./types.ts").CalendarSchedule;
   }) => Promise<boolean>;
+  onEditAutomation?: (
+    id: string,
+    details: {
+      workspacePath?: string;
+      providerId?: string;
+      modelId?: string;
+      workspaceMode?: "local" | "worktree";
+      title: string;
+      prompt: string;
+      schedule: Automation["schedule"];
+      stopCondition?: string;
+      calendar?: import("./types.ts").CalendarSchedule;
+    },
+  ) => Promise<boolean>;
+  onOpenSession?: (id: string) => void;
   onOpenWorkspace?: () => void;
   onOpenProviders?: () => void;
   onRunAutomation?: (automationId: string) => void;
   onSelectAutomation?: (automationId: string) => void;
   onToggleAutomation?: (automationId: string) => void;
 }) {
+  const [projectPath, setProjectPath] = useState(creationWorkspace ?? "");
+  const [runMode, setRunMode] = useState<"local" | "worktree">(
+    creationWorkspaceMode === "worktree" ? "worktree" : "local",
+  );
+  const [runProvider, setRunProvider] = useState("");
+  const [runModel, setRunModel] = useState("");
+  const chosenProvider =
+    providerChoices.find((item) => item.id === runProvider) ??
+    (runProvider
+      ? undefined
+      : (providerChoices.find((item) => item.label === creationProvider) ??
+        providerChoices[0]));
+  const chosenModel =
+    chosenProvider?.models.find((item) => item.id === runModel) ??
+    (runModel
+      ? undefined
+      : (chosenProvider?.models.find((item) => item.label === creationModel) ??
+        chosenProvider?.models[0]));
+  const resetExecution = () => {
+    setProjectPath(creationWorkspace ?? "");
+    setRunMode(creationWorkspaceMode === "worktree" ? "worktree" : "local");
+    setRunProvider("");
+    setRunModel("");
+  };
   const [isCreating, setIsCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Automation["status"] | "">(
+    "",
+  );
+  const [calendar, setCalendar] = useState<
+    import("./types.ts").CalendarSchedule
+  >({
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    time: "09:00",
+    weekday: 0,
+  });
+  const [saveError, setSaveError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [schedule, setSchedule] = useState<Automation["schedule"]>("daily");
+  const [schedule, setSchedule] = useState<Automation["schedule"]>("daily-at");
   const [stopCondition, setStopCondition] = useState("");
   useEffect(() => {
     if (createRequestToken > 0) {
+      resetExecution();
+      setEditingId(undefined);
+      setSchedule("daily-at");
+      setTitle("");
+      setPrompt("");
+      setStopCondition("");
+      setSaveError("");
       setIsCreating(true);
       onCreateRequestHandled?.();
     }
@@ -16404,36 +16338,84 @@ export function AutomationsSurface({
   const selectedAutomation =
     automations.find((automation) => automation.id === selectedAutomationId) ??
     automations[0];
-  const currentCount = automations.filter(
-    (automation) => automation.status === "current",
-  ).length;
-  const pausedCount = automations.filter(
-    (automation) => automation.status === "paused",
-  ).length;
-  const reviewCount = automations.filter(
-    (automation) => automation.triageState === "needs-review",
-  ).length;
+  const visibleAutomations = automations.filter(
+    (item) =>
+      (!statusFilter || item.status === statusFilter) &&
+      `${item.title} ${item.project}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  const beginCreate = (suggestion?: "daily" | "weekly") => {
+    resetExecution();
+    setEditingId(undefined);
+    setSaveError("");
+    setTitle(
+      suggestion === "daily"
+        ? "Daily project check"
+        : suggestion === "weekly"
+          ? "Weekly code review"
+          : "",
+    );
+    setPrompt(
+      suggestion === "daily"
+        ? "Inspect the project and summarize recent changes, failing checks, and any work that needs my attention. Do not edit files."
+        : suggestion === "weekly"
+          ? "Review this week's project changes. Summarize progress, identify concrete risks, and suggest the next priorities. Do not edit files."
+          : "",
+    );
+    setSchedule(suggestion === "weekly" ? "weekly-at" : "daily-at");
+    setCalendar({
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      time: "09:00",
+      weekday: 4,
+    });
+    setStopCondition("");
+    setIsCreating(true);
+  };
   const canCreate = Boolean(
-    title.trim() && prompt.trim() && creationWorkspace && creationProvider,
+    title.trim() &&
+    prompt.trim() &&
+    projectPath.trim() &&
+    chosenProvider?.ready &&
+    chosenModel,
   );
   const submitAutomation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canCreate || isSaving || !onCreateAutomation) return;
     setIsSaving(true);
     try {
-      const created = await onCreateAutomation({
+      setSaveError("");
+      const details = {
+        workspacePath: projectPath.trim(),
+        workspaceMode: runMode,
+        providerId: chosenProvider?.id,
+        modelId: chosenModel?.id,
         title: title.trim(),
         prompt: prompt.trim(),
         schedule,
         stopCondition: stopCondition.trim() || undefined,
-      });
+        calendar: ["once", "daily-at", "weekly-at"].includes(schedule)
+          ? calendar
+          : undefined,
+      };
+      const created = editingId
+        ? await onEditAutomation?.(editingId, details)
+        : await onCreateAutomation(details);
       if (created) {
         setIsCreating(false);
+        setDetailOpen(true);
+        setEditingId(undefined);
         setTitle("");
         setPrompt("");
-        setSchedule("daily");
+        setSchedule("daily-at");
         setStopCondition("");
       }
+      if (!created)
+        setSaveError(
+          "Could not save. Check the schedule, connection, and whether a run is active.",
+        );
+    } catch (error) {
+      setSaveError(String(error));
     } finally {
       setIsSaving(false);
     }
@@ -16441,186 +16423,455 @@ export function AutomationsSurface({
 
   return (
     <div
-      className={`gyro-automations-surface${isCreating ? " is-creating" : automations.length === 0 ? " is-empty" : ""}`}
+      className={`gyro-scheduled-page${isCreating || detailOpen ? " has-detail" : ""}`}
     >
-      <header className="gyro-automation-toolbar gyro-surface-page-header">
-        <div className="gyro-surface-page-title">
-          <span className="gyro-surface-page-icon" aria-hidden="true">
-            <CalendarClock size={18} />
-          </span>
-          <div>
-            <span className="gyro-surface-page-eyebrow">Scheduled work</span>
-            <h1>Automations</h1>
-            <p>Schedule checks and follow-ups in your project.</p>
-          </div>
-        </div>
-        <div className="gyro-board-actions">
-          <button
-            className={
-              isCreating ? "gyro-secondary-button" : "gyro-primary-button"
-            }
-            onClick={() => setIsCreating((current) => !current)}
-            type="button"
-          >
-            {isCreating ? null : <Plus size={15} />}
-            {isCreating ? "Cancel" : "New automation"}
-          </button>
-        </div>
-      </header>
-
-      {!isCreating && automations.length > 0 ? (
-        <div className="gyro-automation-summary">
-          <AutomationMetric label="Current" value={currentCount} />
-          <AutomationMetric label="Paused" value={pausedCount} />
-          <AutomationMetric label="Needs review" value={reviewCount} />
-        </div>
-      ) : null}
-
-      {isCreating ? (
-        <form
-          className="gyro-automation-create"
-          onSubmit={(event) => void submitAutomation(event)}
+      <div className="gyro-scheduled-titlebar" data-tauri-drag-region>
+        <button
+          className="gyro-primary-button"
+          type="button"
+          disabled={isSaving}
+          onClick={() => beginCreate()}
         >
-          <header>
-            <h2>New automation</h2>
-            <p>Describe the work, then choose when Gyro should run it.</p>
+          Create automation
+        </button>
+      </div>
+      <div className="gyro-scheduled-body">
+        <section className="gyro-scheduled-index" aria-label="Scheduled work">
+          <header className="gyro-scheduled-heading">
+            <h1>Automations</h1>
+            <p>Schedule project checks and follow-ups.</p>
           </header>
-          <div className="gyro-automation-create-context">
-            {creationWorkspace ? (
-              <span>Project: {creationWorkspace}</span>
-            ) : (
-              <button onClick={onOpenWorkspace} type="button">
-                Open a project
-              </button>
-            )}
-            {creationProvider ? (
-              <span>Provider: {creationProvider}</span>
-            ) : (
-              <button onClick={onOpenProviders} type="button">
-                Connect a provider
-              </button>
-            )}
-          </div>
-          <label>
-            Name
-            <input
-              autoFocus
-              maxLength={120}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Daily workspace check"
-              required
-              value={title}
-            />
-          </label>
-          <label>
-            Instructions
-            <textarea
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Check the project and report what needs attention."
-              required
-              rows={5}
-              value={prompt}
-            />
-          </label>
-          <div className="gyro-automation-create-fields">
-            <label>
-              Schedule
-              <select
-                onChange={(event) =>
-                  setSchedule(event.target.value as Automation["schedule"])
-                }
-                value={schedule}
-              >
-                <option value="manual">Manual only</option>
-                <option value="hourly">Every hour</option>
-                <option value="daily">Every 24 hours</option>
-                <option value="weekly">Every 7 days</option>
-                <option value="heartbeat">Heartbeat (hourly)</option>
-              </select>
-            </label>
-            <label>
-              <span className="gyro-automation-field-label">
-                Stop condition <em>(optional)</em>
-              </span>
-              <input
-                onChange={(event) => setStopCondition(event.target.value)}
-                placeholder="Stop when the check passes twice"
-                value={stopCondition}
-              />
-            </label>
-          </div>
-          <footer>
-            <button
-              className="gyro-primary-button"
-              disabled={!canCreate || isSaving}
-              type="submit"
-            >
-              {isSaving ? "Creating…" : "Create automation"}
-            </button>
-          </footer>
-        </form>
-      ) : automations.length === 0 ? (
-        <section className="gyro-automation-empty">
-          <div className="gyro-pane-empty-icon">
-            <CalendarClock size={22} />
-          </div>
-          <strong>No scheduled work yet</strong>
-          <span>Schedule a check or follow-up for a project.</span>
-          <button
-            className="gyro-primary-button"
-            onClick={() => setIsCreating(true)}
-            type="button"
+          <input
+            className="gyro-scheduled-search"
+            type="search"
+            aria-label="Search automations"
+            placeholder="Search automations"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <nav
+            className="gyro-scheduled-filters"
+            aria-label="Automation status"
           >
-            <Plus size={15} />
-            New automation
-          </button>
-        </section>
-      ) : (
-        <div className="gyro-automation-layout">
-          <section className="gyro-automation-list" aria-label="Automations">
-            {automations.map((automation) => (
+            {(
+              [
+                ["", "All"],
+                ["current", "Active"],
+                ["paused", "Paused"],
+                ["completed", "Completed"],
+              ] as const
+            ).map(([status, label]) => (
               <button
-                aria-label={`${automation.title}, ${automation.schedule}, ${automation.status}`}
-                className={
-                  automation.id === selectedAutomation?.id
-                    ? "gyro-automation-row is-active"
-                    : "gyro-automation-row"
-                }
-                key={automation.id}
-                onClick={() => onSelectAutomation?.(automation.id)}
-                title={automation.title}
                 type="button"
+                key={status}
+                aria-pressed={statusFilter === status}
+                onClick={() => setStatusFilter(status)}
               >
-                <strong>{automation.title}</strong>
-                <small className={`is-${automation.status}`}>
-                  {automation.schedule} · {automation.status}
-                </small>
-                {automation.unreadResults > 0 ? (
-                  <b>{automation.unreadResults}</b>
-                ) : null}
+                {label}
               </button>
             ))}
+          </nav>
+          <div className="gyro-scheduled-list">
+            {visibleAutomations.map((automation) => (
+              <button
+                type="button"
+                className={`gyro-scheduled-item${detailOpen && !isCreating && automation.id === selectedAutomation?.id ? " is-selected" : ""}`}
+                key={automation.id}
+                onClick={() => {
+                  onSelectAutomation?.(automation.id);
+                  setIsCreating(false);
+                  setDetailOpen(true);
+                }}
+                disabled={isSaving}
+              >
+                <CalendarClock size={15} aria-hidden="true" />
+                <span>
+                  <strong>{automation.title}</strong>
+                  <small>
+                    {automationScheduleLabel(automation)} ·{" "}
+                    {automation.status === "current"
+                      ? "Active"
+                      : automation.status === "paused"
+                        ? "Paused"
+                        : "Completed"}
+                  </small>
+                </span>
+                {automation.unreadResults > 0 && (
+                  <b aria-label={`${automation.unreadResults} unread results`}>
+                    {automation.unreadResults}
+                  </b>
+                )}
+              </button>
+            ))}
+            {!visibleAutomations.length && (
+              <p className="gyro-scheduled-empty">
+                {query || statusFilter
+                  ? "No matching automations"
+                  : "No scheduled work yet"}
+              </p>
+            )}
+          </div>
+          {!query && !statusFilter && (
+            <section
+              className="gyro-scheduled-suggestions"
+              aria-label="Suggestions"
+            >
+              <h2>Suggestions</h2>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => beginCreate("daily")}
+              >
+                <CalendarClock size={15} />
+                <span>
+                  <strong>Daily project check</strong>
+                  <small>
+                    Review changes and surface what needs attention.
+                  </small>
+                </span>
+                <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => beginCreate("weekly")}
+              >
+                <GitPullRequest size={15} />
+                <span>
+                  <strong>Weekly code review</strong>
+                  <small>Summarize progress, risks, and next priorities.</small>
+                </span>
+                <Plus size={14} />
+              </button>
+            </section>
+          )}
+          <p className="gyro-scheduled-local-note">
+            Runs on this Mac while Gyro is open.
+          </p>
+        </section>
+        {isCreating || detailOpen ? (
+          <section
+            className="gyro-scheduled-panel"
+            aria-label={isCreating ? "Automation setup" : "Automation details"}
+          >
+            <button
+              className="gyro-scheduled-close"
+              aria-label="Close automation details"
+              type="button"
+              disabled={isSaving}
+              onClick={() => {
+                setIsCreating(false);
+                setDetailOpen(false);
+                setEditingId(undefined);
+              }}
+            >
+              <X size={16} />
+            </button>
+            {isCreating ? (
+              <form
+                className="gyro-scheduled-editor"
+                onSubmit={(event) => void submitAutomation(event)}
+              >
+                <header>
+                  <h2>{editingId ? "Edit" : "New"}</h2>
+                </header>
+
+                <label className="gyro-scheduled-title-field">
+                  <span className="gyro-scheduled-sr-only">Name</span>
+                  <input
+                    autoFocus
+                    maxLength={120}
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Automation title"
+                    required
+                    value={title}
+                  />
+                </label>
+                <label className="gyro-scheduled-prompt-field">
+                  <span className="gyro-scheduled-sr-only">Instructions</span>
+                  <textarea
+                    onChange={(event) => setPrompt(event.target.value)}
+                    placeholder="Describe what Gyro should do"
+                    required
+                    rows={2}
+                    value={prompt}
+                  />
+                </label>
+                <section className="gyro-scheduled-settings-section">
+                  <h3>Details</h3>
+                  <div className="gyro-scheduled-settings-group">
+                    <div className="gyro-scheduled-setting">
+                      <span>Runs on</span>
+                      <span>This Mac</span>
+                    </div>
+                    <div className="gyro-scheduled-setting">
+                      <span>Runs in</span>
+                      <span>New chat for each run</span>
+                    </div>
+                    <div className="gyro-scheduled-setting">
+                      <span>Project</span>
+                      <button
+                        type="button"
+                        title={projectPath}
+                        onClick={async () => {
+                          const path = await onChooseProject?.();
+                          if (path) setProjectPath(path);
+                        }}
+                      >
+                        {projectPath.split("/").filter(Boolean).pop() ||
+                          "Choose project"}
+                        <ChevronDown size={12} />
+                      </button>
+                    </div>
+                    <label className="gyro-scheduled-setting">
+                      Workspace
+                      <select
+                        value={runMode}
+                        onChange={(event) =>
+                          setRunMode(event.target.value as "local" | "worktree")
+                        }
+                      >
+                        <option value="local">Project folder</option>
+                        <option value="worktree">Isolated worktree</option>
+                      </select>
+                    </label>
+                    <label className="gyro-scheduled-setting">
+                      Provider
+                      <select
+                        value={chosenProvider?.id ?? ""}
+                        onChange={(event) => {
+                          setRunProvider(event.target.value);
+                          setRunModel("");
+                        }}
+                      >
+                        <option value="" disabled>
+                          Choose provider
+                        </option>
+                        {providerChoices.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.label}
+                            {item.ready ? "" : " · Not connected"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="gyro-scheduled-setting">
+                      Model
+                      <select
+                        value={chosenModel?.id ?? ""}
+                        onChange={(event) => setRunModel(event.target.value)}
+                      >
+                        <option value="" disabled>
+                          Choose model
+                        </option>
+                        {chosenProvider?.models.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {!chosenProvider?.ready && (
+                      <div className="gyro-scheduled-setting">
+                        <span>Provider connection required</span>
+                        <button type="button" onClick={onOpenProviders}>
+                          Connect provider
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+                <section className="gyro-scheduled-settings-section">
+                  <h3>Frequency</h3>
+                  <div className="gyro-scheduled-settings-group">
+                    <div className="gyro-automation-create-fields">
+                      <label>
+                        Repeat
+                        <select
+                          onChange={(event) =>
+                            setSchedule(
+                              event.target.value as Automation["schedule"],
+                            )
+                          }
+                          value={schedule}
+                        >
+                          <option value="once">Once at a date and time</option>
+                          <option value="daily-at">Daily at a time</option>
+                          <option value="weekly-at">Weekly on a day</option>
+                          <option value="manual">Manual only</option>
+                          <option value="hourly">Every hour</option>
+                          <option value="daily">Every 24 hours</option>
+                          <option value="weekly">Every 7 days</option>
+                          <option value="heartbeat">Heartbeat (hourly)</option>
+                        </select>
+                      </label>
+                    </div>
+                    {["once", "daily-at", "weekly-at"].includes(schedule) ? (
+                      <div className="gyro-automation-create-fields">
+                        <label>
+                          Time
+                          <input
+                            type="time"
+                            required
+                            value={calendar.time}
+                            onChange={(e) =>
+                              setCalendar({ ...calendar, time: e.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Time zone
+                          <input
+                            required
+                            placeholder="Europe/Amsterdam"
+                            value={calendar.timezone}
+                            onChange={(e) =>
+                              setCalendar({
+                                ...calendar,
+                                timezone: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        {schedule === "once" ? (
+                          <label>
+                            Date
+                            <input
+                              type="date"
+                              required
+                              value={calendar.date ?? ""}
+                              onChange={(e) =>
+                                setCalendar({
+                                  ...calendar,
+                                  date: e.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                        ) : null}
+                        {schedule === "weekly-at" ? (
+                          <label>
+                            Day
+                            <select
+                              value={calendar.weekday ?? 0}
+                              onChange={(e) =>
+                                setCalendar({
+                                  ...calendar,
+                                  weekday: Number(e.target.value),
+                                })
+                              }
+                            >
+                              {[
+                                "Monday",
+                                "Tuesday",
+                                "Wednesday",
+                                "Thursday",
+                                "Friday",
+                                "Saturday",
+                                "Sunday",
+                              ].map((day, index) => (
+                                <option key={day} value={index}>
+                                  {day}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+                <details
+                  className="gyro-scheduled-advanced"
+                  open={stopCondition ? true : undefined}
+                >
+                  <summary>Stop condition</summary>
+                  <label>
+                    <span className="gyro-automation-field-label">
+                      Stop condition <em>(optional)</em>
+                    </span>
+                    <input
+                      onChange={(event) => setStopCondition(event.target.value)}
+                      placeholder="Stop when the check passes twice"
+                      value={stopCondition}
+                    />
+                  </label>
+                </details>
+                <p>
+                  Keep Gyro open for scheduled runs. Missed runs resume when you
+                  reopen it.
+                </p>
+                {saveError ? <p role="alert">{saveError}</p> : null}
+                <footer>
+                  <button
+                    className="gyro-secondary-button"
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => {
+                      setIsCreating(false);
+                      setEditingId(undefined);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="gyro-primary-button"
+                    disabled={!canCreate || isSaving}
+                    type="submit"
+                  >
+                    {isSaving
+                      ? "Saving…"
+                      : editingId
+                        ? "Save changes"
+                        : "Create"}
+                  </button>
+                </footer>
+              </form>
+            ) : selectedAutomation ? (
+              <AutomationDetail
+                automation={selectedAutomation}
+                onOpenSession={onOpenSession}
+                onEdit={() => {
+                  setProjectPath(
+                    selectedAutomation.execution?.workspacePath ?? "",
+                  );
+                  setRunMode(
+                    selectedAutomation.workspaceMode === "worktree"
+                      ? "worktree"
+                      : "local",
+                  );
+                  setRunProvider(
+                    selectedAutomation.execution?.providerId ??
+                      providerChoices.find(
+                        (item) => item.label === selectedAutomation.provider,
+                      )?.id ??
+                      "",
+                  );
+                  setRunModel(selectedAutomation.execution?.modelId ?? "");
+                  setEditingId(selectedAutomation.id);
+                  setTitle(selectedAutomation.title);
+                  setPrompt(selectedAutomation.prompt);
+                  setSchedule(selectedAutomation.schedule);
+                  setStopCondition(selectedAutomation.stopCondition ?? "");
+                  setCalendar(
+                    selectedAutomation.execution?.calendar ?? {
+                      timezone:
+                        Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      time: "09:00",
+                      weekday: 0,
+                    },
+                  );
+                  setSaveError("");
+                  setIsCreating(true);
+                }}
+                onArchive={() => onArchiveAutomation?.(selectedAutomation.id)}
+                onRun={() => onRunAutomation?.(selectedAutomation.id)}
+                onToggle={() => onToggleAutomation?.(selectedAutomation.id)}
+              />
+            ) : null}
           </section>
-
-          {selectedAutomation ? (
-            <AutomationDetail
-              automation={selectedAutomation}
-              onArchive={() => onArchiveAutomation?.(selectedAutomation.id)}
-              onRun={() => onRunAutomation?.(selectedAutomation.id)}
-              onToggle={() => onToggleAutomation?.(selectedAutomation.id)}
-            />
-          ) : null}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AutomationMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="gyro-automation-metric">
-      <strong>{value}</strong>
-      <span>{label}</span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -16628,16 +16879,29 @@ function AutomationMetric({ label, value }: { label: string; value: number }) {
 function AutomationDetail({
   automation,
   onArchive,
+  onEdit,
+  onOpenSession,
   onRun,
   onToggle,
 }: {
   automation: Automation;
   onArchive: () => void;
+  onEdit: () => void;
+  onOpenSession?: (id: string) => void;
   onRun: () => void;
   onToggle: () => void;
 }) {
   const running = Boolean(
     automation.leaseOwner || automation.runHistory[0]?.status === "running",
+  );
+  const history = automation.runHistory.filter(
+    (run) =>
+      !(
+        run.status === "queued" &&
+        run.summary === "Automation created locally" &&
+        !run.finishedAt &&
+        !run.sessionId
+      ),
   );
   const canRun = automation.status === "current" && !running;
   return (
@@ -16650,6 +16914,14 @@ function AutomationDetail({
           </span>
         </div>
         <div className="gyro-board-actions">
+          <button
+            className="gyro-secondary-button"
+            disabled={running}
+            onClick={onEdit}
+            type="button"
+          >
+            Edit
+          </button>
           <button
             className="gyro-secondary-button"
             onClick={onToggle}
@@ -16681,13 +16953,20 @@ function AutomationDetail({
       </header>
 
       <div className="gyro-automation-detail-grid">
-        <AutomationFact label="Schedule" value={automation.schedule} />
+        <AutomationFact
+          label="Schedule"
+          value={automationScheduleLabel(automation)}
+        />
         <AutomationFact
           label="Next run"
           value={
             automation.nextRunAt
               ? relativeFutureTime(automation.nextRunAt)
-              : "manual"
+              : automation.status === "paused"
+                ? "Paused"
+                : automation.status === "completed"
+                  ? "Completed"
+                  : "Not scheduled"
           }
         />
         <AutomationFact label="Branch" value={automation.branch} />
@@ -16749,13 +17028,23 @@ function AutomationDetail({
 
       <div className="gyro-automation-history">
         <strong>Run history</strong>
-        {automation.runHistory.length === 0 ? (
+        <p>Execution requires Gyro to remain running.</p>
+        {history.length === 0 ? (
           <div className="gyro-empty-row">No runs recorded yet</div>
         ) : null}
-        {automation.runHistory.map((run) => (
+        {history.map((run) => (
           <div className="gyro-automation-run" key={run.id}>
             <span className={`is-${run.status}`}>{run.status}</span>
             <strong>{run.summary}</strong>
+            {run.sessionId ? (
+              <button
+                type="button"
+                className="gyro-secondary-button"
+                onClick={() => onOpenSession?.(run.sessionId!)}
+              >
+                Open chat
+              </button>
+            ) : null}
             <small>
               {run.stopConditionMet === true
                 ? "Stop condition met · "
@@ -17250,6 +17539,7 @@ export function DiffReviewSurface({
   const collapsedDirectories = new Set(review.collapsedDirectories);
   const diffTree = buildDiffFileTree(review.files, workspacePath);
   const hasFiles = review.files.length > 0;
+  const countsKnown = review.files.every((file) => file.countsKnown !== false);
   const selectedDisplayPath = selectedFile
     ? workspaceRelativeFilePath(selectedFile.path, workspacePath)
     : "No file selected";
@@ -17268,15 +17558,17 @@ export function DiffReviewSurface({
         .join(" ")}
     >
       <header className="gyro-review-scope" aria-label="Comparison scope">
-        <strong>Proposed edits</strong>
-        {hasFiles ? (
+        <strong>File reading review</strong>
+        {hasFiles && countsKnown ? (
           <span>
             <span className="gyro-diff-added-count">+{additions}</span>
             {" · "}
             <span className="gyro-diff-removed-count">−{deletions}</span>
           </span>
         ) : (
-          <span>Awaiting approval</span>
+          <span>
+            {hasFiles ? "Line counts not reported" : "No files recorded"}
+          </span>
         )}
       </header>
       <aside className="gyro-diff-file-list" aria-label="Changed files">
@@ -17296,7 +17588,7 @@ export function DiffReviewSurface({
             <strong>Changed files</strong>
           )}
           <span>
-            +{additions} -{deletions}
+            {countsKnown ? `+${additions} −${deletions}` : "Counts unavailable"}
           </span>
         </header>
         <div
@@ -17330,7 +17622,7 @@ export function DiffReviewSurface({
           <div className="gyro-diff-review-toolbar">
             <div>
               <strong title={selectedFile?.path}>{selectedDisplayPath}</strong>
-              {selectedFile ? (
+              {selectedFile && selectedFile.countsKnown !== false ? (
                 <span>
                   <span className="gyro-diff-added-count">
                     +{selectedFile.additions} added
@@ -17341,7 +17633,7 @@ export function DiffReviewSurface({
                   </span>
                 </span>
               ) : (
-                <span>No changes proposed</span>
+                <span>Line counts not reported</span>
               )}
             </div>
             <div className="gyro-diff-actions">
@@ -17363,7 +17655,7 @@ export function DiffReviewSurface({
                 type="button"
               >
                 <RefreshCw size={15} />
-                Undo
+                Clear review marks
               </button>
               <button
                 className="gyro-secondary-button"
@@ -17374,7 +17666,7 @@ export function DiffReviewSurface({
                 type="button"
               >
                 <X size={15} />
-                Reject file
+                Needs follow-up
               </button>
               <button
                 className="gyro-primary-button"
@@ -17385,7 +17677,7 @@ export function DiffReviewSurface({
                 type="button"
               >
                 <Check size={15} />
-                Accept file
+                Mark reviewed
               </button>
             </div>
           </div>
@@ -17414,21 +17706,15 @@ export function DiffReviewSurface({
                   <code>{line.content || " "}</code>
                 </div>
               ))}
-              <button
-                className="gyro-diff-comment"
-                onClick={() => onComment?.(selectedFile.path)}
-                type="button"
-              >
-                <Plus size={14} />
-                Comment on this hunk
-                {selectedFile.comments ? ` (${selectedFile.comments})` : ""}
-              </button>
             </>
           ) : (
             <div className="gyro-diff-empty-state">
               <GitPullRequest size={18} />
               <strong>No changes to review</strong>
-              <span>Proposed file edits will appear here before approval.</span>
+              <span>
+                Recorded file changes will appear here. Edit approval happens in
+                the chat.
+              </span>
             </div>
           )}
         </div>
@@ -17501,7 +17787,7 @@ export function DiffReviewSurface({
                 onClick={onRejectAll}
                 type="button"
               >
-                Reject all
+                Flag all for follow-up
               </button>
               <button
                 className="gyro-primary-button"
@@ -17509,7 +17795,7 @@ export function DiffReviewSurface({
                 onClick={onAcceptAll}
                 type="button"
               >
-                Approve changes
+                Mark all reviewed
               </button>
             </div>
           </footer>
@@ -17820,38 +18106,55 @@ function GithubSidebarPanel({
       {github.error ? (
         <div className="gyro-sidebar-mini-copy">{github.error}</div>
       ) : null}
+      <div className="gyro-sidebar-mini-copy">
+        {github.error
+          ? "PR refresh failed. Previously loaded results may be stale."
+          : github.loading
+            ? "Refreshing pull requests…"
+            : github.lastCheckedAt &&
+                !github.pullRequests.some((pr) => pr.headRef === branch)
+              ? `No open pull request for ${branch ?? "this branch"}`
+              : null}
+      </div>
       {github.pullRequests.length > 0 ? (
         <>
           <div className="gyro-sidebar-scm-group-label">
             <span className="gyro-scm-label-text">Pull requests</span>
             <small>{github.pullRequests.length}</small>
           </div>
-          {github.pullRequests.slice(0, 8).map((pullRequest) => {
-            const ChecksIcon = pullRequest.checks
-              ? githubRunStateIcon(pullRequest.checks)
-              : undefined;
-            return (
-              <button
-                className="gyro-sidebar-github-row"
-                key={pullRequest.number}
-                onClick={() => void onOpenUrl?.(pullRequest.url)}
-                title={`#${pullRequest.number} ${pullRequest.title}`}
-                type="button"
-              >
-                <GitPullRequest size={12} aria-hidden="true" />
-                <span className="gyro-sidebar-github-title">
-                  {pullRequest.title}
-                </span>
-                <small>#{pullRequest.number}</small>
-                {ChecksIcon ? (
-                  <ChecksIcon
-                    className={`gyro-github-state is-${pullRequest.checks}`}
-                    size={11}
-                  />
-                ) : null}
-              </button>
-            );
-          })}
+          {[...github.pullRequests]
+            .sort(
+              (a, b) =>
+                Number(b.headRef === branch) - Number(a.headRef === branch),
+            )
+            .slice(0, 8)
+            .map((pullRequest) => {
+              const ChecksIcon = pullRequest.checks
+                ? githubRunStateIcon(pullRequest.checks)
+                : undefined;
+              return (
+                <button
+                  className="gyro-sidebar-github-row"
+                  key={pullRequest.number}
+                  onClick={() => void onOpenUrl?.(pullRequest.url)}
+                  title={`Open GitHub for comments, review, and merge · #${pullRequest.number} ${pullRequest.title} · Checks: ${pullRequest.checks ?? "not reported"}`}
+                  type="button"
+                >
+                  <GitPullRequest size={12} aria-hidden="true" />
+                  <span className="gyro-sidebar-github-title">
+                    {pullRequest.headRef === branch ? "Current branch · " : ""}
+                    {pullRequest.title}
+                  </span>
+                  <small>#{pullRequest.number}</small>
+                  {ChecksIcon ? (
+                    <ChecksIcon
+                      className={`gyro-github-state is-${pullRequest.checks}`}
+                      size={11}
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
         </>
       ) : null}
       <div className="gyro-sidebar-scm-group-label">
@@ -18121,7 +18424,15 @@ function renderDiffTreeNode({
         <FileText size={14} />
         <span title={node.name}>{node.name}</span>
         <small>
-          +{file.additions} -{file.deletions} · {file.state}
+          {file.countsKnown === false
+            ? "Counts unavailable"
+            : `+${file.additions} −${file.deletions}`}{" "}
+          ·{" "}
+          {file.state === "accepted"
+            ? "reviewed"
+            : file.state === "rejected"
+              ? "follow-up"
+              : "unread"}
         </small>
       </button>
     );
@@ -19400,13 +19711,6 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     layout: "terminal-grid",
     toolTab: "terminal",
     icon: Play,
-  },
-  {
-    id: "create-task",
-    label: "Create task",
-    meta: "Add an item to the plan board",
-    destination: "tasks",
-    icon: Activity,
   },
   {
     id: "open-automations",
@@ -24952,6 +25256,33 @@ function Composer({
   // Slash commands work at the start of a draft and after whitespace, so a
   // person can write naturally and then add `/plan`, `/image`, etc. Paths and
   // URLs stay quiet because a slash in the middle of a word is not a command.
+  const contextCandidates = useContext(ComposerContextCandidates);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionMatch = !isGoalComposerActive
+    ? draft.match(/(?:^|\s)@([^\s]*)$/)
+    : null;
+  const mentions = mentionMatch
+    ? contextMentionCandidates(
+        contextCandidates,
+        mentionMatch[1] ?? "",
+        workspacePath,
+      )
+    : [];
+  const mentionOpen = !mentionDismissed && mentions.length > 0;
+  const selectedMention = Math.min(
+    mentionIndex,
+    Math.max(0, mentions.length - 1),
+  );
+  const attachMention = (index: number) => {
+    const item = mentions[index];
+    if (!item || !mentionMatch) return;
+    onDraftChange(draft.slice(0, draft.lastIndexOf("@")));
+    onComposerAction?.(
+      `${item.kind === "open-tab" ? "attach-open-tab" : "attach-workspace-path"}:${encodeURIComponent(item.path)}`,
+    );
+    setMentionIndex(0);
+  };
   const slashMatch = isGoalComposerActive
     ? null
     : draft.match(/(?:^|\s)\/([^\s/]*)$/);
@@ -25354,6 +25685,35 @@ function Composer({
           ) : null}
         </div>
       ) : null}
+      {mentionOpen ? (
+        <div
+          className="gyro-composer-slash-menu"
+          role="listbox"
+          id={`${popoverBaseId}-context-menu`}
+          aria-label="Attach context"
+        >
+          <header>
+            <strong>Context · @file or @open-tab</strong>
+            <span>↑↓ navigate · Enter attach · Esc close</span>
+          </header>
+          {mentions.map((item, index) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={index === selectedMention}
+              id={`${popoverBaseId}-context-${index}`}
+              className={index === selectedMention ? "is-selected" : ""}
+              key={`${item.kind}:${item.path}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => attachMention(index)}
+            >
+              <FileText size={14} />
+              <code>@{item.kind}</code>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {isSlashMenuOpen ? (
         <div
           aria-label="Chat commands"
@@ -25485,15 +25845,21 @@ function Composer({
             : "Message Gyro"
         }
         aria-controls={
-          isSlashMenuOpen ? `${popoverBaseId}-slash-menu` : undefined
+          mentionOpen
+            ? `${popoverBaseId}-context-menu`
+            : isSlashMenuOpen
+              ? `${popoverBaseId}-slash-menu`
+              : undefined
         }
         aria-activedescendant={
-          isSlashMenuOpen
-            ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
-            : undefined
+          mentionOpen
+            ? `${popoverBaseId}-context-${selectedMention}`
+            : isSlashMenuOpen
+              ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
+              : undefined
         }
-        aria-expanded={isSlashMenuOpen}
-        aria-haspopup="menu"
+        aria-expanded={mentionOpen || isSlashMenuOpen}
+        aria-haspopup={mentionOpen ? "listbox" : "menu"}
         onPaste={(event) => {
           const files = chatMediaFiles(event.clipboardData);
           if (files.length) {
@@ -25507,11 +25873,39 @@ function Composer({
         }}
         maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
         onChange={(event) => {
+          setMentionDismissed(false);
+          setMentionIndex(0);
           setIsSlashHelpOpen(false);
           setIsSlashMenuDismissed(false);
           onDraftChange(event.target.value);
         }}
         onKeyDown={(event) => {
+          if (mentionOpen && !event.nativeEvent.isComposing) {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              setMentionIndex(
+                (current) =>
+                  (current +
+                    (event.key === "ArrowDown" ? 1 : -1) +
+                    mentions.length) %
+                  mentions.length,
+              );
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setMentionDismissed(true);
+              return;
+            }
+            if (
+              (event.key === "Enter" || event.key === "Tab") &&
+              !event.shiftKey
+            ) {
+              event.preventDefault();
+              attachMention(selectedMention);
+              return;
+            }
+          }
           if (isGoalComposerActive && event.key === "Escape") {
             event.preventDefault();
             onCancelGoalComposer?.();
@@ -27417,7 +27811,14 @@ function ChatTurn({
             isSummarizing={fileReview?.isSummarizing}
             onAsk={fileReview?.onAsk}
             onKeep={fileReview?.onKeep}
-            onLoadChangeDiff={onLoadChangeDiff}
+            onLoadChangeDiff={async (path) => {
+              const patches = turnReviewPatches(turn.timelineEvents, path);
+              if (!patches.length)
+                throw new Error(
+                  "Historical diff unavailable. Open Review to compare the current file separately.",
+                );
+              return patches.join("\n");
+            }}
             onReview={openTurnChanges}
             onUndo={onUndoChanges}
             summaries={fileReviewSummaries}

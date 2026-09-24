@@ -1,0 +1,546 @@
+.gyro-scheduled-page {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+}
+.gyro-scheduled-titlebar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 24px 0 180px;
+}
+.gyro-scheduled-titlebar button {
+  font-size: 12px;
+  min-height: 30px;
+  padding: 5px 12px;
+}
+.gyro-scheduled-body {
+  width: min(760px, calc(100% - 64px));
+  margin: 30px auto 60px;
+}
+.gyro-scheduled-heading {
+  margin-bottom: 26px;
+}
+.gyro-scheduled-heading h1 {
+  font-size: 26px;
+  letter-spacing: -0.6px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.gyro-scheduled-heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--gyro-muted);
+}
+.gyro-scheduled-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--gyro-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+}
+.gyro-scheduled-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 20px 0;
+}
+.gyro-scheduled-filters button {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.gyro-scheduled-filters button[aria-pressed="true"],
+.gyro-scheduled-filters button:hover {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+.gyro-scheduled-item,
+.gyro-scheduled-suggestions button {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 13px 10px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.gyro-scheduled-item:hover,
+.gyro-scheduled-item.is-selected,
+.gyro-scheduled-suggestions button:hover {
+  background: var(--gyro-surface-soft);
+}
+.gyro-scheduled-item > svg,
+.gyro-scheduled-suggestions button > svg {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.gyro-scheduled-item > span,
+.gyro-scheduled-suggestions button > span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.gyro-scheduled-item strong,
+.gyro-scheduled-suggestions strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.gyro-scheduled-item small,
+.gyro-scheduled-suggestions small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gyro-muted);
+  overflow-wrap: anywhere;
+}
+.gyro-scheduled-item b {
+  font-size: 11px;
+}
+.gyro-scheduled-empty {
+  padding: 56px 0;
+  font-size: 13px;
+  text-align: center;
+  color: var(--gyro-muted);
+}
+.gyro-scheduled-suggestions {
+  border-top: 1px solid var(--gyro-border);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+.gyro-scheduled-suggestions h2 {
+  font-size: 12px;
+  color: var(--gyro-muted);
+  font-weight: 500;
+  margin: 0 10px 10px;
+}
+.gyro-scheduled-local-note {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 12px 10px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  width: calc(100% - 48px);
+  max-width: 1200px;
+  gap: 30px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-heading h1 {
+  font-size: 20px;
+}
+.gyro-scheduled-panel {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--gyro-border);
+  padding: 0 0 24px 30px;
+}
+.gyro-scheduled-close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  z-index: 2;
+}
+.gyro-scheduled-close:hover {
+  background: var(--gyro-surface-soft);
+}
+.gyro-scheduled-editor {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+.gyro-scheduled-editor > header {
+  padding-right: 36px;
+}
+.gyro-scheduled-editor h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.gyro-scheduled-editor p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--gyro-muted);
+  margin: 0;
+}
+.gyro-scheduled-editor label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+.gyro-scheduled-editor :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--gyro-border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+.gyro-scheduled-editor :is(input, select) {
+  height: 36px;
+}
+.gyro-scheduled-editor textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+.gyro-scheduled-editor .gyro-automation-create-context {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--gyro-border);
+  border-radius: 8px;
+  background: transparent;
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.gyro-scheduled-editor .gyro-automation-create-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+.gyro-scheduled-editor footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--gyro-border);
+  padding-top: 16px;
+}
+.gyro-scheduled-editor footer button {
+  min-height: 32px;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.gyro-scheduled-editor em {
+  font-style: normal;
+  color: var(--gyro-muted);
+}
+.gyro-scheduled-panel .gyro-automation-detail {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  min-height: 0;
+  align-content: start;
+  gap: 20px;
+}
+.gyro-scheduled-panel .gyro-automation-detail > header {
+  padding-right: 36px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.gyro-scheduled-panel .gyro-automation-detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.gyro-scheduled-page :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--gyro-muted);
+  outline-offset: 3px;
+}
+@media (max-width: 850px) {
+  .gyro-scheduled-page.has-detail .gyro-scheduled-body {
+    display: block;
+    width: calc(100% - 40px);
+  }
+  .gyro-scheduled-page.has-detail .gyro-scheduled-index {
+    display: none;
+  }
+  .gyro-scheduled-panel {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .gyro-scheduled-body {
+    width: calc(100% - 40px);
+    margin-top: 24px;
+  }
+}
+
+.gyro-scheduled-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--gyro-surface);
+}
+
+/* The open editor uses the available window, with independent list/detail scrolling. */
+.gyro-scheduled-page.has-detail {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.gyro-scheduled-page.has-detail > .gyro-scheduled-titlebar {
+  display: none;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  gap: 0;
+  grid-template-columns: minmax(240px, 31%) minmax(0, 1fr);
+}
+.gyro-app-shell.is-sidebar-hidden .gyro-scheduled-page.has-detail {
+  padding-top: 56px;
+  box-sizing: border-box;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-index {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  padding: 16px 20px 28px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-heading {
+  display: none;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-filters {
+  order: -1;
+  margin: 0 0 24px;
+  gap: 0;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-filters button {
+  padding: 6px 9px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-search {
+  border-radius: 18px;
+  flex-shrink: 0;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-empty {
+  padding: 70px 0;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-suggestions {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 6px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-panel {
+  padding: 0;
+  overflow: auto;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-close {
+  top: 14px;
+  right: 16px;
+}
+.gyro-scheduled-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 20px 24px 0;
+}
+.gyro-scheduled-editor > header h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gyro-muted);
+}
+.gyro-scheduled-editor .gyro-scheduled-title-field input {
+  border: 0;
+  border-radius: 4px;
+  padding: 3px 0;
+  height: 30px;
+  font-size: 16px;
+  box-shadow: none;
+  background: transparent;
+}
+.gyro-scheduled-editor .gyro-scheduled-title-field input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.gyro-scheduled-editor .gyro-scheduled-title-field input:focus-visible {
+  outline: 1px solid var(--gyro-border);
+  outline-offset: 5px;
+}
+.gyro-scheduled-editor .gyro-scheduled-prompt-field textarea {
+  min-height: 68px;
+  padding: 13px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.gyro-scheduled-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.gyro-scheduled-settings-section {
+  margin-top: 8px;
+}
+.gyro-scheduled-settings-section h3 {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  font-weight: 400;
+  margin: 0 4px 8px;
+}
+.gyro-scheduled-settings-group {
+  border: 1px solid var(--gyro-border);
+  border-radius: 14px;
+  padding: 0 14px;
+}
+.gyro-scheduled-setting,
+.gyro-scheduled-editor .gyro-automation-create-fields > label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  min-height: 42px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-scheduled-setting:last-child {
+  border-bottom: 0;
+}
+.gyro-scheduled-setting > span:last-child {
+  text-align: right;
+  overflow-wrap: anywhere;
+  color: var(--gyro-muted);
+  max-width: 72%;
+}
+.gyro-scheduled-setting button {
+  background: transparent;
+  color: var(--gyro-text);
+  border: 0;
+  padding: 6px 0;
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-scheduled-editor .gyro-automation-create-fields {
+  display: contents;
+}
+.gyro-scheduled-editor
+  .gyro-automation-create-fields:last-child
+  > label:last-child {
+  border-bottom: 0;
+}
+.gyro-scheduled-editor .gyro-automation-create-fields :is(input, select) {
+  width: auto;
+  max-width: 70%;
+  min-width: 0;
+  text-align: right;
+  height: 32px;
+  padding: 4px 0 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--gyro-muted);
+  background: transparent;
+}
+.gyro-scheduled-advanced {
+  font-size: 12px;
+  color: var(--gyro-muted);
+}
+.gyro-scheduled-advanced summary {
+  cursor: pointer;
+  padding: 4px;
+}
+.gyro-scheduled-advanced label {
+  margin: 8px 4px;
+}
+.gyro-scheduled-editor > p {
+  font-size: 11px;
+}
+.gyro-scheduled-editor footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin: auto -24px 0;
+  padding: 16px 24px;
+  background: var(--gyro-surface);
+  min-height: 32px;
+  flex-shrink: 0;
+}
+.gyro-scheduled-editor footer .gyro-primary-button {
+  background: var(--gyro-text);
+  border-color: var(--gyro-text);
+  color: var(--gyro-surface);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.gyro-scheduled-editor footer .gyro-primary-button:disabled {
+  opacity: 0.35;
+}
+.gyro-scheduled-panel > .gyro-automation-detail {
+  padding: 24px;
+}
+@media (max-width: 850px) {
+  .gyro-scheduled-page.has-detail .gyro-scheduled-index {
+    display: none;
+  }
+  .gyro-scheduled-page.has-detail .gyro-scheduled-body {
+    display: flex;
+  }
+  .gyro-scheduled-page.has-detail .gyro-scheduled-panel {
+    flex: 1;
+    border: 0;
+  }
+  .gyro-scheduled-editor {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .gyro-scheduled-editor footer {
+    margin-left: -20px;
+    margin-right: -20px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+.gyro-scheduled-editor label.gyro-scheduled-setting {
+  display: flex;
+  flex-direction: row;
+}
+.gyro-scheduled-setting select {
+  width: auto;
+  max-width: 72%;
+  height: 32px;
+  padding: 4px 0 4px 8px;
+  border: 0;
+  text-align: right;
+  color: var(--gyro-muted);
+  font-size: 12px;
+}
+.gyro-scheduled-setting button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 72%;
+  overflow-wrap: anywhere;
+}

@@ -13,7 +13,6 @@ export type AppDestination =
   | "workspace"
   | "tools"
   | "settings"
-  | "tasks"
   | "automations"
   | "providers"
   | "onboarding";
@@ -418,6 +417,10 @@ export type TerminalPane = {
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
 
 export type Task = {
+  completedAt?: string;
+  sessionId?: string;
+  prompt?: string;
+  workspacePath?: string;
   id: string;
   title: string;
   status: TaskStatus;
@@ -437,7 +440,14 @@ export type Task = {
 export type AutomationStatus = "current" | "paused" | "completed";
 
 export type AutomationSchedule =
-  "manual" | "hourly" | "daily" | "weekly" | "heartbeat";
+  | "manual"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "heartbeat"
+  | "once"
+  | "daily-at"
+  | "weekly-at";
 
 export type AutomationRunStatus =
   "queued" | "running" | "passed" | "failed" | "stopped";
@@ -445,6 +455,7 @@ export type AutomationRunStatus =
 export type AutomationTriageState = "none" | "needs-review" | "archived";
 
 export type AutomationRun = {
+  sessionId?: string;
   id: string;
   status: AutomationRunStatus;
   startedAt: string;
@@ -453,7 +464,15 @@ export type AutomationRun = {
   stopConditionMet?: boolean;
 };
 
+export type CalendarSchedule = {
+  timezone: string;
+  time: string;
+  date?: string;
+  weekday?: number;
+};
+
 export type AutomationExecutionContext = {
+  calendar?: CalendarSchedule;
   workspacePath?: string;
   providerId?: string;
   providerLabel?: string;
@@ -541,6 +560,7 @@ export type DiffLine = {
 };
 
 export type DiffFile = {
+  countsKnown?: boolean;
   path: string;
   additions: number;
   deletions: number;
