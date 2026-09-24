@@ -19,9 +19,11 @@ streams tokens as they arrive and allows up to thirty minutes per generation,
 while connection checks remain short. Stop still cancels the in-flight request.
 
 Gyro accepts only loopback HTTP Ollama endpoints and does not follow redirects.
-Models that advertise tool support can use governed Gyro tools. Other models
-are chat-only. Inference can use substantial CPU, GPU, and memory depending on
-the model and hardware; the model runtime is separate from Gyro's idle app work.
+Models that advertise tool support can use native governed Gyro tools. Other
+models use a structured Gyro Workspace bridge; models that cannot produce valid
+structured actions fail visibly after one retry. Inference can use substantial
+CPU, GPU, and memory depending on the model and hardware; the model runtime is
+separate from Gyro's idle app work.
 
 For the CLI:
 

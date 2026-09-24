@@ -1,3 +1,21 @@
+import {
+  turnIdFromSessionEvent,
+  deriveSessionPlan,
+  deriveSessionGoal,
+  deriveChatMode,
+  chatModeEventMessage,
+  createChatModeSessionEvent,
+  normalizePlanItem,
+  normalizePlanStatus,
+  recordFromUnknown,
+  stringFromRecord,
+  numberFromUnknown,
+  planStatusVerb,
+  createPlanSessionEvent,
+  createGoalSessionEvent,
+  createEditorSessionEvent,
+  slugify,
+} from "./session-context-events";
 import { ComposerContextCandidates } from "@gyro-dev/ui";
 import {
   restoreCompanionPanes,
@@ -394,6 +412,10 @@ type TurnSourceControlBaselines = Record<
 
 type ChatTurnContextSnapshot = {
   mode?: ChatMode;
+  /** Captured when a send must focus another chat pane first. */
+  draftModeKey?: string;
+  draftModeRevision?: number;
+  consumeDraftMode?: boolean;
   goal?: SessionGoal;
   plan?: SessionPlan;
   attachments?: ChatAttachment[];
@@ -531,6 +553,7 @@ function storedThemeMode(value: unknown): ThemeMode | undefined {
     : undefined;
 }
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
+const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 /** Set once the first launch has asked macOS for its folder grants. */
@@ -876,6 +899,11 @@ export function App() {
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
     loadChatDrafts(),
   );
+  const [chatDraftModes, setChatDraftModes] = useState<
+    Record<string, ChatMode>
+  >(() => loadChatDraftModes());
+  const chatDraftModesRef = useRef(chatDraftModes);
+  const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -888,8 +916,6 @@ export function App() {
   >({});
   const [pendingNewChatGoal, setPendingNewChatGoal] = useState<SessionGoal>();
   const [isGoalComposerActive, setIsGoalComposerActive] = useState(false);
-  const [pendingNewChatMode, setPendingNewChatMode] =
-    useState<ChatMode>("normal");
   const [pendingNewChatPlan, setPendingNewChatPlan] = useState<SessionPlan>({
     title: "Plan",
     items: [],
@@ -1214,16 +1240,23 @@ export function App() {
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
-    () =>
-      workspaceFolderPaths(
+    () => {
+      const configured = workspaceFolderPaths(
         activeWorkspaceRoot,
         workbench.preferences.workspaceFolders,
         activeWorkspaceRoot
           ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
               ?.primaryFolder
           : undefined,
-      ),
+      );
+      if (!activeWorkspaceRoot || activeWorkspaceRoot in workbench.preferences.workspaceFolders) {
+        return configured;
+      }
+      const persisted = activeSession?.workspaceIdentity?.roots.map((root) => root.path);
+      return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
+    },
     [
+      activeSession?.workspaceIdentity,
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
       workbench.preferences.projectDetails,
@@ -1233,6 +1266,12 @@ export function App() {
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  useEffect(() => {
+    const identity = activeSession?.workspaceIdentity;
+    const active = identity?.roots.find((root) => root.id === identity.activeRootId);
+    if (active) setSelectedWorkspaceRoot(active.path);
+  }, [activeSession?.id, activeSession?.workspaceIdentity?.activeRootId]);
+
   const workspaceTrusted = isWorkspaceTrusted(
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
@@ -1752,19 +1791,17 @@ export function App() {
     void refreshUsageSafety();
   }, [activeSessionCallCount, refreshUsageSafety]);
 
-  const storedActiveChatMode = activeSessionId
-    ? persistedActiveChatMode
-    : pendingNewChatMode;
-  // A session left in council mode before the freeze reads as normal, so the
-  // composer never shows council UI for a run that cannot start.
-  const activeChatMode =
-    COUNCIL_COMING_SOON && storedActiveChatMode === "council"
-      ? "normal"
-      : storedActiveChatMode;
   const activeDraftKey =
     activeChatPane?.kind === "draft"
       ? activeChatPane.draftKey
       : (activeSessionId ?? NEW_CHAT_DRAFT_KEY);
+  // The chip describes the next message. Historical mode events describe
+  // submitted turns and must never select a mode for an unsent draft.
+  const selectedDraftMode = chatDraftModes[activeDraftKey] ?? "normal";
+  const activeChatMode =
+    COUNCIL_COMING_SOON && selectedDraftMode === "council"
+      ? "normal"
+      : selectedDraftMode;
   const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
   const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
   const activeQueuedChatMessages = activeSessionId
@@ -1955,6 +1992,49 @@ export function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !activeSession || !workspaceActionRoot ||
+        activeSession.eventsPath.startsWith("preview://")) return;
+    const identity = activeSession.workspaceIdentity;
+    const sameRoots = identity?.roots.length === workspaceRoots.length &&
+      identity.roots.every((root, index) => root.path === workspaceRoots[index]);
+    if (sameRoots && identity?.activeRootId === identity.roots.find(
+      (root) => root.path === workspaceActionRoot,
+    )?.id) return;
+    const timer = window.setTimeout(() => {
+      void invoke<Session>("set_session_workspace_identity", {
+        request: {
+          sessionId: activeSession.id,
+          roots: workspaceRoots,
+          activeRoot: workspaceActionRoot,
+        },
+      }).then((updated) => {
+        const persistedRoots = updated.workspaceIdentity?.roots.map((root) => root.path);
+        if (persistedRoots && persistedRoots.some((path, index) => path !== workspaceRoots[index])) {
+          dispatchWorkbench({
+            type: "set-workspace-folders",
+            workspacePath: updated.workspacePath,
+            paths: persistedRoots.slice(1),
+          });
+          const active = updated.workspaceIdentity?.roots.find(
+            (root) => root.id === updated.workspaceIdentity?.activeRootId,
+          );
+          if (active) setSelectedWorkspaceRoot(active.path);
+        }
+        setSessions((current) => current.map((session) =>
+          session.id === updated.id &&
+          (session.workspaceIdentity?.revision ?? 0) <
+            (updated.workspaceIdentity?.revision ?? 0)
+            ? { ...session, workspaceIdentity: updated.workspaceIdentity }
+            : session,
+        ));
+      }).catch((error) => {
+        notify("command-failed", "Workspace roots could not be saved", String(error));
+      });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [activeSession, notify, workspaceActionRoot, workspaceRoots]);
 
   const loadExplorerDirectory = useCallback(
     async (path: string) => {
@@ -2406,6 +2486,12 @@ export function App() {
   useEffect(() => {
     safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(chatDrafts));
   }, [chatDrafts]);
+  useEffect(() => {
+    safeSetLocalStorage(
+      CHAT_DRAFT_MODES_STORAGE_KEY,
+      JSON.stringify(chatDraftModes),
+    );
+  }, [chatDraftModes]);
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_ATTACHMENTS_STORAGE_KEY,
@@ -4414,20 +4500,43 @@ export function App() {
     workspaceRoots,
   ]);
 
+  // Keep live editor text in the in-memory capability broker only. The turn
+  // snapshot and session event continue to contain project signals, never an
+  // unsaved buffer. Reading this evidence requires WorkspaceReadEditor approval.
+  const liveEditorEvidence = useMemo(
+    () =>
+      workspaceContextSnapshot
+        ? workspaceContextWithLiveEditor(
+            workspaceContextSnapshot,
+            selectedFile,
+            workbench.ide.buffers[selectedFile ?? ""],
+            workbench.ide.selection,
+            workbench.ide.tabs.map((tab) => tab.path),
+          )
+        : undefined,
+    [
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.selection,
+      workbench.ide.tabs,
+      workspaceContextSnapshot,
+    ],
+  );
+
   useEffect(() => {
-    const root = workspaceContextSnapshot?.workspaceKey;
+    const root = liveEditorEvidence?.workspaceKey;
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
         workspacePath: root,
-        diagnostics: workspaceContextSnapshot?.diagnostics ?? [],
-        context: workspaceContextSnapshot,
+        diagnostics: liveEditorEvidence?.diagnostics ?? [],
+        context: liveEditorEvidence,
       },
     }).catch(() => {
       // A background evidence refresh must not produce an unhandled rejection.
       // Sending a turn awaits this same update and exposes any persistent error.
     });
-  }, [workspaceContextSnapshot]);
+  }, [liveEditorEvidence]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -8839,57 +8948,32 @@ export function App() {
   // dragging sessions from the sidebar into the chat grid — works.
 
   const changeChatMode = useCallback(
-    async (mode: ChatMode) => {
-      if (!activeSessionId) {
-        setPendingNewChatMode(mode);
+    (mode: ChatMode, draftKey = activeDraftKey) => {
+      if ((chatDraftModesRef.current[draftKey] ?? "normal") === mode)
         return true;
-      }
+      const next = { ...chatDraftModesRef.current };
+      if (mode === "normal") delete next[draftKey];
+      else next[draftKey] = mode;
+      chatDraftModesRef.current = next;
+      chatDraftModeRevisionsRef.current[draftKey] =
+        (chatDraftModeRevisionsRef.current[draftKey] ?? 0) + 1;
+      setChatDraftModes(next);
+      return true;
+    },
+    [activeDraftKey],
+  );
 
-      // A goal is the outcome, a mode is how the turn runs: neither cancels
-      // the other. Entering Plan mode used to delete the goal outright.
-      if (activeChatMode === mode) return true;
-
-      const modeMessage =
-        mode === "plan"
-          ? "Plan mode enabled"
-          : mode === "council"
-            ? "Council mode enabled"
-            : "Normal mode enabled";
-      if (!isTauriRuntime()) {
-        const now = new Date().toISOString();
-        setEvents((current) => [
-          ...current,
-          {
-            id: `chat-mode-${Date.now()}`,
-            sessionId: activeSessionId,
-            createdAt: now,
-            kind: "chat-mode-changed" as const,
-            message: modeMessage,
-            payload: { mode },
-          },
-        ]);
-        return true;
-      }
-
-      try {
-        await invoke<SessionEvent>("append_chat_context_event", {
-          sessionId: activeSessionId,
-          eventKind: "chat-mode-changed",
-          message: modeMessage,
-          payload: { mode },
-        });
-        await refreshEvents(activeSessionId);
-        return true;
-      } catch (error) {
-        notify("command-failed", "Mode change failed", String(error));
-        return false;
+  const consumeDraftMode = useCallback(
+    (draftKey: string, revision: number) => {
+      if (chatDraftModeRevisionsRef.current[draftKey] === revision) {
+        changeChatMode("normal", draftKey);
       }
     },
-    [activeChatMode, activeSessionId, notify, refreshEvents],
+    [changeChatMode],
   );
 
   const handleComposerAction = useCallback(
-    (action: string) => {
+    (action: string, draftKey = activeDraftKey) => {
       if (isShellOptimizing) {
         const allowedWhileOptimizing =
           action.startsWith("select-provider:") ||
@@ -9252,7 +9336,7 @@ export function App() {
                 ? "council"
                 : "normal";
             // A half-typed goal survives a mode change.
-            void changeChatMode(mode);
+            changeChatMode(mode, draftKey);
           }
           break;
         case "search-workspace":
@@ -9452,6 +9536,7 @@ export function App() {
     [
       attachEditorSnapshot,
       attachBrowserSnapshot,
+      activeDraftKey,
       activeChatMode,
       activeSession?.workspacePath,
       checkProviderReadiness,
@@ -9683,6 +9768,23 @@ export function App() {
         );
         return false;
       }
+      // Fix the mode at the click, before pending media or provider checks can
+      // await. A later chip change belongs to the following draft.
+      const draftModeKey = overrideContext?.draftModeKey ?? activeDraftKey;
+      const draftModeRevision =
+        overrideContext?.draftModeRevision ??
+        chatDraftModeRevisionsRef.current[draftModeKey] ??
+        0;
+      const selectedMode = chatDraftModesRef.current[draftModeKey] ?? "normal";
+      const turnMode =
+        overrideContext?.mode ??
+        (COUNCIL_COMING_SOON && selectedMode === "council"
+          ? "normal"
+          : selectedMode);
+      const consumeSelectedMode =
+        overrideContext?.consumeDraftMode ??
+        (overrideContext?.mode === undefined &&
+          !overrideContext?.preserveDraft);
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
@@ -9690,10 +9792,12 @@ export function App() {
       const turnAttachments = draftAttachments.some((item) => item.pending)
         ? await settlePendingMedia(draftAttachments)
         : draftAttachments;
-      const turnMode = overrideContext?.mode ?? activeChatMode;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
-      const turnGoal = overrideContext?.goal ?? activeSessionGoal;
+      const turnGoal =
+        overrideContext && "goal" in overrideContext
+          ? overrideContext.goal
+          : activeSessionGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
       const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
       const targetSession = targetSessionId
@@ -9858,6 +9962,9 @@ export function App() {
         if (!overrideContext?.preserveDraft) {
           resetChatDraft();
         }
+        if (consumeSelectedMode) {
+          consumeDraftMode(draftModeKey, draftModeRevision);
+        }
         notify(
           "terminal",
           "Message queued",
@@ -9922,6 +10029,19 @@ export function App() {
         ]);
       });
       const isRetry = Boolean(targetSessionId && retryTurnId);
+      const restoreUnsentMode = (sessionKey: string) => {
+        if (
+          !consumeSelectedMode ||
+          turnMode === "normal" ||
+          persistedChatTurnIdsRef.current.has(turnId) ||
+          chatDraftModeRevisionsRef.current[draftModeKey] !==
+            draftModeRevision + 1 ||
+          (chatDraftModesRef.current[sessionKey] ?? "normal") !== "normal"
+        ) {
+          return;
+        }
+        changeChatMode(turnMode, sessionKey);
+      };
       const shouldSuggestTitle =
         !isRetry &&
         shouldSuggestSessionTitle(
@@ -9959,10 +10079,18 @@ export function App() {
           selectedProvider,
           turnAttachments,
         );
+        if (!isTauriRuntime() && turnMode !== "normal") {
+          optimisticEvents.unshift(
+            createChatModeSessionEvent(session.id, turnMode, turnId),
+          );
+        }
         let sendingSessionId = session.id;
         optimisticEventsRef.current.set(session.id, optimisticEvents);
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
+        if (consumeSelectedMode) {
+          consumeDraftMode(draftModeKey, draftModeRevision);
+        }
         setWorkspacePath(session.workspacePath);
         setFiles(
           session.workspacePath
@@ -10138,11 +10266,8 @@ export function App() {
               await invoke<SessionEvent>("append_chat_context_event", {
                 sessionId: persistedSession.id,
                 eventKind: "chat-mode-changed",
-                message:
-                  turnMode === "council"
-                    ? "Council mode enabled"
-                    : "Plan mode enabled",
-                payload: { mode: turnMode },
+                message: chatModeEventMessage(turnMode),
+                payload: { mode: turnMode, turnId },
               }),
             );
           }
@@ -10179,12 +10304,25 @@ export function App() {
             message,
             turnId,
           });
+          if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== persistedSession.workspacePath) {
+            await invoke("update_capability_ide_evidence", {
+              request: {
+                workspacePath: liveEditorEvidence.workspaceKey,
+                diagnostics: liveEditorEvidence.diagnostics,
+                context: liveEditorEvidence,
+              },
+            });
+          }
           if (turnWorkspaceContext) {
             await invoke("update_capability_ide_evidence", {
               request: {
                 workspacePath: persistedSession.workspacePath,
                 diagnostics: turnWorkspaceContext.diagnostics,
-                context: turnWorkspaceContext,
+                context:
+                  liveEditorEvidence?.workspaceKey ===
+                  persistedSession.workspacePath
+                    ? liveEditorEvidence
+                    : turnWorkspaceContext,
               },
             });
           }
@@ -10250,7 +10388,6 @@ export function App() {
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
           setPendingNewChatGoal(undefined);
-          setPendingNewChatMode("normal");
           setPendingNewChatPlan({ title: "Plan", items: [] });
           optimisticEventsRef.current.delete(persistedSession.id);
           // Refresh plan windows after every completed turn so Claude stream
@@ -10264,6 +10401,7 @@ export function App() {
             void refreshProviderLedger(usageProviderId);
           }
         } catch (error) {
+          restoreUnsentMode(optimisticSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
           if (
@@ -10347,6 +10485,9 @@ export function App() {
       // A validated new send explicitly resumes this chat's pending queue.
       stoppedChatSessionsRef.current.delete(targetSessionId);
       setSessionSending(targetSessionId, true);
+      if (consumeSelectedMode) {
+        consumeDraftMode(draftModeKey, draftModeRevision);
+      }
       if (!isBackgroundSend) {
         dispatchWorkbench({ type: "set-chat-panel" });
       }
@@ -10361,6 +10502,14 @@ export function App() {
         }
       }
       if (!isTauriRuntime()) {
+        if (!isRetry) {
+          setEventsForSession(targetSessionId, (current) =>
+            limitSessionEventsForUi([
+              ...current,
+              createChatModeSessionEvent(targetSessionId, turnMode, turnId),
+            ]),
+          );
+        }
         updateOptimisticProviderStatus(
           optimisticEventsRef,
           (value) => setEventsForSession(targetSessionId, value),
@@ -10376,6 +10525,18 @@ export function App() {
       try {
         await waitForNextPaint();
         if (!isRetry) {
+          const modeEvent = await invoke<SessionEvent>(
+            "append_chat_context_event",
+            {
+              sessionId: targetSessionId,
+              eventKind: "chat-mode-changed",
+              message: chatModeEventMessage(turnMode),
+              payload: { mode: turnMode, turnId },
+            },
+          );
+          setEventsForSession(targetSessionId, (current) =>
+            limitSessionEventsForUi([...current, modeEvent]),
+          );
           await invoke<SessionEvent>("append_user_message", {
             attachments: turnAttachments,
             sessionId: targetSessionId,
@@ -10384,12 +10545,24 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
         }
+        if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== chatWorkspacePath) {
+          await invoke("update_capability_ide_evidence", {
+            request: {
+              workspacePath: liveEditorEvidence.workspaceKey,
+              diagnostics: liveEditorEvidence.diagnostics,
+              context: liveEditorEvidence,
+            },
+          });
+        }
         if (turnWorkspaceContext) {
           await invoke("update_capability_ide_evidence", {
             request: {
               workspacePath: chatWorkspacePath,
               diagnostics: turnWorkspaceContext.diagnostics,
-              context: turnWorkspaceContext,
+              context:
+                liveEditorEvidence?.workspaceKey === chatWorkspacePath
+                  ? liveEditorEvidence
+                  : turnWorkspaceContext,
             },
           });
         }
@@ -10459,6 +10632,7 @@ export function App() {
           void refreshProviderLedger(usageProviderId);
         }
       } catch (error) {
+        restoreUnsentMode(targetSessionId);
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
         if (
@@ -10502,7 +10676,8 @@ export function App() {
       activeDraftKey,
       activeChatAttachments,
       activeChatDraft,
-      activeChatMode,
+      changeChatMode,
+      consumeDraftMode,
       isBranchLoading,
       activeSessionGoal,
       activeSessionPlan,
@@ -10526,6 +10701,7 @@ export function App() {
       setEventsForSession,
       updateSessionTitle,
       workbench.ide.sourceControl,
+      liveEditorEvidence,
       workbench.providerStatuses,
       workbench.workspaceMode,
       workspacePath,
@@ -10554,13 +10730,13 @@ export function App() {
       }
 
       if (action.type === "continue-as-run") {
-        await changeChatMode("normal");
+        changeChatMode("normal");
         const message = [
           "Implement the Council recommendation below. Prefer the adoption steps and call out any risks before mutating files.",
           "",
           action.markdown.trim(),
         ].join("\n");
-        void sendDraft(message);
+        void sendDraft(message, { mode: "normal" });
         notify(
           "terminal",
           "Continuing from Council",
@@ -10585,7 +10761,7 @@ export function App() {
             });
           }
         }
-        await changeChatMode("normal");
+        changeChatMode("normal");
         const body =
           action.fullText?.trim() || action.seat.outputPreview?.trim() || "";
         const message = [
@@ -10684,6 +10860,7 @@ export function App() {
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
         preserveDraft: true,
+        consumeDraftMode: true,
       });
     },
     [sendDraft],
@@ -10697,8 +10874,17 @@ export function App() {
   }, [activeChatPane?.paneId, sendDraft]);
 
   const handlePlanDecision = useCallback(
-    async (decision: "approve" | "reject") => {
+    async (
+      decision: "approve" | "reject",
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        plan: SessionPlan;
+        goal?: SessionGoal;
+      },
+    ) => {
       if (decision === "reject") {
+        changeChatMode("plan", target?.draftKey ?? activeDraftKey);
         notify(
           "terminal",
           "Plan kept",
@@ -10708,21 +10894,26 @@ export function App() {
       }
       // A plan the model wrote as prose but never emitted as a checklist is
       // still a plan the user can approve.
-      if (activeSessionPlan.items.length === 0 && !activeSessionPlan.content) {
-        return false;
-      }
-      const modeChanged = await changeChatMode("normal");
-      if (!modeChanged) {
+      const plan = target?.plan ?? activeSessionPlan;
+      if (plan.items.length === 0 && !plan.content) {
         return false;
       }
       return sendDraft("Implement the approved plan.", {
-        goal: activeSessionGoal,
+        goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
-        plan: activeSessionPlan,
+        plan,
         preserveDraft: true,
+        sessionId: target?.sessionId,
       });
     },
-    [activeSessionGoal, activeSessionPlan, changeChatMode, notify, sendDraft],
+    [
+      activeDraftKey,
+      activeSessionGoal,
+      activeSessionPlan,
+      changeChatMode,
+      notify,
+      sendDraft,
+    ],
   );
 
   useEffect(() => {
@@ -10877,6 +11068,7 @@ export function App() {
           (attachment) => ({ ...attachment }),
         ),
       }));
+      changeChatMode(selected.context.mode ?? "normal", activeDraftKey);
       setChatMessageQueues((current) => {
         const remaining = (current[activeSessionId] ?? []).filter(
           (item) => item.id !== messageId,
@@ -10894,7 +11086,13 @@ export function App() {
         "The message is back in the composer.",
       );
     },
-    [activeDraftKey, activeSessionId, chatMessageQueues, notify],
+    [
+      activeDraftKey,
+      activeSessionId,
+      changeChatMode,
+      chatMessageQueues,
+      notify,
+    ],
   );
 
   const handleProviderStatusAction = useCallback(
@@ -15493,8 +15691,13 @@ export function App() {
       pane.kind === "session"
         ? deriveSessionGoal(paneEvents, pane.sessionId)
         : pendingNewChatGoal;
+    const paneSelectedMode = chatDraftModes[paneDraftKey] ?? "normal";
     const paneMode =
-      pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
+      COUNCIL_COMING_SOON && paneSelectedMode === "council"
+        ? "normal"
+        : paneSelectedMode;
+    const paneSubmittedMode =
+      pane.kind === "session" ? deriveChatMode(paneEvents) : "normal";
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     // Plan still takes the rail on its own; the dock's tab shows through when
@@ -15521,7 +15724,20 @@ export function App() {
         void sendDraft(message, context);
         return;
       }
-      pendingPaneSendRef.current = { paneId: pane.paneId, message, context };
+      pendingPaneSendRef.current = {
+        paneId: pane.paneId,
+        message,
+        context: {
+          ...context,
+          mode: context?.mode ?? paneMode,
+          draftModeKey: paneDraftKey,
+          draftModeRevision:
+            chatDraftModeRevisionsRef.current[paneDraftKey] ?? 0,
+          consumeDraftMode:
+            context?.consumeDraftMode ??
+            (context?.mode === undefined && !context?.preserveDraft),
+        },
+      };
       focusChatPane(pane);
     };
     const togglePanePanel = (panel: ChatSidePanelId) => {
@@ -15632,6 +15848,7 @@ export function App() {
         onResumeUsage={() => void resumeUsage()}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
+        submittedChatMode={paneSubmittedMode}
         diffReview={workbench.diffReview}
         draftResetToken={draftResetToken}
         draft={chatDrafts[paneDraftKey] ?? ""}
@@ -15667,7 +15884,7 @@ export function App() {
         }}
         onComposerAction={(action) => {
           focusChatPane(pane);
-          handleComposerAction(action);
+          handleComposerAction(action, paneDraftKey);
         }}
         onDraftChange={(value) =>
           setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
@@ -15729,7 +15946,12 @@ export function App() {
         }}
         onPlanDecision={async (decision) => {
           focusChatPane(pane);
-          return handlePlanDecision(decision);
+          return handlePlanDecision(decision, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            plan: panePlan,
+            goal: paneGoal,
+          });
         }}
         planEditorRequest={isFocused ? planEditorRequest : undefined}
         onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
@@ -15741,6 +15963,7 @@ export function App() {
           requestSend(goal, {
             goal: { text: goal, status: "active" },
             preserveDraft: true,
+            consumeDraftMode: true,
           })
         }
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
@@ -15883,6 +16106,7 @@ export function App() {
       }
       attachments={activeChatAttachments}
       chatMode={activeChatMode}
+      submittedChatMode={persistedActiveChatMode}
       diffReview={workbench.diffReview}
       draftResetToken={draftResetToken}
       draft={activeChatDraft}
@@ -16252,6 +16476,7 @@ export function App() {
                     }
                     attachments={activeChatAttachments}
                     chatMode={activeChatMode}
+                    submittedChatMode={persistedActiveChatMode}
                     diffReview={workbench.diffReview}
                     draftResetToken={draftResetToken}
                     draft={activeChatDraft}
@@ -17025,6 +17250,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
+          submittedChatMode={persistedActiveChatMode}
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
           events={[]}
@@ -17649,6 +17875,26 @@ function loadChatDrafts(): Record<string, string> {
           typeof entry[0] === "string" &&
           typeof entry[1] === "string" &&
           entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadChatDraftModes(): Record<string, ChatMode> {
+  const stored = readBoundedLocalStorage(CHAT_DRAFT_MODES_STORAGE_KEY, 64_000);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, ChatMode] =>
+          typeof entry[0] === "string" &&
+          (entry[1] === "plan" || entry[1] === "council"),
       ),
     );
   } catch {
@@ -18391,7 +18637,9 @@ function capabilityApprovalFromSessionEvent(
     status: "waiting",
     scopeKind,
     scopeValue,
-    choices: ["deny", "allow-once", "allow-project"],
+    choices: capabilityId === "workspace-read-editor"
+      ? ["deny", "allow-once"]
+      : ["deny", "allow-once", "allow-project"],
   };
 }
 
@@ -18459,21 +18707,6 @@ function pathFromSessionEvent(
     );
   })();
   return workspaceRelativeFilePath(rawPath, workspacePath);
-}
-
-function turnIdFromSessionEvent(event: SessionEvent): string | undefined {
-  if (event.turnId) {
-    return event.turnId;
-  }
-  if (
-    typeof event.payload === "object" &&
-    event.payload &&
-    "turnId" in event.payload &&
-    typeof event.payload.turnId === "string"
-  ) {
-    return event.payload.turnId;
-  }
-  return undefined;
 }
 
 function deriveActiveTurn(
@@ -18655,385 +18888,6 @@ function areWorkbenchTurnsEqual(
   );
 }
 
-function deriveSessionPlan(
-  events: SessionEvent[],
-  sessionId?: string,
-): SessionPlan {
-  const assistantContentByTurnId = new Map<string, string>();
-  const normalTurnIds = new Set<string>();
-  for (const event of events) {
-    const payload = recordFromUnknown(event.payload);
-    const turnId = turnIdFromSessionEvent(event);
-    if (turnId && stringFromRecord(payload, "chatMode") === "normal") {
-      normalTurnIds.add(turnId);
-    }
-  }
-  for (const event of events) {
-    if (event.kind !== "assistant-message" || !event.message.trim()) {
-      continue;
-    }
-    const turnId = turnIdFromSessionEvent(event);
-    if (turnId) {
-      assistantContentByTurnId.set(turnId, event.message.trim());
-    }
-  }
-  let plan: SessionPlan = {
-    sessionId,
-    title: "Plan",
-    items: [],
-  };
-
-  for (const event of events) {
-    if (event.kind !== "plan-updated") {
-      continue;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const action = stringFromRecord(payload, "action") ?? "replace";
-    const sourceTurnId =
-      turnIdFromSessionEvent(event) ?? stringFromRecord(payload, "turnId");
-    // Older ACP runs persisted execution checklists as plan replacements.
-    // Do not turn their entire normal-mode response into a Plan document.
-    if (
-      action === "replace" &&
-      sourceTurnId &&
-      normalTurnIds.has(sourceTurnId) &&
-      !stringFromRecord(payload, "content") &&
-      !stringFromRecord(payload, "markdown")
-    ) {
-      continue;
-    }
-    if (!plan.createdAt) {
-      plan = { ...plan, createdAt: event.createdAt };
-    }
-    const providerId = stringFromRecord(payload, "providerId");
-    const title = stringFromRecord(payload, "title");
-    const content =
-      stringFromRecord(payload, "content") ??
-      stringFromRecord(payload, "markdown") ??
-      (action === "replace" && sourceTurnId
-        ? assistantContentByTurnId.get(sourceTurnId)
-        : undefined);
-    if (title) {
-      plan = { ...plan, title };
-    }
-    if (content) {
-      plan = { ...plan, content };
-    }
-    if (sourceTurnId && (action === "replace" || !plan.sourceTurnId)) {
-      plan = { ...plan, sourceTurnId };
-    }
-    if (providerId) {
-      plan = { ...plan, providerId };
-    }
-
-    if (action === "clear") {
-      plan = {
-        ...plan,
-        content: undefined,
-        items: [],
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const payloadItems = Array.isArray(payload?.items)
-      ? payload.items
-      : undefined;
-    if (payloadItems && (action === "add-item" || action === "append")) {
-      plan = {
-        ...plan,
-        items: [
-          ...plan.items,
-          ...payloadItems.map((item, index) =>
-            normalizePlanItem(item, event, plan.items.length + index),
-          ),
-        ],
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    // Progress reports name only the ids that moved, so a turn that finishes
-    // three steps stays one marker line and never restates the plan.
-    if (payloadItems && action === "update-items") {
-      const updates = new Map(
-        payloadItems
-          .map((item) => recordFromUnknown(item))
-          .filter((record): record is Record<string, unknown> =>
-            Boolean(record),
-          )
-          .map((record) => [stringFromRecord(record, "id"), record] as const)
-          .filter(([id]) => Boolean(id)),
-      );
-      plan = {
-        ...plan,
-        items: plan.items.map((item) => {
-          const update = updates.get(item.id);
-          if (!update) {
-            return item;
-          }
-          return {
-            ...item,
-            detail: stringFromRecord(update, "detail") ?? item.detail,
-            status: normalizePlanStatus(update.status ?? item.status),
-            title:
-              stringFromRecord(update, "title") ??
-              stringFromRecord(update, "label") ??
-              item.title,
-            updatedAt: event.createdAt,
-          };
-        }),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    if (action === "replace" || payloadItems) {
-      plan = {
-        ...plan,
-        items: (payloadItems ?? []).map((item, index) =>
-          normalizePlanItem(item, event, index),
-        ),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const payloadItem = payload?.item;
-    if (!payloadItem) {
-      plan = { ...plan, updatedAt: event.createdAt };
-      continue;
-    }
-
-    const nextItemRecord = recordFromUnknown(payloadItem);
-    const explicitTitle =
-      stringFromRecord(nextItemRecord, "title") ??
-      stringFromRecord(nextItemRecord, "label");
-    const explicitDetail = stringFromRecord(nextItemRecord, "detail");
-    const nextItem = normalizePlanItem(payloadItem, event, plan.items.length);
-    if (action === "remove-item") {
-      plan = {
-        ...plan,
-        items: plan.items.filter((item) => item.id !== nextItem.id),
-        updatedAt: event.createdAt,
-      };
-      continue;
-    }
-
-    const existingItem = plan.items.find((item) => item.id === nextItem.id);
-    const items = existingItem
-      ? plan.items.map((item) =>
-          item.id === nextItem.id
-            ? {
-                ...item,
-                ...nextItem,
-                createdAt: item.createdAt,
-                detail: explicitDetail ?? item.detail,
-                title: explicitTitle ?? item.title,
-              }
-            : item,
-        )
-      : [...plan.items, nextItem];
-    plan = { ...plan, items, updatedAt: event.createdAt };
-  }
-
-  return plan;
-}
-
-function deriveSessionGoal(
-  events: SessionEvent[],
-  sessionId?: string,
-): SessionGoal | undefined {
-  let goal: SessionGoal | undefined;
-  for (const event of events) {
-    if (event.kind !== "goal-updated") {
-      continue;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const action = stringFromRecord(payload, "action") ?? "set";
-    if (action === "clear") {
-      goal = undefined;
-      continue;
-    }
-    const text = stringFromRecord(payload, "text") ?? goal?.text;
-    if (!text) {
-      continue;
-    }
-    goal = {
-      sessionId,
-      text,
-      status:
-        stringFromRecord(payload, "status") === "complete"
-          ? "complete"
-          : "active",
-      sourceTurnId:
-        stringFromRecord(payload, "sourceTurnId") ?? goal?.sourceTurnId,
-      createdAt: goal?.createdAt ?? event.createdAt,
-      updatedAt: event.createdAt,
-    };
-  }
-  return goal;
-}
-
-function deriveChatMode(events: SessionEvent[]): ChatMode {
-  let mode: ChatMode = "normal";
-  for (const event of events) {
-    if (event.kind !== "chat-mode-changed") {
-      continue;
-    }
-    const value = stringFromRecord(recordFromUnknown(event.payload), "mode");
-    mode =
-      value === "plan" ? "plan" : value === "council" ? "council" : "normal";
-  }
-  return mode;
-}
-
-function normalizePlanItem(
-  value: unknown,
-  event: SessionEvent,
-  index: number,
-): SessionPlanItem {
-  const record = recordFromUnknown(value);
-  const title =
-    stringFromRecord(record, "title") ??
-    stringFromRecord(record, "label") ??
-    `Checklist item ${index + 1}`;
-  const sourceTurnId =
-    stringFromRecord(record, "sourceTurnId") ??
-    turnIdFromSessionEvent(event) ??
-    stringFromRecord(record, "turnId");
-  const id =
-    stringFromRecord(record, "id") ??
-    `${event.id}-${slugify(title) || `item-${index + 1}`}`;
-  return {
-    id,
-    title,
-    detail: stringFromRecord(record, "detail"),
-    status: normalizePlanStatus(record?.status),
-    sourceTurnId,
-    providerId:
-      stringFromRecord(record, "providerId") ??
-      stringFromRecord(recordFromUnknown(event.payload), "providerId"),
-    createdAt: stringFromRecord(record, "createdAt") ?? event.createdAt,
-    updatedAt: stringFromRecord(record, "updatedAt") ?? event.createdAt,
-  };
-}
-
-function normalizePlanStatus(value: unknown): SessionPlanItemStatus {
-  if (
-    value === "todo" ||
-    value === "in-progress" ||
-    value === "complete" ||
-    value === "blocked"
-  ) {
-    return value;
-  }
-  if (value === "done") {
-    return "complete";
-  }
-  if (value === "doing" || value === "running") {
-    return "in-progress";
-  }
-  return "todo";
-}
-
-function recordFromUnknown(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function stringFromRecord(
-  record: Record<string, unknown> | undefined,
-  key: string,
-) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function numberFromUnknown(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function planStatusVerb(status: SessionPlanItemStatus) {
-  switch (status) {
-    case "in-progress":
-      return "started";
-    case "complete":
-      return "completed";
-    case "blocked":
-      return "blocked";
-    case "todo":
-    default:
-      return "reopened";
-  }
-}
-
-function createPlanSessionEvent(
-  sessionId: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  const now = new Date().toISOString();
-  const turnId =
-    typeof payload.turnId === "string" ? payload.turnId : undefined;
-  return {
-    id: `plan-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    turnId,
-    createdAt: now,
-    kind: "plan-updated",
-    message,
-    payload,
-  };
-}
-
-function createGoalSessionEvent(
-  sessionId: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  return {
-    id: `goal-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    createdAt: new Date().toISOString(),
-    kind: "goal-updated",
-    message,
-    payload,
-  };
-}
-
-function createEditorSessionEvent(
-  sessionId: string,
-  eventKind: string,
-  message: string,
-  payload: Record<string, unknown>,
-): SessionEvent {
-  return {
-    id: `editor-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-    sessionId,
-    createdAt: new Date().toISOString(),
-    kind:
-      eventKind === "ai-edit-proposed" ? "file-edit-proposed" : "system-event",
-    message,
-    payload: {
-      kind: eventKind,
-      surface: "desktop-ide",
-      data: payload,
-    },
-  };
-}
-
 function workspaceContentToEditorBuffer(
   content: WorkspaceFileContent,
 ): EditorBuffer {
@@ -19175,6 +19029,52 @@ function workspaceContextRelativePath(path: string, root: string) {
   return normalizedPath.startsWith(prefix)
     ? normalizedPath.slice(prefix.length)
     : normalizedPath;
+}
+
+function workspaceContextWithLiveEditor(
+  context: WorkspaceContextSnapshot,
+  activePath: string | undefined,
+  buffer: EditorBuffer | undefined,
+  selection: EditorSelection | undefined,
+  tabs: string[],
+): WorkspaceContextSnapshot {
+  const root = context.workspaceKey.replace(/\/+$/, "");
+  const belongsToRoot = (path: string) => path.startsWith(`${root}/`);
+  const visibleTabs = tabs
+    .filter(belongsToRoot)
+    .slice(0, 64)
+    .map((path) => workspaceContextRelativePath(path, root));
+  if (!activePath || !belongsToRoot(activePath) || !buffer) {
+    return { ...context, visibleTabs };
+  }
+  const path = workspaceContextRelativePath(activePath, root);
+  const maxText = 48_000;
+  const clipped = (value: string) => value.slice(0, maxText);
+  return {
+    ...context,
+    revision: Date.now(),
+    activePath: path,
+    visibleTabs,
+    selection:
+      selection?.path === activePath
+        ? {
+            ...selection,
+            path,
+            text: clipped(selection.text),
+            truncated: selection.text.length > maxText,
+          }
+        : undefined,
+    buffers: [
+      {
+        path,
+        dirty: buffer.content !== buffer.savedContent,
+        content: clipped(buffer.content),
+        truncated: buffer.content.length > maxText,
+        diskHash: buffer.contentHash,
+        documentVersion: buffer.updatedAt,
+      },
+    ],
+  };
 }
 
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
@@ -20162,15 +20062,6 @@ function workspaceRunMetadata(
     worktreeName: `gyro-${slug}`,
     workingDirectory,
   };
-}
-
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
 }
 
 function createOptimisticTurnEvents(

@@ -5,6 +5,27 @@ not fill a chat's context in one call. Bounds should be visible to the model,
 and collections that have more results provide a way to continue reading.
 The existing workspace and approval policies apply to every page.
 
+## Workspace roots and live editor text
+
+`gyro_workspace_get_context` returns the Session's versioned root IDs. A tool
+request that acts on a Workspace root accepts `rootId`; it is required when a
+Session has multiple roots. Paths remain relative to that root, and each root
+uses its own project trust and approval policy. Pending edit proposals retain
+the selected root through review and application.
+
+Ordinary Workspace context lists editor metadata without selection text or
+unsaved buffer content. `gyro_workspace_read_editor` requests live text for a
+specific path and always opens a one-time approval card with the requested
+text. The preview is delivered only to the running UI, not saved in Session
+events. If the text changes before approval completes, Gyro rejects the read.
+The returned `documentVersion` can be passed to a Workspace edit to reject a
+changed editor document; an unsaved buffer also blocks file proposals.
+
+Ollama models without native function calling use Gyro's JSON action loop.
+OpenAI-compatible endpoints that explicitly reject native tools on the first
+request switch to the same loop. Gyro validates each action against the
+advertised schema and retries one malformed action before reporting failure.
+
 ## Code navigation
 
 `gyro_code_definition`, `gyro_code_references`, and `gyro_code_symbols` accept

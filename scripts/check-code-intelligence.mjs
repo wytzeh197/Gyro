@@ -52,7 +52,7 @@ assert.ok(
 assert.ok(lib.includes("lsp_capability::schema(id)"), "schema delegation is missing");
 assert.match(
   lib,
-  /CapabilityId::WorkspaceRead\s*\n\s*\| CapabilityId::WorkspaceReadRange\s*\n\s*\| CapabilityId::CodeDefinition/,
+  /CapabilityId::WorkspaceRead\s*\n\s*\| CapabilityId::WorkspaceReadRange\s*\n\s*\| CapabilityId::WorkspaceReadEditor\s*\n\s*\| CapabilityId::CodeDefinition/,
   "code capabilities must join the sensitive-path upgrade",
 );
 assert.ok(lib.includes("mod lsp_smoke;"), "lsp_smoke module not declared");

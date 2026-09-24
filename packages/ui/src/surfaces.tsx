@@ -1,5 +1,6 @@
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
+import { AutomationChoice } from "./automation-choice.tsx";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -7984,6 +7985,8 @@ type ChatSurfaceProps = {
   onStartGoalChat?: (goal: string) => void;
   promptHistory?: string[];
   chatMode?: ChatMode;
+  /** Mode of the latest submitted turn, independent of the next draft. */
+  submittedChatMode?: ChatMode;
   attachments?: ChatAttachment[];
   queuedMessages?: Array<{
     attachmentCount: number;
@@ -8261,6 +8264,7 @@ export function ChatSurface({
   isGoalComposerActive = false,
   promptHistory = [],
   chatMode = "normal",
+  submittedChatMode = chatMode,
   attachments = [],
   queuedMessages = [],
   savedProjects = [],
@@ -8549,7 +8553,7 @@ export function ChatSurface({
     ].join(":");
   }, [sessionPlan]);
   const isPlanReadyForDecision = Boolean(
-    chatMode === "plan" &&
+    submittedChatMode === "plan" &&
     !isComposerSending &&
     planDecisionKey &&
     planDecisionKey !== dismissedPlanDecisionKey,
@@ -8690,7 +8694,7 @@ export function ChatSurface({
     return () => window.cancelAnimationFrame(animationFrame);
   }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
   // The dock overlays the transcript. Only the composer is reserved at the end
-  // of the scroll content: the changes pill, queue, and plan card float, so the
+  // of the scroll content: the changes pill and queue float, so the
   // conversation runs down behind them to the composer.
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -8904,15 +8908,6 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
-        {/* The outcome rides on the composer now, so the transcript starts with
-            the route: the plan belongs to the run, not to the message box. */}
-        <SessionGoalBand
-          plan={sessionPlan}
-          density="thread"
-          onOpenPlan={
-            activeRailPanel === "plan" ? undefined : onTogglePlanPanel
-          }
-        />
         {looseEvents.map((event) => (
           <ChatEvent
             event={event}
@@ -9007,12 +9002,7 @@ export function ChatSurface({
               // and imply unfinished work on already-finished messages.
               turnIndex === turns.length - 1 ? onContinueChat : undefined
             }
-            onOpenPlan={onTogglePlanPanel}
-            onPlanDecision={handlePlanDecision}
             plan={sessionPlan}
-            isPlanDecisionPending={isPlanDecisionPending}
-            isPlanPanelOpen={activeRailPanel === "plan"}
-            isPlanReadyForDecision={isPlanReadyForDecision}
             previewCapture={
               browserPreview?.latestCapture
                 ? {
@@ -9124,6 +9114,9 @@ export function ChatSurface({
         sourceControl={sourceControl}
         onPlanItemStatusChange={onPlanItemStatusChange}
         onPlanAction={onPlanAction}
+        isPlanReadyForDecision={isPlanReadyForDecision}
+        isPlanDecisionPending={isPlanDecisionPending}
+        onPlanDecision={handlePlanDecision}
         onGoalAction={onGoalAction}
         editorRequest={planEditorRequest}
         onEditorRequestHandled={onPlanEditorRequestHandled}
@@ -9173,6 +9166,7 @@ export function ChatSurface({
         onShowLauncher={onShowCompanionLauncher}
         onToggleToolPanel={onToggleToolPanel}
         isToolPanelOpen={isToolPanelOpen === true}
+        isTiled={isTiled}
         onWidthChange={onCompanionWidthChange}
         openTabs={openTabs}
         browserTabLabel={
@@ -9580,10 +9574,7 @@ export function ChatSurface({
               <ArrowDown aria-hidden="true" size={20} strokeWidth={1.8} />
             </button>
           ) : null}
-          {/* Live changes lead the dock: the running turn's file count is the
-              one line here that keeps changing, so it stays put at the top
-              rather than sliding down each time a message is queued or the
-              plan card appears beneath it. */}
+          {/* Keep the running turn's file count above queued messages. */}
           <div
             className="gyro-composer-live-changes"
             ref={setLiveChangesTarget}
@@ -9605,14 +9596,7 @@ export function ChatSurface({
           ) : null}
           <Composer
             overlay={
-              isPlanReadyForDecision && sessionPlan ? (
-                <PlanDecisionCard
-                  isPending={isPlanDecisionPending}
-                  onDecision={handlePlanDecision}
-                  onOpenPlan={onTogglePlanPanel}
-                  plan={sessionPlan}
-                />
-              ) : showQuestionPopup ? (
+              showQuestionPopup ? (
                 <ChatQuestionPopup
                   key={questionRequest.id}
                   request={questionRequest}
@@ -9686,26 +9670,20 @@ export function ChatSurface({
   );
 }
 
-/**
- * One quiet row above the composer: the question, the plan it is about (which
- * opens the document), and the two answers. The steps live in the plan itself.
- */
+/** Approval stays beside the plan document and checklist. */
 function PlanDecisionCard({
   isPending,
   onDecision,
-  onOpenPlan,
   plan,
 }: {
   isPending: boolean;
   onDecision: (decision: "approve" | "reject") => void;
-  onOpenPlan?: () => void;
   plan: SessionPlan;
 }) {
   const stepLabel =
     plan.items.length > 0
       ? `${plan.items.length} ${plan.items.length === 1 ? "step" : "steps"}`
       : undefined;
-  const summary = planDecisionSummary(plan);
   return (
     <section
       aria-label="Plan ready for approval"
@@ -9716,22 +9694,7 @@ function PlanDecisionCard({
         <span>
           Plan ready{stepLabel ? <small> · {stepLabel}</small> : null}
         </span>
-        {onOpenPlan ? (
-          <button
-            aria-label="Open plan"
-            className="gyro-plan-decision-open"
-            onClick={onOpenPlan}
-            title="Open plan"
-            type="button"
-          >
-            <Maximize2 aria-hidden="true" size={13} />
-          </button>
-        ) : null}
       </header>
-      <div className="gyro-plan-decision-text">
-        <strong>{plan.title || "Ready to implement"}</strong>
-        {summary ? <p>{summary}</p> : null}
-      </div>
       <footer className="gyro-plan-decision-foot">
         <span className="gyro-plan-decision-hint">
           Implementing switches to Normal mode
@@ -9760,27 +9723,6 @@ function PlanDecisionCard({
       ) : null}
     </section>
   );
-}
-
-/** First prose line of the plan document, so the approval says what it builds. */
-function planDecisionSummary(plan: SessionPlan) {
-  const title = plan.title.trim().toLowerCase();
-  for (const raw of (plan.content ?? "").split("\n")) {
-    const line = raw
-      .trim()
-      .replace(/^>\s*/, "")
-      .replace(/[*_`]/g, "")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-    if (
-      !line ||
-      /^(#|[-+*]\s|\d+[.)]\s|\||```|---)/.test(raw.trim()) ||
-      line.toLowerCase() === title
-    ) {
-      continue;
-    }
-    return line;
-  }
-  return plan.items[0]?.detail ?? undefined;
 }
 
 function PlanDocument({
@@ -9852,102 +9794,6 @@ function normalizePlanDocumentOrderedSteps(content: string) {
       return `${nextStep}${match[3]}${match[4]}`;
     })
     .join("\n");
-}
-
-function PlanArtifactCard({
-  content,
-  isOpen,
-  isPending,
-  onOpen,
-  onOpenBrowserUrl,
-  onPlanDecision,
-  showDecision,
-  title,
-}: {
-  content: string;
-  isOpen: boolean;
-  isPending: boolean;
-  onOpen?: () => void;
-  onOpenBrowserUrl?: (url: string) => void;
-  onPlanDecision?: (decision: "approve" | "reject") => void;
-  showDecision: boolean;
-  title: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1400);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  // While the plan panel shows the document, the transcript keeps only the
-  // header row: the same text twice side by side is noise, not context.
-  return (
-    <div className="gyro-plan-artifact">
-      <section
-        aria-label="Plan"
-        className={["gyro-plan-artifact-card", isOpen ? "is-open" : ""]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        <header className="gyro-plan-artifact-header">
-          <Lightbulb aria-hidden="true" size={14} />
-          <span>Plan</span>
-          <span className="gyro-plan-artifact-tools">
-            <button
-              aria-label={copied ? "Plan copied" : "Copy plan"}
-              onClick={() => {
-                copyAssistantResponse(content);
-                setCopied(true);
-              }}
-              title={copied ? "Copied" : "Copy plan"}
-              type="button"
-            >
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-            </button>
-            <button
-              aria-expanded={isOpen}
-              aria-label={isOpen ? "Close plan document" : "Open plan document"}
-              onClick={onOpen}
-              title={isOpen ? "Close plan" : "Open plan"}
-              type="button"
-            >
-              {isOpen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
-          </span>
-        </header>
-        {isOpen ? null : (
-          // The fade promises more document; clicking anywhere in it opens the
-          // full plan. The header button is the keyboard path.
-          <button
-            aria-hidden="true"
-            className="gyro-plan-artifact-preview"
-            onClick={onOpen}
-            tabIndex={-1}
-            type="button"
-          >
-            <PlanDocument
-              content={content}
-              onOpenBrowserUrl={onOpenBrowserUrl}
-              title={title}
-            />
-          </button>
-        )}
-      </section>
-      {showDecision ? (
-        <div className="gyro-plan-artifact-actions">
-          <button
-            disabled={isPending}
-            onClick={() => onPlanDecision?.("approve")}
-            type="button"
-          >
-            {isPending
-              ? "Starting implementation…"
-              : "Yes, implement this plan"}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function ChatMessageQueue({
@@ -10316,6 +10162,9 @@ function ChatSidePanel({
   sourceControl,
   onPlanItemStatusChange,
   onPlanAction,
+  isPlanReadyForDecision,
+  isPlanDecisionPending,
+  onPlanDecision,
   editorRequest,
   onEditorRequestHandled,
   onClose,
@@ -10379,6 +10228,9 @@ function ChatSidePanel({
     itemId?: string,
     value?: string,
   ) => void;
+  isPlanReadyForDecision: boolean;
+  isPlanDecisionPending: boolean;
+  onPlanDecision?: (decision: "approve" | "reject") => void;
   onGoalAction?: (
     action: SessionGoalAction,
     value?: string,
@@ -10657,6 +10509,13 @@ function ChatSidePanel({
             <X size={14} />
           </button>
         </header>
+        {isPlanReadyForDecision ? (
+          <PlanDecisionCard
+            isPending={isPlanDecisionPending}
+            onDecision={(decision) => onPlanDecision?.(decision)}
+            plan={sessionPlan}
+          />
+        ) : null}
         <PlanDocument
           content={sessionPlan.content}
           onOpenBrowserUrl={onBrowserNavigate}
@@ -10705,6 +10564,13 @@ function ChatSidePanel({
           terminalLabel={terminalLabel}
           workspacePath={workspacePath}
         />
+        {isPlanReadyForDecision && sessionPlan ? (
+          <PlanDecisionCard
+            isPending={isPlanDecisionPending}
+            onDecision={(decision) => onPlanDecision?.(decision)}
+            plan={sessionPlan}
+          />
+        ) : null}
         <section className="gyro-plan-harness" aria-label="Plan harness">
           <header>
             <div className="gyro-plan-harness-title">
@@ -11141,6 +11007,7 @@ function ChatCompanionDock({
   browserTabLabel,
   children,
   isToolPanelOpen,
+  isTiled,
   onClose,
   onCloseTab,
   onOpenTab,
@@ -11156,6 +11023,7 @@ function ChatCompanionDock({
   browserTabLabel?: string;
   children: ReactNode;
   isToolPanelOpen: boolean;
+  isTiled: boolean;
   onClose: () => void;
   onCloseTab?: (tab: ChatCompanionTabId) => void;
   onOpenTab?: (tab: ChatCompanionTabId) => void;
@@ -11184,6 +11052,7 @@ function ChatCompanionDock({
   } = useCompanionResize(dockRef, width, onWidthChange, widthMode);
   const overlay = shouldOverlayChatCompanion(availableWidth);
   const fillSurface = isExpanded || overlay;
+  const cannotExpand = overlay && !isTiled && !isExpanded;
   const activeLabel = activeTab
     ? chatCompanionTabLabels[activeTab]
     : "Open a tool";
@@ -11221,7 +11090,7 @@ function ChatCompanionDock({
         isResizing ? "is-resizing" : "",
         isBrowserFocus ? "is-browser-focus" : "",
         isBrowserAddress ? "is-browser-address" : "",
-        fillSurface ? "is-expanded" : "",
+        isExpanded ? "is-expanded" : "",
         overlay ? "is-overlay" : "",
         activeTab ? `is-${activeTab}` : "is-launcher",
       ]
@@ -11306,25 +11175,33 @@ function ChatCompanionDock({
         <div className="gyro-chat-companion-window-actions">
           <button
             aria-label={
-              overlay
+              cannotExpand
                 ? "Not enough room to split"
                 : isExpanded
-                  ? "Restore split view"
-                  : "Expand panel"
+                  ? isTiled
+                    ? "Restore compact panel"
+                    : "Restore split view"
+                  : isTiled
+                    ? "Expand panel over chat"
+                    : "Expand panel"
             }
-            aria-pressed={fillSurface}
-            disabled={overlay}
+            aria-pressed={isExpanded}
+            disabled={cannotExpand}
             onClick={() => setIsExpanded((current) => !current)}
             title={
-              overlay
+              cannotExpand
                 ? "This window is too narrow to keep the conversation beside Review."
                 : isExpanded
-                  ? "Restore split view"
-                  : "Expand panel"
+                  ? isTiled
+                    ? "Restore compact panel"
+                    : "Restore split view"
+                  : isTiled
+                    ? "Expand panel over chat"
+                    : "Expand panel"
             }
             type="button"
           >
-            {fillSurface ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
           {onToggleToolPanel ? (
             <button
@@ -16209,6 +16086,24 @@ export function ToolsSurface({
   );
 }
 
+const automationTimeZoneOptions = Array.from(
+  new Set([
+    "UTC",
+    ...(typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : []),
+  ]),
+).map((timezone) => ({ value: timezone, label: timezone }));
+
+function isValidAutomationTimeZone(timezone: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function AutomationsSurface({
   automations = [],
   providerChoices = [],
@@ -16372,12 +16267,28 @@ export function AutomationsSurface({
     setStopCondition("");
     setIsCreating(true);
   };
+  const hasCalendarSchedule = ["once", "daily-at", "weekly-at"].includes(
+    schedule,
+  );
+  const timezoneChoices =
+    calendar.timezone &&
+    isValidAutomationTimeZone(calendar.timezone) &&
+    !automationTimeZoneOptions.some((item) => item.value === calendar.timezone)
+      ? [
+          { value: calendar.timezone, label: calendar.timezone },
+          ...automationTimeZoneOptions,
+        ]
+      : automationTimeZoneOptions;
   const canCreate = Boolean(
     title.trim() &&
     prompt.trim() &&
     projectPath.trim() &&
     chosenProvider?.ready &&
-    chosenModel,
+    chosenModel &&
+    (!hasCalendarSchedule ||
+      (calendar.time &&
+        isValidAutomationTimeZone(calendar.timezone) &&
+        (schedule !== "once" || calendar.date))),
   );
   const submitAutomation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -16573,104 +16484,126 @@ export function AutomationsSurface({
                 onSubmit={(event) => void submitAutomation(event)}
               >
                 <header>
-                  <h2>{editingId ? "Edit" : "New"}</h2>
+                  <h2>{editingId ? "Edit automation" : "New automation"}</h2>
+                  <p>Set the task Gyro will run on your schedule.</p>
                 </header>
 
-                <label className="gyro-scheduled-title-field">
-                  <span className="gyro-scheduled-sr-only">Name</span>
-                  <input
-                    autoFocus
-                    maxLength={120}
-                    onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Automation title"
-                    required
-                    value={title}
-                  />
-                </label>
-                <label className="gyro-scheduled-prompt-field">
-                  <span className="gyro-scheduled-sr-only">Instructions</span>
-                  <textarea
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Describe what Gyro should do"
-                    required
-                    rows={2}
-                    value={prompt}
-                  />
-                </label>
+                <div className="gyro-scheduled-intent">
+                  <label className="gyro-scheduled-title-field">
+                    <span>Title</span>
+                    <input
+                      aria-label="Title"
+                      autoFocus
+                      maxLength={120}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder="e.g. Daily project check"
+                      required
+                      value={title}
+                    />
+                  </label>
+                  <label className="gyro-scheduled-prompt-field">
+                    <span>Prompt</span>
+                    <textarea
+                      aria-label="Prompt"
+                      aria-describedby="gyro-automation-prompt-hint"
+                      onChange={(event) => setPrompt(event.target.value)}
+                      placeholder="Tell Gyro what to do each time this runs…"
+                      required
+                      rows={3}
+                      value={prompt}
+                    />
+                    <small id="gyro-automation-prompt-hint">
+                      Gyro uses this prompt for every scheduled run.
+                    </small>
+                  </label>
+                </div>
                 <section className="gyro-scheduled-settings-section">
                   <h3>Details</h3>
                   <div className="gyro-scheduled-settings-group">
-                    <div className="gyro-scheduled-setting">
+                    <div className="gyro-scheduled-setting is-informational">
                       <span>Runs on</span>
                       <span>This Mac</span>
                     </div>
-                    <div className="gyro-scheduled-setting">
+                    <div className="gyro-scheduled-setting is-informational">
                       <span>Runs in</span>
                       <span>New chat for each run</span>
                     </div>
-                    <div className="gyro-scheduled-setting">
+                    <div className="gyro-scheduled-setting is-editable">
                       <span>Project</span>
                       <button
+                        className="gyro-scheduled-project-button"
                         type="button"
-                        title={projectPath}
+                        aria-label={
+                          projectPath
+                            ? "Change project folder"
+                            : "Choose project folder"
+                        }
+                        title={projectPath || "Choose project folder"}
                         onClick={async () => {
                           const path = await onChooseProject?.();
                           if (path) setProjectPath(path);
                         }}
                       >
-                        {projectPath.split("/").filter(Boolean).pop() ||
-                          "Choose project"}
-                        <ChevronDown size={12} />
+                        <FolderOpen size={14} aria-hidden="true" />
+                        <span>
+                          {projectPath.split("/").filter(Boolean).pop() ||
+                            "Choose project"}
+                        </span>
+                        <small>{projectPath ? "Change" : "Browse"}</small>
                       </button>
                     </div>
-                    <label className="gyro-scheduled-setting">
-                      Workspace
-                      <select
+                    <div className="gyro-scheduled-setting is-editable">
+                      <span>Workspace</span>
+                      <AutomationChoice
+                        label="Workspace"
                         value={runMode}
-                        onChange={(event) =>
-                          setRunMode(event.target.value as "local" | "worktree")
+                        options={[
+                          {
+                            value: "local",
+                            label: "Project folder",
+                            detail: "Use the selected project directly",
+                          },
+                          {
+                            value: "worktree",
+                            label: "Isolated worktree",
+                            detail: "Run in a separate checkout",
+                          },
+                        ]}
+                        onChange={(value) =>
+                          setRunMode(value as "local" | "worktree")
                         }
-                      >
-                        <option value="local">Project folder</option>
-                        <option value="worktree">Isolated worktree</option>
-                      </select>
-                    </label>
-                    <label className="gyro-scheduled-setting">
-                      Provider
-                      <select
+                      />
+                    </div>
+                    <div className="gyro-scheduled-setting is-editable">
+                      <span>Provider</span>
+                      <AutomationChoice
+                        label="Provider"
                         value={chosenProvider?.id ?? ""}
-                        onChange={(event) => {
-                          setRunProvider(event.target.value);
+                        options={providerChoices.map((item) => ({
+                          value: item.id,
+                          label: item.label,
+                          detail: item.ready ? undefined : "Not connected",
+                        }))}
+                        onChange={(value) => {
+                          setRunProvider(value);
                           setRunModel("");
                         }}
-                      >
-                        <option value="" disabled>
-                          Choose provider
-                        </option>
-                        {providerChoices.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.label}
-                            {item.ready ? "" : " · Not connected"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="gyro-scheduled-setting">
-                      Model
-                      <select
+                      />
+                    </div>
+                    <div className="gyro-scheduled-setting is-editable">
+                      <span>Model</span>
+                      <AutomationChoice
+                        label="Model"
                         value={chosenModel?.id ?? ""}
-                        onChange={(event) => setRunModel(event.target.value)}
-                      >
-                        <option value="" disabled>
-                          Choose model
-                        </option>
-                        {chosenProvider?.models.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        options={
+                          chosenProvider?.models.map((item) => ({
+                            value: item.id,
+                            label: item.label,
+                          })) ?? []
+                        }
+                        onChange={setRunModel}
+                      />
+                    </div>
                     {!chosenProvider?.ready && (
                       <div className="gyro-scheduled-setting">
                         <span>Provider connection required</span>
@@ -16684,84 +16617,82 @@ export function AutomationsSurface({
                 <section className="gyro-scheduled-settings-section">
                   <h3>Frequency</h3>
                   <div className="gyro-scheduled-settings-group">
-                    <div className="gyro-automation-create-fields">
-                      <label>
-                        Repeat
-                        <select
-                          onChange={(event) =>
-                            setSchedule(
-                              event.target.value as Automation["schedule"],
-                            )
-                          }
-                          value={schedule}
-                        >
-                          <option value="once">Once at a date and time</option>
-                          <option value="daily-at">Daily at a time</option>
-                          <option value="weekly-at">Weekly on a day</option>
-                          <option value="manual">Manual only</option>
-                          <option value="hourly">Every hour</option>
-                          <option value="daily">Every 24 hours</option>
-                          <option value="weekly">Every 7 days</option>
-                          <option value="heartbeat">Heartbeat (hourly)</option>
-                        </select>
-                      </label>
+                    <div className="gyro-scheduled-setting is-editable">
+                      <span>Repeat</span>
+                      <AutomationChoice
+                        label="Repeat"
+                        value={schedule}
+                        options={[
+                          { value: "once", label: "Once at a date and time" },
+                          { value: "daily-at", label: "Daily at a time" },
+                          { value: "weekly-at", label: "Weekly on a day" },
+                          { value: "manual", label: "Manual only" },
+                          { value: "hourly", label: "Every hour" },
+                          { value: "daily", label: "Every 24 hours" },
+                          { value: "weekly", label: "Every 7 days" },
+                          { value: "heartbeat", label: "Heartbeat (hourly)" },
+                        ]}
+                        onChange={(value) =>
+                          setSchedule(value as Automation["schedule"])
+                        }
+                      />
                     </div>
                     {["once", "daily-at", "weekly-at"].includes(schedule) ? (
-                      <div className="gyro-automation-create-fields">
-                        <label>
-                          Time
+                      <div
+                        className="gyro-scheduled-conditional"
+                        key={schedule}
+                      >
+                        <label className="gyro-scheduled-setting is-editable">
+                          <span>Time</span>
                           <input
+                            className="gyro-scheduled-inline-input"
                             type="time"
                             required
                             value={calendar.time}
-                            onChange={(e) =>
-                              setCalendar({ ...calendar, time: e.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          Time zone
-                          <input
-                            required
-                            placeholder="Europe/Amsterdam"
-                            value={calendar.timezone}
-                            onChange={(e) =>
+                            onChange={(event) =>
                               setCalendar({
                                 ...calendar,
-                                timezone: e.target.value,
+                                time: event.target.value,
                               })
                             }
                           />
                         </label>
+                        <div className="gyro-scheduled-setting is-editable">
+                          <span>Time zone</span>
+                          <AutomationChoice
+                            label="Time zone"
+                            value={calendar.timezone}
+                            options={timezoneChoices}
+                            searchable
+                            onChange={(value) =>
+                              setCalendar({ ...calendar, timezone: value })
+                            }
+                          />
+                        </div>
                         {schedule === "once" ? (
-                          <label>
-                            Date
+                          <label className="gyro-scheduled-setting is-editable">
+                            <span>Date</span>
                             <input
+                              className="gyro-scheduled-inline-input"
                               type="date"
                               required
                               value={calendar.date ?? ""}
-                              onChange={(e) =>
+                              onChange={(event) =>
                                 setCalendar({
                                   ...calendar,
-                                  date: e.target.value,
+                                  date: event.target.value,
                                 })
                               }
                             />
                           </label>
                         ) : null}
                         {schedule === "weekly-at" ? (
-                          <label>
-                            Day
-                            <select
-                              value={calendar.weekday ?? 0}
-                              onChange={(e) =>
-                                setCalendar({
-                                  ...calendar,
-                                  weekday: Number(e.target.value),
-                                })
-                              }
-                            >
-                              {[
+                          <div className="gyro-scheduled-setting is-editable">
+                            <span>Day</span>
+                            <AutomationChoice
+                              label="Day"
+                              value={String(calendar.weekday ?? 0)}
+                              options={[
                                 "Monday",
                                 "Tuesday",
                                 "Wednesday",
@@ -16769,13 +16700,18 @@ export function AutomationsSurface({
                                 "Friday",
                                 "Saturday",
                                 "Sunday",
-                              ].map((day, index) => (
-                                <option key={day} value={index}>
-                                  {day}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                              ].map((day, index) => ({
+                                value: String(index),
+                                label: day,
+                              }))}
+                              onChange={(value) =>
+                                setCalendar({
+                                  ...calendar,
+                                  weekday: Number(value),
+                                })
+                              }
+                            />
+                          </div>
                         ) : null}
                       </div>
                     ) : null}
@@ -16785,7 +16721,12 @@ export function AutomationsSurface({
                   className="gyro-scheduled-advanced"
                   open={stopCondition ? true : undefined}
                 >
-                  <summary>Stop condition</summary>
+                  <summary>
+                    <span>
+                      Stop condition <small>Optional</small>
+                    </span>
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </summary>
                   <label>
                     <span className="gyro-automation-field-label">
                       Stop condition <em>(optional)</em>
@@ -26114,15 +26055,21 @@ function Composer({
         {/* Mode and goal are independent, so both chips can sit here at once. */}
         {chatMode === "plan" ? (
           <button
-            aria-label="Remove Plan mode"
+            aria-label={
+              isSending ? "Remove Plan from next message" : "Remove Plan mode"
+            }
             aria-pressed="true"
             className="gyro-composer-chip is-plan"
             onClick={() => onComposerAction?.("set-chat-mode-normal")}
-            title="Remove Plan mode"
+            title={
+              isSending ? "Plan applies to the next message" : "Remove Plan mode"
+            }
             type="button"
           >
             <ListChecks size={13} />
-            <span className="gyro-composer-label">Plan</span>
+            <span className="gyro-composer-label">
+              {isSending ? "Plan next" : "Plan"}
+            </span>
             <X
               aria-hidden="true"
               className="gyro-composer-chip-remove"
@@ -26783,6 +26730,7 @@ type MutationApproval = {
   proposalId: string;
   operation: "create" | "update";
   path: string;
+  workspacePath?: string;
   scope: string;
   risk: string;
   effect: string;
@@ -26795,6 +26743,7 @@ type ProviderToolApproval = {
   approvalType: "command" | "file-change" | "permissions" | "capability";
   providerLabel: string;
   capabilityId?: string;
+  editorPreview?: string;
   scope?: string;
   command?: string;
   cwd?: string;
@@ -26826,7 +26775,9 @@ function MutationApprovalCard({
         .join(" ")}
       files={[{ path: approval.path }]}
       scope={
-        approval.scope === "workspace-file"
+        approval.workspacePath
+          ? `Workspace: ${approval.workspacePath}`
+          : approval.scope === "workspace-file"
           ? "Selected project only"
           : approval.scope
       }
@@ -26886,7 +26837,7 @@ function ProviderToolApprovalCard({
       title={title}
       icon={icon}
       description={approval.reason ?? approval.risk}
-      command={approval.command}
+      command={approval.editorPreview ?? approval.command}
       files={approval.changes}
       cwd={approval.cwd}
       scope={approval.scope}
@@ -26901,7 +26852,7 @@ function ProviderToolApprovalCard({
           >
             Reject
           </button>
-          {approval.approvalType === "capability" ? (
+          {approval.approvalType === "capability" && approval.capabilityId !== "workspace-read-editor" ? (
             <button
               disabled={!onAction}
               onClick={() => onAction?.(approval.approvalId, "allow-project")}
@@ -27457,12 +27408,7 @@ function ChatTurn({
   onProviderStatusAction,
   onReusePrompt,
   onContinueChat,
-  onOpenPlan,
-  onPlanDecision,
   plan,
-  isPlanDecisionPending,
-  isPlanPanelOpen,
-  isPlanReadyForDecision,
   previewCapture,
   sourceControl,
   sourceControlBaseline,
@@ -27503,12 +27449,7 @@ function ChatTurn({
   ) => void | Promise<string | void>;
   onReusePrompt?: (message: string) => void;
   onContinueChat?: () => void;
-  onOpenPlan?: () => void;
-  onPlanDecision?: (decision: "approve" | "reject") => void;
   plan?: SessionPlan;
-  isPlanDecisionPending: boolean;
-  isPlanPanelOpen?: boolean;
-  isPlanReadyForDecision: boolean;
   previewCapture?: { src?: string; path?: string };
   sourceControl?: SourceControlState;
   sourceControlBaseline?: Record<
@@ -27720,7 +27661,7 @@ function ChatTurn({
           }
           onContinueAfterToolBudget={canContinue ? onContinueChat : undefined}
         />
-        {responseEvent && shouldShowFinalResponse ? (
+        {responseEvent && shouldShowFinalResponse && !isPlanResponseTurn ? (
           <div
             className="gyro-chat-run-sequence is-response"
             aria-label="Final response"
@@ -27732,28 +27673,13 @@ function ChatTurn({
             >
               <article className="gyro-message is-assistant">
                 <div>
-                  {isPlanResponseTurn ? (
-                    <PlanArtifactCard
-                      content={plan?.content ?? responseEvent.message}
-                      isOpen={Boolean(isPlanPanelOpen)}
-                      isPending={isPlanDecisionPending}
-                      onOpen={onOpenPlan}
-                      onOpenBrowserUrl={onOpenBrowserUrl}
-                      onPlanDecision={onPlanDecision}
-                      showDecision={false}
-                      title={plan?.title ?? "Implementation plan"}
-                    />
-                  ) : (
-                    <>
-                      <AssistantResponse
-                        actions={artifactActions}
-                        event={responseEvent}
-                        onCouncilAction={onCouncilAction}
-                        onOpenBrowserUrl={onOpenBrowserUrl}
-                        previewCapture={previewCapture}
-                      />
-                    </>
-                  )}
+                  <AssistantResponse
+                    actions={artifactActions}
+                    event={responseEvent}
+                    onCouncilAction={onCouncilAction}
+                    onOpenBrowserUrl={onOpenBrowserUrl}
+                    previewCapture={previewCapture}
+                  />
                   {/* Inside the content box, not beside it: several rules give
                       `.gyro-message.is-assistant > div:last-child` its full
                       width, so a sibling here takes that selector away and
@@ -28209,170 +28135,6 @@ function SessionGoalStrip({
         ) : null}
       </span>
     </section>
-  );
-}
-
-function SessionGoalBand({
-  goal,
-  plan,
-  density = "thread",
-  onClear,
-  onComplete,
-  onEdit,
-  onOpenPlan,
-}: {
-  goal?: SessionGoal;
-  plan?: SessionPlan;
-  density?: "hero" | "thread" | "rail";
-  onClear?: () => void;
-  onComplete?: () => void;
-  onEdit?: () => void;
-  onOpenPlan?: () => void;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-  const isActive = goal?.status === "active";
-  useEffect(() => {
-    if (!isActive) return;
-    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(interval);
-  }, [isActive]);
-
-  const startedAt = Date.parse(goal?.createdAt ?? goal?.updatedAt ?? "");
-  const finishedAt = Date.parse(goal?.updatedAt ?? "");
-  const durationEnd =
-    isActive || !Number.isFinite(finishedAt) ? now : finishedAt;
-  // The rail sits beside the thread, which already carries the running clock.
-  const duration =
-    Number.isFinite(startedAt) && density !== "rail"
-      ? formatRunDuration(
-          Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
-        )
-      : undefined;
-  const label = isActive ? "Pursuing goal" : "Goal completed";
-
-  const steps = plan?.items ?? [];
-  const completedSteps = steps.filter(
-    (item) => item.status === "complete",
-  ).length;
-  const blockedSteps = steps.filter((item) => item.status === "blocked").length;
-  // A plan the model wrote as prose is still a plan worth pointing at, even
-  // before it has a single checklist step.
-  const hasPlan = Boolean(plan && (steps.length > 0 || plan.content));
-  // The strip belongs where the plan is not already on screen. In the rail the
-  // checklist and its own progress bar sit directly below.
-  const showPlanStrip = hasPlan && density === "thread";
-
-  if (!goal?.text && !showPlanStrip) {
-    return null;
-  }
-
-  const goalRow = goal?.text ? (
-    <section
-      aria-label={`${label}: ${goal.text}`}
-      className={`gyro-session-goal-status is-${goal.status}`}
-    >
-      <span aria-hidden="true" className="gyro-session-goal-status-mark">
-        {isActive ? <CircleDashed size={14} /> : <Check size={14} />}
-      </span>
-      <strong>{label}</strong>
-      <span className="gyro-session-goal-status-text">{goal.text}</span>
-      {duration ? <time>{duration}</time> : null}
-      <span className="gyro-session-goal-status-actions">
-        {onEdit ? (
-          <button
-            aria-label="Edit goal"
-            onClick={onEdit}
-            title="Edit goal"
-            type="button"
-          >
-            <Edit3 aria-hidden="true" size={13} />
-          </button>
-        ) : null}
-        {onComplete ? (
-          <button
-            aria-label={isActive ? "Complete goal" : "Reopen goal"}
-            onClick={onComplete}
-            title={isActive ? "Complete goal" : "Reopen goal"}
-            type="button"
-          >
-            {isActive ? (
-              <Check aria-hidden="true" size={13} />
-            ) : (
-              <RefreshCw aria-hidden="true" size={13} />
-            )}
-          </button>
-        ) : null}
-        {onClear ? (
-          <button
-            aria-label="Clear goal"
-            onClick={onClear}
-            title="Clear goal"
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={13} />
-          </button>
-        ) : null}
-      </span>
-    </section>
-  ) : null;
-
-  if (!showPlanStrip) {
-    return (
-      <div className="gyro-session-goal-band" data-density={density}>
-        {goalRow}
-      </div>
-    );
-  }
-
-  const stepProgress =
-    steps.length > 0 ? Math.round((completedSteps / steps.length) * 100) : 0;
-  // Steps completed is not the goal met: the plan can finish and leave the
-  // outcome unreached. This strip only ever counts steps.
-  const stepSummary =
-    steps.length > 0
-      ? `${completedSteps} of ${steps.length} steps`
-      : "Plan ready to review";
-
-  return (
-    <div className="gyro-session-goal-band" data-density={density}>
-      {goalRow}
-      <div className="gyro-plan-strip">
-        <span aria-hidden="true" className="gyro-plan-strip-mark">
-          <ListChecks size={13} />
-        </span>
-        <span
-          className="gyro-plan-strip-count"
-          data-blocked={blockedSteps > 0 ? "true" : undefined}
-        >
-          {stepSummary}
-          {blockedSteps > 0 ? ` · ${blockedSteps} blocked` : ""}
-        </span>
-        {steps.length > 0 ? (
-          <div
-            aria-label={`Plan steps completed: ${stepSummary}`}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={stepProgress}
-            className="gyro-plan-strip-track"
-            role="progressbar"
-          >
-            <span style={{ width: `${stepProgress}%` }} />
-          </div>
-        ) : (
-          <span className="gyro-plan-strip-track is-empty" />
-        )}
-        {onOpenPlan ? (
-          <button
-            className="gyro-plan-strip-open"
-            onClick={onOpenPlan}
-            title="Open plan"
-            type="button"
-          >
-            Open plan
-          </button>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
@@ -29305,6 +29067,7 @@ function mutationApprovalFromEvent(
     proposalId,
     operation,
     path,
+    workspacePath: stringFromEventPayload(payload, "workspacePath"),
     scope: stringFromEventPayload(payload, "scope") ?? "workspace-file",
     risk:
       stringFromEventPayload(payload, "risk") ??
@@ -29332,16 +29095,22 @@ function providerApprovalFromEvent(
     if (!approvalId || !capabilityId) return undefined;
     const scopeKind = stringFromEventPayload(payload, "scopeKind");
     const scopeValue = stringFromEventPayload(payload, "scopeValue");
+    const editorPreview = recordFromUnknown(payload?.editorPreview);
+    const previewPath = stringFromRecord(editorPreview, "path");
+    const previewContent = stringFromRecord(editorPreview, "content");
     return {
       approvalId,
       approvalType: "capability",
       providerLabel:
         stringFromEventPayload(payload, "providerId") ?? "Model capability",
       capabilityId,
+      editorPreview: previewContent,
       scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
-      reason: `The model requested ${capabilityId.replaceAll("-", " ")}.`,
+      reason: capabilityId === "workspace-read-editor"
+        ? "The model requested live text from your editor. Review the text below before sharing it."
+        : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
       risk: "This capability is restricted to the owning Chat and project.",
-      changes: [],
+      changes: previewPath ? [{ path: previewPath }] : [],
       status: "pending",
     };
   }

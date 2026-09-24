@@ -12,7 +12,9 @@ pub(super) fn execute(
         arguments, "path",
     )?)?;
     let workspace = bound.workspace.display().to_string();
-    let ranged = request.capability_id == CapabilityId::WorkspaceReadRange
+    let editor_read = request.capability_id == CapabilityId::WorkspaceReadEditor;
+    let ranged = editor_read
+        || request.capability_id == CapabilityId::WorkspaceReadRange
         || ["line", "endLine", "column", "endColumn"]
             .iter()
             .any(|key| arguments.get(key).is_some());
@@ -42,7 +44,35 @@ pub(super) fn execute(
             buffer.get("path").and_then(Value::as_str) == Some(&path)
                 && buffer.get("content").and_then(Value::as_str).is_some()
         });
-        let (content, hash, disk_hash, dirty, source) = if let Some(buffer) = buffer {
+        let selection_only = arguments
+            .get("selectionOnly")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let selection = context.selection.as_ref().filter(|selection| {
+            selection.get("path").and_then(Value::as_str) == Some(&path)
+                && selection.get("text").and_then(Value::as_str).is_some()
+        });
+        let (content, hash, disk_hash, dirty, source) = if editor_read && selection_only {
+            let selection = selection.ok_or_else(|| {
+                anyhow::anyhow!("No text selection is available for this editor file")
+            })?;
+            if selection["truncated"].as_bool().unwrap_or(false) {
+                anyhow::bail!(
+                    "Editor selection exceeds the live-text limit; select a smaller range"
+                );
+            }
+            (
+                selection["text"].as_str().unwrap().to_owned(),
+                selection["contentHash"].clone(),
+                Value::Null,
+                true,
+                "editor-selection",
+            )
+        } else if editor_read && buffer.is_some() {
+            let buffer = buffer.unwrap();
+            if buffer["truncated"].as_bool().unwrap_or(false) {
+                anyhow::bail!("Editor buffer exceeds the live-text limit; select a smaller range and use selectionOnly");
+            }
             (
                 buffer["content"].as_str().unwrap().to_owned(),
                 buffer["contentHash"].clone(),
@@ -50,6 +80,8 @@ pub(super) fn execute(
                 buffer["dirty"].as_bool().unwrap_or(false),
                 "editor-buffer",
             )
+        } else if editor_read {
+            anyhow::bail!("No live editor buffer is available for this file");
         } else {
             let file = read_range_source(&workspace, &path)?;
             (
@@ -67,11 +99,19 @@ pub(super) fn execute(
         data["contentHash"] = hash;
         data["diskHash"] = disk_hash;
         data["contextRevision"] = json!(context.revision);
+        if editor_read && !selection_only {
+            data["documentVersion"] = buffer
+                .and_then(|item| item.get("documentVersion"))
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
         data
     };
     // Redaction can change encoded size, so bound the actual outgoing data.
     data = bound_read_result(redact_json_strings(data))?;
-    let summary = if ranged {
+    let summary = if editor_read {
+        format!("Read live editor text for {path}")
+    } else if ranged {
         format!("Read {path}:{}-{}", data["line"], data["endLine"])
     } else {
         format!("Read {path}")

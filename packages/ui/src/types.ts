@@ -93,6 +93,7 @@ export type CapabilityId =
   | "workspace-search"
   | "workspace-read"
   | "workspace-read-range"
+  | "workspace-read-editor"
   | "workspace-diagnostics"
   | "workspace-git-status"
   | "workspace-diff"
@@ -186,13 +187,15 @@ export type WorkspaceContextSnapshot = {
   activePath?: string;
   activeView?: IdeViewId;
   visibleTabs: string[];
-  selection?: EditorSelection;
+  selection?: EditorSelection & { truncated?: boolean };
   buffers: Array<{
     path: string;
     dirty: boolean;
     contentHash?: string;
     diskHash?: string;
     content?: string;
+    documentVersion?: string;
+    truncated?: boolean;
   }>;
   diagnostics: ProblemDiagnostic[];
   testFailures: TestTreeItem[];
@@ -1809,6 +1812,13 @@ export type Session = {
   id: string;
   title: string;
   workspacePath: string;
+  workspaceIdentity?: {
+    schema: "gyro.workspace.v2";
+    revision: number;
+    roots: Array<{ id: string; path: string }>;
+    activeRootId: string;
+    worktreeRootId?: string;
+  };
   origin: SessionOrigin;
   workspaceMode?: WorkbenchMode;
   branch?: string;

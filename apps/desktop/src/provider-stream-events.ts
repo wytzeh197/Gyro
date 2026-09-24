@@ -229,6 +229,24 @@ export function mergePersistedAndOptimisticEvents(
     const hasSameProviderActivity =
       isProviderActivityEvent(event) &&
       providerActivityKeys.has(providerActivityKey(event));
+    if (hasSameId) {
+      const transientPreview = recordFromUnknown(event.payload)?.editorPreview;
+      if (transientPreview) {
+        const index = merged.findIndex(
+          (stored) => stored.sessionId === event.sessionId && stored.id === event.id,
+        );
+        const persisted = merged[index];
+        if (persisted) {
+          merged[index] = {
+            ...persisted,
+            payload: {
+              ...recordFromUnknown(persisted.payload),
+              editorPreview: transientPreview,
+            },
+          };
+        }
+      }
+    }
     if (
       !hasSameId &&
       !hasSameTurnUser &&

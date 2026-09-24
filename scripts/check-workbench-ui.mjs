@@ -348,7 +348,10 @@ expect(
   "Chat send requires a connected provider; a project is optional.",
 );
 
-const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const appSource = [
+  readRepoFile("apps/desktop/src/App.tsx"),
+  readRepoFile("apps/desktop/src/session-context-events.ts"),
+].join("\n");
 const turnTimingSource = readRepoFile("apps/desktop/src/turn-timing.ts");
 const captureFixtureSource = readRepoFile(
   "apps/desktop/src/capture-fixtures.ts",
@@ -841,8 +844,11 @@ expect(
 expect(
   chatTurnSource.includes(
     "const shouldShowFinalResponse = Boolean(responseEvent);",
-  ) && chatTurnSource.includes("{responseEvent && shouldShowFinalResponse ? ("),
-  "A completed workspace turn should retain its final response above the change summary.",
+  ) &&
+    chatTurnSource.includes(
+      "{responseEvent && shouldShowFinalResponse && !isPlanResponseTurn ? (",
+    ),
+  "A completed workspace turn should retain its final response above the change summary, except when the plan lives in the right panel.",
 );
 expect(
   runViewSource.includes('aria-label="Work timeline"') &&
@@ -993,6 +999,8 @@ const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
 ].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
@@ -3842,7 +3850,7 @@ expect(
 
 for (const readinessCall of [
   'checkProviderReadiness("chat")',
-  'checkProviderReadiness("task", "openai")',
+  'checkProviderReadiness("chat", sessionModel.providerId)',
   'checkProviderReadiness("handoff", toProviderId)',
 ]) {
   expect(
@@ -5045,19 +5053,19 @@ expect(
 );
 
 expect(
-  appSource.includes("const started = await launchTerminalPane") &&
-    appSource.includes("agent failed to start") &&
-    appSource.includes("task.terminalPaneId") &&
-    appSource.includes("Automation queued") &&
-    surfaceSource.includes("Running") &&
-    surfaceSource.includes("Move to todo") &&
-    surfaceSource.includes("Move to review") &&
+  appSource.includes("Automation queued") &&
+    appSource.includes("onCreateAutomation={createAutomation}") &&
+    appSource.includes("onRunAutomation={runAutomation}") &&
+    surfaceSource.includes("Create automation") &&
+    surfaceSource.includes(
+      "onRun={() => onRunAutomation?.(selectedAutomation.id)}",
+    ) &&
     surfaceSource.includes('label: "Open providers"') &&
     !surfaceSource.includes('id: "dispatch-agent"') &&
     !surfaceSource.includes('aria-label="Dictate message"') &&
     !surfaceSource.includes("onClick={() => undefined}") &&
     !appSource.includes("Coming soon"),
-  "Visible task, automation, provider, chat, and IDE controls should execute or be omitted instead of acting as placeholders.",
+  "Visible automation, provider, chat, and IDE controls should execute or be omitted instead of acting as placeholders.",
 );
 
 if (readinessAuditSource !== undefined) {
@@ -5185,7 +5193,7 @@ expect(
     !chatSidebarSource.includes("Plugins") &&
     !chatSidebarSource.includes('title="Projects"') &&
     !chatSidebarSource.includes("activeSession.worktreeName") &&
-    !chatSidebarSource.includes('onSelectDestination("automations")'),
+    chatSidebarSource.includes('onSelectDestination("automations")'),
   "Sessions sidebar should combine Chat and CLI rows, merge duplicate Gyro workspace groups, keep the active row visible, and omit unrelated destinations.",
 );
 expect(
@@ -5243,10 +5251,9 @@ expect(
     appSource.includes('activeDestination === "tools"') &&
     surfaceSource.includes("ToolsSurface") &&
     surfaceSource.includes("<h1>Tools</h1>") &&
-    surfaceSource.includes('onSelectDestination("tasks")') &&
     surfaceSource.includes('onSelectDestination("automations")') &&
     surfaceSource.includes('onSelectDestination("providers")'),
-  "Tools destination should route to a hub for tasks, automations, and providers.",
+  "Tools destination should route to a hub for automations and providers.",
 );
 expect(
   surfaceSource.includes("function SettingsSidebarContent") &&
@@ -5367,7 +5374,7 @@ expect(
     surfaceSource.includes("ChatSurfaceControls") &&
     surfaceSource.includes("ChatSidePanel") &&
     surfaceSource.includes("function PlanDocument") &&
-    surfaceSource.includes("function PlanArtifactCard") &&
+    surfaceSource.includes("function PlanDecisionCard") &&
     typeSource.includes("content?: string") &&
     appSource.includes("assistantContentByTurnId") &&
     surfaceSource.includes("gyro-plan-inline-editor") &&
@@ -5437,7 +5444,7 @@ expect(
     appSource.includes('kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
     styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
-    styleSource.includes(".gyro-plan-artifact-card") &&
+    styleSource.includes(".gyro-plan-decision-card") &&
     styleSource.includes(".gyro-plan-harness") &&
     styleSource.includes(".gyro-plan-progress") &&
     surfaceSource.includes('aria-label="Plan harness"') &&
@@ -5451,7 +5458,7 @@ expect(
     styleSource.includes("padding-top: 60px;") &&
     styleSource.includes("z-index: 71;") &&
     styleSource.includes("cursor: pointer;"),
-  "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
+  "AI model checklist plan events should be typed, persisted, derived, and visible in the right panel.",
 );
 
 // The companion dock replaces the old right rail and the Environment launcher,
@@ -6082,7 +6089,7 @@ expect(
     appSource.includes('case "add-plan"') &&
     surfaceSource.includes('"set-chat-mode-plan"') &&
     surfaceSource.includes("gyro-composer-attachments") &&
-    surfaceSource.includes("gyro-session-goal") &&
+    surfaceSource.includes("gyro-goal-strip") &&
     tauriSource.includes("MAX_CHAT_IMAGE_BYTES") &&
     tauriSource.includes("MAX_CHAT_VIDEO_BYTES") &&
     tauriSource.includes('attachment.kind == "video"') &&
@@ -6741,41 +6748,42 @@ expect(
 );
 expect(
   surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes("overlay={") &&
-    surfaceSource.includes("isPlanReadyForDecision && sessionPlan ? (") &&
     surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes("function planDecisionSummary") &&
-    surfaceSource.includes("Implementing switches to Normal mode") &&
     surfaceSource.includes('onDecision("reject")') &&
     surfaceSource.includes('onDecision("approve")') &&
-    surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
-    surfaceSource.includes('className="gyro-plan-artifact-preview"') &&
-    surfaceSource.includes("Yes, implement") &&
-    surfaceSource.includes('onPlanDecision?.("approve")') &&
-    // The document arm is still gated on the plan panel and a written plan,
-    // but a reader can now cross to the checklist instead of the two being
-    // mutually exclusive arms of one branch.
+    surfaceSource.includes("onPlanDecision={handlePlanDecision}") &&
+    surfaceSource.includes(
+      "onDecision={(decision) => onPlanDecision?.(decision)}",
+    ) &&
+    surfaceSource.includes(
+      "autoOpenedPlanDecisionKeyRef.current = planDecisionKey",
+    ) &&
+    surfaceSource.includes("!isPlanResponseTurn ? (") &&
+    !surfaceSource.includes("function PlanArtifactCard") &&
+    !chatSurfaceSource.includes("<PlanDecisionCard") &&
+    !chatSurfaceSource.includes("<SessionGoalBand") &&
     /activePanel === "plan" &&\s*sessionPlan\?\.content/.test(surfaceSource) &&
     surfaceSource.includes('planView === "document"') &&
     surfaceSource.includes('aria-label="Plan view"') &&
     surfaceSource.includes("content={sessionPlan.content}") &&
     surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
-    surfaceSource.includes('chatMode === "plan"') &&
+    surfaceSource.includes('submittedChatMode === "plan"') &&
     surfaceSource.includes("planDecisionKey !== dismissedPlanDecisionKey") &&
-    surfaceSource.includes("!isComposerSending") &&
     appSource.includes("const handlePlanDecision = useCallback") &&
-    appSource.includes('await changeChatMode("normal")') &&
+    appSource.includes(
+      'changeChatMode("plan", target?.draftKey ?? activeDraftKey)',
+    ) &&
     appSource.includes('sendDraft("Implement the approved plan."') &&
     appSource.includes('mode: "normal"') &&
-    appSource.includes("plan: activeSessionPlan") &&
+    appSource.includes("const plan = target?.plan ?? activeSessionPlan") &&
     appSource.includes("preserveDraft: true") &&
-    styleSource.includes(".gyro-plan-artifact-actions") &&
-    styleSource.includes(".gyro-plan-artifact-preview") &&
-    styleSource.includes(".gyro-plan-rail.is-document") &&
-    styleSource.includes(".gyro-chat-surface.is-thread.has-plan"),
-  "Completed Plan-mode output should show a composer-attached decision prompt, switch to Normal mode on approval, and retain the expandable plan artifact.",
+    styleSource.includes(".gyro-plan-decision-card") &&
+    !styleSource.includes(".gyro-plan-artifact-card") &&
+    styleSource.includes(".gyro-plan-rail.is-document"),
+  "Completed Plan-mode output should open the right panel with approval controls and keep the plan out of the transcript.",
 );
+
 expect(
   timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
     timelineSource.includes("fileEvents.push(event)") &&
@@ -6801,11 +6809,10 @@ expect(
     !appSource.includes(
       'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
     ) &&
-    appSource.includes(
-      "const turnGoal = overrideContext?.goal ?? activeSessionGoal",
-    ) &&
-    appSource.includes('const modeChanged = await changeChatMode("normal")') &&
-    appSource.includes("if (!modeChanged)"),
+    appSource.includes('overrideContext && "goal" in overrideContext') &&
+    appSource.includes("const turnMode =") &&
+    appSource.includes('chatDraftModesRef.current[draftModeKey] ?? "normal"') &&
+    appSource.includes("submittedChatMode={persistedActiveChatMode}"),
   "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
 );
 expect(
@@ -7070,7 +7077,6 @@ for (const surface of [
   "ChatSurface",
   "IdeSurface",
   "SettingsSurface",
-  "TaskBoardSurface",
   "AutomationsSurface",
   "ProvidersSurface",
   "ToolsSurface",
@@ -8053,22 +8059,11 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("function SessionGoalBand") &&
-    surfaceSource.includes(
-      'const label = isActive ? "Pursuing goal" : "Goal completed"',
-    ) &&
-    surfaceSource.includes(
-      "className={`gyro-session-goal-status is-${goal.status}`}",
-    ) &&
-    surfaceSource.includes(
-      'className="gyro-chat-run-change-summary-trigger"',
-    ) &&
+  surfaceSource.includes('className="gyro-chat-run-change-summary-trigger"') &&
     surfaceSource.includes("function LiveFileChanges") &&
     surfaceSource.includes("gyro-composer-live-changes") &&
     surfaceSource.indexOf('className="gyro-composer-live-changes"') <
       surfaceSource.indexOf("{queuedMessages.length > 0 ?") &&
-    surfaceSource.indexOf('className="gyro-composer-live-changes"') <
-      surfaceSource.indexOf("isPlanReadyForDecision && sessionPlan ?") &&
     cssRules(styleSource, ".gyro-chat-message-queue-wrap").every(
       (rule) => !/margin-bottom:\s*-/.test(rule),
     ) &&
@@ -8078,11 +8073,9 @@ expect(
     surfaceSource.includes(
       'className="gyro-chat-run-change-summary is-complete"',
     ) &&
-    surfaceSource.includes('onEdit={() => onComposerAction?.("add-goal")}') &&
-    styleSource.includes(".gyro-session-goal-status") &&
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
-  "Live file changes lead the composer dock — above queued turns and the plan card, so the running count holds its place instead of sliding down — without negative-margin overlap, and completed edits retain their file review card.",
+  "Live file changes lead the composer dock above queued turns, without negative-margin overlap, and completed edits retain their file review card.",
 );
 
 expect(

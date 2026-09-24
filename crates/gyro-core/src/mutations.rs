@@ -245,6 +245,26 @@ where
                     proposal.status.as_str()
                 ));
             }
+            let session = store
+                .get_session(proposal.session_id)?
+                .ok_or_else(|| anyhow!("owning session was removed"))?;
+            if !session
+                .workspace_identity
+                .roots
+                .iter()
+                .any(|root| root.path == proposal.workspace_path)
+            {
+                let detail = "workspace root was removed from this session; review a new proposal"
+                    .to_string();
+                let proposal = store.resolve_mutation_proposal_status(
+                    proposal_id,
+                    MutationProposalStatus::Failed,
+                    Some(detail.clone()),
+                )?;
+                let _event =
+                    append_mutation_decision_event(store, &proposal, Some(detail.clone()))?;
+                return Err(anyhow!("could not apply {}: {detail}", proposal.path));
+            }
             if mutation_approval_expired(proposal.created_at, Utc::now()) {
                 let detail = "approval expired; review a new proposal".to_string();
                 let proposal = store.resolve_mutation_proposal_status(
@@ -316,6 +336,7 @@ pub fn mutation_approval_payload(
         "turnId": proposal.turn_id,
         "operation": proposal.operation,
         "path": proposal.path,
+        "workspacePath": proposal.workspace_path,
         "scope": "workspace-file",
         "risk": "Writes one file inside the selected project",
         "effect": match proposal.operation {
