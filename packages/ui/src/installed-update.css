@@ -1,0 +1,242 @@
+/* The installed release floats above Settings so the chat list keeps its height. */
+.gyro-installed-update-notice {
+  bottom: calc(100% + 8px);
+  left: 8px;
+  position: absolute;
+  right: 8px;
+  z-index: 2;
+}
+
+.gyro-installed-update-trigger {
+  background: var(--gyro-surface-raised);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border));
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  color: var(--gyro-text);
+  display: grid;
+  gap: 5px;
+  padding: 15px 14px 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-installed-update-trigger:hover,
+.gyro-installed-update-trigger:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 5%,
+    var(--gyro-surface-raised)
+  );
+}
+
+:root[data-theme="light"] .gyro-installed-update-trigger {
+  box-shadow: 0 12px 32px rgba(28, 39, 52, 0.15);
+}
+
+.gyro-installed-update-trigger:focus-visible,
+.gyro-installed-update-dismiss:focus-visible,
+.gyro-installed-update-card button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-installed-update-icon,
+.gyro-installed-update-card-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.gyro-installed-update-icon {
+  height: 42px;
+  width: 42px;
+}
+
+.gyro-installed-update-icon img {
+  height: 31px;
+  width: 31px;
+}
+
+.gyro-installed-update-brand {
+  color: var(--gyro-text);
+  display: grid;
+  font-size: 10px;
+  font-weight: 650;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-installed-update-brand .gyro-installed-update-icon {
+  justify-self: center;
+}
+
+.gyro-installed-update-icon img,
+.gyro-installed-update-card-icon img {
+  display: block;
+}
+
+.gyro-installed-update-compact-version {
+  color: var(--gyro-muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.gyro-installed-update-title {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.gyro-installed-update-preview {
+  color: var(--gyro-muted);
+  display: -webkit-box;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.gyro-installed-update-action {
+  align-items: center;
+  color: var(--gyro-accent);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 4px;
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.gyro-installed-update-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 26px;
+}
+
+.gyro-installed-update-dismiss:hover,
+.gyro-installed-update-card-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-installed-update-card {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
+  border-radius: 15px;
+  bottom: 0;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+  color: var(--gyro-text);
+  display: grid;
+  gap: 14px;
+  left: 0;
+  max-height: min(70vh, 460px);
+  overflow: auto;
+  padding: 18px;
+  position: absolute;
+  width: min(340px, calc(100vw - 32px));
+  z-index: 140;
+}
+
+:root[data-theme="light"] .gyro-installed-update-card {
+  box-shadow: 0 22px 54px rgba(28, 39, 52, 0.2);
+}
+
+.gyro-installed-update-card-heading {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 56px;
+  position: relative;
+}
+
+.gyro-installed-update-card-icon {
+  height: 56px;
+  width: 56px;
+}
+
+.gyro-installed-update-card-icon img {
+  height: 41px;
+  width: 41px;
+}
+
+:root[data-theme="light"] .gyro-installed-update-icon img,
+:root[data-theme="light"] .gyro-installed-update-card-icon img {
+  filter: brightness(0);
+}
+
+.gyro-installed-update-card-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 28px;
+}
+
+.gyro-installed-update-eyebrow {
+  color: var(--gyro-accent);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.gyro-installed-update-card h2 {
+  font-size: 20px;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin: 5px 0 3px;
+}
+
+.gyro-installed-update-version {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.gyro-installed-update-notes {
+  border-top: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  padding-top: 13px;
+  white-space: pre-wrap;
+}
+
+.gyro-installed-update-done {
+  background: var(--gyro-accent);
+  border: 0;
+  border-radius: 7px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  justify-self: start;
+  min-height: 30px;
+  padding: 0 14px;
+}
+
+.gyro-installed-update-done:hover {
+  background: var(--gyro-accent-strong);
+}
+

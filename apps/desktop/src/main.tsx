@@ -100,6 +100,7 @@ if (bootSurface === "embedded") {
     import("./MenuBarPopover"),
     import("./menu-bar.css"),
     import("@gyro-dev/ui/styles.css"),
+    import("@gyro-dev/ui/installed-update.css"),
   ])
     .then(([{ MenuBarPopover }]) => {
       root.render(
@@ -123,6 +124,7 @@ if (bootSurface === "embedded") {
   void Promise.all([
     import("./App"),
     import("@gyro-dev/ui/styles.css"),
+    import("@gyro-dev/ui/installed-update.css"),
     import("./menu-bar.css"),
   ])
     .then(([{ App }]) => {

@@ -778,6 +778,23 @@ assert.deepEqual(rowText("file", "Updated create_gyro_bp.js"), {
   label: "Edited file",
   description: "create_gyro_bp.js",
 });
+const imageRead = buildRunModel([
+  activity("read", "Read image", { detail: "assets/mockup.png" }),
+]);
+assert.equal(imageRead.steps[0].item.kind, "read");
+assert.equal(imageRead.steps[0].item.media, "image");
+assert.deepEqual(
+  imageRead.files,
+  [],
+  "viewing an image must not count as changing a file",
+);
+for (const activityKind of ["create", "edit", "delete", "move"]) {
+  const run = buildRunModel([
+    activity(activityKind, `${activityKind} file`, { detail: "src/a.ts" }),
+  ]);
+  assert.equal(run.steps[0].item.kind, "file", `${activityKind} is file work`);
+  assert.equal(run.files[0]?.path, "src/a.ts");
+}
 assert.deepEqual(
   rowText("search", "Searched", { scope: "project", query: "palette" }),
   {

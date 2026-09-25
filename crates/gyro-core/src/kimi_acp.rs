@@ -1117,9 +1117,10 @@ fn acp_tool_activity_parts(
 ) -> (String, String, Option<String>) {
     let titled = |fallback: String| title.map(str::to_string).unwrap_or(fallback);
     match acp_kind {
-        "read" | "edit" | "delete" | "move" => {
+        "read" | "create" | "edit" | "delete" | "move" => {
             let verb = match acp_kind {
                 "read" => "Read",
+                "create" => "Create",
                 "edit" => "Edit",
                 "delete" => "Delete",
                 _ => "Move",
@@ -1128,7 +1129,11 @@ fn acp_tool_activity_parts(
                 Some(path) => format!("{verb} {path}"),
                 None => format!("{verb} file"),
             });
-            ("file".into(), label, path)
+            (
+                if acp_kind == "read" { "read" } else { "file" }.into(),
+                label,
+                path,
+            )
         }
         "execute" => {
             let label = titled(match command.as_deref() {
@@ -2166,9 +2171,24 @@ done
             |_, _| Ok(()),
         )
         .unwrap();
-        assert_eq!(activities[0].kind, "file");
+        assert_eq!(activities[0].kind, "read");
         assert_eq!(activities[0].label, "Read README.md");
         assert_eq!(activities[0].detail.as_deref(), Some("README.md"));
+    }
+
+    #[test]
+    fn create_activity_is_file_work() {
+        let (kind, label, detail) = super::acp_tool_activity_parts(
+            "Kimi",
+            "create",
+            None,
+            Some("src/new.ts".into()),
+            None,
+            None,
+        );
+        assert_eq!(kind, "file");
+        assert_eq!(label, "Create src/new.ts");
+        assert_eq!(detail.as_deref(), Some("src/new.ts"));
     }
 
     #[cfg(unix)]

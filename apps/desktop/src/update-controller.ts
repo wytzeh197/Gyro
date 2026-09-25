@@ -14,9 +14,17 @@ const UPDATE_RETRY_DELAYS_MS = [
   2 * 60 * 60 * 1_000,
 ];
 const LAST_UPDATE_CHECK_STORAGE_KEY = "gyro.update.last-checked-at.v1";
+const INSTALLED_UPDATE_NOTICE_STORAGE_KEY = "gyro.update.installed-notice.v1";
+
+export type InstalledUpdateNotice = {
+  version: string;
+  releaseNotes: string;
+};
 
 export type GyroUpdateController = {
   state: UpdateState;
+  installedUpdateNotice?: InstalledUpdateNotice;
+  dismissInstalledUpdateNotice: () => void;
   checkForUpdate: (userInitiated?: boolean) => Promise<UpdateCheckResult>;
   downloadUpdate: () => Promise<void>;
   restartAndInstallUpdate: () => Promise<void>;
@@ -62,6 +70,8 @@ export function useGyroUpdater({
     status: import.meta.env.DEV ? "development" : "checking",
     currentVersion: import.meta.env.DEV ? "development" : "unknown",
   });
+  const [installedUpdateNotice, setInstalledUpdateNotice] =
+    useState<InstalledUpdateNotice>();
   const stateRef = useRef(state);
   const updateRef = useRef<Update | null>(null);
   const currentVersionRef = useRef("unknown");
@@ -231,9 +241,24 @@ export function useGyroUpdater({
       await checkForUpdate(true);
       return;
     }
+    const installedNotice: InstalledUpdateNotice = {
+      version: update.version,
+      releaseNotes: update.body ?? "",
+    };
     setState((current) => ({ ...current, status: "installing" }));
     try {
       await update.install();
+      // Installation succeeded. Store the offered release before the process
+      // exits so the next launch can show its notes without another check.
+      try {
+        localStorage.setItem(
+          INSTALLED_UPDATE_NOTICE_STORAGE_KEY,
+          JSON.stringify(installedNotice),
+        );
+      } catch {
+        // Storage availability should never prevent the installed app from
+        // restarting. The update itself is already on disk.
+      }
       await invoke("restart_app");
     } catch (error) {
       setState((current) => ({
@@ -245,6 +270,68 @@ export function useGyroUpdater({
       }));
     }
   }, [checkForUpdate]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV || !isTauriRuntime()) {
+      return;
+    }
+    let active = true;
+    void getVersion()
+      .then((currentVersion) => {
+        if (!active) return;
+        try {
+          const raw = localStorage.getItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
+          if (!raw) return;
+          let saved: unknown;
+          try {
+            saved = JSON.parse(raw);
+          } catch {
+            localStorage.removeItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
+            return;
+          }
+          if (
+            !saved ||
+            typeof saved !== "object" ||
+            !("version" in saved) ||
+            typeof saved.version !== "string" ||
+            !("releaseNotes" in saved) ||
+            typeof saved.releaseNotes !== "string"
+          ) {
+            localStorage.removeItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
+            return;
+          }
+          // Tauri's app version may omit a v prefix used by release manifests.
+          if (
+            saved.version.trim().replace(/^v/, "") ===
+            currentVersion.trim().replace(/^v/, "")
+          ) {
+            setInstalledUpdateNotice({
+              version: saved.version,
+              releaseNotes: saved.releaseNotes,
+            });
+          } else {
+            // A different installed build must not surface stale release notes
+            // on this or a later launch.
+            localStorage.removeItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
+          }
+        } catch {
+          // A malformed or inaccessible local record cannot block startup.
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const dismissInstalledUpdateNotice = useCallback(() => {
+    setInstalledUpdateNotice(undefined);
+    try {
+      localStorage.removeItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
+    } catch {
+      // Keep dismissal effective for this launch when storage is unavailable.
+    }
+  }, []);
 
   useEffect(() => {
     if (import.meta.env.DEV || !automaticChecks || !isTauriRuntime()) {
@@ -294,5 +381,15 @@ export function useGyroUpdater({
     [],
   );
 
-  return { state, checkForUpdate, downloadUpdate, restartAndInstallUpdate };
+  return {
+    state: {
+      ...state,
+      installedUpdateNotice,
+      dismissInstalledUpdateNotice,
+    },
+    dismissInstalledUpdateNotice,
+    checkForUpdate,
+    downloadUpdate,
+    restartAndInstallUpdate,
+  };
 }

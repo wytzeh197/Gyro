@@ -1157,6 +1157,7 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         media: isImagePath(path) ? "image" : "file",
       };
     }
+    case "create":
     case "edit":
     case "delete":
     case "move":

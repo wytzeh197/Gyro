@@ -25,7 +25,7 @@ const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 5;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 6;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -1836,6 +1836,8 @@ impl SessionStore {
             .query_row("pragma user_version", [], |row| row.get(0))?;
         if user_version >= SESSION_STORE_SCHEMA_VERSION {
             self.ensure_core_tables()?;
+            self.ensure_column("parent_session_id", "parent_session_id text")?;
+            self.ensure_parent_session_index()?;
             crate::usage::ensure_usage_schema(&self.conn)?;
             crate::file_review::ensure_file_review_schema(&self.conn)?;
             return Ok(());
@@ -1858,6 +1860,7 @@ impl SessionStore {
         // A session a turn started records the chat that started it; sessions
         // that predate the column are the user's own chats, so null is right.
         self.ensure_column("parent_session_id", "parent_session_id text")?;
+        self.ensure_parent_session_index()?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -1893,9 +1896,6 @@ impl SessionStore {
 
              create index if not exists idx_sessions_updated_at
              on sessions(updated_at desc);
-
-             create index if not exists idx_sessions_parent_session_id
-             on sessions(parent_session_id);
 
              create index if not exists idx_sessions_workspace_path
              on sessions(workspace_path);
@@ -2209,6 +2209,14 @@ impl SessionStore {
         }
         self.conn
             .execute_batch(&format!("alter table sessions add column {definition};"))?;
+        Ok(())
+    }
+
+    fn ensure_parent_session_index(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "create index if not exists idx_sessions_parent_session_id
+             on sessions(parent_session_id);",
+        )?;
         Ok(())
     }
 }

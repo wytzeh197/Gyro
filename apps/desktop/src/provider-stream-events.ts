@@ -656,7 +656,7 @@ function preserveFirstSeenTimelineMetadata(
   const updatedPayload = { ...recordFromUnknown(updated.payload) };
   // Status-only frames and durable snapshots can omit counts already measured
   // for this operation. Carry them only within the same chat, turn and file.
-  const fileKinds = ["file", "edit", "delete", "move"];
+  const fileKinds = ["file", "create", "edit", "delete", "move"];
   const firstPath = firstPayload.path ?? firstPayload.detail;
   const updatedPath = updatedPayload.path ?? updatedPayload.detail;
   if (

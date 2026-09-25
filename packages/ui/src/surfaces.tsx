@@ -2459,6 +2459,12 @@ export function AppChrome({
 
           {activeDestination !== "settings" && !isIdeSurface ? (
             <div className="gyro-sidebar-footer">
+              {updateState?.installedUpdateNotice ? (
+                <InstalledUpdateNotice
+                  notice={updateState.installedUpdateNotice}
+                  onDismiss={updateState.dismissInstalledUpdateNotice}
+                />
+              ) : null}
               <div className="gyro-sidebar-footer-row">
                 <button
                   className="gyro-account-button"
@@ -2821,6 +2827,128 @@ function SidebarUpdateControl({
         <strong>{tag ?? label}</strong>
         <span>{size}</span>
       </div>
+    </div>
+  );
+}
+
+function InstalledUpdateNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: { version: string; releaseNotes: string };
+  onDismiss?: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const cardId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const version = notice.version.replace(/^v/, "");
+  const releaseNotes =
+    notice.releaseNotes.trim() ||
+    `Gyro ${version} is installed and ready to use.`;
+  const preview = releaseNotes
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s+)/gm, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    closeRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="gyro-installed-update-notice" ref={rootRef}>
+      <button
+        aria-controls={cardId}
+        aria-expanded={isOpen}
+        className="gyro-installed-update-trigger"
+        onClick={() => setIsOpen((current) => !current)}
+        ref={triggerRef}
+        type="button"
+      >
+        <span className="gyro-installed-update-brand">
+          <span className="gyro-installed-update-icon" aria-hidden="true">
+            <img src={gyroLogoTransparentLight} alt="" />
+          </span>
+          <span>Gyro</span>
+        </span>
+        <span className="gyro-installed-update-title">What’s new</span>
+        <span className="gyro-installed-update-compact-version">
+          Version {version}
+        </span>
+        <span className="gyro-installed-update-preview">{preview}</span>
+        <span className="gyro-installed-update-action">
+          See what’s new <ArrowRight size={13} aria-hidden="true" />
+        </span>
+      </button>
+      <button
+        aria-label="Dismiss What’s new notice"
+        className="gyro-installed-update-dismiss"
+        onClick={onDismiss}
+        title="Dismiss"
+        type="button"
+      >
+        <X size={13} />
+      </button>
+      {isOpen ? (
+        <section
+          aria-label={`What’s new in Gyro ${notice.version}`}
+          className="gyro-installed-update-card"
+          id={cardId}
+        >
+          <div className="gyro-installed-update-card-heading">
+            <span
+              className="gyro-installed-update-card-icon"
+              aria-hidden="true"
+            >
+              <img src={gyroLogoTransparentLight} alt="" />
+            </span>
+            <button
+              aria-label="Close What’s new card"
+              className="gyro-installed-update-card-close"
+              onClick={() => {
+                setIsOpen(false);
+                triggerRef.current?.focus();
+              }}
+              ref={closeRef}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="gyro-installed-update-card-intro">
+            <span className="gyro-installed-update-eyebrow">GYRO UPDATE</span>
+            <h2>What’s new</h2>
+            <p className="gyro-installed-update-version">Version {version}</p>
+          </div>
+          <div className="gyro-installed-update-notes">{releaseNotes}</div>
+          <button
+            className="gyro-installed-update-done"
+            onClick={onDismiss}
+            type="button"
+          >
+            Done
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }

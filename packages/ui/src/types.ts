@@ -2307,6 +2307,8 @@ export type UpdateState = {
   error?: string;
   retryable?: boolean;
   silentFailure?: boolean;
+  installedUpdateNotice?: { version: string; releaseNotes: string };
+  dismissInstalledUpdateNotice?: () => void;
 };
 
 /** One provider CLI that Gyro can update (Claude, Codex, Grok, …). */
