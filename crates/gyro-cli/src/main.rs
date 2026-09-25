@@ -3233,6 +3233,7 @@ fn execute_kimi_acp_provider(
             auth_method_ids: cli_acp_auth_methods(runtime),
             workspace: session.workspace_path.clone(),
             prompt: vec![serde_json::json!({"type": "text", "text": prompt})],
+            resumed_prompt: None,
             conversation_history_text: None,
             // The CLI has no desktop capability bridge to attach.
             mcp_servers: Vec::new(),
@@ -3246,7 +3247,7 @@ fn execute_kimi_acp_provider(
                         runtime.default_model.into()
                     }
                 }),
-            reasoning_effort: "max".into(),
+            reasoning_effort: Some("max".into()),
             mode: if plan_mode {
                 KimiAcpMode::Plan
             } else {

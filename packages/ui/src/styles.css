@@ -13969,6 +13969,33 @@ body {
   max-width: 760px;
 }
 
+.gyro-chat-transcript .gyro-model-switch-marker {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 9px;
+  line-height: 16px;
+  margin: 8px 0 20px;
+  max-width: 760px;
+}
+
+.gyro-model-switch-marker::before,
+.gyro-model-switch-marker::after {
+  background: var(--gyro-border-soft);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
+.gyro-model-switch-marker > svg {
+  flex: 0 0 auto;
+}
+
+.gyro-model-switch-marker > span {
+  white-space: nowrap;
+}
+
 .gyro-chat-transcript .gyro-message {
   display: grid;
   gap: 0;

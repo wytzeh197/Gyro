@@ -48,6 +48,11 @@ import {
   revealBrowserCapture,
 } from "./browser-capture";
 import { useModelBrowserReveal } from "./model-browser-reveal";
+import { useRemoteCheck } from "./use-remote-check";
+import {
+  useSessionModelSave,
+  type SessionModelSelection,
+} from "./use-session-model-save";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { createGithubRefreshController } from "./github-refresh";
 import { useProviderUsage } from "./use-provider-usage";
@@ -511,14 +516,6 @@ type ModelUsageEntry = {
 };
 
 type ModelUsageMap = Record<string, ModelUsageEntry>;
-
-type SessionModelSelection = {
-  providerId?: ProviderId;
-  providerLabel?: string;
-  modelId?: string;
-  modelLabel?: string;
-  reasoningEffort?: ReasoningEffort;
-};
 
 type SavedProject = {
   path: string;
@@ -5975,6 +5972,25 @@ export function App() {
   const isSourceControlVisible =
     workbench.activeDestination === "workspace" &&
     workbench.ide.activeView === "source-control";
+  const {
+    checkRemoteChanges,
+    isRemoteChecking,
+    remoteCheckFailed,
+    remoteCheckMessage,
+  } = useRemoteCheck({
+    root: workspaceActionRoot,
+    sourceControl: workbench.ide.sourceControl,
+    visible: isSourceControlVisible,
+    trusted: workspaceActionRoot
+      ? isWorkspaceTrusted(
+          workbench.preferences.workspaceTrust,
+          workspaceActionRoot,
+        )
+      : false,
+    currentRoot: ideSourceControlRootRef,
+    dispatch: dispatchWorkbench,
+    notify,
+  });
 
   // Edits made outside Gyro — another editor, a terminal, a rebase — never
   // reach the file-edit refresh, so re-read while the panel is on screen.
@@ -7708,51 +7724,11 @@ export function App() {
     [commandProfiles, launchTerminalPane, notify],
   );
 
-  const saveSessionModel = useCallback(
-    async (sessionId: string, model: SessionModelSelection) => {
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === sessionId
-            ? {
-                ...session,
-                providerId: model.providerId,
-                providerLabel: model.providerLabel,
-                modelId: model.modelId,
-                modelLabel: model.modelLabel,
-                reasoningEffort: model.reasoningEffort,
-              }
-            : session,
-        ),
-      );
-
-      if (!isTauriRuntime()) {
-        return;
-      }
-
-      try {
-        const updated = await invoke<Session>("set_session_model", {
-          sessionId,
-          providerId: model.providerId,
-          providerLabel: model.providerLabel,
-          modelId: model.modelId,
-          modelLabel: model.modelLabel,
-          reasoningEffort: model.reasoningEffort,
-        });
-        setSessions((current) =>
-          current.map((session) =>
-            session.id === sessionId ? updated : session,
-          ),
-        );
-      } catch {
-        notify(
-          "command-failed",
-          "Model memory failed",
-          "This chat kept the model in the current window only",
-        );
-      }
-    },
-    [notify],
-  );
+  const { saveSessionModel, pendingModelSave } = useSessionModelSave({
+    setSessions,
+    refreshEvents,
+    notify,
+  });
 
   const selectProvider = useCallback(
     (providerId: ProviderId) => {
@@ -10472,7 +10448,22 @@ export function App() {
           notifyFailure: false,
         });
       }
-      void saveSessionModel(targetSessionId, sessionModel);
+      // Finish any pending model switch before appending the next user message.
+      // A normal send already has this model bound and needs no extra disk read.
+      const boundModel = sessionsRef.current.find(
+        (session) => session.id === targetSessionId,
+      );
+      if (
+        boundModel?.providerId !== sessionModel.providerId ||
+        boundModel?.providerLabel !== sessionModel.providerLabel ||
+        boundModel?.modelId !== sessionModel.modelId ||
+        boundModel?.modelLabel !== sessionModel.modelLabel ||
+        boundModel?.reasoningEffort !== sessionModel.reasoningEffort
+      ) {
+        await saveSessionModel(targetSessionId, sessionModel);
+      } else {
+        await pendingModelSave(targetSessionId);
+      }
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
@@ -10713,6 +10704,7 @@ export function App() {
       replaceSendingSessionId,
       refreshEvents,
       resetChatDraft,
+      pendingModelSave,
       saveSessionModel,
       sessions,
       setSessionSending,
@@ -16144,9 +16136,9 @@ export function App() {
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
-              onMediaDropError={(message) =>
-                notify("command-failed", "Image could not be attached", message)
-              }
+      onMediaDropError={(message) =>
+        notify("command-failed", "Image could not be attached", message)
+      }
       onComposerAction={handleComposerAction}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
@@ -16283,6 +16275,10 @@ export function App() {
       onCommitSourceControl={commitSourceControl}
       onPullSourceControl={() => void pullSourceControl()}
       onPushSourceControl={() => void pushSourceControl()}
+      onCheckRemote={() => void checkRemoteChanges()}
+      isRemoteChecking={isRemoteChecking}
+      remoteCheckMessage={remoteCheckMessage}
+      remoteCheckFailed={remoteCheckFailed}
       isSourceControlSyncing={sourceControlSyncing}
       onRefreshSourceControl={refreshSourceControl}
       onStageAllSourceControl={stageAllSourceControl}
@@ -16524,9 +16520,13 @@ export function App() {
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
-              onMediaDropError={(message) =>
-                notify("command-failed", "Image could not be attached", message)
-              }
+                    onMediaDropError={(message) =>
+                      notify(
+                        "command-failed",
+                        "Image could not be attached",
+                        message,
+                      )
+                    }
                     onComposerAction={handleComposerAction}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
@@ -17280,9 +17280,9 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
-              onMediaDropError={(message) =>
-                notify("command-failed", "Image could not be attached", message)
-              }
+          onMediaDropError={(message) =>
+            notify("command-failed", "Image could not be attached", message)
+          }
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}

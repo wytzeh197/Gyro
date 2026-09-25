@@ -25,6 +25,8 @@ mod kimi_usage;
 #[cfg(debug_assertions)]
 mod performance_benchmark;
 mod session_goal;
+mod session_model;
+use session_model::set_session_model;
 mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
@@ -2532,34 +2534,6 @@ fn create_worktree_session_blocking(
         .get_session(session.id)
         .map_err(to_string)?
         .ok_or_else(|| "worktree session was not persisted".into())
-}
-
-#[tauri::command]
-async fn set_session_model(
-    session_id: String,
-    provider_id: Option<String>,
-    provider_label: Option<String>,
-    model_id: Option<String>,
-    model_label: Option<String>,
-    reasoning_effort: Option<String>,
-) -> Result<Session, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let store = open_store()?;
-        let session_id = parse_uuid(&session_id)?;
-        store
-            .update_session_model(
-                session_id,
-                provider_id,
-                provider_label,
-                model_id,
-                model_label,
-                reasoning_effort,
-            )
-            .map_err(to_string)?
-            .ok_or_else(|| "session not found".into())
-    })
-    .await
-    .map_err(|error| format!("session model worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -13684,6 +13658,18 @@ fn run_kimi_acp_chat(
     let resume_session_id = resume_cursor
         .filter(|cursor| cursor.kind == runtime.cursor_kind)
         .map(|cursor| cursor.session_id.clone());
+    // ACP may reject a saved cursor and open a fresh session. Pass both prompt
+    // forms so the adapter can choose after it knows whether reopen succeeded.
+    let resumed_prompt = resume_session_id.as_ref().map(|_| {
+        provider_context_message_for_turn(
+            request,
+            None,
+            PromptTurn {
+                resumed: true,
+                approvals_sent_separately: false,
+            },
+        )
+    });
     // Always load the local transcript. Grok often cannot resume; model handoffs
     // also start a fresh agent session. Either way the local Gyro session is the
     // source of truth and must travel with the prompt when resume is unavailable.
@@ -13725,6 +13711,7 @@ fn run_kimi_acp_chat(
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
+            resumed_prompt,
             conversation_history_text,
             mcp_servers,
             model: request
@@ -13738,10 +13725,7 @@ fn run_kimi_acp_chat(
                         runtime.default_model.into()
                     }
                 }),
-            reasoning_effort: request
-                .reasoning_effort
-                .clone()
-                .unwrap_or_else(|| "max".into()),
+            reasoning_effort: request.reasoning_effort.clone(),
             mode: if plan_mode {
                 KimiAcpMode::Plan
             } else {

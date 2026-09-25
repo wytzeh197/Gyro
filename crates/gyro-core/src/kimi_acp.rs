@@ -70,6 +70,9 @@ pub struct KimiAcpRequest {
     pub auth_method_ids: Vec<String>,
     pub workspace: PathBuf,
     pub prompt: Vec<Value>,
+    /// Short turn prompt for a successfully reopened session. A failed reopen
+    /// still uses `prompt`, which contains the guidance a fresh agent needs.
+    pub resumed_prompt: Option<String>,
     /// Prior Gyro-chat turns, used only when the agent cannot reopen its ACP
     /// session (Grok often lacks `session/resume`). Injected into a fresh
     /// `session/new` so multi-turn still has context.
@@ -78,7 +81,8 @@ pub struct KimiAcpRequest {
     /// Empty leaves the agent with only its own built-in tools.
     pub mcp_servers: Vec<Value>,
     pub model: String,
-    pub reasoning_effort: String,
+    /// Override the agent's thinking level only when the user selected one.
+    pub reasoning_effort: Option<String>,
     pub mode: KimiAcpMode,
     pub resume_session_id: Option<String>,
     pub timeout: Duration,
@@ -494,7 +498,7 @@ where
             &mut on_write_file,
         );
     }
-    if !skip_in_session_config {
+    if !skip_in_session_config && request.reasoning_effort.is_some() {
         let thinking_id = connection.send_request(
             "session/set_config_option",
             json!({
@@ -533,6 +537,13 @@ where
 
     crate::timing::mark(crate::timing::Stage::ProtocolReady);
     let mut prompt = request.prompt.clone();
+    if resumed {
+        if let Some(short_prompt) = request.resumed_prompt.as_deref() {
+            if let Some(text) = prompt.first_mut().and_then(|part| part.get_mut("text")) {
+                *text = Value::String(short_prompt.to_string());
+            }
+        }
+    }
     // Gyro sessions are local. Whenever this provider turn is not continuing an
     // open agent session — first turn after a model handoff, failed reopen, or
     // an agent that never supported resume — inject the local transcript so any
@@ -1392,11 +1403,12 @@ pub fn check_acp_health(
         auth_method_ids: auth_method_ids.iter().map(ToString::to_string).collect(),
         workspace: std::env::temp_dir(),
         prompt: Vec::new(),
+        resumed_prompt: None,
         conversation_history_text: None,
         // A health probe only checks that the agent starts and authenticates.
         mcp_servers: Vec::new(),
         model: "k3".into(),
-        reasoning_effort: "max".into(),
+        reasoning_effort: None,
         mode: KimiAcpMode::Normal,
         resume_session_id: None,
         timeout,
@@ -1660,10 +1672,11 @@ mod tests {
             auth_method_ids: vec!["login".into()],
             workspace,
             prompt: vec![json!({"type": "text", "text": "hello"})],
+            resumed_prompt: None,
             conversation_history_text: None,
             mcp_servers: Vec::new(),
             model: "k3".into(),
-            reasoning_effort: "max".into(),
+            reasoning_effort: Some("max".into()),
             mode: KimiAcpMode::Normal,
             resume_session_id,
             timeout: Duration::from_secs(3),
@@ -1980,6 +1993,7 @@ while IFS= read -r line; do
     *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
     *'"method":"session/prompt"'*)
       case "$line" in
+        *short\ resumed\ context*) exit 9 ;;
         *Prior\ conversation*)
           printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"handoff-aware reply"}}}}'
           ;;
@@ -2032,6 +2046,7 @@ while IFS= read -r line; do
     *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{}}' ;;
     *'"method":"session/prompt"'*)
       case "$line" in
+        *short\ resumed\ context*) exit 9 ;;
         *Prior\ conversation*)
           printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"history-aware reply"}}}}'
           ;;
@@ -2052,6 +2067,7 @@ done
         );
         request.provider_label = "xAI".into();
         request.conversation_history_text = Some("User: hello\n\nAssistant: hi there".into());
+        request.resumed_prompt = Some("short resumed context".into());
         let output = run_kimi_acp(
             request,
             |_| {},
@@ -2157,6 +2173,43 @@ done
 
     #[cfg(unix)]
     #[test]
+    fn unset_effort_uses_agent_default_without_config_call() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"default-effort"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) exit 9 ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ready"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.reasoning_effort = None;
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output.response, "ready");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn resumes_session_and_returns_only_one_shot_permission() {
         let (temp, program) = acp_fixture(
             r#"
@@ -2167,7 +2220,9 @@ while IFS= read -r line; do
     *'"method":"session/resume"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}' ;;
     *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
     *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
-    *'"method":"session/prompt"'*) printf '%s\n' '{"jsonrpc":"2.0","id":99,"method":"session/request_permission","params":{"toolCall":{"title":"Run command","kind":"execute"},"options":[{"optionId":"always","kind":"allow_always"},{"optionId":"once","kind":"allow_once"},{"optionId":"reject","kind":"reject_once"}]}}' ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in *short\ resumed\ context*) ;; *) exit 9 ;; esac
+      printf '%s\n' '{"jsonrpc":"2.0","id":99,"method":"session/request_permission","params":{"toolCall":{"title":"Run command","kind":"execute"},"options":[{"optionId":"always","kind":"allow_always"},{"optionId":"once","kind":"allow_once"},{"optionId":"reject","kind":"reject_once"}]}}' ;;
     *'"id":99'*)
       case "$line" in *'"optionId":"once"'*) ;; *) exit 9 ;; esac
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"resumed"}}}}'
@@ -2177,13 +2232,15 @@ done
 "#,
         );
         let mut approvals = 0;
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            Some("saved-session".into()),
+        );
+        request.resumed_prompt = Some("short resumed context".into());
         let output = run_kimi_acp(
-            fixture_request(
-                program,
-                temp.path().to_path_buf(),
-                CancellationToken::default(),
-                Some("saved-session".into()),
-            ),
+            request,
             |_| {},
             |_| {},
             |_| {

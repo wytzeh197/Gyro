@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { chatTurnTimelineSections } from "../packages/ui/src/chat-timeline.ts";
+import {
+  chatTurnTimelineSections,
+  interleaveModelSwitches,
+  isModelSwitchEvent,
+} from "../packages/ui/src/chat-timeline.ts";
 
 let sequence = 0;
 const event = (kind, message, payload = {}, minutes = 0) => {
@@ -24,6 +28,43 @@ const activity = (activityKind, label, minutes) =>
     { kind: "provider-activity", activityKind, label, status: "done" },
     minutes,
   );
+
+const modelSwitch = {
+  ...event(
+    "system-event",
+    "Switched to GPT-6 Sol",
+    { kind: "model-switch", modelId: "gpt-6-sol" },
+    2,
+  ),
+  turnId: undefined,
+};
+assert.equal(isModelSwitchEvent(modelSwitch), true);
+assert.equal(
+  isModelSwitchEvent(event("system-event", "Other status", {}, 2)),
+  false,
+);
+const modelTimeline = interleaveModelSwitches(
+  [
+    { id: "first", startedAt: "2026-07-27T09:00:00.000Z" },
+    { id: "second", startedAt: "2026-07-27T09:03:00.000Z" },
+  ],
+  [modelSwitch],
+);
+assert.deepEqual(
+  modelTimeline.map((item) =>
+    item.kind === "turn" ? item.turn.id : item.event.message,
+  ),
+  ["first", "Switched to GPT-6 Sol", "second"],
+  "a model switch should appear between the surrounding turns",
+);
+assert.deepEqual(
+  interleaveModelSwitches(
+    [{ id: "first", startedAt: "2026-07-27T09:00:00.000Z" }],
+    [modelSwitch],
+  ).map((item) => item.kind),
+  ["turn", "model-switch"],
+  "a switch before the next message should remain visible at the tail",
+);
 
 const events = [
   event("assistant-message", "I'll start by reading the palette code.", {}, 0),

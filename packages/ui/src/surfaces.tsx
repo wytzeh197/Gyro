@@ -13,8 +13,13 @@ import {
 } from "./browser-capture-view";
 import { latestChatQuestions } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
+import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
 import { WorkspaceSearchResults } from "./workspace-search-results";
-import { chatMediaFiles, chatMediaFilesFromDrop, isMediaDrag } from "./chat-media-transfer";
+import {
+  chatMediaFiles,
+  chatMediaFilesFromDrop,
+  isMediaDrag,
+} from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
 import {
   SidebarProjectCard,
@@ -228,7 +233,11 @@ import {
   chatArtifactsFromEvent,
   type ChatArtifactActions,
 } from "./chat-artifacts";
-import { orderedChatTimelineEvents } from "./chat-timeline";
+import {
+  interleaveModelSwitches,
+  isModelSwitchEvent,
+  orderedChatTimelineEvents,
+} from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
@@ -504,34 +513,6 @@ const TOOL_PANEL_MAX_VIEWPORT_RATIO = 0.92;
 const IDE_SIDEBAR_KEYBOARD_STEP = 16;
 const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
 const SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH = 360;
-/**
- * How far off the bottom of the transcript still counts as being at the bottom.
- *
- * Wide enough to survive sub-pixel rounding and a line of text arriving between
- * frames, narrow enough that a reader who scrolled up stays scrolled up.
- */
-const TRANSCRIPT_BOTTOM_SLACK = 72;
-/**
- * Ignore sub-pixel rounding when deciding whether loaded messages actually
- * overflow the area above the composer dock.
- */
-const TRANSCRIPT_OVERFLOW_SLACK = 8;
-
-function isLoadedTranscriptClipped(transcript: HTMLElement) {
-  const styles = window.getComputedStyle(transcript);
-  const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
-  const loadEarlier = transcript.querySelector(".gyro-chat-load-earlier");
-  const loadEarlierHeight =
-    loadEarlier instanceof HTMLElement ? loadEarlier.offsetHeight : 0;
-  const messageHeight = Math.max(
-    0,
-    transcript.scrollHeight - paddingTop - paddingBottom - loadEarlierHeight,
-  );
-  const visibleAboveDock = Math.max(0, transcript.clientHeight - paddingBottom);
-  return messageHeight > visibleAboveDock + TRANSCRIPT_OVERFLOW_SLACK;
-}
-
 function restingSidebarWidth() {
   if (typeof window === "undefined") {
     return 240;
@@ -844,6 +825,10 @@ type AppChromeProps = {
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
+  onCheckRemote?: () => void;
+  isRemoteChecking?: boolean;
+  remoteCheckMessage?: string;
+  remoteCheckFailed?: boolean;
   isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
@@ -1638,6 +1623,10 @@ export function AppChrome({
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
+  onCheckRemote,
+  isRemoteChecking = false,
+  remoteCheckMessage,
+  remoteCheckFailed = false,
   isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
@@ -2417,6 +2406,10 @@ export function AppChrome({
               onCommitSourceControl={onCommitSourceControl}
               onPushSourceControl={onPushSourceControl}
               onPullSourceControl={onPullSourceControl}
+              onCheckRemote={onCheckRemote}
+              isRemoteChecking={isRemoteChecking}
+              remoteCheckMessage={remoteCheckMessage}
+              remoteCheckFailed={remoteCheckFailed}
               isSourceControlSyncing={isSourceControlSyncing}
               branchCatalog={branchCatalog}
               isBranchLoading={isBranchLoading}
@@ -3529,6 +3522,10 @@ function WorkspaceSidebarContent({
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
+  onCheckRemote,
+  isRemoteChecking = false,
+  remoteCheckMessage,
+  remoteCheckFailed = false,
   isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
@@ -3626,6 +3623,10 @@ function WorkspaceSidebarContent({
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
+  onCheckRemote?: () => void;
+  isRemoteChecking?: boolean;
+  remoteCheckMessage?: string;
+  remoteCheckFailed?: boolean;
   isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
@@ -4872,9 +4873,13 @@ function WorkspaceSidebarContent({
                           {workspaceName(workspacePath)}
                         </strong>
                         <button
-                          aria-label="Refresh source control"
-                          onClick={onRefreshSourceControl}
-                          title="Refresh"
+                          aria-label="Refresh source control and check GitHub"
+                          disabled={isRemoteChecking}
+                          onClick={() => {
+                            onRefreshSourceControl?.();
+                            onCheckRemote?.();
+                          }}
+                          title="Refresh and check GitHub"
                           type="button"
                         >
                           <RefreshCw size={12} />
@@ -4941,7 +4946,9 @@ function WorkspaceSidebarContent({
                       <div className="gyro-sidebar-commit-actions">
                         {showSourceControlSyncButton ? (
                           <button
-                            disabled={isSourceControlSyncing}
+                            disabled={
+                              isSourceControlSyncing || isRemoteChecking
+                            }
                             onClick={
                               sourceControlSyncAction === "pull"
                                 ? onPullSourceControl
@@ -4975,6 +4982,20 @@ function WorkspaceSidebarContent({
                               </span>
                             ) : null}
                           </button>
+                        ) : !hasSourceControlChanges &&
+                          sourceControlPublished &&
+                          ide?.sourceControl.available === true ? (
+                          <button
+                            disabled={
+                              isRemoteChecking || isSourceControlSyncing
+                            }
+                            onClick={onCheckRemote}
+                            title="Check the tracked GitHub branch for new commits"
+                            type="button"
+                          >
+                            <RefreshCw size={13} />
+                            {isRemoteChecking ? "Checking…" : "Check GitHub"}
+                          </button>
                         ) : (
                           <button
                             disabled={
@@ -5003,9 +5024,17 @@ function WorkspaceSidebarContent({
                       hasPendingChanges={hasSourceControlChanges}
                       onPull={onPullSourceControl}
                       onPush={onPushSourceControl}
-                      syncing={isSourceControlSyncing}
+                      syncing={isSourceControlSyncing || isRemoteChecking}
                       upstream={ide?.sourceControl.upstream}
                     />
+                    {remoteCheckMessage && ide?.sourceControl.available ? (
+                      <div
+                        className={`gyro-sidebar-mini-copy${remoteCheckFailed ? " is-error" : ""}`}
+                        role={remoteCheckFailed ? "alert" : "status"}
+                      >
+                        {remoteCheckMessage}
+                      </div>
+                    ) : null}
                     {ide?.sourceControl.error ? (
                       <div className="gyro-sidebar-mini-copy is-error">
                         {ide.sourceControl.error}
@@ -8326,10 +8355,6 @@ export function ChatSurface({
     string | undefined
   >();
   const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
-  const [isTranscriptAwayFromBottom, setIsTranscriptAwayFromBottom] =
-    useState(false);
-  const [isLoadedChatClipped, setIsLoadedChatClipped] = useState(false);
-  const transcriptRef = useRef<HTMLDivElement>(null);
   const [liveChangesTarget, setLiveChangesTarget] =
     useState<HTMLDivElement | null>(null);
   const [reviewScope, setReviewScope] = useState<ReviewScope>({
@@ -8343,19 +8368,6 @@ export function ChatSurface({
       patches?: string[];
     }>
   >();
-  /**
-   * Whether the transcript should keep itself at the bottom as it grows.
-   *
-   * Jumping to the bottom once is not what the button is for: a live turn is
-   * still appending, so a single scroll lands where the bottom *was* and the
-   * reader is left behind again a moment later. This holds the pin until the
-   * reader scrolls up themselves.
-   */
-  const isFollowingTranscriptBottomRef = useRef(true);
-  /** Previous offset, so a scroll up can be told from content growing below. */
-  const lastTranscriptScrollTopRef = useRef(0);
-  const transcriptPointerDownRef = useRef(false);
-  const transcriptTouchYRef = useRef<number>();
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
   useEffect(() => {
@@ -8572,52 +8584,6 @@ export function ChatSurface({
   // working, so streaming and status updates always read from the latest list.
   const deferredEvents = useDeferredValue(events);
   const transcriptEvents = isComposerSending ? events : deferredEvents;
-  const updateTranscriptScrollPosition = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript) {
-      setIsTranscriptAwayFromBottom(false);
-      setIsLoadedChatClipped(false);
-      return;
-    }
-    const distanceFromBottom =
-      transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
-    const isAtBottom = distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK;
-    // Being at the bottom is the pin, whichever way the offset got there:
-    // content collapsing above also drags it back, and that is not the reader
-    // leaving. Only moving up and away from the bottom hands control over.
-    if (isAtBottom) {
-      isFollowingTranscriptBottomRef.current = true;
-    } else if (
-      transcriptPointerDownRef.current &&
-      transcript.scrollTop < lastTranscriptScrollTopRef.current
-    ) {
-      isFollowingTranscriptBottomRef.current = false;
-    }
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-    setIsTranscriptAwayFromBottom(!isAtBottom);
-    setIsLoadedChatClipped(isLoadedTranscriptClipped(transcript));
-  }, []);
-  /** Re-seat the transcript at the bottom, but only while it is following. */
-  const pinTranscriptToBottom = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript || !isFollowingTranscriptBottomRef.current) {
-      return;
-    }
-    // Assigned rather than animated: a smooth scroll started against the last
-    // height is exactly what the growing turn outruns.
-    transcript.scrollTop = transcript.scrollHeight;
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-  }, []);
-  const scrollTranscriptToBottom = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript) {
-      return;
-    }
-    isFollowingTranscriptBottomRef.current = true;
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-    pinTranscriptToBottom();
-    updateTranscriptScrollPosition();
-  }, [pinTranscriptToBottom, updateTranscriptScrollPosition]);
   const transcriptSessionId = transcriptEvents[0]?.sessionId;
   useEffect(() => {
     setGoalDraft(undefined);
@@ -8662,98 +8628,25 @@ export function ChatSurface({
     )
       openCanvas(latest.id);
   }, [canvasArtifacts, canvasRevision, openCanvas, transcriptSessionId]);
-  useLayoutEffect(() => {
-    // Reused chat surfaces must not inherit another chat's scroll position.
-    // Use the rendered events so deferred history loads are seated as well.
-    isFollowingTranscriptBottomRef.current = true;
-    lastTranscriptScrollTopRef.current = 0;
-    pinTranscriptToBottom();
-    updateTranscriptScrollPosition();
-  }, [
-    transcriptSessionId,
-    pinTranscriptToBottom,
-    updateTranscriptScrollPosition,
-  ]);
-  useEffect(() => {
-    const animationFrame = window.requestAnimationFrame(() => {
-      pinTranscriptToBottom();
-      updateTranscriptScrollPosition();
-    });
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
-  // The dock overlays the transcript. Only the composer is reserved at the end
-  // of the scroll content: the changes pill and queue float, so the
-  // conversation runs down behind them to the composer.
-  useEffect(() => {
-    const transcript = transcriptRef.current;
-    const dock = liveChangesTarget?.parentElement;
-    if (!transcript || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const updateDockClearance = () => {
-      if (dock) {
-        const dockBounds = dock.getBoundingClientRect();
-        const composer = dock.querySelector<HTMLElement>(
-          ":scope > .gyro-composer-shell",
-        );
-        const composerHeight = `${Math.ceil(
-          dockBounds.bottom -
-            (composer?.getBoundingClientRect().top ?? dockBounds.top),
-        )}px`;
-        transcript.style.setProperty(
-          "--gyro-composer-dock-height",
-          `${Math.ceil(dockBounds.height)}px`,
-        );
-        dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
-      }
-      pinTranscriptToBottom();
-      updateTranscriptScrollPosition();
-    };
-    updateDockClearance();
-    // Resize notifications run during layout. Batch the resulting scroll/style
-    // writes into the next frame so composer growth cannot feed the observer
-    // recursively while a reply is streaming.
-    let resizeFrame: number | undefined;
-    const observer = new ResizeObserver(() => {
-      if (resizeFrame !== undefined) return;
-      resizeFrame = window.requestAnimationFrame(() => {
-        resizeFrame = undefined;
-        updateDockClearance();
-      });
-    });
-    observer.observe(transcript);
-    // The scroll viewport stays the same size when replies, images, or tool
-    // cards grow. Observe its content as well, including newly added turns.
-    for (const child of transcript.children) observer.observe(child);
-    const mutations = new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.removedNodes) {
-          if (node instanceof Element) observer.unobserve(node);
-        }
-        for (const node of record.addedNodes) {
-          if (node instanceof Element) observer.observe(node);
-        }
-      }
-    });
-    mutations.observe(transcript, { childList: true });
-    const releasePointer = () => {
-      transcriptPointerDownRef.current = false;
-    };
-    window.addEventListener("pointerup", releasePointer);
-    window.addEventListener("pointercancel", releasePointer);
-    if (dock) observer.observe(dock);
-    return () => {
-      mutations.disconnect();
-      window.removeEventListener("pointerup", releasePointer);
-      window.removeEventListener("pointercancel", releasePointer);
-      observer.disconnect();
-      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
-    };
-  }, [
+  const {
+    transcriptRef,
+    isTranscriptAwayFromBottom,
+    isLoadedChatClipped,
+    requestEarlierMessages,
+    scrollTranscriptToBottom,
+    onTranscriptScroll,
+    onTranscriptWheel,
+    onTranscriptTouchStart,
+    onTranscriptTouchMove,
+    onTranscriptKeyDown,
+    onTranscriptPointerDown,
+  } = useChatTranscriptScroll({
+    events: transcriptEvents,
+    hasMoreBefore,
+    isLoadingEarlier,
+    onLoadEarlier,
     liveChangesTarget,
-    pinTranscriptToBottom,
-    updateTranscriptScrollPosition,
-  ]);
+  });
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -8836,6 +8729,15 @@ export function ChatSurface({
     [transcriptEvents],
   );
   const { looseEvents, turns } = transcriptState;
+  const standaloneEvents = useMemo(
+    () => looseEvents.filter((event) => !isModelSwitchEvent(event)),
+    [looseEvents],
+  );
+  const transcriptItems = useMemo(
+    () =>
+      interleaveModelSwitches(turns, looseEvents.filter(isModelSwitchEvent)),
+    [looseEvents, turns],
+  );
   const isEmptyStart = turns.length === 0 && looseEvents.length === 0;
   const activeRailPanel =
     activeChatPanel ?? (isEnvironmentRailOpen ? "environment" : undefined);
@@ -8896,7 +8798,7 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
-        {looseEvents.map((event) => (
+        {standaloneEvents.map((event) => (
           <ChatEvent
             event={event}
             key={event.id}
@@ -8907,103 +8809,112 @@ export function ChatSurface({
             onProviderStatusAction={onProviderStatusAction}
           />
         ))}
-        {turns.map((turn, turnIndex) => (
-          <ChatTurn
-            artifactActions={{
-              onOpenCanvas: openCanvas,
-              onOpenPreview: (url) => {
-                onSelectChatPanel?.("browser");
-                if (url && /^https?:\/\//i.test(url)) onBrowserNavigate?.(url);
-              },
-              onOpenFiles: () =>
-                onSelectChatPanel
-                  ? onSelectChatPanel("files")
-                  : onComposerAction?.("open-files"),
-              // Artifact actions belong beside their owning conversation.
-              onOpenTool: (tab) => {
-                if (
-                  (tab === "browser" || tab === "terminal") &&
+        {transcriptItems.map((item) => {
+          if (item.kind === "model-switch") {
+            return <ChatEvent event={item.event} key={item.event.id} />;
+          }
+          const { turn, turnIndex } = item;
+          return (
+            <ChatTurn
+              artifactActions={{
+                onOpenCanvas: openCanvas,
+                onOpenPreview: (url) => {
+                  onSelectChatPanel?.("browser");
+                  if (url && /^https?:\/\//i.test(url))
+                    onBrowserNavigate?.(url);
+                },
+                onOpenFiles: () =>
                   onSelectChatPanel
-                ) {
-                  onSelectChatPanel(tab);
-                  return;
-                }
-                if (tab === "diff" && onSelectChatPanel) {
+                    ? onSelectChatPanel("files")
+                    : onComposerAction?.("open-files"),
+                // Artifact actions belong beside their owning conversation.
+                onOpenTool: (tab) => {
+                  if (
+                    (tab === "browser" || tab === "terminal") &&
+                    onSelectChatPanel
+                  ) {
+                    onSelectChatPanel(tab);
+                    return;
+                  }
+                  if (tab === "diff" && onSelectChatPanel) {
+                    onSelectChatPanel("review");
+                    return;
+                  }
+                  onOpenToolPanel?.(tab);
+                },
+                onOpenExternalPreview: () => onBrowserOpenExternal?.(),
+                onSendPrompt: handleArtifactPrompt,
+              }}
+              isActive={turn.id === activeTurnId}
+              keepAlives={keepAlives.filter(
+                (watch) => watch.turnId === turn.id,
+              )}
+              liveChangesTarget={liveChangesTarget}
+              onOpenBrowserUrl={onBrowserNavigate}
+              onOpenKeepAlive={onOpenKeepAlive}
+              onRelaunchKeepAlive={onRelaunchKeepAlive}
+              onStopKeepAlive={onStopKeepAlive}
+              fileReview={
+                isFileReviewEnabled
+                  ? {
+                      summaries: fileReviewSummaries?.[turn.id],
+                      isSummarizing:
+                        fileReviewPendingTurnIds?.includes(turn.id) ?? false,
+                      onKeep: onFileReviewKeep
+                        ? (path, contentHash) =>
+                            onFileReviewKeep({
+                              turnId: turn.id,
+                              path,
+                              contentHash,
+                            })
+                        : undefined,
+                      onAsk: onFileReviewAsk,
+                    }
+                  : undefined
+              }
+              key={turn.id}
+              onLoadChangeDiff={onLoadChangeDiff}
+              onOpenChanges={(path, files) => {
+                setReviewScope({ kind: "turn", turnId: turn.id });
+                setReviewTurnFiles(
+                  (files ?? []).map((file) => ({
+                    ...file,
+                    patches: turnReviewPatches(turn.timelineEvents, file.path),
+                  })),
+                );
+                if (path) railDiffTools?.onSelectFile?.(path);
+                if (onSelectChatPanel) {
                   onSelectChatPanel("review");
                   return;
                 }
-                onOpenToolPanel?.(tab);
-              },
-              onOpenExternalPreview: () => onBrowserOpenExternal?.(),
-              onSendPrompt: handleArtifactPrompt,
-            }}
-            isActive={turn.id === activeTurnId}
-            keepAlives={keepAlives.filter((watch) => watch.turnId === turn.id)}
-            liveChangesTarget={liveChangesTarget}
-            onOpenBrowserUrl={onBrowserNavigate}
-            onOpenKeepAlive={onOpenKeepAlive}
-            onRelaunchKeepAlive={onRelaunchKeepAlive}
-            onStopKeepAlive={onStopKeepAlive}
-            fileReview={
-              isFileReviewEnabled
-                ? {
-                    summaries: fileReviewSummaries?.[turn.id],
-                    isSummarizing:
-                      fileReviewPendingTurnIds?.includes(turn.id) ?? false,
-                    onKeep: onFileReviewKeep
-                      ? (path, contentHash) =>
-                          onFileReviewKeep({
-                            turnId: turn.id,
-                            path,
-                            contentHash,
-                          })
-                      : undefined,
-                    onAsk: onFileReviewAsk,
-                  }
-                : undefined
-            }
-            key={turn.id}
-            onLoadChangeDiff={onLoadChangeDiff}
-            onOpenChanges={(path, files) => {
-              setReviewScope({ kind: "turn", turnId: turn.id });
-              setReviewTurnFiles(
-                (files ?? []).map((file) => ({
-                  ...file,
-                  patches: turnReviewPatches(turn.timelineEvents, file.path),
-                })),
-              );
-              if (path) railDiffTools?.onSelectFile?.(path);
-              if (onSelectChatPanel) {
-                onSelectChatPanel("review");
-                return;
+                onOpenToolPanel?.("diff");
+              }}
+              onUndoChanges={railDiffTools?.onUndo}
+              onCouncilAction={onCouncilAction}
+              onMutationApprovalAction={onMutationApprovalAction}
+              onProviderApprovalAction={onProviderApprovalAction}
+              onProviderStatusAction={onProviderStatusAction}
+              onReusePrompt={onReusePrompt}
+              onContinueChat={
+                // Only the latest turn needs Continue — older ones clutter the rail
+                // and imply unfinished work on already-finished messages.
+                turnIndex === turns.length - 1 ? onContinueChat : undefined
               }
-              onOpenToolPanel?.("diff");
-            }}
-            onUndoChanges={railDiffTools?.onUndo}
-            onCouncilAction={onCouncilAction}
-            onMutationApprovalAction={onMutationApprovalAction}
-            onProviderApprovalAction={onProviderApprovalAction}
-            onProviderStatusAction={onProviderStatusAction}
-            onReusePrompt={onReusePrompt}
-            onContinueChat={
-              // Only the latest turn needs Continue — older ones clutter the rail
-              // and imply unfinished work on already-finished messages.
-              turnIndex === turns.length - 1 ? onContinueChat : undefined
-            }
-            plan={sessionPlan}
-            previewCapture={
-              browserPreview?.latestCapture
-                ? {
-                    src: browserPreview.latestCapture.src,
-                    path: browserPreview.latestCapture.path,
-                  }
-                : undefined
-            }
-            sourceControl={sourceControl}
-            sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
-            turn={turn}
-          />
-        ))}
+              plan={sessionPlan}
+              previewCapture={
+                browserPreview?.latestCapture
+                  ? {
+                      src: browserPreview.latestCapture.src,
+                      path: browserPreview.latestCapture.path,
+                    }
+                  : undefined
+              }
+              sourceControl={sourceControl}
+              sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
+              turn={turn}
+            />
+          );
+        })}
         {turns.length === 0 && looseEvents.length === 0 ? (
           <div className="gyro-thread-empty">Start with a request.</div>
         ) : null}
@@ -9047,6 +8958,8 @@ export function ChatSurface({
       isPlanReadyForDecision,
       activeRailPanel,
       looseEvents,
+      standaloneEvents,
+      transcriptItems,
       onTogglePlanPanel,
       sessionGoal,
       sessionPlan,
@@ -9502,36 +9415,12 @@ export function ChatSurface({
           aria-live="polite"
           aria-relevant="additions text"
           className="gyro-thread-body gyro-chat-transcript"
-          onScroll={updateTranscriptScrollPosition}
-          onWheel={(event) => {
-            if (event.deltaY < 0)
-              isFollowingTranscriptBottomRef.current = false;
-          }}
-          onPointerDown={() => {
-            transcriptPointerDownRef.current = true;
-          }}
-          onTouchStart={(event) => {
-            transcriptTouchYRef.current = event.touches[0]?.clientY;
-          }}
-          onTouchMove={(event) => {
-            const y = event.touches[0]?.clientY;
-            if (
-              y !== undefined &&
-              transcriptTouchYRef.current !== undefined &&
-              y > transcriptTouchYRef.current
-            ) {
-              isFollowingTranscriptBottomRef.current = false;
-            }
-            transcriptTouchYRef.current = y;
-          }}
-          onKeyDown={(event) => {
-            if (
-              ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
-              (event.key === " " && event.shiftKey)
-            ) {
-              isFollowingTranscriptBottomRef.current = false;
-            }
-          }}
+          onScroll={onTranscriptScroll}
+          onWheel={onTranscriptWheel}
+          onPointerDown={onTranscriptPointerDown}
+          onTouchStart={onTranscriptTouchStart}
+          onTouchMove={onTranscriptTouchMove}
+          onKeyDown={onTranscriptKeyDown}
           ref={transcriptRef}
           role="log"
         >
@@ -9539,7 +9428,7 @@ export function ChatSurface({
             <div className="gyro-chat-load-earlier">
               <button
                 disabled={isLoadingEarlier}
-                onClick={onLoadEarlier}
+                onClick={() => requestEarlierMessages(true)}
                 type="button"
               >
                 {isLoadingEarlier
@@ -15927,9 +15816,7 @@ export function WorkspaceToolPanel({
       ) : null}
       <WorkbenchPaneContent
         terminalPanelActions={compactTerminal ? panelControls : undefined}
-        onSelectTerminalPanel={
-          compactTerminal ? onPaneTabChange : undefined
-        }
+        onSelectTerminalPanel={compactTerminal ? onPaneTabChange : undefined}
         activePaneTab={activePaneTab}
         activeProfileId={activeProfileId}
         browserPreview={browserPreview}
@@ -21600,7 +21487,9 @@ export function SettingsSurface({
                           { label: "Bars", value: "bars" },
                           { label: "Wheels", value: "wheels" },
                         ]}
-                        onChange={(value) => onUsageVisualizationChange?.(value)}
+                        onChange={(value) =>
+                          onUsageVisualizationChange?.(value)
+                        }
                       />
                     ) : null}
                     <button
@@ -21677,39 +21566,37 @@ export function SettingsSurface({
                       Refresh
                     </button>
                   </div>
-                ) : (
-                  /* No plan windows to show — fall back to what Gyro measured
+                ) : /* No plan windows to show — fall back to what Gyro measured
                      itself. This is the only usage view Gemini has, and the
                      fallback for every provider whose live read failed. */
-                  localUsageWindows.length > 0 ? (
-                    <div className="gyro-usage-cards">
-                      {localUsageWindows.map((window) => (
-                        <UsageCard
-                          key={window.id}
-                          resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
-                          visualization={usageVisualization}
-                          window={{
-                            id: window.id,
-                            label:
-                              window.id === "five-hour"
-                                ? "5-hour spend · local"
-                                : "Weekly spend · local",
-                            usedPercent: window.percent,
-                          }}
-                        />
-                      ))}
+                localUsageWindows.length > 0 ? (
+                  <div className="gyro-usage-cards">
+                    {localUsageWindows.map((window) => (
+                      <UsageCard
+                        key={window.id}
+                        resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
+                        visualization={usageVisualization}
+                        window={{
+                          id: window.id,
+                          label:
+                            window.id === "five-hour"
+                              ? "5-hour spend · local"
+                              : "Weekly spend · local",
+                          usedPercent: window.percent,
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="gyro-usage-empty" role="status">
+                    <Gauge size={22} />
+                    <div>
+                      <strong>No usage recorded yet</strong>
+                      <span>
+                        Start a chat or refresh to check provider usage.
+                      </span>
                     </div>
-                  ) : (
-                    <div className="gyro-usage-empty" role="status">
-                      <Gauge size={22} />
-                      <div>
-                        <strong>No usage recorded yet</strong>
-                        <span>
-                          Start a chat or refresh to check provider usage.
-                        </span>
-                      </div>
-                    </div>
-                  )
+                  </div>
                 )}
               </div>
             ) : (
@@ -25371,7 +25258,8 @@ function Composer({
   mediaDropErrorRef.current = onMediaDropError;
   useEffect(() => {
     const attach = (files: File[]) => attachMediaFilesRef.current?.(files);
-    const reportError = (message: string) => mediaDropErrorRef.current?.(message);
+    const reportError = (message: string) =>
+      mediaDropErrorRef.current?.(message);
     const host: MediaDropTarget = {
       attach,
       reportError,
@@ -25996,7 +25884,9 @@ function Composer({
             className="gyro-composer-chip is-plan"
             onClick={() => onComposerAction?.("set-chat-mode-normal")}
             title={
-              isSending ? "Plan applies to the next message" : "Remove Plan mode"
+              isSending
+                ? "Plan applies to the next message"
+                : "Remove Plan mode"
             }
             type="button"
           >
@@ -26442,6 +26332,14 @@ const ChatEvent = memo(function ChatEvent({
   onReusePrompt?: (message: string) => void;
 }) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  if (isModelSwitchEvent(event)) {
+    return (
+      <div className="gyro-model-switch-marker">
+        <Sparkles aria-hidden="true" size={12} />
+        <span>{event.message}</span>
+      </div>
+    );
+  }
   const providerStatus = providerStatusFromEvent(event);
   if (providerStatus) {
     return (
@@ -26712,8 +26610,8 @@ function MutationApprovalCard({
         approval.workspacePath
           ? `Workspace: ${approval.workspacePath}`
           : approval.scope === "workspace-file"
-          ? "Selected project only"
-          : approval.scope
+            ? "Selected project only"
+            : approval.scope
       }
       error={approval.error}
       status={approval.status}
@@ -26786,7 +26684,8 @@ function ProviderToolApprovalCard({
           >
             Reject
           </button>
-          {approval.approvalType === "capability" && approval.capabilityId !== "workspace-read-editor" ? (
+          {approval.approvalType === "capability" &&
+          approval.capabilityId !== "workspace-read-editor" ? (
             <button
               disabled={!onAction}
               onClick={() => onAction?.(approval.approvalId, "allow-project")}
@@ -29055,9 +28954,10 @@ function providerApprovalFromEvent(
       capabilityId,
       editorPreview: previewContent,
       scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
-      reason: capabilityId === "workspace-read-editor"
-        ? "The model requested live text from your editor. Review the text below before sharing it."
-        : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
+      reason:
+        capabilityId === "workspace-read-editor"
+          ? "The model requested live text from your editor. Review the text below before sharing it."
+          : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
       risk: "This capability is restricted to the owning Chat and project.",
       changes: previewPath ? [{ path: previewPath }] : [],
       status: "pending",
