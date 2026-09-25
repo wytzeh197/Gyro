@@ -193,6 +193,75 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+// Dropping a sidebar chat already open in the split moves its existing pane,
+// preserving the React key, draft ownership and every other conversation.
+let reorderedGrid = chatGridReducer(chatGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("two"),
+  mode: "drop",
+  slotIndex: 1,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  reorderedGrid.layouts["/Users/example/Gyro"].slots
+    .slice(0, 2)
+    .map((pane) => pane?.sessionId)
+    .join(",") === "one,two" &&
+    reorderedGrid.layouts["/Users/example/Gyro"].slots[1]?.paneId ===
+      "pane:two",
+  "Dropping an open chat at a split seam should move its existing pane.",
+);
+for (const sessionId of ["three", "four"]) {
+  reorderedGrid = chatGridReducer(reorderedGrid, {
+    type: "select-pane",
+    projectKey: "/Users/example/Gyro",
+    pane: gridPane(sessionId),
+    mode: "drop",
+    slotIndex:
+      reorderedGrid.layouts["/Users/example/Gyro"].slots.findLastIndex(Boolean),
+    insertPosition: "after",
+    arrangement: "columns",
+  });
+}
+const fullRow = reorderedGrid.layouts["/Users/example/Gyro"];
+expect(
+  chatGridDropZones(fullRow.slots, "columns").length === 0 &&
+    chatGridDropZones(fullRow.slots, "columns", true).length === 5,
+  "A full row should expose boundaries only when rearranging one of its chats.",
+);
+reorderedGrid = chatGridReducer(reorderedGrid, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("one"),
+  mode: "drop",
+  slotIndex: 3,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  reorderedGrid.layouts["/Users/example/Gyro"].slots
+    .map((pane) => pane?.sessionId)
+    .filter(Boolean)
+    .join(",") === "two,three,four,one" &&
+    reorderedGrid.layouts["/Users/example/Gyro"].slots[3]?.paneId ===
+      "pane:one",
+  "Repeated drops in a full row should reorder without duplicating or replacing chats.",
+);
+const rejectedFullRowDrop = chatGridReducer(reorderedGrid, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("five"),
+  mode: "drop",
+  slotIndex: 3,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  rejectedFullRowDrop === reorderedGrid,
+  "A new chat dropped on a full row must not silently evict one already open.",
+);
 // Re-focusing the already-focused pane must keep state identity. Grid slots
 // fire focus on every pointerdown; a fresh object re-rendered the chat under
 // the finger and could turn empty-margin presses into stops.
@@ -662,7 +731,9 @@ expect(
     chatGridDropSource.includes('"Top right"') &&
     chatGridDropSource.includes('"Bottom left"') &&
     chatGridDropSource.includes('"Bottom right"') &&
-    surfaceSource.includes("chatGridDropZones(slots, arrangement)") &&
+    surfaceSource.includes(
+      "chatGridDropZones(slots, arrangement, reorderingSession)",
+    ) &&
     surfaceSource.includes(
       "const dropLayout = chatGridDropLayout(dropZones)",
     ) &&
@@ -2413,9 +2484,9 @@ expect(
   "Opening a tool panel tab should route through the workspace shell.",
 );
 
-// The chat's bottom tray is terminal-only (`terminalOnly` pins its tab), so a
-// browser reveal from a thread has to land in the chat's side rail. Opening the
-// tray instead dropped an empty terminal over the thread and hid the page.
+// A browser reveal from a thread lands in the chat's side rail: the drawer is a
+// Workspace surface, so opening it over the thread left the page nowhere to be
+// seen. Drawer state itself is unchanged — the Chat layout simply draws none.
 let chatBrowserState = workbenchReducer(createInitialWorkbenchState(), {
   type: "select-workspace-layout",
   layout: "thread",
@@ -2435,7 +2506,7 @@ expect(
       type: "open-tool-panel",
       tab: "terminal",
     }).isToolPanelOpen === true,
-  "A browser reveal inside a chat should open the chat browser rail and leave the terminal-only tray closed.",
+  "A browser reveal inside a chat should open the chat browser rail and leave the shared tool panel alone.",
 );
 state = workbenchReducer(state, { type: "close-tool-panel" });
 expect(state.isToolPanelOpen === false, "Tool panel close action failed.");
@@ -4346,6 +4417,9 @@ expect(
     surfaceSource.includes('payload?.surface === "desktop-ide"') &&
     surfaceSource.includes('"provider-diagnostics"') &&
     styleSource.includes(
+      ".gyro-response-actions .gyro-message-token-count",
+    ) &&
+    !styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
     ) &&
     typeSource.includes("ProviderChatStreamEvent") &&
@@ -5224,7 +5298,12 @@ expect(
       "workspacePath={activeSession?.workspacePath ?? workspacePath}",
     ) &&
     appSource.includes("onOpenWorkspace={openWorkspace}") &&
-    appSource.includes('activeWorkspaceLayout !== "code" ||') &&
+    // The bottom drawer is a Workspace surface: the Chat (thread) layout never
+    // draws it, and the code layout still waits for a project.
+    appSource.includes("const isBottomDrawerAvailable =") &&
+    appSource.includes(
+      'isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread"',
+    ) &&
     appSource.includes(
       'activeWorkspaceLayout === "code" &&\n          Boolean(activeSession?.workspacePath ?? workspacePath)',
     ) &&
@@ -5480,21 +5559,32 @@ expect(
     appSource.includes("toolPanelHeight") &&
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
-    surfaceSource.includes("data-active-tab={effectivePaneTab}") &&
+    surfaceSource.includes("data-active-tab={activePaneTab}") &&
     surfaceSource.includes("terminalTitle={activeTerminalPane?.title}") &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
-    surfaceSource.includes(
-      'const effectivePaneTab = terminalOnly ? "terminal" : activePaneTab',
-    ) &&
     surfaceSource.includes('tab.id === "terminal"') &&
     appSource.includes('openToolPanel("terminal")') &&
+    // The drawer is a Workspace surface. A Chat (thread) layout draws it
+    // nowhere and offers no control for it, so it never pins the tray to a
+    // terminal-only half state either.
+    appSource.includes(
+      'const isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread"',
+    ) &&
+    appSource.includes("isToolPanelAvailable={isBottomDrawerAvailable}") &&
+    surfaceSource.includes("isToolPanelAvailable = true") &&
+    surfaceSource.includes(
+      "isToolPanelAvailable && isToolPanelOpen === true",
+    ) &&
+    surfaceSource.includes("showToolPanel={isToolPanelAvailable}") &&
+    !surfaceSource.includes("terminalOnly") &&
+    !appSource.includes("terminalOnly") &&
     !styleSource.includes(".gyro-tool-panel-reveal") &&
     styleSource.includes(".gyro-workspace-tool-panel.is-resizable") &&
     styleSource.includes('[data-active-tab="terminal"]') &&
     styleSource.includes(".gyro-terminal-toolbar {\n  display: none;") &&
     !styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
-  "Chat bottom panel should be a terminal-only tray opened from the explicit top control, with no reveal strip.",
+  "The bottom drawer should stay a Workspace surface: the Chat layout draws it nowhere and offers no control for it, while the workspace panel keeps its resize handle and terminal tab with no reveal strip.",
 );
 const chatSurfaceSource = surfaceSource.slice(
   surfaceSource.indexOf("export function ChatSurface"),

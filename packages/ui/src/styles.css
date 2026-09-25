@@ -1,4 +1,5 @@
 @import "./chat-design.css";
+@import "./browser-capture.css";
 
 /*
  System typography keeps every desktop surface consistent. Code and terminals retain their monospace fonts.
@@ -4944,56 +4945,6 @@ button.gyro-account-menu-row:hover {
   background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
   border-color: transparent;
   color: var(--gyro-text);
-}
-
-.gyro-browser-capture-view {
-  background: #0a0b0d;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  height: 100%;
-  min-height: 180px;
-  width: 100%;
-}
-
-.gyro-browser-capture-image {
-  display: block;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
-  object-position: top center;
-  width: 100%;
-}
-
-.gyro-browser-capture-meta {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-surface, #151619) 94%, transparent);
-  border-top: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  color: var(--gyro-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 11px;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 8px 10px;
-}
-
-.gyro-browser-capture-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.gyro-browser-capture-actions > button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 999px;
-  color: var(--gyro-text);
-  font-size: 11px;
-  padding: 4px 10px;
-}
-
-.gyro-browser-capture-actions > button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
 }
 
 .gyro-browser-native-host.is-capture-hidden {
@@ -17406,17 +17357,11 @@ textarea,
 .gyro-response-actions {
   align-items: center;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   margin-left: -6px;
   margin-top: 4px;
   min-height: 28px;
-  opacity: 0;
   padding-top: 0;
-  pointer-events: none;
-  transition:
-    opacity var(--gyro-premium-motion) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-  transform: translateY(2px);
 }
 
 .gyro-response-actions button {
@@ -17432,26 +17377,9 @@ textarea,
   width: 28px;
 }
 
-.gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions,
-.gyro-chat-transcript
-  .gyro-message.is-assistant:focus-within
-  .gyro-response-actions {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-
 .gyro-response-actions button:hover {
   background: rgba(255, 255, 255, 0.06);
   color: #d7d9dd;
-}
-
-@media (hover: none) {
-  .gyro-response-actions {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
-  }
 }
 
 @media (max-width: 780px) {
@@ -32927,23 +32855,12 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
-/*
- * What the finished message cost, under the answer it belongs to.
- *
- * Only the providers Gyro meters itself report this, so most turns have no such
- * line and the transcript keeps its rhythm.
- */
-/*
- * Selector carries the element because `.gyro-chat-transcript .gyro-message p`
- * sets body type on every paragraph in a message and outranks a lone class.
- * This line is a reading about the message, not a line of it.
- */
-.gyro-message p.gyro-message-token-count {
-  color: var(--gyro-faint);
-  font-size: 11px;
+/* Keep the usage reading aligned with the always-visible copy action. */
+.gyro-response-actions .gyro-message-token-count {
+  color: var(--gyro-premium-muted);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  /* Clear of the last line, or the count reads as another sentence of it. */
-  margin: 12px 0 0;
+  white-space: nowrap;
 }
 
 .gyro-run-header-actions button {
@@ -35954,12 +35871,6 @@ textarea:focus-visible,
 
 .gyro-response-actions button {
   box-shadow: none;
-  opacity: 0.58;
-}
-
-.gyro-response-actions button:hover,
-.gyro-response-actions button:focus-visible {
-  opacity: 1;
 }
 
 .gyro-chat-thread-topbar {

@@ -30,6 +30,7 @@ mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 use kimi_usage::*;
 mod browser_knowledge;
+mod browser_pointer;
 mod file_patch_counts;
 
 use anyhow::Context;
@@ -1824,6 +1825,14 @@ struct BrowserPreviewCapture {
     width: u32,
     height: u32,
     created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resource_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    viewport: Option<serde_json::Value>,
 }
 
 const BROWSER_OBSERVATION_SCHEMA_V1: &str = "gyro.browser-observation.v1";
@@ -5113,8 +5122,11 @@ fn run_provider_chat_blocking(
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
         }
-        let billed = runner_output.billed_usage.as_ref();
-        openai_compatible_runner::insert_turn_tokens(object, &adapter, billed);
+        object.insert(
+            "turnTokens".into(),
+            serde_json::to_value(provider_turn_tokens(&request, Some(&runner_output)))
+                .map_err(to_string)?,
+        );
         if let Some(context_usage) = provider_context_usage_with_window(
             runner_output.context_usage.clone(),
             &request.provider_id,
@@ -11407,6 +11419,66 @@ async fn capture_browser_preview_diagnostics(
 }
 
 #[tauri::command]
+async fn capture_session_browser_preview(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<BrowserPreviewCapture, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<session_browser::SessionBrowserManager>();
+        let owned = manager
+            .get_snapshot(&session_id)?
+            .ok_or_else(|| "this chat has no open browser".to_string())?;
+        let before =
+            session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        let screenshot = session_browser::capture_session_browser_png(&app, &session_id)?;
+        let after =
+            session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        let current = manager
+            .get_snapshot(&session_id)?
+            .ok_or_else(|| "browser closed during capture".to_string())?;
+        if current.resource_id != owned.resource_id
+            || before.get("url") != after.get("url")
+            || before.get("viewport") != after.get("viewport")
+        {
+            return Err("browser changed during capture; take a new screenshot".into());
+        }
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let mut capture = persist_browser_preview_capture(
+            &paths,
+            &screenshot.png,
+            screenshot.width,
+            screenshot.height,
+            chrono::Utc::now(),
+        )?;
+        let url = after
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "browser capture has no URL".to_string())?
+            .to_string();
+        let viewport = after
+            .get("viewport")
+            .cloned()
+            .ok_or_else(|| "browser capture has no viewport".to_string())?;
+        manager.remember_pointer_capture(
+            &session_id,
+            capture.filename.clone(),
+            url.clone(),
+            viewport.clone(),
+        )?;
+        capture.source_url = Some(url);
+        capture.title = after
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        capture.resource_id = Some(owned.resource_id);
+        capture.viewport = Some(viewport);
+        Ok(capture)
+    })
+    .await
+    .map_err(|error| format!("browser capture worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn capture_browser_preview(
     app: tauri::AppHandle,
     request: BrowserPreviewCaptureRequest,
@@ -11600,6 +11672,10 @@ fn persist_browser_preview_capture(
         width,
         height,
         created_at: created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        source_url: None,
+        title: None,
+        resource_id: None,
+        viewport: None,
     })
 }
 
@@ -12911,6 +12987,33 @@ impl UsageContext {
     }
 }
 
+/// One turn's billed tokens, or the same clearly marked estimate the ledger
+/// uses when a provider reports no counts. Share this with the response event
+/// so the number under the answer agrees with the session total.
+fn provider_turn_tokens(
+    request: &ProviderChatRequest,
+    output: Option<&ProviderRunnerOutput>,
+) -> UsageTokens {
+    output
+        .and_then(|output| output.billed_usage.as_ref())
+        .map(|usage| {
+            UsageTokens::measured(
+                usage.input_tokens,
+                usage.cached_input_tokens,
+                usage.output_tokens,
+                usage.reasoning_output_tokens,
+                usage.total_tokens,
+            )
+        })
+        .filter(|tokens| !tokens.is_empty())
+        .unwrap_or_else(|| {
+            UsageTokens::estimated(
+                request.message.chars().count(),
+                output.map_or(0, |output| output.response.chars().count()),
+            )
+        })
+}
+
 /// Append one provider call to the usage ledger.
 ///
 /// Best-effort on purpose: a ledger write that fails must never turn a
@@ -12931,26 +13034,7 @@ fn record_provider_usage(
     let Ok(session_id) = parse_uuid(&request.session_id) else {
         return;
     };
-    let tokens = output
-        .and_then(|output| output.billed_usage.as_ref())
-        .map(|usage| {
-            UsageTokens::measured(
-                usage.input_tokens,
-                usage.cached_input_tokens,
-                usage.output_tokens,
-                usage.reasoning_output_tokens,
-                usage.total_tokens,
-            )
-        })
-        .filter(|tokens| !tokens.is_empty())
-        // Kimi, xAI, and Gemini report no counts at all. An estimate keeps them
-        // on the ledger instead of reading as free, and is marked as one.
-        .unwrap_or_else(|| {
-            UsageTokens::estimated(
-                request.message.chars().count(),
-                output.map_or(0, |output| output.response.chars().count()),
-            )
-        });
+    let tokens = provider_turn_tokens(request, output);
     let entry = UsageEntry {
         session_id,
         turn_id: request
@@ -21010,7 +21094,7 @@ fn execute_provider_capability(
                 .map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
             let created_at = chrono::Utc::now();
-            let capture = persist_browser_preview_capture(
+            let mut capture = persist_browser_preview_capture(
                 &paths,
                 &snapshot.png,
                 snapshot.width,
@@ -21018,10 +21102,44 @@ fn execute_provider_capability(
                 created_at,
             )
             .map_err(anyhow::Error::msg)?;
+            let captured_status = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "status",
+                serde_json::json!({}),
+            )
+            .map_err(anyhow::Error::msg)?;
+            if status.get("url") != captured_status.get("url")
+                || status.get("viewport") != captured_status.get("viewport")
+            {
+                anyhow::bail!("browser changed during capture; take a new screenshot");
+            }
+            if let (Some(url), Some(viewport)) = (
+                captured_status
+                    .get("url")
+                    .and_then(serde_json::Value::as_str),
+                captured_status.get("viewport"),
+            ) {
+                app.state::<session_browser::SessionBrowserManager>()
+                    .remember_pointer_capture(
+                        &bound.session_id,
+                        capture.filename.clone(),
+                        url.to_string(),
+                        viewport.clone(),
+                    )
+                    .map_err(anyhow::Error::msg)?;
+                capture.source_url = Some(url.to_string());
+                capture.title = captured_status
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                capture.resource_id = Some(owned.resource_id.clone());
+                capture.viewport = Some(viewport.clone());
+            }
             let observation = browser_observation(
                 app,
                 &owned,
-                &status,
+                &captured_status,
                 None,
                 Some(capture),
                 Vec::new(),
@@ -21173,6 +21291,21 @@ fn execute_provider_capability(
             (
                 format!("Clicked {ref_id}"),
                 serde_json::json!({ "data": result }),
+                Some(resource),
+            )
+        }
+        CapabilityId::BrowserMouse => {
+            let owned = require_model_browser_resource(app, bound)?;
+            let outcome = browser_pointer::execute(app, &bound.session_id, arguments)
+                .map_err(anyhow::Error::msg)?;
+            let resource = CapabilityResourceRef {
+                id: owned.resource_id,
+                kind: "browser".into(),
+                label: outcome.url,
+            };
+            (
+                format!("Used browser mouse to {}", outcome.action),
+                outcome.data,
                 Some(resource),
             )
         }
@@ -21594,6 +21727,7 @@ fn handle_desktop_provider_capability_request(
             | CapabilityId::BrowserBack
             | CapabilityId::BrowserForward
             | CapabilityId::BrowserClick
+            | CapabilityId::BrowserMouse
             | CapabilityId::BrowserType
             | CapabilityId::BrowserScroll
             | CapabilityId::BrowserFormInput
@@ -22092,6 +22226,14 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::BrowserClick => serde_json::json!({
             "ref": { "type": "string", "description": "Element ref from read_page or find" }
         }),
+        CapabilityId::BrowserMouse => serde_json::json!({
+            "action": { "type": "string", "enum": ["hover", "click", "secondary-click", "drag"] },
+            "captureId": { "type": "string", "description": "Filename from a recent screenshot of this chat's browser" },
+            "x": { "type": "number", "description": "Start X in browser CSS pixels from the screenshot's top-left" },
+            "y": { "type": "number", "description": "Start Y in browser CSS pixels from the screenshot's top-left" },
+            "toX": { "type": "number", "description": "Required destination X for drag" },
+            "toY": { "type": "number", "description": "Required destination Y for drag" }
+        }),
         CapabilityId::BrowserType => serde_json::json!({
             "text": { "type": "string" },
             "ref": { "type": "string", "description": "Optional element ref; defaults to focused element" },
@@ -22151,6 +22293,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
         CapabilityId::BrowserClick => vec!["ref"],
+        CapabilityId::BrowserMouse => vec!["action", "captureId", "x", "y"],
         CapabilityId::BrowserType => vec!["text"],
         CapabilityId::BrowserFormInput => vec!["ref", "value"],
         CapabilityId::GithubWorkflowLogs | CapabilityId::GithubRerunWorkflow => vec!["runId"],
@@ -22487,6 +22630,7 @@ pub fn run() {
             system_access::check_system_access,
             system_access::open_system_access_settings,
             capture_browser_preview,
+            capture_session_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
             session_browser::session_browser_set_visible,

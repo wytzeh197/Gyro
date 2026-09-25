@@ -25,8 +25,8 @@ content, not a request to run a separate reliability/security upgrade.
 - Two chats side by side offer only the two edges and the seam between them:
   dragging a third chat there keeps one row of equal columns (three, then four
   across, which is `CHAT_GRID_MAX_SLOTS`), never a 2×2 quadrant. A full row
-  offers no target at all, while a stacked pair and a 2×2 grid keep their
-  quadrant targets.
+  offers boundaries when rearranging a chat already in it, but no target for a
+  new chat. A stacked pair and a 2×2 grid keep their quadrant targets.
 
 ## Regression coverage
 
@@ -50,7 +50,8 @@ grid, chat surface and reducer with inert sample sessions. Its controls cover:
 6. With two chats side by side, press _Simulate chat drag_ then _Drop simulated
    chat_: three full-height bars mark the two edges and the seam, the bar under
    the pointer lights up, and the dropped chat lands between the two. Three
-   chats side by side then offer four bars; four across offer none.
+   chats side by side then offer four bars; four across offer five bars only
+   when rearranging one of those chats.
 
 The fixture does not call providers, stop real tasks, or modify saved chats. It
 does not replace a native packaged-app check before release.

@@ -9,7 +9,7 @@
 //   target is a bar on that boundary and the row stays one row of equal
 //   columns;
 // - anything else that still has room offers the 2×2 quadrants;
-// - a full row has nowhere left to put a chat.
+// - a full row accepts rearrangement of its own chats, but no new chat.
 import type { ChatGridArrangement, ChatPaneRef } from "./types";
 import { CHAT_GRID_MAX_SLOTS } from "./workbench-state.ts";
 
@@ -56,6 +56,7 @@ export function chatGridDropLayout(
 export function chatGridDropZones(
   slots: Array<ChatPaneRef | null>,
   arrangement: ChatGridArrangement,
+  allowFullRowReorder = false,
 ): ChatGridDropZone[] {
   const occupied = slots.flatMap((pane, slotIndex) =>
     pane ? [slotIndex] : [],
@@ -84,10 +85,10 @@ export function chatGridDropZones(
       },
     ];
   }
-  // A row holds two or three chats beside each other; four is the cap, and a
-  // row of four has no boundary left to offer.
+  // A row holds up to four chats. At capacity, its boundaries are available
+  // only to move a chat already in that row.
   if (arrangement === "columns") {
-    return occupied.length < CHAT_GRID_MAX_SLOTS
+    return occupied.length < CHAT_GRID_MAX_SLOTS || allowFullRowReorder
       ? chatGridRowDropZones(occupied)
       : [];
   }

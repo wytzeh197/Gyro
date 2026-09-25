@@ -674,8 +674,25 @@ export type BrowserPreviewCapture = {
   width: number;
   height: number;
   createdAt: string;
+  sourceUrl?: string;
+  title?: string;
+  resourceId?: string;
+  viewport?: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+    scrollX?: number;
+    scrollY?: number;
+  };
   /** Optional asset URL for rendering the capture in UI (e.g. convertFileSrc). */
   src?: string;
+};
+
+export type BrowserFeedback = {
+  captureId: string;
+  comment: string;
+  /** Rectangle in normalized screenshot coordinates (0–1). */
+  region: { x: number; y: number; width: number; height: number };
 };
 
 export type BrowserPreview = {

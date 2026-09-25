@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Runtime, WebviewUrl};
 use uuid::Uuid;
 
@@ -76,6 +76,14 @@ pub struct SessionBrowserCapture {
     pub height: u32,
 }
 
+#[derive(Clone, Debug)]
+pub struct BrowserPointerReference {
+    pub capture_id: String,
+    pub url: String,
+    pub viewport: Value,
+    pub created_at: Instant,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserConsoleEntry {
@@ -112,6 +120,7 @@ struct SessionBrowserSlot {
     title: String,
     visible: bool,
     approved_origins: HashSet<String>,
+    pointer_reference: Option<BrowserPointerReference>,
     console: VecDeque<BrowserConsoleEntry>,
     network: VecDeque<BrowserNetworkEntry>,
 }
@@ -185,6 +194,34 @@ impl SessionBrowserManager {
         })
     }
 
+    pub fn remember_pointer_capture(
+        &self,
+        session_id: &str,
+        capture_id: String,
+        url: String,
+        viewport: Value,
+    ) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.pointer_reference = Some(BrowserPointerReference {
+                capture_id,
+                url,
+                viewport,
+                created_at: Instant::now(),
+            });
+        })
+    }
+
+    pub fn pointer_reference(
+        &self,
+        session_id: &str,
+        capture_id: &str,
+    ) -> Result<BrowserPointerReference, String> {
+        self.with_slot_mut(session_id, |slot| slot.pointer_reference.clone())?
+            .filter(|reference| reference.capture_id == capture_id)
+            .filter(|reference| reference.created_at.elapsed() <= Duration::from_secs(60))
+            .ok_or_else(|| "browser screenshot is stale; capture the page again".to_string())
+    }
+
     pub fn console_entries(
         &self,
         session_id: &str,
@@ -245,6 +282,9 @@ impl SessionBrowserManager {
 
     fn set_url(&self, session_id: &str, url: &str) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
+            if slot.url != url {
+                slot.pointer_reference = None;
+            }
             slot.url = url.to_string();
         })
     }
@@ -749,17 +789,52 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         if (needle && !name.toLowerCase().includes(needle) && !(el.innerText || "").toLowerCase().includes(needle)) {{
           continue;
         }}
+        const rect = el.getBoundingClientRect();
         results.push({{
           ref: assignRef(el),
           role: roleOf(el),
           name,
           tag: el.tagName.toLowerCase(),
+          rect: {{
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          }},
         }});
         if (results.length >= {MAX_FIND_RESULTS}) break;
       }}
       return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results }};
     }},
-    click(options) {{
+    pointerTarget(options) {{
+      const x = Number(options && options.x);
+      const y = Number(options && options.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)
+          || x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {{
+        return {{ ok: false, error: "pointer coordinates are outside the browser viewport" }};
+      }}
+      const hit = document.elementFromPoint(x, y);
+      if (!hit) return {{ ok: false, error: "no page target at pointer coordinates" }};
+      const el = hit.closest("a,button,input,textarea,select,[role],[onclick],form") || hit;
+      const name = targetName(el);
+      const form = el.closest("form");
+      const formName = form ? targetName(form) : "";
+      const sensitive = /\b(buy|checkout|purchase|pay|send|submit|publish|delete|remove|transfer|book|confirm)\b/i.test(name + " " + formName);
+      return {{
+        ok: true,
+        name,
+        role: roleOf(el),
+        tag: el.tagName.toLowerCase(),
+        blocked: isCredentialField(el) || el.tagName.toLowerCase() === "iframe",
+        blockedReason: el.tagName.toLowerCase() === "iframe"
+          ? "embedded frames need user takeover in the Browser"
+          : "credential fields cannot be targeted by the model",
+        sensitive,
+        url: location.href,
+        viewport: pageState().viewport,
+      }};
+    }},
+        click(options) {{
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
       clickEl(el);
@@ -1118,6 +1193,7 @@ pub fn open_session_browser<R: Runtime>(
             title: String::new(),
             visible,
             approved_origins: approved,
+            pointer_reference: None,
             console: VecDeque::new(),
             network: VecDeque::new(),
         },
@@ -1306,6 +1382,133 @@ pub fn call_agent<R: Runtime>(
         manager.set_title(session_id, &sanitize_text(title))?;
     }
     sanitize_agent_result(value)
+}
+
+pub fn mouse_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    action: &str,
+    x: f64,
+    y: f64,
+    to_x: f64,
+    to_y: f64,
+) -> Result<(), String> {
+    if ![x, y, to_x, to_y].iter().all(|value| value.is_finite()) {
+        return Err("browser pointer coordinates must be finite".into());
+    }
+    if !matches!(action, "hover" | "click" | "secondary-click" | "drag") {
+        return Err("unsupported browser pointer action".into());
+    }
+    let manager = app.state::<SessionBrowserManager>();
+    let snapshot = manager
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "this chat has no open browser".to_string())?;
+    if !snapshot.visible {
+        return Err("show this chat's Browser before using the mouse".into());
+    }
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let action = action.to_string();
+        let (sender, receiver) = mpsc::channel();
+        webview
+            .with_webview(move |platform| unsafe {
+                use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView};
+                use objc2_foundation::NSPoint;
+                use objc2_web_kit::WKWebView;
+
+                let result = (|| -> Result<(), String> {
+                    let webview: &WKWebView = &*platform.inner().cast();
+                    let view: &NSView = webview;
+                    let window = view
+                        .window()
+                        .ok_or_else(|| "browser window is not available".to_string())?;
+                    window.setAcceptsMouseMovedEvents(true);
+                    let bounds = view.bounds();
+                    let width = bounds.size.width;
+                    let height = bounds.size.height;
+                    let point = |px: f64, py: f64| -> Result<NSPoint, String> {
+                        if px < 0.0 || py < 0.0 || px >= width || py >= height {
+                            return Err("pointer coordinates are outside the browser viewport".into());
+                        }
+                        let local_y = if view.isFlipped() {
+                            bounds.origin.y + py
+                        } else {
+                            bounds.origin.y + height - py
+                        };
+                        Ok(view.convertPoint_toView(
+                            NSPoint::new(bounds.origin.x + px, local_y),
+                            None,
+                        ))
+                    };
+                    let start = point(x, y)?;
+                    let end = point(to_x, to_y)?;
+                    let send = |kind: NSEventType, location: NSPoint, number: isize| -> Result<(), String> {
+                        let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                            kind,
+                            location,
+                            NSEventModifierFlags::empty(),
+                            0.0,
+                            window.windowNumber(),
+                            None,
+                            number,
+                            1,
+                            if matches!(kind, NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged | NSEventType::RightMouseDown) { 1.0 } else { 0.0 },
+                        )
+                        .ok_or_else(|| "could not create browser mouse event".to_string())?;
+                        window.sendEvent(&event);
+                        Ok(())
+                    };
+                    if action == "hover" {
+                        let outside = point(1.0, 1.0)?;
+                        if (outside.x - start.x).abs() > 2.0 || (outside.y - start.y).abs() > 2.0 {
+                            send(NSEventType::MouseMoved, outside, 0)?;
+                        }
+                    }
+                    send(NSEventType::MouseMoved, start, 1)?;
+                    match action.as_str() {
+                        "hover" => {}
+                        "click" => {
+                            send(NSEventType::LeftMouseDown, start, 2)?;
+                            send(NSEventType::LeftMouseUp, start, 3)?;
+                        }
+                        "secondary-click" => {
+                            send(NSEventType::RightMouseDown, start, 2)?;
+                            send(NSEventType::RightMouseUp, start, 3)?;
+                        }
+                        "drag" => {
+                            send(NSEventType::LeftMouseDown, start, 2)?;
+                            for step in 1..=12 {
+                                let progress = step as f64 / 12.0;
+                                let location = NSPoint::new(
+                                    start.x + (end.x - start.x) * progress,
+                                    start.y + (end.y - start.y) * progress,
+                                );
+                                send(NSEventType::LeftMouseDragged, location, 2 + step)?;
+                            }
+                            send(NSEventType::LeftMouseUp, end, 15)?;
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })();
+                let _ = sender.send(result);
+            })
+            .map_err(|error| format!("could not send browser mouse event: {error}"))?;
+        receiver
+            .recv_timeout(AGENT_CALL_TIMEOUT)
+            .map_err(|_| "browser mouse action timed out".to_string())?
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (webview, action, x, y, to_x, to_y);
+        Err("browser mouse actions are currently available on macOS only".into())
+    }
 }
 
 fn sanitize_agent_result(value: Value) -> Result<Value, String> {

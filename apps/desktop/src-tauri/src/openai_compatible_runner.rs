@@ -48,33 +48,6 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
         .and_then(|provider| provider.kind.clone())
 }
 
-/// What one message cost, as opposed to how full the context window is.
-///
-/// A turn that runs tools makes several requests and bills every one of them,
-/// so the running total and `ProviderContextUsage` answer different questions:
-/// the context reading is the last request's input, which is what sizes the
-/// window meter, while this is every request added together, which is what the
-/// user pays. Keeping them apart is why a turn that ran ten tools does not read
-/// as having overrun a window it never approached.
-///
-/// Only this runner reports it. The API-key presets and custom endpoints reach
-/// their model over Gyro's own HTTPS with no vendor dashboard behind them, so
-/// Gyro is the only thing counting; the CLI providers meter their own plans and
-/// surface that in Usage instead.
-pub(super) fn insert_turn_tokens(
-    payload: &mut serde_json::Map<String, serde_json::Value>,
-    adapter: &ProviderAdapterDescriptor,
-    billed: Option<&ProviderContextUsage>,
-) {
-    if adapter.kind != ProviderAdapterKind::OpenAiCompatible {
-        return;
-    }
-    let Some(value) = billed.and_then(|usage| serde_json::to_value(usage).ok()) else {
-        return;
-    };
-    payload.insert("turnTokens".into(), value);
-}
-
 /// Publish the running total mid-turn, so the working header can count up.
 ///
 /// Emitted after each round of the tool loop rather than once at the end: a

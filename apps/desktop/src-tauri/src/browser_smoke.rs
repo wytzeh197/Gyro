@@ -1,6 +1,7 @@
 //! Opt-in native regression check. Runs without provider calls or user data.
 //! GYRO_BROWSER_SMOKE_URL must point to scripts/fixtures/browser-observation.html
 //! served on loopback; GYRO_TEST_DATA_DIR receives the report and native PNG.
+use crate::browser_pointer;
 use crate::session_browser::*;
 use serde_json::{json, Value};
 use std::{
@@ -92,6 +93,23 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
             .map(String::from)
             .ok_or_else(|| format!("missing {selector}: {result}"))
     };
+    let point = |selector: &str| -> Result<(f64, f64), String> {
+        let result = call("find", json!({"selector": selector}))?;
+        let rect = &result["results"][0]["rect"];
+        let x = rect["x"]
+            .as_f64()
+            .ok_or_else(|| format!("missing {selector} X"))?;
+        let y = rect["y"]
+            .as_f64()
+            .ok_or_else(|| format!("missing {selector} Y"))?;
+        let width = rect["width"]
+            .as_f64()
+            .ok_or_else(|| format!("missing {selector} width"))?;
+        let height = rect["height"]
+            .as_f64()
+            .ok_or_else(|| format!("missing {selector} height"))?;
+        Ok((x + width / 2.0, y + height / 2.0))
+    };
     wait_page("Browser observation ready")?;
     steps.push("open/read".into());
     // A second read used to clear the map but retain invalid refs on elements.
@@ -111,6 +129,67 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("click fired twice".into());
     }
     steps.push("repeat read/find/click exactly once/read changed state".into());
+    let _pointer_capture = capture_session_browser_png(app, session)?;
+    let pointer_status = call("status", json!({}))?;
+    let pointer_url = pointer_status["url"]
+        .as_str()
+        .ok_or("missing pointer URL")?;
+    let pointer_viewport = pointer_status["viewport"]
+        .as_object()
+        .ok_or("missing pointer viewport")?;
+    app.state::<SessionBrowserManager>()
+        .remember_pointer_capture(
+            session,
+            "native-smoke-pointer.png".into(),
+            pointer_url.into(),
+            Value::Object(pointer_viewport.clone()),
+        )?;
+    let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
+        let outcome = browser_pointer::execute(
+            app,
+            session,
+            &json!({
+                "action": action,
+                "captureId": "native-smoke-pointer.png",
+                "x": x,
+                "y": y,
+                "toX": to_x,
+                "toY": to_y,
+            }),
+        )?;
+        if outcome.action != action {
+            return Err("browser mouse returned the wrong action".into());
+        }
+        Ok(())
+    };
+    let (hover_x, hover_y) = point("#hover-trigger")?;
+    let pointer_target = call("pointerTarget", json!({"x":hover_x,"y":hover_y}))?;
+    if pointer_target["name"] != "Hover target" {
+        return Err(format!(
+            "pointer coordinates missed hover target: {pointer_target}"
+        ));
+    }
+    if browser_pointer::execute(
+        app,
+        session,
+        &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
+    )
+    .is_ok()
+    {
+        return Err("stale pointer capture was accepted".into());
+    }
+    mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
+    wait_page("Hover: open")?;
+    mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
+    wait_page("Context: opened")?;
+    let (canvas_x, canvas_y) = point("#pointer-canvas")?;
+    mouse("click", canvas_x, canvas_y, canvas_x, canvas_y)?;
+    wait_page("Canvas: clicked")?;
+    let (drag_x, drag_y) = point("#drag-handle")?;
+    let (drop_x, drop_y) = point("#drop-zone")?;
+    mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
+    wait_page("Drag: completed")?;
+    steps.push("native hover/secondary-click/canvas click/drag".into());
     let input = find("#project-name")?;
     let typed = call(
         "type",

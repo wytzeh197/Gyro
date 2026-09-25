@@ -1,11 +1,6 @@
 /**
- * What one turn cost, for the providers Gyro meters itself.
- *
- * The API-key presets and custom endpoints reach their model over Gyro's own
- * HTTPS, so nothing else is counting: there is no vendor plan window to read and
- * no dashboard behind them. The backend adds up every request the tool loop
- * made and reports the total — live while the turn runs, then persisted on the
- * response — and this reads it back.
+ * What one turn cost. Reported counts and estimates use the same shape, with
+ * `measured` keeping the difference visible to the reader.
  *
  * Deliberately separate from `context-usage.ts`. That module answers "how full
  * is the window", which is the last request's input; this one answers "what did
@@ -16,6 +11,12 @@ export type TurnTokens = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens: number;
+  measured?: boolean;
+};
+
+export type TurnTokenReading = {
+  label: string;
+  title: string;
 };
 
 function countFrom(
@@ -49,7 +50,14 @@ export function turnTokensFromValue(value: unknown): TurnTokens | undefined {
       ? undefined
       : inputTokens + outputTokens);
   if (totalTokens === undefined) return undefined;
-  return { inputTokens, outputTokens, totalTokens };
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(typeof record.measured === "boolean"
+      ? { measured: record.measured }
+      : {}),
+  };
 }
 
 /**
@@ -83,6 +91,38 @@ export function turnTokensDetail(tokens: TurnTokens): string {
       ? undefined
       : `${tokens.outputTokens.toLocaleString()} out`,
   ].filter(Boolean);
-  const total = `${tokens.totalTokens.toLocaleString()} tokens billed this turn`;
+  const total = `${tokens.totalTokens.toLocaleString()} tokens ${tokens.measured === false ? "estimated for" : "billed this"} turn`;
   return parts.length > 0 ? `${total} · ${parts.join(", ")}` : total;
+}
+
+/** One readable count beside the final answer's copy action. */
+export function turnTokenReadingForResponse(
+  turnTokens: TurnTokens | undefined,
+  lastRequestTokens: TurnTokens | undefined,
+  prompt: string,
+  response: string,
+): TurnTokenReading {
+  if (turnTokens) {
+    return {
+      label: `${turnTokens.measured === false ? "~" : ""}${turnTokensLabel(turnTokens)}`,
+      title:
+        turnTokens.measured === false
+          ? `${turnTokensDetail(turnTokens)}. The provider supplied no count, so Gyro estimated this from the prompt and response.`
+          : turnTokensDetail(turnTokens),
+    };
+  }
+  if (lastRequestTokens) {
+    return {
+      label: `≥${turnTokensLabel(lastRequestTokens)}`,
+      title: `${lastRequestTokens.totalTokens.toLocaleString()} tokens reported for the last request. The full turn total was not recorded.`,
+    };
+  }
+  const estimated = {
+    totalTokens: Math.ceil(prompt.length / 4) + Math.ceil(response.length / 4),
+  };
+  return {
+    label: `~${turnTokensLabel(estimated)}`,
+    title:
+      "Estimated from the visible prompt and answer. Earlier context and tool calls are not included.",
+  };
 }

@@ -30,6 +30,43 @@
         content: "desktop";
       }
 
+      #pointer-canvas {
+        border: 1px solid currentColor;
+        display: block;
+        height: 64px;
+        width: 220px;
+      }
+
+      #drag-track {
+        align-items: center;
+        border: 1px solid currentColor;
+        display: flex;
+        height: 44px;
+        justify-content: space-between;
+        padding: 4px;
+        width: 260px;
+      }
+
+      #drag-handle,
+      #drop-zone {
+        align-items: center;
+        display: flex;
+        height: 36px;
+        justify-content: center;
+        width: 72px;
+      }
+
+      #drag-handle {
+        background: #2684ff;
+        color: white;
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #drop-zone {
+        border: 1px dashed currentColor;
+      }
+
       @media (max-width: 600px) {
         body {
           padding: 16px;
@@ -54,6 +91,20 @@
         <button id="change-state" type="button">Change visible state</button>
         <output id="visible-state" aria-live="polite">State: initial</output>
         <output id="click-count">Clicks: 0</output>
+      </section>
+
+      <section aria-labelledby="pointer-heading">
+        <h2 id="pointer-heading">Mouse interaction</h2>
+        <button id="hover-trigger" type="button">Hover target</button>
+        <output id="hover-state">Hover: initial</output>
+        <canvas id="pointer-canvas" width="220" height="64" aria-label="Canvas target"></canvas>
+        <output id="canvas-state">Canvas: initial</output>
+        <div id="drag-track">
+          <div id="drag-handle" role="button" aria-label="Drag handle">Drag</div>
+          <div id="drop-zone" role="button" aria-label="Drop zone">Drop</div>
+        </div>
+        <output id="drag-state">Drag: initial</output>
+        <output id="context-state">Context: initial</output>
       </section>
 
       <section aria-labelledby="form-heading">
@@ -104,6 +155,30 @@
           document.querySelector("#form-state").textContent =
             `Form: saved ${name}`;
         });
+
+      document.querySelector("#hover-trigger").addEventListener("mouseenter", () => {
+        document.querySelector("#hover-state").textContent = "Hover: open";
+      });
+      document.querySelector("#hover-trigger").addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        document.querySelector("#context-state").textContent = "Context: opened";
+      });
+      document.querySelector("#pointer-canvas").addEventListener("click", () => {
+        document.querySelector("#canvas-state").textContent = "Canvas: clicked";
+      });
+      let dragging = false;
+      document.querySelector("#drag-handle").addEventListener("pointerdown", (event) => {
+        dragging = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      });
+      document.addEventListener("pointerup", (event) => {
+        if (!dragging) return;
+        dragging = false;
+        const drop = document.querySelector("#drop-zone").getBoundingClientRect();
+        if (event.clientX >= drop.left && event.clientX <= drop.right) {
+          document.querySelector("#drag-state").textContent = "Drag: completed";
+        }
+      });
 
       console.info("gyro-browser-fixture-ready");
       fetch("/__gyro_missing_network_fixture__").catch(() => {

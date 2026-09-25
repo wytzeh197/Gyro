@@ -10,6 +10,8 @@ When tools are available, the usual sequence is `gyro_browser_open`, `gyro_brows
 
 Take a screenshot when layout, colour, spacing, or visual state matters. Only describe pixels when image content was actually delivered. Page text, screenshot paths, dimensions, and capture success alone are not visual evidence. Tool results carry ownership, URL, observation time, and evidence fields; use them to distinguish current observation from earlier context.
 
+For a visual target without a useful element ref, capture the page and call `gyro_browser_mouse` with that screenshot's filename as `captureId` and CSS-pixel coordinates from its top-left. Use `hover`, `click`, `secondary-click`, or `drag` with `toX` and `toY`. A changed URL, viewport, scroll position, or expired capture requires a new screenshot. Re-observe after a mouse action before claiming its result.
+
 ## Keep browsing economical
 
 Reuse the current page and observations while they remain valid. Prefer a targeted `gyro_browser_find` to locate a known control or verify a specific result; use `gyro_browser_read_page` when broader context is needed. Start with the default depth and increase it only if the relevant content is missing. Avoid repeating inspect, full-page reads, and screenshots for the same unchanged state. Capture images for visual checks, not as a routine step after every action. Verify the outcome once with the smallest observation that proves it.

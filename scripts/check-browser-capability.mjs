@@ -82,6 +82,12 @@ const BROWSER_TOOLS = [
     required: ["ref"],
   },
   {
+    id: "BrowserMouse",
+    tool: "gyro_browser_mouse",
+    class: "BrowserNavigate",
+    required: ["action", "captureId", "x", "y"],
+  },
+  {
     id: "BrowserType",
     tool: "gyro_browser_type",
     class: "BrowserNavigate",
@@ -191,6 +197,7 @@ for (const tool of BROWSER_TOOLS) {
 // Interaction tools must stay on the Ask class (BrowserNavigate), not auto-Allow.
 for (const id of [
   "BrowserClick",
+  "BrowserMouse",
   "BrowserType",
   "BrowserScroll",
   "BrowserFormInput",

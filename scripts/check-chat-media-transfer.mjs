@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chatMediaFiles,
+  chatMediaFilesFromDrop,
   isMediaDrag,
 } from "../packages/ui/src/chat-media-transfer.ts";
 
@@ -63,4 +64,30 @@ assert.equal(isMediaDrag(drop(types("application/x-gyro-chat-pane"))), false);
 assert.equal(isMediaDrag(drop(types(), [{ kind: "file" }])), true);
 assert.equal(isMediaDrag(null), false);
 
-console.log("Chat media transfer: 14 checks passed");
+// A browser image drag may expose a URL but no FileList. Resolve it while
+// the drop still owns its data store, then hand the composer a real File.
+const urlDrop = {
+  types: types("text/uri-list"),
+  files: [],
+  items: [],
+  getData: (type) =>
+    type === "text/uri-list" ? "data:image/png;base64,iVBORw0KGgo=" : "",
+};
+const [urlImage] = await chatMediaFilesFromDrop(urlDrop);
+assert.equal(urlImage.name, "image.png");
+assert.equal(urlImage.type, "image/png");
+assert.ok(urlImage.size > 0);
+assert.deepEqual(await chatMediaFilesFromDrop({ files: [image], items: [] }), [
+  image,
+]);
+await assert.rejects(
+  chatMediaFilesFromDrop({
+    types: types("text/uri-list"),
+    files: [],
+    items: [],
+    getData: () => "",
+  }),
+  /readable file or URL/,
+);
+
+console.log("Chat media transfer checks passed");

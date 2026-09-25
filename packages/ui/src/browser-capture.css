@@ -1,0 +1,112 @@
+.gyro-browser-capture-view {
+  background: #0a0b0d;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 180px;
+  width: 100%;
+}
+
+.gyro-browser-capture-stage {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+}
+
+.gyro-browser-capture-image {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  object-position: top center;
+  width: 100%;
+}
+
+.gyro-browser-feedback-layer {
+  cursor: crosshair;
+  inset: 0;
+  position: absolute;
+  touch-action: none;
+}
+
+.gyro-browser-feedback-selection {
+  background: rgba(65, 136, 255, 0.2);
+  border: 2px solid #69a5ff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  position: absolute;
+}
+
+.gyro-browser-feedback-form {
+  background: var(--gyro-surface, #151619);
+  border-top: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.gyro-browser-feedback-form span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+}
+
+.gyro-browser-feedback-form textarea {
+  background: var(--gyro-surface, #151619);
+  border: 1px solid var(--gyro-border);
+  border-radius: 6px;
+  color: var(--gyro-text);
+  min-height: 56px;
+  padding: 8px;
+  resize: vertical;
+}
+
+.gyro-browser-feedback-form > div {
+  display: flex;
+  gap: 6px;
+}
+
+.gyro-browser-feedback-form button {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  color: var(--gyro-text);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.gyro-browser-feedback-form button:disabled {
+  opacity: 0.45;
+}
+
+.gyro-browser-capture-meta {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-surface, #151619) 94%, transparent);
+  border-top: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
+  color: var(--gyro-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.gyro-browser-capture-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gyro-browser-capture-actions > button {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  color: var(--gyro-text);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.gyro-browser-capture-actions > button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
+}

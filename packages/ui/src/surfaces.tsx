@@ -7,10 +7,14 @@ import {
 } from "./composer-context.ts";
 import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
+import {
+  BrowserCaptureView,
+  browserPreviewLocationLabel,
+} from "./browser-capture-view";
 import { latestChatQuestions } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
 import { WorkspaceSearchResults } from "./workspace-search-results";
-import { chatMediaFiles, isMediaDrag } from "./chat-media-transfer";
+import { chatMediaFiles, chatMediaFilesFromDrop, isMediaDrag } from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
 import {
   SidebarProjectCard,
@@ -233,9 +237,11 @@ import {
   type ComposerLimitWindow,
 } from "./context-usage";
 import {
+  turnTokenReadingForResponse,
   turnTokensDetail,
   turnTokensFromValue,
   turnTokensLabel,
+  type TurnTokenReading,
   type TurnTokens,
 } from "./turn-tokens";
 import {
@@ -281,6 +287,7 @@ import type {
   CustomTaskDraft,
   AppDestination,
   Automation,
+  BrowserFeedback,
   BrowserPreview,
   BrowserPreviewDevice,
   CapabilityActivity,
@@ -437,7 +444,7 @@ import {
   resolveCouncilSeatRequests,
 } from "./council";
 
-type BrowserScreenshotAction = "capture" | "reveal";
+type BrowserScreenshotAction = "capture" | "reveal" | "feedback";
 import {
   cliUpdateActionLabel,
   cliUpdateNoticeMessage,
@@ -482,6 +489,9 @@ const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
 };
 const CHAT_SESSION_DRAG_MIME = "application/x-gyro-chat-session";
 const CHAT_PANE_DRAG_MIME = "application/x-gyro-chat-pane";
+// WebKit withholds getData during dragover. The sidebar and grid share this
+// renderer, so keep the dragged identity until drop or dragend.
+let activeSidebarChatDragSessionId: string | undefined;
 const TOOL_PANEL_DEFAULT_HEIGHT = 280;
 /** Comfortable height when opening Browser so the iframe is usable. */
 const TOOL_PANEL_BROWSER_HEIGHT = 420;
@@ -4234,9 +4244,15 @@ function WorkspaceSidebarContent({
           }),
         );
         event.dataTransfer.setData("text/plain", session.id);
+        activeSidebarChatDragSessionId = session.id;
         setDraggedSessionId(session.id);
       }}
-      onDragEnd={() => setDraggedSessionId(undefined)}
+      onDragEnd={() => {
+        if (activeSidebarChatDragSessionId === session.id) {
+          activeSidebarChatDragSessionId = undefined;
+        }
+        setDraggedSessionId(undefined);
+      }}
       session={session}
     />
   );
@@ -7325,6 +7341,7 @@ export function ChatGridSurface({
   ) => ReactNode;
 }) {
   const [dragSource, setDragSource] = useState<"session" | "pane">();
+  const [dragSessionId, setDragSessionId] = useState<string>();
   const [dropTargetId, setDropTargetId] = useState<string>();
   const isChatDragging = dragSource !== undefined;
   const occupiedCount = layout.slots.filter(Boolean).length;
@@ -7335,7 +7352,12 @@ export function ChatGridSurface({
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
-  const dropZones = chatGridDropZones(slots, arrangement);
+  const reorderingSession =
+    dragSource === "session" &&
+    slots.some(
+      (pane) => pane?.kind === "session" && pane.sessionId === dragSessionId,
+    );
+  const dropZones = chatGridDropZones(slots, arrangement, reorderingSession);
   const dropLayout = chatGridDropLayout(dropZones);
   const gridRef = useRef<HTMLDivElement>(null);
   // The pointer position of the last grid-level drag event. macOS only
@@ -7376,6 +7398,7 @@ export function ChatGridSurface({
   const finishDrag = useCallback(() => {
     dragPointer.current = undefined;
     setDragSource(undefined);
+    setDragSessionId(undefined);
     setDropTargetId(undefined);
   }, []);
 
@@ -7457,6 +7480,7 @@ export function ChatGridSurface({
     if (didDrop && maximizedPaneId) {
       onToggleMaximize(maximizedPaneId);
     }
+    if (didDrop) activeSidebarChatDragSessionId = undefined;
     finishDrag();
   };
 
@@ -7542,6 +7566,14 @@ export function ChatGridSurface({
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         dragPointer.current = { x: event.clientX, y: event.clientY };
+        if (source === "session") {
+          const sessionId =
+            activeSidebarChatDragSessionId ??
+            chatSessionDragPayload(event.dataTransfer)?.sessionId;
+          if (sessionId && dragSessionId !== sessionId) {
+            setDragSessionId(sessionId);
+          }
+        }
         if (dragSource !== source) {
           // First sighting of this drag: mount the overlay, then let the
           // layout effect light the tile it is already sitting on.
@@ -7663,6 +7695,26 @@ export function ChatGridSurface({
   );
 }
 
+function chatSessionDragPayload(dataTransfer: DataTransfer) {
+  try {
+    const raw = dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
+    if (!raw) return undefined;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object") return undefined;
+    const payload = value as Record<string, unknown>;
+    return typeof payload.sessionId === "string" && payload.sessionId
+      ? {
+          sessionId: payload.sessionId,
+          projectKey:
+            typeof payload.projectKey === "string" ? payload.projectKey : "",
+        }
+      : undefined;
+  } catch {
+    // WebKit may deny reading payload bytes until the drop itself.
+    return undefined;
+  }
+}
+
 function chatDragSource(dataTransfer: DataTransfer) {
   if (dataTransferHasType(dataTransfer, CHAT_PANE_DRAG_MIME)) {
     return "pane" as const;
@@ -7707,6 +7759,7 @@ export const NEW_CHAT_DRAFT_KEY = "new";
  */
 type MediaDropTarget = {
   attach: (files: File[]) => void;
+  reportError: (message: string) => void;
   paneKey: string;
   rect: () => DOMRect;
 };
@@ -7733,6 +7786,7 @@ const handledMediaDrops = new WeakSet<Event>();
 
 const NO_MEDIA_DROP_TARGET: MediaDropTarget = {
   attach: () => undefined,
+  reportError: () => undefined,
   paneKey: "",
   rect: () => new DOMRect(),
 };
@@ -7883,7 +7937,10 @@ type ChatSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -7940,6 +7997,13 @@ type ChatSurfaceProps = {
   /** Whether empty chats show their starter prompt shortcuts. */
   isEnvironmentRailOpen?: boolean;
   isToolPanelOpen?: boolean;
+  /**
+   * Whether the surrounding layout can draw the bottom drawer at all. The Chat
+   * (thread) layout has none — the drawer belongs to the Workspace layouts — so
+   * its chats pass false and lose the drawer control, together with the model
+   * dot that only ever pointed at it.
+   */
+  isToolPanelAvailable?: boolean;
   isComposerSending?: boolean;
   /** False while desktop shell warm-up is still running. */
   shellReady?: boolean;
@@ -7984,6 +8048,7 @@ type ChatSurfaceProps = {
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
+  onMediaDropError?: (message: string) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
   onCloseChat?: () => void;
@@ -8206,6 +8271,7 @@ export function ChatSurface({
   planEditorRequest,
   isEnvironmentRailOpen,
   isToolPanelOpen,
+  isToolPanelAvailable = true,
   isComposerSending,
   shellReady = true,
   isCliUpdating = false,
@@ -8220,6 +8286,7 @@ export function ChatSurface({
   onSteerQueuedMessage,
   canAttachEditorSnapshot = false,
   onAttachMediaFiles,
+  onMediaDropError,
   onReusePrompt,
   onStopChat,
   onCloseChat,
@@ -8378,8 +8445,6 @@ export function ChatSurface({
     const onDrop = (event: DragEvent) => {
       if (handledMediaDrops.has(event)) return;
       if (!isMediaDrag(event.dataTransfer)) return;
-      const files = chatMediaFiles(event.dataTransfer!);
-      if (!files.length) return;
       event.preventDefault();
       event.stopPropagation();
       const point = { x: event.clientX, y: event.clientY };
@@ -8397,8 +8462,12 @@ export function ChatSurface({
         NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
       // surface's own capture handler is still the one that can attach.
-      if (target !== NO_MEDIA_DROP_TARGET) handledMediaDrops.add(event);
-      target.attach(files);
+      if (target === NO_MEDIA_DROP_TARGET) return;
+      handledMediaDrops.add(event);
+      void chatMediaFilesFromDrop(event.dataTransfer!).then(
+        (files) => target.attach(files),
+        (error) => target.reportError(String(error)),
+      );
     };
     const onDragLeave = (event: DragEvent) => {
       // Dragging out of the window must not leave a stale hovered chat for the
@@ -8444,13 +8513,15 @@ export function ChatSurface({
       // The window listener runs first and owns routing; it marks the event so
       // this pass does not attach the same image twice.
       if (handledMediaDrops.has(event.nativeEvent)) return;
-      const files = chatMediaFiles(event.dataTransfer);
-      if (!files.length) return;
+      if (!isMediaDrag(event.dataTransfer)) return;
       event.preventDefault();
       event.stopPropagation();
-      onAttachMediaFiles?.(files);
+      void chatMediaFilesFromDrop(event.dataTransfer).then(
+        (files) => onAttachMediaFiles?.(files),
+        (error) => onMediaDropError?.(String(error)),
+      );
     },
-    [onAttachMediaFiles],
+    [onAttachMediaFiles, onMediaDropError],
   );
   const planDecisionKey = useMemo(() => {
     // A plan that wrote the document but skipped the checklist marker is still
@@ -9081,8 +9152,8 @@ export function ChatSurface({
         }}
         onSelectTab={onSelectChatPanel}
         onShowLauncher={onShowCompanionLauncher}
-        onToggleToolPanel={onToggleToolPanel}
-        isToolPanelOpen={isToolPanelOpen === true}
+        onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
+        isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
         isTiled={isTiled}
         onWidthChange={onCompanionWidthChange}
         openTabs={openTabs}
@@ -9304,6 +9375,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
+            onMediaDropError={onMediaDropError}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -9378,8 +9450,8 @@ export function ChatSurface({
           <ChatSurfaceControls
             isDockOpen={isCompanionPanel}
             isPlanOpen={activeRailPanel === "plan"}
-            isToolPanelOpen={isToolPanelOpen === true}
-            modelFocus={visibleModelFocus}
+            isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+            modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
             onToggleToolPanel={onToggleToolPanel}
@@ -9406,8 +9478,8 @@ export function ChatSurface({
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
             isPlanOpen={activeRailPanel === "plan"}
-            isToolPanelOpen={isToolPanelOpen === true}
-            modelFocus={visibleModelFocus}
+            isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+            modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
             onCloseChat={onCloseChat}
             onToggleDock={
               isCompanionPanel ? closeCompanion : onReopenCompanionDock
@@ -9419,7 +9491,7 @@ export function ChatSurface({
             showClose={isTiled}
             showEnvironment
             showOverflow={false}
-            showToolPanel
+            showToolPanel={isToolPanelAvailable}
           />
         </div>
       </div>
@@ -9540,6 +9612,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
+            onMediaDropError={onMediaDropError}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -10170,7 +10243,10 @@ function ChatSidePanel({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -12225,7 +12301,10 @@ type CliWorkspaceSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
 };
 
@@ -13151,7 +13230,10 @@ type IdeSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
 };
 
@@ -15100,37 +15182,33 @@ function WorkbenchPaneTabs({
   onTabChange,
   onAddPane,
   terminalTitle,
-  terminalOnly = false,
 }: {
   activeTab: WorkbenchPaneTab;
   onTabChange: (tab: WorkbenchPaneTab) => void;
   onAddPane?: () => void;
   terminalTitle?: string;
-  terminalOnly?: boolean;
 }) {
   return (
     <div className="gyro-pane-tabs" role="tablist" aria-label="Workbench panes">
-      {paneTabs
-        .filter((tab) => !terminalOnly || tab.id === "terminal")
-        .map((tab) => {
-          const Icon = tab.icon;
-          const isActive = tab.id === activeTab;
-          const label =
-            tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
-          return (
-            <button
-              aria-selected={isActive}
-              className={isActive ? "is-active" : ""}
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              role="tab"
-              type="button"
-            >
-              <Icon size={15} />
-              {label}
-            </button>
-          );
-        })}
+      {paneTabs.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = tab.id === activeTab;
+        const label =
+          tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
+        return (
+          <button
+            aria-selected={isActive}
+            className={isActive ? "is-active" : ""}
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            role="tab"
+            type="button"
+          >
+            <Icon size={15} />
+            {label}
+          </button>
+        );
+      })}
       {activeTab === "terminal" && onAddPane ? (
         <button
           aria-label="New terminal"
@@ -15269,7 +15347,10 @@ function WorkbenchPaneContent({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -15496,7 +15577,6 @@ type WorkspaceToolPanelProps = {
   isTerminalSourceControlLoading?: boolean;
   isPrimary?: boolean;
   isResizable?: boolean;
-  terminalOnly?: boolean;
   height?: number;
   onClose?: () => void;
   onHeightChange?: (height: number) => void;
@@ -15546,7 +15626,10 @@ type WorkspaceToolPanelProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -15575,7 +15658,6 @@ export function WorkspaceToolPanel({
   isTerminalSourceControlLoading,
   isPrimary = false,
   isResizable = false,
-  terminalOnly = false,
   height,
   onClose,
   onHeightChange,
@@ -15624,7 +15706,6 @@ export function WorkspaceToolPanel({
   const [isResizing, setIsResizing] = useState(false);
   const dragMovedRef = useRef(false);
   const canResize = isResizable && !isPrimary;
-  const effectivePaneTab = terminalOnly ? "terminal" : activePaneTab;
   const activeTerminalPane =
     terminalPanes?.find((pane) => pane.id === selectedTerminalPaneId) ??
     terminalPanes?.[0];
@@ -15744,7 +15825,7 @@ export function WorkspaceToolPanel({
     }
     if (isNearFull) {
       onHeightChange(
-        effectivePaneTab === "browser"
+        activePaneTab === "browser"
           ? TOOL_PANEL_BROWSER_HEIGHT
           : TOOL_PANEL_DEFAULT_HEIGHT,
       );
@@ -15755,7 +15836,7 @@ export function WorkspaceToolPanel({
 
   const compactTerminal =
     !isPrimary &&
-    effectivePaneTab === "terminal" &&
+    activePaneTab === "terminal" &&
     Boolean(terminalPanes?.length);
   const panelControls = (
     <>
@@ -15791,7 +15872,7 @@ export function WorkspaceToolPanel({
     canResize ? "is-resizable" : "",
     isResizing ? "is-resizing" : "",
     isNearFull ? "is-maximized" : "",
-    effectivePaneTab === "browser" ? "is-browser" : "",
+    activePaneTab === "browser" ? "is-browser" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -15808,7 +15889,7 @@ export function WorkspaceToolPanel({
           : undefined
       }
       aria-label="Workspace tools"
-      data-active-tab={effectivePaneTab}
+      data-active-tab={activePaneTab}
     >
       {canResize ? (
         <button
@@ -15836,11 +15917,10 @@ export function WorkspaceToolPanel({
       {!isPrimary && !compactTerminal ? (
         <div className="gyro-workspace-tool-panel-head">
           <WorkbenchPaneTabs
-            activeTab={effectivePaneTab}
+            activeTab={activePaneTab}
             onAddPane={onAddTerminalPane}
             onTabChange={onPaneTabChange}
             terminalTitle={activeTerminalPane?.title}
-            terminalOnly={terminalOnly}
           />
           {panelControls}
         </div>
@@ -15848,9 +15928,9 @@ export function WorkspaceToolPanel({
       <WorkbenchPaneContent
         terminalPanelActions={compactTerminal ? panelControls : undefined}
         onSelectTerminalPanel={
-          compactTerminal && !terminalOnly ? onPaneTabChange : undefined
+          compactTerminal ? onPaneTabChange : undefined
         }
-        activePaneTab={effectivePaneTab}
+        activePaneTab={activePaneTab}
         activeProfileId={activeProfileId}
         browserPreview={browserPreview}
         cliLaunchPreset={cliLaunchPreset}
@@ -18397,7 +18477,10 @@ function ResizableBrowserRail({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -18659,7 +18742,10 @@ export function BrowserPreviewSurface({
   onUrlChange?: (url: string) => void;
   onNavigate?: (url: string) => void;
   onDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onOpenExternal?: () => void;
   onHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -18712,6 +18798,9 @@ export function BrowserPreviewSurface({
     useNativeHost || isLoopbackBrowserPreviewUrl(frameUrl);
   const isLocalPreview = isLoopbackBrowserPreviewUrl(frameUrl);
   const hostLabel = browserPreviewHostLabel(preview.url);
+  const captureSourceLabel = browserPreviewLocationLabel(
+    preview.latestCapture?.sourceUrl ?? preview.url,
+  );
   const isLoading = preview.status === "loading";
   const isCapturing = preview.captureStatus === "capturing";
   const isLive =
@@ -19088,35 +19177,16 @@ export function BrowserPreviewSurface({
             </div>
           ) : null}
           {isBlank ? null : showingCapture && captureSrc ? (
-            <div className="gyro-browser-capture-view">
-              <img
-                alt={`Browser capture of ${hostLabel || preview.url}`}
-                className="gyro-browser-capture-image"
-                draggable={false}
-                src={captureSrc}
-              />
-              <div className="gyro-browser-capture-meta">
-                <span>
-                  {preview.latestCapture?.width ?? 0} ×{" "}
-                  {preview.latestCapture?.height ?? 0}
-                  {hostLabel ? ` · ${hostLabel}` : ""}
-                  {preview.latestCapture?.createdAt
-                    ? ` · ${formatBrowserCaptureTime(preview.latestCapture.createdAt)}`
-                    : ""}
-                </span>
-                <div className="gyro-browser-capture-actions">
-                  <button onClick={() => setFrameMode("live")} type="button">
-                    Back to live
-                  </button>
-                  <button
-                    onClick={() => onScreenshot?.("reveal")}
-                    type="button"
-                  >
-                    Reveal file
-                  </button>
-                </div>
-              </div>
-            </div>
+            <BrowserCaptureView
+              key={`${preview.latestCapture!.path}:${preview.latestCapture!.createdAt}`}
+              capture={preview.latestCapture!}
+              src={captureSrc}
+              fallbackUrl={preview.url}
+              deviceLabel={deviceLabel(preview.device)}
+              isChat={isChat}
+              onBackToLive={() => setFrameMode("live")}
+              onScreenshot={onScreenshot}
+            />
           ) : !useNativeHost ? (
             showPlaceholder ? (
               <BrowserFramePlaceholder
@@ -19158,7 +19228,7 @@ export function BrowserPreviewSurface({
           <span className={statusRingClass} />
           <span>
             {showingCapture
-              ? `Capture · ${hostLabel || "preview"} · ${deviceLabel(preview.device)}`
+              ? `Capture · ${captureSourceLabel || "preview"} · ${deviceLabel(preview.device)}`
               : browserStatusLabel(preview)}
           </span>
         </div>
@@ -19359,21 +19429,6 @@ function browserPreviewHostLabel(url?: string) {
     return parsed.host || parsed.hostname || "";
   } catch {
     return "";
-  }
-}
-
-function formatBrowserCaptureTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date);
-  } catch {
-    return date.toLocaleTimeString();
   }
 }
 
@@ -24351,6 +24406,7 @@ function Composer({
   onRemoveAttachment,
   canAttachEditorSnapshot = false,
   onAttachMediaFiles,
+  onMediaDropError,
   onSend,
   onStop,
   worktreeName,
@@ -24407,6 +24463,7 @@ function Composer({
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
+  onMediaDropError?: (message: string) => void;
   onSend: () => void;
   onStop?: () => void;
   worktreeName?: string;
@@ -25310,10 +25367,14 @@ function Composer({
   const composerShellRef = useRef<HTMLDivElement | null>(null);
   const attachMediaFilesRef = useRef(onAttachMediaFiles);
   attachMediaFilesRef.current = onAttachMediaFiles;
+  const mediaDropErrorRef = useRef(onMediaDropError);
+  mediaDropErrorRef.current = onMediaDropError;
   useEffect(() => {
     const attach = (files: File[]) => attachMediaFilesRef.current?.(files);
+    const reportError = (message: string) => mediaDropErrorRef.current?.(message);
     const host: MediaDropTarget = {
       attach,
+      reportError,
       paneKey: draftKey,
       rect: () => new DOMRect(),
     };
@@ -25322,6 +25383,7 @@ function Composer({
     localMediaDrop = host;
     const deregister = registerMediaDropTarget({
       attach,
+      reportError,
       paneKey: draftKey,
       rect: () => {
         const shell = composerShellRef.current;
@@ -26837,7 +26899,7 @@ type ChatTranscriptTurn = {
   durationMs?: number;
   runStatus?: string;
   runUpdatedAtMs?: number;
-  /** What this turn billed, for the providers Gyro meters itself. */
+  /** What this turn used, reported or clearly marked as estimated. */
   turnTokens?: TurnTokens;
 };
 
@@ -27406,6 +27468,17 @@ function ChatTurn({
     );
   }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
+  const responsePayload = responseEvent
+    ? eventPayloadRecord(responseEvent)
+    : undefined;
+  const responseTokenReading = responseEvent
+    ? turnTokenReadingForResponse(
+        turnTokensFromValue(responsePayload?.turnTokens) ?? turn.turnTokens,
+        turnTokensFromValue(responsePayload?.contextUsage),
+        turn.user?.message ?? "",
+        responseEvent.message,
+      )
+    : undefined;
   // `/compact` produces no answer, only its compaction step. Without a result
   // line the finished turn reads as an empty, stalled response.
   const isCompactionResult =
@@ -27551,19 +27624,8 @@ function ChatTurn({
                     onCouncilAction={onCouncilAction}
                     onOpenBrowserUrl={onOpenBrowserUrl}
                     previewCapture={previewCapture}
+                    tokenReading={responseTokenReading}
                   />
-                  {/* Inside the content box, not beside it: several rules give
-                      `.gyro-message.is-assistant > div:last-child` its full
-                      width, so a sibling here takes that selector away and
-                      collapses the answer to a one-word column. */}
-                  {!isRunning && turn.turnTokens ? (
-                    <p
-                      className="gyro-message-token-count"
-                      title={turnTokensDetail(turn.turnTokens)}
-                    >
-                      {turnTokensLabel(turn.turnTokens)}
-                    </p>
-                  ) : null}
                 </div>
               </article>
             </div>
@@ -28128,6 +28190,7 @@ function AssistantResponse({
   onCouncilAction,
   onOpenBrowserUrl,
   previewCapture,
+  tokenReading,
 }: {
   actions?: ChatArtifactActions;
   event: SessionEvent;
@@ -28136,6 +28199,7 @@ function AssistantResponse({
   ) => void | Promise<string | void>;
   onOpenBrowserUrl?: (url: string) => void;
   previewCapture?: { src?: string; path?: string };
+  tokenReading?: TurnTokenReading;
 }) {
   const council = useMemo(() => councilResponseFromEvent(event), [event]);
   // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
@@ -28165,6 +28229,7 @@ function AssistantResponse({
         onCouncilAction={onCouncilAction}
         onOpenBrowserUrl={onOpenBrowserUrl}
         payload={council}
+        tokenReading={tokenReading}
       />
     );
   }
@@ -28196,6 +28261,11 @@ function AssistantResponse({
         >
           <Copy size={15} />
         </button>
+        {tokenReading ? (
+          <span className="gyro-message-token-count" title={tokenReading.title}>
+            {tokenReading.label}
+          </span>
+        ) : null}
       </footer>
     </div>
   );
@@ -28257,6 +28327,7 @@ function CouncilResponseCard({
   payload,
   onCouncilAction,
   onOpenBrowserUrl,
+  tokenReading,
 }: {
   event: SessionEvent;
   payload: CouncilResponsePayload;
@@ -28264,6 +28335,7 @@ function CouncilResponseCard({
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
   onOpenBrowserUrl?: (url: string) => void;
+  tokenReading?: TurnTokenReading;
 }) {
   const [expandedSeatId, setExpandedSeatId] = useState<string | null>(null);
   const [seatBodies, setSeatBodies] = useState<Record<string, string>>({});
@@ -28459,6 +28531,11 @@ function CouncilResponseCard({
         >
           <Copy size={15} />
         </button>
+        {tokenReading ? (
+          <span className="gyro-message-token-count" title={tokenReading.title}>
+            {tokenReading.label}
+          </span>
+        ) : null}
         <button
           disabled={busyAction !== null}
           onClick={() =>

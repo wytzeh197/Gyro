@@ -41,6 +41,12 @@ import {
   browserUnreachableMessage,
   normalizedPreviewUrl,
 } from "./browser-preview-text";
+import {
+  appendFeedback,
+  browserFeedbackDraft,
+  captureChatBrowserPage,
+  revealBrowserCapture,
+} from "./browser-capture";
 import { useModelBrowserReveal } from "./model-browser-reveal";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { createGithubRefreshController } from "./github-refresh";
@@ -81,7 +87,7 @@ import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -171,6 +177,7 @@ import {
   type AppDestination,
   type Automation,
   type BrowserPreviewCapture,
+  type BrowserFeedback,
   type BrowserPreviewDiagnostic,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
@@ -297,6 +304,7 @@ import {
   mergePersistedAndOptimisticEvents,
   mergeLiveCapabilityEvent,
   mergeProviderResponseEvents,
+  preserveDeliveredResponses,
   resetStreamingAssistantForRetry,
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
@@ -1244,6 +1252,9 @@ export function App() {
     [activeSessionId, sessions],
   );
   const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  // The bottom drawer belongs to the Workspace layouts. A Chat (thread) surface
+  // never draws it, so its chats must not offer the control either.
+  const isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread";
   // Browser focus splits the code route into editor + preview rows. It has to
   // track whether the preview panel is actually rendered: leaving the pane tab
   // on "browser" after closing the panel used to keep the split, so the editor
@@ -2687,16 +2698,18 @@ export function App() {
             ...current,
             [sessionId]: page.hasMoreBefore,
           }));
-          setEventsForSession(
-            sessionId,
+          setEventsForSession(sessionId, (current) =>
             limitEventsForSession(
               sessionId,
-              markInactiveCapabilityResources(
-                mergePersistedAndOptimisticEvents(
-                  page.events,
-                  latestOptimisticEvents,
+              preserveDeliveredResponses(
+                markInactiveCapabilityResources(
+                  mergePersistedAndOptimisticEvents(
+                    page.events,
+                    latestOptimisticEvents,
+                  ),
+                  liveCapabilityResourceIdsRef.current,
                 ),
-                liveCapabilityResourceIdsRef.current,
+                current,
               ),
             ),
           );
@@ -8859,22 +8872,22 @@ export function App() {
         }));
       }
       const upload = async (dropped: File, kind: "image" | "video") => {
-        const file =
-          kind === "image"
-            ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
-            : dropped;
-        const name =
-          file.name ||
-          `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
-        const byteLimit =
-          kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
-        if (file.size > byteLimit) {
-          rejected.push(
-            `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
-          );
-          return undefined;
-        }
         try {
+          const file =
+            kind === "image"
+              ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+              : dropped;
+          const name =
+            file.name ||
+            `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+          const byteLimit =
+            kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+          if (file.size > byteLimit) {
+            rejected.push(
+              `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
+            );
+            return undefined;
+          }
           const headers: Record<string, string> = {
             "x-gyro-kind": kind,
             "x-gyro-name": base64Utf8(name),
@@ -8890,7 +8903,7 @@ export function App() {
           );
           return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
-          rejected.push(`${name}: ${String(error)}`);
+          rejected.push(`${dropped.name || kind}: ${String(error)}`);
           return undefined;
         }
       };
@@ -13182,79 +13195,49 @@ export function App() {
       workspacePath,
     ],
   );
-
   const captureBrowserPreview = useCallback(
-    async (action: "capture" | "reveal" = "capture") => {
-      if (action === "reveal") {
-        const path = workbench.browserPreview.latestCapture?.path;
-        if (!path) return;
-        try {
-          await revealItemInDir(path);
-        } catch (error) {
-          notify(
-            "command-failed",
-            "Could not reveal screenshot",
-            String(error),
-          );
-        }
-        return;
-      }
-
-      dispatchWorkbench({ type: "browser-capture-start" });
-      if (!isTauriRuntime()) {
-        dispatchWorkbench({
-          type: "browser-capture-failure",
-          error: "Preview screenshots require the Gyro desktop app",
+    async (
+      action: "capture" | "reveal" | "feedback" = "capture",
+      feedback?: BrowserFeedback,
+    ) => {
+      if (action === "feedback") {
+        const draft = browserFeedbackDraft({
+          capture: workbench.browserPreview.latestCapture,
+          feedback,
+          attachments: chatAttachments[activeDraftKey] ?? [],
+          fallbackUrl: workbench.browserPreview.url,
         });
-        return;
+        if (!draft.ok) {
+          notify("command-failed", "Browser feedback unavailable", draft.error);
+          return false;
+        }
+        setChatDrafts((current) => ({
+          ...current,
+          [activeDraftKey]: appendFeedback(current[activeDraftKey], draft.note),
+        }));
+        return true;
       }
+      if (action === "reveal") {
+        const error = await revealBrowserCapture(
+          workbench.browserPreview.latestCapture?.path,
+        );
+        if (error)
+          notify("command-failed", "Could not reveal screenshot", error);
+        return undefined;
+      }
+      dispatchWorkbench({ type: "browser-capture-start" });
       try {
-        // Prefer the live session webview; fall back to ephemeral loopback capture.
-        let capture: BrowserPreviewCapture | undefined;
-        try {
-          const snapshot = await invoke<{ url: string } | null>(
-            "session_browser_snapshot",
-            { sessionId: sessionBrowserKey },
-          );
-          if (snapshot) {
-            // Session screenshot is handled through the capability path for models;
-            // user-triggered capture still uses the existing loopback command when
-            // possible, otherwise navigates the live browser and reuses capture.
-            capture = await invoke<BrowserPreviewCapture>(
-              "capture_browser_preview",
-              {
-                request: {
-                  device: workbench.browserPreview.device,
-                  url: normalizedPreviewUrl(workbench.browserPreview.url),
-                },
-              },
-            );
-          }
-        } catch {
-          capture = undefined;
-        }
-        if (!capture) {
-          capture = await invoke<BrowserPreviewCapture>(
-            "capture_browser_preview",
-            {
-              request: {
-                device: workbench.browserPreview.device,
-                url: normalizedPreviewUrl(workbench.browserPreview.url),
-              },
-            },
-          );
-        }
-        const captureWithSrc: BrowserPreviewCapture = {
-          ...capture,
-          src: isTauriRuntime() ? convertFileSrc(capture.path) : capture.path,
-        };
+        const captureWithSrc = await captureChatBrowserPage({
+          sessionId: sessionBrowserKey,
+          nativeHost: workbench.browserPreview.nativeHost === true,
+          device: workbench.browserPreview.device,
+          url: workbench.browserPreview.url,
+        });
         dispatchWorkbench({
           type: "browser-capture-success",
           capture: captureWithSrc,
         });
-        // Drop the freeze-frame into the composer so it becomes part of the
-        // chat trail (send it as context, or just keep it staged).
-        void attachBrowserCaptureToChat(captureWithSrc);
+        await attachBrowserCaptureToChat(captureWithSrc);
       } catch (error) {
         const message = String(error);
         dispatchWorkbench({
@@ -13263,17 +13246,20 @@ export function App() {
         });
         notify("command-failed", "Screenshot failed", message);
       }
+      return undefined;
     },
     [
+      activeDraftKey,
       attachBrowserCaptureToChat,
+      chatAttachments,
       notify,
       sessionBrowserKey,
       workbench.browserPreview.device,
-      workbench.browserPreview.latestCapture?.path,
+      workbench.browserPreview.latestCapture,
+      workbench.browserPreview.nativeHost,
       workbench.browserPreview.url,
     ],
   );
-
   useEffect(() => {
     if (workbench.browserPreview.status !== "loading") return;
     const controller = new AbortController();
@@ -15242,7 +15228,6 @@ export function App() {
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
-      terminalOnly={!isPrimary && activeWorkspaceLayout === "thread"}
       onAcceptAllDiffs={() =>
         dispatchWorkbench({
           type: "set-diff-review-state",
@@ -15886,6 +15871,7 @@ export function App() {
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
+        isToolPanelAvailable={isBottomDrawerAvailable}
         isTiled={options.isTiled}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
@@ -15898,6 +15884,9 @@ export function App() {
             workspacePath: pane.workspacePath,
           });
         }}
+        onMediaDropError={(message) =>
+          notify("command-failed", "Image could not be attached", message)
+        }
         onComposerAction={(action) => {
           focusChatPane(pane);
           handleComposerAction(action, paneDraftKey);
@@ -16151,9 +16140,13 @@ export function App() {
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
+      isToolPanelAvailable={isBottomDrawerAvailable}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
+              onMediaDropError={(message) =>
+                notify("command-failed", "Image could not be attached", message)
+              }
       onComposerAction={handleComposerAction}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
@@ -16524,12 +16517,16 @@ export function App() {
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
+                    isToolPanelAvailable={isBottomDrawerAvailable}
                     maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
                     onAgentAction={(action) =>
                       notify("terminal", "Agent action", action)
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
+              onMediaDropError={(message) =>
+                notify("command-failed", "Image could not be attached", message)
+              }
                     onComposerAction={handleComposerAction}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
@@ -16825,12 +16822,14 @@ export function App() {
             </section>
           ) : null}
 
-          {activeWorkspaceLayout !== "terminal-grid" &&
-          (activeWorkspaceLayout !== "code" ||
-            Boolean(activeSession?.workspacePath ?? workspacePath)) ? (
+          {/* The bottom drawer is a Workspace surface. A Chat (thread) layout
+              never draws it: terminals, review and the browser live on the
+              chat's own rail there. */}
+          {activeWorkspaceLayout === "code" &&
+          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             workbench.isToolPanelOpen ? (
               renderWorkspaceToolPanel(false)
-            ) : activeWorkspaceLayout === "code" ? (
+            ) : (
               <nav
                 aria-label="Workspace tools"
                 className="gyro-workspace-tool-launcher"
@@ -16844,7 +16843,7 @@ export function App() {
                   Panel
                 </button>
               </nav>
-            ) : null
+            )
           ) : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
@@ -17277,9 +17276,13 @@ export function App() {
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
+          isToolPanelAvailable={isBottomDrawerAvailable}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
+              onMediaDropError={(message) =>
+                notify("command-failed", "Image could not be attached", message)
+              }
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}

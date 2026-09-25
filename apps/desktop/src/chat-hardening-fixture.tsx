@@ -42,6 +42,18 @@ const answer = makeEvent(
     timelineSequence: 2,
   },
 );
+const meteredAnswer: SessionEvent = {
+  ...answer,
+  payload: {
+    ...(answer.payload as object),
+    turnTokens: {
+      inputTokens: 1_200,
+      outputTokens: 340,
+      totalTokens: 1_540,
+      measured: true,
+    },
+  },
+};
 const status = makeEvent("status", "system-event", "Answered", {
   kind: "provider-status",
   status: "done",
@@ -251,7 +263,7 @@ function Fixture() {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       {/* Hidden browser previews pause entrance animations at opacity zero. */}
-      <style>{`.gyro-chat-thread-canvas, .gyro-chat-composer-dock { animation: none !important; }`}</style>
+      <style>{`.gyro-chat-thread-canvas, .gyro-chat-composer-dock, .gyro-chat-run-timeline > .gyro-message.is-assistant { animation: none !important; }`}</style>
       <nav
         aria-label="Replay controls"
         style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: 16 }}
@@ -277,6 +289,14 @@ function Fixture() {
           }}
         >
           Complete turn
+        </button>
+        <button
+          onClick={() => {
+            setKeepAlivePanes([]);
+            setEvents([user, meteredAnswer, status]);
+          }}
+        >
+          Reported tokens
         </button>
         <button
           onClick={() => {

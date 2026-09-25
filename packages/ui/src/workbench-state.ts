@@ -422,9 +422,51 @@ export function chatGridReducer(
         pane && chatPaneIdentity(pane) === chatPaneIdentity(action.pane),
     );
     if (existingIndex >= 0) {
-      const existing = current.slots[existingIndex];
-      next = { ...current, focusedPaneId: existing?.paneId };
+      const existing = current.slots[existingIndex]!;
+      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
+      if (action.mode === "drop" && requestedIndex !== undefined) {
+        const slots = current.slots.slice();
+        if (action.insertPosition && slots[requestedIndex]) {
+          const occupied = slots.filter((pane): pane is ChatPaneRef =>
+            Boolean(pane),
+          );
+          const fromPosition = occupied.findIndex(
+            (pane) => pane.paneId === existing.paneId,
+          );
+          const targetPosition = occupied.findIndex(
+            (pane) => pane.paneId === slots[requestedIndex]?.paneId,
+          );
+          let insertionIndex =
+            targetPosition + (action.insertPosition === "after" ? 1 : 0);
+          if (fromPosition < insertionIndex) insertionIndex -= 1;
+          occupied.splice(fromPosition, 1);
+          occupied.splice(insertionIndex, 0, existing);
+          const reordered: Array<ChatPaneRef | null> = occupied;
+          while (reordered.length < CHAT_GRID_MAX_SLOTS) reordered.push(null);
+          next = {
+            ...current,
+            slots: reordered,
+            focusedPaneId: existing.paneId,
+            arrangement: action.arrangement ?? current.arrangement,
+          };
+        } else {
+          slots[existingIndex] = slots[requestedIndex] ?? null;
+          slots[requestedIndex] = existing;
+          next = { ...current, slots, focusedPaneId: existing.paneId };
+        }
+      } else {
+        next = { ...current, focusedPaneId: existing.paneId };
+      }
     } else {
+      // A full row has reorder targets only for a chat already in it. A stale
+      // or synthetic drop must not silently evict the last conversation.
+      if (
+        action.mode === "drop" &&
+        action.insertPosition &&
+        current.slots.every(Boolean)
+      ) {
+        return state;
+      }
       // Pane ids are React keys and the focus handle. An incoming pane that
       // reuses an id already on screen — a sent draft keeps its draft pane id —
       // would either merge into the chat it replaces or share focus with
@@ -5214,10 +5256,9 @@ function isSessionsLayout(
 /**
  * Reveal the browser on the surface that can actually draw it.
  *
- * In the `thread` layout the bottom tray is terminal-only (`terminalOnly` in
- * WorkspaceToolPanel pins its tab to "terminal"), so forcing it open for a
- * browser navigation dropped an empty terminal over the thread and left the
- * page nowhere to be seen. A chat shows the browser in its side rail instead.
+ * A chat shows the browser in its side rail: the bottom drawer is a Workspace
+ * surface, so forcing it open for a browser navigation left the page nowhere to
+ * be seen.
  */
 function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
   if (state.activeWorkspaceLayout === "thread") {
