@@ -897,7 +897,12 @@ fn receive_lsp_response(
         let message = process
             .messages
             .recv_timeout(remaining)
-            .map_err(|error| anyhow::anyhow!("language server response failed: {error}"))?
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => anyhow::anyhow!(LSP_REQUEST_TIMEOUT_MESSAGE),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    anyhow::anyhow!("language server response channel disconnected")
+                }
+            })?
             .map_err(anyhow::Error::msg)?;
         if message.get("id").and_then(|value| value.as_u64()) == Some(request_id) {
             return Ok((message, messages));
