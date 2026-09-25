@@ -1946,6 +1946,16 @@ export type UsageGuardConfig = {
    * the tool loop ends.
    */
   maxToolRounds: number;
+  /**
+   * Share of the model's context window at which a tool loop compacts what it
+   * is carrying. Zero switches it off.
+   *
+   * Measured from the previous request, so it only fires for a model whose
+   * window Gyro knows, and it is local: the oldest tool exchanges are replaced
+   * by one note, with no extra provider call. Vendor CLIs manage their own
+   * context, so this governs the API and local-model runners.
+   */
+  autoCompactPercent: number;
   maxResynthesesPerWindow: number;
 };
 

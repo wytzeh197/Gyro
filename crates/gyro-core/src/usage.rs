@@ -279,6 +279,17 @@ pub struct UsageGuardConfig {
     /// switching this off leaves the turn finite and still rate-limited.
     #[serde(default = "default_max_tool_rounds")]
     pub max_tool_rounds: usize,
+    /// Share of the model's context window at which a tool loop compacts what
+    /// it is carrying. Zero switches it off.
+    ///
+    /// Measured from what the provider reported for the previous request, so
+    /// it only fires for a model whose window Gyro knows. The compaction is
+    /// local — the oldest tool exchanges are replaced by one note — so it
+    /// costs no provider call, and the turn's later requests stop re-sending
+    /// results it has already moved past. A vendor CLI keeps its own context,
+    /// so this governs Gyro's own API and local-model runners only.
+    #[serde(default = "default_auto_compact_percent")]
+    pub auto_compact_percent: u32,
     /// Denominator for the usage percentages when no budget is configured.
     ///
     /// A percentage needs something to be a percentage *of*. Only Codex
@@ -319,6 +330,10 @@ fn default_max_tool_rounds() -> usize {
     512
 }
 
+fn default_auto_compact_percent() -> u32 {
+    80
+}
+
 fn default_max_resyntheses_per_window() -> u32 {
     3
 }
@@ -338,6 +353,7 @@ impl Default for UsageGuardConfig {
             max_unattended_calls_per_window: default_max_unattended_calls_per_window(),
             max_tokens_per_call: default_max_tokens_per_call(),
             max_tool_rounds: default_max_tool_rounds(),
+            auto_compact_percent: default_auto_compact_percent(),
             max_resyntheses_per_window: default_max_resyntheses_per_window(),
             daily_reference_tokens: default_daily_reference_tokens(),
         }
@@ -506,6 +522,14 @@ pub fn set_provider_budget(
             .as_ref()
             .map_or_else(default_throttle_percent, |budget| budget.throttle_percent),
     });
+}
+
+/// Set the share of the window at which a tool loop compacts what it carries.
+///
+/// Zero is the documented "off". Above the whole window the setting would ask
+/// to compact a request that cannot exist, so the stored value stops at 100.
+pub fn set_auto_compact_percent(guard: &mut UsageGuardConfig, percent: u32) {
+    guard.auto_compact_percent = percent.min(100);
 }
 
 /// How close a budget is to its cap.
@@ -1109,6 +1133,29 @@ mod tests {
 
         let trusted_total = UsageTokens::measured(Some(10), None, Some(10), None, Some(9_000));
         assert_eq!(trusted_total.total_tokens, 9_000);
+    }
+
+    #[test]
+    fn auto_compaction_defaults_to_eighty_and_clamps_at_the_whole_window() {
+        assert_eq!(UsageGuardConfig::default().auto_compact_percent, 80);
+        // A guard block written before the setting existed still gets the
+        // default, rather than zero (off) or a missing-key parse failure.
+        let guard: UsageGuardConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+        }))
+        .expect("a guard block without the setting still parses");
+        assert_eq!(guard.auto_compact_percent, 80);
+
+        let mut guard = UsageGuardConfig::default();
+        set_auto_compact_percent(&mut guard, 95);
+        assert_eq!(guard.auto_compact_percent, 95);
+        set_auto_compact_percent(&mut guard, 0);
+        assert_eq!(
+            guard.auto_compact_percent, 0,
+            "zero is how the setting is switched off"
+        );
+        set_auto_compact_percent(&mut guard, 1_000);
+        assert_eq!(guard.auto_compact_percent, 100);
     }
 
     #[test]

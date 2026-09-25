@@ -23,6 +23,10 @@ import {
   sanitizeStoredChatGridState,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
+import {
+  chatGridDropLayout,
+  chatGridDropZones,
+} from "../packages/ui/src/chat-grid-drop.ts";
 import { resolveCleanMachinePath } from "../packages/ui/src/clean-machine-path.ts";
 import {
   globalSearchMatchScore,
@@ -287,6 +291,97 @@ expect(
     resolveChatGridDropSlot(quadrantDropLayout.slots, 2).targetIndex === 2,
   "A grid-position drop should land in the quadrant it was aimed at, displacing the column's sitting chat.",
 );
+// Two chats side by side leave only their two edges and the seam between them,
+// so a third chat dropped there keeps one row of three instead of opening a
+// second row that nothing on screen offers.
+let rowDropState = createInitialChatGridState();
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("left"),
+  mode: "replace",
+});
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("right"),
+  mode: "drop",
+  slotIndex: 0,
+  insertPosition: "after",
+  splitDirection: "horizontal",
+});
+const twoPaneRowZones = chatGridDropZones(
+  rowDropState.layouts["/Users/example/Gyro"]?.slots ?? [],
+  "columns",
+);
+expect(
+  twoPaneRowZones.length === 3 &&
+    twoPaneRowZones.map((zone) => zone.position).join(",") ===
+      "row-start,row-seam-1,row-end" &&
+    twoPaneRowZones.every(
+      (zone) => zone.placement?.arrangement === "columns",
+    ) &&
+    twoPaneRowZones[0]?.placement?.insertPosition === "before" &&
+    twoPaneRowZones[1]?.placement?.insertPosition === "before" &&
+    twoPaneRowZones[2]?.placement?.insertPosition === "after" &&
+    twoPaneRowZones[0]?.slotIndex === 0 &&
+    twoPaneRowZones[1]?.slotIndex === 1 &&
+    twoPaneRowZones[2]?.slotIndex === 1 &&
+    chatGridDropLayout(twoPaneRowZones) === "row",
+  "A row of two chats should offer its two edges and the seam between them, and nothing above or below.",
+);
+const rowSeamZone = twoPaneRowZones[1];
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("between"),
+  mode: "drop",
+  slotIndex: rowSeamZone?.slotIndex,
+  insertPosition: rowSeamZone?.placement?.insertPosition,
+  arrangement: rowSeamZone?.placement?.arrangement,
+});
+const threePaneRowLayout = rowDropState.layouts["/Users/example/Gyro"];
+const threePaneRowZones = chatGridDropZones(
+  threePaneRowLayout?.slots ?? [],
+  threePaneRowLayout?.arrangement ?? "grid",
+);
+expect(
+  threePaneRowLayout?.arrangement === "columns" &&
+    threePaneRowLayout.slots[0]?.sessionId === "left" &&
+    threePaneRowLayout.slots[1]?.sessionId === "between" &&
+    threePaneRowLayout.slots[2]?.sessionId === "right" &&
+    threePaneRowLayout.slots[3] === null &&
+    threePaneRowZones.length === 4 &&
+    threePaneRowZones.map((zone) => zone.position).join(",") ===
+      "row-start,row-seam-1,row-seam-2,row-end",
+  "A seam drop should insert the chat into the row and leave four bars behind.",
+);
+const rowEndZone = threePaneRowZones[3];
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("last"),
+  mode: "drop",
+  slotIndex: rowEndZone?.slotIndex,
+  insertPosition: rowEndZone?.placement?.insertPosition,
+  arrangement: rowEndZone?.placement?.arrangement,
+});
+const fourPaneRowLayout = rowDropState.layouts["/Users/example/Gyro"];
+expect(
+  fourPaneRowLayout?.slots.filter(Boolean).length === 4 &&
+    fourPaneRowLayout.slots[3]?.sessionId === "last" &&
+    fourPaneRowLayout.arrangement === "columns" &&
+    chatGridDropZones(fourPaneRowLayout.slots, "columns").length === 0 &&
+    chatGridDropZones(
+      [gridPane("one"), gridPane("two"), gridPane("three"), null],
+      "grid",
+    ).every((zone) => zone.position.startsWith("position-")) &&
+    chatGridDropZones(
+      [gridPane("one"), gridPane("two"), null, null],
+      "rows",
+    ).every((zone) => zone.position.startsWith("position-")),
+  "A full row of four should offer no target, while a stack and a 2×2 grid keep their quadrants.",
+);
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
   layouts: {
@@ -389,6 +484,7 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
 const scmFileActionsSource = readRepoFile(
   "packages/ui/src/scm-file-actions.tsx",
@@ -554,14 +650,23 @@ expect(
     surfaceSource.includes('className="gyro-chat-grid-empty"') &&
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
-    surfaceSource.includes('label: "Open here"') &&
-    surfaceSource.includes('label: "Left"') &&
-    surfaceSource.includes('label: "Right"') &&
-    surfaceSource.includes('"Top left"') &&
-    surfaceSource.includes('"Top right"') &&
-    surfaceSource.includes('"Bottom left"') &&
-    surfaceSource.includes('"Bottom right"') &&
-    surfaceSource.includes("chatGridDropZones(slots)") &&
+    chatGridDropSource.includes("function chatGridRowDropZones") &&
+    chatDesignSource.includes(
+      '.gyro-chat-grid-drop-zone[data-position="row-seam-1"]',
+    ) &&
+    chatDesignSource.includes('[data-layout="row"]') &&
+    chatGridDropSource.includes('label: "Open here"') &&
+    chatGridDropSource.includes('label: "Left"') &&
+    chatGridDropSource.includes('label: "Right"') &&
+    chatGridDropSource.includes('"Top left"') &&
+    chatGridDropSource.includes('"Top right"') &&
+    chatGridDropSource.includes('"Bottom left"') &&
+    chatGridDropSource.includes('"Bottom right"') &&
+    surfaceSource.includes("chatGridDropZones(slots, arrangement)") &&
+    surfaceSource.includes(
+      "const dropLayout = chatGridDropLayout(dropZones)",
+    ) &&
+    surfaceSource.includes("data-layout={dropLayout}") &&
     surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
     surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
     surfaceSource.includes("didDrop && maximizedPaneId") &&
@@ -582,7 +687,8 @@ expect(
   "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
 );
 expect(
-  surfaceSource.includes("function nearestChatGridDropZone") &&
+  chatGridDropSource.includes("function nearestChatGridDropZone") &&
+    surfaceSource.includes("nearestChatGridDropZone(") &&
     surfaceSource.includes("highlightZoneUnderPointer") &&
     surfaceSource.includes("isChatDragging && dropTargetId === undefined") &&
     surfaceSource.includes("paneElementCache") &&
@@ -4606,6 +4712,29 @@ expect(
     tauriSource.includes("fn has_foreground_job") &&
     tauriSource.includes("terminal_pane_has_foreground_job"),
   "Idle shells should preserve their profile identity and close directly while foreground jobs remain protected.",
+);
+// A chat's model terminal is a focus, not a place. Selecting it whenever the
+// chat owned one moved the terminal out from under a run or test the user had
+// just started, and listed chat-owned processes in the strip they manage.
+const devTaskSource = appSource.slice(
+  appSource.indexOf("const launchIdeDevTask = useCallback("),
+  appSource.indexOf("const runIdeTask = useCallback("),
+);
+expect(
+  devTaskSource.includes('type: "select-terminal-pane"') &&
+    appSource.includes(
+      'dispatchWorkbench({ type: "set-browser-url", url: browser.url });',
+    ) &&
+    !appSource.includes(
+      "workbench.selectedTerminalPaneId !== modelTerminal.id",
+    ) &&
+    /if \(shouldFollow\) \{[\s\S]{0,200}?type: "select-terminal-pane",[\s\S]{0,200}?type: "open-tool-panel", tab: "terminal"/.test(
+      appSource,
+    ) &&
+    surfaceSource.includes(
+      "listedTerminalPanes(terminalPanes, selectedTerminalPaneId)",
+    ),
+  "Running a task must select the terminal that runs it; a model terminal may only be revealed by Follow and never crowds the user's terminal strip.",
 );
 expect(
   typeSource.includes(

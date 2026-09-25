@@ -17,11 +17,18 @@ import {
   type SidebarProjectSettings,
 } from "./sidebar-project-card";
 import {
+  listedTerminalPanes,
   placeTerminalTab,
   type TerminalDropEdge,
   type TerminalSplitLayout,
 } from "./terminal-layout";
 import { SettingsHelp } from "./settings-help";
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsSelect,
+  settingsSearchKey,
+} from "./settings-controls";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -373,6 +380,12 @@ import {
   isUserSelectedWorkspacePath,
   resolveChatGridDropSlot,
 } from "./workbench-state";
+import {
+  chatGridDropLayout,
+  chatGridDropZones,
+  nearestChatGridDropZone,
+} from "./chat-grid-drop";
+import type { ChatGridDropPlacement, ChatGridDropZone } from "./chat-grid-drop";
 import {
   BROWSER_COMPANION_DEFAULT_WIDTH,
   BROWSER_COMPANION_MAX_WIDTH,
@@ -1205,13 +1218,6 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     keywords: "vulnerability",
   },
 ];
-
-function settingsSearchKey(label: string) {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
 
 function settingsSearchResults(query: string) {
   const normalized = query.trim().toLowerCase();
@@ -7330,8 +7336,9 @@ export function ChatGridSurface({
   const isMaximized = Boolean(maximizedPaneId);
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
-  const dropZones = chatGridDropZones(slots);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
+  const dropZones = chatGridDropZones(slots, arrangement);
+  const dropLayout = chatGridDropLayout(dropZones);
   const gridRef = useRef<HTMLDivElement>(null);
   // The pointer position of the last grid-level drag event. macOS only
   // hit-tests drop targets on mouse movement, so a pointer that arrives over
@@ -7611,19 +7618,13 @@ export function ChatGridSurface({
           </section>
         );
       })}
-      {isChatDragging ? (
+      {isChatDragging && dropZones.length > 0 ? (
         <>
           <div
             aria-hidden="true"
             className="gyro-chat-grid-drop-overlay"
             data-drag-source={dragSource}
-            data-layout={
-              occupiedCount === 0
-                ? "full"
-                : occupiedCount === 1
-                  ? "columns"
-                  : "positions"
-            }
+            data-layout={dropLayout}
             data-zone-count={dropZones.length}
           >
             {dropZones.map((zone) => (
@@ -7654,96 +7655,14 @@ export function ChatGridSurface({
             ))}
           </div>
           <span aria-live="polite" className="gyro-sr-only">
-            Choose where to place the chat: above, beside, or below another
-            chat.
+            {dropLayout === "row"
+              ? "Choose where the chat joins the row: left edge, between chats, or right edge."
+              : "Choose where to place the chat: above, beside, or below another chat."}
           </span>
         </>
       ) : null}
     </div>
   );
-}
-
-type ChatGridDropPlacement = {
-  insertPosition: "before" | "after";
-  splitDirection?: "horizontal" | "vertical";
-};
-
-type ChatGridDropZone = {
-  id: string;
-  label: string;
-  placement?: ChatGridDropPlacement;
-  position: string;
-  slotIndex: number;
-};
-
-function chatGridDropZones(
-  slots: Array<ChatPaneRef | null>,
-): ChatGridDropZone[] {
-  const occupiedCount = slots.filter(Boolean).length;
-  // First chat into an empty grid: a single full-height/full-width target.
-  if (occupiedCount === 0) {
-    return [{ id: "full", label: "Open here", position: "full", slotIndex: 0 }];
-  }
-  // Second chat: a full-height Left / Right split — two panes tile side by side.
-  if (occupiedCount === 1) {
-    const slotIndex = slots.findIndex(Boolean);
-    return [
-      {
-        id: "left",
-        label: "Left",
-        placement: { insertPosition: "before", splitDirection: "horizontal" },
-        position: "left",
-        slotIndex: slotIndex < 0 ? 0 : slotIndex,
-      },
-      {
-        id: "right",
-        label: "Right",
-        placement: { insertPosition: "after", splitDirection: "horizontal" },
-        position: "right",
-        slotIndex: slotIndex < 0 ? 0 : slotIndex,
-      },
-    ];
-  }
-  // Third chat onward: place into a 2×2 grid position (the quadrants fill in).
-  const labels = ["Top left", "Top right", "Bottom left", "Bottom right"];
-  return labels.map((label, index) => ({
-    id: `slot-${index}`,
-    label,
-    position: `position-${index + 1}`,
-    slotIndex: index,
-  }));
-}
-
-/**
- * Resolve the zone that owns a pointer position by distance to the rendered
- * tiles. The hover preview and the drop itself both use this, so the lit tile
- * is always the tile a release would land on — including in the gaps and
- * padding between tiles, where no zone contains the pointer at all.
- */
-function nearestChatGridDropZone(
-  targets: ArrayLike<HTMLElement>,
-  zones: ChatGridDropZone[],
-  x: number,
-  y: number,
-): ChatGridDropZone | undefined {
-  let nearest: ChatGridDropZone | undefined;
-  let distance = Infinity;
-  for (let index = 0; index < targets.length; index += 1) {
-    const target = targets[index];
-    if (!target) continue;
-    const bounds = target.getBoundingClientRect();
-    const dx = Math.max(bounds.left - x, 0, x - bounds.right);
-    const dy = Math.max(bounds.top - y, 0, y - bounds.bottom);
-    const candidateDistance = dx * dx + dy * dy;
-    const zone = zones.find(
-      (item) => item.position === target.dataset.position,
-    );
-    if (zone && candidateDistance < distance) {
-      nearest = zone;
-      distance = candidateDistance;
-    }
-  }
-  return nearest;
 }
 
 function chatDragSource(dataTransfer: DataTransfer) {
@@ -14696,7 +14615,7 @@ export function TerminalPanel({
   revealWorkspaceOnLaunch = true,
 }: TerminalPanelProps) {
   const launchOptions = revealWorkspaceOnLaunch ? undefined : { reveal: false };
-  const panes = terminalPanes ?? [];
+  const panes = listedTerminalPanes(terminalPanes, selectedTerminalPaneId);
   const hasPanes = panes.length > 0;
   const activePaneId = selectedTerminalPaneId ?? panes[0]?.id;
   const activePane = panes.find((pane) => pane.id === activePaneId);
@@ -20654,6 +20573,8 @@ type SettingsSurfaceProps = {
   usageSafety?: UsageSafetySnapshot;
   onProviderBudgetChange?: (providerId: ProviderId, maxTokens: number) => void;
   onUsagePauseChange?: (paused: boolean) => void;
+  /** Share of the window a tool loop compacts itself at; 0 is off. */
+  onAutoCompactPercentChange?: (percent: number) => void;
   onUsageProviderChange?: (providerId: ProviderId) => void;
   onUsageVisualizationChange?: (visualization: "bars" | "wheels") => void;
   onDailyPaceWarningChange?: (enabled: boolean) => void;
@@ -21267,6 +21188,7 @@ export function SettingsSurface({
   usageSafety,
   onProviderBudgetChange,
   onUsagePauseChange,
+  onAutoCompactPercentChange,
   onUsageProviderChange,
   onUsageVisualizationChange,
   onDailyPaceWarningChange,
@@ -21797,7 +21719,27 @@ export function SettingsSurface({
                 detail="Multiple CLI agents stay explicit until provider health is stable."
               />
             </SettingsGroup>
-            <SettingsGroup label="Local guardrails">
+            <SettingsGroup label="Auto Context Compact">
+              <SettingsRow
+                label="Auto-compact context"
+                detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
+              >
+                <SettingsSelect
+                  aria-label="Auto-compact context threshold"
+                  disabled={!onAutoCompactPercentChange}
+                  onChange={(event) =>
+                    onAutoCompactPercentChange?.(Number(event.target.value))
+                  }
+                  value={String(config.usageGuard?.autoCompactPercent ?? 80)}
+                >
+                  <option value="0">Off</option>
+                  {[50, 60, 70, 80, 90, 95].map((percent) => (
+                    <option key={percent} value={String(percent)}>
+                      {percent}%
+                    </option>
+                  ))}
+                </SettingsSelect>
+              </SettingsRow>
               <SettingsRow
                 label="Command output"
                 value="Bounded"
@@ -22892,17 +22834,6 @@ function WorkspaceKeyboardSettings({
   );
 }
 
-function SettingsSelect(props: React.ComponentProps<"select">) {
-  return (
-    <select
-      {...props}
-      className={["gyro-settings-select", props.className]
-        .filter(Boolean)
-        .join(" ")}
-    />
-  );
-}
-
 function SettingsSection({
   icon: Icon,
   title,
@@ -22934,57 +22865,6 @@ function SettingsSection({
   );
 }
 
-function SettingsRow({
-  label,
-  value,
-  detail,
-  onClick,
-  children,
-  tone,
-}: {
-  label: string;
-  value?: string;
-  detail: string;
-  onClick?: () => void;
-  children?: ReactNode;
-  tone?: "danger";
-}) {
-  const content = (
-    <>
-      <div>
-        <strong>{label}</strong>
-        <span>{detail}</span>
-      </div>
-      <div className="gyro-settings-control-column">
-        {children ?? <span className="gyro-settings-info-value">{value}</span>}
-      </div>
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        className={`gyro-settings-row${tone ? ` is-${tone}` : ""}`}
-        data-setting-key={settingsSearchKey(label)}
-        onClick={onClick}
-        type="button"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div
-      className="gyro-settings-row"
-      data-setting-key={settingsSearchKey(label)}
-      tabIndex={-1}
-    >
-      {content}
-    </div>
-  );
-}
-
 function AppearanceColorControl({
   color,
   label,
@@ -23008,31 +22888,6 @@ function AppearanceColorControl({
       <span aria-hidden="true" className="gyro-color-swatch" />
       <code>{color.toUpperCase()}</code>
     </label>
-  );
-}
-
-function SettingsGroup({
-  label,
-  badge,
-  children,
-}: {
-  label: string;
-  /** Marks a group whose controls are visible but not yet usable. */
-  badge?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}>
-      {badge ? (
-        <h2>
-          {label}
-          <span className="gyro-settings-group-badge">{badge}</span>
-        </h2>
-      ) : (
-        <h2>{label}</h2>
-      )}
-      <div className="gyro-settings-group-rows">{children}</div>
-    </section>
   );
 }
 

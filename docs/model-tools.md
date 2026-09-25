@@ -5,6 +5,22 @@ not fill a chat's context in one call. Bounds should be visible to the model,
 and collections that have more results provide a way to continue reading.
 The existing workspace and approval policies apply to every page.
 
+## Workspace discovery
+
+`gyro_workspace_list` accepts an optional workspace-relative directory `path`,
+`depth`, zero-based `offset`, and `limit` (up to 200). It returns `entries`,
+`total`, `returned`, `hasMore`, and `nextOffset`. Use `path` to inspect a large
+subtree and pass `nextOffset` with the same path and depth for the next page.
+The page is shortened further when needed to fit the tool result budget. As
+with other paged observations, repeat from offset zero if the tree changes.
+The Workspace explorer still uses its complete tree listing.
+
+`gyro_workspace_search` always interprets its query as a ripgrep regular
+expression. An invalid expression or ripgrep failure is reported as an error;
+it never silently retries as a literal search or drops requested globs.
+Large match sets are shortened to fit the result budget, and the summary says
+when to narrow the query or globs for the remaining matches.
+
 ## Workspace roots and live editor text
 
 `gyro_workspace_get_context` returns the Session's versioned root IDs. A tool

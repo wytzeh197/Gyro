@@ -1206,6 +1206,8 @@ mod tests {
         assert!(!lsp_result_is_empty(&serde_json::json!([
             { "uri": "file:///workspace/src/lib.rs" }
         ])));
-        assert!(!lsp_result_is_empty(&serde_json::json!({ "contents": "hover" })));
+        assert!(!lsp_result_is_empty(
+            &serde_json::json!({ "contents": "hover" })
+        ));
     }
 }

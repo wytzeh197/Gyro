@@ -280,8 +280,20 @@ pub(super) fn run_openai_compatible_chat(
     );
     let mut response = None;
     let mut paused_at_tool_budget = false;
+    // The window the live context note measures against: the same catalog
+    // value the usage meter reports to the user, since these endpoints
+    // report no window of their own.
+    let context_window =
+        crate::provider_context::provider_model_context_window(&request.provider_id, Some(model));
+    // `usageGuard.autoCompactPercent`, read once: the guard is native-owned and
+    // a settings save cannot change it mid-turn.
+    let auto_compact_percent = config.usage_guard.auto_compact_percent;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
+        let mut last_measured: Option<(Option<u64>, Option<u64>)> = None;
+        // What auto-compaction removed this turn, for the activity rail and the
+        // event the user can inspect afterwards.
+        let mut auto_compactions = Vec::new();
         // One turn's tool loop, not a whole task, bounded by
         // `usageGuard.maxToolRounds`. The round after the budget carries the
         // checkpoint instead of tools, so the loop ends there.
@@ -294,6 +306,42 @@ pub(super) fn run_openai_compatible_chat(
             }
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
+            }
+            // Auto-compaction, before the note is refreshed for the same round:
+            // once the previous request has filled the share of the window set
+            // in Usage Limits, the oldest tool exchanges are replaced so later
+            // rounds stop re-sending results the turn has moved past. It costs
+            // no provider call -- the message list itself is what shrinks --
+            // which is what makes it safe to leave on by default.
+            if let Some((input_tokens, output_tokens)) = last_measured {
+                if let Some(compaction) = crate::provider_context::auto_compact_messages(
+                    &mut messages,
+                    input_tokens,
+                    output_tokens,
+                    context_window,
+                    auto_compact_percent,
+                ) {
+                    let activity =
+                        context_compaction::activity(auto_compactions.len(), &compaction);
+                    emit_provider_activity_event(
+                        app,
+                        request,
+                        &activity,
+                        Some(auto_compactions.len() as u64),
+                    );
+                    auto_compactions.push(activity);
+                }
+            }
+            // The live context note rides at the tail of the request it
+            // belongs to: rewritten from the previous response's measured
+            // counts, and replaced -- not stacked -- on every round.
+            if let Some((input_tokens, output_tokens)) = last_measured {
+                crate::provider_context::refresh_context_checkpoint(
+                    &mut messages,
+                    input_tokens,
+                    output_tokens,
+                    context_window,
+                );
             }
             let round_tools = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
@@ -361,6 +409,8 @@ pub(super) fn run_openai_compatible_chat(
                 Ok(turn) => turn,
             };
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
+            // What the live context note reports before the next request.
+            last_measured = Some((turn.input_tokens, turn.output_tokens));
             if let Some(measured) = turn_usage.measured() {
                 emit_provider_turn_tokens(app, request, &measured);
             }
@@ -545,7 +595,7 @@ pub(super) fn run_openai_compatible_chat(
         }
         let response_chars = response.content.chars().count();
         Ok(ProviderRunnerOutput {
-            activities: provider_activities_for_response(Vec::new(), &response.content),
+            activities: provider_activities_for_response(auto_compactions, &response.content),
             context_usage: Some(ProviderContextUsage {
                 input_tokens: response.input_tokens,
                 output_tokens: response.output_tokens,

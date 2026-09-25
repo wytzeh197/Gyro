@@ -5,6 +5,7 @@ mod git_read;
 mod model_catalog;
 mod provider_activity;
 use provider_activity::*;
+mod context_compaction;
 mod provider_mcp;
 mod provider_reliability;
 use provider_reliability::{
@@ -130,6 +131,7 @@ mod source_control_review;
 mod system_access;
 mod terminal_capability;
 mod terminal_wait;
+mod workspace_capability_list;
 mod workspace_capability_read;
 mod workspace_edit_capability;
 mod workspace_mutations;
@@ -970,8 +972,7 @@ struct WorkspaceSearchRequest {
     globs: Option<Vec<String>>,
     max_results: Option<usize>,
     /// When true, treat `query` as a regex (ripgrep default). UI search leaves
-    /// this off so ordinary user typing is fixed-string; capability/agent search
-    /// turns it on because agents send patterns like `stop|abort|cancel`.
+    /// this off so ordinary user typing is fixed-string.
     #[serde(default)]
     regex: Option<bool>,
 }
@@ -5687,13 +5688,14 @@ fn compact_provider_chat_blocking(
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     };
     let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
-    let running = codex_context_compaction_activity(&activity_params, "running");
+    let running =
+        context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
     let (completed, context_usage) =
         match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
             Ok(usage) => (
-                codex_context_compaction_activity(&activity_params, "done"),
+                context_compaction::codex_context_compaction_activity(&activity_params, "done"),
                 provider_context_usage_with_window(
                     usage,
                     &request.provider_id,
@@ -5746,7 +5748,7 @@ fn compact_local_provider_chat(
         "this chat needs a completed reply before context can be compacted".to_string()
     })?;
     let params = serde_json::json!({ "turnId": run_id.to_string() });
-    let running = codex_context_compaction_activity(&params, "running");
+    let running = context_compaction::codex_context_compaction_activity(&params, "running");
     emit_provider_activity_event(app, request, &running, Some(0));
 
     // A new provider session starts from the saved checkpoint on the next
@@ -5755,7 +5757,7 @@ fn compact_local_provider_chat(
     store
         .clear_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
-    let mut completed = codex_context_compaction_activity(&params, "done");
+    let mut completed = context_compaction::codex_context_compaction_activity(&params, "done");
     completed.detail =
         Some("Condensed the local chat history for this provider's next turn.".into());
     let mut entry = provider_activity_event_entry(request, run_id, 0, &completed);
@@ -10122,10 +10124,8 @@ fn search_workspace_impl(
         return Ok(Vec::new());
     }
     let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
-    // Agents (Grok ACP, Claude via capabilities) send regex patterns with `|`
-    // and `.*`. Fixed-string mode made those always return zero hits, so the
-    // model looped short "I'll investigate" turns and looked like a ~30s stop.
-    // UI search keeps fixed-strings so plain typing is not treated as regex.
+    // UI search keeps fixed strings so ordinary typing is not treated as regex.
+    // Model capability search calls ripgrep directly and reports regex errors.
     let use_regex = request.regex.unwrap_or(false);
     match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, use_regex) {
         Ok(results) => Ok(results),
@@ -10218,6 +10218,28 @@ fn parse_rg_output(
         })
         .take(max_results)
         .collect()
+}
+
+fn bound_model_search_results(
+    mut results: Vec<WorkspaceSearchResult>,
+) -> anyhow::Result<(Vec<WorkspaceSearchResult>, bool)> {
+    let original_count = results.len();
+    let (mut low, mut high) = (0, original_count);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        let data = redact_json_strings(serde_json::to_value(&results[..mid])?);
+        if serde_json::to_vec(&data)?.len() <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+        {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    if low == 0 && original_count > 0 {
+        anyhow::bail!("A Workspace search match is too large to return; narrow the query");
+    }
+    results.truncate(low);
+    Ok((results, low < original_count))
 }
 
 fn fallback_search_workspace(
@@ -14569,7 +14591,8 @@ fn run_openai_codex_app_server_chat(
                 }
                 "thread/compacted" => {
                     completed_artifact_response_at = None;
-                    let activity = codex_context_compaction_activity(&params, "done");
+                    let activity =
+                        context_compaction::codex_context_compaction_activity(&params, "done");
                     record_codex_app_server_activity(
                         app,
                         request,
@@ -14639,7 +14662,9 @@ fn run_openai_codex_app_server_chat(
                             Some("contextCompaction") => emit_provider_activity_event(
                                 app,
                                 request,
-                                &codex_context_compaction_activity(&params, "running"),
+                                &context_compaction::codex_context_compaction_activity(
+                                    &params, "running",
+                                ),
                                 None,
                             ),
                             _ => {}
@@ -14716,7 +14741,10 @@ fn run_openai_codex_app_server_chat(
                             }
                             Some("contextCompaction") => {
                                 completed_artifact_response_at = None;
-                                let activity = codex_context_compaction_activity(&params, "done");
+                                let activity =
+                                    context_compaction::codex_context_compaction_activity(
+                                        &params, "done",
+                                    );
                                 record_codex_app_server_activity(
                                     app,
                                     request,
@@ -15313,30 +15341,6 @@ fn codex_file_change_activities(
             }
         })
         .collect()
-}
-
-fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -> ProviderActivity {
-    let identity = params
-        .get("turnId")
-        .or_else(|| params.pointer("/item/id"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("turn");
-    ProviderActivity {
-        id: format!("context-compaction-{identity}"),
-        kind: "context".into(),
-        label: if status == "running" {
-            "Compacting context".into()
-        } else {
-            "Compacted context".into()
-        },
-        detail: Some(
-            "Summarized earlier conversation to keep the thread within the model context window."
-                .into(),
-        ),
-        file_counts: None,
-        note: None,
-        status: status.into(),
-    }
 }
 
 /// The headline of a Codex reasoning summary, as a muted status beat.
@@ -20745,20 +20749,15 @@ fn execute_provider_capability(
             (summary, serde_json::to_value(report)?, None)
         }
         CapabilityId::WorkspaceList => {
-            let depth = arguments
-                .get("depth")
-                .and_then(serde_json::Value::as_u64)
-                .map(|value| value as usize);
-            let entries = list_workspace_tree_blocking(workspace.clone(), depth)
-                .map_err(anyhow::Error::msg)?;
-            (
-                format!("Listed {} workspace entries", entries.len()),
-                serde_json::to_value(entries)?,
-                None,
-            )
+            workspace_capability_list::execute(&bound.workspace, arguments)?
         }
         CapabilityId::WorkspaceSearch => {
-            let query = capability_argument_string(arguments, "query")?.to_string();
+            let query = capability_argument_string(arguments, "query")?
+                .trim()
+                .to_string();
+            if query.is_empty() {
+                anyhow::bail!("Workspace search query must not be empty");
+            }
             let globs = arguments
                 .get("globs")
                 .and_then(|value| serde_json::from_value::<Vec<String>>(value.clone()).ok());
@@ -20768,22 +20767,35 @@ fn execute_provider_capability(
                 .map(|value| value as usize);
             // Agents send regex-shaped queries (`foo|bar`, `cancel.*stream`).
             // Fixed-string search made those return zero matches every turn.
-            let mut results = search_workspace_impl(&WorkspaceSearchRequest {
-                workspace_path: workspace,
-                query,
-                globs,
-                max_results,
-                regex: Some(true),
-            })?;
+            // Model searches promise regex semantics. Surface ripgrep failures
+            // instead of silently retrying as a literal search (or with a
+            // fallback scanner that ignores the requested globs).
+            let result_cap = max_results.unwrap_or(200).clamp(1, 1000);
+            let mut results = run_workspace_rg_search(
+                &bound.workspace,
+                &query,
+                globs.as_ref(),
+                result_cap,
+                true,
+            )?;
+            let cap_reached = results.len() == result_cap;
             results.retain(|result| !gyro_core::capability_path_is_sensitive(&result.path));
             for result in &mut results {
                 result.line = gyro_core::sanitize_capability_summary(&result.line);
             }
-            (
-                format!("Found {} workspace matches", results.len()),
-                serde_json::to_value(results)?,
-                None,
-            )
+            let found = results.len();
+            let (results, budget_limited) = bound_model_search_results(results)?;
+            let summary = if budget_limited {
+                format!(
+                    "Returned {} of {found} workspace matches; narrow the query to see the rest",
+                    results.len()
+                )
+            } else if cap_reached {
+                format!("Returned {found} workspace matches (result cap reached; narrow the query for more)")
+            } else {
+                format!("Returned {found} workspace matches")
+            };
+            (summary, serde_json::to_value(results)?, None)
         }
         CapabilityId::WorkspaceRead
         | CapabilityId::WorkspaceReadRange
@@ -22258,7 +22270,10 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
     }
     let properties = match id {
         CapabilityId::WorkspaceList => serde_json::json!({
-            "depth": { "type": "integer", "minimum": 1, "maximum": 8 }
+            "path": { "type": "string", "description": "Optional workspace-relative directory to list." },
+            "depth": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "offset": { "type": "integer", "minimum": 0 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
         }),
         CapabilityId::WorkspaceSearch => serde_json::json!({
             "query": {
@@ -22752,6 +22767,7 @@ pub fn run() {
             get_provider_usage_ledger,
             set_usage_paused,
             set_provider_budget,
+            context_compaction::set_auto_compact_percent,
             git_commit,
             git_branches,
             git_checkout_branch,
@@ -23421,6 +23437,41 @@ mod tests {
             |_, _| panic!("plan must not ask to write")
         )
         .is_err());
+    }
+
+    #[test]
+    fn model_search_keeps_regex_and_glob_semantics() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("match.rs"), "needle\n").unwrap();
+        fs::write(workspace.path().join("other.txt"), "needle\n").unwrap();
+        let globs = vec!["*.rs".to_string()];
+        let results =
+            run_workspace_rg_search(workspace.path(), "need.*", Some(&globs), 10, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "match.rs");
+        assert!(run_workspace_rg_search(workspace.path(), "[", Some(&globs), 10, true).is_err());
+    }
+
+    #[test]
+    fn model_search_bounds_large_match_sets() {
+        let results = (0..100)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("file-{index}.rs"),
+                line_number: index + 1,
+                line: "x".repeat(4_000),
+                ranges: vec![WorkspaceSearchRange {
+                    start_column: 1,
+                    end_column: 2,
+                }],
+            })
+            .collect();
+        let (bounded, limited) = bound_model_search_results(results).unwrap();
+        assert!(limited);
+        assert!(bounded.len() < 100);
+        assert!(
+            serde_json::to_vec(&bounded).unwrap().len()
+                <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+        );
     }
 
     #[test]
@@ -26766,14 +26817,14 @@ while True:
         assert_eq!(compaction.label, "Compacted context");
         assert_eq!(compaction.status, "done");
 
-        let started_compaction = codex_context_compaction_activity(
+        let started_compaction = context_compaction::codex_context_compaction_activity(
             &serde_json::json!({
                 "turnId": "turn_1",
                 "item": { "id": "compact_1", "type": "contextCompaction" }
             }),
             "running",
         );
-        let completed_compaction = codex_context_compaction_activity(
+        let completed_compaction = context_compaction::codex_context_compaction_activity(
             &serde_json::json!({ "threadId": "thread_1", "turnId": "turn_1" }),
             "done",
         );

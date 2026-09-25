@@ -186,6 +186,32 @@ function completedEvents(sessionId: string): SessionEvent[] {
   ];
 }
 
+/**
+ * Dev-only: a headless capture cannot perform a drag, so the fixture drives the
+ * grid's own drag and drop handlers with synthetic events instead. They land at
+ * the centre of the grid — the seam between two chats side by side, and inside
+ * one of three — because that is where the placement bars have to appear.
+ */
+function dispatchChatDrag(type: "dragover" | "drop", sequence = 0) {
+  const grid = document.querySelector<HTMLElement>(".gyro-chat-grid");
+  if (!grid) return;
+  const bounds = grid.getBoundingClientRect();
+  const dataTransfer = new DataTransfer();
+  dataTransfer.setData(
+    "application/x-gyro-chat-session",
+    JSON.stringify({ sessionId: `drop-${sequence}`, projectKey }),
+  );
+  grid.dispatchEvent(
+    new DragEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2,
+      dataTransfer,
+    }),
+  );
+}
+
 function Fixture() {
   const [grid, setGrid] = useState(initialState);
   const [sequence, setSequence] = useState(0);
@@ -339,6 +365,15 @@ function Fixture() {
           onClick={() => addPane("horizontal", true)}
         >
           Add running chat
+        </button>
+        <button onClick={() => dispatchChatDrag("dragover")}>
+          Simulate chat drag
+        </button>
+        <button
+          disabled={paneCount >= 4}
+          onClick={() => dispatchChatDrag("drop", paneCount + 1)}
+        >
+          Drop simulated chat
         </button>
         <button
           disabled={!layout.focusedPaneId}

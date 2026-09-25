@@ -23,6 +23,8 @@ import {
   type PullRequestDraft,
 } from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
+import { persistAutoCompactPercent } from "./auto-compaction";
+import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
 import {
@@ -1243,36 +1245,40 @@ export function App() {
     workbench.activePaneTab === "browser" &&
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
-  const workspaceRoots = useMemo(
-    () => {
-      const configured = workspaceFolderPaths(
-        activeWorkspaceRoot,
-        workbench.preferences.workspaceFolders,
-        activeWorkspaceRoot
-          ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
-              ?.primaryFolder
-          : undefined,
-      );
-      if (!activeWorkspaceRoot || activeWorkspaceRoot in workbench.preferences.workspaceFolders) {
-        return configured;
-      }
-      const persisted = activeSession?.workspaceIdentity?.roots.map((root) => root.path);
-      return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
-    },
-    [
-      activeSession?.workspaceIdentity,
+  const workspaceRoots = useMemo(() => {
+    const configured = workspaceFolderPaths(
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
-      workbench.preferences.projectDetails,
-    ],
-  );
+      activeWorkspaceRoot
+        ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+            ?.primaryFolder
+        : undefined,
+    );
+    if (
+      !activeWorkspaceRoot ||
+      activeWorkspaceRoot in workbench.preferences.workspaceFolders
+    ) {
+      return configured;
+    }
+    const persisted = activeSession?.workspaceIdentity?.roots.map(
+      (root) => root.path,
+    );
+    return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
+  }, [
+    activeSession?.workspaceIdentity,
+    activeWorkspaceRoot,
+    workbench.preferences.workspaceFolders,
+    workbench.preferences.projectDetails,
+  ]);
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
-    const active = identity?.roots.find((root) => root.id === identity.activeRootId);
+    const active = identity?.roots.find(
+      (root) => root.id === identity.activeRootId,
+    );
     if (active) setSelectedWorkspaceRoot(active.path);
   }, [activeSession?.id, activeSession?.workspaceIdentity?.activeRootId]);
 
@@ -1998,14 +2004,25 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!isTauriRuntime() || !activeSession || !workspaceActionRoot ||
-        activeSession.eventsPath.startsWith("preview://")) return;
+    if (
+      !isTauriRuntime() ||
+      !activeSession ||
+      !workspaceActionRoot ||
+      activeSession.eventsPath.startsWith("preview://")
+    )
+      return;
     const identity = activeSession.workspaceIdentity;
-    const sameRoots = identity?.roots.length === workspaceRoots.length &&
-      identity.roots.every((root, index) => root.path === workspaceRoots[index]);
-    if (sameRoots && identity?.activeRootId === identity.roots.find(
-      (root) => root.path === workspaceActionRoot,
-    )?.id) return;
+    const sameRoots =
+      identity?.roots.length === workspaceRoots.length &&
+      identity.roots.every(
+        (root, index) => root.path === workspaceRoots[index],
+      );
+    if (
+      sameRoots &&
+      identity?.activeRootId ===
+        identity.roots.find((root) => root.path === workspaceActionRoot)?.id
+    )
+      return;
     const timer = window.setTimeout(() => {
       void invoke<Session>("set_session_workspace_identity", {
         request: {
@@ -2013,29 +2030,42 @@ export function App() {
           roots: workspaceRoots,
           activeRoot: workspaceActionRoot,
         },
-      }).then((updated) => {
-        const persistedRoots = updated.workspaceIdentity?.roots.map((root) => root.path);
-        if (persistedRoots && persistedRoots.some((path, index) => path !== workspaceRoots[index])) {
-          dispatchWorkbench({
-            type: "set-workspace-folders",
-            workspacePath: updated.workspacePath,
-            paths: persistedRoots.slice(1),
-          });
-          const active = updated.workspaceIdentity?.roots.find(
-            (root) => root.id === updated.workspaceIdentity?.activeRootId,
+      })
+        .then((updated) => {
+          const persistedRoots = updated.workspaceIdentity?.roots.map(
+            (root) => root.path,
           );
-          if (active) setSelectedWorkspaceRoot(active.path);
-        }
-        setSessions((current) => current.map((session) =>
-          session.id === updated.id &&
-          (session.workspaceIdentity?.revision ?? 0) <
-            (updated.workspaceIdentity?.revision ?? 0)
-            ? { ...session, workspaceIdentity: updated.workspaceIdentity }
-            : session,
-        ));
-      }).catch((error) => {
-        notify("command-failed", "Workspace roots could not be saved", String(error));
-      });
+          if (
+            persistedRoots &&
+            persistedRoots.some((path, index) => path !== workspaceRoots[index])
+          ) {
+            dispatchWorkbench({
+              type: "set-workspace-folders",
+              workspacePath: updated.workspacePath,
+              paths: persistedRoots.slice(1),
+            });
+            const active = updated.workspaceIdentity?.roots.find(
+              (root) => root.id === updated.workspaceIdentity?.activeRootId,
+            );
+            if (active) setSelectedWorkspaceRoot(active.path);
+          }
+          setSessions((current) =>
+            current.map((session) =>
+              session.id === updated.id &&
+              (session.workspaceIdentity?.revision ?? 0) <
+                (updated.workspaceIdentity?.revision ?? 0)
+                ? { ...session, workspaceIdentity: updated.workspaceIdentity }
+                : session,
+            ),
+          );
+        })
+        .catch((error) => {
+          notify(
+            "command-failed",
+            "Workspace roots could not be saved",
+            String(error),
+          );
+        });
     }, 200);
     return () => window.clearTimeout(timer);
   }, [activeSession, notify, workspaceActionRoot, workspaceRoots]);
@@ -2107,62 +2137,12 @@ export function App() {
     ],
   );
 
-  const refreshProviderLedger = useCallback(async (providerId: ProviderId) => {
-    try {
-      const summary = await invoke<ProviderLedgerSummary>(
-        "get_provider_usage_ledger",
-        { providerId },
-      );
-      setProviderLedgerById((current) => ({
-        ...current,
-        [providerId]: summary,
-      }));
-    } catch {
-      // Settings falls back to the reference denominator.
-    }
-  }, []);
-  const setProviderBudget = useCallback(
-    async (providerId: ProviderId, maxTokens: number) => {
-      try {
-        await invoke("set_provider_budget", { providerId, maxTokens });
-        await refreshProviderLedger(providerId);
-      } catch (error) {
-        notify(
-          "provider",
-          "Could not save the budget",
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    },
-    [notify, refreshProviderLedger],
-  );
-  const setUsagePaused = useCallback(
-    async (paused: boolean) => {
-      try {
-        await invoke("set_usage_paused", { paused });
-        await refreshUsageSafety();
-      } catch (error) {
-        notify(
-          "provider",
-          paused ? "Could not pause" : "Could not resume",
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    },
-    [notify, refreshUsageSafety],
-  );
-  const resumeUsage = useCallback(async () => {
-    try {
-      await invoke("set_usage_paused", { paused: false });
-      await refreshUsageSafety();
-    } catch (error) {
-      notify(
-        "provider",
-        "Could not resume",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }, [notify, refreshUsageSafety]);
+  const {
+    refreshProviderLedger,
+    setProviderBudget,
+    setUsagePaused,
+    resumeUsage,
+  } = useUsageActions({ notify, refreshUsageSafety, setProviderLedgerById });
   const recoveryNoticeShownRef = useRef(false);
   useEffect(() => {
     if (recoveryNoticeShownRef.current) return;
@@ -2940,6 +2920,17 @@ export function App() {
                 },
               },
             });
+            // Follow is the one mode where the app moves with the model, and
+            // only for the chat on screen. Selecting the pane is what makes
+            // the model's terminal join the strip; nothing else does, so the
+            // user's own terminals stay uncluttered.
+            if (shouldFollow) {
+              dispatchWorkbench({
+                type: "select-terminal-pane",
+                paneId: snapshot.paneId,
+              });
+              dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+            }
             terminalOutputRevisionRef.current[snapshot.paneId] =
               snapshot.outputRevision;
             const stoppedBy = stringFromRecord(
@@ -3135,28 +3126,14 @@ export function App() {
     if (browser && workbench.browserPreview.url !== browser.url) {
       dispatchWorkbench({ type: "set-browser-url", url: browser.url });
     }
-    const modelTerminal = workbench.terminalPanes.find(
-      (pane) =>
-        pane.owner?.kind === "model" &&
-        pane.owner.sessionId === activeSessionId,
-    );
-    if (
-      modelTerminal &&
-      workbench.activePaneTab === "terminal" &&
-      workbench.selectedTerminalPaneId !== modelTerminal.id
-    ) {
-      dispatchWorkbench({
-        type: "select-terminal-pane",
-        paneId: modelTerminal.id,
-      });
-    }
+    // A model terminal is a focus, not a place. Selecting it here moved the
+    // workspace terminal whenever this chat owned one, so clicking a run or
+    // test task could never land on the task's own terminal. Peek and off
+    // leave the workspace alone; Follow rides the capability resource events.
   }, [
     activeSessionId,
     browserResourcesBySessionId,
-    workbench.activePaneTab,
     workbench.browserPreview.url,
-    workbench.selectedTerminalPaneId,
-    workbench.terminalPanes,
   ]);
 
   const scheduleProviderStreamFlush = useCallback(() => {
@@ -3597,6 +3574,14 @@ export function App() {
   const selectDestination = useCallback((destination: AppDestination) => {
     dispatchWorkbench({ type: "select-destination", destination });
   }, []);
+
+  // The auto-compaction share lives in the native-owned usage guard, so it
+  // crosses its own command and the config the surface renders is re-read.
+  const setAutoCompactPercent = useCallback(
+    (percent: number) =>
+      persistAutoCompactPercent(percent, { notify, refreshConfig }),
+    [notify, refreshConfig],
+  );
 
   const returnFromSettings = useCallback(() => {
     const destination =
@@ -4704,6 +4689,9 @@ export function App() {
         command: commandLine,
         output: `$ ${commandLine}\n`,
       });
+      // Run has to land on the terminal that is actually running the task: a
+      // pane that already existed would otherwise stay behind another tab.
+      dispatchWorkbench({ type: "select-terminal-pane", paneId });
       setTerminalOutput(`$ ${commandLine}\n`);
 
       if (!isTauriRuntime()) {
@@ -10308,7 +10296,10 @@ export function App() {
             message,
             turnId,
           });
-          if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== persistedSession.workspacePath) {
+          if (
+            liveEditorEvidence &&
+            liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
+          ) {
             await invoke("update_capability_ide_evidence", {
               request: {
                 workspacePath: liveEditorEvidence.workspaceKey,
@@ -10549,7 +10540,10 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
         }
-        if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== chatWorkspacePath) {
+        if (
+          liveEditorEvidence &&
+          liveEditorEvidence.workspaceKey !== chatWorkspacePath
+        ) {
           await invoke("update_capability_ide_evidence", {
             request: {
               workspacePath: liveEditorEvidence.workspaceKey,
@@ -16430,6 +16424,7 @@ export function App() {
                     projectKey,
                     mode: "drop",
                     slotIndex,
+                    arrangement: placement?.arrangement,
                     insertPosition: placement?.insertPosition,
                     splitDirection: placement?.splitDirection,
                     pane: chatPaneForSession(session),
@@ -16829,27 +16824,17 @@ export function App() {
               renderWorkspaceToolPanel(false)
             ) : activeWorkspaceLayout === "code" ? (
               <nav
-                className="gyro-workspace-tool-launcher"
                 aria-label="Workspace tools"
+                className="gyro-workspace-tool-launcher"
               >
-                {(
-                  [
-                    ["diff", "Diff"],
-                    ["terminal", "Terminal"],
-                    ["browser", "Browser"],
-                    ["problems", "Problems"],
-                    ["test-results", "Test Results"],
-                    ["output", "Output"],
-                  ] as const
-                ).map(([tab, label]) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => openToolPanel(tab)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                <button
+                  aria-label="Open the workspace panel"
+                  onClick={toggleChatToolPanel}
+                  title="Open the panel you used last (⌘J)"
+                  type="button"
+                >
+                  Panel
+                </button>
               </nav>
             ) : null
           ) : null}
@@ -17016,6 +17001,9 @@ export function App() {
             void setProviderBudget(providerId, maxTokens)
           }
           onUsagePauseChange={(paused) => void setUsagePaused(paused)}
+          onAutoCompactPercentChange={(percent) =>
+            void setAutoCompactPercent(percent)
+          }
           themeMode={workbench.preferences.theme}
           defaultWorkspaceMode={workbench.preferences.defaultWorkspaceMode}
           onDefaultWorkspaceModeChange={(mode) =>
@@ -18637,9 +18625,10 @@ function capabilityApprovalFromSessionEvent(
     status: "waiting",
     scopeKind,
     scopeValue,
-    choices: capabilityId === "workspace-read-editor"
-      ? ["deny", "allow-once"]
-      : ["deny", "allow-once", "allow-project"],
+    choices:
+      capabilityId === "workspace-read-editor"
+        ? ["deny", "allow-once"]
+        : ["deny", "allow-once", "allow-project"],
   };
 }
 

@@ -666,12 +666,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceList,
         class: CapabilityClass::WorkspaceInspect,
-        description: "List bounded entries inside the current Gyro project.",
+        description: "List a workspace directory with bounded pages. Pass path to narrow the tree, then reuse nextOffset until hasMore is false. Paths are workspace-relative.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search text inside the current Gyro project with a regular expression (ripgrep).",
+        description: "Search workspace text with a ripgrep regular expression. Invalid patterns and ripgrep failures are reported; use globs or maxResults to narrow large searches.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,

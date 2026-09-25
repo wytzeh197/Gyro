@@ -665,3 +665,63 @@
     transition: none;
   }
 }
+
+/* Row drop bars. When two or three chats already share the width, the only
+   places left are the two edges and the seams between them, so each target is
+   a thin full-height bar on that boundary instead of a tile lying over a pane.
+   The overlay itself keeps no padding and no gap, so a bar lands on the pane
+   boundary it names, and the row stays visible underneath while choosing. */
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="row"] {
+  /* One pane column plus the grid's gap: where that column ends. */
+  --gyro-chat-grid-drop-track: calc(
+    (100% - (var(--gyro-grid-count, 1) - 1) * 1px) / var(--gyro-grid-count, 1) +
+      1px
+  );
+  background: none;
+  display: block;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone {
+  bottom: 0;
+  padding: 0;
+  position: absolute;
+  top: 0;
+  width: var(--gyro-chat-grid-drop-bar-width, 8px);
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone[data-position="row-start"] {
+  left: 0;
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone[data-position="row-seam-1"] {
+  left: var(--gyro-chat-grid-drop-track);
+  transform: translateX(-50%);
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone[data-position="row-seam-2"] {
+  left: calc(var(--gyro-chat-grid-drop-track) * 2);
+  transform: translateX(-50%);
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone[data-position="row-seam-3"] {
+  left: calc(var(--gyro-chat-grid-drop-track) * 3);
+  transform: translateX(-50%);
+}
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-zone[data-position="row-end"] {
+  right: 0;
+}
+/* Eight pixels of bar cannot hold the label; it stays for assistive tech. */
+:root[data-theme]
+  .gyro-chat-grid-drop-overlay[data-layout="row"]
+  .gyro-chat-grid-drop-tile {
+  font-size: 0;
+  overflow: hidden;
+}
