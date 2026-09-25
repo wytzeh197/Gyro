@@ -7,6 +7,7 @@ import {
   mergeLiveCapabilityEvent,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
+  preserveDeliveredResponses,
   sameTimelineEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import { buildRunModel, segmentRunSteps } from "../packages/ui/src/chat-run.ts";
@@ -75,6 +76,23 @@ assert.equal(
 );
 assert.equal(mergeProviderResponseEvents([foreign], [answer]).length, 2);
 assert.equal(mergePersistedAndOptimisticEvents([foreign], [answer]).length, 2);
+// A read begun before completion must not erase the answer delivered while it
+// was in flight, including when the stale page still has a streaming preview.
+const user = event("user", "user-message", "Question");
+const stream = {
+  ...answer,
+  id: "stream",
+  message: "Fix",
+  payload: { kind: "provider-stream", streaming: true },
+};
+const refreshed = preserveDeliveredResponses([user, stream], [user, answer]);
+assert.equal(
+  refreshed.filter((item) => item.kind === "assistant-message").length,
+  1,
+);
+assert.equal(buildRunModel(refreshed).response?.message, "Fixed.");
+assert.deepEqual(preserveDeliveredResponses(refreshed, refreshed), refreshed);
+assert.deepEqual(preserveDeliveredResponses([user], [foreign]), [user]);
 assert.equal(
   stripHiddenControlMarkers("The GYRO_SESSION_TITLE: marker names a session."),
   "The GYRO_SESSION_TITLE: marker names a session.",

@@ -189,6 +189,24 @@ const outcome = deriveLatestMenuBarOutcome(
   [],
 );
 assert.equal(outcome?.status, "succeeded");
+
+// A research sub-agent keeps its transcript in a session of its own. That run
+// is not a chat the user started, so finishing it is not a chat outcome: the
+// turn waiting on it reports its own.
+const researchSession = {
+  ...session,
+  id: "session-research",
+  title: "Research: where do sidebar chats come from?",
+  parentSessionId: session.id,
+};
+assert.equal(
+  deriveLatestMenuBarOutcome(
+    [session, researchSession],
+    { [researchSession.id]: completedEvents },
+    [],
+  ),
+  undefined,
+);
 const complete = deriveMenuBarSnapshot({
   automations: [],
   finishedOutcomes: [outcome],

@@ -436,6 +436,30 @@ export function resetStreamingAssistantForRetry(
   });
 }
 
+/** Keep a reply already delivered to this window when an older disk read returns
+ * after it. The next fresh read will contain the saved event as well. */
+export function preserveDeliveredResponses(
+  refreshedEvents: SessionEvent[],
+  currentEvents: SessionEvent[],
+) {
+  const visibleTurns = new Set(
+    refreshedEvents
+      .filter((event) => event.turnId)
+      .map((event) => `${event.sessionId}:${event.turnId}`),
+  );
+  const delivered = currentEvents.filter((event) => {
+    const payload = recordFromUnknown(event.payload);
+    return (
+      event.kind === "assistant-message" &&
+      payload?.kind === "provider-response" &&
+      visibleTurns.has(`${event.sessionId}:${event.turnId}`)
+    );
+  });
+  return delivered.length
+    ? mergeProviderResponseEvents(refreshedEvents, delivered)
+    : refreshedEvents;
+}
+
 export function mergeProviderResponseEvents(
   currentEvents: SessionEvent[],
   responseEvents: SessionEvent[],
@@ -632,7 +656,7 @@ function preserveFirstSeenTimelineMetadata(
   const updatedPayload = { ...recordFromUnknown(updated.payload) };
   // Status-only frames and durable snapshots can omit counts already measured
   // for this operation. Carry them only within the same chat, turn and file.
-  const fileKinds = ["file", "edit", "delete", "move"];
+  const fileKinds = ["file", "create", "edit", "delete", "move"];
   const firstPath = firstPayload.path ?? firstPayload.detail;
   const updatedPath = updatedPayload.path ?? updatedPayload.detail;
   if (

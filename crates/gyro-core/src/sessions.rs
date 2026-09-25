@@ -25,7 +25,10 @@ const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 3;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 6;
+/// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
+/// the write path cannot create — cannot spin forever.
+const MAX_SUBAGENT_SESSION_TREE: usize = 256;
 const MAX_WORKSPACE_IDENTITY_ROOTS: usize = 20;
 
 /// One page of session history read from the JSONL log.
@@ -177,6 +180,13 @@ pub struct Session {
     pub workspace_path: PathBuf,
     pub workspace_identity: WorkspaceIdentity,
     pub origin: SessionOrigin,
+    /// The chat whose turn started this session, when the user did not start
+    /// it: a research sub-agent runs in a session of its own so its transcript
+    /// stays auditable, but that session belongs to the turn that started it.
+    /// It is not listed as a chat of its own, "the latest chat" skips it, and
+    /// deleting the chat that started it takes it away too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<Uuid>,
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
     pub worktree_name: Option<String>,
@@ -463,6 +473,40 @@ impl SessionStore {
         title: impl Into<String>,
         context: CreateSessionContext,
     ) -> Result<Session> {
+        self.insert_session(workspace_path, origin, title, context, None)
+    }
+
+    /// Starts a session a chat's turn owns rather than the user.
+    ///
+    /// A research sub-agent runs in a session of its own so its transcript is
+    /// auditable, but that session is not a chat of its own: the chat list
+    /// leaves it out, `latest_session` skips it, and deleting the chat that
+    /// started it takes it away too.
+    pub fn create_subagent_session(
+        &self,
+        workspace_path: impl AsRef<Path>,
+        origin: SessionOrigin,
+        title: impl Into<String>,
+        context: CreateSessionContext,
+        parent_session_id: Uuid,
+    ) -> Result<Session> {
+        self.insert_session(
+            workspace_path,
+            origin,
+            title,
+            context,
+            Some(parent_session_id),
+        )
+    }
+
+    fn insert_session(
+        &self,
+        workspace_path: impl AsRef<Path>,
+        origin: SessionOrigin,
+        title: impl Into<String>,
+        context: CreateSessionContext,
+        parent_session_id: Option<Uuid>,
+    ) -> Result<Session> {
         let now = Utc::now();
         let id = Uuid::new_v4();
         let title = normalize_session_title(title)?;
@@ -480,6 +524,7 @@ impl SessionStore {
             ),
             workspace_path,
             origin,
+            parent_session_id,
             workspace_mode: context.workspace_mode,
             branch: context.branch,
             worktree_name: context.worktree_name,
@@ -497,8 +542,8 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into sessions
-             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path, workspace_identity_json)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path, workspace_identity_json, parent_session_id)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 session.id.to_string(),
                 session.title,
@@ -516,6 +561,7 @@ impl SessionStore {
                 session.updated_at.to_rfc3339(),
                 session.events_path.to_string_lossy(),
                 serde_json::to_string(&session.workspace_identity)?,
+                session.parent_session_id.map(|id| id.to_string()),
             ],
         )?;
 
@@ -546,7 +592,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 row_to_session,
@@ -589,12 +635,16 @@ impl SessionStore {
             .ok_or_else(|| anyhow!("session disappeared after Workspace update"))
     }
 
+    /// The newest chat the user started.
+    ///
+    /// A session another chat's turn started — a research sub-agent run — is
+    /// not a chat the user can resume, so it never answers "the latest chat".
     pub fn latest_session(&self) -> Result<Option<Session>> {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
-                 from sessions order by updated_at desc limit 1",
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 from sessions where parent_session_id is null order by updated_at desc limit 1",
                 [],
                 row_to_session,
             )
@@ -611,11 +661,11 @@ impl SessionStore {
     pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
         let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
              from sessions order by updated_at desc limit ?1"
         } else {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
              from sessions order by updated_at desc"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -680,7 +730,53 @@ impl SessionStore {
         self.get_session(session_id)
     }
 
+    /// Deletes a chat and the sub-agent sessions its turns started.
+    ///
+    /// A sub-agent run is kept for audit but is not a chat of its own, so once
+    /// the chat that started it is gone it would be invisible junk. The whole
+    /// tree goes: a chat opened from a call card can run research of its own,
+    /// and that session would otherwise be orphaned the same way. One that
+    /// cannot be removed does not fail the delete the user did ask for.
     pub fn delete_session(&self, session_id: Uuid) -> Result<bool> {
+        let deleted = self.delete_session_only(session_id)?;
+        let mut pending = self.child_session_ids(session_id)?;
+        let mut removed = 0usize;
+        while let Some(child) = pending.pop() {
+            if removed >= MAX_SUBAGENT_SESSION_TREE {
+                eprintln!(
+                    "stopped removing sub-agent sessions after {MAX_SUBAGENT_SESSION_TREE} of them"
+                );
+                break;
+            }
+            removed += 1;
+            match self.delete_session_only(child) {
+                Ok(_) => {
+                    if let Ok(grandchildren) = self.child_session_ids(child) {
+                        pending.extend(grandchildren);
+                    }
+                }
+                Err(error) => eprintln!("could not remove sub-agent session {child}: {error}"),
+            }
+        }
+        Ok(deleted)
+    }
+
+    /// The sessions this chat's turns started, whatever they were called.
+    fn child_session_ids(&self, session_id: Uuid) -> Result<Vec<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("select id from sessions where parent_session_id = ?1")?;
+        let rows = stmt.query_map(params![session_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut children = Vec::new();
+        for row in rows {
+            children.push(Uuid::parse_str(&row?)?);
+        }
+        Ok(children)
+    }
+
+    fn delete_session_only(&self, session_id: Uuid) -> Result<bool> {
         let Some(session) = self.get_session(session_id)? else {
             let orphaned_events = self.session_events_path(session_id)?;
             if let Err(error) = std::fs::remove_file(&orphaned_events) {
@@ -1505,6 +1601,153 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// Read durable chat context independently of the bounded transcript tail.
+    /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
+    pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(Vec::new());
+        }
+        let mut file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for context indexing", events_path.display()))?;
+        let file_len = file.seek(SeekFrom::End(0))?;
+        let has_complete_tail = if file_len == 0 {
+            true
+        } else {
+            file.seek(SeekFrom::End(-1))?;
+            let mut last = [0u8; 1];
+            file.read_exact(&mut last)?;
+            last[0] == b'\n'
+        };
+        let indexed_bytes: u64 = self
+            .conn
+            .query_row(
+                "select indexed_bytes from session_context_index where session_id = ?1",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let scan_start = if indexed_bytes > file_len {
+            0
+        } else {
+            indexed_bytes
+        };
+        file.seek(SeekFrom::Start(scan_start))?;
+        let mut reader = BufReader::new(&mut file);
+        let mut offset = scan_start;
+        let mut preceding_assistant: Option<(u64, SessionEvent)> = None;
+        let mut context_events = Vec::new();
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            let next_offset = reader.stream_position()?;
+            if next_offset == file_len && !has_complete_tail {
+                break;
+            }
+            if !line.is_empty() {
+                let event = parse_session_event_line(&events_path, 0, &line)?;
+                if event.kind == SessionEventKind::AssistantMessage {
+                    preceding_assistant = Some((offset, event.clone()));
+                }
+                if event.kind == SessionEventKind::PlanUpdated
+                    && event.payload.get("content").is_none()
+                    && event.payload.get("markdown").is_none()
+                {
+                    let adjacent = preceding_assistant.as_ref().filter(|(_, assistant)| {
+                        assistant.turn_id.is_some() && assistant.turn_id == event.turn_id
+                    });
+                    if let Some((assistant_offset, assistant)) = adjacent {
+                        context_events.push((*assistant_offset, assistant.clone()));
+                    } else if let Some(turn_id) = event.turn_id {
+                        // A read may have indexed the assistant before its
+                        // plan marker was appended. Its turn index keeps the
+                        // Markdown fallback available across that boundary.
+                        if let Some(assistant) = self.find_indexed_turn_message(
+                            session_id,
+                            turn_id,
+                            &SessionEventKind::AssistantMessage,
+                            &events_path,
+                        )? {
+                            context_events.push((offset.saturating_sub(1), assistant));
+                        }
+                    }
+                }
+                if matches!(
+                    &event.kind,
+                    SessionEventKind::GoalUpdated
+                        | SessionEventKind::PlanUpdated
+                        | SessionEventKind::ChatModeChanged
+                ) {
+                    context_events.push((offset, event));
+                }
+            }
+            offset = next_offset;
+        }
+        drop(reader);
+        drop(_lock);
+        if offset != indexed_bytes || indexed_bytes > file_len {
+            let transaction = self.conn.unchecked_transaction()?;
+            let current_offset: u64 = transaction
+                .query_row(
+                    "select indexed_bytes from session_context_index where session_id = ?1",
+                    params![session_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            let reset_index = current_offset > file_len;
+            if reset_index {
+                transaction.execute(
+                    "delete from session_context_events where session_id = ?1",
+                    params![session_id.to_string()],
+                )?;
+            }
+            for (event_offset, event) in context_events {
+                transaction.execute(
+                    "insert or ignore into session_context_events
+                     (session_id, event_id, log_offset, event_json)
+                     values (?1, ?2, ?3, ?4)",
+                    params![
+                        session_id.to_string(),
+                        event.id.to_string(),
+                        event_offset,
+                        serde_json::to_string(&event)?,
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "insert into session_context_index (session_id, indexed_bytes)
+                 values (?1, ?2)
+                 on conflict(session_id) do update set indexed_bytes = excluded.indexed_bytes",
+                params![
+                    session_id.to_string(),
+                    if reset_index {
+                        offset
+                    } else {
+                        offset.max(current_offset)
+                    },
+                ],
+            )?;
+            transaction.commit()?;
+        }
+
+        let mut statement = self.conn.prepare(
+            "select event_json from session_context_events
+             where session_id = ?1 order by log_offset asc",
+        )?;
+        let rows = statement.query_map(params![session_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| {
+            let encoded = row?;
+            serde_json::from_str(&encoded).map_err(Into::into)
+        })
+        .collect()
+    }
+
     /// Read up to `limit` events that appear **before** `before_event_id` in the
     /// JSONL log (older history). Returns oldest→newest order within the page.
     ///
@@ -1593,6 +1836,8 @@ impl SessionStore {
             .query_row("pragma user_version", [], |row| row.get(0))?;
         if user_version >= SESSION_STORE_SCHEMA_VERSION {
             self.ensure_core_tables()?;
+            self.ensure_column("parent_session_id", "parent_session_id text")?;
+            self.ensure_parent_session_index()?;
             crate::usage::ensure_usage_schema(&self.conn)?;
             crate::file_review::ensure_file_review_schema(&self.conn)?;
             return Ok(());
@@ -1612,6 +1857,10 @@ impl SessionStore {
         self.ensure_column("summary", "summary text")?;
         self.ensure_column("summary_updated_at", "summary_updated_at text")?;
         self.ensure_column("workspace_identity_json", "workspace_identity_json text")?;
+        // A session a turn started records the chat that started it; sessions
+        // that predate the column are the user's own chats, so null is right.
+        self.ensure_column("parent_session_id", "parent_session_id text")?;
+        self.ensure_parent_session_index()?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -1639,6 +1888,7 @@ impl SessionStore {
                summary text,
                summary_updated_at text,
                workspace_identity_json text,
+               parent_session_id text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -1718,6 +1968,24 @@ impl SessionStore {
                updated_at text not null,
                primary key (session_id, turn_id),
                foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create table if not exists session_context_index (
+               session_id text primary key not null,
+               indexed_bytes integer not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create table if not exists session_context_events (
+               session_id text not null,
+               event_id text primary key not null,
+               log_offset integer not null,
+               event_json text not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create index if not exists idx_session_context_events_order
+             on session_context_events(session_id, log_offset
              );",
         )?;
         Ok(())
@@ -1941,6 +2209,14 @@ impl SessionStore {
         }
         self.conn
             .execute_batch(&format!("alter table sessions add column {definition};"))?;
+        Ok(())
+    }
+
+    fn ensure_parent_session_index(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "create index if not exists idx_sessions_parent_session_id
+             on sessions(parent_session_id);",
+        )?;
         Ok(())
     }
 }
@@ -2285,6 +2561,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let summary: Option<String> = row.get(15)?;
     let summary_updated_at: Option<String> = row.get(16)?;
     let workspace_identity_json: Option<String> = row.get(17)?;
+    let parent_session_id: Option<String> = row.get(18)?;
     let workspace_path = PathBuf::from(workspace_path);
     let workspace_mode = SessionWorkspaceMode::from_str(&workspace_mode);
     let workspace_identity = workspace_identity_json
@@ -2298,6 +2575,9 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         workspace_path,
         workspace_identity,
         origin: SessionOrigin::from_str(&origin),
+        parent_session_id: parent_session_id
+            .map(|value| Uuid::parse_str(&value).map_err(parse_error))
+            .transpose()?,
         workspace_mode,
         branch,
         worktree_name,
@@ -2471,6 +2751,96 @@ mod tests {
         assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
         assert_eq!(events[1].message, "hello");
         assert!(store.latest_session().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_subagent_session_records_the_chat_that_started_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "ask the model")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: where do the sidebar chats come from?",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+
+        assert_eq!(child.parent_session_id, Some(parent.id));
+        assert_eq!(parent.parent_session_id, None);
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let reopened = SessionStore::open(paths).unwrap();
+        let persisted = reopened.get_session(child.id).unwrap().unwrap();
+        assert_eq!(persisted.parent_session_id, Some(parent.id));
+    }
+
+    #[test]
+    fn the_latest_chat_skips_a_subagent_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "the chat I opened")
+            .unwrap();
+        store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: am I the latest chat?",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+
+        // The child is the newest row, but "the latest chat" means the chat the
+        // user started.
+        let latest = store.latest_session().unwrap().unwrap();
+        assert_eq!(latest.id, parent.id);
+    }
+
+    #[test]
+    fn deleting_a_chat_deletes_the_subagent_sessions_it_started() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "delete me")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: kept only while the chat lives",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        let unrelated = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "leave me alone")
+            .unwrap();
+        // A sub-agent chat can be opened from its call card and run research of
+        // its own, so the tree is removed a level at a time rather than just the
+        // first one.
+        let grandchild = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research: one level further",
+                CreateSessionContext::default(),
+                child.id,
+            )
+            .unwrap();
+        let child_log = child.events_path.clone();
+
+        assert!(store.delete_session(parent.id).unwrap());
+
+        assert!(store.get_session(parent.id).unwrap().is_none());
+        assert!(store.get_session(child.id).unwrap().is_none());
+        assert!(store.get_session(grandchild.id).unwrap().is_none());
+        assert!(!child_log.exists());
+        assert!(store.get_session(unrelated.id).unwrap().is_some());
     }
 
     #[cfg(unix)]
@@ -2898,6 +3268,93 @@ mod tests {
             .unwrap();
         assert!(missing.events.is_empty());
         assert!(!missing.has_more_before);
+    }
+
+    #[test]
+    fn context_events_survive_a_long_transcript_and_incremental_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "long context")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let goal = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal set",
+                serde_json::json!({"action":"set","text":"Ship Gyro","status":"active"}),
+            )
+            .unwrap();
+        let assistant = store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::AssistantMessage,
+                "A complete plan",
+                serde_json::json!({}),
+                Some(turn_id),
+            )
+            .unwrap();
+        assert_eq!(store.read_context_events(session.id).unwrap().len(), 1);
+        let plan = store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::PlanUpdated,
+                "Plan created",
+                serde_json::json!({"action":"replace","items":[]}),
+                Some(turn_id),
+            )
+            .unwrap();
+        let first_context = store.read_context_events(session.id).unwrap();
+        assert_eq!(
+            first_context
+                .iter()
+                .map(|event| event.id)
+                .collect::<Vec<_>>(),
+            vec![goal.id, assistant.id, plan.id]
+        );
+
+        let mut writer = std::io::BufWriter::new(
+            OpenOptions::new()
+                .append(true)
+                .open(&session.events_path)
+                .unwrap(),
+        );
+        for index in 0..1_100 {
+            let event = SessionEvent::new(
+                session.id,
+                SessionEventKind::SystemEvent,
+                format!("activity {index}"),
+                serde_json::json!({}),
+            );
+            writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
+        }
+        writer.flush().unwrap();
+        assert!(store
+            .read_recent_events(session.id, 400)
+            .unwrap()
+            .iter()
+            .all(|event| event.id != goal.id && event.id != plan.id));
+        drop(store);
+
+        let reopened = SessionStore::open(paths).unwrap();
+        let context = reopened.read_context_events(session.id).unwrap();
+        assert_eq!(
+            context.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![goal.id, assistant.id, plan.id]
+        );
+        reopened
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal cleared",
+                serde_json::json!({"action":"clear"}),
+            )
+            .unwrap();
+        let updated = reopened.read_context_events(session.id).unwrap();
+        assert_eq!(updated.len(), 4);
+        assert_eq!(updated.last().unwrap().payload["action"], "clear");
     }
 
     #[test]

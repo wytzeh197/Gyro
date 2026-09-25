@@ -1,8 +1,5 @@
 import {
   turnIdFromSessionEvent,
-  deriveSessionPlan,
-  deriveSessionGoal,
-  deriveChatMode,
   chatModeEventMessage,
   createChatModeSessionEvent,
   normalizePlanItem,
@@ -16,6 +13,11 @@ import {
   createEditorSessionEvent,
   slugify,
 } from "./session-context-events";
+import {
+  deriveSessionContext,
+  useDerivedSessionContext,
+  useSessionContextEvents,
+} from "./use-session-context-events";
 import { ComposerContextCandidates } from "@gyro-dev/ui";
 import {
   restoreCompanionPanes,
@@ -23,6 +25,8 @@ import {
   type PullRequestDraft,
 } from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
+import { persistAutoCompactPercent } from "./auto-compaction";
+import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
 import {
@@ -37,12 +41,27 @@ import {
   browserUnreachableMessage,
   normalizedPreviewUrl,
 } from "./browser-preview-text";
+import {
+  appendFeedback,
+  browserFeedbackDraft,
+  captureChatBrowserPage,
+  revealBrowserCapture,
+} from "./browser-capture";
 import { useModelBrowserReveal } from "./model-browser-reveal";
+import { useRemoteCheck } from "./use-remote-check";
+import {
+  useSessionModelSave,
+  type SessionModelSelection,
+} from "./use-session-model-save";
 import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { createGithubRefreshController } from "./github-refresh";
 import { useProviderUsage } from "./use-provider-usage";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { resolveChatPaneClose } from "./chat-pane-close";
+import {
+  normalizeProjectPath,
+  visibleSessionsForProjects,
+} from "./session-listing";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
@@ -73,7 +92,7 @@ import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -163,6 +182,7 @@ import {
   type AppDestination,
   type Automation,
   type BrowserPreviewCapture,
+  type BrowserFeedback,
   type BrowserPreviewDiagnostic,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
@@ -289,6 +309,7 @@ import {
   mergePersistedAndOptimisticEvents,
   mergeLiveCapabilityEvent,
   mergeProviderResponseEvents,
+  preserveDeliveredResponses,
   resetStreamingAssistantForRetry,
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
@@ -495,14 +516,6 @@ type ModelUsageEntry = {
 };
 
 type ModelUsageMap = Record<string, ModelUsageEntry>;
-
-type SessionModelSelection = {
-  providerId?: ProviderId;
-  providerLabel?: string;
-  modelId?: string;
-  modelLabel?: string;
-  reasoningEffort?: ReasoningEffort;
-};
 
 type SavedProject = {
   path: string;
@@ -819,6 +832,12 @@ export function App() {
   const [sessionEventsById, setSessionEventsById] = useState<
     Record<string, SessionEvent[]>
   >({});
+  const {
+    eventsBySession: sessionContextEventsById,
+    replace: replaceSessionContextEvents,
+    forget: forgetSessionContextEvents,
+    forgetMany: forgetManySessionContextEvents,
+  } = useSessionContextEvents();
   const [capabilityRunsBySessionId, setCapabilityRunsBySessionId] = useState<
     Record<string, Record<string, CapabilityActivity>>
   >({});
@@ -1230,6 +1249,9 @@ export function App() {
     [activeSessionId, sessions],
   );
   const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  // The bottom drawer belongs to the Workspace layouts. A Chat (thread) surface
+  // never draws it, so its chats must not offer the control either.
+  const isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread";
   // Browser focus splits the code route into editor + preview rows. It has to
   // track whether the preview panel is actually rendered: leaving the pane tab
   // on "browser" after closing the panel used to keep the split, so the editor
@@ -1239,36 +1261,40 @@ export function App() {
     workbench.activePaneTab === "browser" &&
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
-  const workspaceRoots = useMemo(
-    () => {
-      const configured = workspaceFolderPaths(
-        activeWorkspaceRoot,
-        workbench.preferences.workspaceFolders,
-        activeWorkspaceRoot
-          ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
-              ?.primaryFolder
-          : undefined,
-      );
-      if (!activeWorkspaceRoot || activeWorkspaceRoot in workbench.preferences.workspaceFolders) {
-        return configured;
-      }
-      const persisted = activeSession?.workspaceIdentity?.roots.map((root) => root.path);
-      return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
-    },
-    [
-      activeSession?.workspaceIdentity,
+  const workspaceRoots = useMemo(() => {
+    const configured = workspaceFolderPaths(
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
-      workbench.preferences.projectDetails,
-    ],
-  );
+      activeWorkspaceRoot
+        ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+            ?.primaryFolder
+        : undefined,
+    );
+    if (
+      !activeWorkspaceRoot ||
+      activeWorkspaceRoot in workbench.preferences.workspaceFolders
+    ) {
+      return configured;
+    }
+    const persisted = activeSession?.workspaceIdentity?.roots.map(
+      (root) => root.path,
+    );
+    return persisted?.[0] === activeWorkspaceRoot ? persisted : configured;
+  }, [
+    activeSession?.workspaceIdentity,
+    activeWorkspaceRoot,
+    workbench.preferences.workspaceFolders,
+    workbench.preferences.projectDetails,
+  ]);
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
-    const active = identity?.roots.find((root) => root.id === identity.activeRootId);
+    const active = identity?.roots.find(
+      (root) => root.id === identity.activeRootId,
+    );
     if (active) setSelectedWorkspaceRoot(active.path);
   }, [activeSession?.id, activeSession?.workspaceIdentity?.activeRootId]);
 
@@ -1714,29 +1740,22 @@ export function App() {
   // Plan/goal/mode can lag while idle. An in-flight turn cannot: deferred
   // events starved live status and the rail froze before the provider finished.
   const deferredEventsForPlan = useDeferredValue(events);
+  const persistedSessionContext = useDerivedSessionContext(
+    sessionContextEventsById,
+    activeSessionId,
+    deferredEventsForPlan,
+  );
   const isLiveTurnStreaming = activeSessionId
     ? sendingSessionIds.includes(activeSessionId)
     : isStartingFirstTurn;
   const deferredEventsForTurn = isLiveTurnStreaming
     ? events
     : deferredEventsForPlan;
-  const persistedActiveSessionPlan = useMemo(
-    () => deriveSessionPlan(deferredEventsForPlan, activeSessionId),
-    [activeSessionId, deferredEventsForPlan],
-  );
   const activeSessionPlan = activeSessionId
-    ? persistedActiveSessionPlan
+    ? persistedSessionContext.plan
     : pendingNewChatPlan;
-  const persistedActiveSessionGoal = useMemo(
-    () => deriveSessionGoal(deferredEventsForPlan, activeSessionId),
-    [activeSessionId, deferredEventsForPlan],
-  );
-  const persistedActiveChatMode = useMemo(
-    () => deriveChatMode(deferredEventsForPlan),
-    [deferredEventsForPlan],
-  );
   const activeSessionGoal = activeSessionId
-    ? persistedActiveSessionGoal
+    ? persistedSessionContext.goal
     : pendingNewChatGoal;
   const activeSessionUsage = activeSessionId
     ? sessionUsageById[activeSessionId]
@@ -1994,14 +2013,25 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!isTauriRuntime() || !activeSession || !workspaceActionRoot ||
-        activeSession.eventsPath.startsWith("preview://")) return;
+    if (
+      !isTauriRuntime() ||
+      !activeSession ||
+      !workspaceActionRoot ||
+      activeSession.eventsPath.startsWith("preview://")
+    )
+      return;
     const identity = activeSession.workspaceIdentity;
-    const sameRoots = identity?.roots.length === workspaceRoots.length &&
-      identity.roots.every((root, index) => root.path === workspaceRoots[index]);
-    if (sameRoots && identity?.activeRootId === identity.roots.find(
-      (root) => root.path === workspaceActionRoot,
-    )?.id) return;
+    const sameRoots =
+      identity?.roots.length === workspaceRoots.length &&
+      identity.roots.every(
+        (root, index) => root.path === workspaceRoots[index],
+      );
+    if (
+      sameRoots &&
+      identity?.activeRootId ===
+        identity.roots.find((root) => root.path === workspaceActionRoot)?.id
+    )
+      return;
     const timer = window.setTimeout(() => {
       void invoke<Session>("set_session_workspace_identity", {
         request: {
@@ -2009,29 +2039,42 @@ export function App() {
           roots: workspaceRoots,
           activeRoot: workspaceActionRoot,
         },
-      }).then((updated) => {
-        const persistedRoots = updated.workspaceIdentity?.roots.map((root) => root.path);
-        if (persistedRoots && persistedRoots.some((path, index) => path !== workspaceRoots[index])) {
-          dispatchWorkbench({
-            type: "set-workspace-folders",
-            workspacePath: updated.workspacePath,
-            paths: persistedRoots.slice(1),
-          });
-          const active = updated.workspaceIdentity?.roots.find(
-            (root) => root.id === updated.workspaceIdentity?.activeRootId,
+      })
+        .then((updated) => {
+          const persistedRoots = updated.workspaceIdentity?.roots.map(
+            (root) => root.path,
           );
-          if (active) setSelectedWorkspaceRoot(active.path);
-        }
-        setSessions((current) => current.map((session) =>
-          session.id === updated.id &&
-          (session.workspaceIdentity?.revision ?? 0) <
-            (updated.workspaceIdentity?.revision ?? 0)
-            ? { ...session, workspaceIdentity: updated.workspaceIdentity }
-            : session,
-        ));
-      }).catch((error) => {
-        notify("command-failed", "Workspace roots could not be saved", String(error));
-      });
+          if (
+            persistedRoots &&
+            persistedRoots.some((path, index) => path !== workspaceRoots[index])
+          ) {
+            dispatchWorkbench({
+              type: "set-workspace-folders",
+              workspacePath: updated.workspacePath,
+              paths: persistedRoots.slice(1),
+            });
+            const active = updated.workspaceIdentity?.roots.find(
+              (root) => root.id === updated.workspaceIdentity?.activeRootId,
+            );
+            if (active) setSelectedWorkspaceRoot(active.path);
+          }
+          setSessions((current) =>
+            current.map((session) =>
+              session.id === updated.id &&
+              (session.workspaceIdentity?.revision ?? 0) <
+                (updated.workspaceIdentity?.revision ?? 0)
+                ? { ...session, workspaceIdentity: updated.workspaceIdentity }
+                : session,
+            ),
+          );
+        })
+        .catch((error) => {
+          notify(
+            "command-failed",
+            "Workspace roots could not be saved",
+            String(error),
+          );
+        });
     }, 200);
     return () => window.clearTimeout(timer);
   }, [activeSession, notify, workspaceActionRoot, workspaceRoots]);
@@ -2103,62 +2146,12 @@ export function App() {
     ],
   );
 
-  const refreshProviderLedger = useCallback(async (providerId: ProviderId) => {
-    try {
-      const summary = await invoke<ProviderLedgerSummary>(
-        "get_provider_usage_ledger",
-        { providerId },
-      );
-      setProviderLedgerById((current) => ({
-        ...current,
-        [providerId]: summary,
-      }));
-    } catch {
-      // Settings falls back to the reference denominator.
-    }
-  }, []);
-  const setProviderBudget = useCallback(
-    async (providerId: ProviderId, maxTokens: number) => {
-      try {
-        await invoke("set_provider_budget", { providerId, maxTokens });
-        await refreshProviderLedger(providerId);
-      } catch (error) {
-        notify(
-          "provider",
-          "Could not save the budget",
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    },
-    [notify, refreshProviderLedger],
-  );
-  const setUsagePaused = useCallback(
-    async (paused: boolean) => {
-      try {
-        await invoke("set_usage_paused", { paused });
-        await refreshUsageSafety();
-      } catch (error) {
-        notify(
-          "provider",
-          paused ? "Could not pause" : "Could not resume",
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    },
-    [notify, refreshUsageSafety],
-  );
-  const resumeUsage = useCallback(async () => {
-    try {
-      await invoke("set_usage_paused", { paused: false });
-      await refreshUsageSafety();
-    } catch (error) {
-      notify(
-        "provider",
-        "Could not resume",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }, [notify, refreshUsageSafety]);
+  const {
+    refreshProviderLedger,
+    setProviderBudget,
+    setUsagePaused,
+    resumeUsage,
+  } = useUsageActions({ notify, refreshUsageSafety, setProviderLedgerById });
   const recoveryNoticeShownRef = useRef(false);
   useEffect(() => {
     if (recoveryNoticeShownRef.current) return;
@@ -2683,6 +2676,7 @@ export function App() {
       try {
         const page = await invoke<{
           events: SessionEvent[];
+          contextEvents: SessionEvent[];
           hasMoreBefore: boolean;
         }>("read_session_events", {
           sessionId,
@@ -2696,20 +2690,23 @@ export function App() {
           // Fresh open always starts from the recent window; expanded history
           // only grows via load-earlier.
           expandedHistorySessionsRef.current.delete(sessionId);
+          replaceSessionContextEvents(sessionId, page.contextEvents);
           setHasMoreBeforeBySession((current) => ({
             ...current,
             [sessionId]: page.hasMoreBefore,
           }));
-          setEventsForSession(
-            sessionId,
+          setEventsForSession(sessionId, (current) =>
             limitEventsForSession(
               sessionId,
-              markInactiveCapabilityResources(
-                mergePersistedAndOptimisticEvents(
-                  page.events,
-                  latestOptimisticEvents,
+              preserveDeliveredResponses(
+                markInactiveCapabilityResources(
+                  mergePersistedAndOptimisticEvents(
+                    page.events,
+                    latestOptimisticEvents,
+                  ),
+                  liveCapabilityResourceIdsRef.current,
                 ),
-                liveCapabilityResourceIdsRef.current,
+                current,
               ),
             ),
           );
@@ -2726,7 +2723,7 @@ export function App() {
         }
       }
     },
-    [limitEventsForSession, setEventsForSession],
+    [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
   );
 
   const loadEarlierEvents = useCallback(
@@ -2936,6 +2933,17 @@ export function App() {
                 },
               },
             });
+            // Follow is the one mode where the app moves with the model, and
+            // only for the chat on screen. Selecting the pane is what makes
+            // the model's terminal join the strip; nothing else does, so the
+            // user's own terminals stay uncluttered.
+            if (shouldFollow) {
+              dispatchWorkbench({
+                type: "select-terminal-pane",
+                paneId: snapshot.paneId,
+              });
+              dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+            }
             terminalOutputRevisionRef.current[snapshot.paneId] =
               snapshot.outputRevision;
             const stoppedBy = stringFromRecord(
@@ -3131,28 +3139,14 @@ export function App() {
     if (browser && workbench.browserPreview.url !== browser.url) {
       dispatchWorkbench({ type: "set-browser-url", url: browser.url });
     }
-    const modelTerminal = workbench.terminalPanes.find(
-      (pane) =>
-        pane.owner?.kind === "model" &&
-        pane.owner.sessionId === activeSessionId,
-    );
-    if (
-      modelTerminal &&
-      workbench.activePaneTab === "terminal" &&
-      workbench.selectedTerminalPaneId !== modelTerminal.id
-    ) {
-      dispatchWorkbench({
-        type: "select-terminal-pane",
-        paneId: modelTerminal.id,
-      });
-    }
+    // A model terminal is a focus, not a place. Selecting it here moved the
+    // workspace terminal whenever this chat owned one, so clicking a run or
+    // test task could never land on the task's own terminal. Peek and off
+    // leave the workspace alone; Follow rides the capability resource events.
   }, [
     activeSessionId,
     browserResourcesBySessionId,
-    workbench.activePaneTab,
     workbench.browserPreview.url,
-    workbench.selectedTerminalPaneId,
-    workbench.terminalPanes,
   ]);
 
   const scheduleProviderStreamFlush = useCallback(() => {
@@ -3593,6 +3587,14 @@ export function App() {
   const selectDestination = useCallback((destination: AppDestination) => {
     dispatchWorkbench({ type: "select-destination", destination });
   }, []);
+
+  // The auto-compaction share lives in the native-owned usage guard, so it
+  // crosses its own command and the config the surface renders is re-read.
+  const setAutoCompactPercent = useCallback(
+    (percent: number) =>
+      persistAutoCompactPercent(percent, { notify, refreshConfig }),
+    [notify, refreshConfig],
+  );
 
   const returnFromSettings = useCallback(() => {
     const destination =
@@ -4700,6 +4702,9 @@ export function App() {
         command: commandLine,
         output: `$ ${commandLine}\n`,
       });
+      // Run has to land on the terminal that is actually running the task: a
+      // pane that already existed would otherwise stay behind another tab.
+      dispatchWorkbench({ type: "select-terminal-pane", paneId });
       setTerminalOutput(`$ ${commandLine}\n`);
 
       if (!isTauriRuntime()) {
@@ -5967,6 +5972,25 @@ export function App() {
   const isSourceControlVisible =
     workbench.activeDestination === "workspace" &&
     workbench.ide.activeView === "source-control";
+  const {
+    checkRemoteChanges,
+    isRemoteChecking,
+    remoteCheckFailed,
+    remoteCheckMessage,
+  } = useRemoteCheck({
+    root: workspaceActionRoot,
+    sourceControl: workbench.ide.sourceControl,
+    visible: isSourceControlVisible,
+    trusted: workspaceActionRoot
+      ? isWorkspaceTrusted(
+          workbench.preferences.workspaceTrust,
+          workspaceActionRoot,
+        )
+      : false,
+    currentRoot: ideSourceControlRootRef,
+    dispatch: dispatchWorkbench,
+    notify,
+  });
 
   // Edits made outside Gyro — another editor, a terminal, a rebase — never
   // reach the file-edit refresh, so re-read while the panel is on screen.
@@ -7288,6 +7312,7 @@ export function App() {
         delete next[sessionId];
         return next;
       });
+      forgetSessionContextEvents(sessionId);
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
@@ -7309,6 +7334,7 @@ export function App() {
     [
       activeSessionId,
       capabilityRunsBySessionId,
+      forgetSessionContextEvents,
       forgetUnreadCompletedChat,
       notify,
       sessions,
@@ -7386,6 +7412,7 @@ export function App() {
         ),
       ),
     );
+    forgetManySessionContextEvents(projectSessionIds);
 
     if (
       activeProjectPath === projectPath ||
@@ -7412,6 +7439,7 @@ export function App() {
   }, [
     activeSession?.workspacePath,
     activeSessionId,
+    forgetManySessionContextEvents,
     notify,
     projectRemoveCandidate,
     removedProjectPaths,
@@ -7696,51 +7724,11 @@ export function App() {
     [commandProfiles, launchTerminalPane, notify],
   );
 
-  const saveSessionModel = useCallback(
-    async (sessionId: string, model: SessionModelSelection) => {
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === sessionId
-            ? {
-                ...session,
-                providerId: model.providerId,
-                providerLabel: model.providerLabel,
-                modelId: model.modelId,
-                modelLabel: model.modelLabel,
-                reasoningEffort: model.reasoningEffort,
-              }
-            : session,
-        ),
-      );
-
-      if (!isTauriRuntime()) {
-        return;
-      }
-
-      try {
-        const updated = await invoke<Session>("set_session_model", {
-          sessionId,
-          providerId: model.providerId,
-          providerLabel: model.providerLabel,
-          modelId: model.modelId,
-          modelLabel: model.modelLabel,
-          reasoningEffort: model.reasoningEffort,
-        });
-        setSessions((current) =>
-          current.map((session) =>
-            session.id === sessionId ? updated : session,
-          ),
-        );
-      } catch {
-        notify(
-          "command-failed",
-          "Model memory failed",
-          "This chat kept the model in the current window only",
-        );
-      }
-    },
-    [notify],
-  );
+  const { saveSessionModel, pendingModelSave } = useSessionModelSave({
+    setSessions,
+    refreshEvents,
+    notify,
+  });
 
   const selectProvider = useCallback(
     (providerId: ProviderId) => {
@@ -8860,22 +8848,22 @@ export function App() {
         }));
       }
       const upload = async (dropped: File, kind: "image" | "video") => {
-        const file =
-          kind === "image"
-            ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
-            : dropped;
-        const name =
-          file.name ||
-          `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
-        const byteLimit =
-          kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
-        if (file.size > byteLimit) {
-          rejected.push(
-            `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
-          );
-          return undefined;
-        }
         try {
+          const file =
+            kind === "image"
+              ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+              : dropped;
+          const name =
+            file.name ||
+            `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+          const byteLimit =
+            kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+          if (file.size > byteLimit) {
+            rejected.push(
+              `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
+            );
+            return undefined;
+          }
           const headers: Record<string, string> = {
             "x-gyro-kind": kind,
             "x-gyro-name": base64Utf8(name),
@@ -8891,7 +8879,7 @@ export function App() {
           );
           return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
-          rejected.push(`${name}: ${String(error)}`);
+          rejected.push(`${dropped.name || kind}: ${String(error)}`);
           return undefined;
         }
       };
@@ -10304,7 +10292,10 @@ export function App() {
             message,
             turnId,
           });
-          if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== persistedSession.workspacePath) {
+          if (
+            liveEditorEvidence &&
+            liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
+          ) {
             await invoke("update_capability_ide_evidence", {
               request: {
                 workspacePath: liveEditorEvidence.workspaceKey,
@@ -10457,7 +10448,22 @@ export function App() {
           notifyFailure: false,
         });
       }
-      void saveSessionModel(targetSessionId, sessionModel);
+      // Finish any pending model switch before appending the next user message.
+      // A normal send already has this model bound and needs no extra disk read.
+      const boundModel = sessionsRef.current.find(
+        (session) => session.id === targetSessionId,
+      );
+      if (
+        boundModel?.providerId !== sessionModel.providerId ||
+        boundModel?.providerLabel !== sessionModel.providerLabel ||
+        boundModel?.modelId !== sessionModel.modelId ||
+        boundModel?.modelLabel !== sessionModel.modelLabel ||
+        boundModel?.reasoningEffort !== sessionModel.reasoningEffort
+      ) {
+        await saveSessionModel(targetSessionId, sessionModel);
+      } else {
+        await pendingModelSave(targetSessionId);
+      }
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
@@ -10545,7 +10551,10 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
         }
-        if (liveEditorEvidence && liveEditorEvidence.workspaceKey !== chatWorkspacePath) {
+        if (
+          liveEditorEvidence &&
+          liveEditorEvidence.workspaceKey !== chatWorkspacePath
+        ) {
           await invoke("update_capability_ide_evidence", {
             request: {
               workspacePath: liveEditorEvidence.workspaceKey,
@@ -10695,6 +10704,7 @@ export function App() {
       replaceSendingSessionId,
       refreshEvents,
       resetChatDraft,
+      pendingModelSave,
       saveSessionModel,
       sessions,
       setSessionSending,
@@ -11115,6 +11125,15 @@ export function App() {
       if (action === "show-capability") {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
+        if (activity.resource.kind === "chat") {
+          // A research sub-agent keeps its transcript in a chat of its own.
+          // That chat is not listed among the user's chats, so the call that
+          // ran it is what opens it — and the session list may not know about
+          // it yet.
+          const chatSessionId = activity.resource.id;
+          void refreshSessions().then(() => selectSession(chatSessionId));
+          return;
+        }
         selectSession(event.sessionId);
         const session = sessions.find((item) => item.id === event.sessionId);
         if (session) setWorkspacePath(session.workspacePath);
@@ -11338,6 +11357,7 @@ export function App() {
       capabilityResourceDataByCallId,
       connectProvider,
       notify,
+      refreshSessions,
       selectSession,
       sendDraft,
       sessions,
@@ -13167,79 +13187,49 @@ export function App() {
       workspacePath,
     ],
   );
-
   const captureBrowserPreview = useCallback(
-    async (action: "capture" | "reveal" = "capture") => {
-      if (action === "reveal") {
-        const path = workbench.browserPreview.latestCapture?.path;
-        if (!path) return;
-        try {
-          await revealItemInDir(path);
-        } catch (error) {
-          notify(
-            "command-failed",
-            "Could not reveal screenshot",
-            String(error),
-          );
-        }
-        return;
-      }
-
-      dispatchWorkbench({ type: "browser-capture-start" });
-      if (!isTauriRuntime()) {
-        dispatchWorkbench({
-          type: "browser-capture-failure",
-          error: "Preview screenshots require the Gyro desktop app",
+    async (
+      action: "capture" | "reveal" | "feedback" = "capture",
+      feedback?: BrowserFeedback,
+    ) => {
+      if (action === "feedback") {
+        const draft = browserFeedbackDraft({
+          capture: workbench.browserPreview.latestCapture,
+          feedback,
+          attachments: chatAttachments[activeDraftKey] ?? [],
+          fallbackUrl: workbench.browserPreview.url,
         });
-        return;
+        if (!draft.ok) {
+          notify("command-failed", "Browser feedback unavailable", draft.error);
+          return false;
+        }
+        setChatDrafts((current) => ({
+          ...current,
+          [activeDraftKey]: appendFeedback(current[activeDraftKey], draft.note),
+        }));
+        return true;
       }
+      if (action === "reveal") {
+        const error = await revealBrowserCapture(
+          workbench.browserPreview.latestCapture?.path,
+        );
+        if (error)
+          notify("command-failed", "Could not reveal screenshot", error);
+        return undefined;
+      }
+      dispatchWorkbench({ type: "browser-capture-start" });
       try {
-        // Prefer the live session webview; fall back to ephemeral loopback capture.
-        let capture: BrowserPreviewCapture | undefined;
-        try {
-          const snapshot = await invoke<{ url: string } | null>(
-            "session_browser_snapshot",
-            { sessionId: sessionBrowserKey },
-          );
-          if (snapshot) {
-            // Session screenshot is handled through the capability path for models;
-            // user-triggered capture still uses the existing loopback command when
-            // possible, otherwise navigates the live browser and reuses capture.
-            capture = await invoke<BrowserPreviewCapture>(
-              "capture_browser_preview",
-              {
-                request: {
-                  device: workbench.browserPreview.device,
-                  url: normalizedPreviewUrl(workbench.browserPreview.url),
-                },
-              },
-            );
-          }
-        } catch {
-          capture = undefined;
-        }
-        if (!capture) {
-          capture = await invoke<BrowserPreviewCapture>(
-            "capture_browser_preview",
-            {
-              request: {
-                device: workbench.browserPreview.device,
-                url: normalizedPreviewUrl(workbench.browserPreview.url),
-              },
-            },
-          );
-        }
-        const captureWithSrc: BrowserPreviewCapture = {
-          ...capture,
-          src: isTauriRuntime() ? convertFileSrc(capture.path) : capture.path,
-        };
+        const captureWithSrc = await captureChatBrowserPage({
+          sessionId: sessionBrowserKey,
+          nativeHost: workbench.browserPreview.nativeHost === true,
+          device: workbench.browserPreview.device,
+          url: workbench.browserPreview.url,
+        });
         dispatchWorkbench({
           type: "browser-capture-success",
           capture: captureWithSrc,
         });
-        // Drop the freeze-frame into the composer so it becomes part of the
-        // chat trail (send it as context, or just keep it staged).
-        void attachBrowserCaptureToChat(captureWithSrc);
+        await attachBrowserCaptureToChat(captureWithSrc);
       } catch (error) {
         const message = String(error);
         dispatchWorkbench({
@@ -13248,17 +13238,20 @@ export function App() {
         });
         notify("command-failed", "Screenshot failed", message);
       }
+      return undefined;
     },
     [
+      activeDraftKey,
       attachBrowserCaptureToChat,
+      chatAttachments,
       notify,
       sessionBrowserKey,
       workbench.browserPreview.device,
-      workbench.browserPreview.latestCapture?.path,
+      workbench.browserPreview.latestCapture,
+      workbench.browserPreview.nativeHost,
       workbench.browserPreview.url,
     ],
   );
-
   useEffect(() => {
     if (workbench.browserPreview.status !== "loading") return;
     const controller = new AbortController();
@@ -15227,7 +15220,6 @@ export function App() {
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
-      terminalOnly={!isPrimary && activeWorkspaceLayout === "thread"}
       onAcceptAllDiffs={() =>
         dispatchWorkbench({
           type: "set-diff-review-state",
@@ -15681,23 +15673,24 @@ export function App() {
         : undefined;
     const paneEvents =
       pane.kind === "session" ? (sessionEventsById[pane.sessionId] ?? []) : [];
+    const paneContext =
+      pane.kind === "session"
+        ? deriveSessionContext(
+            sessionContextEventsById[pane.sessionId] ?? [],
+            paneEvents,
+            pane.sessionId,
+          )
+        : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
-    const panePlan =
-      pane.kind === "session"
-        ? deriveSessionPlan(paneEvents, pane.sessionId)
-        : pendingNewChatPlan;
+    const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
-      pane.kind === "session"
-        ? deriveSessionGoal(paneEvents, pane.sessionId)
-        : pendingNewChatGoal;
+      pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
     const paneSelectedMode = chatDraftModes[paneDraftKey] ?? "normal";
     const paneMode =
       COUNCIL_COMING_SOON && paneSelectedMode === "council"
         ? "normal"
         : paneSelectedMode;
-    const paneSubmittedMode =
-      pane.kind === "session" ? deriveChatMode(paneEvents) : "normal";
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     // Plan still takes the rail on its own; the dock's tab shows through when
@@ -15848,7 +15841,7 @@ export function App() {
         onResumeUsage={() => void resumeUsage()}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
-        submittedChatMode={paneSubmittedMode}
+        submittedChatMode={paneContext?.mode ?? "normal"}
         diffReview={workbench.diffReview}
         draftResetToken={draftResetToken}
         draft={chatDrafts[paneDraftKey] ?? ""}
@@ -15870,6 +15863,7 @@ export function App() {
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
+        isToolPanelAvailable={isBottomDrawerAvailable}
         isTiled={options.isTiled}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
@@ -15882,6 +15876,9 @@ export function App() {
             workspacePath: pane.workspacePath,
           });
         }}
+        onMediaDropError={(message) =>
+          notify("command-failed", "Image could not be attached", message)
+        }
         onComposerAction={(action) => {
           focusChatPane(pane);
           handleComposerAction(action, paneDraftKey);
@@ -16106,7 +16103,7 @@ export function App() {
       }
       attachments={activeChatAttachments}
       chatMode={activeChatMode}
-      submittedChatMode={persistedActiveChatMode}
+      submittedChatMode={persistedSessionContext.mode}
       diffReview={workbench.diffReview}
       draftResetToken={draftResetToken}
       draft={activeChatDraft}
@@ -16135,9 +16132,13 @@ export function App() {
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
+      isToolPanelAvailable={isBottomDrawerAvailable}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
+      onMediaDropError={(message) =>
+        notify("command-failed", "Image could not be attached", message)
+      }
       onComposerAction={handleComposerAction}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
@@ -16274,6 +16275,10 @@ export function App() {
       onCommitSourceControl={commitSourceControl}
       onPullSourceControl={() => void pullSourceControl()}
       onPushSourceControl={() => void pushSourceControl()}
+      onCheckRemote={() => void checkRemoteChanges()}
+      isRemoteChecking={isRemoteChecking}
+      remoteCheckMessage={remoteCheckMessage}
+      remoteCheckFailed={remoteCheckFailed}
       isSourceControlSyncing={sourceControlSyncing}
       onRefreshSourceControl={refreshSourceControl}
       onStageAllSourceControl={stageAllSourceControl}
@@ -16416,6 +16421,7 @@ export function App() {
                     projectKey,
                     mode: "drop",
                     slotIndex,
+                    arrangement: placement?.arrangement,
                     insertPosition: placement?.insertPosition,
                     splitDirection: placement?.splitDirection,
                     pane: chatPaneForSession(session),
@@ -16476,7 +16482,7 @@ export function App() {
                     }
                     attachments={activeChatAttachments}
                     chatMode={activeChatMode}
-                    submittedChatMode={persistedActiveChatMode}
+                    submittedChatMode={persistedSessionContext.mode}
                     diffReview={workbench.diffReview}
                     draftResetToken={draftResetToken}
                     draft={activeChatDraft}
@@ -16507,12 +16513,20 @@ export function App() {
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
+                    isToolPanelAvailable={isBottomDrawerAvailable}
                     maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
                     onAgentAction={(action) =>
                       notify("terminal", "Agent action", action)
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
+                    onMediaDropError={(message) =>
+                      notify(
+                        "command-failed",
+                        "Image could not be attached",
+                        message,
+                      )
+                    }
                     onComposerAction={handleComposerAction}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
@@ -16808,36 +16822,28 @@ export function App() {
             </section>
           ) : null}
 
-          {activeWorkspaceLayout !== "terminal-grid" &&
-          (activeWorkspaceLayout !== "code" ||
-            Boolean(activeSession?.workspacePath ?? workspacePath)) ? (
+          {/* The bottom drawer is a Workspace surface. A Chat (thread) layout
+              never draws it: terminals, review and the browser live on the
+              chat's own rail there. */}
+          {activeWorkspaceLayout === "code" &&
+          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             workbench.isToolPanelOpen ? (
               renderWorkspaceToolPanel(false)
-            ) : activeWorkspaceLayout === "code" ? (
+            ) : (
               <nav
-                className="gyro-workspace-tool-launcher"
                 aria-label="Workspace tools"
+                className="gyro-workspace-tool-launcher"
               >
-                {(
-                  [
-                    ["diff", "Diff"],
-                    ["terminal", "Terminal"],
-                    ["browser", "Browser"],
-                    ["problems", "Problems"],
-                    ["test-results", "Test Results"],
-                    ["output", "Output"],
-                  ] as const
-                ).map(([tab, label]) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => openToolPanel(tab)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                <button
+                  aria-label="Open the workspace panel"
+                  onClick={toggleChatToolPanel}
+                  title="Open the panel you used last (⌘J)"
+                  type="button"
+                >
+                  Panel
+                </button>
               </nav>
-            ) : null
+            )
           ) : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
@@ -17002,6 +17008,9 @@ export function App() {
             void setProviderBudget(providerId, maxTokens)
           }
           onUsagePauseChange={(paused) => void setUsagePaused(paused)}
+          onAutoCompactPercentChange={(percent) =>
+            void setAutoCompactPercent(percent)
+          }
           themeMode={workbench.preferences.theme}
           defaultWorkspaceMode={workbench.preferences.defaultWorkspaceMode}
           onDefaultWorkspaceModeChange={(mode) =>
@@ -17250,7 +17259,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
-          submittedChatMode={persistedActiveChatMode}
+          submittedChatMode={persistedSessionContext.mode}
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
           events={[]}
@@ -17267,9 +17276,13 @@ export function App() {
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
+          isToolPanelAvailable={isBottomDrawerAvailable}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
+          onMediaDropError={(message) =>
+            notify("command-failed", "Image could not be attached", message)
+          }
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}
@@ -17996,10 +18009,6 @@ function loadRecentProjectPaths(): string[] {
   }
 }
 
-function normalizeProjectPath(path?: string) {
-  return path?.trim().replace(/\/+$/, "") ?? "";
-}
-
 function chatPaneForSession(session: Session): ChatPaneRef {
   return {
     paneId: `session:${session.id}`,
@@ -18007,16 +18016,6 @@ function chatPaneForSession(session: Session): ChatPaneRef {
     sessionId: session.id,
     workspacePath: session.workspacePath,
   };
-}
-
-function visibleSessionsForProjects(
-  sessions: Session[],
-  removedProjectPaths: string[],
-) {
-  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
-  return sessions.filter(
-    (session) => !removed.has(normalizeProjectPath(session.workspacePath)),
-  );
 }
 
 function readBoundedLocalStorage(key: string, maxChars: number) {
@@ -18637,9 +18636,10 @@ function capabilityApprovalFromSessionEvent(
     status: "waiting",
     scopeKind,
     scopeValue,
-    choices: capabilityId === "workspace-read-editor"
-      ? ["deny", "allow-once"]
-      : ["deny", "allow-once", "allow-project"],
+    choices:
+      capabilityId === "workspace-read-editor"
+        ? ["deny", "allow-once"]
+        : ["deny", "allow-once", "allow-project"],
   };
 }
 

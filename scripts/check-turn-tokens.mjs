@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   formatTokenCount,
+  turnTokenReadingForResponse,
   turnTokensDetail,
   turnTokensFromValue,
   turnTokensLabel,
@@ -88,5 +89,37 @@ assert.equal(
   turnTokensDetail({ totalTokens: 1_540 }),
   "1,540 tokens billed this turn",
 );
+
+const estimated = turnTokensFromValue({
+  inputTokens: 100,
+  outputTokens: 25,
+  totalTokens: 125,
+  measured: false,
+});
+assert.equal(estimated?.measured, false);
+assert.equal(
+  turnTokenReadingForResponse(estimated, undefined, "prompt", "answer").label,
+  "~125 tokens",
+);
+assert.equal(
+  turnTokenReadingForResponse(reported, undefined, "prompt", "answer").label,
+  "1,540 tokens",
+);
+const oldResponse = turnTokenReadingForResponse(
+  undefined,
+  { totalTokens: 1_200 },
+  "prompt",
+  "answer",
+);
+assert.equal(oldResponse.label, "≥1,200 tokens");
+assert.match(oldResponse.title, /last request/);
+const withoutUsage = turnTokenReadingForResponse(
+  undefined,
+  undefined,
+  "12345678",
+  "1234",
+);
+assert.equal(withoutUsage.label, "~3 tokens");
+assert.match(withoutUsage.title, /not included/);
 
 console.log("turn token checks passed");

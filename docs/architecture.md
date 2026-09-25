@@ -33,6 +33,10 @@ store.
   reads for long sessions. Opening a chat loads the recent event window; older
   history is available via reverse pagination (`read_events_before`) so a
   month-old thread stays fully readable without parsing the entire log at once.
+- A rebuildable SQLite index tracks goal, plan, and submitted-mode events past
+  the recent transcript window. Reads catch the index up from JSONL; the UI
+  derives current context from those events without rendering old transcript
+  pages. JSONL remains the source of truth.
 - Chat retention is local and unbounded by age: sessions stay until the user
   deletes them. Closing a chat pane while a provider turn (or model-owned
   terminal) is live asks Stop and close vs Keep running so background work is
@@ -134,6 +138,22 @@ cancellation and approval checks. Responses must match the request's call and
 capability identity and carry a valid terminal outcome. Transport failures do
 not automatically replay workspace actions.
 
+A research sub-agent is dispatched through that same harness rather than beside
+it: `gyro_research` starts a fresh session on a read-only Plan turn, and the
+child holds a run control of its own for the whole turn, so its capability
+context, broker checks, approvals, usage ledger rows, and timeline behave
+exactly like any other provider run. The child's control follows the calling
+chat's stop token one way — stopping the chat stops the research instead of
+leaving it spending in the background, while stopping the research alone leaves
+the chat running. The parent's tool call blocks until the child reports and only
+the child's final message returns to it; the child session is kept so the
+research stays auditable, and it records the chat that started it. That record
+is what keeps a sub-agent run from reading as a chat of its own: the chat list,
+the "latest chat" lookup that resume and startup use, and the menu bar's chat
+outcomes all leave it out, and the call card that reports the research is what
+opens the transcript. Deleting the chat that started the research deletes it
+too, so a hidden run never outlives the conversation it belongs to.
+
 The OpenAI-compatible API runner is the third adapter family. Gyro ships
 DeepSeek, Mistral, and OpenRouter presets, and a user can add any other endpoint
 as a `custom:<slug>` provider. All of them share one HTTPS client in `gyro-core`
@@ -197,6 +217,11 @@ Gyro does not write metadata into user repositories by default. A future optiona
 ## Desktop Backend
 
 The Tauri backend exposes commands for session listing, local/worktree session creation, event reads/writes, config loading/saving, and shallow workspace file listing.
+
+The automation scheduler reserves provider capacity before claiming a durable
+lease. It can run two due automations at once when their workspace paths differ;
+runs targeting the same checkout wait for one another. A busy interactive app
+leaves due work queued instead of recording a failed automation run.
 
 At startup it binds the local Unix socket. The CLI sends newline-delimited JSON
 notifications to this socket when a session should open or attach in Gyro.app.

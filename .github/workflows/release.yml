@@ -38,6 +38,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Install ripgrep for workspace search tests
+        run: brew install ripgrep
       - run: pnpm install --frozen-lockfile
       - name: Verify pinned Tauri release toolchain
         run: test "$(pnpm --filter @gyro-dev/desktop tauri --version)" = "tauri-cli 2.11.4"

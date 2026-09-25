@@ -1,6 +1,6 @@
 /** The part of a transfer this module reads, so tests need no real drag. */
 type MediaTransfer = Pick<DataTransfer, "types"> &
-  Partial<Pick<DataTransfer, "files" | "items">>;
+  Partial<Pick<DataTransfer, "files" | "items" | "getData">>;
 
 /** Whether a drag is carrying files rather than text or a page element.
  *
@@ -26,7 +26,7 @@ export function isMediaDrag(transfer: MediaTransfer | null | undefined) {
 
 /** Read file objects while the drop/paste event still owns its data store. */
 export function chatMediaFiles(
-  transfer: Pick<DataTransfer, "files" | "items">,
+  transfer: Partial<Pick<DataTransfer, "files" | "items">>,
 ): File[] {
   const files = Array.from(transfer.files ?? []);
   // Some drag sources expose file items without populating FileList. Prefer
@@ -47,6 +47,59 @@ export function chatMediaFiles(
         ),
     ),
   );
+}
+
+/** Browser and Photos drags can contain only an image URL, with no FileList.
+ * Capture its data during the drop event; the data store closes afterward. */
+export async function chatMediaFilesFromDrop(
+  transfer: MediaTransfer,
+): Promise<File[]> {
+  const files = chatMediaFiles(transfer);
+  if (files.length) return files;
+  const read = (type: string) => {
+    try {
+      return transfer.getData?.(type).trim() ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const uri =
+    (read("text/uri-list")
+      .split(/\r?\n/)
+      .find((line) => line && !line.startsWith("#")) ??
+      "") ||
+    read("image/png") ||
+    read("image/jpeg") ||
+    read("image/webp");
+  if (!uri)
+    throw new Error("This image drag did not provide a readable file or URL");
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    throw new Error("This image drag did not provide a valid image URL");
+  }
+  if (!["http:", "https:", "data:"].includes(url.protocol)) {
+    throw new Error("This image source cannot be attached");
+  }
+  const response = await fetch(url.href);
+  if (!response.ok)
+    throw new Error(`Image download failed (${response.status})`);
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("The dropped URL did not return an image");
+  }
+  const extension =
+    blob.type === "image/jpeg"
+      ? "jpg"
+      : blob.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
+  const candidate =
+    url.protocol === "data:"
+      ? "image"
+      : decodeURIComponent(url.pathname.split("/").at(-1) || "image");
+  const base =
+    candidate.replace(/\.[^.]*$/, "").replace(/[^\w. -]/g, "_") || "image";
+  return [new File([blob], `${base}.${extension}`, { type: blob.type })];
 }
 
 const SENDABLE_IMAGE = /\.(?:png|jpe?g|webp)$/i;

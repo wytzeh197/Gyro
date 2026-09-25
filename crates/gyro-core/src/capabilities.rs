@@ -55,6 +55,7 @@ pub enum CapabilityId {
     BrowserBack,
     BrowserForward,
     BrowserClick,
+    BrowserMouse,
     BrowserType,
     BrowserScroll,
     BrowserFormInput,
@@ -117,6 +118,7 @@ impl CapabilityId {
             Self::BrowserBack => "browser.back",
             Self::BrowserForward => "browser.forward",
             Self::BrowserClick => "browser.click",
+            Self::BrowserMouse => "browser.mouse",
             Self::BrowserType => "browser.type",
             Self::BrowserScroll => "browser.scroll",
             Self::BrowserFormInput => "browser.form_input",
@@ -179,6 +181,7 @@ impl CapabilityId {
             Self::BrowserBack => "gyro_browser_back",
             Self::BrowserForward => "gyro_browser_forward",
             Self::BrowserClick => "gyro_browser_click",
+            Self::BrowserMouse => "gyro_browser_mouse",
             Self::BrowserType => "gyro_browser_type",
             Self::BrowserScroll => "gyro_browser_scroll",
             Self::BrowserFormInput => "gyro_browser_form_input",
@@ -666,12 +669,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceList,
         class: CapabilityClass::WorkspaceInspect,
-        description: "List bounded entries inside the current Gyro project.",
+        description: "List a workspace directory with bounded pages. Pass path to narrow the tree, then reuse nextOffset until hasMore is false. Paths are workspace-relative.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search text inside the current Gyro project with a regular expression (ripgrep).",
+        description: "Search workspace text with a ripgrep regular expression. Invalid patterns and ripgrep failures are reported; use globs or maxResults to narrow large searches.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
@@ -847,6 +850,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::BrowserClick,
         class: CapabilityClass::BrowserNavigate,
         description: "Click an element in this chat's browser by ref from a prior read_page or find result. Changes page state.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserMouse,
+        class: CapabilityClass::BrowserNavigate,
+        description: "Move, click, secondary-click, or drag the mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. Re-observe after acting; coordinates from a changed page are rejected.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserType,

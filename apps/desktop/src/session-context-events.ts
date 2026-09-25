@@ -7,6 +7,20 @@ import type {
   SessionPlanItemStatus,
 } from "@gyro-dev/ui";
 
+/** Context is retained beyond the visible transcript window. Keep it out of
+ * the rendered timeline while deriving the current goal and plan. */
+export function withSessionContextEvents(
+  contextEvents: SessionEvent[],
+  recentEvents: SessionEvent[],
+): SessionEvent[] {
+  if (contextEvents.length === 0) return recentEvents;
+  const recentIds = new Set(recentEvents.map((event) => event.id));
+  return [
+    ...contextEvents.filter((event) => !recentIds.has(event.id)),
+    ...recentEvents,
+  ];
+}
+
 export function turnIdFromSessionEvent(
   event: SessionEvent,
 ): string | undefined {

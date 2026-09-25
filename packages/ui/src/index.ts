@@ -12,6 +12,7 @@ export type {
   BrowserPreview,
   BrowserPreviewCapture,
   BrowserPreviewCaptureStatus,
+  BrowserFeedback,
   BrowserPreviewDiagnostic,
   BrowserPreviewDevice,
   BrowserPreviewStatus,

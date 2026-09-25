@@ -17,6 +17,48 @@ export type InterleavedChatTimelineItem =
       events: SessionEvent[];
     };
 
+export function isModelSwitchEvent(event: SessionEvent) {
+  const payload = event.payload;
+  return (
+    event.kind === "system-event" &&
+    payload !== null &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    (payload as Record<string, unknown>).kind === "model-switch"
+  );
+}
+
+/** Place durable model changes at their timestamp, between chat turns. */
+export function interleaveModelSwitches<T extends { startedAt: string }>(
+  turns: T[],
+  markers: SessionEvent[],
+) {
+  const items: Array<
+    | { kind: "turn"; turn: T; turnIndex: number }
+    | { kind: "model-switch"; event: SessionEvent }
+  > = [];
+  const orderedMarkers = [...markers].sort(
+    (first, second) =>
+      Date.parse(first.createdAt) - Date.parse(second.createdAt),
+  );
+  let markerIndex = 0;
+  for (const [turnIndex, turn] of turns.entries()) {
+    while (
+      markerIndex < orderedMarkers.length &&
+      Date.parse(orderedMarkers[markerIndex]!.createdAt) <=
+        Date.parse(turn.startedAt)
+    ) {
+      items.push({ kind: "model-switch", event: orderedMarkers[markerIndex]! });
+      markerIndex += 1;
+    }
+    items.push({ kind: "turn", turn, turnIndex });
+  }
+  for (; markerIndex < orderedMarkers.length; markerIndex += 1) {
+    items.push({ kind: "model-switch", event: orderedMarkers[markerIndex]! });
+  }
+  return items;
+}
+
 /**
  * Provider frames and broker calls share a durable first-observation order.
  * Legacy provider sequence numbers belong to a different clock: never compare
@@ -24,11 +66,15 @@ export type InterleavedChatTimelineItem =
  * event, and neither clock nor inheritance crosses a chat/turn boundary.
  */
 export function orderedChatTimelineEvents(events: SessionEvent[]) {
-  const turns = new Map<string, { index: number; canonical: boolean; inherited?: number }>();
+  const turns = new Map<
+    string,
+    { index: number; canonical: boolean; inherited?: number }
+  >();
   for (const event of events) {
     const key = timelineTurnKey(event);
     const turn = turns.get(key) ?? { index: turns.size, canonical: false };
-    turn.canonical ||= canonicalTimelineOrder(eventPayload(event)?.timelineOrder) !== undefined;
+    turn.canonical ||=
+      canonicalTimelineOrder(eventPayload(event)?.timelineOrder) !== undefined;
     turns.set(key, turn);
   }
   return events
@@ -38,7 +84,12 @@ export function orderedChatTimelineEvents(events: SessionEvent[]) {
         ? canonicalTimelineOrder(eventPayload(event)?.timelineOrder)
         : timelineSequence(event);
       if (sequence !== undefined) turn.inherited = sequence;
-      return { event, index, turn: turn.index, sequence: sequence ?? turn.inherited };
+      return {
+        event,
+        index,
+        turn: turn.index,
+        sequence: sequence ?? turn.inherited,
+      };
     })
     .sort((first, second) => {
       if (first.turn !== second.turn) return first.turn - second.turn;
@@ -114,10 +165,8 @@ function assistantMessageSegments(
         // list that would slice at the wrong characters.
         break;
       }
-      const { start, sequence, timelineOrder, createdAt, afterActivityId } = entry as Record<
-        string,
-        unknown
-      >;
+      const { start, sequence, timelineOrder, createdAt, afterActivityId } =
+        entry as Record<string, unknown>;
       const previous = segments.at(-1);
       if (
         typeof start !== "number" ||
@@ -172,25 +221,40 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
   return events.flatMap((event) => {
     if (event.kind !== "assistant-message") {
       const payload = eventPayload(event);
-      if (payload?.kind === "provider-activity" && payload.activityKind === "commentary" &&
-          Array.isArray(payload.timelineSegments) && payload.timelineSegments.length > 1) {
-        const label = typeof payload.label === "string" ? payload.label : event.message;
+      if (
+        payload?.kind === "provider-activity" &&
+        payload.activityKind === "commentary" &&
+        Array.isArray(payload.timelineSegments) &&
+        payload.timelineSegments.length > 1
+      ) {
+        const label =
+          typeof payload.label === "string" ? payload.label : event.message;
         const segments = assistantMessageSegments({
-          ...event, message: label, payload: { segments: payload.timelineSegments },
+          ...event,
+          message: label,
+          payload: { segments: payload.timelineSegments },
         });
         if (segments?.every((segment) => segment.timelineOrder !== undefined)) {
-          return segments.map((segment, index) => {
-            const text = label.slice(segment.start, segments[index + 1]?.start).trim();
-            return {
-              ...event,
-              id: `${event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
-              createdAt: segment.createdAt ?? event.createdAt,
-              message: text,
-              payload: { ...payload, label: text, timelineSegments: undefined,
-                activityId: `${payload.activityId ?? event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
-                timelineOrder: segment.timelineOrder },
-            };
-          }).filter((segment) => segment.message);
+          return segments
+            .map((segment, index) => {
+              const text = label
+                .slice(segment.start, segments[index + 1]?.start)
+                .trim();
+              return {
+                ...event,
+                id: `${event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
+                createdAt: segment.createdAt ?? event.createdAt,
+                message: text,
+                payload: {
+                  ...payload,
+                  label: text,
+                  timelineSegments: undefined,
+                  activityId: `${payload.activityId ?? event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
+                  timelineOrder: segment.timelineOrder,
+                },
+              };
+            })
+            .filter((segment) => segment.message);
         }
       }
       return [event];
@@ -431,7 +495,10 @@ function providerActivitySequencesByTurn(events: SessionEvent[]) {
   const byTurn = new Map<string, Map<string, number>>();
   for (const event of events) {
     const payload = eventPayload(event);
-    if (event.kind !== "system-event" || payload?.kind !== "provider-activity") {
+    if (
+      event.kind !== "system-event" ||
+      payload?.kind !== "provider-activity"
+    ) {
       continue;
     }
     const activityId = payload.activityId;

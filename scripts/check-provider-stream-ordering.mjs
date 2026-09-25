@@ -1267,6 +1267,32 @@ for (const merge of [
     "a reused activity id cannot transfer counts to another file");
 }
 
+// A native create is file work throughout the stream, including status updates.
+{
+  const ref = { current: new Map([["create-session", []]]) };
+  const createFrame = (sequence, additions) =>
+    applyProviderChatStreamActivity(ref, () => {}, {
+      sessionId: "create-session",
+      turnId: "create-turn",
+      providerId: "openai",
+      eventId: `create-frame-${sequence}`,
+      sequence,
+      phase: "activity",
+      activityId: "create-file",
+      activityKind: "create",
+      activityLabel: "Created src/new.ts",
+      activityDetail: "src/new.ts",
+      activityStatus: "done",
+      ...(additions === undefined ? {} : { additions }),
+    });
+  createFrame(1, 4);
+  createFrame(2);
+  assert.equal(
+    buildRunModel(ref.current.get("create-session")).files[0].additions,
+    4,
+  );
+}
+
 // Concurrent chats can report the same path and activity id without sharing totals.
 {
   const ref = {

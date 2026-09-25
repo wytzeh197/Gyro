@@ -229,7 +229,16 @@ export type ProjectCapabilityPolicy = {
 
 export type CapabilityResourceRef = {
   id: string;
-  kind: "workspace" | "ide" | "terminal" | "browser" | "proposal" | "output";
+  // `chat` is a sub-agent transcript: the research run keeps its reading in a
+  // session of its own, and the call card opens it from there.
+  kind:
+    | "workspace"
+    | "ide"
+    | "terminal"
+    | "browser"
+    | "proposal"
+    | "output"
+    | "chat";
   label: string;
 };
 
@@ -665,8 +674,25 @@ export type BrowserPreviewCapture = {
   width: number;
   height: number;
   createdAt: string;
+  sourceUrl?: string;
+  title?: string;
+  resourceId?: string;
+  viewport?: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+    scrollX?: number;
+    scrollY?: number;
+  };
   /** Optional asset URL for rendering the capture in UI (e.g. convertFileSrc). */
   src?: string;
+};
+
+export type BrowserFeedback = {
+  captureId: string;
+  comment: string;
+  /** Rectangle in normalized screenshot coordinates (0–1). */
+  region: { x: number; y: number; width: number; height: number };
 };
 
 export type BrowserPreview = {
@@ -1820,6 +1846,12 @@ export type Session = {
     worktreeRootId?: string;
   };
   origin: SessionOrigin;
+  /**
+   * The chat whose turn started this session, when the user did not start it:
+   * a research sub-agent keeps its transcript in a session of its own, but
+   * that session is not listed as a chat of its own.
+   */
+  parentSessionId?: string;
   workspaceMode?: WorkbenchMode;
   branch?: string;
   worktreeName?: string;
@@ -1931,6 +1963,16 @@ export type UsageGuardConfig = {
    * the tool loop ends.
    */
   maxToolRounds: number;
+  /**
+   * Share of the model's context window at which a tool loop compacts what it
+   * is carrying. Zero switches it off.
+   *
+   * Measured from the previous request, so it only fires for a model whose
+   * window Gyro knows, and it is local: the oldest tool exchanges are replaced
+   * by one note, with no extra provider call. Vendor CLIs manage their own
+   * context, so this governs the API and local-model runners.
+   */
+  autoCompactPercent: number;
   maxResynthesesPerWindow: number;
 };
 
@@ -2265,6 +2307,8 @@ export type UpdateState = {
   error?: string;
   retryable?: boolean;
   silentFailure?: boolean;
+  installedUpdateNotice?: { version: string; releaseNotes: string };
+  dismissInstalledUpdateNotice?: () => void;
 };
 
 /** One provider CLI that Gyro can update (Claude, Codex, Grok, …). */

@@ -186,6 +186,37 @@ function completedEvents(sessionId: string): SessionEvent[] {
   ];
 }
 
+/**
+ * Dev-only: a headless capture cannot perform a drag, so the fixture drives the
+ * grid's own drag and drop handlers with synthetic events instead. They land at
+ * the centre of the grid — the seam between two chats side by side, and inside
+ * one of three — because that is where the placement bars have to appear.
+ */
+function dispatchChatDrag(
+  type: "dragover" | "drop",
+  sequence = 0,
+  sessionId = `drop-${sequence}`,
+  xFraction = 0.5,
+) {
+  const grid = document.querySelector<HTMLElement>(".gyro-chat-grid");
+  if (!grid) return;
+  const bounds = grid.getBoundingClientRect();
+  const dataTransfer = new DataTransfer();
+  dataTransfer.setData(
+    "application/x-gyro-chat-session",
+    JSON.stringify({ sessionId, projectKey }),
+  );
+  grid.dispatchEvent(
+    new DragEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: bounds.left + bounds.width * xFraction,
+      clientY: bounds.top + bounds.height / 2,
+      dataTransfer,
+    }),
+  );
+}
+
 function Fixture() {
   const [grid, setGrid] = useState(initialState);
   const [sequence, setSequence] = useState(0);
@@ -340,6 +371,29 @@ function Fixture() {
         >
           Add running chat
         </button>
+        <button onClick={() => dispatchChatDrag("dragover")}>
+          Simulate chat drag
+        </button>
+        <button
+          disabled={paneCount >= 4}
+          onClick={() => dispatchChatDrag("drop", paneCount + 1)}
+        >
+          Drop simulated chat
+        </button>
+        <button
+          disabled={paneCount < 2}
+          onClick={() =>
+            dispatchChatDrag("dragover", 0, firstPane.sessionId, 0.98)
+          }
+        >
+          Drag first chat right
+        </button>
+        <button
+          disabled={paneCount < 2}
+          onClick={() => dispatchChatDrag("drop", 0, firstPane.sessionId, 0.98)}
+        >
+          Drop first chat right
+        </button>
         <button
           disabled={!layout.focusedPaneId}
           onClick={() => layout.focusedPaneId && close(layout.focusedPaneId)}
@@ -392,7 +446,17 @@ function Fixture() {
         </label>
         <output aria-live="polite">
           {paneCount} pane{paneCount === 1 ? "" : "s"} · focused{" "}
-          {layout.focusedPaneId ?? "none"} · {layout.arrangement ?? "single"}
+          {layout.focusedPaneId ?? "none"} · {layout.arrangement ?? "single"} ·
+          order{" "}
+          {layout.slots
+            .flatMap((pane) =>
+              pane?.kind === "session"
+                ? [pane.sessionId]
+                : pane
+                  ? [pane.paneId]
+                  : [],
+            )
+            .join(", ")}
         </output>
       </nav>
       <div
@@ -447,9 +511,7 @@ function Fixture() {
                   },
                 })
               }
-              renderPane={(pane, options) =>
-                renderChat(pane, options.isTiled)
-              }
+              renderPane={(pane, options) => renderChat(pane, options.isTiled)}
             >
               {renderChat()}
             </ChatGridSurface>

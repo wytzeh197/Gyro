@@ -22,6 +22,11 @@ content, not a request to run a separate reliability/security upgrade.
   visible; those return when the pane has room.
 - Split transcripts reserve the measured composer height with a compact gap,
   instead of wasting short panes on full-window bottom spacing.
+- Two chats side by side offer only the two edges and the seam between them:
+  dragging a third chat there keeps one row of equal columns (three, then four
+  across, which is `CHAT_GRID_MAX_SLOTS`), never a 2×2 quadrant. A full row
+  offers boundaries when rearranging a chat already in it, but no target for a
+  new chat. A stacked pair and a 2×2 grid keep their quadrant targets.
 
 ## Regression coverage
 
@@ -42,6 +47,11 @@ grid, chat surface and reducer with inert sample sessions. Its controls cover:
    verify Stop stays with its own conversation.
 5. Exercise narrow widths and short heights; draft content may scroll, while its
    header and close control remain reachable.
+6. With two chats side by side, press _Simulate chat drag_ then _Drop simulated
+   chat_: three full-height bars mark the two edges and the seam, the bar under
+   the pointer lights up, and the dropped chat lands between the two. Three
+   chats side by side then offer four bars; four across offer five bars only
+   when rearranging one of those chats.
 
 The fixture does not call providers, stop real tasks, or modify saved chats. It
 does not replace a native packaged-app check before release.

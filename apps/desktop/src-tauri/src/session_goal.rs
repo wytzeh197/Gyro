@@ -45,6 +45,20 @@ pub(crate) fn stored_session_goal(events: &[SessionEvent]) -> Option<SessionGoal
     goal
 }
 
+pub(crate) fn stored_or_unsaved_goal(
+    events: &[SessionEvent],
+    unsaved: Option<SessionGoalContext>,
+) -> Option<SessionGoalContext> {
+    if events
+        .iter()
+        .any(|event| event.kind == SessionEventKind::GoalUpdated)
+    {
+        stored_session_goal(events)
+    } else {
+        unsaved
+    }
+}
+
 /// Check a requested goal change against the current goal and word it.
 ///
 /// Returns the transcript line and the payload to store. The text is trimmed
@@ -159,6 +173,22 @@ mod tests {
         let mut cleared = events;
         cleared.push(goal_event(serde_json::json!({"action": "clear"})));
         assert!(stored_session_goal(&cleared).is_none());
+    }
+
+    #[test]
+    fn a_clear_does_not_revive_a_stale_window_goal() {
+        let stale = goal("Ship", "active");
+        assert_eq!(
+            stored_or_unsaved_goal(&[], Some(stale.clone()))
+                .unwrap()
+                .text,
+            "Ship"
+        );
+        assert!(stored_or_unsaved_goal(
+            &[goal_event(serde_json::json!({"action":"clear"}))],
+            Some(stale)
+        )
+        .is_none());
     }
 
     #[test]

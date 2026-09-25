@@ -23,6 +23,10 @@ import {
   sanitizeStoredChatGridState,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
+import {
+  chatGridDropLayout,
+  chatGridDropZones,
+} from "../packages/ui/src/chat-grid-drop.ts";
 import { resolveCleanMachinePath } from "../packages/ui/src/clean-machine-path.ts";
 import {
   globalSearchMatchScore,
@@ -189,6 +193,75 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+// Dropping a sidebar chat already open in the split moves its existing pane,
+// preserving the React key, draft ownership and every other conversation.
+let reorderedGrid = chatGridReducer(chatGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("two"),
+  mode: "drop",
+  slotIndex: 1,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  reorderedGrid.layouts["/Users/example/Gyro"].slots
+    .slice(0, 2)
+    .map((pane) => pane?.sessionId)
+    .join(",") === "one,two" &&
+    reorderedGrid.layouts["/Users/example/Gyro"].slots[1]?.paneId ===
+      "pane:two",
+  "Dropping an open chat at a split seam should move its existing pane.",
+);
+for (const sessionId of ["three", "four"]) {
+  reorderedGrid = chatGridReducer(reorderedGrid, {
+    type: "select-pane",
+    projectKey: "/Users/example/Gyro",
+    pane: gridPane(sessionId),
+    mode: "drop",
+    slotIndex:
+      reorderedGrid.layouts["/Users/example/Gyro"].slots.findLastIndex(Boolean),
+    insertPosition: "after",
+    arrangement: "columns",
+  });
+}
+const fullRow = reorderedGrid.layouts["/Users/example/Gyro"];
+expect(
+  chatGridDropZones(fullRow.slots, "columns").length === 0 &&
+    chatGridDropZones(fullRow.slots, "columns", true).length === 5,
+  "A full row should expose boundaries only when rearranging one of its chats.",
+);
+reorderedGrid = chatGridReducer(reorderedGrid, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("one"),
+  mode: "drop",
+  slotIndex: 3,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  reorderedGrid.layouts["/Users/example/Gyro"].slots
+    .map((pane) => pane?.sessionId)
+    .filter(Boolean)
+    .join(",") === "two,three,four,one" &&
+    reorderedGrid.layouts["/Users/example/Gyro"].slots[3]?.paneId ===
+      "pane:one",
+  "Repeated drops in a full row should reorder without duplicating or replacing chats.",
+);
+const rejectedFullRowDrop = chatGridReducer(reorderedGrid, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("five"),
+  mode: "drop",
+  slotIndex: 3,
+  insertPosition: "after",
+  arrangement: "columns",
+});
+expect(
+  rejectedFullRowDrop === reorderedGrid,
+  "A new chat dropped on a full row must not silently evict one already open.",
+);
 // Re-focusing the already-focused pane must keep state identity. Grid slots
 // fire focus on every pointerdown; a fresh object re-rendered the chat under
 // the finger and could turn empty-margin presses into stops.
@@ -287,6 +360,97 @@ expect(
     resolveChatGridDropSlot(quadrantDropLayout.slots, 2).targetIndex === 2,
   "A grid-position drop should land in the quadrant it was aimed at, displacing the column's sitting chat.",
 );
+// Two chats side by side leave only their two edges and the seam between them,
+// so a third chat dropped there keeps one row of three instead of opening a
+// second row that nothing on screen offers.
+let rowDropState = createInitialChatGridState();
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("left"),
+  mode: "replace",
+});
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("right"),
+  mode: "drop",
+  slotIndex: 0,
+  insertPosition: "after",
+  splitDirection: "horizontal",
+});
+const twoPaneRowZones = chatGridDropZones(
+  rowDropState.layouts["/Users/example/Gyro"]?.slots ?? [],
+  "columns",
+);
+expect(
+  twoPaneRowZones.length === 3 &&
+    twoPaneRowZones.map((zone) => zone.position).join(",") ===
+      "row-start,row-seam-1,row-end" &&
+    twoPaneRowZones.every(
+      (zone) => zone.placement?.arrangement === "columns",
+    ) &&
+    twoPaneRowZones[0]?.placement?.insertPosition === "before" &&
+    twoPaneRowZones[1]?.placement?.insertPosition === "before" &&
+    twoPaneRowZones[2]?.placement?.insertPosition === "after" &&
+    twoPaneRowZones[0]?.slotIndex === 0 &&
+    twoPaneRowZones[1]?.slotIndex === 1 &&
+    twoPaneRowZones[2]?.slotIndex === 1 &&
+    chatGridDropLayout(twoPaneRowZones) === "row",
+  "A row of two chats should offer its two edges and the seam between them, and nothing above or below.",
+);
+const rowSeamZone = twoPaneRowZones[1];
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("between"),
+  mode: "drop",
+  slotIndex: rowSeamZone?.slotIndex,
+  insertPosition: rowSeamZone?.placement?.insertPosition,
+  arrangement: rowSeamZone?.placement?.arrangement,
+});
+const threePaneRowLayout = rowDropState.layouts["/Users/example/Gyro"];
+const threePaneRowZones = chatGridDropZones(
+  threePaneRowLayout?.slots ?? [],
+  threePaneRowLayout?.arrangement ?? "grid",
+);
+expect(
+  threePaneRowLayout?.arrangement === "columns" &&
+    threePaneRowLayout.slots[0]?.sessionId === "left" &&
+    threePaneRowLayout.slots[1]?.sessionId === "between" &&
+    threePaneRowLayout.slots[2]?.sessionId === "right" &&
+    threePaneRowLayout.slots[3] === null &&
+    threePaneRowZones.length === 4 &&
+    threePaneRowZones.map((zone) => zone.position).join(",") ===
+      "row-start,row-seam-1,row-seam-2,row-end",
+  "A seam drop should insert the chat into the row and leave four bars behind.",
+);
+const rowEndZone = threePaneRowZones[3];
+rowDropState = chatGridReducer(rowDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("last"),
+  mode: "drop",
+  slotIndex: rowEndZone?.slotIndex,
+  insertPosition: rowEndZone?.placement?.insertPosition,
+  arrangement: rowEndZone?.placement?.arrangement,
+});
+const fourPaneRowLayout = rowDropState.layouts["/Users/example/Gyro"];
+expect(
+  fourPaneRowLayout?.slots.filter(Boolean).length === 4 &&
+    fourPaneRowLayout.slots[3]?.sessionId === "last" &&
+    fourPaneRowLayout.arrangement === "columns" &&
+    chatGridDropZones(fourPaneRowLayout.slots, "columns").length === 0 &&
+    chatGridDropZones(
+      [gridPane("one"), gridPane("two"), gridPane("three"), null],
+      "grid",
+    ).every((zone) => zone.position.startsWith("position-")) &&
+    chatGridDropZones(
+      [gridPane("one"), gridPane("two"), null, null],
+      "rows",
+    ).every((zone) => zone.position.startsWith("position-")),
+  "A full row of four should offer no target, while a stack and a 2×2 grid keep their quadrants.",
+);
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
   layouts: {
@@ -351,6 +515,14 @@ expect(
 const appSource = [
   readRepoFile("apps/desktop/src/App.tsx"),
   readRepoFile("apps/desktop/src/session-context-events.ts"),
+  readRepoFile("apps/desktop/src/browser-capture.ts"),
+  readRepoFile("apps/desktop/src/session-listing.ts"),
+  readRepoFile("apps/desktop/src/usage-actions.ts"),
+  readRepoFile("apps/desktop/src/use-remote-check.ts"),
+  readRepoFile("apps/desktop/src/use-session-context-events.ts"),
+  readRepoFile("apps/desktop/src/use-session-model-save.ts"),
+  readRepoFile("apps/desktop/src/unread-completed-chats.ts"),
+  readRepoFile("apps/desktop/src/provider-stream-events.ts"),
 ].join("\n");
 const turnTimingSource = readRepoFile("apps/desktop/src/turn-timing.ts");
 const captureFixtureSource = readRepoFile(
@@ -388,7 +560,14 @@ const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
 const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
-const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const surfaceSource = [
+  readRepoFile("packages/ui/src/surfaces.tsx"),
+  readRepoFile("packages/ui/src/browser-capture-view.tsx"),
+  readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
+  readRepoFile("packages/ui/src/chat-run-view.tsx"),
+].join("\n");
+const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
 const scmFileActionsSource = readRepoFile(
   "packages/ui/src/scm-file-actions.tsx",
@@ -399,7 +578,12 @@ const inlineApprovalSource = readRepoFile(
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
-const styleSource = readRepoFile("packages/ui/src/styles.css");
+const styleSource = [
+  readRepoFile("packages/ui/src/styles.css"),
+  readRepoFile("packages/ui/src/chat-design.css"),
+  readRepoFile("packages/ui/src/browser-capture.css"),
+  readRepoFile("packages/ui/src/installed-update.css"),
+].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
@@ -554,14 +738,25 @@ expect(
     surfaceSource.includes('className="gyro-chat-grid-empty"') &&
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
-    surfaceSource.includes('label: "Open here"') &&
-    surfaceSource.includes('label: "Left"') &&
-    surfaceSource.includes('label: "Right"') &&
-    surfaceSource.includes('"Top left"') &&
-    surfaceSource.includes('"Top right"') &&
-    surfaceSource.includes('"Bottom left"') &&
-    surfaceSource.includes('"Bottom right"') &&
-    surfaceSource.includes("chatGridDropZones(slots)") &&
+    chatGridDropSource.includes("function chatGridRowDropZones") &&
+    chatDesignSource.includes(
+      '.gyro-chat-grid-drop-zone[data-position="row-seam-1"]',
+    ) &&
+    chatDesignSource.includes('[data-layout="row"]') &&
+    chatGridDropSource.includes('label: "Open here"') &&
+    chatGridDropSource.includes('label: "Left"') &&
+    chatGridDropSource.includes('label: "Right"') &&
+    chatGridDropSource.includes('"Top left"') &&
+    chatGridDropSource.includes('"Top right"') &&
+    chatGridDropSource.includes('"Bottom left"') &&
+    chatGridDropSource.includes('"Bottom right"') &&
+    surfaceSource.includes(
+      "chatGridDropZones(slots, arrangement, reorderingSession)",
+    ) &&
+    surfaceSource.includes(
+      "const dropLayout = chatGridDropLayout(dropZones)",
+    ) &&
+    surfaceSource.includes("data-layout={dropLayout}") &&
     surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
     surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
     surfaceSource.includes("didDrop && maximizedPaneId") &&
@@ -582,7 +777,8 @@ expect(
   "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
 );
 expect(
-  surfaceSource.includes("function nearestChatGridDropZone") &&
+  chatGridDropSource.includes("function nearestChatGridDropZone") &&
+    surfaceSource.includes("nearestChatGridDropZone(") &&
     surfaceSource.includes("highlightZoneUnderPointer") &&
     surfaceSource.includes("isChatDragging && dropTargetId === undefined") &&
     surfaceSource.includes("paneElementCache") &&
@@ -997,10 +1193,21 @@ const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 // source that holds the code, not on where it used to live.
 const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/automation_scheduler.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/browser_pointer.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/browser_smoke.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/context_compaction.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/language_server.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
   readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_browser.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_goal.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_model.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/subagent_capability.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/workspace_capability_list.rs"),
 ].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
@@ -1008,6 +1215,13 @@ const languageServerRustSource = readRepoFile(
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
 );
+const subagentRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/subagent_capability.rs",
+);
+const sessionListingSource = readRepoFile(
+  "apps/desktop/src/session-listing.ts",
+);
+const menuBarStateSource = readRepoFile("apps/desktop/src/menu-bar-state.ts");
 const updateStateSource = readRepoFile("packages/ui/src/update-state.ts");
 const updateControllerSource = readRepoFile(
   "apps/desktop/src/update-controller.ts",
@@ -2300,9 +2514,9 @@ expect(
   "Opening a tool panel tab should route through the workspace shell.",
 );
 
-// The chat's bottom tray is terminal-only (`terminalOnly` pins its tab), so a
-// browser reveal from a thread has to land in the chat's side rail. Opening the
-// tray instead dropped an empty terminal over the thread and hid the page.
+// A browser reveal from a thread lands in the chat's side rail: the drawer is a
+// Workspace surface, so opening it over the thread left the page nowhere to be
+// seen. Drawer state itself is unchanged — the Chat layout simply draws none.
 let chatBrowserState = workbenchReducer(createInitialWorkbenchState(), {
   type: "select-workspace-layout",
   layout: "thread",
@@ -2322,7 +2536,7 @@ expect(
       type: "open-tool-panel",
       tab: "terminal",
     }).isToolPanelOpen === true,
-  "A browser reveal inside a chat should open the chat browser rail and leave the terminal-only tray closed.",
+  "A browser reveal inside a chat should open the chat browser rail and leave the shared tool panel alone.",
 );
 state = workbenchReducer(state, { type: "close-tool-panel" });
 expect(state.isToolPanelOpen === false, "Tool panel close action failed.");
@@ -3948,8 +4162,10 @@ expect(
       "const deferredEventsForPlan = useDeferredValue(events)",
     ) &&
     appSource.includes(
-      "deriveSessionPlan(deferredEventsForPlan, activeSessionId)",
+      "const persistedSessionContext = useDerivedSessionContext(",
     ) &&
+    appSource.includes("deferredEventsForPlan,") &&
+    appSource.includes("plan: deriveSessionPlan(events, sessionId)") &&
     // Live turns must not wait on deferred events — otherwise the rail freezes
     // mid-stream while the provider is still working.
     appSource.includes("const isLiveTurnStreaming = activeSessionId") &&
@@ -4232,7 +4448,8 @@ expect(
     surfaceSource.includes("isHiddenTranscriptEvent") &&
     surfaceSource.includes('payload?.surface === "desktop-ide"') &&
     surfaceSource.includes('"provider-diagnostics"') &&
-    styleSource.includes(
+    styleSource.includes(".gyro-response-actions .gyro-message-token-count") &&
+    !styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
     ) &&
     typeSource.includes("ProviderChatStreamEvent") &&
@@ -4599,6 +4816,29 @@ expect(
     tauriSource.includes("fn has_foreground_job") &&
     tauriSource.includes("terminal_pane_has_foreground_job"),
   "Idle shells should preserve their profile identity and close directly while foreground jobs remain protected.",
+);
+// A chat's model terminal is a focus, not a place. Selecting it whenever the
+// chat owned one moved the terminal out from under a run or test the user had
+// just started, and listed chat-owned processes in the strip they manage.
+const devTaskSource = appSource.slice(
+  appSource.indexOf("const launchIdeDevTask = useCallback("),
+  appSource.indexOf("const runIdeTask = useCallback("),
+);
+expect(
+  devTaskSource.includes('type: "select-terminal-pane"') &&
+    appSource.includes(
+      'dispatchWorkbench({ type: "set-browser-url", url: browser.url });',
+    ) &&
+    !appSource.includes(
+      "workbench.selectedTerminalPaneId !== modelTerminal.id",
+    ) &&
+    /if \(shouldFollow\) \{[\s\S]{0,200}?type: "select-terminal-pane",[\s\S]{0,200}?type: "open-tool-panel", tab: "terminal"/.test(
+      appSource,
+    ) &&
+    surfaceSource.includes(
+      "listedTerminalPanes(terminalPanes, selectedTerminalPaneId)",
+    ),
+  "Running a task must select the terminal that runs it; a model terminal may only be revealed by Follow and never crowds the user's terminal strip.",
 );
 expect(
   typeSource.includes(
@@ -5013,7 +5253,8 @@ expect(
 );
 
 expect(
-  appSource.includes("openUrl, revealItemInDir") &&
+  appSource.includes("openUrl") &&
+    appSource.includes("revealItemInDir") &&
     appSource.includes("openBrowserPreviewExternal") &&
     appSource.includes("invoke<BrowserPreviewCapture>(") &&
     appSource.includes('"capture_browser_preview"') &&
@@ -5088,7 +5329,12 @@ expect(
       "workspacePath={activeSession?.workspacePath ?? workspacePath}",
     ) &&
     appSource.includes("onOpenWorkspace={openWorkspace}") &&
-    appSource.includes('activeWorkspaceLayout !== "code" ||') &&
+    // The bottom drawer is a Workspace surface: the Chat (thread) layout never
+    // draws it, and the code layout still waits for a project.
+    appSource.includes("const isBottomDrawerAvailable =") &&
+    appSource.includes(
+      'isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread"',
+    ) &&
     appSource.includes(
       'activeWorkspaceLayout === "code" &&\n          Boolean(activeSession?.workspacePath ?? workspacePath)',
     ) &&
@@ -5151,7 +5397,7 @@ expect(
     chatSidebarSource.includes("Projects") &&
     chatSidebarSource.includes("Recents") &&
     chatSidebarSource.includes("gyro-sidebar-recents") &&
-    chatSidebarSource.includes("No Chats") &&
+    chatSidebarSource.includes("No chats") &&
     chatSidebarSource.includes(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
@@ -5344,21 +5590,32 @@ expect(
     appSource.includes("toolPanelHeight") &&
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
-    surfaceSource.includes("data-active-tab={effectivePaneTab}") &&
+    surfaceSource.includes("data-active-tab={activePaneTab}") &&
     surfaceSource.includes("terminalTitle={activeTerminalPane?.title}") &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
-    surfaceSource.includes(
-      'const effectivePaneTab = terminalOnly ? "terminal" : activePaneTab',
-    ) &&
     surfaceSource.includes('tab.id === "terminal"') &&
     appSource.includes('openToolPanel("terminal")') &&
+    // The drawer is a Workspace surface. A Chat (thread) layout draws it
+    // nowhere and offers no control for it, so it never pins the tray to a
+    // terminal-only half state either.
+    appSource.includes(
+      'const isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread"',
+    ) &&
+    appSource.includes("isToolPanelAvailable={isBottomDrawerAvailable}") &&
+    surfaceSource.includes("isToolPanelAvailable = true") &&
+    surfaceSource.includes(
+      "isToolPanelAvailable && isToolPanelOpen === true",
+    ) &&
+    surfaceSource.includes("showToolPanel={isToolPanelAvailable}") &&
+    !surfaceSource.includes("terminalOnly") &&
+    !appSource.includes("terminalOnly") &&
     !styleSource.includes(".gyro-tool-panel-reveal") &&
     styleSource.includes(".gyro-workspace-tool-panel.is-resizable") &&
     styleSource.includes('[data-active-tab="terminal"]') &&
     styleSource.includes(".gyro-terminal-toolbar {\n  display: none;") &&
     !styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
-  "Chat bottom panel should be a terminal-only tray opened from the explicit top control, with no reveal strip.",
+  "The bottom drawer should stay a Workspace surface: the Chat layout draws it nowhere and offers no control for it, while the workspace panel keeps its resize handle and terminal tab with no reveal strip.",
 );
 const chatSurfaceSource = surfaceSource.slice(
   surfaceSource.indexOf("export function ChatSurface"),
@@ -5615,9 +5872,9 @@ expect(
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('aria-label="Jump to latest message"') &&
     surfaceSource.includes("isTranscriptAwayFromBottom") &&
-    surfaceSource.includes("distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK") &&
-    surfaceSource.includes("isFollowingTranscriptBottomRef") &&
-    surfaceSource.includes("const pinTranscriptToBottom") &&
+    surfaceSource.includes("distanceFromBottom <= BOTTOM_SLACK") &&
+    surfaceSource.includes("isFollowingBottomRef") &&
+    surfaceSource.includes("const pinToBottom") &&
     surfaceSource.includes('behavior: "smooth"') &&
     styleSource.includes(".gyro-chat-jump-to-bottom") &&
     styleSource.includes("bottom: calc(100% + 10px)") &&
@@ -5760,7 +6017,7 @@ expect(
 );
 expect(
   surfaceSource.includes("function isLoadedTranscriptClipped") &&
-    surfaceSource.includes("TRANSCRIPT_OVERFLOW_SLACK") &&
+    surfaceSource.includes("OVERFLOW_SLACK") &&
     surfaceSource.includes(
       "hasMoreBefore && onLoadEarlier && isLoadedChatClipped",
     ) &&
@@ -6099,6 +6356,48 @@ expect(
     coreSessionsSource.includes("GoalUpdated") &&
     coreSessionsSource.includes("ChatModeChanged"),
   "Chat should persist goals, plans, modes, drafts, attachments, and real provider cancellation.",
+);
+// A research sub-agent is a real provider run in its own session, and every
+// provider run is dispatched against a control in the cancellation manager:
+// the capability context is bound through it, the broker checks it before each
+// tool call, a waiting approval abandons itself when it stops, and timeline and
+// usage events read their sequence from it. Without a control of its own the
+// child dies before its first token with "provider run is no longer active".
+// The child's control also watches the parent chat's stop token, so stopping
+// the chat that asked for research stops the research instead of leaving it
+// spending in the background while the parent waits on a tool result nobody is
+// waiting for any more.
+expect(
+  tauriSource.includes(
+    "CapabilityId::ResearchRun => subagent_capability::execute",
+  ) &&
+    subagentRustSource.includes("ChildRunControl::claim(") &&
+    subagentRustSource.includes("claim_child_run_control(") &&
+    subagentRustSource.includes("release_child_run_control(") &&
+    subagentRustSource.includes("ParentStopWatcher::start(") &&
+    subagentRustSource.includes("ProviderCancellationManager") &&
+    subagentRustSource.includes("MAX_CONCURRENT_PROVIDER_RUNS") &&
+    subagentRustSource.includes("drop(run);"),
+  "A research sub-agent should claim its own provider run control, watch its parent chat's stop, and release the control when the child turn ends.",
+);
+// A sub-agent run belongs to the chat that started it. The child session
+// records the chat that started it; the store keeps it out of "the latest
+// chat", which is what resume and startup mean, and takes it away when the
+// chat is deleted; the chat list leaves it out; the menu bar does not report
+// its completion as a chat of its own; and the call card that reports the
+// research is the way the transcript is opened.
+expect(
+  subagentRustSource.includes("create_subagent_session(") &&
+    coreSessionsSource.includes("create_subagent_session(") &&
+    coreSessionsSource.includes("parent_session_id") &&
+    coreSessionsSource.includes("where parent_session_id = ?1") &&
+    coreSessionsSource.includes("where parent_session_id is null") &&
+    sessionListingSource.includes("parentSessionId") &&
+    sessionListingSource.includes("visibleSessionsForProjects") &&
+    appSource.includes('from "./session-listing"') &&
+    appSource.includes('activity.resource.kind === "chat"') &&
+    menuBarStateSource.includes("session?.parentSessionId"),
+  "A research sub-agent should record the chat that started it, stay out of the chat list, the latest-chat lookup and the menu bar, and be opened from the call card.",
 );
 expect(
   coreSessionsSource.includes(
@@ -6811,8 +7110,10 @@ expect(
     ) &&
     appSource.includes('overrideContext && "goal" in overrideContext') &&
     appSource.includes("const turnMode =") &&
-    appSource.includes('chatDraftModesRef.current[draftModeKey] ?? "normal"') &&
-    appSource.includes("submittedChatMode={persistedActiveChatMode}"),
+    /chatDraftModesRef\.current\[draftModeKey\]\s*\?\?\s*"normal"/.test(
+      appSource,
+    ) &&
+    appSource.includes("submittedChatMode={persistedSessionContext.mode}"),
   "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
 );
 expect(

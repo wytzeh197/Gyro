@@ -164,6 +164,17 @@ lets a long edit sweep keep going, and `0` removes the round budget entirely so
 a turn works until the model stops or the user does. The window and per-call
 ceilings still bound such a turn, which is what makes `0` safe to offer.
 
+The context window is bounded the same way. A tool loop re-sends its message
+list on every round, so a turn that reads a few large files can fill a window no
+single request asked for — and on a metered API it re-pays for those results
+each round. `usageGuard.autoCompactPercent` (80 by default, `0` off, adjustable
+in Settings → Usage Limits → Auto Context Compact) is the fill at which the loop
+replaces its oldest tool exchanges with one note: local, so no provider call, no
+change to the stored chat, and the newest exchange plus the prompt head always
+stay. A provider whose window Gyro cannot resolve never auto-compacts, because a
+share of an unknown window is not a measurement — the same rule the live context
+note follows.
+
 A ledger the guard cannot read is not treated as proof of safety, but blocking
 on a read failure would strand the user with no way to work, so the call runs
 and the failure is logged. A pause is the exception: it holds even when the

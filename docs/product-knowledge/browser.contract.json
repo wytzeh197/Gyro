@@ -115,6 +115,55 @@
       "name": "gyro_browser_click"
     },
     {
+      "description": "Move, click, secondary-click, or drag the mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. Re-observe after acting; coordinates from a changed page are rejected.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "hover",
+              "click",
+              "secondary-click",
+              "drag"
+            ],
+            "type": "string"
+          },
+          "captureId": {
+            "description": "Filename from a recent screenshot of this chat's browser",
+            "type": "string"
+          },
+          "rootId": {
+            "description": "Workspace root ID from gyro_workspace_get_context. Required when this session has multiple roots.",
+            "type": "string"
+          },
+          "toX": {
+            "description": "Required destination X for drag",
+            "type": "number"
+          },
+          "toY": {
+            "description": "Required destination Y for drag",
+            "type": "number"
+          },
+          "x": {
+            "description": "Start X in browser CSS pixels from the screenshot's top-left",
+            "type": "number"
+          },
+          "y": {
+            "description": "Start Y in browser CSS pixels from the screenshot's top-left",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "captureId",
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "name": "gyro_browser_mouse"
+    },
+    {
       "description": "Type text into a focused or ref-targeted element in this chat's browser. Does not fill password or credential fields.",
       "inputSchema": {
         "additionalProperties": false,

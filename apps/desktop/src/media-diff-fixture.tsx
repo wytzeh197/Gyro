@@ -21,11 +21,25 @@ function Fixture() {
     });
     document.querySelector("textarea")!.dispatchEvent(event);
   };
+  const dropUrl = () => {
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", {
+      value: {
+        files: [],
+        items: [],
+        types: ["text/uri-list"],
+        getData: (type: string) =>
+          type === "text/uri-list" ? "data:image/png;base64,iVBORw0KGgo=" : "",
+      },
+    });
+    document.querySelector("textarea")!.dispatchEvent(event);
+  };
   return (
     <main style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <nav style={{ display: "flex", gap: 12, padding: 12 }}>
         <button onClick={() => drop(false)}>Drop FileList image</button>
         <button onClick={() => drop(true)}>Drop file-item image</button>
+        <button onClick={dropUrl}>Drop image URL</button>
         <button onClick={() => setOldLayout(!oldLayout)}>
           Toggle old layout
         </button>

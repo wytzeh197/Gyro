@@ -1,3 +1,4 @@
+mod automation_scheduler;
 mod canvas_preview;
 mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
@@ -5,6 +6,7 @@ mod git_read;
 mod model_catalog;
 mod provider_activity;
 use provider_activity::*;
+mod context_compaction;
 mod provider_mcp;
 mod provider_reliability;
 use provider_reliability::{
@@ -23,14 +25,24 @@ mod kimi_usage;
 #[cfg(debug_assertions)]
 mod performance_benchmark;
 mod session_goal;
+mod session_model;
+use session_model::set_session_model;
 mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 use kimi_usage::*;
 mod browser_knowledge;
+mod browser_pointer;
 mod file_patch_counts;
 
 use anyhow::Context;
+use automation_scheduler::start_automation_scheduler;
+#[cfg(test)]
+use automation_scheduler::{
+    automation_dispatch_candidates, recover_automation_scheduler_leases_with,
+    run_automation_scheduler_once_at_with, run_automation_scheduler_once_with,
+    run_automation_scheduler_once_with_heartbeat_interval,
+};
 use base64::Engine as _;
 use gyro_core::augmented_gui_path;
 #[cfg(test)]
@@ -130,6 +142,7 @@ mod source_control_review;
 mod system_access;
 mod terminal_capability;
 mod terminal_wait;
+mod workspace_capability_list;
 mod workspace_capability_read;
 mod workspace_edit_capability;
 mod workspace_mutations;
@@ -153,6 +166,7 @@ const MAX_TERMINAL_PROCESSES: usize = 32;
 const MAX_DEBUG_ADAPTER_PROCESSES: usize = 8;
 const MAX_CONCURRENT_IDE_COMMANDS: usize = 4;
 const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
+const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
@@ -704,6 +718,56 @@ struct AutomationSchedulerClock {
     last_sample: Instant,
 }
 
+/// A scheduled run owns a provider slot before its lease is claimed. A busy
+/// interactive app leaves the automation due instead of recording a false failure.
+struct AutomationRunAdmission {
+    app: tauri::AppHandle,
+    reservation_key: String,
+}
+
+impl AutomationRunAdmission {
+    fn reserve(app: &tauri::AppHandle, automation_id: Uuid) -> Result<Option<Self>, String> {
+        let reservation_key = format!("automation-reserved-{automation_id}");
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Ok(None);
+        }
+        flags.insert(
+            reservation_key.clone(),
+            Arc::new(ProviderRunControl::default()),
+        );
+        Ok(Some(Self {
+            app: app.clone(),
+            reservation_key,
+        }))
+    }
+
+    fn transfer_to_session(&self, session_id: &str) -> Result<(), String> {
+        let manager = self.app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        let control = flags
+            .remove(&self.reservation_key)
+            .ok_or_else(|| "automation provider reservation was lost".to_string())?;
+        flags.insert(session_id.to_string(), control);
+        Ok(())
+    }
+}
+
+impl Drop for AutomationRunAdmission {
+    fn drop(&mut self) {
+        if let Ok(mut flags) = self.app.state::<ProviderCancellationManager>().flags.lock() {
+            flags.remove(&self.reservation_key);
+        }
+    }
+}
+
 fn automation_scheduler_effective_now(
     previous: chrono::DateTime<chrono::Utc>,
     monotonic_elapsed: Duration,
@@ -970,8 +1034,7 @@ struct WorkspaceSearchRequest {
     globs: Option<Vec<String>>,
     max_results: Option<usize>,
     /// When true, treat `query` as a regex (ripgrep default). UI search leaves
-    /// this off so ordinary user typing is fixed-string; capability/agent search
-    /// turns it on because agents send patterns like `stop|abort|cancel`.
+    /// this off so ordinary user typing is fixed-string.
     #[serde(default)]
     regex: Option<bool>,
 }
@@ -1764,6 +1827,14 @@ struct BrowserPreviewCapture {
     width: u32,
     height: u32,
     created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resource_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    viewport: Option<serde_json::Value>,
 }
 
 const BROWSER_OBSERVATION_SCHEMA_V1: &str = "gyro.browser-observation.v1";
@@ -2466,34 +2537,6 @@ fn create_worktree_session_blocking(
 }
 
 #[tauri::command]
-async fn set_session_model(
-    session_id: String,
-    provider_id: Option<String>,
-    provider_label: Option<String>,
-    model_id: Option<String>,
-    model_label: Option<String>,
-    reasoning_effort: Option<String>,
-) -> Result<Session, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let store = open_store()?;
-        let session_id = parse_uuid(&session_id)?;
-        store
-            .update_session_model(
-                session_id,
-                provider_id,
-                provider_label,
-                model_id,
-                model_label,
-                reasoning_effort,
-            )
-            .map_err(to_string)?
-            .ok_or_else(|| "session not found".into())
-    })
-    .await
-    .map_err(|error| format!("session model worker failed: {error}"))?
-}
-
-#[tauri::command]
 async fn rename_session(session_id: String, title: String) -> Result<Session, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
@@ -3054,334 +3097,6 @@ fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
     }
 }
 
-fn start_automation_scheduler(app: tauri::AppHandle) {
-    std::thread::spawn(move || {
-        let paths = match GyroPaths::for_current_user() {
-            Ok(paths) => paths,
-            Err(error) => {
-                eprintln!("could not resolve automation scheduler paths: {error}");
-                return;
-            }
-        };
-        let lease_owner = format!("desktop-{}-{}", std::process::id(), Uuid::new_v4());
-        let mut observed_generation = app.state::<AutomationSchedulerControl>().generation();
-        let mut clock = AutomationSchedulerClock::new(chrono::Utc::now());
-
-        loop {
-            let now = clock.now();
-            if let Err(error) =
-                recover_automation_scheduler_leases_with(&paths, now, |automation| {
-                    emit_automation_update(&app, automation);
-                    notify_automation_outcome(&app, automation);
-                })
-            {
-                eprintln!("could not recover automation leases: {error}");
-            }
-            match run_automation_scheduler_once_at_with(&paths, &lease_owner, now, |automation| {
-                emit_automation_update(&app, automation);
-                execute_claimed_automation(&app, &paths, automation)
-            }) {
-                Ok(Some(automation)) => {
-                    emit_automation_update(&app, &automation);
-                    notify_automation_outcome(&app, &automation);
-                    continue;
-                }
-                Ok(None) => {}
-                Err(error) => eprintln!("automation scheduler iteration failed: {error}"),
-            }
-            observed_generation = app
-                .state::<AutomationSchedulerControl>()
-                .wait_for_change(observed_generation, AUTOMATION_SCHEDULER_POLL_INTERVAL);
-        }
-    });
-}
-
-fn recover_automation_scheduler_leases_with<F>(
-    paths: &GyroPaths,
-    now: chrono::DateTime<chrono::Utc>,
-    mut on_recovered: F,
-) -> Result<usize, String>
-where
-    F: FnMut(&Automation),
-{
-    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
-    let expired_ids = store
-        .list_automations()
-        .map_err(to_string)?
-        .into_iter()
-        .filter(|automation| {
-            automation
-                .lease_expires_at
-                .is_some_and(|expires_at| expires_at <= now)
-        })
-        .map(|automation| automation.id)
-        .collect::<Vec<_>>();
-    if expired_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let recovered = store
-        .recover_expired_automation_leases(now)
-        .map_err(to_string)?;
-    for automation_id in expired_ids {
-        let Some(automation) = store.get_automation(automation_id).map_err(to_string)? else {
-            continue;
-        };
-        // Lease ownership cleared by recovery is enough signal; exact timestamp
-        // equality with the recovery clock is fragile under store rounding.
-        if automation.lease_owner.is_none() {
-            on_recovered(&automation);
-        }
-    }
-    Ok(recovered)
-}
-#[cfg(test)]
-fn run_automation_scheduler_once_with<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with(paths, lease_owner, chrono::Utc::now(), execute)
-}
-
-fn run_automation_scheduler_once_at_with<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    now: chrono::DateTime<chrono::Utc>,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with_heartbeat_interval(
-        paths,
-        lease_owner,
-        now,
-        AUTOMATION_LEASE_HEARTBEAT_INTERVAL,
-        execute,
-    )
-}
-
-#[cfg(test)]
-fn run_automation_scheduler_once_with_heartbeat_interval<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    heartbeat_interval: Duration,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with_heartbeat_interval(
-        paths,
-        lease_owner,
-        chrono::Utc::now(),
-        heartbeat_interval,
-        execute,
-    )
-}
-
-fn run_automation_scheduler_once_at_with_heartbeat_interval<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    now: chrono::DateTime<chrono::Utc>,
-    heartbeat_interval: Duration,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
-    let Some(claimed) = store
-        .claim_due_automation_at(lease_owner, AUTOMATION_LEASE_SECONDS, now)
-        .map_err(to_string)?
-    else {
-        return Ok(None);
-    };
-
-    let heartbeat = AutomationLeaseHeartbeat::start(
-        paths.clone(),
-        claimed.id,
-        lease_owner.to_string(),
-        AUTOMATION_LEASE_SECONDS,
-        heartbeat_interval,
-    );
-    let execution_result =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute(&claimed)))
-            .unwrap_or_else(|_| {
-                Err("automation execution panicked and was safely contained".into())
-            });
-    drop(heartbeat);
-
-    let (status, summary, pause_for_configuration, stop_condition_met) = match execution_result {
-        Ok(summary) => match parse_automation_execution_outcome(&claimed, &summary) {
-            Ok(outcome) => (
-                AutomationRunStatus::Passed,
-                outcome.summary,
-                false,
-                outcome.stop_condition_met,
-            ),
-            Err(error) => (AutomationRunStatus::Failed, error, false, None),
-        },
-        Err(error) if error.contains("chat cancelled") => (
-            AutomationRunStatus::Stopped,
-            "Automation stopped before completion".into(),
-            false,
-            None,
-        ),
-        Err(error) => {
-            let error = gyro_core::security::redact_secrets(&error);
-            let pause = error.starts_with("configuration:");
-            (AutomationRunStatus::Failed, error, pause, None)
-        }
-    };
-    let updated = store
-        .finish_automation_lease_with_stop_condition(
-            claimed.id,
-            lease_owner,
-            status,
-            bounded_automation_summary(&summary),
-            stop_condition_met,
-        )
-        .map_err(to_string)?
-        .ok_or_else(|| "claimed automation disappeared before completion".to_string())?;
-    if pause_for_configuration {
-        return store
-            .set_automation_status(updated.id, AutomationStatus::Paused)
-            .map_err(to_string);
-    }
-    Ok(Some(updated))
-}
-
-fn execute_claimed_automation(
-    app: &tauri::AppHandle,
-    paths: &GyroPaths,
-    automation: &Automation,
-) -> Result<String, String> {
-    let workspace_path = resolve_automation_workspace(paths, automation)?;
-    let provider_id = automation
-        .execution
-        .provider_id
-        .clone()
-        .unwrap_or_else(|| provider_id_for_automation_label(&automation.provider).into());
-    if provider_adapter_for(&provider_id).kind == ProviderAdapterKind::ReadinessOnly {
-        return Err(format!(
-            "configuration: {} cannot execute automation runs",
-            automation.provider
-        ));
-    }
-    let provider_label = automation
-        .execution
-        .provider_label
-        .clone()
-        .or_else(|| Some(automation.provider.clone()));
-    let store = open_store()?;
-    let session = store
-        .create_session_with_context(
-            &workspace_path,
-            SessionOrigin::Desktop,
-            format!("Automation: {}", automation.title),
-            CreateSessionContext {
-                workspace_mode: automation.workspace_mode.clone(),
-                branch: automation.branch.clone(),
-                worktree_name: automation.worktree_name.clone(),
-                provider_id: Some(provider_id.clone()),
-                provider_label: provider_label.clone(),
-                model_id: automation.execution.model_id.clone(),
-                model_label: automation.execution.model_label.clone(),
-                reasoning_effort: automation.execution.reasoning_effort.clone(),
-            },
-        )
-        .map_err(to_string)?;
-    let linked = open_automation_store()?
-        .link_run_session(
-            automation.id,
-            automation
-                .lease_owner
-                .as_deref()
-                .ok_or("automation has no lease")?,
-            session.id,
-        )
-        .map_err(to_string)?;
-    emit_automation_update(app, &linked);
-    let message = automation_provider_prompt(automation);
-    let user_event = store
-        .append_user_turn_message(
-            session.id,
-            message.clone(),
-            serde_json::json!({
-                "surface": "automation",
-                "automationId": automation.id,
-                "schedule": automation.schedule,
-            }),
-        )
-        .map_err(to_string)?;
-    let session_id = session.id.to_string();
-    let control = Arc::new(ProviderRunControl::default());
-    {
-        let cancellation_manager = app.state::<ProviderCancellationManager>();
-        let mut flags = cancellation_manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Err(format!(
-                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
-            ));
-        }
-        flags.insert(session_id.clone(), control);
-    }
-    app.state::<AutomationSchedulerControl>()
-        .register(automation.id, session_id.clone());
-
-    let request = ProviderChatRequest {
-        session_id: session_id.clone(),
-        message,
-        turn_id: user_event.turn_id.map(|id| id.to_string()),
-        provider_id,
-        provider_label,
-        model_id: automation.execution.model_id.clone(),
-        model_label: automation.execution.model_label.clone(),
-        reasoning_effort: automation.execution.reasoning_effort.clone(),
-        require_command_approval: true,
-        require_file_edit_approval: true,
-        full_access: false,
-        suggest_title: false,
-        workspace_path: Some(workspace_path.display().to_string()),
-        mode: ChatMode::Normal,
-        goal: None,
-        plan: None,
-        attachments: Vec::new(),
-        workspace_context: None,
-        workspace_check: None,
-    };
-    // Register cancellation first, then re-read persisted state. A pause between
-    // claiming the lease and registering this session must still prevent dispatch.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let latest = open_automation_store()?
-            .get_automation(automation.id)
-            .map_err(to_string)?
-            .ok_or_else(|| "automation no longer exists".to_string())?;
-        if latest.status != AutomationStatus::Current
-            || latest.lease_owner != automation.lease_owner
-        {
-            return Err("chat cancelled before automation dispatch".to_string());
-        }
-        run_provider_chat_blocking(app.clone(), request, UsageOrigin::Automation)
-            .map(|response| response.assistant_event.message)
-    }))
-    .unwrap_or_else(|_| Err("automation execution panicked and was safely contained".into()));
-    app.state::<AutomationSchedulerControl>()
-        .unregister(automation.id);
-    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
-        flags.remove(&session_id);
-    }
-    result
-}
-
 fn resolve_automation_workspace(
     paths: &GyroPaths,
     automation: &Automation,
@@ -3520,6 +3235,8 @@ fn bounded_automation_summary(value: &str) -> String {
 #[serde(rename_all = "camelCase")]
 struct SessionEventsReadResult {
     events: Vec<SessionEvent>,
+    /// Durable goal, plan, and submitted-mode events outside the recent window.
+    context_events: Vec<SessionEvent>,
     /// True when older events exist before the returned window.
     has_more_before: bool,
 }
@@ -3554,6 +3271,7 @@ fn read_session_events_blocking(
             .map_err(to_string)?;
         return Ok(SessionEventsReadResult {
             events: page.events,
+            context_events: Vec::new(),
             has_more_before: page.has_more_before,
         });
     }
@@ -3565,6 +3283,9 @@ fn read_session_events_from_store(
     session_id: Uuid,
     max_recent_events: usize,
 ) -> anyhow::Result<SessionEventsReadResult> {
+    // Read context first so a concurrent append can only land in the newer
+    // transcript snapshot; context events then always precede its tail.
+    let context_events = store.read_context_events(session_id)?;
     let mut events = store.read_recent_events(session_id, max_recent_events)?;
     // The tail path re-inserts session-created, so a full page of "content"
     // events still means older history may exist even when the returned length
@@ -3598,6 +3319,7 @@ fn read_session_events_from_store(
     }
     Ok(SessionEventsReadResult {
         events,
+        context_events,
         has_more_before,
     })
 }
@@ -5064,8 +4786,8 @@ fn run_provider_chat_blocking(
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
-    let events = store.read_events(session_id).map_err(to_string)?;
-    request.goal = session_goal::stored_session_goal(&events).or(request.goal.take());
+    let events = store.read_context_events(session_id).map_err(to_string)?;
+    request.goal = session_goal::stored_or_unsaved_goal(&events, request.goal.take());
     if request.suggest_title {
         if let Some(control) = app
             .state::<ProviderCancellationManager>()
@@ -5374,8 +5096,11 @@ fn run_provider_chat_blocking(
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
         }
-        let billed = runner_output.billed_usage.as_ref();
-        openai_compatible_runner::insert_turn_tokens(object, &adapter, billed);
+        object.insert(
+            "turnTokens".into(),
+            serde_json::to_value(provider_turn_tokens(&request, Some(&runner_output)))
+                .map_err(to_string)?,
+        );
         if let Some(context_usage) = provider_context_usage_with_window(
             runner_output.context_usage.clone(),
             &request.provider_id,
@@ -5473,7 +5198,26 @@ fn run_provider_chat_blocking(
                 })
             })
         });
-    let plan_event = plan_payload.and_then(|payload| {
+    let plan_event = plan_payload.and_then(|mut payload| {
+        if request.mode == ChatMode::Plan {
+            if payload.get("content").is_none() && payload.get("markdown").is_none() {
+                let mut with_content = payload.clone();
+                if let Some(object) = with_content.as_object_mut() {
+                    object.insert(
+                        "content".into(),
+                        serde_json::Value::String(assistant_event.message.clone()),
+                    );
+                    // The event payload has a hard 128 KiB limit. Keep a large
+                    // plan marker valid; the context index can carry the
+                    // preceding assistant message as its content fallback.
+                    if serde_json::to_vec(&with_content)
+                        .is_ok_and(|encoded| encoded.len() <= 96 * 1024)
+                    {
+                        payload = with_content;
+                    }
+                }
+            }
+        }
         store
             .append_event_with_turn_id(
                 session_id,
@@ -5687,13 +5431,14 @@ fn compact_provider_chat_blocking(
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     };
     let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
-    let running = codex_context_compaction_activity(&activity_params, "running");
+    let running =
+        context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
     let (completed, context_usage) =
         match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
             Ok(usage) => (
-                codex_context_compaction_activity(&activity_params, "done"),
+                context_compaction::codex_context_compaction_activity(&activity_params, "done"),
                 provider_context_usage_with_window(
                     usage,
                     &request.provider_id,
@@ -5746,7 +5491,7 @@ fn compact_local_provider_chat(
         "this chat needs a completed reply before context can be compacted".to_string()
     })?;
     let params = serde_json::json!({ "turnId": run_id.to_string() });
-    let running = codex_context_compaction_activity(&params, "running");
+    let running = context_compaction::codex_context_compaction_activity(&params, "running");
     emit_provider_activity_event(app, request, &running, Some(0));
 
     // A new provider session starts from the saved checkpoint on the next
@@ -5755,7 +5500,7 @@ fn compact_local_provider_chat(
     store
         .clear_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
-    let mut completed = codex_context_compaction_activity(&params, "done");
+    let mut completed = context_compaction::codex_context_compaction_activity(&params, "done");
     completed.detail =
         Some("Condensed the local chat history for this provider's next turn.".into());
     let mut entry = provider_activity_event_entry(request, run_id, 0, &completed);
@@ -6594,7 +6339,7 @@ async fn append_chat_context_event(
         let (kind, message, payload) = match event_kind.as_str() {
             "goal-updated" => {
                 let current = session_goal::stored_session_goal(
-                    &store.read_events(session_id).map_err(to_string)?,
+                    &store.read_context_events(session_id).map_err(to_string)?,
                 );
                 let (message, payload) = session_goal::goal_change(&payload, current.as_ref())?;
                 (SessionEventKind::GoalUpdated, message, payload)
@@ -10122,10 +9867,8 @@ fn search_workspace_impl(
         return Ok(Vec::new());
     }
     let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
-    // Agents (Grok ACP, Claude via capabilities) send regex patterns with `|`
-    // and `.*`. Fixed-string mode made those always return zero hits, so the
-    // model looped short "I'll investigate" turns and looked like a ~30s stop.
-    // UI search keeps fixed-strings so plain typing is not treated as regex.
+    // UI search keeps fixed strings so ordinary typing is not treated as regex.
+    // Model capability search calls ripgrep directly and reports regex errors.
     let use_regex = request.regex.unwrap_or(false);
     match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, use_regex) {
         Ok(results) => Ok(results),
@@ -10218,6 +9961,28 @@ fn parse_rg_output(
         })
         .take(max_results)
         .collect()
+}
+
+fn bound_model_search_results(
+    mut results: Vec<WorkspaceSearchResult>,
+) -> anyhow::Result<(Vec<WorkspaceSearchResult>, bool)> {
+    let original_count = results.len();
+    let (mut low, mut high) = (0, original_count);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        let data = redact_json_strings(serde_json::to_value(&results[..mid])?);
+        if serde_json::to_vec(&data)?.len() <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+        {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    if low == 0 && original_count > 0 {
+        anyhow::bail!("A Workspace search match is too large to return; narrow the query");
+    }
+    results.truncate(low);
+    Ok((results, low < original_count))
 }
 
 fn fallback_search_workspace(
@@ -11628,6 +11393,66 @@ async fn capture_browser_preview_diagnostics(
 }
 
 #[tauri::command]
+async fn capture_session_browser_preview(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<BrowserPreviewCapture, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<session_browser::SessionBrowserManager>();
+        let owned = manager
+            .get_snapshot(&session_id)?
+            .ok_or_else(|| "this chat has no open browser".to_string())?;
+        let before =
+            session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        let screenshot = session_browser::capture_session_browser_png(&app, &session_id)?;
+        let after =
+            session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        let current = manager
+            .get_snapshot(&session_id)?
+            .ok_or_else(|| "browser closed during capture".to_string())?;
+        if current.resource_id != owned.resource_id
+            || before.get("url") != after.get("url")
+            || before.get("viewport") != after.get("viewport")
+        {
+            return Err("browser changed during capture; take a new screenshot".into());
+        }
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let mut capture = persist_browser_preview_capture(
+            &paths,
+            &screenshot.png,
+            screenshot.width,
+            screenshot.height,
+            chrono::Utc::now(),
+        )?;
+        let url = after
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "browser capture has no URL".to_string())?
+            .to_string();
+        let viewport = after
+            .get("viewport")
+            .cloned()
+            .ok_or_else(|| "browser capture has no viewport".to_string())?;
+        manager.remember_pointer_capture(
+            &session_id,
+            capture.filename.clone(),
+            url.clone(),
+            viewport.clone(),
+        )?;
+        capture.source_url = Some(url);
+        capture.title = after
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        capture.resource_id = Some(owned.resource_id);
+        capture.viewport = Some(viewport);
+        Ok(capture)
+    })
+    .await
+    .map_err(|error| format!("browser capture worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn capture_browser_preview(
     app: tauri::AppHandle,
     request: BrowserPreviewCaptureRequest,
@@ -11821,6 +11646,10 @@ fn persist_browser_preview_capture(
         width,
         height,
         created_at: created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        source_url: None,
+        title: None,
+        resource_id: None,
+        viewport: None,
     })
 }
 
@@ -13132,6 +12961,33 @@ impl UsageContext {
     }
 }
 
+/// One turn's billed tokens, or the same clearly marked estimate the ledger
+/// uses when a provider reports no counts. Share this with the response event
+/// so the number under the answer agrees with the session total.
+fn provider_turn_tokens(
+    request: &ProviderChatRequest,
+    output: Option<&ProviderRunnerOutput>,
+) -> UsageTokens {
+    output
+        .and_then(|output| output.billed_usage.as_ref())
+        .map(|usage| {
+            UsageTokens::measured(
+                usage.input_tokens,
+                usage.cached_input_tokens,
+                usage.output_tokens,
+                usage.reasoning_output_tokens,
+                usage.total_tokens,
+            )
+        })
+        .filter(|tokens| !tokens.is_empty())
+        .unwrap_or_else(|| {
+            UsageTokens::estimated(
+                request.message.chars().count(),
+                output.map_or(0, |output| output.response.chars().count()),
+            )
+        })
+}
+
 /// Append one provider call to the usage ledger.
 ///
 /// Best-effort on purpose: a ledger write that fails must never turn a
@@ -13152,26 +13008,7 @@ fn record_provider_usage(
     let Ok(session_id) = parse_uuid(&request.session_id) else {
         return;
     };
-    let tokens = output
-        .and_then(|output| output.billed_usage.as_ref())
-        .map(|usage| {
-            UsageTokens::measured(
-                usage.input_tokens,
-                usage.cached_input_tokens,
-                usage.output_tokens,
-                usage.reasoning_output_tokens,
-                usage.total_tokens,
-            )
-        })
-        .filter(|tokens| !tokens.is_empty())
-        // Kimi, xAI, and Gemini report no counts at all. An estimate keeps them
-        // on the ledger instead of reading as free, and is marked as one.
-        .unwrap_or_else(|| {
-            UsageTokens::estimated(
-                request.message.chars().count(),
-                output.map_or(0, |output| output.response.chars().count()),
-            )
-        });
+    let tokens = provider_turn_tokens(request, output);
     let entry = UsageEntry {
         session_id,
         turn_id: request
@@ -13821,6 +13658,18 @@ fn run_kimi_acp_chat(
     let resume_session_id = resume_cursor
         .filter(|cursor| cursor.kind == runtime.cursor_kind)
         .map(|cursor| cursor.session_id.clone());
+    // ACP may reject a saved cursor and open a fresh session. Pass both prompt
+    // forms so the adapter can choose after it knows whether reopen succeeded.
+    let resumed_prompt = resume_session_id.as_ref().map(|_| {
+        provider_context_message_for_turn(
+            request,
+            None,
+            PromptTurn {
+                resumed: true,
+                approvals_sent_separately: false,
+            },
+        )
+    });
     // Always load the local transcript. Grok often cannot resume; model handoffs
     // also start a fresh agent session. Either way the local Gyro session is the
     // source of truth and must travel with the prompt when resume is unavailable.
@@ -13862,6 +13711,7 @@ fn run_kimi_acp_chat(
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
+            resumed_prompt,
             conversation_history_text,
             mcp_servers,
             model: request
@@ -13875,10 +13725,7 @@ fn run_kimi_acp_chat(
                         runtime.default_model.into()
                     }
                 }),
-            reasoning_effort: request
-                .reasoning_effort
-                .clone()
-                .unwrap_or_else(|| "max".into()),
+            reasoning_effort: request.reasoning_effort.clone(),
             mode: if plan_mode {
                 KimiAcpMode::Plan
             } else {
@@ -14569,7 +14416,8 @@ fn run_openai_codex_app_server_chat(
                 }
                 "thread/compacted" => {
                     completed_artifact_response_at = None;
-                    let activity = codex_context_compaction_activity(&params, "done");
+                    let activity =
+                        context_compaction::codex_context_compaction_activity(&params, "done");
                     record_codex_app_server_activity(
                         app,
                         request,
@@ -14639,7 +14487,9 @@ fn run_openai_codex_app_server_chat(
                             Some("contextCompaction") => emit_provider_activity_event(
                                 app,
                                 request,
-                                &codex_context_compaction_activity(&params, "running"),
+                                &context_compaction::codex_context_compaction_activity(
+                                    &params, "running",
+                                ),
                                 None,
                             ),
                             _ => {}
@@ -14716,7 +14566,10 @@ fn run_openai_codex_app_server_chat(
                             }
                             Some("contextCompaction") => {
                                 completed_artifact_response_at = None;
-                                let activity = codex_context_compaction_activity(&params, "done");
+                                let activity =
+                                    context_compaction::codex_context_compaction_activity(
+                                        &params, "done",
+                                    );
                                 record_codex_app_server_activity(
                                     app,
                                     request,
@@ -15313,30 +15166,6 @@ fn codex_file_change_activities(
             }
         })
         .collect()
-}
-
-fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -> ProviderActivity {
-    let identity = params
-        .get("turnId")
-        .or_else(|| params.pointer("/item/id"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("turn");
-    ProviderActivity {
-        id: format!("context-compaction-{identity}"),
-        kind: "context".into(),
-        label: if status == "running" {
-            "Compacting context".into()
-        } else {
-            "Compacted context".into()
-        },
-        detail: Some(
-            "Summarized earlier conversation to keep the thread within the model context window."
-                .into(),
-        ),
-        file_counts: None,
-        note: None,
-        status: status.into(),
-    }
 }
 
 /// The headline of a Codex reasoning summary, as a muted status beat.
@@ -20745,20 +20574,15 @@ fn execute_provider_capability(
             (summary, serde_json::to_value(report)?, None)
         }
         CapabilityId::WorkspaceList => {
-            let depth = arguments
-                .get("depth")
-                .and_then(serde_json::Value::as_u64)
-                .map(|value| value as usize);
-            let entries = list_workspace_tree_blocking(workspace.clone(), depth)
-                .map_err(anyhow::Error::msg)?;
-            (
-                format!("Listed {} workspace entries", entries.len()),
-                serde_json::to_value(entries)?,
-                None,
-            )
+            workspace_capability_list::execute(&bound.workspace, arguments)?
         }
         CapabilityId::WorkspaceSearch => {
-            let query = capability_argument_string(arguments, "query")?.to_string();
+            let query = capability_argument_string(arguments, "query")?
+                .trim()
+                .to_string();
+            if query.is_empty() {
+                anyhow::bail!("Workspace search query must not be empty");
+            }
             let globs = arguments
                 .get("globs")
                 .and_then(|value| serde_json::from_value::<Vec<String>>(value.clone()).ok());
@@ -20768,22 +20592,35 @@ fn execute_provider_capability(
                 .map(|value| value as usize);
             // Agents send regex-shaped queries (`foo|bar`, `cancel.*stream`).
             // Fixed-string search made those return zero matches every turn.
-            let mut results = search_workspace_impl(&WorkspaceSearchRequest {
-                workspace_path: workspace,
-                query,
-                globs,
-                max_results,
-                regex: Some(true),
-            })?;
+            // Model searches promise regex semantics. Surface ripgrep failures
+            // instead of silently retrying as a literal search (or with a
+            // fallback scanner that ignores the requested globs).
+            let result_cap = max_results.unwrap_or(200).clamp(1, 1000);
+            let mut results = run_workspace_rg_search(
+                &bound.workspace,
+                &query,
+                globs.as_ref(),
+                result_cap,
+                true,
+            )?;
+            let cap_reached = results.len() == result_cap;
             results.retain(|result| !gyro_core::capability_path_is_sensitive(&result.path));
             for result in &mut results {
                 result.line = gyro_core::sanitize_capability_summary(&result.line);
             }
-            (
-                format!("Found {} workspace matches", results.len()),
-                serde_json::to_value(results)?,
-                None,
-            )
+            let found = results.len();
+            let (results, budget_limited) = bound_model_search_results(results)?;
+            let summary = if budget_limited {
+                format!(
+                    "Returned {} of {found} workspace matches; narrow the query to see the rest",
+                    results.len()
+                )
+            } else if cap_reached {
+                format!("Returned {found} workspace matches (result cap reached; narrow the query for more)")
+            } else {
+                format!("Returned {found} workspace matches")
+            };
+            (summary, serde_json::to_value(results)?, None)
         }
         CapabilityId::WorkspaceRead
         | CapabilityId::WorkspaceReadRange
@@ -21241,7 +21078,7 @@ fn execute_provider_capability(
                 .map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
             let created_at = chrono::Utc::now();
-            let capture = persist_browser_preview_capture(
+            let mut capture = persist_browser_preview_capture(
                 &paths,
                 &snapshot.png,
                 snapshot.width,
@@ -21249,10 +21086,44 @@ fn execute_provider_capability(
                 created_at,
             )
             .map_err(anyhow::Error::msg)?;
+            let captured_status = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "status",
+                serde_json::json!({}),
+            )
+            .map_err(anyhow::Error::msg)?;
+            if status.get("url") != captured_status.get("url")
+                || status.get("viewport") != captured_status.get("viewport")
+            {
+                anyhow::bail!("browser changed during capture; take a new screenshot");
+            }
+            if let (Some(url), Some(viewport)) = (
+                captured_status
+                    .get("url")
+                    .and_then(serde_json::Value::as_str),
+                captured_status.get("viewport"),
+            ) {
+                app.state::<session_browser::SessionBrowserManager>()
+                    .remember_pointer_capture(
+                        &bound.session_id,
+                        capture.filename.clone(),
+                        url.to_string(),
+                        viewport.clone(),
+                    )
+                    .map_err(anyhow::Error::msg)?;
+                capture.source_url = Some(url.to_string());
+                capture.title = captured_status
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                capture.resource_id = Some(owned.resource_id.clone());
+                capture.viewport = Some(viewport.clone());
+            }
             let observation = browser_observation(
                 app,
                 &owned,
-                &status,
+                &captured_status,
                 None,
                 Some(capture),
                 Vec::new(),
@@ -21404,6 +21275,21 @@ fn execute_provider_capability(
             (
                 format!("Clicked {ref_id}"),
                 serde_json::json!({ "data": result }),
+                Some(resource),
+            )
+        }
+        CapabilityId::BrowserMouse => {
+            let owned = require_model_browser_resource(app, bound)?;
+            let outcome = browser_pointer::execute(app, &bound.session_id, arguments)
+                .map_err(anyhow::Error::msg)?;
+            let resource = CapabilityResourceRef {
+                id: owned.resource_id,
+                kind: "browser".into(),
+                label: outcome.url,
+            };
+            (
+                format!("Used browser mouse to {}", outcome.action),
+                outcome.data,
                 Some(resource),
             )
         }
@@ -21825,6 +21711,7 @@ fn handle_desktop_provider_capability_request(
             | CapabilityId::BrowserBack
             | CapabilityId::BrowserForward
             | CapabilityId::BrowserClick
+            | CapabilityId::BrowserMouse
             | CapabilityId::BrowserType
             | CapabilityId::BrowserScroll
             | CapabilityId::BrowserFormInput
@@ -22258,7 +22145,10 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
     }
     let properties = match id {
         CapabilityId::WorkspaceList => serde_json::json!({
-            "depth": { "type": "integer", "minimum": 1, "maximum": 8 }
+            "path": { "type": "string", "description": "Optional workspace-relative directory to list." },
+            "depth": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "offset": { "type": "integer", "minimum": 0 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
         }),
         CapabilityId::WorkspaceSearch => serde_json::json!({
             "query": {
@@ -22320,6 +22210,14 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::BrowserClick => serde_json::json!({
             "ref": { "type": "string", "description": "Element ref from read_page or find" }
         }),
+        CapabilityId::BrowserMouse => serde_json::json!({
+            "action": { "type": "string", "enum": ["hover", "click", "secondary-click", "drag"] },
+            "captureId": { "type": "string", "description": "Filename from a recent screenshot of this chat's browser" },
+            "x": { "type": "number", "description": "Start X in browser CSS pixels from the screenshot's top-left" },
+            "y": { "type": "number", "description": "Start Y in browser CSS pixels from the screenshot's top-left" },
+            "toX": { "type": "number", "description": "Required destination X for drag" },
+            "toY": { "type": "number", "description": "Required destination Y for drag" }
+        }),
         CapabilityId::BrowserType => serde_json::json!({
             "text": { "type": "string" },
             "ref": { "type": "string", "description": "Optional element ref; defaults to focused element" },
@@ -22379,6 +22277,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
         CapabilityId::BrowserClick => vec!["ref"],
+        CapabilityId::BrowserMouse => vec!["action", "captureId", "x", "y"],
         CapabilityId::BrowserType => vec!["text"],
         CapabilityId::BrowserFormInput => vec!["ref", "value"],
         CapabilityId::GithubWorkflowLogs | CapabilityId::GithubRerunWorkflow => vec!["runId"],
@@ -22715,6 +22614,7 @@ pub fn run() {
             system_access::check_system_access,
             system_access::open_system_access_settings,
             capture_browser_preview,
+            capture_session_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
             session_browser::session_browser_set_visible,
@@ -22752,6 +22652,7 @@ pub fn run() {
             get_provider_usage_ledger,
             set_usage_paused,
             set_provider_budget,
+            context_compaction::set_auto_compact_percent,
             git_commit,
             git_branches,
             git_checkout_branch,
@@ -23421,6 +23322,41 @@ mod tests {
             |_, _| panic!("plan must not ask to write")
         )
         .is_err());
+    }
+
+    #[test]
+    fn model_search_keeps_regex_and_glob_semantics() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("match.rs"), "needle\n").unwrap();
+        fs::write(workspace.path().join("other.txt"), "needle\n").unwrap();
+        let globs = vec!["*.rs".to_string()];
+        let results =
+            run_workspace_rg_search(workspace.path(), "need.*", Some(&globs), 10, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "match.rs");
+        assert!(run_workspace_rg_search(workspace.path(), "[", Some(&globs), 10, true).is_err());
+    }
+
+    #[test]
+    fn model_search_bounds_large_match_sets() {
+        let results = (0..100)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("file-{index}.rs"),
+                line_number: index + 1,
+                line: "x".repeat(4_000),
+                ranges: vec![WorkspaceSearchRange {
+                    start_column: 1,
+                    end_column: 2,
+                }],
+            })
+            .collect();
+        let (bounded, limited) = bound_model_search_results(results).unwrap();
+        assert!(limited);
+        assert!(bounded.len() < 100);
+        assert!(
+            serde_json::to_vec(&bounded).unwrap().len()
+                <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+        );
     }
 
     #[test]
@@ -26766,14 +26702,14 @@ while True:
         assert_eq!(compaction.label, "Compacted context");
         assert_eq!(compaction.status, "done");
 
-        let started_compaction = codex_context_compaction_activity(
+        let started_compaction = context_compaction::codex_context_compaction_activity(
             &serde_json::json!({
                 "turnId": "turn_1",
                 "item": { "id": "compact_1", "type": "contextCompaction" }
             }),
             "running",
         );
-        let completed_compaction = codex_context_compaction_activity(
+        let completed_compaction = context_compaction::codex_context_compaction_activity(
             &serde_json::json!({ "threadId": "thread_1", "turnId": "turn_1" }),
             "done",
         );
@@ -30552,6 +30488,52 @@ while True:
             })
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn scheduler_dispatches_distinct_workspaces_and_defers_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let root_a = temp.path().join("a");
+        let root_b = temp.path().join("b");
+        fs::create_dir_all(&root_a).unwrap();
+        fs::create_dir_all(&root_b).unwrap();
+        let make = |title: &str, workspace: &Path| {
+            store
+                .create_automation(CreateAutomationRequest {
+                    title: title.into(),
+                    prompt: "Run checks".into(),
+                    schedule: gyro_core::AutomationSchedule::Hourly,
+                    project: "Gyro".into(),
+                    provider: "Codex".into(),
+                    branch: "main".into(),
+                    workspace_mode: SessionWorkspaceMode::Local,
+                    worktree_name: None,
+                    stop_condition: None,
+                    next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                    execution: gyro_core::AutomationExecutionContext {
+                        workspace_path: Some(workspace.display().to_string()),
+                        ..Default::default()
+                    },
+                })
+                .unwrap()
+        };
+        let first = make("First A", &root_a);
+        let same_workspace = make("Second A", &root_a);
+        let independent = make("First B", &root_b);
+        let due = vec![first.clone(), same_workspace.clone(), independent.clone()];
+        let selected = automation_dispatch_candidates(&paths, due.clone(), &HashMap::new());
+        assert_eq!(
+            selected.iter().map(|(run, _)| run.id).collect::<Vec<_>>(),
+            vec![first.id, independent.id]
+        );
+        let running = HashMap::from([(first.id, root_a.canonicalize().unwrap())]);
+        let selected = automation_dispatch_candidates(&paths, due, &running);
+        assert_eq!(
+            selected.iter().map(|(run, _)| run.id).collect::<Vec<_>>(),
+            vec![independent.id]
         );
     }
 

@@ -159,6 +159,13 @@ Each versioned release body must include:
 6. **CLI:** architecture archives and the CLI-only Homebrew commands after the
    Formula is published.
 
+The post-update **What’s new** card reads `latest.json.notes`, not the GitHub
+release body. For each release, put release-specific notes covering the
+user-visible changes in that field. The compact notice previews this text and
+the expanded card shows it in full. Keep it readable as plain text in the
+sidebar; the current manifest generator's fixed Alpha description is not
+sufficient.
+
 Use direct links of this form, substituting the exact tag and version:
 
 ```text
@@ -193,7 +200,8 @@ do not require a product release by themselves.
 3. Let `.github/workflows/release.yml` build both native architectures, verify
    them, assemble `latest.json`, checksums and `gyro.rb`, and create one draft.
 4. Download the draft assets exactly as a user would. Match every digest to
-   `SHA256SUMS`, inspect the release body and install both architectures on the
+   `SHA256SUMS`, inspect the release body and confirm `latest.json.notes`
+   contains the release-specific changes. Install both architectures on the
    appropriate hardware.
 5. Complete the clean-user Gatekeeper and updater acceptance checks. Publish
    the draft as a non-prerelease only when every check passes.
@@ -256,8 +264,11 @@ Manual acceptance must cover:
 - the Intel app and CLI execute on the Intel runner or Intel hardware;
 - both generated-Formula installs report the correct version, generate zsh,
   bash, and fish completions, and return `gyro.cli.v1` from `doctor --json`;
-- an older approved Gyro installs the signed updater, relaunches, and preserves
-  sessions;
+- an older approved Gyro installs the signed updater, relaunches, preserves
+  sessions, and shows the compact **What’s new** notice above Settings only
+  when the installed version matches the update target; it stays compact until
+  clicked, then shows the full release notes. Closing returns to the compact
+  notice, and dismissing clears it while leaving the Update button independent;
 - an invalid updater manifest or signature is rejected;
 - CLI-created sessions open in Gyro.app and app-created sessions remain visible
   to the CLI; and

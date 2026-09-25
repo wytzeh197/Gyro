@@ -7,21 +7,37 @@ import {
 } from "./composer-context.ts";
 import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
+import {
+  BrowserCaptureView,
+  browserPreviewLocationLabel,
+} from "./browser-capture-view";
 import { latestChatQuestions } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
+import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
 import { WorkspaceSearchResults } from "./workspace-search-results";
-import { chatMediaFiles, isMediaDrag } from "./chat-media-transfer";
+import {
+  chatMediaFiles,
+  chatMediaFilesFromDrop,
+  isMediaDrag,
+} from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
 import {
   SidebarProjectCard,
   type SidebarProjectSettings,
 } from "./sidebar-project-card";
 import {
+  listedTerminalPanes,
   placeTerminalTab,
   type TerminalDropEdge,
   type TerminalSplitLayout,
 } from "./terminal-layout";
 import { SettingsHelp } from "./settings-help";
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsSelect,
+  settingsSearchKey,
+} from "./settings-controls";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -217,7 +233,11 @@ import {
   chatArtifactsFromEvent,
   type ChatArtifactActions,
 } from "./chat-artifacts";
-import { orderedChatTimelineEvents } from "./chat-timeline";
+import {
+  interleaveModelSwitches,
+  isModelSwitchEvent,
+  orderedChatTimelineEvents,
+} from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
@@ -226,9 +246,11 @@ import {
   type ComposerLimitWindow,
 } from "./context-usage";
 import {
+  turnTokenReadingForResponse,
   turnTokensDetail,
   turnTokensFromValue,
   turnTokensLabel,
+  type TurnTokenReading,
   type TurnTokens,
 } from "./turn-tokens";
 import {
@@ -274,6 +296,7 @@ import type {
   CustomTaskDraft,
   AppDestination,
   Automation,
+  BrowserFeedback,
   BrowserPreview,
   BrowserPreviewDevice,
   CapabilityActivity,
@@ -374,6 +397,12 @@ import {
   resolveChatGridDropSlot,
 } from "./workbench-state";
 import {
+  chatGridDropLayout,
+  chatGridDropZones,
+  nearestChatGridDropZone,
+} from "./chat-grid-drop";
+import type { ChatGridDropPlacement, ChatGridDropZone } from "./chat-grid-drop";
+import {
   BROWSER_COMPANION_DEFAULT_WIDTH,
   BROWSER_COMPANION_MAX_WIDTH,
   BROWSER_COMPANION_MIN_WIDTH,
@@ -424,7 +453,7 @@ import {
   resolveCouncilSeatRequests,
 } from "./council";
 
-type BrowserScreenshotAction = "capture" | "reveal";
+type BrowserScreenshotAction = "capture" | "reveal" | "feedback";
 import {
   cliUpdateActionLabel,
   cliUpdateNoticeMessage,
@@ -469,6 +498,9 @@ const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
 };
 const CHAT_SESSION_DRAG_MIME = "application/x-gyro-chat-session";
 const CHAT_PANE_DRAG_MIME = "application/x-gyro-chat-pane";
+// WebKit withholds getData during dragover. The sidebar and grid share this
+// renderer, so keep the dragged identity until drop or dragend.
+let activeSidebarChatDragSessionId: string | undefined;
 const TOOL_PANEL_DEFAULT_HEIGHT = 280;
 /** Comfortable height when opening Browser so the iframe is usable. */
 const TOOL_PANEL_BROWSER_HEIGHT = 420;
@@ -481,34 +513,6 @@ const TOOL_PANEL_MAX_VIEWPORT_RATIO = 0.92;
 const IDE_SIDEBAR_KEYBOARD_STEP = 16;
 const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
 const SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH = 360;
-/**
- * How far off the bottom of the transcript still counts as being at the bottom.
- *
- * Wide enough to survive sub-pixel rounding and a line of text arriving between
- * frames, narrow enough that a reader who scrolled up stays scrolled up.
- */
-const TRANSCRIPT_BOTTOM_SLACK = 72;
-/**
- * Ignore sub-pixel rounding when deciding whether loaded messages actually
- * overflow the area above the composer dock.
- */
-const TRANSCRIPT_OVERFLOW_SLACK = 8;
-
-function isLoadedTranscriptClipped(transcript: HTMLElement) {
-  const styles = window.getComputedStyle(transcript);
-  const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
-  const loadEarlier = transcript.querySelector(".gyro-chat-load-earlier");
-  const loadEarlierHeight =
-    loadEarlier instanceof HTMLElement ? loadEarlier.offsetHeight : 0;
-  const messageHeight = Math.max(
-    0,
-    transcript.scrollHeight - paddingTop - paddingBottom - loadEarlierHeight,
-  );
-  const visibleAboveDock = Math.max(0, transcript.clientHeight - paddingBottom);
-  return messageHeight > visibleAboveDock + TRANSCRIPT_OVERFLOW_SLACK;
-}
-
 function restingSidebarWidth() {
   if (typeof window === "undefined") {
     return 240;
@@ -821,6 +825,10 @@ type AppChromeProps = {
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
+  onCheckRemote?: () => void;
+  isRemoteChecking?: boolean;
+  remoteCheckMessage?: string;
+  remoteCheckFailed?: boolean;
   isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
@@ -1206,13 +1214,6 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
 ];
 
-function settingsSearchKey(label: string) {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 function settingsSearchResults(query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return [];
@@ -1297,7 +1298,8 @@ function WorkspaceActivityRail({
 }) {
   const renderView = (view: (typeof workspaceViewContainers)[number]) => {
     const Icon = workspaceShellIcons[view.icon];
-    const isActive = activeView === view.id;
+    const isActive =
+      (hasWorkspace || view.id === "settings") && activeView === view.id;
     const isDisabled = view.requiresWorkspace && !hasWorkspace;
     const badge = badges?.[view.id];
     const badgeCount = isDisabled ? 0 : (badge?.count ?? 0);
@@ -1621,6 +1623,10 @@ export function AppChrome({
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
+  onCheckRemote,
+  isRemoteChecking = false,
+  remoteCheckMessage,
+  remoteCheckFailed = false,
   isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
@@ -2400,6 +2406,10 @@ export function AppChrome({
               onCommitSourceControl={onCommitSourceControl}
               onPushSourceControl={onPushSourceControl}
               onPullSourceControl={onPullSourceControl}
+              onCheckRemote={onCheckRemote}
+              isRemoteChecking={isRemoteChecking}
+              remoteCheckMessage={remoteCheckMessage}
+              remoteCheckFailed={remoteCheckFailed}
               isSourceControlSyncing={isSourceControlSyncing}
               branchCatalog={branchCatalog}
               isBranchLoading={isBranchLoading}
@@ -2449,6 +2459,12 @@ export function AppChrome({
 
           {activeDestination !== "settings" && !isIdeSurface ? (
             <div className="gyro-sidebar-footer">
+              {updateState?.installedUpdateNotice ? (
+                <InstalledUpdateNotice
+                  notice={updateState.installedUpdateNotice}
+                  onDismiss={updateState.dismissInstalledUpdateNotice}
+                />
+              ) : null}
               <div className="gyro-sidebar-footer-row">
                 <button
                   className="gyro-account-button"
@@ -2811,6 +2827,128 @@ function SidebarUpdateControl({
         <strong>{tag ?? label}</strong>
         <span>{size}</span>
       </div>
+    </div>
+  );
+}
+
+function InstalledUpdateNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: { version: string; releaseNotes: string };
+  onDismiss?: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const cardId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const version = notice.version.replace(/^v/, "");
+  const releaseNotes =
+    notice.releaseNotes.trim() ||
+    `Gyro ${version} is installed and ready to use.`;
+  const preview = releaseNotes
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s+)/gm, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    closeRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="gyro-installed-update-notice" ref={rootRef}>
+      <button
+        aria-controls={cardId}
+        aria-expanded={isOpen}
+        className="gyro-installed-update-trigger"
+        onClick={() => setIsOpen((current) => !current)}
+        ref={triggerRef}
+        type="button"
+      >
+        <span className="gyro-installed-update-brand">
+          <span className="gyro-installed-update-icon" aria-hidden="true">
+            <img src={gyroLogoTransparentLight} alt="" />
+          </span>
+          <span>Gyro</span>
+        </span>
+        <span className="gyro-installed-update-title">What’s new</span>
+        <span className="gyro-installed-update-compact-version">
+          Version {version}
+        </span>
+        <span className="gyro-installed-update-preview">{preview}</span>
+        <span className="gyro-installed-update-action">
+          See what’s new <ArrowRight size={13} aria-hidden="true" />
+        </span>
+      </button>
+      <button
+        aria-label="Dismiss What’s new notice"
+        className="gyro-installed-update-dismiss"
+        onClick={onDismiss}
+        title="Dismiss"
+        type="button"
+      >
+        <X size={13} />
+      </button>
+      {isOpen ? (
+        <section
+          aria-label={`What’s new in Gyro ${notice.version}`}
+          className="gyro-installed-update-card"
+          id={cardId}
+        >
+          <div className="gyro-installed-update-card-heading">
+            <span
+              className="gyro-installed-update-card-icon"
+              aria-hidden="true"
+            >
+              <img src={gyroLogoTransparentLight} alt="" />
+            </span>
+            <button
+              aria-label="Close What’s new card"
+              className="gyro-installed-update-card-close"
+              onClick={() => {
+                setIsOpen(false);
+                triggerRef.current?.focus();
+              }}
+              ref={closeRef}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="gyro-installed-update-card-intro">
+            <span className="gyro-installed-update-eyebrow">GYRO UPDATE</span>
+            <h2>What’s new</h2>
+            <p className="gyro-installed-update-version">Version {version}</p>
+          </div>
+          <div className="gyro-installed-update-notes">{releaseNotes}</div>
+          <button
+            className="gyro-installed-update-done"
+            onClick={onDismiss}
+            type="button"
+          >
+            Done
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -3512,6 +3650,10 @@ function WorkspaceSidebarContent({
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
+  onCheckRemote,
+  isRemoteChecking = false,
+  remoteCheckMessage,
+  remoteCheckFailed = false,
   isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
@@ -3609,6 +3751,10 @@ function WorkspaceSidebarContent({
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
+  onCheckRemote?: () => void;
+  isRemoteChecking?: boolean;
+  remoteCheckMessage?: string;
+  remoteCheckFailed?: boolean;
   isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
@@ -4227,9 +4373,15 @@ function WorkspaceSidebarContent({
           }),
         );
         event.dataTransfer.setData("text/plain", session.id);
+        activeSidebarChatDragSessionId = session.id;
         setDraggedSessionId(session.id);
       }}
-      onDragEnd={() => setDraggedSessionId(undefined)}
+      onDragEnd={() => {
+        if (activeSidebarChatDragSessionId === session.id) {
+          activeSidebarChatDragSessionId = undefined;
+        }
+        setDraggedSessionId(undefined);
+      }}
       session={session}
     />
   );
@@ -4303,19 +4455,14 @@ function WorkspaceSidebarContent({
       {isIdeSidebar ? (
         <>
           {!workspacePath ? (
-            <div className="gyro-sidebar-actions">
-              <button
-                className="gyro-sidebar-action"
-                onClick={onOpenWorkspace}
-                type="button"
-              >
-                <Folder size={15} />
-                Open folder
-              </button>
-            </div>
+            <SidebarSection grow title="Workspace">
+              <div className="gyro-sidebar-mini-copy">
+                Open a project to see its files, search, and changes here.
+              </div>
+            </SidebarSection>
           ) : null}
 
-          {activeIdeView === "explorer" ? (
+          {workspacePath && activeIdeView === "explorer" ? (
             <SidebarSection
               grow
               headerActions={
@@ -4627,7 +4774,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "search" ? (
+          {workspacePath && activeIdeView === "search" ? (
             <SidebarSection
               grow
               meta={String(ide?.searchResults.length ?? 0)}
@@ -4795,7 +4942,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "source-control" ? (
+          {workspacePath && activeIdeView === "source-control" ? (
             <SidebarSection
               grow
               title="Source control"
@@ -4854,9 +5001,13 @@ function WorkspaceSidebarContent({
                           {workspaceName(workspacePath)}
                         </strong>
                         <button
-                          aria-label="Refresh source control"
-                          onClick={onRefreshSourceControl}
-                          title="Refresh"
+                          aria-label="Refresh source control and check GitHub"
+                          disabled={isRemoteChecking}
+                          onClick={() => {
+                            onRefreshSourceControl?.();
+                            onCheckRemote?.();
+                          }}
+                          title="Refresh and check GitHub"
                           type="button"
                         >
                           <RefreshCw size={12} />
@@ -4923,7 +5074,9 @@ function WorkspaceSidebarContent({
                       <div className="gyro-sidebar-commit-actions">
                         {showSourceControlSyncButton ? (
                           <button
-                            disabled={isSourceControlSyncing}
+                            disabled={
+                              isSourceControlSyncing || isRemoteChecking
+                            }
                             onClick={
                               sourceControlSyncAction === "pull"
                                 ? onPullSourceControl
@@ -4957,6 +5110,20 @@ function WorkspaceSidebarContent({
                               </span>
                             ) : null}
                           </button>
+                        ) : !hasSourceControlChanges &&
+                          sourceControlPublished &&
+                          ide?.sourceControl.available === true ? (
+                          <button
+                            disabled={
+                              isRemoteChecking || isSourceControlSyncing
+                            }
+                            onClick={onCheckRemote}
+                            title="Check the tracked GitHub branch for new commits"
+                            type="button"
+                          >
+                            <RefreshCw size={13} />
+                            {isRemoteChecking ? "Checking…" : "Check GitHub"}
+                          </button>
                         ) : (
                           <button
                             disabled={
@@ -4985,9 +5152,17 @@ function WorkspaceSidebarContent({
                       hasPendingChanges={hasSourceControlChanges}
                       onPull={onPullSourceControl}
                       onPush={onPushSourceControl}
-                      syncing={isSourceControlSyncing}
+                      syncing={isSourceControlSyncing || isRemoteChecking}
                       upstream={ide?.sourceControl.upstream}
                     />
+                    {remoteCheckMessage && ide?.sourceControl.available ? (
+                      <div
+                        className={`gyro-sidebar-mini-copy${remoteCheckFailed ? " is-error" : ""}`}
+                        role={remoteCheckFailed ? "alert" : "status"}
+                      >
+                        {remoteCheckMessage}
+                      </div>
+                    ) : null}
                     {ide?.sourceControl.error ? (
                       <div className="gyro-sidebar-mini-copy is-error">
                         {ide.sourceControl.error}
@@ -5388,7 +5563,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "run-test" ? (
+          {workspacePath && activeIdeView === "run-test" ? (
             <SidebarSection
               grow
               headerActions={
@@ -5687,7 +5862,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "ai" ? (
+          {workspacePath && activeIdeView === "ai" ? (
             renderAiChat ? (
               // The workspace's only chat lives here now: the same ChatSurface
               // the Sessions destination renders, at sidebar width.
@@ -5993,7 +6168,9 @@ function WorkspaceSidebarContent({
                   {pinnedSessions.map((session) => renderSessionRow(session))}
                 </>
               ) : null}
-              <div className="gyro-sidebar-small-title">Projects</div>
+              {projectGroups.length > 0 ? (
+                <div className="gyro-sidebar-small-title">Projects</div>
+              ) : null}
               {projectGroups.map((project, projectIndex) => {
                 const isCollapsed = collapsedProjectIds.includes(project.key);
                 const projectVisibleCount =
@@ -6200,7 +6377,7 @@ function WorkspaceSidebarContent({
                     renderSessionRow(session),
                   )
                 ) : (
-                  <div className="gyro-sidebar-recents-empty">No Chats</div>
+                  <div className="gyro-sidebar-recents-empty">No chats yet</div>
                 )}
               </section>
             </div>
@@ -7321,6 +7498,7 @@ export function ChatGridSurface({
   ) => ReactNode;
 }) {
   const [dragSource, setDragSource] = useState<"session" | "pane">();
+  const [dragSessionId, setDragSessionId] = useState<string>();
   const [dropTargetId, setDropTargetId] = useState<string>();
   const isChatDragging = dragSource !== undefined;
   const occupiedCount = layout.slots.filter(Boolean).length;
@@ -7330,8 +7508,14 @@ export function ChatGridSurface({
   const isMaximized = Boolean(maximizedPaneId);
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
-  const dropZones = chatGridDropZones(slots);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
+  const reorderingSession =
+    dragSource === "session" &&
+    slots.some(
+      (pane) => pane?.kind === "session" && pane.sessionId === dragSessionId,
+    );
+  const dropZones = chatGridDropZones(slots, arrangement, reorderingSession);
+  const dropLayout = chatGridDropLayout(dropZones);
   const gridRef = useRef<HTMLDivElement>(null);
   // The pointer position of the last grid-level drag event. macOS only
   // hit-tests drop targets on mouse movement, so a pointer that arrives over
@@ -7371,6 +7555,7 @@ export function ChatGridSurface({
   const finishDrag = useCallback(() => {
     dragPointer.current = undefined;
     setDragSource(undefined);
+    setDragSessionId(undefined);
     setDropTargetId(undefined);
   }, []);
 
@@ -7452,6 +7637,7 @@ export function ChatGridSurface({
     if (didDrop && maximizedPaneId) {
       onToggleMaximize(maximizedPaneId);
     }
+    if (didDrop) activeSidebarChatDragSessionId = undefined;
     finishDrag();
   };
 
@@ -7537,6 +7723,14 @@ export function ChatGridSurface({
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         dragPointer.current = { x: event.clientX, y: event.clientY };
+        if (source === "session") {
+          const sessionId =
+            activeSidebarChatDragSessionId ??
+            chatSessionDragPayload(event.dataTransfer)?.sessionId;
+          if (sessionId && dragSessionId !== sessionId) {
+            setDragSessionId(sessionId);
+          }
+        }
         if (dragSource !== source) {
           // First sighting of this drag: mount the overlay, then let the
           // layout effect light the tile it is already sitting on.
@@ -7611,19 +7805,13 @@ export function ChatGridSurface({
           </section>
         );
       })}
-      {isChatDragging ? (
+      {isChatDragging && dropZones.length > 0 ? (
         <>
           <div
             aria-hidden="true"
             className="gyro-chat-grid-drop-overlay"
             data-drag-source={dragSource}
-            data-layout={
-              occupiedCount === 0
-                ? "full"
-                : occupiedCount === 1
-                  ? "columns"
-                  : "positions"
-            }
+            data-layout={dropLayout}
             data-zone-count={dropZones.length}
           >
             {dropZones.map((zone) => (
@@ -7654,8 +7842,9 @@ export function ChatGridSurface({
             ))}
           </div>
           <span aria-live="polite" className="gyro-sr-only">
-            Choose where to place the chat: above, beside, or below another
-            chat.
+            {dropLayout === "row"
+              ? "Choose where the chat joins the row: left edge, between chats, or right edge."
+              : "Choose where to place the chat: above, beside, or below another chat."}
           </span>
         </>
       ) : null}
@@ -7663,87 +7852,24 @@ export function ChatGridSurface({
   );
 }
 
-type ChatGridDropPlacement = {
-  insertPosition: "before" | "after";
-  splitDirection?: "horizontal" | "vertical";
-};
-
-type ChatGridDropZone = {
-  id: string;
-  label: string;
-  placement?: ChatGridDropPlacement;
-  position: string;
-  slotIndex: number;
-};
-
-function chatGridDropZones(
-  slots: Array<ChatPaneRef | null>,
-): ChatGridDropZone[] {
-  const occupiedCount = slots.filter(Boolean).length;
-  // First chat into an empty grid: a single full-height/full-width target.
-  if (occupiedCount === 0) {
-    return [{ id: "full", label: "Open here", position: "full", slotIndex: 0 }];
+function chatSessionDragPayload(dataTransfer: DataTransfer) {
+  try {
+    const raw = dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
+    if (!raw) return undefined;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object") return undefined;
+    const payload = value as Record<string, unknown>;
+    return typeof payload.sessionId === "string" && payload.sessionId
+      ? {
+          sessionId: payload.sessionId,
+          projectKey:
+            typeof payload.projectKey === "string" ? payload.projectKey : "",
+        }
+      : undefined;
+  } catch {
+    // WebKit may deny reading payload bytes until the drop itself.
+    return undefined;
   }
-  // Second chat: a full-height Left / Right split — two panes tile side by side.
-  if (occupiedCount === 1) {
-    const slotIndex = slots.findIndex(Boolean);
-    return [
-      {
-        id: "left",
-        label: "Left",
-        placement: { insertPosition: "before", splitDirection: "horizontal" },
-        position: "left",
-        slotIndex: slotIndex < 0 ? 0 : slotIndex,
-      },
-      {
-        id: "right",
-        label: "Right",
-        placement: { insertPosition: "after", splitDirection: "horizontal" },
-        position: "right",
-        slotIndex: slotIndex < 0 ? 0 : slotIndex,
-      },
-    ];
-  }
-  // Third chat onward: place into a 2×2 grid position (the quadrants fill in).
-  const labels = ["Top left", "Top right", "Bottom left", "Bottom right"];
-  return labels.map((label, index) => ({
-    id: `slot-${index}`,
-    label,
-    position: `position-${index + 1}`,
-    slotIndex: index,
-  }));
-}
-
-/**
- * Resolve the zone that owns a pointer position by distance to the rendered
- * tiles. The hover preview and the drop itself both use this, so the lit tile
- * is always the tile a release would land on — including in the gaps and
- * padding between tiles, where no zone contains the pointer at all.
- */
-function nearestChatGridDropZone(
-  targets: ArrayLike<HTMLElement>,
-  zones: ChatGridDropZone[],
-  x: number,
-  y: number,
-): ChatGridDropZone | undefined {
-  let nearest: ChatGridDropZone | undefined;
-  let distance = Infinity;
-  for (let index = 0; index < targets.length; index += 1) {
-    const target = targets[index];
-    if (!target) continue;
-    const bounds = target.getBoundingClientRect();
-    const dx = Math.max(bounds.left - x, 0, x - bounds.right);
-    const dy = Math.max(bounds.top - y, 0, y - bounds.bottom);
-    const candidateDistance = dx * dx + dy * dy;
-    const zone = zones.find(
-      (item) => item.position === target.dataset.position,
-    );
-    if (zone && candidateDistance < distance) {
-      nearest = zone;
-      distance = candidateDistance;
-    }
-  }
-  return nearest;
 }
 
 function chatDragSource(dataTransfer: DataTransfer) {
@@ -7790,6 +7916,7 @@ export const NEW_CHAT_DRAFT_KEY = "new";
  */
 type MediaDropTarget = {
   attach: (files: File[]) => void;
+  reportError: (message: string) => void;
   paneKey: string;
   rect: () => DOMRect;
 };
@@ -7816,6 +7943,7 @@ const handledMediaDrops = new WeakSet<Event>();
 
 const NO_MEDIA_DROP_TARGET: MediaDropTarget = {
   attach: () => undefined,
+  reportError: () => undefined,
   paneKey: "",
   rect: () => new DOMRect(),
 };
@@ -7966,7 +8094,10 @@ type ChatSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -8023,6 +8154,13 @@ type ChatSurfaceProps = {
   /** Whether empty chats show their starter prompt shortcuts. */
   isEnvironmentRailOpen?: boolean;
   isToolPanelOpen?: boolean;
+  /**
+   * Whether the surrounding layout can draw the bottom drawer at all. The Chat
+   * (thread) layout has none — the drawer belongs to the Workspace layouts — so
+   * its chats pass false and lose the drawer control, together with the model
+   * dot that only ever pointed at it.
+   */
+  isToolPanelAvailable?: boolean;
   isComposerSending?: boolean;
   /** False while desktop shell warm-up is still running. */
   shellReady?: boolean;
@@ -8067,6 +8205,7 @@ type ChatSurfaceProps = {
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
+  onMediaDropError?: (message: string) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
   onCloseChat?: () => void;
@@ -8289,6 +8428,7 @@ export function ChatSurface({
   planEditorRequest,
   isEnvironmentRailOpen,
   isToolPanelOpen,
+  isToolPanelAvailable = true,
   isComposerSending,
   shellReady = true,
   isCliUpdating = false,
@@ -8303,6 +8443,7 @@ export function ChatSurface({
   onSteerQueuedMessage,
   canAttachEditorSnapshot = false,
   onAttachMediaFiles,
+  onMediaDropError,
   onReusePrompt,
   onStopChat,
   onCloseChat,
@@ -8342,10 +8483,6 @@ export function ChatSurface({
     string | undefined
   >();
   const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
-  const [isTranscriptAwayFromBottom, setIsTranscriptAwayFromBottom] =
-    useState(false);
-  const [isLoadedChatClipped, setIsLoadedChatClipped] = useState(false);
-  const transcriptRef = useRef<HTMLDivElement>(null);
   const [liveChangesTarget, setLiveChangesTarget] =
     useState<HTMLDivElement | null>(null);
   const [reviewScope, setReviewScope] = useState<ReviewScope>({
@@ -8359,19 +8496,6 @@ export function ChatSurface({
       patches?: string[];
     }>
   >();
-  /**
-   * Whether the transcript should keep itself at the bottom as it grows.
-   *
-   * Jumping to the bottom once is not what the button is for: a live turn is
-   * still appending, so a single scroll lands where the bottom *was* and the
-   * reader is left behind again a moment later. This holds the pin until the
-   * reader scrolls up themselves.
-   */
-  const isFollowingTranscriptBottomRef = useRef(true);
-  /** Previous offset, so a scroll up can be told from content growing below. */
-  const lastTranscriptScrollTopRef = useRef(0);
-  const transcriptPointerDownRef = useRef(false);
-  const transcriptTouchYRef = useRef<number>();
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
   useEffect(() => {
@@ -8461,8 +8585,6 @@ export function ChatSurface({
     const onDrop = (event: DragEvent) => {
       if (handledMediaDrops.has(event)) return;
       if (!isMediaDrag(event.dataTransfer)) return;
-      const files = chatMediaFiles(event.dataTransfer!);
-      if (!files.length) return;
       event.preventDefault();
       event.stopPropagation();
       const point = { x: event.clientX, y: event.clientY };
@@ -8480,8 +8602,12 @@ export function ChatSurface({
         NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
       // surface's own capture handler is still the one that can attach.
-      if (target !== NO_MEDIA_DROP_TARGET) handledMediaDrops.add(event);
-      target.attach(files);
+      if (target === NO_MEDIA_DROP_TARGET) return;
+      handledMediaDrops.add(event);
+      void chatMediaFilesFromDrop(event.dataTransfer!).then(
+        (files) => target.attach(files),
+        (error) => target.reportError(String(error)),
+      );
     };
     const onDragLeave = (event: DragEvent) => {
       // Dragging out of the window must not leave a stale hovered chat for the
@@ -8527,13 +8653,15 @@ export function ChatSurface({
       // The window listener runs first and owns routing; it marks the event so
       // this pass does not attach the same image twice.
       if (handledMediaDrops.has(event.nativeEvent)) return;
-      const files = chatMediaFiles(event.dataTransfer);
-      if (!files.length) return;
+      if (!isMediaDrag(event.dataTransfer)) return;
       event.preventDefault();
       event.stopPropagation();
-      onAttachMediaFiles?.(files);
+      void chatMediaFilesFromDrop(event.dataTransfer).then(
+        (files) => onAttachMediaFiles?.(files),
+        (error) => onMediaDropError?.(String(error)),
+      );
     },
-    [onAttachMediaFiles],
+    [onAttachMediaFiles, onMediaDropError],
   );
   const planDecisionKey = useMemo(() => {
     // A plan that wrote the document but skipped the checklist marker is still
@@ -8584,52 +8712,6 @@ export function ChatSurface({
   // working, so streaming and status updates always read from the latest list.
   const deferredEvents = useDeferredValue(events);
   const transcriptEvents = isComposerSending ? events : deferredEvents;
-  const updateTranscriptScrollPosition = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript) {
-      setIsTranscriptAwayFromBottom(false);
-      setIsLoadedChatClipped(false);
-      return;
-    }
-    const distanceFromBottom =
-      transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
-    const isAtBottom = distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK;
-    // Being at the bottom is the pin, whichever way the offset got there:
-    // content collapsing above also drags it back, and that is not the reader
-    // leaving. Only moving up and away from the bottom hands control over.
-    if (isAtBottom) {
-      isFollowingTranscriptBottomRef.current = true;
-    } else if (
-      transcriptPointerDownRef.current &&
-      transcript.scrollTop < lastTranscriptScrollTopRef.current
-    ) {
-      isFollowingTranscriptBottomRef.current = false;
-    }
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-    setIsTranscriptAwayFromBottom(!isAtBottom);
-    setIsLoadedChatClipped(isLoadedTranscriptClipped(transcript));
-  }, []);
-  /** Re-seat the transcript at the bottom, but only while it is following. */
-  const pinTranscriptToBottom = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript || !isFollowingTranscriptBottomRef.current) {
-      return;
-    }
-    // Assigned rather than animated: a smooth scroll started against the last
-    // height is exactly what the growing turn outruns.
-    transcript.scrollTop = transcript.scrollHeight;
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-  }, []);
-  const scrollTranscriptToBottom = useCallback(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript) {
-      return;
-    }
-    isFollowingTranscriptBottomRef.current = true;
-    lastTranscriptScrollTopRef.current = transcript.scrollTop;
-    pinTranscriptToBottom();
-    updateTranscriptScrollPosition();
-  }, [pinTranscriptToBottom, updateTranscriptScrollPosition]);
   const transcriptSessionId = transcriptEvents[0]?.sessionId;
   useEffect(() => {
     setGoalDraft(undefined);
@@ -8674,98 +8756,25 @@ export function ChatSurface({
     )
       openCanvas(latest.id);
   }, [canvasArtifacts, canvasRevision, openCanvas, transcriptSessionId]);
-  useLayoutEffect(() => {
-    // Reused chat surfaces must not inherit another chat's scroll position.
-    // Use the rendered events so deferred history loads are seated as well.
-    isFollowingTranscriptBottomRef.current = true;
-    lastTranscriptScrollTopRef.current = 0;
-    pinTranscriptToBottom();
-    updateTranscriptScrollPosition();
-  }, [
-    transcriptSessionId,
-    pinTranscriptToBottom,
-    updateTranscriptScrollPosition,
-  ]);
-  useEffect(() => {
-    const animationFrame = window.requestAnimationFrame(() => {
-      pinTranscriptToBottom();
-      updateTranscriptScrollPosition();
-    });
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
-  // The dock overlays the transcript. Only the composer is reserved at the end
-  // of the scroll content: the changes pill and queue float, so the
-  // conversation runs down behind them to the composer.
-  useEffect(() => {
-    const transcript = transcriptRef.current;
-    const dock = liveChangesTarget?.parentElement;
-    if (!transcript || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const updateDockClearance = () => {
-      if (dock) {
-        const dockBounds = dock.getBoundingClientRect();
-        const composer = dock.querySelector<HTMLElement>(
-          ":scope > .gyro-composer-shell",
-        );
-        const composerHeight = `${Math.ceil(
-          dockBounds.bottom -
-            (composer?.getBoundingClientRect().top ?? dockBounds.top),
-        )}px`;
-        transcript.style.setProperty(
-          "--gyro-composer-dock-height",
-          `${Math.ceil(dockBounds.height)}px`,
-        );
-        dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
-      }
-      pinTranscriptToBottom();
-      updateTranscriptScrollPosition();
-    };
-    updateDockClearance();
-    // Resize notifications run during layout. Batch the resulting scroll/style
-    // writes into the next frame so composer growth cannot feed the observer
-    // recursively while a reply is streaming.
-    let resizeFrame: number | undefined;
-    const observer = new ResizeObserver(() => {
-      if (resizeFrame !== undefined) return;
-      resizeFrame = window.requestAnimationFrame(() => {
-        resizeFrame = undefined;
-        updateDockClearance();
-      });
-    });
-    observer.observe(transcript);
-    // The scroll viewport stays the same size when replies, images, or tool
-    // cards grow. Observe its content as well, including newly added turns.
-    for (const child of transcript.children) observer.observe(child);
-    const mutations = new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.removedNodes) {
-          if (node instanceof Element) observer.unobserve(node);
-        }
-        for (const node of record.addedNodes) {
-          if (node instanceof Element) observer.observe(node);
-        }
-      }
-    });
-    mutations.observe(transcript, { childList: true });
-    const releasePointer = () => {
-      transcriptPointerDownRef.current = false;
-    };
-    window.addEventListener("pointerup", releasePointer);
-    window.addEventListener("pointercancel", releasePointer);
-    if (dock) observer.observe(dock);
-    return () => {
-      mutations.disconnect();
-      window.removeEventListener("pointerup", releasePointer);
-      window.removeEventListener("pointercancel", releasePointer);
-      observer.disconnect();
-      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
-    };
-  }, [
+  const {
+    transcriptRef,
+    isTranscriptAwayFromBottom,
+    isLoadedChatClipped,
+    requestEarlierMessages,
+    scrollTranscriptToBottom,
+    onTranscriptScroll,
+    onTranscriptWheel,
+    onTranscriptTouchStart,
+    onTranscriptTouchMove,
+    onTranscriptKeyDown,
+    onTranscriptPointerDown,
+  } = useChatTranscriptScroll({
+    events: transcriptEvents,
+    hasMoreBefore,
+    isLoadingEarlier,
+    onLoadEarlier,
     liveChangesTarget,
-    pinTranscriptToBottom,
-    updateTranscriptScrollPosition,
-  ]);
+  });
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -8848,6 +8857,15 @@ export function ChatSurface({
     [transcriptEvents],
   );
   const { looseEvents, turns } = transcriptState;
+  const standaloneEvents = useMemo(
+    () => looseEvents.filter((event) => !isModelSwitchEvent(event)),
+    [looseEvents],
+  );
+  const transcriptItems = useMemo(
+    () =>
+      interleaveModelSwitches(turns, looseEvents.filter(isModelSwitchEvent)),
+    [looseEvents, turns],
+  );
   const isEmptyStart = turns.length === 0 && looseEvents.length === 0;
   const activeRailPanel =
     activeChatPanel ?? (isEnvironmentRailOpen ? "environment" : undefined);
@@ -8908,7 +8926,7 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
-        {looseEvents.map((event) => (
+        {standaloneEvents.map((event) => (
           <ChatEvent
             event={event}
             key={event.id}
@@ -8919,103 +8937,112 @@ export function ChatSurface({
             onProviderStatusAction={onProviderStatusAction}
           />
         ))}
-        {turns.map((turn, turnIndex) => (
-          <ChatTurn
-            artifactActions={{
-              onOpenCanvas: openCanvas,
-              onOpenPreview: (url) => {
-                onSelectChatPanel?.("browser");
-                if (url && /^https?:\/\//i.test(url)) onBrowserNavigate?.(url);
-              },
-              onOpenFiles: () =>
-                onSelectChatPanel
-                  ? onSelectChatPanel("files")
-                  : onComposerAction?.("open-files"),
-              // Artifact actions belong beside their owning conversation.
-              onOpenTool: (tab) => {
-                if (
-                  (tab === "browser" || tab === "terminal") &&
+        {transcriptItems.map((item) => {
+          if (item.kind === "model-switch") {
+            return <ChatEvent event={item.event} key={item.event.id} />;
+          }
+          const { turn, turnIndex } = item;
+          return (
+            <ChatTurn
+              artifactActions={{
+                onOpenCanvas: openCanvas,
+                onOpenPreview: (url) => {
+                  onSelectChatPanel?.("browser");
+                  if (url && /^https?:\/\//i.test(url))
+                    onBrowserNavigate?.(url);
+                },
+                onOpenFiles: () =>
                   onSelectChatPanel
-                ) {
-                  onSelectChatPanel(tab);
-                  return;
-                }
-                if (tab === "diff" && onSelectChatPanel) {
+                    ? onSelectChatPanel("files")
+                    : onComposerAction?.("open-files"),
+                // Artifact actions belong beside their owning conversation.
+                onOpenTool: (tab) => {
+                  if (
+                    (tab === "browser" || tab === "terminal") &&
+                    onSelectChatPanel
+                  ) {
+                    onSelectChatPanel(tab);
+                    return;
+                  }
+                  if (tab === "diff" && onSelectChatPanel) {
+                    onSelectChatPanel("review");
+                    return;
+                  }
+                  onOpenToolPanel?.(tab);
+                },
+                onOpenExternalPreview: () => onBrowserOpenExternal?.(),
+                onSendPrompt: handleArtifactPrompt,
+              }}
+              isActive={turn.id === activeTurnId}
+              keepAlives={keepAlives.filter(
+                (watch) => watch.turnId === turn.id,
+              )}
+              liveChangesTarget={liveChangesTarget}
+              onOpenBrowserUrl={onBrowserNavigate}
+              onOpenKeepAlive={onOpenKeepAlive}
+              onRelaunchKeepAlive={onRelaunchKeepAlive}
+              onStopKeepAlive={onStopKeepAlive}
+              fileReview={
+                isFileReviewEnabled
+                  ? {
+                      summaries: fileReviewSummaries?.[turn.id],
+                      isSummarizing:
+                        fileReviewPendingTurnIds?.includes(turn.id) ?? false,
+                      onKeep: onFileReviewKeep
+                        ? (path, contentHash) =>
+                            onFileReviewKeep({
+                              turnId: turn.id,
+                              path,
+                              contentHash,
+                            })
+                        : undefined,
+                      onAsk: onFileReviewAsk,
+                    }
+                  : undefined
+              }
+              key={turn.id}
+              onLoadChangeDiff={onLoadChangeDiff}
+              onOpenChanges={(path, files) => {
+                setReviewScope({ kind: "turn", turnId: turn.id });
+                setReviewTurnFiles(
+                  (files ?? []).map((file) => ({
+                    ...file,
+                    patches: turnReviewPatches(turn.timelineEvents, file.path),
+                  })),
+                );
+                if (path) railDiffTools?.onSelectFile?.(path);
+                if (onSelectChatPanel) {
                   onSelectChatPanel("review");
                   return;
                 }
-                onOpenToolPanel?.(tab);
-              },
-              onOpenExternalPreview: () => onBrowserOpenExternal?.(),
-              onSendPrompt: handleArtifactPrompt,
-            }}
-            isActive={turn.id === activeTurnId}
-            keepAlives={keepAlives.filter((watch) => watch.turnId === turn.id)}
-            liveChangesTarget={liveChangesTarget}
-            onOpenBrowserUrl={onBrowserNavigate}
-            onOpenKeepAlive={onOpenKeepAlive}
-            onRelaunchKeepAlive={onRelaunchKeepAlive}
-            onStopKeepAlive={onStopKeepAlive}
-            fileReview={
-              isFileReviewEnabled
-                ? {
-                    summaries: fileReviewSummaries?.[turn.id],
-                    isSummarizing:
-                      fileReviewPendingTurnIds?.includes(turn.id) ?? false,
-                    onKeep: onFileReviewKeep
-                      ? (path, contentHash) =>
-                          onFileReviewKeep({
-                            turnId: turn.id,
-                            path,
-                            contentHash,
-                          })
-                      : undefined,
-                    onAsk: onFileReviewAsk,
-                  }
-                : undefined
-            }
-            key={turn.id}
-            onLoadChangeDiff={onLoadChangeDiff}
-            onOpenChanges={(path, files) => {
-              setReviewScope({ kind: "turn", turnId: turn.id });
-              setReviewTurnFiles(
-                (files ?? []).map((file) => ({
-                  ...file,
-                  patches: turnReviewPatches(turn.timelineEvents, file.path),
-                })),
-              );
-              if (path) railDiffTools?.onSelectFile?.(path);
-              if (onSelectChatPanel) {
-                onSelectChatPanel("review");
-                return;
+                onOpenToolPanel?.("diff");
+              }}
+              onUndoChanges={railDiffTools?.onUndo}
+              onCouncilAction={onCouncilAction}
+              onMutationApprovalAction={onMutationApprovalAction}
+              onProviderApprovalAction={onProviderApprovalAction}
+              onProviderStatusAction={onProviderStatusAction}
+              onReusePrompt={onReusePrompt}
+              onContinueChat={
+                // Only the latest turn needs Continue — older ones clutter the rail
+                // and imply unfinished work on already-finished messages.
+                turnIndex === turns.length - 1 ? onContinueChat : undefined
               }
-              onOpenToolPanel?.("diff");
-            }}
-            onUndoChanges={railDiffTools?.onUndo}
-            onCouncilAction={onCouncilAction}
-            onMutationApprovalAction={onMutationApprovalAction}
-            onProviderApprovalAction={onProviderApprovalAction}
-            onProviderStatusAction={onProviderStatusAction}
-            onReusePrompt={onReusePrompt}
-            onContinueChat={
-              // Only the latest turn needs Continue — older ones clutter the rail
-              // and imply unfinished work on already-finished messages.
-              turnIndex === turns.length - 1 ? onContinueChat : undefined
-            }
-            plan={sessionPlan}
-            previewCapture={
-              browserPreview?.latestCapture
-                ? {
-                    src: browserPreview.latestCapture.src,
-                    path: browserPreview.latestCapture.path,
-                  }
-                : undefined
-            }
-            sourceControl={sourceControl}
-            sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
-            turn={turn}
-          />
-        ))}
+              plan={sessionPlan}
+              previewCapture={
+                browserPreview?.latestCapture
+                  ? {
+                      src: browserPreview.latestCapture.src,
+                      path: browserPreview.latestCapture.path,
+                    }
+                  : undefined
+              }
+              sourceControl={sourceControl}
+              sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
+              turn={turn}
+            />
+          );
+        })}
         {turns.length === 0 && looseEvents.length === 0 ? (
           <div className="gyro-thread-empty">Start with a request.</div>
         ) : null}
@@ -9059,6 +9086,8 @@ export function ChatSurface({
       isPlanReadyForDecision,
       activeRailPanel,
       looseEvents,
+      standaloneEvents,
+      transcriptItems,
       onTogglePlanPanel,
       sessionGoal,
       sessionPlan,
@@ -9164,8 +9193,8 @@ export function ChatSurface({
         }}
         onSelectTab={onSelectChatPanel}
         onShowLauncher={onShowCompanionLauncher}
-        onToggleToolPanel={onToggleToolPanel}
-        isToolPanelOpen={isToolPanelOpen === true}
+        onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
+        isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
         isTiled={isTiled}
         onWidthChange={onCompanionWidthChange}
         openTabs={openTabs}
@@ -9387,6 +9416,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
+            onMediaDropError={onMediaDropError}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -9461,8 +9491,8 @@ export function ChatSurface({
           <ChatSurfaceControls
             isDockOpen={isCompanionPanel}
             isPlanOpen={activeRailPanel === "plan"}
-            isToolPanelOpen={isToolPanelOpen === true}
-            modelFocus={visibleModelFocus}
+            isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+            modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
             onToggleToolPanel={onToggleToolPanel}
@@ -9489,8 +9519,8 @@ export function ChatSurface({
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
             isPlanOpen={activeRailPanel === "plan"}
-            isToolPanelOpen={isToolPanelOpen === true}
-            modelFocus={visibleModelFocus}
+            isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+            modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
             onCloseChat={onCloseChat}
             onToggleDock={
               isCompanionPanel ? closeCompanion : onReopenCompanionDock
@@ -9502,7 +9532,7 @@ export function ChatSurface({
             showClose={isTiled}
             showEnvironment
             showOverflow={false}
-            showToolPanel
+            showToolPanel={isToolPanelAvailable}
           />
         </div>
       </div>
@@ -9513,36 +9543,12 @@ export function ChatSurface({
           aria-live="polite"
           aria-relevant="additions text"
           className="gyro-thread-body gyro-chat-transcript"
-          onScroll={updateTranscriptScrollPosition}
-          onWheel={(event) => {
-            if (event.deltaY < 0)
-              isFollowingTranscriptBottomRef.current = false;
-          }}
-          onPointerDown={() => {
-            transcriptPointerDownRef.current = true;
-          }}
-          onTouchStart={(event) => {
-            transcriptTouchYRef.current = event.touches[0]?.clientY;
-          }}
-          onTouchMove={(event) => {
-            const y = event.touches[0]?.clientY;
-            if (
-              y !== undefined &&
-              transcriptTouchYRef.current !== undefined &&
-              y > transcriptTouchYRef.current
-            ) {
-              isFollowingTranscriptBottomRef.current = false;
-            }
-            transcriptTouchYRef.current = y;
-          }}
-          onKeyDown={(event) => {
-            if (
-              ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
-              (event.key === " " && event.shiftKey)
-            ) {
-              isFollowingTranscriptBottomRef.current = false;
-            }
-          }}
+          onScroll={onTranscriptScroll}
+          onWheel={onTranscriptWheel}
+          onPointerDown={onTranscriptPointerDown}
+          onTouchStart={onTranscriptTouchStart}
+          onTouchMove={onTranscriptTouchMove}
+          onKeyDown={onTranscriptKeyDown}
           ref={transcriptRef}
           role="log"
         >
@@ -9550,7 +9556,7 @@ export function ChatSurface({
             <div className="gyro-chat-load-earlier">
               <button
                 disabled={isLoadingEarlier}
-                onClick={onLoadEarlier}
+                onClick={() => requestEarlierMessages(true)}
                 type="button"
               >
                 {isLoadingEarlier
@@ -9623,6 +9629,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachMediaFiles={onAttachMediaFiles}
+            onMediaDropError={onMediaDropError}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -10253,7 +10260,10 @@ function ChatSidePanel({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -12308,7 +12318,10 @@ type CliWorkspaceSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
 };
 
@@ -13234,7 +13247,10 @@ type IdeSurfaceProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
 };
 
@@ -14696,7 +14712,7 @@ export function TerminalPanel({
   revealWorkspaceOnLaunch = true,
 }: TerminalPanelProps) {
   const launchOptions = revealWorkspaceOnLaunch ? undefined : { reveal: false };
-  const panes = terminalPanes ?? [];
+  const panes = listedTerminalPanes(terminalPanes, selectedTerminalPaneId);
   const hasPanes = panes.length > 0;
   const activePaneId = selectedTerminalPaneId ?? panes[0]?.id;
   const activePane = panes.find((pane) => pane.id === activePaneId);
@@ -15183,37 +15199,33 @@ function WorkbenchPaneTabs({
   onTabChange,
   onAddPane,
   terminalTitle,
-  terminalOnly = false,
 }: {
   activeTab: WorkbenchPaneTab;
   onTabChange: (tab: WorkbenchPaneTab) => void;
   onAddPane?: () => void;
   terminalTitle?: string;
-  terminalOnly?: boolean;
 }) {
   return (
     <div className="gyro-pane-tabs" role="tablist" aria-label="Workbench panes">
-      {paneTabs
-        .filter((tab) => !terminalOnly || tab.id === "terminal")
-        .map((tab) => {
-          const Icon = tab.icon;
-          const isActive = tab.id === activeTab;
-          const label =
-            tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
-          return (
-            <button
-              aria-selected={isActive}
-              className={isActive ? "is-active" : ""}
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              role="tab"
-              type="button"
-            >
-              <Icon size={15} />
-              {label}
-            </button>
-          );
-        })}
+      {paneTabs.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = tab.id === activeTab;
+        const label =
+          tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
+        return (
+          <button
+            aria-selected={isActive}
+            className={isActive ? "is-active" : ""}
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            role="tab"
+            type="button"
+          >
+            <Icon size={15} />
+            {label}
+          </button>
+        );
+      })}
       {activeTab === "terminal" && onAddPane ? (
         <button
           aria-label="New terminal"
@@ -15352,7 +15364,10 @@ function WorkbenchPaneContent({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -15579,7 +15594,6 @@ type WorkspaceToolPanelProps = {
   isTerminalSourceControlLoading?: boolean;
   isPrimary?: boolean;
   isResizable?: boolean;
-  terminalOnly?: boolean;
   height?: number;
   onClose?: () => void;
   onHeightChange?: (height: number) => void;
@@ -15629,7 +15643,10 @@ type WorkspaceToolPanelProps = {
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -15658,7 +15675,6 @@ export function WorkspaceToolPanel({
   isTerminalSourceControlLoading,
   isPrimary = false,
   isResizable = false,
-  terminalOnly = false,
   height,
   onClose,
   onHeightChange,
@@ -15707,7 +15723,6 @@ export function WorkspaceToolPanel({
   const [isResizing, setIsResizing] = useState(false);
   const dragMovedRef = useRef(false);
   const canResize = isResizable && !isPrimary;
-  const effectivePaneTab = terminalOnly ? "terminal" : activePaneTab;
   const activeTerminalPane =
     terminalPanes?.find((pane) => pane.id === selectedTerminalPaneId) ??
     terminalPanes?.[0];
@@ -15827,7 +15842,7 @@ export function WorkspaceToolPanel({
     }
     if (isNearFull) {
       onHeightChange(
-        effectivePaneTab === "browser"
+        activePaneTab === "browser"
           ? TOOL_PANEL_BROWSER_HEIGHT
           : TOOL_PANEL_DEFAULT_HEIGHT,
       );
@@ -15838,7 +15853,7 @@ export function WorkspaceToolPanel({
 
   const compactTerminal =
     !isPrimary &&
-    effectivePaneTab === "terminal" &&
+    activePaneTab === "terminal" &&
     Boolean(terminalPanes?.length);
   const panelControls = (
     <>
@@ -15874,7 +15889,7 @@ export function WorkspaceToolPanel({
     canResize ? "is-resizable" : "",
     isResizing ? "is-resizing" : "",
     isNearFull ? "is-maximized" : "",
-    effectivePaneTab === "browser" ? "is-browser" : "",
+    activePaneTab === "browser" ? "is-browser" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -15891,7 +15906,7 @@ export function WorkspaceToolPanel({
           : undefined
       }
       aria-label="Workspace tools"
-      data-active-tab={effectivePaneTab}
+      data-active-tab={activePaneTab}
     >
       {canResize ? (
         <button
@@ -15919,21 +15934,18 @@ export function WorkspaceToolPanel({
       {!isPrimary && !compactTerminal ? (
         <div className="gyro-workspace-tool-panel-head">
           <WorkbenchPaneTabs
-            activeTab={effectivePaneTab}
+            activeTab={activePaneTab}
             onAddPane={onAddTerminalPane}
             onTabChange={onPaneTabChange}
             terminalTitle={activeTerminalPane?.title}
-            terminalOnly={terminalOnly}
           />
           {panelControls}
         </div>
       ) : null}
       <WorkbenchPaneContent
         terminalPanelActions={compactTerminal ? panelControls : undefined}
-        onSelectTerminalPanel={
-          compactTerminal && !terminalOnly ? onPaneTabChange : undefined
-        }
-        activePaneTab={effectivePaneTab}
+        onSelectTerminalPanel={compactTerminal ? onPaneTabChange : undefined}
+        activePaneTab={activePaneTab}
         activeProfileId={activeProfileId}
         browserPreview={browserPreview}
         cliLaunchPreset={cliLaunchPreset}
@@ -18480,7 +18492,10 @@ function ResizableBrowserRail({
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onBrowserOpenExternal?: () => void;
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -18742,7 +18757,10 @@ export function BrowserPreviewSurface({
   onUrlChange?: (url: string) => void;
   onNavigate?: (url: string) => void;
   onDeviceChange?: (device: BrowserPreviewDevice) => void;
-  onScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onScreenshot?: (
+    action?: BrowserScreenshotAction,
+    feedback?: BrowserFeedback,
+  ) => void;
   onOpenExternal?: () => void;
   onHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
@@ -18795,6 +18813,9 @@ export function BrowserPreviewSurface({
     useNativeHost || isLoopbackBrowserPreviewUrl(frameUrl);
   const isLocalPreview = isLoopbackBrowserPreviewUrl(frameUrl);
   const hostLabel = browserPreviewHostLabel(preview.url);
+  const captureSourceLabel = browserPreviewLocationLabel(
+    preview.latestCapture?.sourceUrl ?? preview.url,
+  );
   const isLoading = preview.status === "loading";
   const isCapturing = preview.captureStatus === "capturing";
   const isLive =
@@ -19171,35 +19192,16 @@ export function BrowserPreviewSurface({
             </div>
           ) : null}
           {isBlank ? null : showingCapture && captureSrc ? (
-            <div className="gyro-browser-capture-view">
-              <img
-                alt={`Browser capture of ${hostLabel || preview.url}`}
-                className="gyro-browser-capture-image"
-                draggable={false}
-                src={captureSrc}
-              />
-              <div className="gyro-browser-capture-meta">
-                <span>
-                  {preview.latestCapture?.width ?? 0} ×{" "}
-                  {preview.latestCapture?.height ?? 0}
-                  {hostLabel ? ` · ${hostLabel}` : ""}
-                  {preview.latestCapture?.createdAt
-                    ? ` · ${formatBrowserCaptureTime(preview.latestCapture.createdAt)}`
-                    : ""}
-                </span>
-                <div className="gyro-browser-capture-actions">
-                  <button onClick={() => setFrameMode("live")} type="button">
-                    Back to live
-                  </button>
-                  <button
-                    onClick={() => onScreenshot?.("reveal")}
-                    type="button"
-                  >
-                    Reveal file
-                  </button>
-                </div>
-              </div>
-            </div>
+            <BrowserCaptureView
+              key={`${preview.latestCapture!.path}:${preview.latestCapture!.createdAt}`}
+              capture={preview.latestCapture!}
+              src={captureSrc}
+              fallbackUrl={preview.url}
+              deviceLabel={deviceLabel(preview.device)}
+              isChat={isChat}
+              onBackToLive={() => setFrameMode("live")}
+              onScreenshot={onScreenshot}
+            />
           ) : !useNativeHost ? (
             showPlaceholder ? (
               <BrowserFramePlaceholder
@@ -19241,7 +19243,7 @@ export function BrowserPreviewSurface({
           <span className={statusRingClass} />
           <span>
             {showingCapture
-              ? `Capture · ${hostLabel || "preview"} · ${deviceLabel(preview.device)}`
+              ? `Capture · ${captureSourceLabel || "preview"} · ${deviceLabel(preview.device)}`
               : browserStatusLabel(preview)}
           </span>
         </div>
@@ -19442,21 +19444,6 @@ function browserPreviewHostLabel(url?: string) {
     return parsed.host || parsed.hostname || "";
   } catch {
     return "";
-  }
-}
-
-function formatBrowserCaptureTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date);
-  } catch {
-    return date.toLocaleTimeString();
   }
 }
 
@@ -20654,6 +20641,8 @@ type SettingsSurfaceProps = {
   usageSafety?: UsageSafetySnapshot;
   onProviderBudgetChange?: (providerId: ProviderId, maxTokens: number) => void;
   onUsagePauseChange?: (paused: boolean) => void;
+  /** Share of the window a tool loop compacts itself at; 0 is off. */
+  onAutoCompactPercentChange?: (percent: number) => void;
   onUsageProviderChange?: (providerId: ProviderId) => void;
   onUsageVisualizationChange?: (visualization: "bars" | "wheels") => void;
   onDailyPaceWarningChange?: (enabled: boolean) => void;
@@ -21267,6 +21256,7 @@ export function SettingsSurface({
   usageSafety,
   onProviderBudgetChange,
   onUsagePauseChange,
+  onAutoCompactPercentChange,
   onUsageProviderChange,
   onUsageVisualizationChange,
   onDailyPaceWarningChange,
@@ -21303,6 +21293,13 @@ export function SettingsSurface({
     ) ??
     enabledProviders[0] ??
     providerConfigs[0];
+  const localUsageWindows = ledgerWindows(providerLedger, usageProvider?.id);
+  const hasUsageVisualization =
+    (providerUsage?.status === "available" &&
+      providerUsage.windows.length > 0) ||
+    (providerUsage?.status !== "loading" &&
+      providerUsage?.status !== "error" &&
+      localUsageWindows.length > 0);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -21610,15 +21607,19 @@ export function SettingsSurface({
                     </span>
                   </div>
                   <div className="gyro-usage-toolbar-actions">
-                    <SettingsSegmented
-                      label="Usage visualization"
-                      value={usageVisualization}
-                      options={[
-                        { label: "Bars", value: "bars" },
-                        { label: "Wheels", value: "wheels" },
-                      ]}
-                      onChange={(value) => onUsageVisualizationChange?.(value)}
-                    />
+                    {hasUsageVisualization ? (
+                      <SettingsSegmented
+                        label="Usage visualization"
+                        value={usageVisualization}
+                        options={[
+                          { label: "Bars", value: "bars" },
+                          { label: "Wheels", value: "wheels" },
+                        ]}
+                        onChange={(value) =>
+                          onUsageVisualizationChange?.(value)
+                        }
+                      />
+                    ) : null}
                     <button
                       aria-label="Refresh provider usage"
                       className="gyro-icon-button is-subtle"
@@ -21693,28 +21694,36 @@ export function SettingsSurface({
                       Refresh
                     </button>
                   </div>
-                ) : (
-                  /* No plan windows to show — fall back to what Gyro measured
+                ) : /* No plan windows to show — fall back to what Gyro measured
                      itself. This is the only usage view Gemini has, and the
                      fallback for every provider whose live read failed. */
+                localUsageWindows.length > 0 ? (
                   <div className="gyro-usage-cards">
-                    {ledgerWindows(providerLedger, usageProvider.id).map(
-                      (window) => (
-                        <UsageCard
-                          key={window.id}
-                          resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
-                          visualization={usageVisualization}
-                          window={{
-                            id: window.id,
-                            label:
-                              window.id === "five-hour"
-                                ? "5-hour spend · local"
-                                : "Weekly spend · local",
-                            usedPercent: window.percent,
-                          }}
-                        />
-                      ),
-                    )}
+                    {localUsageWindows.map((window) => (
+                      <UsageCard
+                        key={window.id}
+                        resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
+                        visualization={usageVisualization}
+                        window={{
+                          id: window.id,
+                          label:
+                            window.id === "five-hour"
+                              ? "5-hour spend · local"
+                              : "Weekly spend · local",
+                          usedPercent: window.percent,
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="gyro-usage-empty" role="status">
+                    <Gauge size={22} />
+                    <div>
+                      <strong>No usage recorded yet</strong>
+                      <span>
+                        Start a chat or refresh to check provider usage.
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -21797,7 +21806,27 @@ export function SettingsSurface({
                 detail="Multiple CLI agents stay explicit until provider health is stable."
               />
             </SettingsGroup>
-            <SettingsGroup label="Local guardrails">
+            <SettingsGroup label="Auto Context Compact">
+              <SettingsRow
+                label="Auto-compact context"
+                detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
+              >
+                <SettingsSelect
+                  aria-label="Auto-compact context threshold"
+                  disabled={!onAutoCompactPercentChange}
+                  onChange={(event) =>
+                    onAutoCompactPercentChange?.(Number(event.target.value))
+                  }
+                  value={String(config.usageGuard?.autoCompactPercent ?? 80)}
+                >
+                  <option value="0">Off</option>
+                  {[50, 60, 70, 80, 90, 95].map((percent) => (
+                    <option key={percent} value={String(percent)}>
+                      {percent}%
+                    </option>
+                  ))}
+                </SettingsSelect>
+              </SettingsRow>
               <SettingsRow
                 label="Command output"
                 value="Bounded"
@@ -22892,17 +22921,6 @@ function WorkspaceKeyboardSettings({
   );
 }
 
-function SettingsSelect(props: React.ComponentProps<"select">) {
-  return (
-    <select
-      {...props}
-      className={["gyro-settings-select", props.className]
-        .filter(Boolean)
-        .join(" ")}
-    />
-  );
-}
-
 function SettingsSection({
   icon: Icon,
   title,
@@ -22934,57 +22952,6 @@ function SettingsSection({
   );
 }
 
-function SettingsRow({
-  label,
-  value,
-  detail,
-  onClick,
-  children,
-  tone,
-}: {
-  label: string;
-  value?: string;
-  detail: string;
-  onClick?: () => void;
-  children?: ReactNode;
-  tone?: "danger";
-}) {
-  const content = (
-    <>
-      <div>
-        <strong>{label}</strong>
-        <span>{detail}</span>
-      </div>
-      <div className="gyro-settings-control-column">
-        {children ?? <span className="gyro-settings-info-value">{value}</span>}
-      </div>
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        className={`gyro-settings-row${tone ? ` is-${tone}` : ""}`}
-        data-setting-key={settingsSearchKey(label)}
-        onClick={onClick}
-        type="button"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div
-      className="gyro-settings-row"
-      data-setting-key={settingsSearchKey(label)}
-      tabIndex={-1}
-    >
-      {content}
-    </div>
-  );
-}
-
 function AppearanceColorControl({
   color,
   label,
@@ -23008,31 +22975,6 @@ function AppearanceColorControl({
       <span aria-hidden="true" className="gyro-color-swatch" />
       <code>{color.toUpperCase()}</code>
     </label>
-  );
-}
-
-function SettingsGroup({
-  label,
-  badge,
-  children,
-}: {
-  label: string;
-  /** Marks a group whose controls are visible but not yet usable. */
-  badge?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}>
-      {badge ? (
-        <h2>
-          {label}
-          <span className="gyro-settings-group-badge">{badge}</span>
-        </h2>
-      ) : (
-        <h2>{label}</h2>
-      )}
-      <div className="gyro-settings-group-rows">{children}</div>
-    </section>
   );
 }
 
@@ -24479,6 +24421,7 @@ function Composer({
   onRemoveAttachment,
   canAttachEditorSnapshot = false,
   onAttachMediaFiles,
+  onMediaDropError,
   onSend,
   onStop,
   worktreeName,
@@ -24535,6 +24478,7 @@ function Composer({
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
   onAttachMediaFiles?: (files: File[]) => void;
+  onMediaDropError?: (message: string) => void;
   onSend: () => void;
   onStop?: () => void;
   worktreeName?: string;
@@ -25438,10 +25382,15 @@ function Composer({
   const composerShellRef = useRef<HTMLDivElement | null>(null);
   const attachMediaFilesRef = useRef(onAttachMediaFiles);
   attachMediaFilesRef.current = onAttachMediaFiles;
+  const mediaDropErrorRef = useRef(onMediaDropError);
+  mediaDropErrorRef.current = onMediaDropError;
   useEffect(() => {
     const attach = (files: File[]) => attachMediaFilesRef.current?.(files);
+    const reportError = (message: string) =>
+      mediaDropErrorRef.current?.(message);
     const host: MediaDropTarget = {
       attach,
+      reportError,
       paneKey: draftKey,
       rect: () => new DOMRect(),
     };
@@ -25450,6 +25399,7 @@ function Composer({
     localMediaDrop = host;
     const deregister = registerMediaDropTarget({
       attach,
+      reportError,
       paneKey: draftKey,
       rect: () => {
         const shell = composerShellRef.current;
@@ -26062,7 +26012,9 @@ function Composer({
             className="gyro-composer-chip is-plan"
             onClick={() => onComposerAction?.("set-chat-mode-normal")}
             title={
-              isSending ? "Plan applies to the next message" : "Remove Plan mode"
+              isSending
+                ? "Plan applies to the next message"
+                : "Remove Plan mode"
             }
             type="button"
           >
@@ -26508,6 +26460,14 @@ const ChatEvent = memo(function ChatEvent({
   onReusePrompt?: (message: string) => void;
 }) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  if (isModelSwitchEvent(event)) {
+    return (
+      <div className="gyro-model-switch-marker">
+        <Sparkles aria-hidden="true" size={12} />
+        <span>{event.message}</span>
+      </div>
+    );
+  }
   const providerStatus = providerStatusFromEvent(event);
   if (providerStatus) {
     return (
@@ -26778,8 +26738,8 @@ function MutationApprovalCard({
         approval.workspacePath
           ? `Workspace: ${approval.workspacePath}`
           : approval.scope === "workspace-file"
-          ? "Selected project only"
-          : approval.scope
+            ? "Selected project only"
+            : approval.scope
       }
       error={approval.error}
       status={approval.status}
@@ -26852,7 +26812,8 @@ function ProviderToolApprovalCard({
           >
             Reject
           </button>
-          {approval.approvalType === "capability" && approval.capabilityId !== "workspace-read-editor" ? (
+          {approval.approvalType === "capability" &&
+          approval.capabilityId !== "workspace-read-editor" ? (
             <button
               disabled={!onAction}
               onClick={() => onAction?.(approval.approvalId, "allow-project")}
@@ -26965,7 +26926,7 @@ type ChatTranscriptTurn = {
   durationMs?: number;
   runStatus?: string;
   runUpdatedAtMs?: number;
-  /** What this turn billed, for the providers Gyro meters itself. */
+  /** What this turn used, reported or clearly marked as estimated. */
   turnTokens?: TurnTokens;
 };
 
@@ -27534,6 +27495,17 @@ function ChatTurn({
     );
   }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
+  const responsePayload = responseEvent
+    ? eventPayloadRecord(responseEvent)
+    : undefined;
+  const responseTokenReading = responseEvent
+    ? turnTokenReadingForResponse(
+        turnTokensFromValue(responsePayload?.turnTokens) ?? turn.turnTokens,
+        turnTokensFromValue(responsePayload?.contextUsage),
+        turn.user?.message ?? "",
+        responseEvent.message,
+      )
+    : undefined;
   // `/compact` produces no answer, only its compaction step. Without a result
   // line the finished turn reads as an empty, stalled response.
   const isCompactionResult =
@@ -27679,19 +27651,8 @@ function ChatTurn({
                     onCouncilAction={onCouncilAction}
                     onOpenBrowserUrl={onOpenBrowserUrl}
                     previewCapture={previewCapture}
+                    tokenReading={responseTokenReading}
                   />
-                  {/* Inside the content box, not beside it: several rules give
-                      `.gyro-message.is-assistant > div:last-child` its full
-                      width, so a sibling here takes that selector away and
-                      collapses the answer to a one-word column. */}
-                  {!isRunning && turn.turnTokens ? (
-                    <p
-                      className="gyro-message-token-count"
-                      title={turnTokensDetail(turn.turnTokens)}
-                    >
-                      {turnTokensLabel(turn.turnTokens)}
-                    </p>
-                  ) : null}
                 </div>
               </article>
             </div>
@@ -28256,6 +28217,7 @@ function AssistantResponse({
   onCouncilAction,
   onOpenBrowserUrl,
   previewCapture,
+  tokenReading,
 }: {
   actions?: ChatArtifactActions;
   event: SessionEvent;
@@ -28264,6 +28226,7 @@ function AssistantResponse({
   ) => void | Promise<string | void>;
   onOpenBrowserUrl?: (url: string) => void;
   previewCapture?: { src?: string; path?: string };
+  tokenReading?: TurnTokenReading;
 }) {
   const council = useMemo(() => councilResponseFromEvent(event), [event]);
   // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
@@ -28293,6 +28256,7 @@ function AssistantResponse({
         onCouncilAction={onCouncilAction}
         onOpenBrowserUrl={onOpenBrowserUrl}
         payload={council}
+        tokenReading={tokenReading}
       />
     );
   }
@@ -28324,6 +28288,11 @@ function AssistantResponse({
         >
           <Copy size={15} />
         </button>
+        {tokenReading ? (
+          <span className="gyro-message-token-count" title={tokenReading.title}>
+            {tokenReading.label}
+          </span>
+        ) : null}
       </footer>
     </div>
   );
@@ -28385,6 +28354,7 @@ function CouncilResponseCard({
   payload,
   onCouncilAction,
   onOpenBrowserUrl,
+  tokenReading,
 }: {
   event: SessionEvent;
   payload: CouncilResponsePayload;
@@ -28392,6 +28362,7 @@ function CouncilResponseCard({
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
   onOpenBrowserUrl?: (url: string) => void;
+  tokenReading?: TurnTokenReading;
 }) {
   const [expandedSeatId, setExpandedSeatId] = useState<string | null>(null);
   const [seatBodies, setSeatBodies] = useState<Record<string, string>>({});
@@ -28587,6 +28558,11 @@ function CouncilResponseCard({
         >
           <Copy size={15} />
         </button>
+        {tokenReading ? (
+          <span className="gyro-message-token-count" title={tokenReading.title}>
+            {tokenReading.label}
+          </span>
+        ) : null}
         <button
           disabled={busyAction !== null}
           onClick={() =>
@@ -29106,9 +29082,10 @@ function providerApprovalFromEvent(
       capabilityId,
       editorPreview: previewContent,
       scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
-      reason: capabilityId === "workspace-read-editor"
-        ? "The model requested live text from your editor. Review the text below before sharing it."
-        : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
+      reason:
+        capabilityId === "workspace-read-editor"
+          ? "The model requested live text from your editor. Review the text below before sharing it."
+          : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
       risk: "This capability is restricted to the owning Chat and project.",
       changes: previewPath ? [{ path: previewPath }] : [],
       status: "pending",

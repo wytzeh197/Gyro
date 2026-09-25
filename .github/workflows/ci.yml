@@ -24,6 +24,9 @@ jobs:
       # Compared against scripts/workbench-smoke-baseline.json, so this fails
       # only on a check that was passing when the baseline was recorded.
       - run: pnpm smoke:workbench
+      # Drives the Canvas preview in a headless Chromium against the dev
+      # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
+      - run: pnpm test:canvas-browser
       - run: pnpm release:check
       - run: pnpm site:check
 
@@ -33,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install ripgrep for workspace search tests
+        run: brew install ripgrep
       - run: cargo test --workspace
       - run: cargo build -p gyro-cli
       - run: node scripts/check-cli-release-packaging.mjs
@@ -52,4 +57,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @gyro-dev/desktop build
+      - name: Install ripgrep for workspace search tests
+        run: brew install ripgrep
       - run: cargo test --workspace
+      # The packaged app is built and actually launched: the debug-only
+      # browser and LSP smoke harnesses (browser_smoke.rs, lsp_smoke.rs) run
+      # against the bundle and must write ok reports.
+      - name: Build debug app bundle
+        run: pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci
+      # The LSP smoke starts rust-analyzer through the app's language-server
+      # manager; rust-analyzer is not in the toolchain's default profile.
+      - name: Install rust-analyzer
+        run: rustup component add rust-analyzer
+      - name: Native smoke (browser + language server)
+        run: node scripts/run-native-smoke.mjs
