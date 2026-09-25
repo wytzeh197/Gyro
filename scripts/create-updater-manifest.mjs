@@ -7,7 +7,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -16,6 +17,7 @@ function argument(name) {
 
 const assetsDirectory = resolve(argument("--assets") ?? "release-assets");
 const tag = argument("--tag") ?? process.env.GITHUB_REF_NAME;
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 if (!tag?.startsWith("v") || tag.length === 1) {
   throw new Error("Provide a version tag such as v0.1.0-alpha.7 with --tag.");
@@ -61,10 +63,21 @@ uniqueAsset(/_x64\.dmg$/, "Intel DMG");
 
 const appleSilicon = platform(/_aarch64\.app\.tar\.gz$/, "Apple Silicon");
 const intel = platform(/_x64\.app\.tar\.gz$/, "Intel");
+const releaseNotesPath = resolve(repoRoot, "docs/releases", `${tag}.md`);
+if (!existsSync(releaseNotesPath)) {
+  throw new Error(`Versioned release notes do not exist: ${releaseNotesPath}`);
+}
+const releaseSummary = readFileSync(releaseNotesPath, "utf8")
+  .split(/^## /m, 1)[0]
+  .replace(/^#[^\n]*\n+/, "")
+  .replace(/\s+/g, " ")
+  .trim();
+if (releaseSummary.length < 40) {
+  throw new Error(`Versioned release notes have no useful summary: ${releaseNotesPath}`);
+}
 const manifest = {
   version: tag.slice(1),
-  notes:
-    "GitHub-built macOS alpha for Apple Silicon and Intel. Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
+  notes: `${releaseSummary} Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.`,
   pub_date: new Date().toISOString(),
   platforms: {
     "darwin-aarch64": appleSilicon,
