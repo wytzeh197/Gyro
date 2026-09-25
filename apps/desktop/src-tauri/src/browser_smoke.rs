@@ -60,7 +60,12 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
                 }
             }
             if Instant::now() > deadline {
-                return Err(format!("page never showed {expected}"));
+                let current = call_agent(app, session, "readPage", json!({"maxDepth":8}))
+                    .map(|page| page.to_string())
+                    .unwrap_or_else(|error| format!("page read failed: {error}"));
+                return Err(format!(
+                    "page never showed {expected}; current page: {current}"
+                ));
             }
             std::thread::sleep(Duration::from_millis(100));
         }

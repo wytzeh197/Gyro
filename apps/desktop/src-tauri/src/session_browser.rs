@@ -1417,7 +1417,10 @@ pub fn mouse_session_browser<R: Runtime>(
         let (sender, receiver) = mpsc::channel();
         webview
             .with_webview(move |platform| unsafe {
-                use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView};
+                use objc2_app_kit::{NSApplication, NSScreen, NSView};
+                use objc2_core_graphics::{
+                    CGEvent, CGEventTapLocation, CGEventType, CGMouseButton,
+                };
                 use objc2_foundation::NSPoint;
                 use objc2_web_kit::WKWebView;
 
@@ -1427,70 +1430,80 @@ pub fn mouse_session_browser<R: Runtime>(
                     let window = view
                         .window()
                         .ok_or_else(|| "browser window is not available".to_string())?;
+                    // The browser webview is a child overlay. In automated
+                    // native smoke runs the app may not yet be the key app,
+                    // and AppKit then drops mouse-moved events for it.
+                    window.makeKeyAndOrderFront(None);
+                    if let Some(mtm) = objc2::MainThreadMarker::new() {
+                        let native_app = NSApplication::sharedApplication(mtm);
+                        #[allow(deprecated)]
+                        native_app.activateIgnoringOtherApps(true);
+                    }
                     window.setAcceptsMouseMovedEvents(true);
                     let bounds = view.bounds();
                     let width = bounds.size.width;
                     let height = bounds.size.height;
                     let point = |px: f64, py: f64| -> Result<NSPoint, String> {
                         if px < 0.0 || py < 0.0 || px >= width || py >= height {
-                            return Err("pointer coordinates are outside the browser viewport".into());
+                            return Err(
+                                "pointer coordinates are outside the browser viewport".into()
+                            );
                         }
                         let local_y = if view.isFlipped() {
                             bounds.origin.y + py
                         } else {
                             bounds.origin.y + height - py
                         };
-                        Ok(view.convertPoint_toView(
-                            NSPoint::new(bounds.origin.x + px, local_y),
-                            None,
-                        ))
+                        Ok(view
+                            .convertPoint_toView(NSPoint::new(bounds.origin.x + px, local_y), None))
                     };
                     let start = point(x, y)?;
                     let end = point(to_x, to_y)?;
-                    let send = |kind: NSEventType, location: NSPoint, number: isize| -> Result<(), String> {
-                        let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-                            kind,
-                            location,
-                            NSEventModifierFlags::empty(),
-                            0.0,
-                            window.windowNumber(),
-                            None,
-                            number,
-                            1,
-                            if matches!(kind, NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged | NSEventType::RightMouseDown) { 1.0 } else { 0.0 },
-                        )
-                        .ok_or_else(|| "could not create browser mouse event".to_string())?;
-                        window.sendEvent(&event);
+                    let mtm = objc2::MainThreadMarker::new()
+                        .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
+                    let main_screen = NSScreen::mainScreen(mtm)
+                        .ok_or_else(|| "main display is unavailable".to_string())?;
+                    let screen_height =
+                        main_screen.frame().origin.y + main_screen.frame().size.height;
+                    let send = |kind: CGEventType,
+                                location: NSPoint,
+                                button: CGMouseButton|
+                     -> Result<(), String> {
+                        let screen = window.convertPointToScreen(location);
+                        let position = NSPoint::new(screen.x, screen_height - screen.y);
+                        let event = CGEvent::new_mouse_event(None, kind, position, button)
+                            .ok_or_else(|| "could not create browser mouse event".to_string())?;
+                        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
                         Ok(())
                     };
                     if action == "hover" {
                         let outside = point(1.0, 1.0)?;
                         if (outside.x - start.x).abs() > 2.0 || (outside.y - start.y).abs() > 2.0 {
-                            send(NSEventType::MouseMoved, outside, 0)?;
+                            send(CGEventType::MouseMoved, outside, CGMouseButton::Left)?;
                         }
                     }
-                    send(NSEventType::MouseMoved, start, 1)?;
+                    send(CGEventType::MouseMoved, start, CGMouseButton::Left)?;
                     match action.as_str() {
                         "hover" => {}
                         "click" => {
-                            send(NSEventType::LeftMouseDown, start, 2)?;
-                            send(NSEventType::LeftMouseUp, start, 3)?;
+                            send(CGEventType::LeftMouseDown, start, CGMouseButton::Left)?;
+                            send(CGEventType::LeftMouseUp, start, CGMouseButton::Left)?;
                         }
                         "secondary-click" => {
-                            send(NSEventType::RightMouseDown, start, 2)?;
-                            send(NSEventType::RightMouseUp, start, 3)?;
+                            send(CGEventType::RightMouseDown, start, CGMouseButton::Right)?;
+                            send(CGEventType::RightMouseUp, start, CGMouseButton::Right)?;
                         }
                         "drag" => {
-                            send(NSEventType::LeftMouseDown, start, 2)?;
+                            send(CGEventType::LeftMouseDown, start, CGMouseButton::Left)?;
                             for step in 1..=12 {
                                 let progress = step as f64 / 12.0;
                                 let location = NSPoint::new(
                                     start.x + (end.x - start.x) * progress,
                                     start.y + (end.y - start.y) * progress,
                                 );
-                                send(NSEventType::LeftMouseDragged, location, 2 + step)?;
+                                send(CGEventType::LeftMouseDragged, location, CGMouseButton::Left)?;
                             }
-                            send(NSEventType::LeftMouseUp, end, 15)?;
+                            send(CGEventType::LeftMouseUp, end, CGMouseButton::Left)?;
                         }
                         _ => unreachable!(),
                     }

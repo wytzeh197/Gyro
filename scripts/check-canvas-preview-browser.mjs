@@ -24,6 +24,14 @@ const browser = spawn(
   ],
   { stdio: "ignore" },
 );
+browser.once("error", (error) => {
+  console.error(`Could not launch Canvas test browser at ${browserPath}: ${error.message}`);
+});
+browser.once("exit", (code, signal) => {
+  if (code !== null && code !== 0) {
+    console.error(`Canvas test browser exited early (code ${code}, signal ${signal})`);
+  }
+});
 const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
 async function until(check) {
   const end = Date.now() + 20000;
@@ -34,7 +42,9 @@ async function until(check) {
     } catch {}
     await pause();
   }
-  throw new Error("Timed out waiting for Canvas");
+  throw new Error(
+    `Timed out waiting for Canvas (browser exit ${browser.exitCode}, signal ${browser.signalCode}, CDP port ${port})`,
+  );
 }
 let ws;
 try {

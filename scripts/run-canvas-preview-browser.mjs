@@ -24,6 +24,7 @@ if (!browserPath) {
   );
   process.exit(1);
 }
+console.log(`Canvas browser: ${browserPath}`);
 
 const reachable = async () => {
   try {
