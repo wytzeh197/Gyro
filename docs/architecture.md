@@ -33,6 +33,10 @@ store.
   reads for long sessions. Opening a chat loads the recent event window; older
   history is available via reverse pagination (`read_events_before`) so a
   month-old thread stays fully readable without parsing the entire log at once.
+- A rebuildable SQLite index tracks goal, plan, and submitted-mode events past
+  the recent transcript window. Reads catch the index up from JSONL; the UI
+  derives current context from those events without rendering old transcript
+  pages. JSONL remains the source of truth.
 - Chat retention is local and unbounded by age: sessions stay until the user
   deletes them. Closing a chat pane while a provider turn (or model-owned
   terminal) is live asks Stop and close vs Keep running so background work is
@@ -213,6 +217,11 @@ Gyro does not write metadata into user repositories by default. A future optiona
 ## Desktop Backend
 
 The Tauri backend exposes commands for session listing, local/worktree session creation, event reads/writes, config loading/saving, and shallow workspace file listing.
+
+The automation scheduler reserves provider capacity before claiming a durable
+lease. It can run two due automations at once when their workspace paths differ;
+runs targeting the same checkout wait for one another. A busy interactive app
+leaves due work queued instead of recording a failed automation run.
 
 At startup it binds the local Unix socket. The CLI sends newline-delimited JSON
 notifications to this socket when a session should open or attach in Gyro.app.

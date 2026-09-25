@@ -1303,7 +1303,8 @@ function WorkspaceActivityRail({
 }) {
   const renderView = (view: (typeof workspaceViewContainers)[number]) => {
     const Icon = workspaceShellIcons[view.icon];
-    const isActive = activeView === view.id;
+    const isActive =
+      (hasWorkspace || view.id === "settings") && activeView === view.id;
     const isDisabled = view.requiresWorkspace && !hasWorkspace;
     const badge = badges?.[view.id];
     const badgeCount = isDisabled ? 0 : (badge?.count ?? 0);
@@ -4309,19 +4310,14 @@ function WorkspaceSidebarContent({
       {isIdeSidebar ? (
         <>
           {!workspacePath ? (
-            <div className="gyro-sidebar-actions">
-              <button
-                className="gyro-sidebar-action"
-                onClick={onOpenWorkspace}
-                type="button"
-              >
-                <Folder size={15} />
-                Open folder
-              </button>
-            </div>
+            <SidebarSection grow title="Workspace">
+              <div className="gyro-sidebar-mini-copy">
+                Open a project to see its files, search, and changes here.
+              </div>
+            </SidebarSection>
           ) : null}
 
-          {activeIdeView === "explorer" ? (
+          {workspacePath && activeIdeView === "explorer" ? (
             <SidebarSection
               grow
               headerActions={
@@ -4633,7 +4629,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "search" ? (
+          {workspacePath && activeIdeView === "search" ? (
             <SidebarSection
               grow
               meta={String(ide?.searchResults.length ?? 0)}
@@ -4801,7 +4797,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "source-control" ? (
+          {workspacePath && activeIdeView === "source-control" ? (
             <SidebarSection
               grow
               title="Source control"
@@ -5394,7 +5390,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "run-test" ? (
+          {workspacePath && activeIdeView === "run-test" ? (
             <SidebarSection
               grow
               headerActions={
@@ -5693,7 +5689,7 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "ai" ? (
+          {workspacePath && activeIdeView === "ai" ? (
             renderAiChat ? (
               // The workspace's only chat lives here now: the same ChatSurface
               // the Sessions destination renders, at sidebar width.
@@ -5999,7 +5995,9 @@ function WorkspaceSidebarContent({
                   {pinnedSessions.map((session) => renderSessionRow(session))}
                 </>
               ) : null}
-              <div className="gyro-sidebar-small-title">Projects</div>
+              {projectGroups.length > 0 ? (
+                <div className="gyro-sidebar-small-title">Projects</div>
+              ) : null}
               {projectGroups.map((project, projectIndex) => {
                 const isCollapsed = collapsedProjectIds.includes(project.key);
                 const projectVisibleCount =
@@ -6206,7 +6204,7 @@ function WorkspaceSidebarContent({
                     renderSessionRow(session),
                   )
                 ) : (
-                  <div className="gyro-sidebar-recents-empty">No Chats</div>
+                  <div className="gyro-sidebar-recents-empty">No chats yet</div>
                 )}
               </section>
             </div>
@@ -21225,6 +21223,13 @@ export function SettingsSurface({
     ) ??
     enabledProviders[0] ??
     providerConfigs[0];
+  const localUsageWindows = ledgerWindows(providerLedger, usageProvider?.id);
+  const hasUsageVisualization =
+    (providerUsage?.status === "available" &&
+      providerUsage.windows.length > 0) ||
+    (providerUsage?.status !== "loading" &&
+      providerUsage?.status !== "error" &&
+      localUsageWindows.length > 0);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -21532,15 +21537,17 @@ export function SettingsSurface({
                     </span>
                   </div>
                   <div className="gyro-usage-toolbar-actions">
-                    <SettingsSegmented
-                      label="Usage visualization"
-                      value={usageVisualization}
-                      options={[
-                        { label: "Bars", value: "bars" },
-                        { label: "Wheels", value: "wheels" },
-                      ]}
-                      onChange={(value) => onUsageVisualizationChange?.(value)}
-                    />
+                    {hasUsageVisualization ? (
+                      <SettingsSegmented
+                        label="Usage visualization"
+                        value={usageVisualization}
+                        options={[
+                          { label: "Bars", value: "bars" },
+                          { label: "Wheels", value: "wheels" },
+                        ]}
+                        onChange={(value) => onUsageVisualizationChange?.(value)}
+                      />
+                    ) : null}
                     <button
                       aria-label="Refresh provider usage"
                       className="gyro-icon-button is-subtle"
@@ -21619,9 +21626,9 @@ export function SettingsSurface({
                   /* No plan windows to show — fall back to what Gyro measured
                      itself. This is the only usage view Gemini has, and the
                      fallback for every provider whose live read failed. */
-                  <div className="gyro-usage-cards">
-                    {ledgerWindows(providerLedger, usageProvider.id).map(
-                      (window) => (
+                  localUsageWindows.length > 0 ? (
+                    <div className="gyro-usage-cards">
+                      {localUsageWindows.map((window) => (
                         <UsageCard
                           key={window.id}
                           resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
@@ -21635,9 +21642,19 @@ export function SettingsSurface({
                             usedPercent: window.percent,
                           }}
                         />
-                      ),
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="gyro-usage-empty" role="status">
+                      <Gauge size={22} />
+                      <div>
+                        <strong>No usage recorded yet</strong>
+                        <span>
+                          Start a chat or refresh to check provider usage.
+                        </span>
+                      </div>
+                    </div>
+                  )
                 )}
               </div>
             ) : (

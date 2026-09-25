@@ -1,8 +1,5 @@
 import {
   turnIdFromSessionEvent,
-  deriveSessionPlan,
-  deriveSessionGoal,
-  deriveChatMode,
   chatModeEventMessage,
   createChatModeSessionEvent,
   normalizePlanItem,
@@ -16,6 +13,11 @@ import {
   createEditorSessionEvent,
   slugify,
 } from "./session-context-events";
+import {
+  deriveSessionContext,
+  useDerivedSessionContext,
+  useSessionContextEvents,
+} from "./use-session-context-events";
 import { ComposerContextCandidates } from "@gyro-dev/ui";
 import {
   restoreCompanionPanes,
@@ -825,6 +827,12 @@ export function App() {
   const [sessionEventsById, setSessionEventsById] = useState<
     Record<string, SessionEvent[]>
   >({});
+  const {
+    eventsBySession: sessionContextEventsById,
+    replace: replaceSessionContextEvents,
+    forget: forgetSessionContextEvents,
+    forgetMany: forgetManySessionContextEvents,
+  } = useSessionContextEvents();
   const [capabilityRunsBySessionId, setCapabilityRunsBySessionId] = useState<
     Record<string, Record<string, CapabilityActivity>>
   >({});
@@ -1724,29 +1732,22 @@ export function App() {
   // Plan/goal/mode can lag while idle. An in-flight turn cannot: deferred
   // events starved live status and the rail froze before the provider finished.
   const deferredEventsForPlan = useDeferredValue(events);
+  const persistedSessionContext = useDerivedSessionContext(
+    sessionContextEventsById,
+    activeSessionId,
+    deferredEventsForPlan,
+  );
   const isLiveTurnStreaming = activeSessionId
     ? sendingSessionIds.includes(activeSessionId)
     : isStartingFirstTurn;
   const deferredEventsForTurn = isLiveTurnStreaming
     ? events
     : deferredEventsForPlan;
-  const persistedActiveSessionPlan = useMemo(
-    () => deriveSessionPlan(deferredEventsForPlan, activeSessionId),
-    [activeSessionId, deferredEventsForPlan],
-  );
   const activeSessionPlan = activeSessionId
-    ? persistedActiveSessionPlan
+    ? persistedSessionContext.plan
     : pendingNewChatPlan;
-  const persistedActiveSessionGoal = useMemo(
-    () => deriveSessionGoal(deferredEventsForPlan, activeSessionId),
-    [activeSessionId, deferredEventsForPlan],
-  );
-  const persistedActiveChatMode = useMemo(
-    () => deriveChatMode(deferredEventsForPlan),
-    [deferredEventsForPlan],
-  );
   const activeSessionGoal = activeSessionId
-    ? persistedActiveSessionGoal
+    ? persistedSessionContext.goal
     : pendingNewChatGoal;
   const activeSessionUsage = activeSessionId
     ? sessionUsageById[activeSessionId]
@@ -2667,6 +2668,7 @@ export function App() {
       try {
         const page = await invoke<{
           events: SessionEvent[];
+          contextEvents: SessionEvent[];
           hasMoreBefore: boolean;
         }>("read_session_events", {
           sessionId,
@@ -2680,6 +2682,7 @@ export function App() {
           // Fresh open always starts from the recent window; expanded history
           // only grows via load-earlier.
           expandedHistorySessionsRef.current.delete(sessionId);
+          replaceSessionContextEvents(sessionId, page.contextEvents);
           setHasMoreBeforeBySession((current) => ({
             ...current,
             [sessionId]: page.hasMoreBefore,
@@ -2710,7 +2713,7 @@ export function App() {
         }
       }
     },
-    [limitEventsForSession, setEventsForSession],
+    [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
   );
 
   const loadEarlierEvents = useCallback(
@@ -7280,6 +7283,7 @@ export function App() {
         delete next[sessionId];
         return next;
       });
+      forgetSessionContextEvents(sessionId);
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
@@ -7301,6 +7305,7 @@ export function App() {
     [
       activeSessionId,
       capabilityRunsBySessionId,
+      forgetSessionContextEvents,
       forgetUnreadCompletedChat,
       notify,
       sessions,
@@ -7378,6 +7383,7 @@ export function App() {
         ),
       ),
     );
+    forgetManySessionContextEvents(projectSessionIds);
 
     if (
       activeProjectPath === projectPath ||
@@ -7404,6 +7410,7 @@ export function App() {
   }, [
     activeSession?.workspacePath,
     activeSessionId,
+    forgetManySessionContextEvents,
     notify,
     projectRemoveCandidate,
     removedProjectPaths,
@@ -15689,23 +15696,24 @@ export function App() {
         : undefined;
     const paneEvents =
       pane.kind === "session" ? (sessionEventsById[pane.sessionId] ?? []) : [];
+    const paneContext =
+      pane.kind === "session"
+        ? deriveSessionContext(
+            sessionContextEventsById[pane.sessionId] ?? [],
+            paneEvents,
+            pane.sessionId,
+          )
+        : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
-    const panePlan =
-      pane.kind === "session"
-        ? deriveSessionPlan(paneEvents, pane.sessionId)
-        : pendingNewChatPlan;
+    const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
-      pane.kind === "session"
-        ? deriveSessionGoal(paneEvents, pane.sessionId)
-        : pendingNewChatGoal;
+      pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
     const paneSelectedMode = chatDraftModes[paneDraftKey] ?? "normal";
     const paneMode =
       COUNCIL_COMING_SOON && paneSelectedMode === "council"
         ? "normal"
         : paneSelectedMode;
-    const paneSubmittedMode =
-      pane.kind === "session" ? deriveChatMode(paneEvents) : "normal";
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     // Plan still takes the rail on its own; the dock's tab shows through when
@@ -15856,7 +15864,7 @@ export function App() {
         onResumeUsage={() => void resumeUsage()}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
-        submittedChatMode={paneSubmittedMode}
+        submittedChatMode={paneContext?.mode ?? "normal"}
         diffReview={workbench.diffReview}
         draftResetToken={draftResetToken}
         draft={chatDrafts[paneDraftKey] ?? ""}
@@ -16114,7 +16122,7 @@ export function App() {
       }
       attachments={activeChatAttachments}
       chatMode={activeChatMode}
-      submittedChatMode={persistedActiveChatMode}
+      submittedChatMode={persistedSessionContext.mode}
       diffReview={workbench.diffReview}
       draftResetToken={draftResetToken}
       draft={activeChatDraft}
@@ -16485,7 +16493,7 @@ export function App() {
                     }
                     attachments={activeChatAttachments}
                     chatMode={activeChatMode}
-                    submittedChatMode={persistedActiveChatMode}
+                    submittedChatMode={persistedSessionContext.mode}
                     diffReview={workbench.diffReview}
                     draftResetToken={draftResetToken}
                     draft={activeChatDraft}
@@ -17252,7 +17260,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
-          submittedChatMode={persistedActiveChatMode}
+          submittedChatMode={persistedSessionContext.mode}
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
           events={[]}

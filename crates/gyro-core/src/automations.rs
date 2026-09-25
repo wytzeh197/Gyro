@@ -493,6 +493,28 @@ impl AutomationStore {
         lease_seconds: i64,
         now: DateTime<Utc>,
     ) -> Result<Option<Automation>> {
+        self.claim_due_automation_matching_at(None, lease_owner, lease_seconds, now)
+    }
+
+    /// Claim a due run selected by the scheduler after its capacity and
+    /// workspace checks. The due predicates are rechecked under the write lock.
+    pub fn claim_due_automation_id_at(
+        &self,
+        automation_id: Uuid,
+        lease_owner: impl Into<String>,
+        lease_seconds: i64,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Automation>> {
+        self.claim_due_automation_matching_at(Some(automation_id), lease_owner, lease_seconds, now)
+    }
+
+    fn claim_due_automation_matching_at(
+        &self,
+        selected_id: Option<Uuid>,
+        lease_owner: impl Into<String>,
+        lease_seconds: i64,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Automation>> {
         let transaction = rusqlite::Transaction::new_unchecked(
             &self.conn,
             rusqlite::TransactionBehavior::Immediate,
@@ -505,20 +527,23 @@ impl AutomationStore {
         let now_string = now.to_rfc3339();
         let lease_expires_at = now + Duration::seconds(lease_seconds.clamp(30, 60 * 60 * 24));
         let lease_expires_at_string = lease_expires_at.to_rfc3339();
-        let automation_id: Option<String> = self
-            .conn
-            .query_row(
-                "select id from automations
+        let automation_id: Option<String> = if let Some(id) = selected_id {
+            Some(id.to_string())
+        } else {
+            self.conn
+                .query_row(
+                    "select id from automations
                  where status = 'current'
                  and next_run_at is not null
                  and next_run_at <= ?1
                  and (lease_expires_at is null or lease_expires_at <= ?1)
                  order by next_run_at asc, updated_at asc
                  limit 1",
-                params![now_string],
-                |row| row.get(0),
-            )
-            .optional()?;
+                    params![now_string],
+                    |row| row.get(0),
+                )
+                .optional()?
+        };
 
         let Some(automation_id) = automation_id else {
             return Ok(None);
@@ -1369,6 +1394,51 @@ mod tests {
         assert_eq!(completed.last_result, "scheduled smoke passed");
         assert_eq!(completed.run_history[0].status, AutomationRunStatus::Passed);
         assert!(completed.next_run_at.unwrap() > Utc::now());
+    }
+
+    #[test]
+    fn selected_due_claim_leaves_another_due_run_available() {
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            AutomationStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let due_at = Utc::now() - Duration::minutes(1);
+        let make = |title: &str| {
+            store
+                .create_automation(CreateAutomationRequest {
+                    title: title.into(),
+                    prompt: "Check".into(),
+                    schedule: AutomationSchedule::Hourly,
+                    project: "Gyro".into(),
+                    provider: "Codex".into(),
+                    branch: "main".into(),
+                    workspace_mode: SessionWorkspaceMode::Local,
+                    worktree_name: None,
+                    stop_condition: None,
+                    next_run_at: Some(due_at),
+                    execution: AutomationExecutionContext::default(),
+                })
+                .unwrap()
+        };
+        let first = make("First");
+        let second = make("Second");
+        let claimed = store
+            .claim_due_automation_id_at(second.id, "worker-two", 300, Utc::now())
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, second.id);
+        assert_eq!(store.list_due_automations_now().unwrap().len(), 1);
+        assert_eq!(
+            store
+                .claim_due_automation("worker-one", 300)
+                .unwrap()
+                .unwrap()
+                .id,
+            first.id
+        );
+        assert!(store
+            .claim_due_automation_id_at(second.id, "duplicate", 300, Utc::now())
+            .unwrap()
+            .is_none());
     }
 
     #[test]

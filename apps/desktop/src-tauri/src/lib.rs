@@ -1,3 +1,4 @@
+mod automation_scheduler;
 mod canvas_preview;
 mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
@@ -32,6 +33,13 @@ mod browser_knowledge;
 mod file_patch_counts;
 
 use anyhow::Context;
+use automation_scheduler::start_automation_scheduler;
+#[cfg(test)]
+use automation_scheduler::{
+    automation_dispatch_candidates, recover_automation_scheduler_leases_with,
+    run_automation_scheduler_once_at_with, run_automation_scheduler_once_with,
+    run_automation_scheduler_once_with_heartbeat_interval,
+};
 use base64::Engine as _;
 use gyro_core::augmented_gui_path;
 #[cfg(test)]
@@ -155,6 +163,7 @@ const MAX_TERMINAL_PROCESSES: usize = 32;
 const MAX_DEBUG_ADAPTER_PROCESSES: usize = 8;
 const MAX_CONCURRENT_IDE_COMMANDS: usize = 4;
 const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
+const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
@@ -704,6 +713,56 @@ struct AutomationLeaseHeartbeat {
 struct AutomationSchedulerClock {
     last_effective: chrono::DateTime<chrono::Utc>,
     last_sample: Instant,
+}
+
+/// A scheduled run owns a provider slot before its lease is claimed. A busy
+/// interactive app leaves the automation due instead of recording a false failure.
+struct AutomationRunAdmission {
+    app: tauri::AppHandle,
+    reservation_key: String,
+}
+
+impl AutomationRunAdmission {
+    fn reserve(app: &tauri::AppHandle, automation_id: Uuid) -> Result<Option<Self>, String> {
+        let reservation_key = format!("automation-reserved-{automation_id}");
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Ok(None);
+        }
+        flags.insert(
+            reservation_key.clone(),
+            Arc::new(ProviderRunControl::default()),
+        );
+        Ok(Some(Self {
+            app: app.clone(),
+            reservation_key,
+        }))
+    }
+
+    fn transfer_to_session(&self, session_id: &str) -> Result<(), String> {
+        let manager = self.app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        let control = flags
+            .remove(&self.reservation_key)
+            .ok_or_else(|| "automation provider reservation was lost".to_string())?;
+        flags.insert(session_id.to_string(), control);
+        Ok(())
+    }
+}
+
+impl Drop for AutomationRunAdmission {
+    fn drop(&mut self) {
+        if let Ok(mut flags) = self.app.state::<ProviderCancellationManager>().flags.lock() {
+            flags.remove(&self.reservation_key);
+        }
+    }
 }
 
 fn automation_scheduler_effective_now(
@@ -3055,334 +3114,6 @@ fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
     }
 }
 
-fn start_automation_scheduler(app: tauri::AppHandle) {
-    std::thread::spawn(move || {
-        let paths = match GyroPaths::for_current_user() {
-            Ok(paths) => paths,
-            Err(error) => {
-                eprintln!("could not resolve automation scheduler paths: {error}");
-                return;
-            }
-        };
-        let lease_owner = format!("desktop-{}-{}", std::process::id(), Uuid::new_v4());
-        let mut observed_generation = app.state::<AutomationSchedulerControl>().generation();
-        let mut clock = AutomationSchedulerClock::new(chrono::Utc::now());
-
-        loop {
-            let now = clock.now();
-            if let Err(error) =
-                recover_automation_scheduler_leases_with(&paths, now, |automation| {
-                    emit_automation_update(&app, automation);
-                    notify_automation_outcome(&app, automation);
-                })
-            {
-                eprintln!("could not recover automation leases: {error}");
-            }
-            match run_automation_scheduler_once_at_with(&paths, &lease_owner, now, |automation| {
-                emit_automation_update(&app, automation);
-                execute_claimed_automation(&app, &paths, automation)
-            }) {
-                Ok(Some(automation)) => {
-                    emit_automation_update(&app, &automation);
-                    notify_automation_outcome(&app, &automation);
-                    continue;
-                }
-                Ok(None) => {}
-                Err(error) => eprintln!("automation scheduler iteration failed: {error}"),
-            }
-            observed_generation = app
-                .state::<AutomationSchedulerControl>()
-                .wait_for_change(observed_generation, AUTOMATION_SCHEDULER_POLL_INTERVAL);
-        }
-    });
-}
-
-fn recover_automation_scheduler_leases_with<F>(
-    paths: &GyroPaths,
-    now: chrono::DateTime<chrono::Utc>,
-    mut on_recovered: F,
-) -> Result<usize, String>
-where
-    F: FnMut(&Automation),
-{
-    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
-    let expired_ids = store
-        .list_automations()
-        .map_err(to_string)?
-        .into_iter()
-        .filter(|automation| {
-            automation
-                .lease_expires_at
-                .is_some_and(|expires_at| expires_at <= now)
-        })
-        .map(|automation| automation.id)
-        .collect::<Vec<_>>();
-    if expired_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let recovered = store
-        .recover_expired_automation_leases(now)
-        .map_err(to_string)?;
-    for automation_id in expired_ids {
-        let Some(automation) = store.get_automation(automation_id).map_err(to_string)? else {
-            continue;
-        };
-        // Lease ownership cleared by recovery is enough signal; exact timestamp
-        // equality with the recovery clock is fragile under store rounding.
-        if automation.lease_owner.is_none() {
-            on_recovered(&automation);
-        }
-    }
-    Ok(recovered)
-}
-#[cfg(test)]
-fn run_automation_scheduler_once_with<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with(paths, lease_owner, chrono::Utc::now(), execute)
-}
-
-fn run_automation_scheduler_once_at_with<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    now: chrono::DateTime<chrono::Utc>,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with_heartbeat_interval(
-        paths,
-        lease_owner,
-        now,
-        AUTOMATION_LEASE_HEARTBEAT_INTERVAL,
-        execute,
-    )
-}
-
-#[cfg(test)]
-fn run_automation_scheduler_once_with_heartbeat_interval<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    heartbeat_interval: Duration,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    run_automation_scheduler_once_at_with_heartbeat_interval(
-        paths,
-        lease_owner,
-        chrono::Utc::now(),
-        heartbeat_interval,
-        execute,
-    )
-}
-
-fn run_automation_scheduler_once_at_with_heartbeat_interval<F>(
-    paths: &GyroPaths,
-    lease_owner: &str,
-    now: chrono::DateTime<chrono::Utc>,
-    heartbeat_interval: Duration,
-    execute: F,
-) -> Result<Option<Automation>, String>
-where
-    F: FnOnce(&Automation) -> Result<String, String>,
-{
-    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
-    let Some(claimed) = store
-        .claim_due_automation_at(lease_owner, AUTOMATION_LEASE_SECONDS, now)
-        .map_err(to_string)?
-    else {
-        return Ok(None);
-    };
-
-    let heartbeat = AutomationLeaseHeartbeat::start(
-        paths.clone(),
-        claimed.id,
-        lease_owner.to_string(),
-        AUTOMATION_LEASE_SECONDS,
-        heartbeat_interval,
-    );
-    let execution_result =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute(&claimed)))
-            .unwrap_or_else(|_| {
-                Err("automation execution panicked and was safely contained".into())
-            });
-    drop(heartbeat);
-
-    let (status, summary, pause_for_configuration, stop_condition_met) = match execution_result {
-        Ok(summary) => match parse_automation_execution_outcome(&claimed, &summary) {
-            Ok(outcome) => (
-                AutomationRunStatus::Passed,
-                outcome.summary,
-                false,
-                outcome.stop_condition_met,
-            ),
-            Err(error) => (AutomationRunStatus::Failed, error, false, None),
-        },
-        Err(error) if error.contains("chat cancelled") => (
-            AutomationRunStatus::Stopped,
-            "Automation stopped before completion".into(),
-            false,
-            None,
-        ),
-        Err(error) => {
-            let error = gyro_core::security::redact_secrets(&error);
-            let pause = error.starts_with("configuration:");
-            (AutomationRunStatus::Failed, error, pause, None)
-        }
-    };
-    let updated = store
-        .finish_automation_lease_with_stop_condition(
-            claimed.id,
-            lease_owner,
-            status,
-            bounded_automation_summary(&summary),
-            stop_condition_met,
-        )
-        .map_err(to_string)?
-        .ok_or_else(|| "claimed automation disappeared before completion".to_string())?;
-    if pause_for_configuration {
-        return store
-            .set_automation_status(updated.id, AutomationStatus::Paused)
-            .map_err(to_string);
-    }
-    Ok(Some(updated))
-}
-
-fn execute_claimed_automation(
-    app: &tauri::AppHandle,
-    paths: &GyroPaths,
-    automation: &Automation,
-) -> Result<String, String> {
-    let workspace_path = resolve_automation_workspace(paths, automation)?;
-    let provider_id = automation
-        .execution
-        .provider_id
-        .clone()
-        .unwrap_or_else(|| provider_id_for_automation_label(&automation.provider).into());
-    if provider_adapter_for(&provider_id).kind == ProviderAdapterKind::ReadinessOnly {
-        return Err(format!(
-            "configuration: {} cannot execute automation runs",
-            automation.provider
-        ));
-    }
-    let provider_label = automation
-        .execution
-        .provider_label
-        .clone()
-        .or_else(|| Some(automation.provider.clone()));
-    let store = open_store()?;
-    let session = store
-        .create_session_with_context(
-            &workspace_path,
-            SessionOrigin::Desktop,
-            format!("Automation: {}", automation.title),
-            CreateSessionContext {
-                workspace_mode: automation.workspace_mode.clone(),
-                branch: automation.branch.clone(),
-                worktree_name: automation.worktree_name.clone(),
-                provider_id: Some(provider_id.clone()),
-                provider_label: provider_label.clone(),
-                model_id: automation.execution.model_id.clone(),
-                model_label: automation.execution.model_label.clone(),
-                reasoning_effort: automation.execution.reasoning_effort.clone(),
-            },
-        )
-        .map_err(to_string)?;
-    let linked = open_automation_store()?
-        .link_run_session(
-            automation.id,
-            automation
-                .lease_owner
-                .as_deref()
-                .ok_or("automation has no lease")?,
-            session.id,
-        )
-        .map_err(to_string)?;
-    emit_automation_update(app, &linked);
-    let message = automation_provider_prompt(automation);
-    let user_event = store
-        .append_user_turn_message(
-            session.id,
-            message.clone(),
-            serde_json::json!({
-                "surface": "automation",
-                "automationId": automation.id,
-                "schedule": automation.schedule,
-            }),
-        )
-        .map_err(to_string)?;
-    let session_id = session.id.to_string();
-    let control = Arc::new(ProviderRunControl::default());
-    {
-        let cancellation_manager = app.state::<ProviderCancellationManager>();
-        let mut flags = cancellation_manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Err(format!(
-                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
-            ));
-        }
-        flags.insert(session_id.clone(), control);
-    }
-    app.state::<AutomationSchedulerControl>()
-        .register(automation.id, session_id.clone());
-
-    let request = ProviderChatRequest {
-        session_id: session_id.clone(),
-        message,
-        turn_id: user_event.turn_id.map(|id| id.to_string()),
-        provider_id,
-        provider_label,
-        model_id: automation.execution.model_id.clone(),
-        model_label: automation.execution.model_label.clone(),
-        reasoning_effort: automation.execution.reasoning_effort.clone(),
-        require_command_approval: true,
-        require_file_edit_approval: true,
-        full_access: false,
-        suggest_title: false,
-        workspace_path: Some(workspace_path.display().to_string()),
-        mode: ChatMode::Normal,
-        goal: None,
-        plan: None,
-        attachments: Vec::new(),
-        workspace_context: None,
-        workspace_check: None,
-    };
-    // Register cancellation first, then re-read persisted state. A pause between
-    // claiming the lease and registering this session must still prevent dispatch.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let latest = open_automation_store()?
-            .get_automation(automation.id)
-            .map_err(to_string)?
-            .ok_or_else(|| "automation no longer exists".to_string())?;
-        if latest.status != AutomationStatus::Current
-            || latest.lease_owner != automation.lease_owner
-        {
-            return Err("chat cancelled before automation dispatch".to_string());
-        }
-        run_provider_chat_blocking(app.clone(), request, UsageOrigin::Automation)
-            .map(|response| response.assistant_event.message)
-    }))
-    .unwrap_or_else(|_| Err("automation execution panicked and was safely contained".into()));
-    app.state::<AutomationSchedulerControl>()
-        .unregister(automation.id);
-    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
-        flags.remove(&session_id);
-    }
-    result
-}
-
 fn resolve_automation_workspace(
     paths: &GyroPaths,
     automation: &Automation,
@@ -3521,6 +3252,8 @@ fn bounded_automation_summary(value: &str) -> String {
 #[serde(rename_all = "camelCase")]
 struct SessionEventsReadResult {
     events: Vec<SessionEvent>,
+    /// Durable goal, plan, and submitted-mode events outside the recent window.
+    context_events: Vec<SessionEvent>,
     /// True when older events exist before the returned window.
     has_more_before: bool,
 }
@@ -3555,6 +3288,7 @@ fn read_session_events_blocking(
             .map_err(to_string)?;
         return Ok(SessionEventsReadResult {
             events: page.events,
+            context_events: Vec::new(),
             has_more_before: page.has_more_before,
         });
     }
@@ -3566,6 +3300,9 @@ fn read_session_events_from_store(
     session_id: Uuid,
     max_recent_events: usize,
 ) -> anyhow::Result<SessionEventsReadResult> {
+    // Read context first so a concurrent append can only land in the newer
+    // transcript snapshot; context events then always precede its tail.
+    let context_events = store.read_context_events(session_id)?;
     let mut events = store.read_recent_events(session_id, max_recent_events)?;
     // The tail path re-inserts session-created, so a full page of "content"
     // events still means older history may exist even when the returned length
@@ -3599,6 +3336,7 @@ fn read_session_events_from_store(
     }
     Ok(SessionEventsReadResult {
         events,
+        context_events,
         has_more_before,
     })
 }
@@ -5065,8 +4803,8 @@ fn run_provider_chat_blocking(
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
-    let events = store.read_events(session_id).map_err(to_string)?;
-    request.goal = session_goal::stored_session_goal(&events).or(request.goal.take());
+    let events = store.read_context_events(session_id).map_err(to_string)?;
+    request.goal = session_goal::stored_or_unsaved_goal(&events, request.goal.take());
     if request.suggest_title {
         if let Some(control) = app
             .state::<ProviderCancellationManager>()
@@ -5474,7 +5212,26 @@ fn run_provider_chat_blocking(
                 })
             })
         });
-    let plan_event = plan_payload.and_then(|payload| {
+    let plan_event = plan_payload.and_then(|mut payload| {
+        if request.mode == ChatMode::Plan {
+            if payload.get("content").is_none() && payload.get("markdown").is_none() {
+                let mut with_content = payload.clone();
+                if let Some(object) = with_content.as_object_mut() {
+                    object.insert(
+                        "content".into(),
+                        serde_json::Value::String(assistant_event.message.clone()),
+                    );
+                    // The event payload has a hard 128 KiB limit. Keep a large
+                    // plan marker valid; the context index can carry the
+                    // preceding assistant message as its content fallback.
+                    if serde_json::to_vec(&with_content)
+                        .is_ok_and(|encoded| encoded.len() <= 96 * 1024)
+                    {
+                        payload = with_content;
+                    }
+                }
+            }
+        }
         store
             .append_event_with_turn_id(
                 session_id,
@@ -6596,7 +6353,7 @@ async fn append_chat_context_event(
         let (kind, message, payload) = match event_kind.as_str() {
             "goal-updated" => {
                 let current = session_goal::stored_session_goal(
-                    &store.read_events(session_id).map_err(to_string)?,
+                    &store.read_context_events(session_id).map_err(to_string)?,
                 );
                 let (message, payload) = session_goal::goal_change(&payload, current.as_ref())?;
                 (SessionEventKind::GoalUpdated, message, payload)
@@ -30603,6 +30360,52 @@ while True:
             })
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn scheduler_dispatches_distinct_workspaces_and_defers_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let root_a = temp.path().join("a");
+        let root_b = temp.path().join("b");
+        fs::create_dir_all(&root_a).unwrap();
+        fs::create_dir_all(&root_b).unwrap();
+        let make = |title: &str, workspace: &Path| {
+            store
+                .create_automation(CreateAutomationRequest {
+                    title: title.into(),
+                    prompt: "Run checks".into(),
+                    schedule: gyro_core::AutomationSchedule::Hourly,
+                    project: "Gyro".into(),
+                    provider: "Codex".into(),
+                    branch: "main".into(),
+                    workspace_mode: SessionWorkspaceMode::Local,
+                    worktree_name: None,
+                    stop_condition: None,
+                    next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                    execution: gyro_core::AutomationExecutionContext {
+                        workspace_path: Some(workspace.display().to_string()),
+                        ..Default::default()
+                    },
+                })
+                .unwrap()
+        };
+        let first = make("First A", &root_a);
+        let same_workspace = make("Second A", &root_a);
+        let independent = make("First B", &root_b);
+        let due = vec![first.clone(), same_workspace.clone(), independent.clone()];
+        let selected = automation_dispatch_candidates(&paths, due.clone(), &HashMap::new());
+        assert_eq!(
+            selected.iter().map(|(run, _)| run.id).collect::<Vec<_>>(),
+            vec![first.id, independent.id]
+        );
+        let running = HashMap::from([(first.id, root_a.canonicalize().unwrap())]);
+        let selected = automation_dispatch_candidates(&paths, due, &running);
+        assert_eq!(
+            selected.iter().map(|(run, _)| run.id).collect::<Vec<_>>(),
+            vec![independent.id]
         );
     }
 

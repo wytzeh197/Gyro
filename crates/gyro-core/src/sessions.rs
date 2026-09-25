@@ -25,7 +25,7 @@ const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 4;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 5;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -1601,6 +1601,153 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// Read durable chat context independently of the bounded transcript tail.
+    /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
+    pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(Vec::new());
+        }
+        let mut file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for context indexing", events_path.display()))?;
+        let file_len = file.seek(SeekFrom::End(0))?;
+        let has_complete_tail = if file_len == 0 {
+            true
+        } else {
+            file.seek(SeekFrom::End(-1))?;
+            let mut last = [0u8; 1];
+            file.read_exact(&mut last)?;
+            last[0] == b'\n'
+        };
+        let indexed_bytes: u64 = self
+            .conn
+            .query_row(
+                "select indexed_bytes from session_context_index where session_id = ?1",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let scan_start = if indexed_bytes > file_len {
+            0
+        } else {
+            indexed_bytes
+        };
+        file.seek(SeekFrom::Start(scan_start))?;
+        let mut reader = BufReader::new(&mut file);
+        let mut offset = scan_start;
+        let mut preceding_assistant: Option<(u64, SessionEvent)> = None;
+        let mut context_events = Vec::new();
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            let next_offset = reader.stream_position()?;
+            if next_offset == file_len && !has_complete_tail {
+                break;
+            }
+            if !line.is_empty() {
+                let event = parse_session_event_line(&events_path, 0, &line)?;
+                if event.kind == SessionEventKind::AssistantMessage {
+                    preceding_assistant = Some((offset, event.clone()));
+                }
+                if event.kind == SessionEventKind::PlanUpdated
+                    && event.payload.get("content").is_none()
+                    && event.payload.get("markdown").is_none()
+                {
+                    let adjacent = preceding_assistant.as_ref().filter(|(_, assistant)| {
+                        assistant.turn_id.is_some() && assistant.turn_id == event.turn_id
+                    });
+                    if let Some((assistant_offset, assistant)) = adjacent {
+                        context_events.push((*assistant_offset, assistant.clone()));
+                    } else if let Some(turn_id) = event.turn_id {
+                        // A read may have indexed the assistant before its
+                        // plan marker was appended. Its turn index keeps the
+                        // Markdown fallback available across that boundary.
+                        if let Some(assistant) = self.find_indexed_turn_message(
+                            session_id,
+                            turn_id,
+                            &SessionEventKind::AssistantMessage,
+                            &events_path,
+                        )? {
+                            context_events.push((offset.saturating_sub(1), assistant));
+                        }
+                    }
+                }
+                if matches!(
+                    &event.kind,
+                    SessionEventKind::GoalUpdated
+                        | SessionEventKind::PlanUpdated
+                        | SessionEventKind::ChatModeChanged
+                ) {
+                    context_events.push((offset, event));
+                }
+            }
+            offset = next_offset;
+        }
+        drop(reader);
+        drop(_lock);
+        if offset != indexed_bytes || indexed_bytes > file_len {
+            let transaction = self.conn.unchecked_transaction()?;
+            let current_offset: u64 = transaction
+                .query_row(
+                    "select indexed_bytes from session_context_index where session_id = ?1",
+                    params![session_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            let reset_index = current_offset > file_len;
+            if reset_index {
+                transaction.execute(
+                    "delete from session_context_events where session_id = ?1",
+                    params![session_id.to_string()],
+                )?;
+            }
+            for (event_offset, event) in context_events {
+                transaction.execute(
+                    "insert or ignore into session_context_events
+                     (session_id, event_id, log_offset, event_json)
+                     values (?1, ?2, ?3, ?4)",
+                    params![
+                        session_id.to_string(),
+                        event.id.to_string(),
+                        event_offset,
+                        serde_json::to_string(&event)?,
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "insert into session_context_index (session_id, indexed_bytes)
+                 values (?1, ?2)
+                 on conflict(session_id) do update set indexed_bytes = excluded.indexed_bytes",
+                params![
+                    session_id.to_string(),
+                    if reset_index {
+                        offset
+                    } else {
+                        offset.max(current_offset)
+                    },
+                ],
+            )?;
+            transaction.commit()?;
+        }
+
+        let mut statement = self.conn.prepare(
+            "select event_json from session_context_events
+             where session_id = ?1 order by log_offset asc",
+        )?;
+        let rows = statement.query_map(params![session_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| {
+            let encoded = row?;
+            serde_json::from_str(&encoded).map_err(Into::into)
+        })
+        .collect()
+    }
+
     /// Read up to `limit` events that appear **before** `before_event_id` in the
     /// JSONL log (older history). Returns oldest→newest order within the page.
     ///
@@ -1821,6 +1968,24 @@ impl SessionStore {
                updated_at text not null,
                primary key (session_id, turn_id),
                foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create table if not exists session_context_index (
+               session_id text primary key not null,
+               indexed_bytes integer not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create table if not exists session_context_events (
+               session_id text not null,
+               event_id text primary key not null,
+               log_offset integer not null,
+               event_json text not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create index if not exists idx_session_context_events_order
+             on session_context_events(session_id, log_offset
              );",
         )?;
         Ok(())
@@ -3095,6 +3260,93 @@ mod tests {
             .unwrap();
         assert!(missing.events.is_empty());
         assert!(!missing.has_more_before);
+    }
+
+    #[test]
+    fn context_events_survive_a_long_transcript_and_incremental_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "long context")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let goal = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal set",
+                serde_json::json!({"action":"set","text":"Ship Gyro","status":"active"}),
+            )
+            .unwrap();
+        let assistant = store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::AssistantMessage,
+                "A complete plan",
+                serde_json::json!({}),
+                Some(turn_id),
+            )
+            .unwrap();
+        assert_eq!(store.read_context_events(session.id).unwrap().len(), 1);
+        let plan = store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::PlanUpdated,
+                "Plan created",
+                serde_json::json!({"action":"replace","items":[]}),
+                Some(turn_id),
+            )
+            .unwrap();
+        let first_context = store.read_context_events(session.id).unwrap();
+        assert_eq!(
+            first_context
+                .iter()
+                .map(|event| event.id)
+                .collect::<Vec<_>>(),
+            vec![goal.id, assistant.id, plan.id]
+        );
+
+        let mut writer = std::io::BufWriter::new(
+            OpenOptions::new()
+                .append(true)
+                .open(&session.events_path)
+                .unwrap(),
+        );
+        for index in 0..1_100 {
+            let event = SessionEvent::new(
+                session.id,
+                SessionEventKind::SystemEvent,
+                format!("activity {index}"),
+                serde_json::json!({}),
+            );
+            writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
+        }
+        writer.flush().unwrap();
+        assert!(store
+            .read_recent_events(session.id, 400)
+            .unwrap()
+            .iter()
+            .all(|event| event.id != goal.id && event.id != plan.id));
+        drop(store);
+
+        let reopened = SessionStore::open(paths).unwrap();
+        let context = reopened.read_context_events(session.id).unwrap();
+        assert_eq!(
+            context.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![goal.id, assistant.id, plan.id]
+        );
+        reopened
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal cleared",
+                serde_json::json!({"action":"clear"}),
+            )
+            .unwrap();
+        let updated = reopened.read_context_events(session.id).unwrap();
+        assert_eq!(updated.len(), 4);
+        assert_eq!(updated.last().unwrap().payload["action"], "clear");
     }
 
     #[test]
