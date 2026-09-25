@@ -36,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install ripgrep for workspace search tests
+        run: brew install ripgrep
       - run: cargo test --workspace
       - run: cargo build -p gyro-cli
       - run: node scripts/check-cli-release-packaging.mjs
@@ -55,6 +57,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @gyro-dev/desktop build
+      - name: Install ripgrep for workspace search tests
+        run: brew install ripgrep
       - run: cargo test --workspace
       # The packaged app is built and actually launched: the debug-only
       # browser and LSP smoke harnesses (browser_smoke.rs, lsp_smoke.rs) run

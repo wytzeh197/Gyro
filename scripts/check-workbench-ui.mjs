@@ -515,6 +515,14 @@ expect(
 const appSource = [
   readRepoFile("apps/desktop/src/App.tsx"),
   readRepoFile("apps/desktop/src/session-context-events.ts"),
+  readRepoFile("apps/desktop/src/browser-capture.ts"),
+  readRepoFile("apps/desktop/src/session-listing.ts"),
+  readRepoFile("apps/desktop/src/usage-actions.ts"),
+  readRepoFile("apps/desktop/src/use-remote-check.ts"),
+  readRepoFile("apps/desktop/src/use-session-context-events.ts"),
+  readRepoFile("apps/desktop/src/use-session-model-save.ts"),
+  readRepoFile("apps/desktop/src/unread-completed-chats.ts"),
+  readRepoFile("apps/desktop/src/provider-stream-events.ts"),
 ].join("\n");
 const turnTimingSource = readRepoFile("apps/desktop/src/turn-timing.ts");
 const captureFixtureSource = readRepoFile(
@@ -552,7 +560,13 @@ const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
 const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
-const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const surfaceSource = [
+  readRepoFile("packages/ui/src/surfaces.tsx"),
+  readRepoFile("packages/ui/src/browser-capture-view.tsx"),
+  readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
+  readRepoFile("packages/ui/src/chat-run-view.tsx"),
+].join("\n");
 const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
 const scmFileActionsSource = readRepoFile(
@@ -564,7 +578,12 @@ const inlineApprovalSource = readRepoFile(
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
-const styleSource = readRepoFile("packages/ui/src/styles.css");
+const styleSource = [
+  readRepoFile("packages/ui/src/styles.css"),
+  readRepoFile("packages/ui/src/chat-design.css"),
+  readRepoFile("packages/ui/src/browser-capture.css"),
+  readRepoFile("packages/ui/src/installed-update.css"),
+].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
@@ -1174,10 +1193,21 @@ const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 // source that holds the code, not on where it used to live.
 const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/automation_scheduler.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/browser_pointer.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/browser_smoke.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/context_compaction.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/language_server.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
   readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_browser.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_goal.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/session_model.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/subagent_capability.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/workspace_capability_list.rs"),
 ].join("\n");
 const languageServerRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/language_server.rs",
@@ -4132,8 +4162,10 @@ expect(
       "const deferredEventsForPlan = useDeferredValue(events)",
     ) &&
     appSource.includes(
-      "deriveSessionPlan(deferredEventsForPlan, activeSessionId)",
+      "const persistedSessionContext = useDerivedSessionContext(",
     ) &&
+    appSource.includes("deferredEventsForPlan,") &&
+    appSource.includes("plan: deriveSessionPlan(events, sessionId)") &&
     // Live turns must not wait on deferred events — otherwise the rail freezes
     // mid-stream while the provider is still working.
     appSource.includes("const isLiveTurnStreaming = activeSessionId") &&
@@ -4416,9 +4448,7 @@ expect(
     surfaceSource.includes("isHiddenTranscriptEvent") &&
     surfaceSource.includes('payload?.surface === "desktop-ide"') &&
     surfaceSource.includes('"provider-diagnostics"') &&
-    styleSource.includes(
-      ".gyro-response-actions .gyro-message-token-count",
-    ) &&
+    styleSource.includes(".gyro-response-actions .gyro-message-token-count") &&
     !styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
     ) &&
@@ -5223,7 +5253,8 @@ expect(
 );
 
 expect(
-  appSource.includes("openUrl, revealItemInDir") &&
+  appSource.includes("openUrl") &&
+    appSource.includes("revealItemInDir") &&
     appSource.includes("openBrowserPreviewExternal") &&
     appSource.includes("invoke<BrowserPreviewCapture>(") &&
     appSource.includes('"capture_browser_preview"') &&
@@ -5366,7 +5397,7 @@ expect(
     chatSidebarSource.includes("Projects") &&
     chatSidebarSource.includes("Recents") &&
     chatSidebarSource.includes("gyro-sidebar-recents") &&
-    chatSidebarSource.includes("No Chats") &&
+    chatSidebarSource.includes("No chats") &&
     chatSidebarSource.includes(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
@@ -5841,9 +5872,9 @@ expect(
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('aria-label="Jump to latest message"') &&
     surfaceSource.includes("isTranscriptAwayFromBottom") &&
-    surfaceSource.includes("distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK") &&
-    surfaceSource.includes("isFollowingTranscriptBottomRef") &&
-    surfaceSource.includes("const pinTranscriptToBottom") &&
+    surfaceSource.includes("distanceFromBottom <= BOTTOM_SLACK") &&
+    surfaceSource.includes("isFollowingBottomRef") &&
+    surfaceSource.includes("const pinToBottom") &&
     surfaceSource.includes('behavior: "smooth"') &&
     styleSource.includes(".gyro-chat-jump-to-bottom") &&
     styleSource.includes("bottom: calc(100% + 10px)") &&
@@ -5986,7 +6017,7 @@ expect(
 );
 expect(
   surfaceSource.includes("function isLoadedTranscriptClipped") &&
-    surfaceSource.includes("TRANSCRIPT_OVERFLOW_SLACK") &&
+    surfaceSource.includes("OVERFLOW_SLACK") &&
     surfaceSource.includes(
       "hasMoreBefore && onLoadEarlier && isLoadedChatClipped",
     ) &&
@@ -7079,8 +7110,10 @@ expect(
     ) &&
     appSource.includes('overrideContext && "goal" in overrideContext') &&
     appSource.includes("const turnMode =") &&
-    appSource.includes('chatDraftModesRef.current[draftModeKey] ?? "normal"') &&
-    appSource.includes("submittedChatMode={persistedActiveChatMode}"),
+    /chatDraftModesRef\.current\[draftModeKey\]\s*\?\?\s*"normal"/.test(
+      appSource,
+    ) &&
+    appSource.includes("submittedChatMode={persistedSessionContext.mode}"),
   "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
 );
 expect(
