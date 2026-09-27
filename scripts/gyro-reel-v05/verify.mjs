@@ -1,0 +1,16 @@
+import {execFileSync} from 'node:child_process';
+import {readFileSync,writeFileSync,readdirSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+const dir='docs/media/launch/reel-v05';
+const file=`${dir}/gyro-launch-16x9-15s-en-v05.mp4`;
+const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-show_format','-of','json',file],{encoding:'utf8'}));
+const v=probe.streams.find(s=>s.codec_type==='video'),a=probe.streams.find(s=>s.codec_type==='audio');
+const hash=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
+const frames=readdirSync(`${dir}/frames`).filter(f=>/^\d{4}\.jpg$/.test(f));
+const holdHashes=new Set(frames.filter(f=>Number(f.slice(0,4))>=780).map(f=>hash(`${dir}/frames/${f}`)));
+const poses=JSON.parse(readFileSync(`${dir}/render-poses.json`,'utf8'));
+const stepMax=Math.max(...poses.slice(1).map((p,i)=>Math.hypot(p.focus[0]-poses[i].focus[0],p.focus[1]-poses[i].focus[1])));
+const checks={dimensions:v.width===1920&&v.height===1080,frameRate:v.r_frame_rate==='60/1',duration:Math.abs(Number(v.duration)-15)<.001,frameCount:Number(v.nb_frames)===900,stereo:a.channels===2&&a.channel_layout==='stereo',sampleRate:a.sample_rate==='48000',renderedFrames:frames.length===900,twoSecondHoldIdentical:holdHashes.size===1};
+writeFileSync(`${dir}/technical-qa.json`,JSON.stringify({checks,maximumCameraTravelPerFrame:stepMax,sha256:hash(file),video:{codec:v.codec_name,width:v.width,height:v.height,fps:v.r_frame_rate,frames:v.nb_frames,duration:v.duration},audio:{codec:a.codec_name,channels:a.channels,sampleRate:a.sample_rate,duration:a.duration}},null,2));
+console.log(JSON.stringify(checks,null,2));
+if(Object.values(checks).some(v=>!v))process.exitCode=1;

@@ -1,0 +1,31 @@
+{
+  "fps": 60,
+  "duration": 15,
+  "width": 1920,
+  "height": 1080,
+  "cues": {
+    "one": 0,
+    "task": 0.4,
+    "selection": 0.82,
+    "taskFragment": 1.45,
+    "codeFragment": 1.7,
+    "shellFragment": 2.1,
+    "places": 2.3,
+    "scatter": 2.8,
+    "converge": 3.65,
+    "lock": 5.35,
+    "meet": 4.95,
+    "conversation": 5.6,
+    "reviewClick": 6.7,
+    "review": 6.8,
+    "reviewHold": 7.95,
+    "terminal": 8.55,
+    "terminalHold": 9.6,
+    "pullback": 9.95,
+    "statement": 10.65,
+    "clear": 11.75,
+    "brand": 12.0,
+    "soon": 12.5,
+    "hold": 13
+  }
+}

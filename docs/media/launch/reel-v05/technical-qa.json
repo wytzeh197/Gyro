@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "dimensions": true,
+    "frameRate": true,
+    "duration": true,
+    "frameCount": true,
+    "stereo": true,
+    "sampleRate": true,
+    "renderedFrames": true,
+    "twoSecondHoldIdentical": true
+  },
+  "maximumCameraTravelPerFrame": 88.1608295594719,
+  "sha256": "3440f7fbbb36379a4061c776b7da60e0d1d7e437a10edb22de9e51543d6fa90c",
+  "video": {
+    "codec": "h264",
+    "width": 1920,
+    "height": 1080,
+    "fps": "60/1",
+    "frames": "900",
+    "duration": "15.000000"
+  },
+  "audio": {
+    "codec": "aac",
+    "channels": 2,
+    "sampleRate": "48000",
+    "duration": "15.000000"
+  }
+}
