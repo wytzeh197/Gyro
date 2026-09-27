@@ -48,7 +48,7 @@
 
 .gyro-browser-feedback-form span {
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-browser-feedback-form textarea {
@@ -71,7 +71,7 @@
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
   border-radius: 999px;
   color: var(--gyro-text);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   padding: 4px 10px;
 }
 
@@ -86,7 +86,7 @@
   color: var(--gyro-muted);
   display: flex;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   gap: 8px;
   justify-content: space-between;
   padding: 8px 10px;
@@ -103,7 +103,7 @@
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
   border-radius: 999px;
   color: var(--gyro-text);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   padding: 4px 10px;
 }
 

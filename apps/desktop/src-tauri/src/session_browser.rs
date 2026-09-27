@@ -698,7 +698,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (highlight) highlight.remove();
     highlight = null;
   }};
-  const flashTarget = (el) => {{
+  const flashTarget = (el, options = {{}}) => {{
     try {{
       clearHighlight();
       const rect = el.getBoundingClientRect();
@@ -725,8 +725,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       cursor.style.cssText = [
         "position:fixed", "pointer-events:none", "display:flex",
         "align-items:center", "gap:4px",
-        "left:" + Math.max(0, Math.min(window.innerWidth - 76, rect.left + rect.width / 2)) + "px",
-        "top:" + Math.max(0, Math.min(window.innerHeight - 32, rect.top + rect.height / 2)) + "px",
+        "left:" + Math.max(0, Math.min(window.innerWidth - 76, (options.x ?? (rect.left + rect.width / 2)))) + "px",
+        "top:" + Math.max(0, Math.min(window.innerHeight - 32, (options.y ?? (rect.top + rect.height / 2)))) + "px",
         "font:600 11px system-ui", "color:#fff",
         "filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))",
       ].join(";");
@@ -742,10 +742,16 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       path.setAttribute("stroke-linejoin", "round");
       arrow.appendChild(path);
       const label = document.createElement("span");
-      label.textContent = "Model";
+      label.textContent = String(options.actor || "Model").slice(0, 32);
       label.style.cssText = "background:#0874df;border-radius:4px;padding:2px 5px";
       cursor.append(arrow, label);
       box.appendChild(cursor);
+      if (options.action === "drag" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {{
+        cursor.animate([
+          {{ transform: "translate(0,0)" }},
+          {{ transform: "translate(" + (options.toX - options.x) + "px," + (options.toY - options.y) + "px)" }},
+        ], {{ duration: 240, fill: "forwards", easing: "ease-out" }});
+      }}
       document.documentElement.appendChild(box);
       highlight = box;
       highlightTimer = window.setTimeout(() => {{
@@ -758,6 +764,13 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   window.__gyroBrowserAgent = {{
     clearHighlight() {{
       clearHighlight();
+      return {{ ok: true }};
+    }},
+    showPointer(options) {{
+      // A click may already have navigated. Never paint old coordinates on a new page.
+      if (options.url !== location.href) return {{ ok: true }};
+      const el = document.elementFromPoint(options.x, options.y);
+      if (el) flashTarget(el, options);
       return {{ ok: true }};
     }},
     readPage(options) {{
@@ -838,14 +851,14 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
       clickEl(el);
-      flashTarget(el);
+      flashTarget(el, options);
       return {{ ok: true, ref: options.ref, name: targetName(el) }};
     }},
     type(options) {{
       const el = options && options.ref ? resolveRef(options.ref) : document.activeElement;
       if (!el) return {{ ok: false, error: "no target element" }};
       const typed = Object.assign({{ ref: el.__gyroRef || null, name: targetName(el) }}, typeInto(el, options && options.text, !!(options && options.submit)));
-      if (typed.ok) flashTarget(el);
+      if (typed.ok) flashTarget(el, options);
       return typed;
     }},
     formInput(options) {{
@@ -855,7 +868,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         return {{ ok: false, error: "credential fields are not writable by the model" }};
       }}
       const name = targetName(el);
-      flashTarget(el);
+      flashTarget(el, options);
       const value = String((options && options.value) ?? "");
       if (el.tagName.toLowerCase() === "select") {{
         el.value = value;
@@ -1430,14 +1443,12 @@ pub fn mouse_session_browser<R: Runtime>(
                     let window = view
                         .window()
                         .ok_or_else(|| "browser window is not available".to_string())?;
-                    // The browser webview is a child overlay. In automated
-                    // native smoke runs the app may not yet be the key app,
-                    // and AppKit then drops mouse-moved events for it.
-                    window.makeKeyAndOrderFront(None);
-                    if let Some(mtm) = objc2::MainThreadMarker::new() {
-                        let native_app = NSApplication::sharedApplication(mtm);
-                        #[allow(deprecated)]
-                        native_app.activateIgnoringOtherApps(true);
+                    // System mouse input must never pull focus from another app.
+                    let mtm = objc2::MainThreadMarker::new()
+                        .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
+                    let native_app = NSApplication::sharedApplication(mtm);
+                    if !native_app.isActive() || !window.isKeyWindow() {
+                        return Err("Bring Gyro and this chat's Browser to the foreground before using the mouse".into());
                     }
                     window.setAcceptsMouseMovedEvents(true);
                     let bounds = view.bounds();
@@ -1711,12 +1722,19 @@ pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Opt
     if !matches!(
         result.capability_id,
         gyro_core::CapabilityId::BrowserClick
+            | gyro_core::CapabilityId::BrowserMouse
             | gyro_core::CapabilityId::BrowserType
             | gyro_core::CapabilityId::BrowserFormInput
     ) {
         return None;
     }
-    let name = result.data.pointer("/data/name")?.as_str()?.trim();
+    let name = if result.capability_id == gyro_core::CapabilityId::BrowserMouse {
+        result.data.pointer("/target/name")
+    } else {
+        result.data.pointer("/data/name")
+    }?
+    .as_str()?
+    .trim();
     (!name.is_empty()).then(|| name.chars().take(80).collect())
 }
 

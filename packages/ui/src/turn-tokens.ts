@@ -107,7 +107,7 @@ export function turnTokenReadingForResponse(
       label: `${turnTokens.measured === false ? "~" : ""}${turnTokensLabel(turnTokens)}`,
       title:
         turnTokens.measured === false
-          ? `${turnTokensDetail(turnTokens)}. The provider supplied no count, so Gyro estimated this from the prompt and response.`
+          ? `${turnTokensDetail(turnTokens)}. Gyro estimated all or part of this usage from observed requests and output. Provider-owned context and image costs may be missing.`
           : turnTokensDetail(turnTokens),
     };
   }

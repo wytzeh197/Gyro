@@ -9,12 +9,13 @@ use std::{
     collections::{HashMap, HashSet},
     fs::OpenOptions,
     io::Write,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 use uuid::Uuid;
 
 const MAX_POINTS: usize = 4096;
-thread_local! { static ACTIVE: RefCell<Option<Trace>> = const { RefCell::new(None) }; }
+thread_local! { static ACTIVE: RefCell<Option<Arc<Mutex<Trace>>>> = const { RefCell::new(None) }; }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -28,8 +29,13 @@ pub enum Stage {
     ProtocolReady,
     PromptSent,
     FirstActivity,
+    FirstToken,
+    RequestStart,
+    RequestEnd,
     ToolStart,
     ToolEnd,
+    BrokerToolStart,
+    BrokerToolEnd,
     ApprovalStart,
     ApprovalEnd,
     ProviderComplete,
@@ -51,6 +57,8 @@ struct Point {
     attempt: u32,
     tool_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    request_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     outcome: Option<Outcome>,
 }
 #[derive(Serialize)]
@@ -63,6 +71,8 @@ struct Trace {
     points: Vec<Point>,
     outcome: Outcome,
     truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_requests: Option<crate::provider_observation::Summary>,
     #[serde(skip)]
     started: Option<Instant>,
     #[serde(skip)]
@@ -98,6 +108,7 @@ impl Trace {
                 .map_or(0., |s| s.elapsed().as_secs_f64() * 1000.),
             attempt: self.attempt,
             tool_index,
+            request_index: None,
             outcome: None,
         });
     }
@@ -106,8 +117,24 @@ pub fn enabled() -> bool {
     std::env::var("GYRO_TIMING_DIAGNOSTICS").as_deref() == Ok("1")
 }
 
+/// Attach the same bounded trace to broker/parallel-read workers. Attaching
+/// never writes a second trace and carries no provider content.
+#[derive(Clone, Default)]
+pub struct Handle(Option<Arc<Mutex<Trace>>>);
+pub fn capture() -> Handle {
+    Handle(ACTIVE.with(|slot| slot.borrow().clone()))
+}
+pub struct Attachment(Option<Arc<Mutex<Trace>>>);
+pub fn attach(handle: Handle) -> Attachment {
+    Attachment(ACTIVE.with(|slot| slot.replace(handle.0)))
+}
+impl Drop for Attachment {
+    fn drop(&mut self) {
+        ACTIVE.with(|slot| slot.replace(self.0.take()));
+    }
+}
 pub struct Scope {
-    previous: Option<Trace>,
+    previous: Option<Arc<Mutex<Trace>>>,
     active: bool,
 }
 impl Scope {
@@ -117,7 +144,7 @@ impl Scope {
     fn with_enabled(session_id: Uuid, turn_id: Uuid, enabled: bool) -> Self {
         let previous = if enabled {
             ACTIVE.with(|slot| {
-                slot.replace(Some(Trace {
+                slot.replace(Some(Arc::new(Mutex::new(Trace {
                     schema: "gyro.timing.v1",
                     trace_id: Uuid::new_v4(),
                     session_id,
@@ -125,12 +152,13 @@ impl Scope {
                     points: Vec::new(),
                     outcome: Outcome::Interrupted,
                     truncated: false,
+                    provider_requests: None,
                     started: Some(Instant::now()),
                     attempt: 0,
                     tools: HashMap::new(),
                     milestones: HashSet::new(),
                     prompt_on_spawn: false,
-                }))
+                }))))
             })
         } else {
             None
@@ -146,7 +174,7 @@ impl Scope {
     pub fn finish(&self, outcome: Outcome) {
         if self.active {
             ACTIVE.with(|s| {
-                if let Some(t) = s.borrow_mut().as_mut() {
+                if let Some(mut t) = s.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
                     t.outcome = outcome;
                     t.push(Stage::Complete, None);
                 }
@@ -161,9 +189,10 @@ impl Drop for Scope {
         }
         let trace = ACTIVE.with(|s| s.replace(self.previous.take()));
         if let Some(trace) = trace {
+            let Ok(trace) = trace.lock() else { return };
             // Diagnostics must never fail a provider run. Failure is visible on
             // stderr; recording success is never claimed when persistence fails.
-            if let Err(error) = write_record(&format!("backend-{}", trace.trace_id), &trace) {
+            if let Err(error) = write_record(&format!("backend-{}", trace.trace_id), &*trace) {
                 eprintln!("Gyro timing trace could not be saved: {}", error.kind());
             }
         }
@@ -171,7 +200,7 @@ impl Drop for Scope {
 }
 pub fn mark(stage: Stage) {
     ACTIVE.with(|s| {
-        if let Some(t) = s.borrow_mut().as_mut() {
+        if let Some(mut t) = s.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
             t.push(stage, None);
             if stage == Stage::ProcessSpawned && t.prompt_on_spawn {
                 t.prompt_on_spawn = false;
@@ -180,9 +209,29 @@ pub fn mark(stage: Stage) {
         }
     });
 }
+/// Request boundaries may repeat inside one model tool loop.
+pub fn request(stage: Stage, index: u32) {
+    ACTIVE.with(|slot| {
+        if let Some(mut trace) = slot.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
+            trace.milestones.remove(&stage);
+            let position = trace.points.len();
+            trace.push(stage, None);
+            if let Some(point) = trace.points.get_mut(position) {
+                point.request_index = Some(index);
+            }
+        }
+    });
+}
+pub fn provider_requests(summary: crate::provider_observation::Summary) {
+    ACTIVE.with(|slot| {
+        if let Some(mut trace) = slot.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
+            trace.provider_requests = Some(summary);
+        }
+    });
+}
 pub fn attempt() {
     ACTIVE.with(|s| {
-        if let Some(t) = s.borrow_mut().as_mut() {
+        if let Some(mut t) = s.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
             t.attempt += 1;
             t.tools.clear();
             t.milestones.clear();
@@ -194,14 +243,20 @@ pub fn attempt() {
 /// A CLI receives its prompt in argv at spawn, rather than a later protocol send.
 pub fn cli_prompt_on_spawn() {
     ACTIVE.with(|s| {
-        if let Some(t) = s.borrow_mut().as_mut() {
+        if let Some(mut t) = s.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
             t.prompt_on_spawn = true;
         }
     });
 }
 pub fn tool(id: &str, status: &str) {
+    tool_with_source(id, status, false);
+}
+pub fn broker_tool(id: &str, status: &str) {
+    tool_with_source(id, status, true);
+}
+fn tool_with_source(id: &str, status: &str, broker: bool) {
     ACTIVE.with(|s| {
-        if let Some(t) = s.borrow_mut().as_mut() {
+        if let Some(mut t) = s.borrow().as_ref().and_then(|trace| trace.lock().ok()) {
             if id.len() > 256 {
                 t.truncated = true;
                 return;
@@ -218,7 +273,14 @@ pub fn tool(id: &str, status: &str) {
                     }
                     let index = t.tools.len() as u32;
                     t.tools.insert(id.to_owned(), (index, false));
-                    t.push(Stage::ToolStart, Some(index));
+                    t.push(
+                        if broker {
+                            Stage::BrokerToolStart
+                        } else {
+                            Stage::ToolStart
+                        },
+                        Some(index),
+                    );
                 }
             } else if matches!(
                 status,
@@ -229,7 +291,14 @@ pub fn tool(id: &str, status: &str) {
                         *ended = true;
                         let index = *index;
                         let position = t.points.len();
-                        t.push(Stage::ToolEnd, Some(index));
+                        t.push(
+                            if broker {
+                                Stage::BrokerToolEnd
+                            } else {
+                                Stage::ToolEnd
+                            },
+                            Some(index),
+                        );
                         if let Some(point) = t.points.get_mut(position) {
                             point.outcome = Some(match status {
                                 "failed" | "error" => Outcome::Failed,
@@ -333,6 +402,38 @@ mod tests {
         ACTIVE.with(|s| assert!(s.borrow().is_none()));
     }
     #[test]
+    fn broker_workers_share_the_parent_trace_without_leaking_content() {
+        let mut scope = Scope::with_enabled(Uuid::new_v4(), Uuid::new_v4(), true);
+        attempt();
+        let handle = capture();
+        std::thread::spawn(move || {
+            let _attached = attach(handle);
+            tool("private-path", "running");
+            let approval = ApprovalScope::start();
+            drop(approval);
+            tool("private-path", "done");
+        })
+        .join()
+        .unwrap();
+        ACTIVE.with(|slot| {
+            let handle = slot.borrow_mut().take().unwrap();
+            let trace = handle.lock().unwrap();
+            assert!(trace
+                .points
+                .iter()
+                .any(|point| point.stage == Stage::ApprovalEnd));
+            assert!(trace
+                .points
+                .iter()
+                .any(|point| point.stage == Stage::ToolEnd));
+            assert!(!serde_json::to_string(&*trace)
+                .unwrap()
+                .contains("private-path"));
+        });
+        scope.active = false;
+    }
+
+    #[test]
     fn trace_deduplicates_is_bounded_and_never_serializes_tool_text() {
         let mut scope = Scope::with_enabled(Uuid::new_v4(), Uuid::new_v4(), true);
         attempt();
@@ -344,7 +445,7 @@ mod tests {
         tool("sensitive command", "done");
         ACTIVE.with(|s| {
             let slot = s.borrow();
-            let t = slot.as_ref().unwrap();
+            let t = slot.as_ref().unwrap().lock().unwrap();
             assert_eq!(
                 t.points
                     .iter()
@@ -356,7 +457,7 @@ mod tests {
                 t.points.iter().filter(|p| p.tool_index.is_some()).count(),
                 2
             );
-            assert!(!serde_json::to_string(t).unwrap().contains("sensitive"));
+            assert!(!serde_json::to_string(&*t).unwrap().contains("sensitive"));
         });
         protocol_item("sensitive MCP arguments", "mcpToolCall", "running");
         protocol_item("sensitive MCP arguments", "mcpToolCall", "failed");
@@ -369,7 +470,7 @@ mod tests {
         mark(Stage::ProcessSpawned);
         ACTIVE.with(|s| {
             let slot = s.borrow();
-            let t = slot.as_ref().unwrap();
+            let t = slot.as_ref().unwrap().lock().unwrap();
             assert_eq!(
                 t.points
                     .iter()
@@ -388,7 +489,7 @@ mod tests {
                 .points
                 .windows(2)
                 .all(|p| p[0].elapsed_ms <= p[1].elapsed_ms));
-            assert!(!serde_json::to_string(t).unwrap().contains("sensitive"));
+            assert!(!serde_json::to_string(&*t).unwrap().contains("sensitive"));
             assert!(t
                 .points
                 .iter()
@@ -410,7 +511,8 @@ mod tests {
         }
         ACTIVE.with(|s| {
             let mut slot = s.borrow_mut();
-            let t = slot.take().unwrap();
+            let trace = slot.take().unwrap();
+            let t = trace.lock().unwrap();
             assert!(t.truncated);
             assert_eq!(t.points.len(), MAX_POINTS);
         });

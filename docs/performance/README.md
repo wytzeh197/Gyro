@@ -40,6 +40,9 @@ numeric tool indexes. No prompts, paths, commands, tool arguments, model output,
 or error text enter their wire format. Frontend records accept only a turn UUID
 and four bounded numeric durations; unknown fields are rejected. Each backend
 trace is capped at 4,096 points; the frontend retains at most 128 turns.
+Backend traces also carry numeric request/retry counts and reported or estimated
+usage totals. Broker worker traces attach to their owning turn; protocol and
+broker tool boundaries remain separate to avoid double-counting tools.
 
 Stage semantics:
 
@@ -51,7 +54,10 @@ Stage semantics:
 | Process start → spawned      | Subprocess creation, excluding protocol initialization               |
 | Spawned → protocol ready     | Runtime initialization and new/resumed session readiness             |
 | Prompt sent → first activity | First useful emitted activity, excluding heartbeats                  |
+| First token                  | First nonempty streamed text delta                                   |
+| Request start/end            | Each API/Ollama HTTP exchange, including retry/compatibility attempts  |
 | Tool start/end               | Provider tool boundaries; overlaps must be merged for wall time      |
+| Broker tool start/end        | Capability execution on its worker, independent of protocol hooks    |
 | Approval start/end           | Each synchronous approval wait on the provider worker                |
 | Provider complete → complete | Usage/result persistence and final desktop response work             |
 | Received → paint opportunity | Accepted ordered event, React commit, then two animation frames      |
@@ -67,13 +73,15 @@ produce protocol/tool timing when called by a traced desktop worker.
 Traces flush at worker exit. A hard process kill can leave no final timing file;
 the session event ledger and startup reconciliation are the evidence for that case.
 The collector reports persistence failures without failing the provider request.
-The synchronous approval hook does not cover every asynchronous capability-server
-approval path; those events remain in the existing capability ledger.
+Synchronous provider approvals and capability-broker approval waits are traced.
+Asynchronous proposals remain in the existing capability ledger. Broker queue
+delay is not yet separately measured.
 
 ## Reproduce the provider matrix
 
-This command makes real provider calls through existing CLI sign-ins and may use
-paid usage. It creates a disposable store and fixture repositories:
+This command makes real provider calls through existing CLI sign-ins, API preset
+credentials, or the local Ollama runtime and may use paid usage. It creates a
+disposable store and fixture repositories:
 
 ```sh
 node scripts/benchmark-providers.mjs --spec docs/performance/benchmark-spec.json
@@ -85,6 +93,21 @@ sequential trials within each provider. A resumed measurement excludes its
 read-only bootstrap turn. Authentication/model/executable failures mark later
 slots unavailable. Each completed trial is checkpointed. To resume an interrupted
 matrix, pass `--resume` with the printed temporary root and the same spec.
+
+The existing spec is a historical CLI matrix. To compare execution families,
+copy it and select up to three executable built-in provider IDs, for example
+`openai`, `openrouter`, and `ollama`, with models actually available to those
+accounts/runtime. Supply `effort` explicitly (an empty string leaves it unset).
+Custom endpoint configuration is not copied into the disposable store. The
+summary discovers provider files and expected slots from the supplied spec.
+It includes first-token time, request counts, observed usage, and sample p95;
+five trials cannot establish a stable production tail-latency claim.
+
+The current harness covers readme edits, code fixes, and follow-up edits in fresh
+and resumed sessions. Separate no-tool, cancellation, and cold-versus-warm local
+trials are still needed for the full upgrade baseline. No cross-family live
+baseline was collected during the September 27 implementation; see the
+[implementation report](../reviews/provider-backend-upgrade-2026-09-27.md).
 
 The debug-only native entry uses the actual desktop `run_provider_chat` command,
 store, capability bridge, cancellation manager, and provider adapter. It uses
@@ -120,6 +143,6 @@ CI=1 pnpm --filter @gyro-dev/desktop build
 cargo test --workspace
 ```
 
-The retry fault probe characterizes current behavior, including a known duplicate
-mutation after a disconnect. A passing probe means the evidence was reproduced;
-it does not mean that behavior is safe. See the dated report for the finding.
+The current retry fault probe asserts that a disconnect after a published edit
+does not replay it. Historical reports describe the behavior of their dated
+checkouts. Mock fault checks do not establish every vendor's live resume behavior.

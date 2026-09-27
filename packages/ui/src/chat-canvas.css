@@ -62,7 +62,7 @@
 }
 
 .gyro-canvas-draft-status {
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-canvas :is(button, select, input) {
@@ -72,7 +72,7 @@
   background: var(--gyro-pane);
   color: var(--gyro-text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   padding: 4px 8px;
 }
 .gyro-canvas button {
@@ -120,7 +120,7 @@
 .gyro-canvas-preview-tools > span {
   flex: 1;
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 .gyro-canvas-preview-stage {
   flex: 1;

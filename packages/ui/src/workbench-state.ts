@@ -1,3 +1,4 @@
+import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
 import type {
   AppDestination,
   Automation,
@@ -66,6 +67,8 @@ import type {
   TerminalTemplate,
   ThemeMode,
   WorkbenchDensity,
+  InterfaceSize,
+  MotionSpeed,
   WorkbenchMode,
   WorkbenchPaneTab,
   WorkbenchState,
@@ -1438,6 +1441,8 @@ export type WorkbenchAction =
       secondaryColor: string;
     }
   | { type: "set-density"; density: WorkbenchDensity }
+  | { type: "set-interface-size"; interfaceSize: InterfaceSize }
+  | { type: "set-motion-speed"; motionSpeed: MotionSpeed }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
@@ -1674,6 +1679,7 @@ export type WorkbenchAction =
   | { type: "set-diff-review-state"; state: DiffApprovalState; action: string }
   | { type: "undo-diff-action"; action: string }
   | { type: "add-diff-comment"; path: string }
+  | { type: "browser-session"; sessionId: string; action: WorkbenchAction }
   | { type: "browser-close" }
   | { type: "set-browser-url"; url: string }
   /**
@@ -1848,6 +1854,32 @@ export function workbenchReducer(
   action: WorkbenchAction,
 ): WorkbenchState {
   switch (action.type) {
+    case "browser-session": {
+      // Reuse browser transitions while keeping async events bound to their owner.
+      if (
+        !action.action.type.startsWith("browser-") &&
+        action.action.type !== "set-browser-url"
+      )
+        return state;
+      if (action.action.type === "browser-session") return state;
+      const scoped = workbenchReducer(
+        {
+          ...state,
+          browserPreview:
+            state.browserPreviewsBySession?.[action.sessionId] ??
+            defaultBrowserPreview(),
+        },
+        action.action,
+      );
+      return {
+        ...scoped,
+        browserPreview: state.browserPreview,
+        browserPreviewsBySession: {
+          ...state.browserPreviewsBySession,
+          [action.sessionId]: scoped.browserPreview,
+        },
+      };
+    }
     case "reset-state":
       return action.state ?? createInitialWorkbenchState();
     case "reset-ui-preferences": {
@@ -1860,6 +1892,8 @@ export function workbenchReducer(
           mainColor: defaults.mainColor,
           secondaryColor: defaults.secondaryColor,
           density: defaults.density,
+          interfaceSize: defaults.interfaceSize,
+          motionSpeed: defaults.motionSpeed,
           sidebarChatsCollapsed: defaults.sidebarChatsCollapsed,
           chatEnvironmentRailOpen: defaults.chatEnvironmentRailOpen,
           activeChatPanel: defaults.activeChatPanel,
@@ -1990,6 +2024,10 @@ export function workbenchReducer(
           ),
         },
       };
+    case "set-interface-size":
+      return { ...state, preferences: { ...state.preferences, interfaceSize: normalizedInterfaceSize(action.interfaceSize) } };
+    case "set-motion-speed":
+      return { ...state, preferences: { ...state.preferences, motionSpeed: normalizedMotionSpeed(action.motionSpeed) } };
     case "set-density":
       return {
         ...state,
@@ -3941,6 +3979,7 @@ export function workbenchReducer(
         browserPreview: {
           ...state.browserPreview,
           url: "",
+          nativeHost: false,
           title: undefined,
           status: "idle",
           history: [],
@@ -4528,6 +4567,8 @@ function normalizeWorkbenchPreferences(
         )
       : [],
     density: preferences?.density === "compact" ? "compact" : "comfortable",
+    interfaceSize: normalizedInterfaceSize(preferences?.interfaceSize),
+    motionSpeed: normalizedMotionSpeed(preferences?.motionSpeed),
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),

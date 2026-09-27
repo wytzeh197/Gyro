@@ -12,6 +12,7 @@ pub(super) struct BrowserMouseOutcome {
 pub(super) fn execute<R: Runtime>(
     app: &AppHandle<R>,
     session_id: &str,
+    actor: &str,
     arguments: &Value,
 ) -> Result<BrowserMouseOutcome, String> {
     let argument = |key: &str| {
@@ -95,6 +96,17 @@ pub(super) fn execute<R: Runtime>(
         }
     }
     session_browser::mouse_session_browser(app, session_id, action, x, y, to_x, to_y)?;
+    // Pointer feedback is best effort: navigation can replace the document
+    // immediately after a successful click. It must not turn success into retry.
+    let _ = session_browser::call_agent(
+        app,
+        session_id,
+        "showPointer",
+        json!({
+            "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+            "actor": actor, "url": reference.url,
+        }),
+    );
     Ok(BrowserMouseOutcome {
         action: action.to_string(),
         url: reference.url,

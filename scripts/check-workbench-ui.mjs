@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
+import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
+import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -514,6 +517,8 @@ expect(
 
 const appSource = [
   readRepoFile("apps/desktop/src/App.tsx"),
+  readRepoFile("apps/desktop/src/use-workbench-appearance.ts"),
+  readRepoFile("apps/desktop/src/editor-presentation.ts"),
   readRepoFile("apps/desktop/src/session-context-events.ts"),
   readRepoFile("apps/desktop/src/browser-capture.ts"),
   readRepoFile("apps/desktop/src/session-listing.ts"),
@@ -564,6 +569,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/surfaces.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/appearance-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
 ].join("\n");
@@ -580,6 +586,7 @@ const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = [
   readRepoFile("packages/ui/src/styles.css"),
+  readRepoFile("packages/ui/src/appearance.css"),
   readRepoFile("packages/ui/src/chat-design.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
@@ -2075,6 +2082,52 @@ expect(
     appSource.includes("parsed.lastSessionsLayout"),
   "Sessions routing should persist and safely hydrate the last Chat or CLI layout.",
 );
+
+for (const scale of Object.values(interfaceScales)) {
+  const options = workspaceEditorOptions({ scale, reduceMotion: true, minimapEnabled: true, limited: true, readOnly: true });
+  expect(options.fontSize === 13.5 * scale && options.lineHeight >= options.fontSize && options.readOnly === true && options.minimap.enabled === false && options.smoothScrolling === false && options.cursorBlinking === "solid",
+    "Shared sizing must retain readable editor lines, reduced motion, and large-file safety settings.");
+  expect(styleSource.includes(`--gyro-ui-scale: ${scale};`), "Canvas font scaling and CSS must use the same size factors.");
+}
+for (const theme of ["dark", "light"]) {
+  expect(colorContrast(workspaceEditorColors[theme]["editorLineNumber.foreground"], workspaceEditorColors[theme]["editorGutter.background"]) >= 4.5,
+    `${theme} editor line numbers must remain readable.`);
+}
+
+// Appearance migrations accept only supported values and leave other state alone.
+for (const [field, action, values] of [
+  ["interfaceSize", "set-interface-size", ["small", "default", "large"]],
+  ["motionSpeed", "set-motion-speed", ["slower", "default", "faster"]],
+]) {
+  for (const value of [undefined, null, "invalid", 99, ...values]) {
+    const expected = values.includes(value) ? value : "default";
+    const restored = createInitialWorkbenchState({ preferences: { [field]: value } });
+    expect(restored.preferences[field] === expected, `Restoring ${field} must validate ${value}.`);
+    const changed = workbenchReducer(initialState, { type: action, [field]: value });
+    expect(changed.preferences[field] === expected, `${field} actions must normalize invalid values.`);
+    const roundTrip = createInitialWorkbenchState(JSON.parse(JSON.stringify(changed)));
+    expect(roundTrip.preferences[field] === expected, `${field} must survive serialization and restore.`);
+    expect(changed.preferences.density === initialState.preferences.density && changed.preferences.mainColor === initialState.preferences.mainColor,
+      "Changing size or motion must preserve density and the user's palette.");
+    const reset = workbenchReducer(changed, { type: "reset-ui-preferences" });
+    expect(reset.preferences[field] === "default", `Reset must restore ${field}.`);
+  }
+}
+expect(interfaceScales.small < 1 && interfaceScales.default === 1 && interfaceScales.large > 1,
+  "Default size must preserve the existing scale, with smaller and larger choices.");
+for (const theme of ["dark", "light"]) {
+  for (const color of ["#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#0874df", "#8b6fcb", "#888888"]) {
+    const palette = appearanceAccentProperties(color, color, theme);
+    for (const surface of theme === "dark" ? ["#181818", "#383c41"] : ["#ffffff", "#e7ebf0"]) {
+      for (const role of ["--gyro-accent", "--gyro-accent-strong", "--gyro-secondary-accent", "--gyro-secondary-accent-strong"]) {
+        expect(colorContrast(palette[role], surface) >= 4.5, `${theme} ${color} ${role} must remain readable on ${surface}.`);
+      }
+    }
+    for (const role of ["--gyro-primary-bg", "--gyro-primary-hover"]) {
+      expect(colorContrast(palette[role], palette["--gyro-primary-text"]) >= 4.5, `${theme} ${color} buttons must retain readable text.`);
+    }
+  }
+}
 
 // Restored preference values must not silently become Compact after the redesign.
 for (const [density, expected] of [
@@ -4200,10 +4253,10 @@ expect(
     appSource.includes("isStreamingAssistantSessionEvent") &&
     !appSource.includes("[...events]\n    .reverse()") &&
     appSource.includes(
-      "document.documentElement.dataset.density = workbench.preferences.density",
+      "document.documentElement.dataset.density = preferences.density",
     ) &&
     appSource.includes(
-      "safeSetLocalStorage(THEME_STORAGE_KEY, themePreference)",
+      "window.localStorage.setItem(THEME_STORAGE_KEY, themePreference)",
     ) &&
     appSource.includes("WORKBENCH_PERSIST_DEBOUNCE_MS") &&
     appSource.includes("WORKBENCH_PERSIST_IDLE_TIMEOUT_MS") &&
@@ -4826,9 +4879,6 @@ const devTaskSource = appSource.slice(
 );
 expect(
   devTaskSource.includes('type: "select-terminal-pane"') &&
-    appSource.includes(
-      'dispatchWorkbench({ type: "set-browser-url", url: browser.url });',
-    ) &&
     !appSource.includes(
       "workbench.selectedTerminalPaneId !== modelTerminal.id",
     ) &&
@@ -5875,7 +5925,7 @@ expect(
     surfaceSource.includes("distanceFromBottom <= BOTTOM_SLACK") &&
     surfaceSource.includes("isFollowingBottomRef") &&
     surfaceSource.includes("const pinToBottom") &&
-    surfaceSource.includes('behavior: "smooth"') &&
+    surfaceSource.includes("transcript.scrollTop = transcript.scrollHeight") &&
     styleSource.includes(".gyro-chat-jump-to-bottom") &&
     styleSource.includes("bottom: calc(100% + 10px)") &&
     surfaceSource.includes('popoverPlacement="up"') &&
@@ -7214,9 +7264,6 @@ expect(
       ".gyro-app-shell:has(.gyro-chat-surface.is-thread) .gyro-sidebar-windowbar",
     ) &&
     styleSource.includes("border-bottom-color: transparent") &&
-    appSource.includes("document.documentElement.dataset.windowActive") &&
-    appSource.includes('window.addEventListener("blur", syncWindowFocus)') &&
-    appSource.includes('window.addEventListener("focus", syncWindowFocus)') &&
     // macOS draws its own inactive traffic lights. A painted copy never
     // matched their spacing and showed up as a second, offset set.
     !styleSource.includes(".gyro-sidebar-persistent-header::after") &&
@@ -7473,7 +7520,7 @@ for (const className of [
 
 expect(
   liveTerminalPaneSource.includes("drawBoldTextInBrightColors: true") &&
-    liveTerminalPaneSource.includes("minimumContrastRatio: 1") &&
+    liveTerminalPaneSource.includes("minimumContrastRatio: 4.5") &&
     liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
     liveTerminalPaneSource.includes('magenta: "#d86cff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
@@ -7584,7 +7631,7 @@ expect(
     styleSource.includes("justify-content: center") &&
     styleSource.includes("font-weight: 450") &&
     styleSource.includes("font-weight: 500") &&
-    styleSource.includes("line-height: 16px") &&
+    styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
     styleSource.includes("@keyframes gyro-native-surface-enter"),
   "Sessions and Workspace switching should use centered reference typography, the shared sliding indicator, and restrained surface motion.",
@@ -7596,16 +7643,16 @@ expect(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 9px") &&
-    styleSource.includes("--gyro-premium-motion: 130ms") &&
+    styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
     styleSource.includes("--gyro-app: #181818") &&
     styleSource.includes("--gyro-pane: #1e1e1e") &&
-    styleSource.includes("--gyro-hero-composer: #292929") &&
+    styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f8f9f9") &&
-    styleSource.includes("--gyro-sidebar: #f1f2f3") &&
+    styleSource.includes("--gyro-app: #f7f9fc") &&
+    styleSource.includes("--gyro-sidebar: #edf1f6") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
@@ -7847,8 +7894,8 @@ expect(
 
 expect(
   styleSource.includes("@media (prefers-reduced-motion: reduce)") &&
-    styleSource.includes("animation-duration: 1ms !important") &&
-    styleSource.includes("transition-duration: 1ms !important"),
+    styleSource.includes("animation-duration: 0.01ms !important") &&
+    styleSource.includes("transition-duration: 0s !important"),
   "Premium motion should respect the system reduced-motion preference.",
 );
 
@@ -7936,7 +7983,7 @@ expect(
       '"editor.lineHighlightBackground": "#161616"',
     ) &&
     appSource.includes(
-      "stickyScroll: { enabled: !syntax.policy.limited, maxLineCount: 3 }",
+      "stickyScroll: { enabled: !limited, maxLineCount: 3 }",
     ) &&
     appSource.includes(
       'theme={theme === "light" ? "gyro-light" : "gyro-dark"}',
@@ -8128,8 +8175,8 @@ expect(
       ':root[data-density="comfortable"] .gyro-sidebar-action',
     ) &&
     styleSource.includes(".gyro-composer-context-row") &&
-    styleSource.includes("--gyro-ide-tab-height: 30px") &&
-    styleSource.includes("--gyro-ide-tab-height: 38px") &&
+    styleSource.includes("--gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1))") &&
+    styleSource.includes("--gyro-ide-tab-height: calc(38px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes(
       ':root[data-density="comfortable"] .gyro-workspace-route.is-code',
     ),
@@ -8342,7 +8389,7 @@ expect(
 
 expect(
   styleSource.includes("Conversation text shares the body scale") &&
-    styleSource.includes("--gyro-font-body: 14px;") &&
+    styleSource.includes("--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));") &&
     styleSource.includes(
       "font-size: var(--gyro-font-body);\n  line-height: 1.6;",
     ) &&

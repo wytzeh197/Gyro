@@ -17,7 +17,7 @@
   color: var(--gyro-faint);
   display: flex;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   gap: 7px;
   min-height: 24px;
   padding-left: 4px;
@@ -69,7 +69,7 @@
 }
 
 .gyro-chat-question-popup legend {
-  font-size: 15px;
+  font-size: calc(15px * var(--gyro-ui-scale, 1));
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.35;
@@ -101,7 +101,7 @@
   color: var(--gyro-muted);
   cursor: pointer;
   display: flex;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
   gap: 10px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -151,7 +151,7 @@
   display: inline-flex;
   flex: none;
   font-family: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   font-variant-numeric: tabular-nums;
   height: 20px;
   justify-content: center;
@@ -182,7 +182,7 @@
   color: var(--gyro-text);
   display: block;
   font: inherit;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
   line-height: 1.45;
   margin-top: 6px;
   height: 34px;
@@ -210,7 +210,7 @@
 .gyro-chat-question-draft,
 .gyro-chat-question-scroll > p[role="alert"] {
   color: var(--gyro-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   margin: 10px 4px 0;
   overflow-wrap: anywhere;
 }
@@ -231,7 +231,7 @@
 .gyro-chat-question-popup > footer > span {
   color: var(--gyro-faint);
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,7 +246,7 @@
   display: inline-flex;
   flex: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
   font-weight: 560;
   gap: 6px;
   min-height: 30px;

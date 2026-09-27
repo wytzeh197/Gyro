@@ -147,7 +147,9 @@ impl UsageTokens {
             cached_input_tokens: cached_input_tokens.unwrap_or_default(),
             output_tokens: output,
             reasoning_output_tokens: reasoning_output_tokens.unwrap_or_default(),
-            total_tokens: total_tokens.unwrap_or_default().max(input + output),
+            total_tokens: total_tokens
+                .unwrap_or_default()
+                .max(input.saturating_add(output)),
             measured: true,
         }
     }

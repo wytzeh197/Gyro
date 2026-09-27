@@ -1,0 +1,50 @@
+/* Size changes typography and controls, never the browser/native host coordinate
+   system. Pane widths remain user controlled. Default is the existing scale. */
+:root[data-interface-size="small"] {
+  --gyro-ui-scale: 0.9;
+}
+
+:root[data-interface-size="default"] {
+  --gyro-ui-scale: 1;
+}
+
+:root[data-interface-size="large"] {
+  --gyro-ui-scale: 1.15;
+}
+
+:root[data-motion-speed="slower"] {
+  --gyro-motion-factor: 1.5;
+}
+
+:root[data-motion-speed="default"] {
+  --gyro-motion-factor: 1;
+}
+
+:root[data-motion-speed="faster"] {
+  --gyro-motion-factor: 0.65;
+}
+
+/* Keep controls together when enlarged, and allow descriptions to wrap. The
+   parent Settings container already stacks labels and controls below 560px. */
+:root .gyro-settings-segmented {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+:root .gyro-settings-row > div:first-child {
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root *,
+  :root *::before,
+  :root *::after {
+    /* Finish finite entry animations so their content cannot remain hidden. */
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

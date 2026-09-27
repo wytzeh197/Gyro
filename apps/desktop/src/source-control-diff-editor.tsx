@@ -1,7 +1,12 @@
+import { useAppearance } from "@gyro-dev/ui";
 import { useSyntax } from "./editor/use-syntax";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PlainDiffView, ScmReviewToolbar, shouldUsePlainDiff } from "@gyro-dev/ui";
+import {
+  PlainDiffView,
+  ScmReviewToolbar,
+  shouldUsePlainDiff,
+} from "@gyro-dev/ui";
 import type { DiffOnMount } from "@monaco-editor/react";
 import type { EditorTab } from "@gyro-dev/ui";
 import { DiffEditor, remeasureMonacoFonts } from "./monaco-editor";
@@ -29,6 +34,7 @@ export default function SourceControlDiffEditor({
   theme: "light" | "dark";
   onOpenFile: () => void;
 }) {
+  const { scale, reduceMotion } = useAppearance();
   const [content, setContent] = useState<Content>();
   const [forcePlain, setForcePlain] = useState(false);
   const syntax = useSyntax(
@@ -107,7 +113,7 @@ export default function SourceControlDiffEditor({
     !unavailable &&
     !!content &&
     (forcePlain ||
-      !content.original && !content.modified && !!content.unified ||
+      (!content.original && !content.modified && !!content.unified) ||
       shouldUsePlainDiff(content.original, content.modified) ||
       syntax.policy.limited);
   const empty =
@@ -155,7 +161,10 @@ export default function SourceControlDiffEditor({
           <strong>Could not display this diff</strong>
           <span>{error || content?.notice}</span>
           <div className="gyro-plain-diff-actions">
-            <button onClick={() => setReload((value) => value + 1)} type="button">
+            <button
+              onClick={() => setReload((value) => value + 1)}
+              type="button"
+            >
               Try again
             </button>
             <button onClick={onOpenFile} type="button">
@@ -166,7 +175,9 @@ export default function SourceControlDiffEditor({
       ) : empty ? (
         <div className="gyro-code-empty" role="status">
           <strong>No text changes in this comparison</strong>
-          <span>The file is present on both sides with identical contents.</span>
+          <span>
+            The file is present on both sides with identical contents.
+          </span>
         </div>
       ) : usePlain && content ? (
         <PlainDiffView
@@ -251,8 +262,9 @@ export default function SourceControlDiffEditor({
               ignoreTrimWhitespace: false,
               fontFamily:
                 "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-              fontSize: 13,
-              lineHeight: 20,
+              fontSize: 13 * scale,
+              lineHeight: Math.round(20 * scale),
+              smoothScrolling: !reduceMotion,
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               padding: { top: 8, bottom: 12 },

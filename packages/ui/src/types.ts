@@ -26,6 +26,9 @@ export type ResolvedTheme = Exclude<ThemeMode, "system">;
 export type WorkbenchPaneTab =
   "diff" | "terminal" | "browser" | "problems" | "output" | "test-results";
 
+export type InterfaceSize = "small" | "default" | "large";
+export type MotionSpeed = "slower" | "default" | "faster";
+
 export type WorkbenchDensity = "comfortable" | "compact";
 
 export type WorkbenchMode = "local" | "worktree";
@@ -129,6 +132,7 @@ export type CapabilityId =
   | "browser-navigate"
   | "browser-back"
   | "browser-forward"
+  | "browser-mouse"
   | "browser-click"
   | "browser-type"
   | "browser-scroll"
@@ -1178,6 +1182,8 @@ export type WorkbenchPreferences = {
   mainColor: string;
   secondaryColor: string;
   density: WorkbenchDensity;
+  interfaceSize: InterfaceSize;
+  motionSpeed: MotionSpeed;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
@@ -1820,6 +1826,8 @@ export type WorkbenchState = {
   selectedAutomationId?: string;
   diffReview: DiffReview;
   browserPreview: BrowserPreview;
+  /** Native browsers and their transient UI state belong to individual chats. */
+  browserPreviewsBySession?: Record<string, BrowserPreview>;
   notifications: Notification[];
   providerStatuses: ProviderStatus[];
   providerSessions: ProviderSession[];

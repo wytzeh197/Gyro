@@ -1,3 +1,4 @@
+import { useAppearance } from "@gyro-dev/ui";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as XTermInstance } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
@@ -27,6 +28,9 @@ export function LiveTerminalPaneBody({
   pane: TerminalPane;
   theme: ResolvedTheme;
 }) {
+  const { scale, reduceMotion } = useAppearance();
+  const appearanceRef = useRef({ scale, reduceMotion });
+  appearanceRef.current = { scale, reduceMotion };
   const [selectionText, setSelectionText] = useState("");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermInstance | null>(null);
@@ -68,16 +72,16 @@ export function LiveTerminalPaneBody({
 
         const terminal = new Terminal({
           allowTransparency: true,
-          cursorBlink: true,
+          cursorBlink: !appearanceRef.current.reduceMotion,
           // Browser preview fixtures are plain text; native output is a raw PTY stream.
           convertEol: !isTauriRuntime(),
           drawBoldTextInBrightColors: true,
           fontFamily:
             "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-          fontSize: 12,
+          fontSize: 12 * appearanceRef.current.scale,
           lineHeight: 1.2,
           macOptionIsMeta: true,
-          minimumContrastRatio: 1,
+          minimumContrastRatio: 4.5,
           rightClickSelectsWord: true,
           scrollOnUserInput: true,
           scrollback: 5000,
@@ -206,7 +210,11 @@ export function LiveTerminalPaneBody({
   }, [pane.output]);
 
   useEffect(() => {
-    if (isActive) terminalRef.current?.focus();
+    if (terminalRef.current) {
+      terminalRef.current.options.fontSize = 12 * scale;
+      terminalRef.current.options.cursorBlink = !reduceMotion;
+      if (isActive) terminalRef.current.focus();
+    }
     // Also report dimensions when a stopped pane gets a new live process.
     const timer = window.setTimeout(() => {
       try {
@@ -239,7 +247,7 @@ export function LiveTerminalPaneBody({
       }
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [isActive, pane.id, pane.status]);
+  }, [isActive, pane.id, pane.status, scale, reduceMotion]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

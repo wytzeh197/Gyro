@@ -112,6 +112,7 @@ export type BrowserAction =
   | "console"
   | "network"
   | "capture"
+  | "mouse"
   | "click"
   | "type"
   | "scroll"
@@ -1802,6 +1803,7 @@ const BROWSER_ACTIONS: Record<string, BrowserAction> = {
   console: "console",
   network: "network",
   screenshot: "capture",
+  mouse: "mouse",
   click: "click",
   type: "type",
   scroll: "scroll",
@@ -1821,6 +1823,7 @@ const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
   console: ["Reading console", "Read console"],
   network: ["Reading network", "Read network"],
   capture: ["Capturing page", "Captured page"],
+  mouse: ["Using browser mouse", "Used browser mouse"],
   click: ["Clicking", "Clicked"],
   type: ["Typing", "Typed"],
   scroll: ["Scrolling", "Scrolled page"],

@@ -573,6 +573,7 @@ where
     }
 
     crate::timing::mark(crate::timing::Stage::PromptSent);
+    crate::provider_observation::native_prompt(&json!(prompt));
     let prompt_id = connection.send_request(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),

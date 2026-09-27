@@ -11,7 +11,7 @@ use codex_app_server::{
 use gyro_core::{
     begin_provider_mutation_transaction, begin_provider_mutation_transaction_with_cancellation,
     config::CommandProfile,
-    create_worktree, discover_ollama_models,
+    create_worktree,
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
     ollama_chat, prepare_claude_provider_mutation_transaction,
@@ -3494,16 +3494,13 @@ fn execute_ollama_provider(
                 "select an installed model with `--model <ollama-model>`",
             )
         })?;
-    let discovery = discover_ollama_models(provider.base_url.as_deref()).map_err(|error| {
+    let selected = gyro_core::discover_ollama_model(provider.base_url.as_deref(), model).map_err(|error| {
         cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
         )
     })?;
-    if !discovery
-        .models
-        .iter()
-        .any(|candidate| candidate.id == model)
+    if selected.is_none()
     {
         return Err(cli_failure(
             CliErrorCategory::InvalidInput,

@@ -31,10 +31,53 @@ const DELAYS: [Duration; 3] = [
     Duration::from_secs(3),
 ];
 
-pub(crate) fn http_response(
+// The transport and stream layers share three retries. Nested retry loops
+// previously allowed up to twelve HTTP sends for one generation.
+thread_local! { static REMAINING: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+struct RetryScope(Option<usize>);
+impl RetryScope {
+    fn start() -> Self {
+        Self(REMAINING.with(|slot| slot.replace(Some(3))))
+    }
+}
+impl Drop for RetryScope {
+    fn drop(&mut self) {
+        REMAINING.with(|slot| slot.set(self.0));
+    }
+}
+fn take_retry() -> bool {
+    REMAINING.with(|slot| match slot.get() {
+        None => true,
+        Some(0) => false,
+        Some(left) => {
+            slot.set(Some(left - 1));
+            true
+        }
+    })
+}
+pub(crate) fn compatibility_retry() -> bool {
+    if !take_retry() {
+        return false;
+    }
+    crate::provider_observation::retry();
+    true
+}
+fn jitter(delay: Duration) -> Duration {
+    let spread = delay.as_millis() / 4;
+    if spread == 0 {
+        return delay;
+    }
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u128;
+    delay + Duration::from_millis((seed % (spread + 1)) as u64)
+}
+
+pub(crate) fn http_response<T>(
     cancellation: &CancellationToken,
-    mut send: impl FnMut() -> Result<ureq::Response, ureq::Error>,
-) -> Result<ureq::Response, ureq::Error> {
+    mut send: impl FnMut() -> Result<T, ureq::Error>,
+) -> Result<T, ureq::Error> {
     for attempt in 0..=DELAYS.len() {
         if cancellation.is_cancelled() {
             return Err(cancelled());
@@ -44,7 +87,8 @@ pub(crate) fn http_response(
             Err(error) => {
                 let Some(delay) = DELAYS
                     .get(attempt)
-                    .and_then(|delay| retry_delay(&error, *delay))
+                    .and_then(|delay| retry_delay(&error, jitter(*delay)))
+                    .filter(|_| take_retry())
                 else {
                     return Err(error);
                 };
@@ -59,6 +103,7 @@ pub(crate) fn http_response(
                             .min(Duration::from_millis(50)),
                     );
                 }
+                crate::provider_observation::retry();
             }
         }
     }
@@ -136,11 +181,13 @@ mod tests {
     fn bounded_retries_and_permanent_errors() {
         for (code, expected) in [(429, 4), (401, 1), (403, 1), (400, 1), (404, 1)] {
             let mut calls = 0;
-            assert!(http_response(&CancellationToken::default(), || {
-                calls += 1;
-                Err(status(code, "0"))
-            })
-            .is_err());
+            assert!(
+                http_response::<ureq::Response>(&CancellationToken::default(), || {
+                    calls += 1;
+                    Err(status(code, "0"))
+                })
+                .is_err()
+            );
             assert_eq!(calls, expected);
         }
         assert_eq!(retry_delay(&status(429, "60"), Duration::ZERO), None);
@@ -150,10 +197,32 @@ mod tests {
         );
     }
     #[test]
+    fn nested_stream_and_http_retries_share_one_budget() {
+        let mut sends = 0;
+        let result: anyhow::Result<()> = stream_response(
+            &CancellationToken::default(),
+            |_| {
+                http_response(&CancellationToken::default(), || {
+                    sends += 1;
+                    if sends < 4 {
+                        Err(status(503, "0"))
+                    } else {
+                        Ok(ureq::Response::new(200, "OK", "").unwrap())
+                    }
+                })?;
+                anyhow::bail!("provider stream ended before completion")
+            },
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert_eq!(sends, 4);
+    }
+
+    #[test]
     fn cancellation_interrupts_backoff() {
         let token = CancellationToken::default();
         let mut calls = 0;
-        let result = http_response(&token, || {
+        let result = http_response::<ureq::Response>(&token, || {
             calls += 1;
             token.cancel();
             Err(status(503, "30"))
@@ -170,7 +239,11 @@ pub(crate) fn stream_response<T>(
     mut run: impl FnMut(&mut dyn FnMut(&str)) -> anyhow::Result<T>,
     mut on_delta: impl FnMut(&str),
 ) -> anyhow::Result<T> {
+    let _budget = RetryScope::start();
     for attempt in 0..3 {
+        if cancellation.is_cancelled() {
+            return Err(anyhow::anyhow!("Provider chat cancelled"));
+        }
         let mut published = false;
         let result = run(&mut |delta| {
             published |= !delta.is_empty();
@@ -196,10 +269,15 @@ pub(crate) fn stream_response<T>(
                         }) || error
                             .downcast_ref::<serde_json::Error>()
                             .is_some_and(|e| e.is_eof())));
-                if published || !interrupted || attempt == 2 || cancellation.is_cancelled() {
+                if published
+                    || !interrupted
+                    || attempt == 2
+                    || cancellation.is_cancelled()
+                    || !take_retry()
+                {
                     return Err(error);
                 }
-                let deadline = Instant::now() + DELAYS[attempt];
+                let deadline = Instant::now() + jitter(DELAYS[attempt]);
                 while Instant::now() < deadline {
                     if cancellation.is_cancelled() {
                         return Err(anyhow::anyhow!("Provider chat cancelled"));
@@ -210,6 +288,7 @@ pub(crate) fn stream_response<T>(
                             .min(Duration::from_millis(50)),
                     );
                 }
+                crate::provider_observation::retry();
             }
         }
     }

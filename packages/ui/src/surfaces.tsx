@@ -1,3 +1,5 @@
+import { AppearanceSettings } from "./appearance-settings";
+import { SettingsSegmented } from "./settings-controls";
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
@@ -154,7 +156,6 @@ import {
   XCircle,
 } from "lucide-react";
 import {
-  createContext,
   Fragment,
   memo,
   useCallback,
@@ -178,9 +179,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
-import themePreviewSystem from "./assets/theme-preview-system.png";
-import themePreviewLight from "./assets/theme-preview-light.png";
-import themePreviewDark from "./assets/theme-preview-dark.png";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import {
@@ -373,6 +371,8 @@ import type {
   CliUpdatePhase,
   CustomProviderDraft,
   WorkbenchDensity,
+  InterfaceSize,
+  MotionSpeed,
   FileReviewSummary,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -1008,12 +1008,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "appearance",
     label: "Appearance",
-    detail: "Theme, density, colors, and quick actions",
+    detail: "Theme, interface size, spacing, animation speed, and colors",
   },
   {
     section: "appearance",
     label: "Theme",
-    detail: "Switch between Light and Dark mode",
+    detail: "Follow the system or choose Light or Dark mode",
     keywords: "color appearance",
   },
   {
@@ -1030,9 +1030,27 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "appearance",
-    label: "Quick actions",
-    detail: "Show starter prompts below an empty new-chat composer",
-    keywords: "welcome start screen shortcuts buttons composer",
+    label: "Interface size",
+    detail: "Scale text and controls, including the editor and terminal",
+    keywords: "font text size scale zoom small large readability",
+  },
+  {
+    section: "appearance",
+    label: "Animation speed",
+    detail: "Slower, default, or faster transitions; respects Reduce Motion",
+    keywords: "motion animation speed reduced accessibility",
+  },
+  {
+    section: "appearance",
+    label: "Secondary color",
+    detail: "Supporting icons, badges, and quiet highlights",
+    keywords: "accent palette color",
+  },
+  {
+    section: "appearance",
+    label: "Default palette",
+    detail: "Restore Gyro blue and violet",
+    keywords: "reset colors",
   },
   {
     section: "usage-limits",
@@ -1911,7 +1929,7 @@ export function AppChrome({
                 `[data-setting-key="${settingsSearchKey(sectionLabel)}"]`,
               )
             : null);
-        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
         target?.focus({ preventScroll: true });
         target?.classList.add("is-search-target");
         window.setTimeout(
@@ -10949,26 +10967,6 @@ function ChatSidePanel({
  * and closing it returns the chat to an uninterrupted canvas without discarding
  * the tabs that were open.
  */
-/**
- * With the browser as the dock's only tab, the tab row and the address row say
- * the same thing twice. The dock lends its header to the browser toolbar
- * instead, so the page gets that height back.
- */
-const CompanionAddressSlotContext = createContext<HTMLElement | null>(null);
-
-function withinSlot(
-  slot: HTMLElement | null,
-  node: ReactNode,
-  /** Scoped styles follow a portal only if the wrapper carries their scope. */
-  wrapperClassName?: string,
-) {
-  if (!slot) return node;
-  return createPortal(
-    wrapperClassName ? <div className={wrapperClassName}>{node}</div> : node,
-    slot,
-  );
-}
-
 /** How long the presence strip lingers after the agent's last browser action. */
 const BROWSER_AGENT_PRESENCE_MS = 6_000;
 
@@ -11046,8 +11044,6 @@ function ChatCompanionDock({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isBrowserFocus = activeTab === "browser";
-  const isBrowserAddress = isBrowserFocus && openTabs.length === 1;
-  const [addressSlot, setAddressSlot] = useState<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLElement | null>(null);
   const widthMode: ChatCompanionWidthMode =
     activeTab === "browser" ? "browser" : "tool";
@@ -11099,7 +11095,6 @@ function ChatCompanionDock({
         "gyro-chat-companion",
         isResizing ? "is-resizing" : "",
         isBrowserFocus ? "is-browser-focus" : "",
-        isBrowserAddress ? "is-browser-address" : "",
         isExpanded ? "is-expanded" : "",
         overlay ? "is-overlay" : "",
         activeTab ? `is-${activeTab}` : "is-launcher",
@@ -11124,17 +11119,11 @@ function ChatCompanionDock({
         type="button"
       />
       <header className="gyro-chat-companion-tabs">
-        {isBrowserAddress ? (
-          <div className="gyro-chat-companion-address" ref={setAddressSlot} />
-        ) : null}
         <div className="gyro-chat-companion-tab-list" role="tablist">
           {openTabs.map((id) => {
             const Icon = chatCompanionTabIcons[id];
             const isActive = id === activeTab;
-            const label =
-              id === "browser" && browserTabLabel
-                ? browserTabLabel
-                : chatCompanionTabLabels[id];
+            const label = chatCompanionTabLabels[id];
             return (
               <span
                 className={[
@@ -11147,9 +11136,9 @@ function ChatCompanionDock({
               >
                 <button
                   aria-selected={isActive}
+                  title={id === "browser" ? browserTabLabel : label}
                   onClick={() => onSelectTab?.(id)}
                   role="tab"
-                  title={label}
                   type="button"
                 >
                   <Icon aria-hidden="true" size={14} />
@@ -11241,11 +11230,7 @@ function ChatCompanionDock({
         role="tabpanel"
       >
         {activeTab ? (
-          <CompanionAddressSlotContext.Provider
-            value={isBrowserAddress ? addressSlot : null}
-          >
-            {children}
-          </CompanionAddressSlotContext.Provider>
+          children
         ) : (
           <nav className="gyro-companion-launcher" aria-label="Companion tools">
             {chatCompanionTabs.map(({ icon: Icon, id, label }) => (
@@ -18769,7 +18754,6 @@ export function BrowserPreviewSurface({
   agentActivity?: string;
   onStopAgent?: () => void;
 }) {
-  const addressSlot = useContext(CompanionAddressSlotContext);
   const preview =
     browserPreview ??
     ({
@@ -18797,7 +18781,7 @@ export function BrowserPreviewSurface({
     () => setIsBrowserMenuOpen(false),
   );
   useEffect(() => {
-    if (!isBlank) setAddressValue(preview.url);
+    setAddressValue(preview.url);
   }, [isBlank, preview.url]);
   const canGoBack = preview.historyIndex > 0;
   const canGoForward = preview.historyIndex < preview.history.length - 1;
@@ -18924,214 +18908,204 @@ export function BrowserPreviewSurface({
 
   return (
     <div className={previewClassName}>
-      {/* One grid row holds the toolbar and the presence strip, whether or not
-          the toolbar has moved into the dock header, so the frame keeps the
-          flexible row and the status bar keeps the last. */}
+      {/* The browser owns navigation; the surrounding dock owns tool tabs. */}
       <div className="gyro-browser-preview-head">
-        {withinSlot(
-          isChat ? addressSlot : null,
-          <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
-            <div
-              className="gyro-browser-nav-group"
-              role="group"
-              aria-label="Navigation"
+        <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
+          <div
+            className="gyro-browser-nav-group"
+            role="group"
+            aria-label="Navigation"
+          >
+            <button
+              aria-label="Back"
+              title="Back"
+              disabled={!canGoBack || showingCapture}
+              onClick={onBack}
+              type="button"
             >
-              <button
-                aria-label="Back"
-                title="Back"
-                disabled={!canGoBack || showingCapture}
-                onClick={onBack}
-                type="button"
-              >
-                <ChevronRight className="is-back" size={15} />
-              </button>
-              <button
-                aria-label="Forward"
-                title="Forward"
-                disabled={!canGoForward || showingCapture}
-                onClick={onForward}
-                type="button"
-              >
-                <ChevronRight size={15} />
-              </button>
-              <button
-                aria-label="Reload"
-                title="Reload"
-                disabled={showingCapture || isBlank}
-                onClick={reloadFrame}
-                type="button"
-              >
-                <RefreshCw size={14} />
-              </button>
-            </div>
-            <form
-              className="gyro-url-bar"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (isChat && !addressValue.trim()) return;
-                if (showingCapture) {
-                  setFrameMode("live");
-                }
-                onNavigate?.(isChat ? addressValue : frameUrl);
+              <ChevronRight className="is-back" size={15} />
+            </button>
+            <button
+              aria-label="Forward"
+              title="Forward"
+              disabled={!canGoForward || showingCapture}
+              onClick={onForward}
+              type="button"
+            >
+              <ChevronRight size={15} />
+            </button>
+            <button
+              aria-label="Reload"
+              title="Reload"
+              disabled={showingCapture || isBlank}
+              onClick={reloadFrame}
+              type="button"
+            >
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          <form
+            className="gyro-url-bar"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (isChat && !addressValue.trim()) return;
+              if (showingCapture) {
+                setFrameMode("live");
+              }
+              onNavigate?.(isChat ? addressValue : frameUrl);
+            }}
+          >
+            <Globe2 size={14} />
+            <input
+              aria-label="Browser URL"
+              onChange={(event) => {
+                setAddressValue(event.target.value);
+                if (!isChat) onUrlChange?.(event.target.value);
               }}
-            >
-              <Globe2 size={14} />
-              <input
-                aria-label="Browser URL"
-                onChange={(event) => {
-                  setAddressValue(event.target.value);
-                  if (!isChat) onUrlChange?.(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (isChat && event.key === "Escape") {
-                    setAddressValue(isBlank ? "" : preview.url);
-                    event.currentTarget.blur();
-                  }
-                }}
-                placeholder={
-                  isChat ? "Search or enter a URL" : "https://example.com"
+              onKeyDown={(event) => {
+                if (isChat && event.key === "Escape") {
+                  setAddressValue(isBlank ? "" : preview.url);
+                  event.currentTarget.blur();
                 }
-                value={isChat ? addressValue : preview.url}
-              />
-              <small className={isLocalPreview ? "is-local" : "is-web"}>
-                {showingCapture
-                  ? "capture"
-                  : useNativeHost
-                    ? "native"
-                    : isLocalPreview
-                      ? "local"
-                      : "web"}
-              </small>
-              {isChat ? (
-                <button
-                  aria-label="Open page in system browser"
-                  disabled={isBlank}
-                  onClick={onOpenExternal}
-                  title="Open in system browser"
-                  type="button"
-                >
-                  <ArrowUpRight size={14} />
-                </button>
-              ) : null}
-            </form>
+              }}
+              placeholder={
+                isChat ? "Search or enter a URL" : "https://example.com"
+              }
+              value={isChat ? addressValue : preview.url}
+            />
+            <small className={isLocalPreview ? "is-local" : "is-web"}>
+              {showingCapture
+                ? "capture"
+                : useNativeHost
+                  ? "native"
+                  : isLocalPreview
+                    ? "local"
+                    : "web"}
+            </small>
             {isChat ? (
               <button
-                className="gyro-browser-menu-trigger"
-                aria-label="Browser options"
-                title="Browser options"
-                aria-expanded={isBrowserMenuOpen}
-                aria-haspopup="menu"
-                onClick={() => setIsBrowserMenuOpen((open) => !open)}
-                type="button"
-              >
-                <MoreVertical size={15} />
-              </button>
-            ) : null}
-            <div
-              className={`gyro-browser-actions${isChat ? " is-overflow-menu" : ""}${isBrowserMenuOpen ? " is-open" : ""}`}
-              role="group"
-              aria-label="Browser actions"
-              onClick={(event) => {
-                if (
-                  (event.target as Element).closest("button:not(:disabled)")
-                ) {
-                  setIsBrowserMenuOpen(false);
-                }
-              }}
-            >
-              {hasCapture ? (
-                <div
-                  className="gyro-browser-view-group"
-                  role="group"
-                  aria-label="Preview mode"
-                >
-                  <button
-                    aria-pressed={frameMode === "live"}
-                    className={frameMode === "live" ? "is-active" : undefined}
-                    onClick={() => setFrameMode("live")}
-                    title="Live preview"
-                    type="button"
-                  >
-                    Live
-                  </button>
-                  <button
-                    aria-pressed={frameMode === "capture"}
-                    className={
-                      frameMode === "capture" ? "is-active" : undefined
-                    }
-                    onClick={() => setFrameMode("capture")}
-                    title="Last capture"
-                    type="button"
-                  >
-                    Capture
-                  </button>
-                </div>
-              ) : null}
-              <div
-                className="gyro-browser-device-group"
-                role="group"
-                aria-label="Device size"
-              >
-                {(
-                  [
-                    { id: "desktop", label: "Desktop", icon: Monitor },
-                    { id: "tablet", label: "Tablet", icon: Tablet },
-                    { id: "mobile", label: "Mobile", icon: Smartphone },
-                  ] as const
-                ).map((device) => {
-                  const Icon = device.icon;
-                  return (
-                    <button
-                      aria-label={device.label}
-                      aria-pressed={preview.device === device.id}
-                      className={
-                        preview.device === device.id ? "is-active" : undefined
-                      }
-                      key={device.id}
-                      onClick={() => onDeviceChange?.(device.id)}
-                      title={device.label}
-                      type="button"
-                    >
-                      <Icon size={14} />
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                aria-label="Capture browser screenshot"
-                className={`gyro-browser-capture-button${
-                  isCapturing ? " is-capturing" : ""
-                }`}
-                disabled={isBlank || isCapturing || !canCapturePreview}
-                onClick={() => {
-                  setFrameMode("live");
-                  onScreenshot?.("capture");
-                }}
-                title={
-                  isCapturing
-                    ? "Capturing preview"
-                    : canCapturePreview
-                      ? "Capture screenshot"
-                      : "Screenshots require the native browser host"
-                }
-                type="button"
-              >
-                <Camera size={14} />
-              </button>
-              <button
-                aria-label="Open in system browser"
-                className="gyro-browser-external-button"
+                aria-label="Open page in system browser"
                 disabled={isBlank}
                 onClick={onOpenExternal}
                 title="Open in system browser"
                 type="button"
               >
-                <Globe2 size={14} />
+                <ArrowUpRight size={14} />
               </button>
+            ) : null}
+          </form>
+          {isChat ? (
+            <button
+              className="gyro-browser-menu-trigger"
+              aria-label="Browser options"
+              title="Browser options"
+              aria-expanded={isBrowserMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setIsBrowserMenuOpen((open) => !open)}
+              type="button"
+            >
+              <MoreVertical size={15} />
+            </button>
+          ) : null}
+          <div
+            className={`gyro-browser-actions${isChat ? " is-overflow-menu" : ""}${isBrowserMenuOpen ? " is-open" : ""}`}
+            role="group"
+            aria-label="Browser actions"
+            onClick={(event) => {
+              if ((event.target as Element).closest("button:not(:disabled)")) {
+                setIsBrowserMenuOpen(false);
+              }
+            }}
+          >
+            {hasCapture ? (
+              <div
+                className="gyro-browser-view-group"
+                role="group"
+                aria-label="Preview mode"
+              >
+                <button
+                  aria-pressed={frameMode === "live"}
+                  className={frameMode === "live" ? "is-active" : undefined}
+                  onClick={() => setFrameMode("live")}
+                  title="Live preview"
+                  type="button"
+                >
+                  Live
+                </button>
+                <button
+                  aria-pressed={frameMode === "capture"}
+                  className={frameMode === "capture" ? "is-active" : undefined}
+                  onClick={() => setFrameMode("capture")}
+                  title="Last capture"
+                  type="button"
+                >
+                  Capture
+                </button>
+              </div>
+            ) : null}
+            <div
+              className="gyro-browser-device-group"
+              role="group"
+              aria-label="Device size"
+            >
+              {(
+                [
+                  { id: "desktop", label: "Desktop", icon: Monitor },
+                  { id: "tablet", label: "Tablet", icon: Tablet },
+                  { id: "mobile", label: "Mobile", icon: Smartphone },
+                ] as const
+              ).map((device) => {
+                const Icon = device.icon;
+                return (
+                  <button
+                    aria-label={device.label}
+                    aria-pressed={preview.device === device.id}
+                    className={
+                      preview.device === device.id ? "is-active" : undefined
+                    }
+                    key={device.id}
+                    onClick={() => onDeviceChange?.(device.id)}
+                    title={device.label}
+                    type="button"
+                  >
+                    <Icon size={14} />
+                  </button>
+                );
+              })}
             </div>
-          </div>,
-          `${previewClassName} is-address-slot`,
-        )}
+            <button
+              aria-label="Capture browser screenshot"
+              className={`gyro-browser-capture-button${
+                isCapturing ? " is-capturing" : ""
+              }`}
+              disabled={isBlank || isCapturing || !canCapturePreview}
+              onClick={() => {
+                setFrameMode("live");
+                onScreenshot?.("capture");
+              }}
+              title={
+                isCapturing
+                  ? "Capturing preview"
+                  : canCapturePreview
+                    ? "Capture screenshot"
+                    : "Screenshots require the native browser host"
+              }
+              type="button"
+            >
+              <Camera size={14} />
+            </button>
+            <button
+              aria-label="Open in system browser"
+              className="gyro-browser-external-button"
+              disabled={isBlank}
+              onClick={onOpenExternal}
+              title="Open in system browser"
+              type="button"
+            >
+              <Globe2 size={14} />
+            </button>
+          </div>
+        </div>
         {isChat && agentActivity ? (
           <div className="gyro-browser-agent-strip" role="status">
             <span aria-hidden="true" className="gyro-browser-agent-dot" />
@@ -20587,6 +20561,11 @@ type SettingsSurfaceProps = {
   mainColor?: string;
   secondaryColor?: string;
   density?: WorkbenchDensity;
+  interfaceSize?: InterfaceSize;
+  motionSpeed?: MotionSpeed;
+  reduceMotion?: boolean;
+  onInterfaceSizeChange?: (size: InterfaceSize) => void;
+  onMotionSpeedChange?: (speed: MotionSpeed) => void;
   showMenuBarIcon?: boolean;
   modelFollow?: ModelFollowMode;
   defaultWorkspaceMode?: WorkbenchMode;
@@ -21217,6 +21196,11 @@ export function SettingsSurface({
   mainColor = "#0874df",
   secondaryColor = "#8b6fcb",
   density = "comfortable",
+  interfaceSize = "default",
+  motionSpeed = "default",
+  reduceMotion = false,
+  onInterfaceSizeChange,
+  onMotionSpeedChange,
   showMenuBarIcon = true,
   modelFollow = "peek",
   defaultWorkspaceMode = "local",
@@ -21424,101 +21408,17 @@ export function SettingsSurface({
           <SettingsSection
             icon={Palette}
             title="Appearance"
-            description="Choose the interface mode used by every Gyro surface."
+            description="Make Gyro comfortable to read and use."
           >
-            <SettingsGroup label="Theme">
-              <div
-                className="gyro-theme-picker"
-                data-setting-key="theme"
-                role="group"
-                aria-label="Theme"
-                tabIndex={-1}
-              >
-                {(
-                  [
-                    {
-                      mode: "system",
-                      label: "System",
-                      image: themePreviewSystem,
-                    },
-                    { mode: "light", label: "Light", image: themePreviewLight },
-                    { mode: "dark", label: "Dark", image: themePreviewDark },
-                  ] as const
-                ).map(({ mode, label, image }) => (
-                  <button
-                    key={mode}
-                    aria-pressed={themeMode === mode}
-                    className={`is-${mode}${themeMode === mode ? " is-active" : ""}`}
-                    onClick={() => onThemeChange(mode)}
-                    type="button"
-                  >
-                    <img src={image} alt="" draggable={false} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </SettingsGroup>
-            <SettingsGroup label="Interface">
-              <SettingsRow
-                label="Density"
-                detail="Choose tighter rows or more room between controls."
-              >
-                <SettingsSegmented
-                  label="Interface density"
-                  value={density}
-                  options={[
-                    { label: "Compact", value: "compact" },
-                    { label: "Comfortable", value: "comfortable" },
-                  ]}
-                  onChange={(value) => onDensityChange?.(value)}
-                />
-              </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup label="Colors">
-              <SettingsRow
-                label="Main color"
-                detail="Selection, focus, and primary action color."
-              >
-                <AppearanceColorControl
-                  color={mainColor}
-                  label="Main color"
-                  onChange={(color) =>
-                    onAppearanceColorsChange?.(color, secondaryColor)
-                  }
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Secondary color"
-                detail="Supporting icons, badges, and quiet highlights."
-              >
-                <AppearanceColorControl
-                  color={secondaryColor}
-                  label="Secondary color"
-                  onChange={(color) =>
-                    onAppearanceColorsChange?.(mainColor, color)
-                  }
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Default palette"
-                detail="Restore Gyro blue and violet."
-              >
-                <button
-                  className="gyro-color-reset"
-                  disabled={
-                    mainColor.toLowerCase() === "#0874df" &&
-                    secondaryColor.toLowerCase() === "#8b6fcb"
-                  }
-                  onClick={() =>
-                    onAppearanceColorsChange?.("#0874df", "#8b6fcb")
-                  }
-                  type="button"
-                >
-                  <RotateCcw aria-hidden="true" size={13} />
-                  Reset colors
-                </button>
-              </SettingsRow>
-            </SettingsGroup>
+            <AppearanceSettings
+              themeMode={themeMode} onThemeChange={onThemeChange}
+              density={density} onDensityChange={onDensityChange}
+              interfaceSize={interfaceSize} onInterfaceSizeChange={onInterfaceSizeChange}
+              motionSpeed={motionSpeed} onMotionSpeedChange={onMotionSpeedChange}
+              reduceMotion={reduceMotion}
+              mainColor={mainColor} secondaryColor={secondaryColor}
+              onAppearanceColorsChange={onAppearanceColorsChange}
+            />
           </SettingsSection>
         ) : null}
 
@@ -22959,31 +22859,6 @@ function SettingsSection({
   );
 }
 
-function AppearanceColorControl({
-  color,
-  label,
-  onChange,
-}: {
-  color: string;
-  label: string;
-  onChange: (color: string) => void;
-}) {
-  return (
-    <label
-      className="gyro-color-control"
-      style={{ "--gyro-color-preview": color } as CSSProperties}
-    >
-      <input
-        aria-label={label}
-        onChange={(event) => onChange(event.target.value)}
-        type="color"
-        value={color}
-      />
-      <span aria-hidden="true" className="gyro-color-swatch" />
-      <code>{color.toUpperCase()}</code>
-    </label>
-  );
-}
 
 function SettingsSwitch({
   checked,
@@ -23011,33 +22886,6 @@ function SettingsSwitch({
   );
 }
 
-function SettingsSegmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: Array<{ label: string; value: T }>;
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div aria-label={label} className="gyro-settings-segmented" role="group">
-      {options.map((option) => (
-        <button
-          aria-pressed={value === option.value}
-          className={value === option.value ? "is-active" : ""}
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function SettingsStatus({
   status,

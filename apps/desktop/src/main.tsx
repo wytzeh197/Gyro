@@ -32,7 +32,7 @@ const initialTheme = (() => {
 document.documentElement.dataset.theme = initialTheme;
 document
   .querySelector('meta[name="theme-color"]')
-  ?.setAttribute("content", initialTheme === "light" ? "#f8f9f9" : "#181818");
+  ?.setAttribute("content", initialTheme === "light" ? "#f7f9fc" : "#181818");
 
 function AppFailure({ startup = false }: { startup?: boolean }) {
   return (

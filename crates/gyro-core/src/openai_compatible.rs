@@ -16,7 +16,7 @@ use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::time::Duration;
 use url::{Host, Url};
 
@@ -44,7 +44,7 @@ pub struct OpenAiCompatChatRequest<'a> {
     pub tools: Vec<serde_json::Value>,
     /// Thinking budget, sent as `reasoning_effort` when the selected model
     /// publishes an effort ramp. Endpoints that do not take the field are why
-    /// the 400 retry below drops it.
+    /// unsupported explicit effort remains an actionable provider error.
     pub reasoning_effort: Option<&'a str>,
 }
 
@@ -146,8 +146,8 @@ pub fn openai_compat_tool_chat(
 
 /// Stream one chat turn, forwarding text deltas as they arrive.
 ///
-/// Cancellation is checked between frames so Stop does not wait out the read
-/// timeout. A non-stream JSON body is accepted too: some gateways ignore
+/// Cancellation interrupts pending headers and body reads, including quiet
+/// streams. A non-stream JSON body is accepted too: some gateways ignore
 /// `stream: true` and answer with a single completion object.
 pub fn openai_compat_tool_chat_with_progress<F>(
     request: OpenAiCompatChatRequest<'_>,
@@ -182,39 +182,73 @@ where
     let endpoint = openai_compat_endpoint(request.base_url)?;
     let url = endpoint_child(&endpoint, CHAT_PATH)?;
     let api_key = request.api_key.trim();
-    let agent = chat_agent();
 
-    // `stream_options.include_usage` is the only way to get token counts from a
-    // streamed OpenAI response, and `reasoning_effort` the only way to ask for a
-    // thinking budget, but both are newer fields and strict gateways reject the
-    // whole request over either. Retrying once without them keeps usage display
-    // and effort on capable servers and keeps the run working on the others: a
-    // turn that answers without the requested effort beats a turn that 400s.
+    let identity = crate::api_compatibility::identity(url.as_str(), model, api_key);
+    let mut include_usage = crate::api_compatibility::include_usage(identity);
+    let initially_include_usage = include_usage;
+    let mut observation = None;
     let response = crate::provider_retry::http_response(cancellation, || {
-        match post_chat(
-            &agent,
-            &url,
-            api_key,
-            &chat_payload(
-                model,
-                &request.messages,
-                &request.tools,
-                request.reasoning_effort,
-                true,
-            ),
-        ) {
-            Ok(response) => Ok(response),
-            Err(ureq::Error::Status(400, _)) => post_chat(
-                &agent,
-                &url,
-                api_key,
-                &chat_payload(model, &request.messages, &request.tools, None, false),
-            ),
-            Err(error) => Err(error),
+        let payload = chat_payload(
+            model,
+            &request.messages,
+            &request.tools,
+            request.reasoning_effort,
+            include_usage,
+        );
+        observation = Some(crate::provider_observation::Request::start(&payload));
+        let result = match post_chat(&url, api_key, &payload, cancellation) {
+            Err(ureq::Error::Status(400, response)) => {
+                observation.as_mut().unwrap().rejected();
+                let mut body = String::new();
+                let _ = response.into_reader().take(8192).read_to_string(&mut body);
+                // Preserve explicitly selected effort and native tools. A generic
+                // 400 is not evidence that either option is unsupported.
+                if include_usage
+                    && crate::api_compatibility::rejects_usage_field(&body)
+                    && crate::provider_retry::compatibility_retry()
+                {
+                    include_usage = false;
+                    let payload = chat_payload(
+                        model,
+                        &request.messages,
+                        &request.tools,
+                        request.reasoning_effort,
+                        false,
+                    );
+                    observation = Some(crate::provider_observation::Request::start(&payload));
+                    post_chat(&url, api_key, &payload, cancellation)
+                } else {
+                    Err(ureq::Error::Status(
+                        400,
+                        ureq::Response::new(400, "Bad Request", &body)
+                            .expect("valid error response"),
+                    ))
+                }
+            }
+            result => result,
+        };
+        if matches!(&result, Err(ureq::Error::Status(400..=499, _))) {
+            observation.as_mut().unwrap().rejected();
         }
+        result
     })
-    .map_err(openai_compat_http_error)?;
-    refuse_redirect(&response, &url)?;
+    .map_err(|error| {
+        if matches!(&error, ureq::Error::Status(400..=499, _)) {
+            if let Some(observation) = observation.as_mut() {
+                observation.rejected();
+            }
+        }
+        openai_compat_http_error(error)
+    })?;
+    if initially_include_usage && !include_usage {
+        crate::api_compatibility::remember_usage_rejection(identity);
+    }
+    let mut observation = observation.expect("a completed HTTP exchange was observed");
+    if (300..400).contains(&response.status()) {
+        return Err(anyhow!(
+            "the provider endpoint redirected; configure the canonical base URL instead"
+        ));
+    }
 
     let mut state = ChatAccumulator::default();
     let mut reader = BufReader::new(response.into_reader());
@@ -254,7 +288,13 @@ where
                 .choices
                 .iter()
                 .any(|choice| choice.index == 0 && choice.finish_reason.is_some());
-            state.apply(frame, &mut on_delta)?;
+            if let Some(usage) = &frame.usage {
+                usage.observe(&mut observation);
+            }
+            state.apply(frame, &mut |text| {
+                observation.delta(text);
+                on_delta(text);
+            })?;
         } else if trimmed.starts_with(':') {
             // SSE comment; gateways send these as keep-alives.
         } else if !saw_stream_frames {
@@ -278,13 +318,27 @@ where
         }
         let parsed: WireCompletion =
             serde_json::from_str(body).context("invalid provider chat response")?;
-        state.apply(parsed, &mut on_delta)?;
+        if let Some(usage) = &parsed.usage {
+            usage.observe(&mut observation);
+        }
+        state.apply(parsed, &mut |text| {
+            observation.delta(text);
+            on_delta(text);
+        })?;
     }
 
     let content = state.content.trim().to_string();
     let reasoning_content = state.reasoning_content.take();
     let input_tokens = state.input_tokens;
     let output_tokens = state.output_tokens;
+    let output_chars = state.content.chars().count()
+        + reasoning_content.as_deref().unwrap_or("").chars().count()
+        + state
+            .tool_calls
+            .iter()
+            .map(|call| call.name.chars().count() + call.arguments.chars().count())
+            .sum::<usize>();
+    observation.complete(input_tokens, output_tokens, output_chars);
     let tool_calls = state.tool_calls()?;
     if content.is_empty() && tool_calls.is_empty() {
         return Err(anyhow!("the provider finished without a text response"));
@@ -369,34 +423,30 @@ fn chat_payload(
     }
     if include_optional_fields {
         payload["stream_options"] = serde_json::json!({ "include_usage": true });
-        if let Some(effort) = reasoning_effort
-            .map(str::trim)
-            .filter(|effort| !effort.is_empty())
-        {
-            payload["reasoning_effort"] = serde_json::Value::String(effort.to_string());
-        }
+    }
+    if let Some(effort) = reasoning_effort
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+    {
+        payload["reasoning_effort"] = serde_json::Value::String(effort.to_string());
     }
     payload
 }
 
 fn post_chat(
-    agent: &ureq::Agent,
     url: &Url,
     api_key: &str,
     payload: &serde_json::Value,
-) -> std::result::Result<ureq::Response, ureq::Error> {
-    let mut request = agent
-        .post(url.as_str())
-        .set("Accept", "text/event-stream")
-        .set("User-Agent", USER_AGENT)
-        // Identity keeps the body as raw SSE lines; a compressed stream is
-        // decoded in blocks, which would hold back the tokens this exists to
-        // stream.
-        .set("Accept-Encoding", "identity");
-    if !api_key.is_empty() {
-        request = request.set("Authorization", &format!("Bearer {api_key}"));
-    }
-    request.send_json(payload)
+    cancellation: &CancellationToken,
+) -> std::result::Result<crate::chat_http::Response, ureq::Error> {
+    crate::chat_http::post(
+        url,
+        api_key,
+        payload,
+        cancellation,
+        CHAT_IDLE_TIMEOUT,
+        openai_compat_host_is_loopback(url),
+    )
 }
 
 /// Append a path segment to the configured base path, preserving any gateway
@@ -434,26 +484,7 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
-/// One shared agent so every tool round of a turn reuses the pooled
-/// connection instead of paying a fresh TLS handshake to the gateway.
-///
-/// There is no overall deadline: a long answer that keeps streaming is healthy,
-/// and cutting it at a fixed wall clock dropped it. A stalled stream still ends
-/// at the idle limit, and Stop ends it at once.
-fn chat_agent() -> ureq::Agent {
-    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
-    AGENT
-        .get_or_init(|| {
-            ureq::AgentBuilder::new()
-                .timeout_connect(CONNECT_TIMEOUT)
-                .timeout_read(CHAT_IDLE_TIMEOUT)
-                .timeout_write(CHAT_IDLE_TIMEOUT)
-                .redirects(0)
-                .build()
-        })
-        .clone()
-}
-
+/// Keep the provider's status and bounded explanation in actionable errors.
 fn openai_compat_http_error(error: ureq::Error) -> anyhow::Error {
     match error {
         ureq::Error::Status(status, response) => {
@@ -768,6 +799,28 @@ struct WireUsage {
     prompt_tokens: Option<u64>,
     #[serde(default)]
     completion_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<WireTokenDetails>,
+    #[serde(default)]
+    completion_tokens_details: Option<WireTokenDetails>,
+}
+#[derive(Default, Deserialize)]
+struct WireTokenDetails {
+    cached_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+}
+impl WireUsage {
+    fn observe(&self, observation: &mut crate::provider_observation::Request) {
+        observation.details(
+            self.prompt_tokens_details
+                .as_ref()
+                .and_then(|detail| detail.cached_tokens),
+            self.completion_tokens_details
+                .as_ref()
+                .and_then(|detail| detail.reasoning_tokens),
+        );
+        observation.reported(self.prompt_tokens, self.completion_tokens);
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -1158,7 +1211,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let mut bodies = Vec::new();
-            for attempt in 0..2 {
+            for attempt in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
                 bodies.push(read_request(&mut stream).body);
                 let response = if attempt == 0 {
@@ -1185,7 +1238,16 @@ mod tests {
             model: "local-model",
             messages: Vec::new(),
             tools: Vec::new(),
-            reasoning_effort: None,
+            reasoning_effort: Some("high"),
+        })
+        .unwrap();
+        openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "",
+            model: "local-model",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: Some("high"),
         })
         .unwrap();
         let bodies = server.join().unwrap();
@@ -1194,8 +1256,33 @@ mod tests {
         let second: serde_json::Value = serde_json::from_str(&bodies[1]).unwrap();
         assert!(first.get("stream_options").is_some());
         assert!(second.get("stream_options").is_none());
+        assert_eq!(second["reasoning_effort"], "high");
+        let third: serde_json::Value = serde_json::from_str(&bodies[2]).unwrap();
+        assert!(third.get("stream_options").is_none());
+        assert_eq!(third["reasoning_effort"], "high");
         // A keyless loopback server must not be handed an empty Bearer header.
         assert!(second.get("tools").is_none());
+    }
+
+    #[test]
+    fn generic_bad_requests_fail_without_removing_selected_options() {
+        let (address, server) = serve_once(
+            "400 Bad Request",
+            "application/json",
+            r#"{"error":{"message":"unknown model"}}"#,
+        );
+        let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "",
+            model: "missing-model",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: Some("high"),
+        })
+        .unwrap_err();
+        let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
+        assert_eq!(sent["reasoning_effort"], "high");
+        assert!(error.to_string().contains("unknown model"));
     }
 
     #[test]

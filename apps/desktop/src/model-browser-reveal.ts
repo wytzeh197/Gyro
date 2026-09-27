@@ -54,6 +54,8 @@ export function useModelBrowserReveal(options: {
     isSplitView: isSplitChatLayout({ occupiedPaneCount, hasMaximizedPane }),
     isBrowserVisible,
   };
+  const activeSessionRef = useRef(activeSessionId);
+  activeSessionRef.current = activeSessionId;
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
 
@@ -65,8 +67,14 @@ export function useModelBrowserReveal(options: {
       unlisten = listen<SessionBrowserOpened>(
         "session-browser-opened",
         (event) => {
-          if (event.payload.sessionId !== activeSessionId) return;
-          const send = dispatchRef.current;
+          const sessionId = event.payload.sessionId;
+          const isActive = sessionId === activeSessionRef.current;
+          const send = (action: WorkbenchAction) =>
+            dispatchRef.current({
+              type: "browser-session",
+              sessionId,
+              action,
+            });
           const decision = resolveBrowserReveal({
             isUserInitiated: false,
             ...contextRef.current,
@@ -74,10 +82,10 @@ export function useModelBrowserReveal(options: {
           send({
             type: "browser-navigate",
             url: event.payload.url,
-            background: !decision.reveal,
+            background: !isActive || !decision.reveal,
           });
-          if (decision.reveal) {
-            send({ type: "set-chat-panel", panel: "browser" });
+          if (isActive && decision.reveal) {
+            dispatchRef.current({ type: "set-chat-panel", panel: "browser" });
           }
           send({
             type: "browser-status",
@@ -101,5 +109,5 @@ export function useModelBrowserReveal(options: {
     return () => {
       void unlisten.then((dispose) => dispose?.());
     };
-  }, [activeSessionId, isTauriRuntime]);
+  }, [isTauriRuntime]);
 }
