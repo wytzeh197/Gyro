@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Gyro. Do not report vulnerabilities or include credentials or private source code here; follow SECURITY.md instead.
+        Thanks for helping improve Gyro. Wytze reviews reports and may mark a reproducible bug for Arda to investigate. Submitting a report does not automatically authorize code changes. Do not report vulnerabilities or include credentials or private source code here; follow SECURITY.md instead.
   - type: textarea
     id: summary
     attributes:
