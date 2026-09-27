@@ -100,5 +100,6 @@
   "check-workbench-ui.mjs": { "kind": "behavioral" },
   "check-workflow-upgrades.mjs": { "kind": "behavioral" },
   "check-workspace-capability-sync.mjs": { "kind": "behavioral" },
-  "check-workspace-explorer.mjs": { "kind": "behavioral" }
+  "check-workspace-explorer.mjs": { "kind": "behavioral" },
+  "check-workspace-search.mjs": { "kind": "behavioral" }
 }

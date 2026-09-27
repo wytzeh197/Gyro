@@ -18,6 +18,21 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+// Opt-in reset for reproducible visual QA. This entry is development-only;
+// normal preview navigation and the shipped app retain their saved state.
+if (parameters.get("reset") === "1") {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("gyro.")) localStorage.removeItem(key);
+  }
+  localStorage.setItem(
+    "gyro.workbench-state",
+    JSON.stringify({
+      preferences: { theme, density: parameters.get("density") ?? "compact" },
+      lastSessionsLayout: "thread",
+      isToolPanelOpen: false,
+    }),
+  );
+}
 const isWebsiteCapture = parameters.get("presentation") === "website";
 const supportedScenes = new Set([
   "chat",
@@ -53,6 +68,12 @@ const session = {
   id: SESSION_ID,
   title: "Bound the sync queue retries",
   workspacePath: WORKSPACE,
+  workspaceIdentity: {
+    schema: "gyro.workspace.v2",
+    revision: 1,
+    roots: [{ id: "capture-root", path: WORKSPACE }],
+    activeRootId: "capture-root",
+  },
   origin: "desktop",
   workspaceMode: "local",
   branch: "main",
@@ -728,13 +749,31 @@ const responses: Record<string, unknown> = {
   git_unstage: sourceControl,
   git_discard: sourceControl,
   git_diff: { stdout: diff, stderr: "", exitCode: 0 },
+  git_review_content: {
+    original: syncSource.replace(
+      "const MAX_ATTEMPTS = 5;",
+      "const MAX_ATTEMPTS = Infinity;",
+    ),
+    modified: syncSource,
+  },
+  git_fetch: {
+    output: {
+      stdout: "Capture fixture: remote status checked.",
+      stderr: "",
+      status: "done",
+    },
+    status: sourceControl,
+  },
   git_branches: branches,
   list_workspace_tree: workspaceTree,
   watch_workspace: workspaceTree,
   search_workspace: [
     {
       path: "src/sync.js",
-      lineNumber: 12,
+      lineNumber:
+        syncSource
+          .split("\n")
+          .findIndex((line) => line.includes("async drain()")) + 1,
       line: "  async drain() {",
       ranges: [{ startColumn: 9, endColumn: 14 }],
     },
@@ -746,7 +785,6 @@ const responses: Record<string, unknown> = {
     },
   ],
   restore_terminal_panes: scene === "cli" ? terminalPanes : [],
-  create_terminal_pane: terminalPanes[0],
   task_discover: [],
   test_discover: [],
   github_status: { available: false },
@@ -803,13 +841,50 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  if (command === "search_workspace") {
+    const request = args?.request as { query: string };
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(request.query, "g");
+    } catch {
+      return [];
+    }
+    const results = responses.search_workspace as Array<{
+      path: string;
+      lineNumber: number;
+      line: string;
+    }>;
+    return results.flatMap((result) => {
+      const ranges = [...result.line.matchAll(pattern)]
+        .filter((match) => match[0].length > 0)
+        .map((match) => ({
+          startColumn: match.index + 1,
+          endColumn: match.index + match[0].length + 1,
+        }));
+      return ranges.length ? [{ ...result, ranges }] : [];
+    });
+  }
+  if (command === "create_terminal_pane") {
+    const request = args?.request as {
+      paneId: string;
+      title?: string;
+      workspacePath?: string;
+    };
+    const pane = {
+      ...terminalPanes[0]!,
+      paneId: request.paneId,
+      title: request.title ?? "Shell",
+      workspacePath: request.workspacePath ?? WORKSPACE,
+    };
+    terminalPanes.push(pane);
+    return pane;
+  }
   // Deterministic folder choice for exercising project editing in browser QA.
   if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
   if (command === "timing_diagnostics_enabled") return false;
   if (command === "prepare_workspace") {
     const request = args?.request as
-      | { runId?: string; workspacePath?: string }
-      | undefined;
+      { runId?: string; workspacePath?: string } | undefined;
     return {
       ...preparation,
       // App accepts progress only for the preparation request it issued.
@@ -916,6 +991,7 @@ const invoke: Invoke = (command, args) => {
     const sessionId = String(args?.sessionId ?? SESSION_ID);
     return {
       events: captureEventsBySessionId.get(sessionId) ?? [],
+      contextEvents: [],
       hasMoreBefore: false,
     };
   }
@@ -1238,7 +1314,15 @@ let callbackId = 0;
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
   value: {
     invoke: (command: string, args?: Record<string, unknown>) =>
-      Promise.resolve(invoke(command, args)),
+      new Promise((resolve, reject) => {
+        window.setTimeout(() => {
+          try {
+            resolve(invoke(command, args));
+          } catch (error) {
+            reject(error);
+          }
+        }, 0);
+      }),
     transformCallback(callback: (payload: unknown) => void) {
       callbackId += 1;
       callbacks.set(callbackId, callback);

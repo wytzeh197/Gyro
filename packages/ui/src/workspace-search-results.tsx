@@ -2,26 +2,29 @@ import { ChevronRight, FileCode2 } from "lucide-react";
 import "./workspace-search-results.css";
 import { useMemo, useState } from "react";
 import type { WorkspaceSearchResult } from "./types";
+import { workspaceSearchPreview } from "./workspace-search-preview";
 
-function SearchLine({ line, query }: { line: string; query: string }) {
-  const needle = query.trim();
-  const first = needle ? line.indexOf(needle) : -1;
-  const start = first > 40 ? first - 40 : 0;
-  const preview = line.slice(
-    start,
-    Math.max(start + 240, first + needle.length),
-  );
-  const parts = needle ? preview.split(needle) : [preview];
+function SearchLine({
+  line,
+  query,
+  ranges,
+}: {
+  line: string;
+  query: string;
+  ranges: WorkspaceSearchResult["ranges"];
+}) {
+  const preview = workspaceSearchPreview(line, query, ranges);
   return (
     <code>
-      {start > 0 ? "…" : null}
-      {parts.map((part, index) => (
-        <span key={index}>
-          {index > 0 ? <mark>{needle}</mark> : null}
-          {part}
-        </span>
-      ))}
-      {start + preview.length < line.length ? "…" : null}
+      {preview.leadingEllipsis ? "…" : null}
+      {preview.parts.map((part, index) =>
+        part.matched ? (
+          <mark key={index}>{part.text}</mark>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+      {preview.trailingEllipsis ? "…" : null}
     </code>
   );
 }
@@ -64,7 +67,7 @@ export function WorkspaceSearchResults({
         const collapsed = collapsedPaths.has(path);
         const slash = path.lastIndexOf("/");
         const name = path.slice(slash + 1);
-        const directory = path.slice(0, slash);
+        const directory = slash >= 0 ? path.slice(0, slash) : "";
         return (
           <section className="gyro-workspace-search-file" key={path}>
             <div className="gyro-workspace-search-file-heading">
@@ -124,7 +127,11 @@ export function WorkspaceSearchResults({
                     <span className="gyro-workspace-search-line-number">
                       {result.lineNumber}
                     </span>
-                    <SearchLine line={result.line.trimStart()} query={query} />
+                    <SearchLine
+                      line={result.line}
+                      query={query}
+                      ranges={result.ranges}
+                    />
                   </button>
                 ))
               : null}

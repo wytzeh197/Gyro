@@ -19363,6 +19363,7 @@ function BrowserFramePlaceholder({
   onReload?: () => void;
   suggestedUrl: string;
 }) {
+  const hasUrl = Boolean(suggestedUrl && suggestedUrl !== "about:blank");
   const title = isOccluded
     ? "Preview hidden"
     : isLoading
@@ -19378,7 +19379,9 @@ function BrowserFramePlaceholder({
         : "Connecting…"
       : isUnreachable
         ? "Start the app, or try another local URL."
-        : "Point the browser at a running app, or open this URL externally.";
+        : hasUrl
+          ? "Point the browser at a running app, or open this URL externally."
+          : "Enter a URL above to preview a running app or website.";
 
   return (
     <div
@@ -19414,7 +19417,7 @@ function BrowserFramePlaceholder({
         <p>{detail}</p>
         {!isOccluded ? (
           <div className="gyro-browser-placeholder-actions">
-            {suggestedUrl && suggestedUrl !== "about:blank" ? (
+            {hasUrl ? (
               <button onClick={() => onNavigate?.(suggestedUrl)} type="button">
                 {hostLabel || "localhost:3000"}
               </button>
@@ -19424,7 +19427,11 @@ function BrowserFramePlaceholder({
                 Retry
               </button>
             ) : null}
-            <button onClick={onOpenExternal} type="button">
+            <button
+              disabled={!hasUrl || !onOpenExternal}
+              onClick={onOpenExternal}
+              type="button"
+            >
               Open external
             </button>
           </div>

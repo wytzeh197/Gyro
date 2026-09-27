@@ -34,6 +34,8 @@ use kimi_usage::*;
 mod browser_knowledge;
 mod browser_pointer;
 mod file_patch_counts;
+mod workspace_search;
+use workspace_search::{literal_search_ranges, parse_rg_output};
 
 use anyhow::Context;
 use automation_scheduler::start_automation_scheduler;
@@ -9891,13 +9893,7 @@ fn run_workspace_rg_search(
     use_regex: bool,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let mut command = command_with_gui_path("rg");
-    command
-        .current_dir(root)
-        .arg("--line-number")
-        .arg("--column")
-        .arg("--no-heading")
-        .arg("--color")
-        .arg("never");
+    command.current_dir(root).arg("--json");
     if !use_regex {
         command.arg("--fixed-strings");
     }
@@ -9915,52 +9911,12 @@ fn run_workspace_rg_search(
         8 * 1024 * 1024,
         64 * 1024,
     ) {
-        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => Ok(parse_rg_output(
-            &output.stdout,
-            query,
-            max_results,
-            use_regex,
-        )),
+        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
+            Ok(parse_rg_output(&output.stdout, max_results))
+        }
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
         Err(error) => Err(error),
     }
-}
-
-fn parse_rg_output(
-    output: &str,
-    query: &str,
-    max_results: usize,
-    use_regex: bool,
-) -> Vec<WorkspaceSearchResult> {
-    // Fixed-string match length is the query length. For regex, rg's column is
-    // the start of the match; without the match end we highlight one character
-    // so the range stays valid rather than inventing a length from the pattern.
-    let highlight_len = if use_regex {
-        1usize
-    } else {
-        query.chars().count().max(1)
-    };
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(4, ':');
-            let path = parts.next()?.trim_start_matches("./").to_string();
-            let line_number = parts.next()?.parse::<usize>().ok()?;
-            let start_column = parts.next()?.parse::<usize>().ok()?;
-            let text = parts.next().unwrap_or_default().to_string();
-            let end_column = start_column + highlight_len;
-            Some(WorkspaceSearchResult {
-                path,
-                line_number,
-                line: text,
-                ranges: vec![WorkspaceSearchRange {
-                    start_column,
-                    end_column,
-                }],
-            })
-        })
-        .take(max_results)
-        .collect()
 }
 
 fn bound_model_search_results(
@@ -10038,7 +9994,7 @@ fn fallback_search_workspace(
         }
         let content = String::from_utf8_lossy(&bytes);
         for (index, line) in content.lines().enumerate() {
-            if let Some(offset) = line.find(query) {
+            if line.contains(query) {
                 let path = entry
                     .path()
                     .strip_prefix(root)?
@@ -10048,10 +10004,7 @@ fn fallback_search_workspace(
                     path,
                     line_number: index + 1,
                     line: line.to_string(),
-                    ranges: vec![WorkspaceSearchRange {
-                        start_column: offset + 1,
-                        end_column: offset + query.len() + 1,
-                    }],
+                    ranges: literal_search_ranges(line, query),
                 });
                 if results.len() >= max_results {
                     return Ok(results);
