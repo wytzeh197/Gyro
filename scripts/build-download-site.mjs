@@ -47,10 +47,7 @@ function containsPath(parent, path) {
 
 const files = [
   ["site/model-catalog.json", "model-catalog.json"],
-  ["site/motion.js", "motion.js"],
   ["site/assets/gyro-coast.webp", "assets/gyro-coast.webp"],
-  ["site/assets/motion/workflow-dark.mp4", "assets/motion/workflow-dark.mp4"],
-  ["site/assets/motion/workflow-light.mp4", "assets/motion/workflow-light.mp4"],
   ["site/_headers", "_headers"],
   ["site/robots.txt", "robots.txt"],
   ["site/sitemap.xml", "sitemap.xml"],
@@ -74,34 +71,29 @@ const files = [
   ["site/assets/github.svg", "assets/github.svg"],
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
   ["site/assets/social-preview.png", "assets/social-preview.png"],
-  ["site/assets/screenshots/hero-600.webp", "assets/screenshots/hero-600.webp"],
   [
-    "site/assets/screenshots/hero-current-dark.webp",
-    "assets/screenshots/hero-current-dark.webp",
+    "site/assets/screenshots/current-chat-light.webp",
+    "assets/screenshots/current-chat-light.webp",
   ],
   [
-    "site/assets/screenshots/hero-current-light.webp",
-    "assets/screenshots/hero-current-light.webp",
+    "site/assets/screenshots/current-chat-dark.webp",
+    "assets/screenshots/current-chat-dark.webp",
   ],
   [
-    "site/assets/screenshots/hero-1200.webp",
-    "assets/screenshots/hero-1200.webp",
+    "site/assets/screenshots/current-workspace-light.webp",
+    "assets/screenshots/current-workspace-light.webp",
   ],
   [
-    "site/assets/screenshots/hero-2400.webp",
-    "assets/screenshots/hero-2400.webp",
+    "site/assets/screenshots/current-workspace-dark.webp",
+    "assets/screenshots/current-workspace-dark.webp",
   ],
   [
-    "site/assets/screenshots/hero-light-600.webp",
-    "assets/screenshots/hero-light-600.webp",
+    "site/assets/screenshots/current-review-light.webp",
+    "assets/screenshots/current-review-light.webp",
   ],
   [
-    "site/assets/screenshots/hero-light-1200.webp",
-    "assets/screenshots/hero-light-1200.webp",
-  ],
-  [
-    "site/assets/screenshots/hero-light-2400.webp",
-    "assets/screenshots/hero-light-2400.webp",
+    "site/assets/screenshots/current-review-dark.webp",
+    "assets/screenshots/current-review-dark.webp",
   ],
 ];
 

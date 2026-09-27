@@ -16,7 +16,8 @@
  * Options:
  *   --scene <name>   capture a single scene
  *   --readme         capture the three README product-tour scenes
- *   --keep-png       also write the intermediate PNGs next to the WebP output
+ *   --keep-png       retain full-resolution PNGs in docs/screenshots/site-v4
+ *   --origin <url>   use an existing local Gyro dev server (default port 1420)
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -35,7 +36,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = resolve(repoRoot, "site/assets/screenshots");
 const readmeOutputRoot = resolve(repoRoot, "docs/screenshots/readme");
 const stagingRoot = resolve(repoRoot, "docs/screenshots/site-v4");
-const appOrigin = "http://127.0.0.1:1420";
+const appOrigin = argument("--origin") ?? "http://127.0.0.1:1420";
 const debugPort = 9333;
 
 /*
@@ -81,142 +82,48 @@ const keepPng = process.argv.includes("--keep-png");
  * the responsive variants the site references. `steps` are run in the page
  * after load to drive the UI into the state we want to photograph.
  */
-/*
- * Capture the real app at 2x. The website renderer puts these windows on its
- * 16:10 scenic canvas and writes the responsive hero posters separately:
- * python3 scripts/site-motion/render.py
- */
-const heroSteps = [
-  "selectSession",
-  "collapseRun",
-  "openCompanion",
-  "openCompanionReview",
-  "scrollThreadTop",
+// Capture the current UI through a complete demo task. All task data comes
+// from the development fixture; the app renders its normal production components.
+const currentTaskSteps = ["selectSession", "runDemoTask", "closeEnvironment"];
+const currentReviewSteps = [
+  ...currentTaskSteps,
+  "showChangedFile",
+  "openRecordedReview",
 ];
-
-const heroWorkbench = {
-  diffReview: {
-    files: [
-      {
-        path: "src/sync.js",
-        additions: 8,
-        deletions: 2,
-        source: "agent-generated",
-        state: "pending",
-        comments: 0,
-        lines: [
-          {
-            kind: "context",
-            content: "export async function drain(queue) {",
-            number: 1,
-          },
-          {
-            kind: "context",
-            content: "  const item = queue.shift();",
-            number: 2,
-          },
-          { kind: "removed", content: "  for (;;) {", number: 3 },
-          {
-            kind: "removed",
-            content: "    try { return await send(item); } catch {}",
-            number: 4,
-          },
-          { kind: "added", content: "  const MAX_ATTEMPTS = 5;", number: 3 },
-          {
-            kind: "added",
-            content: "  for (let n = 0; n < MAX_ATTEMPTS; n++) {",
-            number: 4,
-          },
-          { kind: "added", content: "    try {", number: 5 },
-          {
-            kind: "added",
-            content: "      return await send(item);",
-            number: 6,
-          },
-          { kind: "added", content: "    } catch (error) {", number: 7 },
-          {
-            kind: "added",
-            content: "      if (n === 4) throw error;",
-            number: 8,
-          },
-          {
-            kind: "added",
-            content: "      await wait(2 ** n * 100);",
-            number: 9,
-          },
-          { kind: "added", content: "    }", number: 10 },
-          { kind: "context", content: "  }", number: 11 },
-          { kind: "context", content: "}", number: 12 },
-        ],
-      },
-    ],
-    selectedPath: "src/sync.js",
-    approvalState: "pending",
-    commitMessage: "",
-    collapsedDirectories: [],
-    lastAction: "Sample change ready for review",
-  },
-};
-
-const marketingScenes = [
-  {
-    name: "hero",
-    urlScene: "chat",
-    presentation: "website",
-    theme: "dark",
-    width: 1440,
-    height: 720,
-    steps: heroSteps,
-    workbench: heroWorkbench,
-    outputs: [
-      { file: "hero-ui.webp", width: 2880, height: 1440, directory: "staging" },
-    ],
-  },
-  {
-    /* The same frame in the light theme, for visitors who flip the toggle. */
-    name: "hero-light",
-    urlScene: "chat",
-    presentation: "website",
-    theme: "light",
-    width: 1440,
-    height: 720,
-    steps: heroSteps,
-    workbench: heroWorkbench,
-    outputs: [
-      {
-        file: "hero-light-ui.webp",
-        width: 2880,
-        height: 1440,
-        directory: "staging",
-      },
-    ],
-  },
-];
-
-for (const theme of ["dark", "light"]) {
-  for (const [name, steps] of [
-    ["conversation", ["selectSession", "collapseRun", "scrollThreadTop"]],
-    ["activity", ["selectSession", "expandRun", "scrollThreadTop"]],
+const marketingScenes = [];
+for (const theme of ["light", "dark"]) {
+  for (const [name, sceneSteps, requiredText] of [
+    ["chat", [...currentTaskSteps, "expandRun"], ["Automations", "Edited 1 file"]],
+    ["review", currentReviewSteps, ["Automations", "Recorded changes from this turn", "Compare current file"]],
+    ["workspace", [...currentReviewSteps, "compareCurrentFile", "openCurrentFile", "openWorkspacePanel", "openShell"], ["sync.js", "Shell", "2 passed"]],
   ]) {
     marketingScenes.push({
-      name: `website-${name}-${theme}`,
+      name: `current-${name}-${theme}`,
       urlScene: "chat",
+      query: "reset=1&reel=1",
       presentation: "website",
       theme,
-      width: 960,
-      height: 720,
-      steps,
-      outputs: [
-        {
-          file: `website-${name}-${theme}.webp`,
-          width: 1920,
-          height: 1440,
-          directory: "staging",
-        },
-      ],
+      width: 1440,
+      height: 900,
+      steps: sceneSteps,
+      requiredText,
+      outputs: [{ file: `current-${name}-${theme}.webp`, width: 2880, height: 1800, directory: "site" }],
     });
   }
 }
+marketingScenes.push({
+  name: "current-social",
+  urlScene: "chat",
+  query: "reset=1&reel=1",
+  presentation: "website",
+  theme: "light",
+  width: 1200,
+  height: 630,
+  scaleFactor: 1,
+  steps: currentReviewSteps,
+  requiredText: ["Automations", "Recorded changes from this turn"],
+  outputs: [{ file: "social-preview.png", width: 1200, height: 630, directory: "assets", format: "png" }],
+});
 
 const readmeScenes = [
   {
@@ -315,6 +222,39 @@ const clickByText = (text) => `
 `;
 
 const steps = {
+  runDemoTask: `(async () => {
+    const field = document.querySelector('textarea');
+    if (!field || !window.__gyroReelFixture) return 'missing:current-demo-fixture';
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, 'Limit retries. Add a test.');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const send = document.querySelector('button[aria-label="Send message"]');
+    if (!send || send.disabled) return 'missing:send-message';
+    send.click();
+    for (let attempt = 0; attempt < 100 && !window.__gyroReelFixture.pending; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!window.__gyroReelFixture.pending) return 'missing:pending-demo-task';
+    window.__gyroReelFixture.complete();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (document.querySelector('button[title="Show the change to src/sync.js"]')) return 'completed:current-demo-task';
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return 'missing:recorded-file-change';
+  })()`,
+  closeEnvironment: `(() => {
+    document.querySelector('button[aria-label="Close environment"]')?.click();
+    return 'closed:environment';
+  })()`,
+  showChangedFile: `(() => {
+    const button = document.querySelector('button[title="Show the change to src/sync.js"]');
+    if (!button) return 'missing:recorded-file-change';
+    button.click();
+    return 'opened:recorded-file-change';
+  })()`,
+  openRecordedReview: clickByText("Review"),
+  compareCurrentFile: clickByText("Compare current file"),
+  openCurrentFile: clickByText("Open file"),
   openCompanion: clickByText("Show companion"),
   collapseRun: `(() => {
     const button = document.querySelector('.gyro-run-header-toggle');
@@ -368,6 +308,26 @@ const steps = {
   `,
   openPane: clickByText("Claude Code"),
   openWorkspace: clickByText("Workspace"),
+  openWorkspacePanel: `
+    (() => {
+      const button = document.querySelector(
+        'button[aria-label="Open the workspace panel"]',
+      );
+      if (!button) return 'missing:workspace-panel';
+      button.click();
+      return 'clicked:workspace-panel';
+    })()
+  `,
+  openShell: `
+    (() => {
+      const tab = [...document.querySelectorAll('[role="tab"]')].find(
+        (node) => node.textContent.trim() === 'Shell',
+      );
+      if (!tab) return 'missing:shell-tab';
+      tab.click();
+      return 'clicked:shell-tab';
+    })()
+  `,
   openSourceControl: `
     (() => {
       const view = document.querySelector(
@@ -563,7 +523,7 @@ async function main() {
       await call("Emulation.setDeviceMetricsOverride", {
         width: scene.width,
         height: scene.height,
-        deviceScaleFactor: 2,
+        deviceScaleFactor: scene.scaleFactor ?? 2,
         mobile: false,
       });
 
@@ -583,7 +543,7 @@ async function main() {
           )}));`,
       });
       await call("Page.navigate", {
-        url: `${appOrigin}/capture.html?scene=${scene.urlScene}&theme=${theme}${scene.presentation ? `&presentation=${scene.presentation}` : ""}`,
+        url: `${appOrigin}/capture.html?scene=${scene.urlScene}&theme=${theme}${scene.presentation ? `&presentation=${scene.presentation}` : ""}${scene.query ? `&${scene.query}` : ""}`,
       });
 
       await waitFor(
@@ -599,10 +559,14 @@ async function main() {
       await new Promise((done) => setTimeout(done, 1200));
 
       for (const step of scene.steps) {
-        const { result } = await call("Runtime.evaluate", {
+        const { result, exceptionDetails } = await call("Runtime.evaluate", {
           expression: steps[step],
           returnByValue: true,
+          awaitPromise: true,
         });
+        if (exceptionDetails) {
+          fail(`${scene.name}: ${step}: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
+        }
         console.log(`  ${scene.name}: ${step} -> ${result.value}`);
         if (String(result.value).startsWith("missing:")) {
           fail(`${scene.name}: required capture step failed: ${result.value}`);
@@ -616,6 +580,16 @@ async function main() {
       }
 
       await new Promise((done) => setTimeout(done, 1200));
+
+      if (scene.requiredText) {
+        const { result } = await call("Runtime.evaluate", {
+          expression: `(${JSON.stringify(scene.requiredText)}).filter(text => !document.body.innerText.includes(text))`,
+          returnByValue: true,
+        });
+        if (result.value?.length) {
+          fail(`${scene.name}: current UI landmarks missing: ${result.value.join(", ")}`);
+        }
+      }
 
       const { result: missing } = await call("Runtime.evaluate", {
         expression: "window.__captureMissing ? window.__captureMissing() : []",
@@ -651,10 +625,16 @@ async function main() {
             ? readmeOutputRoot
             : output.directory === "staging"
               ? stagingRoot
-              : outputRoot,
+              : output.directory === "assets"
+                ? resolve(repoRoot, "site/assets")
+                : outputRoot,
           output.file,
         );
-        encodeWebp(png, target, output.width, output.height);
+        if (output.format === "png") {
+          writeFileSync(target, Buffer.from(shot.data, "base64"));
+        } else {
+          encodeWebp(png, target, output.width, output.height);
+        }
         console.log(
           `  wrote ${output.file} (${output.width}x${output.height})`,
         );

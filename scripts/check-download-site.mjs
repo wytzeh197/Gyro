@@ -96,6 +96,27 @@ function webpDimensions(path) {
   return null;
 }
 
+function pngDimensions(path) {
+  const bytes = readFileSync(path);
+  if (
+    bytes.length < 24 ||
+    bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" ||
+    bytes.subarray(12, 16).toString() !== "IHDR"
+  ) {
+    return null;
+  }
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+const screenshotAssets = [
+  "current-chat-light.webp",
+  "current-chat-dark.webp",
+  "current-workspace-light.webp",
+  "current-workspace-dark.webp",
+  "current-review-light.webp",
+  "current-review-dark.webp",
+].map((file) => `assets/screenshots/${file}`);
+
 const pages = {
   home: read("site/index.html"),
   install: read("site/install/index.html"),
@@ -221,16 +242,14 @@ containsAll(pages.home, "Homepage", [
   'class="spine"',
   'class="surface-card"',
   'class="surface-visual"',
-  'class="mock mock-chat"',
-  'class="mock mock-terminal"',
-  'class="mock mock-diff"',
+  'class="surface-shot-dark"',
+  'class="surface-shot-light"',
   "Bring your own.",
   "Your agents. Your subscriptions.",
   'class="agent-grid"',
   'class="agent-tile agent-ollama"',
   ">Ollama</span>",
-  "assets/screenshots/hero-2400.webp",
-  "assets/screenshots/hero-light-2400.webp",
+  ...screenshotAssets,
   "assets/social-preview.png",
   "Download for macOS.",
   "Download DMG",
@@ -240,16 +259,16 @@ containsAll(pages.home, "Homepage", [
   "data-download-surface",
 ]);
 
-// Each mockup stands in for a real interface, so it has to read as one image to
-// assistive tech rather than as a scatter of unrelated labels.
-for (const mock of ["mock mock-chat", "mock mock-terminal", "mock mock-diff"]) {
-  const index = pages.home.indexOf(`class="${mock}"`);
+// Product captures use the real interface and describe the demonstrated state.
+const productImages = [...pages.home.matchAll(/<img\b[^>]*>/gs)]
+  .map(([tag]) => tag)
+  .filter((tag) => tag.includes("assets/screenshots/"));
+for (const tag of productImages) {
   check(
-    index !== -1 &&
-      /^[^>]*role="img"[^>]*aria-label="/s.test(
-        pages.home.slice(index, pages.home.indexOf(">", index)),
-      ),
-    `Mockup ${mock} must carry role="img" and an aria-label`,
+    /\balt="[^"]+"/.test(tag) &&
+      /\bwidth="2880"/.test(tag) &&
+      /\bheight="1800"/.test(tag),
+    "Product screenshots must carry descriptive alt text and their 2880x1800 dimensions",
   );
 }
 
@@ -270,7 +289,7 @@ check(
 );
 check(
   !pages.home.includes("Product preview"),
-  "Product mockups must not be labeled as previews",
+  "Product captures must not be labeled as previews",
 );
 check(
   pages.home.indexOf('id="product"') < pages.home.indexOf('id="agents"'),
@@ -297,18 +316,21 @@ check(
   "Gradients are limited to the requested screenshot outline",
 );
 check(
-  !/assets\/screenshots\/(chat|cli|workspace)-/.test(allHtml),
-  "Only the hero may use a product screenshot; the surfaces are drawn in markup",
+  [...allHtml.matchAll(/assets\/screenshots\/[^\s"'<>]+/g)].every(([path]) =>
+    screenshotAssets.includes(path),
+  ),
+  "Pages must reference only the current product screenshots",
 );
-// The surfaces must stay image-free: a screenshot there would go stale behind
-// the app, and would not follow the theme.
+// Every demonstrated surface has a fresh capture for both site themes.
 const spineStart = pages.home.indexOf('<ol class="spine">');
 const spineEnd = pages.home.indexOf("</ol>", spineStart);
+const spine = pages.home.slice(spineStart, spineEnd);
 check(
   spineStart !== -1 &&
     spineEnd !== -1 &&
-    !pages.home.slice(spineStart, spineEnd).includes("<img"),
-  "Surface mockups must be built from markup, not screenshots",
+    screenshotAssets.every((path) => spine.includes(path)) &&
+    !/class="mock(?:\s|")/.test(spine),
+  "Product surfaces must show current chat, workspace, and review captures in both themes",
 );
 
 containsAll(pages.install, "Install page", [
@@ -380,8 +402,8 @@ containsAll(css, "Shared CSS", [
   ".premise-list",
   ".cost-figure",
   ".cost-gap",
-  ".mock-gate",
-  ".mock-diff-lines",
+  ".surface-shot-dark",
+  ".surface-shot-light",
   ".agent-grid",
   ':root[data-theme="light"]',
   ".theme-toggle",
@@ -477,8 +499,7 @@ containsAll(buildScript, "Site builder", [
   "site/assets/fonts/inter-tight-latin.woff2",
   "site/assets/gyro-mark.png",
   "site/assets/social-preview.png",
-  "site/assets/screenshots/hero-2400.webp",
-  "site/assets/screenshots/hero-light-2400.webp",
+  ...screenshotAssets.map((path) => `site/${path}`),
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
 
@@ -558,21 +579,12 @@ check(
   `Site text must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
 );
 
-/*
- * Scenic hero posters use a 16:10 canvas. The current app windows are
- * captured separately, then composed by scripts/site-motion/render.py.
- * Change poster dimensions here and in the renderer together.
- */
-const screenshotSpecs = [
-  ["site/assets/screenshots/hero-current-dark.webp", 1660, 989],
-  ["site/assets/screenshots/hero-current-light.webp", 1666, 999],
-  ["site/assets/screenshots/hero-600.webp", 600, 375],
-  ["site/assets/screenshots/hero-1200.webp", 1200, 750],
-  ["site/assets/screenshots/hero-2400.webp", 2400, 1500],
-  ["site/assets/screenshots/hero-light-600.webp", 600, 375],
-  ["site/assets/screenshots/hero-light-1200.webp", 1200, 750],
-  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1500],
-];
+// Current app captures render at 1440x900 with a 2x device scale factor.
+const screenshotSpecs = screenshotAssets.map((path) => [
+  `site/${path}`,
+  2880,
+  1800,
+]);
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));
   check(
@@ -580,6 +592,14 @@ for (const [path, width, height] of screenshotSpecs) {
     `${path} must be ${width}x${height}; found ${dimensions ? `${dimensions.width}x${dimensions.height}` : "invalid WebP"}`,
   );
 }
+const socialPreviewDimensions = pngDimensions(
+  resolve(repoRoot, "site/assets/social-preview.png"),
+);
+check(
+  socialPreviewDimensions?.width === 1200 &&
+    socialPreviewDimensions?.height === 630,
+  "site/assets/social-preview.png must be a 1200x630 PNG",
+);
 
 const utilityRuntime = await import(
   `data:text/javascript;base64,${Buffer.from(releaseUtils).toString("base64")}`
@@ -702,6 +722,12 @@ if (!failures.length) {
   ]) {
     check(!filesA.includes(stale), `Built site contains stale asset ${stale}`);
   }
+  check(
+    JSON.stringify(
+      filesA.filter((file) => file.startsWith("assets/screenshots/")).sort(),
+    ) === JSON.stringify([...screenshotAssets].sort()),
+    "Built site must contain exactly the six current product screenshots",
+  );
 }
 
 rmSync(tempRoot, { force: true, recursive: true });
