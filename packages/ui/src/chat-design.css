@@ -141,7 +141,7 @@
   text-align: left;
 }
 
-/* Status is the header text. A mark remains only for failures. */
+/* Status is the header text. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
@@ -190,25 +190,6 @@
   .gyro-run-header::before {
   display: none;
   content: none;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-run.is-problem
-  .gyro-run-header::before {
-  content: "!";
-  display: grid;
-  place-items: center;
-  position: absolute;
-  top: 7px;
-  left: 0;
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
-  border-color: var(--gyro-danger);
-  color: var(--gyro-danger);
-  font-size: calc(9px * var(--gyro-ui-scale, 1));
-  font-weight: 700;
 }
 
 :root[data-theme]

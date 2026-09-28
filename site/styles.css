@@ -4198,7 +4198,7 @@ summary:focus-visible {
 .home-page .hero-note {
   margin-top: 12px;
   color: var(--quiet);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .home-page .product-stage {
@@ -4273,7 +4273,7 @@ summary:focus-visible {
   margin-bottom: 16px;
   color: var(--muted);
   font-family: var(--sans);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -4356,7 +4356,7 @@ summary:focus-visible {
   .home-page .site-header .desktop-nav-link,
   .home-page .site-header .github-link { display: none; }
   .home-page .site-header nav { gap: 4px; }
-  .home-page .site-header .nav-download { min-height: 40px; padding-inline: 12px; font-size: 12px; }
+  .home-page .site-header .nav-download { min-height: 40px; padding-inline: 12px; font-size: 13px; }
   .home-page .hero { padding-top: 42px; }
   .home-page .hero-head { gap: 0; }
   .home-page .hero-copy { display: block; }

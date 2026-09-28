@@ -1,8 +1,8 @@
 pub mod account;
 mod api_compatibility;
-mod chat_http;
 pub mod automations;
 pub mod capabilities;
+mod chat_http;
 pub mod cli_path;
 pub mod cli_updates;
 pub mod config;

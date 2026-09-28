@@ -195,8 +195,11 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
     wait_page("Hover: open")?;
     let pointer_highlight = capture_session_browser_png(app, session)?;
-    std::fs::write(output.join("browser-smoke-mouse-highlight.png"), pointer_highlight.png)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        output.join("browser-smoke-mouse-highlight.png"),
+        pointer_highlight.png,
+    )
+    .map_err(|e| e.to_string())?;
     call("clearHighlight", json!({}))?;
     mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
     wait_page("Context: opened")?;

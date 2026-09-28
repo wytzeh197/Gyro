@@ -3500,8 +3500,7 @@ fn execute_ollama_provider(
             format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
         )
     })?;
-    if selected.is_none()
-    {
+    if selected.is_none() {
         return Err(cli_failure(
             CliErrorCategory::InvalidInput,
             format!(

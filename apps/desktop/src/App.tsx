@@ -6799,7 +6799,7 @@ export function App() {
       } else {
         notify("terminal", "Session created", session.title);
       }
-    } catch {
+    } catch (error) {
       const session = createPreviewSession(
         sessionLayout,
         workbench.workspaceMode,
@@ -6813,7 +6813,7 @@ export function App() {
       activeSessionIdRef.current = session.id;
       setActiveSessionId(session.id);
       setEventsForSession(session.id, []);
-      notify("command-failed", "Session fallback", "Created preview session");
+      notify("command-failed", "Chat not saved yet", String(error));
     }
   }, [
     config,
@@ -9782,9 +9782,14 @@ export function App() {
           ? overrideContext.goal
           : activeSessionGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
-      const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
-      const targetSession = targetSessionId
-        ? sessions.find((session) => session.id === targetSessionId)
+      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const previewSessionId =
+        isTauriRuntime() && requestedSessionId?.startsWith("preview-")
+          ? requestedSessionId
+          : undefined;
+      const targetSessionId = previewSessionId ? undefined : requestedSessionId;
+      const targetSession = requestedSessionId
+        ? sessions.find((session) => session.id === requestedSessionId)
         : undefined;
       const targetSessionHasTranscriptEvents = targetSessionId
         ? (sessionEventsById[targetSessionId] ?? []).some(
@@ -9800,7 +9805,7 @@ export function App() {
         ...selectedSessionModelFromConfig(config),
         // Prefer the model bound to this session or draft pane over the global
         // picker — required so split-screen chats keep independent models.
-        ...(targetSessionId
+        ...(requestedSessionId
           ? sessionModelSelectionFromSession(targetSession)
           : chatDraftModels[activeDraftKey]),
         ...overrideContext?.sessionModel,
@@ -10027,10 +10032,11 @@ export function App() {
       };
       const shouldSuggestTitle =
         !isRetry &&
-        shouldSuggestSessionTitle(
-          targetSession,
-          targetSessionHasTranscriptEvents,
-        );
+        (Boolean(previewSessionId) ||
+          shouldSuggestSessionTitle(
+            targetSession,
+            targetSessionHasTranscriptEvents,
+          ));
       const provisionalTitle = shouldSuggestTitle
         ? sessionTitleFromMessage(message)
         : undefined;
@@ -10080,13 +10086,31 @@ export function App() {
             ? workspaceFilesForRoot(session.workspacePath, previewFiles)
             : [],
         );
-        setSessions((current) => [session, ...current]);
-        dispatchChatGrid({
-          type: "migrate-draft-pane",
-          draftKey: activeDraftKey,
-          sessionId: session.id,
-          workspacePath: session.workspacePath,
-        });
+        setSessions((current) => [
+          session,
+          ...current.filter((item) => item.id !== previewSessionId),
+        ]);
+        if (previewSessionId) {
+          optimisticEventsRef.current.delete(previewSessionId);
+          setSessionEventsById((current) => {
+            const next = { ...current };
+            delete next[previewSessionId];
+            return next;
+          });
+          dispatchChatGrid({
+            type: "rekey-session-pane",
+            fromSessionId: previewSessionId,
+            toSessionId: session.id,
+            workspacePath: session.workspacePath,
+          });
+        } else {
+          dispatchChatGrid({
+            type: "migrate-draft-pane",
+            draftKey: activeDraftKey,
+            sessionId: session.id,
+            workspacePath: session.workspacePath,
+          });
+        }
         setChatDraftModels((current) => {
           if (!(activeDraftKey in current)) {
             return current;

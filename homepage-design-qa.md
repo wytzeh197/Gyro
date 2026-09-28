@@ -20,7 +20,7 @@ Explorer, editor, and Shell. Social previews were replaced as well.
 - Build: `pnpm site:build` passed. The build includes the six new screenshots and excludes legacy screenshot files.
 - Browser: built preview at `http://127.0.0.1:4173/` inspected at desktop 877 × 759 and mobile 390 × 844. Current hero and product screenshots loaded at their expected dimensions. Mobile review images used the selected light/dark theme and the page had no horizontal overflow at 390 px.
 - Visual inspection: all six product captures and the social preview were inspected. No old Sessions/Workspace text switcher or obsolete review approval controls remain in these images.
-- `pnpm site:check`: runtime and build safety checks passed; no image-specific assertions failed. The full check still reports five outdated homepage-copy assertions and three existing 12px text rules below its 13px minimum. These are outside this image revision.
+- Release-preparation follow-up aligned the homepage assertions with the current copy and raised the remaining 12px text rules to the site's 13px minimum. The full `pnpm site:check` result is recorded after that follow-up.
 
 This is an image revision check, not a blanket approval of all website design,
 copy, or accessibility behavior.

@@ -4,14 +4,14 @@ mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod git_read;
 mod model_catalog;
-mod provider_activity;
 mod provider_accounting;
+mod provider_activity;
 use provider_accounting::*;
 use provider_activity::*;
 mod context_compaction;
 mod provider_mcp;
-mod provider_tool_batch;
 mod provider_reliability;
+mod provider_tool_batch;
 use provider_reliability::{
     is_transient_provider_error, provider_failure_recovery, readable_provider_error,
 };
@@ -13048,11 +13048,15 @@ fn run_provider_chat_with_retry(
             gyro_core::provider_observation::attempt();
             let shown = provider_timeline::item_count(app, &request.session_id);
             let result = run_provider_chat_once(app, request, resume_cursor, attempt);
-            attempt.published_output |= provider_timeline::item_count(app, &request.session_id) != shown
+            attempt.published_output |= provider_timeline::item_count(app, &request.session_id)
+                != shown
                 || provider_accounting::has_dispatched_tools(app, &request.session_id);
             if let Ok(output) = &result {
                 if let Some(tokens) = output.accounted_usage.or_else(|| {
-                    output.billed_usage.as_ref().map(provider_accounting::usage_tokens)
+                    output
+                        .billed_usage
+                        .as_ref()
+                        .map(provider_accounting::usage_tokens)
                 }) {
                     gyro_core::provider_observation::native_usage(tokens);
                 }
@@ -13271,7 +13275,9 @@ fn persist_failed_provider_attempt(
                 binding.model_id.clone(),
                 binding.model_label.clone(),
                 binding.reasoning_effort.clone(),
-                attempt.resume_cursor.as_ref()
+                attempt
+                    .resume_cursor
+                    .as_ref()
                     .and_then(|cursor| serde_json::to_value(cursor).ok())
                     .unwrap_or_else(|| binding.resume_cursor_json.clone()),
                 "failed",
@@ -14324,8 +14330,10 @@ fn run_openai_codex_app_server_chat(
             }
             if message.get("id").and_then(serde_json::Value::as_u64) == Some(3) {
                 let result = codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
-                provider_turn_id = result.pointer("/turn/id")
-                    .and_then(serde_json::Value::as_str).map(str::to_string);
+                provider_turn_id = result
+                    .pointer("/turn/id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
                 turn_started = true;
                 continue;
             }
@@ -14334,7 +14342,8 @@ fn run_openai_codex_app_server_chat(
             match method {
                 "thread/tokenUsage/updated" => {
                     if turn_started
-                        && params.get("threadId").and_then(serde_json::Value::as_str) == Some(&thread_id)
+                        && params.get("threadId").and_then(serde_json::Value::as_str)
+                            == Some(&thread_id)
                         && provider_turn_id.as_deref().is_some_and(|id| {
                             params.get("turnId").and_then(serde_json::Value::as_str) == Some(id)
                         })
@@ -21224,8 +21233,9 @@ fn execute_provider_capability(
         }
         CapabilityId::BrowserMouse => {
             let owned = require_model_browser_resource(app, bound)?;
-            let outcome = browser_pointer::execute(app, &bound.session_id, &bound.provider_id, arguments)
-                .map_err(anyhow::Error::msg)?;
+            let outcome =
+                browser_pointer::execute(app, &bound.session_id, &bound.provider_id, arguments)
+                    .map_err(anyhow::Error::msg)?;
             let resource = CapabilityResourceRef {
                 id: owned.resource_id,
                 kind: "browser".into(),
@@ -21501,7 +21511,11 @@ fn handle_desktop_provider_capability_request(
         );
     }
     let _timing = timing::attach(
-        control.timing.lock().map(|trace| trace.clone()).unwrap_or_default(),
+        control
+            .timing
+            .lock()
+            .map(|trace| trace.clone())
+            .unwrap_or_default(),
     );
     let bound = match control
         .capability_context
@@ -24087,6 +24101,7 @@ mod tests {
             .unwrap();
         let request = provider_chat_request_for(&session, temp.path(), "xai");
         let mut attempts = 0;
+        let stop_checks = std::cell::Cell::new(0);
         let started = Instant::now();
         let error = run_provider_chat_with_retry_using(
             &store,
@@ -24096,7 +24111,11 @@ mod tests {
                 attempts += 1;
                 anyhow::bail!("connection reset by peer");
             },
-            || Some(ProviderStopReason::User.message()),
+            || {
+                let check = stop_checks.get();
+                stop_checks.set(check + 1);
+                (check > 0).then(|| ProviderStopReason::User.message())
+            },
         )
         .unwrap_err();
         assert_eq!(attempts, 1);
