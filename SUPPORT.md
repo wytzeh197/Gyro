@@ -15,6 +15,8 @@ Community reports are still valuable and help make the first release safer.
   for reproducible defects or a
   [feature request](https://github.com/wytzeh197/Gyro/issues/new?template=feature_request.yml)
   for product proposals.
+- See the [support and bug-fix workflow](docs/support-workflow.md) for how reports
+  are reviewed and when Arda may prepare a small fix.
 
 When reporting a problem, include the Gyro version or commit, macOS version,
 whether you used the app or CLI, reproduction steps, and redacted diagnostic
