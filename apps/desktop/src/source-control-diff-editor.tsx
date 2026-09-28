@@ -1,6 +1,6 @@
 import { useAppearance } from "@gyro-dev/ui";
 import { useSyntax } from "./editor/use-syntax";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PlainDiffView,
@@ -19,13 +19,13 @@ type Content = {
   unified?: string;
 };
 
-export default function SourceControlDiffEditor({
+function SourceControlDiffEditor({
   review,
   refreshKey,
   languageOverride,
   onDetectedLanguage,
   theme,
-  onOpenFile,
+  onOpenFile: onOpenFileProp,
 }: {
   review: Review;
   refreshKey?: string;
@@ -34,7 +34,7 @@ export default function SourceControlDiffEditor({
   theme: "light" | "dark";
   onOpenFile: () => void;
 }) {
-  const { scale, reduceMotion } = useAppearance();
+  const { scale } = useAppearance();
   const [content, setContent] = useState<Content>();
   const [forcePlain, setForcePlain] = useState(false);
   const syntax = useSyntax(
@@ -43,9 +43,46 @@ export default function SourceControlDiffEditor({
     languageOverride,
     Math.max(content?.original.length ?? 0, content?.modified.length ?? 0),
   );
+  // Callbacks arrive as fresh closures on every App render; the component is
+  // memoised on everything else, so read them through refs.
+  const onDetectedLanguageRef = useRef(onDetectedLanguage);
+  const onOpenFileRef = useRef(onOpenFileProp);
+  onDetectedLanguageRef.current = onDetectedLanguage;
+  onOpenFileRef.current = onOpenFileProp;
+  const onOpenFile = useCallback(() => onOpenFileRef.current(), []);
   useEffect(() => {
-    onDetectedLanguage?.(syntax.definition.id);
-  }, [syntax.definition.id, onDetectedLanguage]);
+    onDetectedLanguageRef.current?.(syntax.definition.id);
+  }, [syntax.definition.id]);
+  // DiffEditor calls updateOptions whenever this object changes identity, so
+  // an inline literal re-configured both editors on every render.
+  const limited = syntax.policy.limited;
+  const diffOptions = useMemo(
+    () => ({
+      automaticLayout: true,
+      bracketPairColorization: { enabled: !limited },
+      guides: { bracketPairs: !limited, indentation: !limited },
+      maxComputationTime: 3000,
+      readOnly: true,
+      originalEditable: false,
+      renderSideBySide: true,
+      useInlineViewWhenSpaceIsLimited: true,
+      renderSideBySideInlineBreakpoint: 560,
+      ignoreTrimWhitespace: false,
+      fontFamily:
+        "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
+      fontSize: 13 * scale,
+      lineHeight: Math.round(20 * scale),
+      // Smooth scrolling animates every wheel tick, which lags behind the
+      // trackpad in WKWebView.
+      smoothScrolling: false,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      padding: { top: 8, bottom: 12 },
+      renderOverviewRuler: true,
+      diffWordWrap: "off" as const,
+    }),
+    [limited, scale],
+  );
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -53,18 +90,45 @@ export default function SourceControlDiffEditor({
   const editorRef = useRef<Parameters<DiffOnMount>[0]>();
   const subscriptionRef = useRef<{ dispose(): void }>();
 
+  // Source control re-checks in the background and bumps `refreshKey` each
+  // time. Tearing the editor down for every check blanked the diff, reset the
+  // scroll, and remounted Monaco. Only a different comparison shows a loading
+  // state; a refresh of the same one swaps content in place, and only when it
+  // actually changed.
+  const identity = [
+    review.workspacePath,
+    review.path,
+    review.originalPath,
+    review.staged,
+    review.comparison,
+  ].join("\u0000");
+  const loadedIdentity = useRef<string>();
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
-    setForcePlain(false);
-    setChangeCount(0);
+    const background = loadedIdentity.current === identity;
+    if (!background) {
+      setLoading(true);
+      setError("");
+      setForcePlain(false);
+      setChangeCount(0);
+    }
     void invoke<Content>("git_review_content", { request: review })
       .then((result) => {
-        if (!cancelled) setContent(result);
+        if (cancelled) return;
+        loadedIdentity.current = identity;
+        setError("");
+        setContent((current) =>
+          current &&
+          current.original === result.original &&
+          current.modified === result.modified &&
+          current.unified === result.unified &&
+          current.notice === result.notice
+            ? current
+            : result,
+        );
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!cancelled && !background) {
           setError(String(error));
           setContent(undefined);
         }
@@ -75,15 +139,7 @@ export default function SourceControlDiffEditor({
     return () => {
       cancelled = true;
     };
-  }, [
-    review.workspacePath,
-    review.path,
-    review.originalPath,
-    review.staged,
-    review.comparison,
-    refreshKey,
-    reload,
-  ]);
+  }, [identity, refreshKey, reload]);
 
   useEffect(() => () => subscriptionRef.current?.dispose(), []);
 
@@ -203,7 +259,7 @@ export default function SourceControlDiffEditor({
             setReload((value) => value + 1);
           }}
         />
-      ) : content ? (
+      ) : content && syntax.ready ? (
         <div className="gyro-source-control-review-editor">
           <DiffEditor
             original={content.original}
@@ -246,31 +302,7 @@ export default function SourceControlDiffEditor({
               }, 4000);
               requestAnimationFrame(remeasureMonacoFonts);
             }}
-            options={{
-              automaticLayout: true,
-              bracketPairColorization: { enabled: !syntax.policy.limited },
-              guides: {
-                bracketPairs: !syntax.policy.limited,
-                indentation: !syntax.policy.limited,
-              },
-              maxComputationTime: 3000,
-              readOnly: true,
-              originalEditable: false,
-              renderSideBySide: true,
-              useInlineViewWhenSpaceIsLimited: true,
-              renderSideBySideInlineBreakpoint: 560,
-              ignoreTrimWhitespace: false,
-              fontFamily:
-                "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-              fontSize: 13 * scale,
-              lineHeight: Math.round(20 * scale),
-              smoothScrolling: !reduceMotion,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              padding: { top: 8, bottom: 12 },
-              renderOverviewRuler: true,
-              diffWordWrap: "off",
-            }}
+            options={diffOptions}
           />
         </div>
       ) : (
@@ -281,3 +313,12 @@ export default function SourceControlDiffEditor({
     </div>
   );
 }
+
+export default memo(
+  SourceControlDiffEditor,
+  (previous, next) =>
+    previous.review === next.review &&
+    previous.refreshKey === next.refreshKey &&
+    previous.languageOverride === next.languageOverride &&
+    previous.theme === next.theme,
+);

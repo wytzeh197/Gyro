@@ -210,6 +210,13 @@ impl MenuBarController {
     }
 
     fn set_snapshot(&self, app: &AppHandle, snapshot: MenuBarSnapshot) {
+        // This runs on the main thread; an unchanged snapshot must not redraw
+        // the tray, resize the popover, or broadcast again.
+        if let Ok(stored) = self.snapshot.lock() {
+            if serde_json::to_value(&*stored).ok() == serde_json::to_value(&snapshot).ok() {
+                return;
+            }
+        }
         let state = self.effective_state(&snapshot);
         if let Ok(mut stored) = self.snapshot.lock() {
             *stored = snapshot;

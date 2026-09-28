@@ -2392,6 +2392,72 @@ pre {
   padding-left: 22px;
 }
 
+.release-group {
+  scroll-margin-top: calc(var(--header-height) + 16px);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.release-entry + .release-group {
+  margin-top: 0;
+}
+
+.release-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 32px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.release-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.release-group > summary::after {
+  margin-left: auto;
+  color: var(--quiet);
+  content: "+";
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.release-group[open] > summary::after {
+  content: "−";
+}
+
+.release-group > summary:hover .release-group-title,
+.release-group > summary:focus-visible .release-group-title {
+  color: var(--accent);
+}
+
+.release-group-heading {
+  display: grid;
+}
+
+.release-group-heading .release-kicker {
+  margin-bottom: 12px;
+}
+
+.release-group-title {
+  color: var(--text);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.release-group-entries {
+  padding-top: 16px;
+}
+
+.release-group-entries > .release-entry:first-child {
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
+}
+
 .release-entry > .text-link {
   display: inline-flex;
   min-height: 44px;
@@ -2919,7 +2985,8 @@ pre {
     justify-content: flex-start;
   }
 
-  .release-entry h2 {
+  .release-entry h2,
+  .release-group-title {
     font-size: 27px;
   }
 

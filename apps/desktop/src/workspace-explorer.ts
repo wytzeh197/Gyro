@@ -118,10 +118,18 @@ export function useWorkspaceExplorerFiles(
     };
     void refresh();
     // Keep open folders current even when native file watching is unavailable.
-    const timer = window.setInterval(() => void refresh(), 2000);
+    // Skip ticks while the window is hidden and catch up when it returns.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 2000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [directoryKey, files, rootKey, loadDirectory, onError]);
   return { explorerFiles, onExpandedDirectoriesChange: setExpanded };

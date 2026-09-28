@@ -20,9 +20,8 @@ assert.deepEqual(reported, {
   totalTokens: 1_540,
 });
 
-// A reported total stands even when it disagrees with the two halves: the
-// endpoint knows what it billed, and cached or reasoning tokens are exactly the
-// kind of thing that makes input + output an incomplete sum.
+// Preserve a provider's larger reported total when its breakdown is incomplete.
+// Cached input and reasoning are subsets; never add them to the total again.
 assert.equal(
   turnTokensFromValue({ inputTokens: 10, outputTokens: 10, totalTokens: 999 })
     ?.totalTokens,
@@ -77,17 +76,17 @@ assert.equal(turnTokensLabel({ totalTokens: 12_400 }), "12.4k tokens");
 
 // The hover has to explain the headline, so it carries the breakdown the
 // rounded label drops.
-assert.equal(
+assert.match(
   turnTokensDetail({
     inputTokens: 1_200,
     outputTokens: 340,
     totalTokens: 1_540,
   }),
-  "1,540 tokens billed this turn · 1,200 in, 340 out",
+  /1,540 tokens reported for this turn · 1,200 input · 340 output/,
 );
-assert.equal(
+assert.match(
   turnTokensDetail({ totalTokens: 1_540 }),
-  "1,540 tokens billed this turn",
+  /1,540 tokens reported for this turn/,
 );
 
 const estimated = turnTokensFromValue({
@@ -119,7 +118,93 @@ const withoutUsage = turnTokenReadingForResponse(
   "12345678",
   "1234",
 );
-assert.equal(withoutUsage.label, "~3 tokens");
-assert.match(withoutUsage.title, /not included/);
+assert.equal(withoutUsage.label, "Usage unavailable");
+assert.match(withoutUsage.title, /No reliable token usage/);
+
+// The screenshot's verified turn: cached input is a subset, never added twice.
+const actual = turnTokensFromValue({
+  inputTokens: 3_879_281,
+  cachedInputTokens: 3_749_120,
+  outputTokens: 15_708,
+  reasoningOutputTokens: 2_825,
+  totalTokens: 3_894_989,
+  measured: false,
+});
+const reading = turnTokenReadingForResponse(actual, undefined, "", "");
+assert.equal(reading.label, "~3.9M tokens · 3.7M cached");
+assert.match(reading.title, /3,894,989 tokens/);
+assert.match(reading.title, /3,749,120 cached input/);
+assert.match(reading.title, /not additional/);
+assert.match(reading.title, /2,825 reasoning/);
+assert.equal(
+  turnTokensLabel(actual),
+  "~3.9M tokens",
+  "live estimate remains labelled",
+);
+assert.equal(
+  turnTokenReadingForResponse(
+    undefined,
+    { totalTokens: 100, measured: false },
+    "",
+    "",
+  ).label,
+  "~100 tokens",
+  "estimated context is not a measured lower bound",
+);
+
+for (const value of [
+  { totalTokens: 1.5 },
+  { totalTokens: Number.MAX_SAFE_INTEGER + 1 },
+  { totalTokens: 5, inputTokens: -1 },
+  { totalTokens: 5, outputTokens: "5" },
+  { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 },
+])
+  assert.equal(turnTokensFromValue(value), undefined);
+assert.deepEqual(
+  turnTokensFromValue({ inputTokens: 100, outputTokens: 20, totalTokens: 0 }),
+  {
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 120,
+    measured: false,
+  },
+);
+assert.equal(
+  turnTokensFromValue({
+    inputTokens: 100,
+    outputTokens: 20,
+    cachedInputTokens: 999,
+    reasoningOutputTokens: 999,
+    totalTokens: 120,
+  }).cachedInputTokens,
+  100,
+);
+assert.equal(
+  turnTokensFromValue({
+    inputTokens: 100,
+    outputTokens: 20,
+    reasoningOutputTokens: 999,
+    totalTokens: 120,
+  }).reasoningOutputTokens,
+  20,
+);
+assert.equal(formatTokenCount(999_999), "1.0M");
+assert.equal(formatTokenCount(NaN), "—");
+assert.equal(formatTokenCount(-1), "—");
+// Persist and reload preserves confidence and breakdown exactly.
+assert.deepEqual(
+  turnTokensFromValue(JSON.parse(JSON.stringify(actual))),
+  actual,
+);
+
+// A total-only backend reading must not claim a known zero input/output split.
+assert.doesNotMatch(
+  turnTokensDetail({ inputTokens: 0, outputTokens: 0, totalTokens: 150, measured: true }),
+  /0 input|0 output/,
+);
+assert.match(
+  turnTokensDetail({ inputTokens: 0, outputTokens: 0, totalTokens: 0, measured: true }),
+  /0 input · 0 output/,
+);
 
 console.log("turn token checks passed");

@@ -61,6 +61,14 @@ assert.equal(isMediaDrag(drop(types("image/png"))), true);
 assert.equal(isMediaDrag(drop(types("text/uri-list", "text/plain"))), true);
 assert.equal(isMediaDrag(drop(types("text/plain"))), false);
 assert.equal(isMediaDrag(drop(types("application/x-gyro-chat-pane"))), false);
+// A chat dragged from the sidebar must reach the chat grid even when the
+// webview also advertises a URI for the dragged element.
+assert.equal(
+  isMediaDrag(
+    drop(types("application/x-gyro-chat-session", "text/uri-list", "Files")),
+  ),
+  false,
+);
 assert.equal(isMediaDrag(drop(types(), [{ kind: "file" }])), true);
 assert.equal(isMediaDrag(null), false);
 

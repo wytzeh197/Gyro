@@ -13,6 +13,7 @@ session with you.
 
 [Download](https://usegyro.io/) ·
 [Releases](https://github.com/wytzeh197/Gyro/releases/latest) ·
+[Changelog](https://usegyro.io/changelog/) ·
 [Architecture](docs/architecture.md) ·
 [Contribute](CONTRIBUTING.md)
 
@@ -39,13 +40,22 @@ session with you.
 - **Approvals before mutation.** Commands, file edits, and sensitive reads stay
   visible before they change local state. Choose **Ask for approval**,
   **Approve for me**, or **Full access**; Plan mode stays non-mutating.
+- **Goals and plans on the composer.** Pin the outcome a session is pursuing,
+  and approve a finished plan with **Implement** or **Keep planning** before
+  any edit starts.
 - **A real workbench.** Files, Git, diffs, problems, output, test results, a
-  terminal grid, a browser rail, and interactive Canvas previews sit in the same
-  window as the chat.
+  terminal grid, a browser, and interactive Canvas previews sit in the same
+  window as the chat. A session can span several project folders, and chats
+  can run side by side in a split layout.
+- **A browser the agent can use.** Models open, read, and inspect pages in a
+  per-session browser. It stays in the background while you work in split
+  chats, and opens beside the chat when you want to watch or take over.
 - **Scheduled work.** Automations run agent tasks on a schedule with pause, stop
   conditions, receipts, and recovery across restarts.
 - **Delegated research.** A read-only sub-agent investigates a question in its
   own child session and returns only its final report to the chat.
+- **Usage you can see.** Turn tokens, plan-usage meters, and provider retries
+  are reported per session; estimates are not hard spend ceilings.
 - **Local-first trust.** Sessions, config, worktrees, and usage stay on your
   Mac; provider keys live in the macOS Keychain; logs are redacted; app
   telemetry is off by default.
@@ -61,6 +71,9 @@ session with you.
   servers on loopback. Keys are stored in the Keychain and sent only to the
   endpoint you configured. See [API-key providers](docs/api-key-providers.md).
 
+New models arrive through a validated remote catalog, so most model launches
+need no app update. See [Model catalog](docs/model-catalog.md).
+
 ## Install
 
 macOS 14 or newer. Apple Silicon and Intel builds are on
@@ -75,6 +88,23 @@ brew install wytzeh197/tap/gyro
 ```
 
 Keep the app and CLI on the same version for session handoff.
+
+## Status
+
+Gyro is working toward **v0.1.0**, its first non-alpha release. Before it
+ships, the macOS app will move from ad-hoc signing to Developer ID signing
+with Apple notarization, and the clean-machine path—install, connect a
+provider, first reply, approved edit, restart and resume—must pass on fresh
+Apple Silicon and Intel Macs. Progress and scope are tracked in the
+[roadmap](docs/roadmap.md); every alpha is listed in the
+[changelog](https://usegyro.io/changelog/).
+
+Known limits in the current alpha:
+
+- App bundles are ad-hoc signed; first launch needs **Open Anyway**.
+- Cursor and OpenCode are experimental and not approval-safe adapters.
+- Notebook and binary file edits are refused rather than applied.
+- Keep the app and CLI on the same version when handing sessions between them.
 
 ## Build from source
 

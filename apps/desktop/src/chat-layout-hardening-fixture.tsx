@@ -315,6 +315,12 @@ function Fixture() {
         onDraftChange={(draft) =>
           setDrafts((current) => ({ ...current, [key]: draft }))
         }
+        onAttachMediaFiles={(files) => {
+          // Read by capture scripts to prove a drop reached exactly one pane.
+          const log = ((window as { __gyroMediaDrops?: string[] })
+            .__gyroMediaDrops ??= []);
+          log.push(...files.map((file) => `${key}:${file.name}`));
+        }}
         isEnvironmentRailOpen={environment === key}
         onToggleEnvironmentRail={() =>
           setEnvironment((current) => (current === key ? undefined : key))

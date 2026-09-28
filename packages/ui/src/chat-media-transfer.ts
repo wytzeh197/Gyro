@@ -16,6 +16,13 @@ export function isMediaDrag(transfer: MediaTransfer | null | undefined) {
   const types = Array.from(
     (transfer.types ?? []) as unknown as ArrayLike<string>,
   );
+  // Gyro's own drags (a chat from the sidebar, a pane title, an editor tab)
+  // are never media, even if the webview adds a URI or image type to them.
+  // Treating one as media let the window drop listener swallow it before the
+  // chat grid saw it, then report a failed image attachment.
+  if (types.some((type) => type.startsWith("application/x-gyro-"))) {
+    return false;
+  }
   if (types.includes("Files")) return true;
   if (Array.from(transfer.items ?? []).some((item) => item.kind === "file")) {
     return true;

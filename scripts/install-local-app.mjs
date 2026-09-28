@@ -60,10 +60,30 @@ mkdirSync(applicationsDir, { recursive: true });
 rmSync(destinationApp, { recursive: true, force: true });
 cpSync(sourceApp, destinationApp, { recursive: true });
 
-if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
+// A Developer ID bundle is already sealed and notarized; re-signing it ad-hoc
+// would discard that identity and its stapled ticket.
+function hasValidDeveloperIdSignature(appPath) {
+  const verify = spawnSync(
+    "codesign",
+    ["--verify", "--deep", "--strict", appPath],
+    { stdio: "ignore" },
+  );
+  if (verify.status !== 0) return false;
+  const display = spawnSync("codesign", ["--display", "--verbose=2", appPath], {
+    encoding: "utf8",
+  });
+  return `${display.stdout ?? ""}${display.stderr ?? ""}`.includes(
+    "Authority=Developer ID Application: ",
+  );
+}
+
+if (hasValidDeveloperIdSignature(destinationApp)) {
+  console.log("Keeping the existing Developer ID signature.");
+} else if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
+  // Match release builds, which always run with the hardened runtime.
   const sign = spawnSync(
     "codesign",
-    ["--force", "--deep", "--sign", "-", destinationApp],
+    ["--force", "--deep", "--options", "runtime", "--sign", "-", destinationApp],
     { stdio: "inherit" },
   );
 

@@ -54,24 +54,9 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
 /// turn that runs tools for a minute is exactly the turn whose cost the user
 /// wants to watch, and a total that only lands when the turn finishes tells
 /// them nothing while it is running.
-fn emit_provider_turn_tokens(
-    app: &tauri::AppHandle,
-    request: &ProviderChatRequest,
-    usage: &ProviderContextUsage,
-) {
-    let _ = app.emit(
-        PROVIDER_CHAT_EVENT,
-        serde_json::json!({
-            "sessionId": request.session_id,
-            "turnId": request.turn_id,
-            "providerId": request.provider_id,
-            "modelId": request.model_id,
-            "eventId": Uuid::new_v4().to_string(),
-            "sequence": next_provider_event_sequence(app, &request.session_id),
-            "phase": "turn-tokens",
-            "turnTokens": usage,
-        }),
-    );
+fn emit_provider_turn_tokens(app: &tauri::AppHandle, request: &ProviderChatRequest) {
+    let usage = provider_accounting::provider_turn_tokens(request, None);
+    provider_accounting::emit_turn_tokens(app, request, usage);
 }
 
 /// Image support is model-specific: DeepSeek Pro is still text-only.
@@ -384,9 +369,7 @@ pub(super) fn run_openai_compatible_chat(
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
             // What the live context note reports before the next request.
             last_measured = Some((turn.input_tokens, turn.output_tokens));
-            if let Some(measured) = turn_usage.measured() {
-                emit_provider_turn_tokens(app, request, &measured);
-            }
+            emit_provider_turn_tokens(app, request);
             if compatibility {
                 anyhow::ensure!(
                     turn.tool_calls.is_empty(),

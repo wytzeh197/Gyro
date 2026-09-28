@@ -41,7 +41,9 @@ export function workspaceEditorOptions({
       verticalScrollbarSize: 10,
     },
     scrollBeyondLastLine: false,
-    smoothScrolling: !reduceMotion,
+    // Smooth scrolling animates every wheel tick, which lags behind the
+    // trackpad in WKWebView.
+    smoothScrolling: false,
     cursorBlinking: reduceMotion ? ("solid" as const) : ("blink" as const),
     stickyScroll: { enabled: !limited, maxLineCount: 3 },
     tabSize: 2,

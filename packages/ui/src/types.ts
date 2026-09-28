@@ -966,8 +966,11 @@ export type ProviderChatStreamEvent = {
    */
   turnTokens?: {
     inputTokens?: number;
+    cachedInputTokens?: number;
     outputTokens?: number;
+    reasoningOutputTokens?: number;
     totalTokens?: number;
+    measured?: boolean;
   } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;

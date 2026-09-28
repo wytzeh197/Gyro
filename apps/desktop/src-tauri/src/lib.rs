@@ -7661,9 +7661,19 @@ fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
             let Ok(relative) = path.strip_prefix(root) else {
                 return false;
             };
-            !relative
-                .components()
-                .any(|component| matches!(component.as_os_str().to_string_lossy().as_ref(), ".git"))
+            let mut components = relative.components();
+            let Some(first) = components.next() else {
+                return true;
+            };
+            let first = first.as_os_str().to_string_lossy();
+            if first == ".git" {
+                return false;
+            }
+            // Build output churns on every compile; rescanning and re-running
+            // git status for it competes with clicks for the whole build. The
+            // folder appearing or vanishing still counts; its contents don't.
+            let is_build_output = matches!(first.as_ref(), ".next" | "target" | "dist" | "build");
+            !(is_build_output && components.next().is_some())
         })
 }
 
@@ -14226,6 +14236,10 @@ fn run_openai_codex_app_server_chat(
         });
 
         timing::mark(TimingStage::ProtocolReady);
+        let mut billed = provider_accounting::CodexTurnUsage::new(can_resume);
+        if can_resume {
+            billed.set_baseline(provider_accounting::codex_usage_baseline(&thread_result["thread"]));
+        }
         gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
         let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
         for attachment in request
@@ -14273,7 +14287,7 @@ fn run_openai_codex_app_server_chat(
         let mut completed_activity_ids = HashSet::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
         let mut context_usage = None;
-        let mut billed = provider_accounting::CodexTurnUsage::new(can_resume);
+        let mut pending_usage = None;
         let mut provider_turn_id = None;
         let mut turn_started = false;
         let mut completed_artifact_response_at: Option<Instant> = None;
@@ -14335,26 +14349,25 @@ fn run_openai_codex_app_server_chat(
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string);
                 turn_started = true;
+                if let Some(params) = pending_usage.take() {
+                    context_usage = provider_accounting::observe_codex_turn_usage(
+                        app, request, &mut billed, &params, &thread_id, provider_turn_id.as_deref(),
+                    ).or(context_usage);
+                }
                 continue;
             }
             let Some(method) = method else { continue };
             let params = message.get("params").cloned().unwrap_or_default();
             match method {
                 "thread/tokenUsage/updated" => {
-                    if turn_started
-                        && params.get("threadId").and_then(serde_json::Value::as_str)
-                            == Some(&thread_id)
-                        && provider_turn_id.as_deref().is_some_and(|id| {
-                            params.get("turnId").and_then(serde_json::Value::as_str) == Some(id)
-                        })
-                    {
-                        if let Some(tokens) = billed.observe(&params) {
-                            gyro_core::provider_observation::native_usage(tokens);
+                    if !turn_started {
+                        if params.get("threadId").and_then(serde_json::Value::as_str) == Some(&thread_id) {
+                            pending_usage = Some(params);
                         }
-                    }
-                    if let Some(usage) = provider_context_usage_from_app_server(&params) {
-                        emit_provider_context_usage(app, request, &usage);
-                        context_usage = Some(usage);
+                    } else {
+                        context_usage = provider_accounting::observe_codex_turn_usage(
+                            app, request, &mut billed, &params, &thread_id, provider_turn_id.as_deref(),
+                        ).or(context_usage);
                     }
                 }
                 "thread/compacted" => {
@@ -17798,6 +17811,8 @@ struct StreamingCommandState {
     /// reading: spend is the sum of every request the run made, so a turn that
     /// used tools legitimately bills past the context window.
     billed_usage: Option<ProviderContextUsage>,
+    claude_request_usage: HashMap<String, ProviderContextUsage>,
+    claude_usage_final: bool,
     /// Newest reading per window id. A run can announce the same window more
     /// than once, and only the last reading describes where the plan stands.
     rate_limits: Vec<ProviderRateLimitWindow>,
@@ -17837,6 +17852,8 @@ impl StreamingCommandState {
             resolved_token_ceiling: None,
             token_ceiling_tripped: false,
             billed_usage: None,
+            claude_request_usage: HashMap::new(),
+            claude_usage_final: false,
             rate_limits: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
@@ -17873,13 +17890,42 @@ impl StreamingCommandState {
     /// The closing frame is the only one that names the model's context window,
     /// and the per-request frames are the only ones whose counts describe what
     /// the window actually holds, so each contributes what it alone knows.
-    fn apply_claude_context_usage(&mut self, frame: ClaudeUsageFrame, usage: ProviderContextUsage) {
+    fn apply_claude_context_usage(&mut self, frame: ClaudeUsageFrame, mut usage: ProviderContextUsage, message_id: Option<&str>) {
         // The ledger takes the turn-wide total when the run reports one, and
         // otherwise accumulates the per-request readings, so a tool-using turn
         // is billed for every request it made rather than only the last.
         match frame {
-            ClaudeUsageFrame::Turn => self.billed_usage = Some(usage.clone()),
-            ClaudeUsageFrame::Request => self.accumulate_billed_usage(&usage),
+            ClaudeUsageFrame::Turn => {
+                self.claude_usage_final = true;
+                self.billed_usage = Some(usage.clone());
+            }
+            ClaudeUsageFrame::Request => {
+                if self.claude_usage_final { return; }
+                if let Some(id) = message_id.filter(|id| !id.is_empty()) {
+                    if let Some(previous) = self.claude_request_usage.get(id) {
+                        // Repeated content blocks share one message ID. Their
+                        // usage is a snapshot, never another billable request.
+                        fn replace(target: &mut Option<u64>, old: Option<u64>, new: &mut Option<u64>) {
+                            *new = match (*new, old) {
+                                (Some(a), Some(b)) => Some(a.max(b)),
+                                (a, b) => a.or(b),
+                            };
+                            if let Some(old) = old {
+                                *target = target.map(|value| value.saturating_sub(old));
+                            }
+                        }
+                        if let Some(current) = self.billed_usage.as_mut() {
+                            replace(&mut current.input_tokens, previous.input_tokens, &mut usage.input_tokens);
+                            replace(&mut current.output_tokens, previous.output_tokens, &mut usage.output_tokens);
+                            replace(&mut current.cached_input_tokens, previous.cached_input_tokens, &mut usage.cached_input_tokens);
+                            replace(&mut current.reasoning_output_tokens, previous.reasoning_output_tokens, &mut usage.reasoning_output_tokens);
+                            replace(&mut current.total_tokens, previous.total_tokens, &mut usage.total_tokens);
+                        }
+                    }
+                    self.claude_request_usage.insert(id.to_string(), usage.clone());
+                }
+                self.accumulate_billed_usage(&usage);
+            }
         }
         if let Some(usage) = &self.billed_usage {
             gyro_core::provider_observation::native_usage(provider_accounting::usage_tokens(usage));
@@ -18574,7 +18620,9 @@ fn handle_provider_stdout_value(
         stream_state.context_usage = Some(context_usage);
         stream_state.context_usage_is_per_request = false;
     } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(value) {
-        stream_state.apply_claude_context_usage(frame, context_usage);
+        stream_state.apply_claude_context_usage(
+            frame, context_usage, value.pointer("/message/id").and_then(serde_json::Value::as_str),
+        );
     }
     enforce_call_token_ceiling(app, request, stream_state);
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(value) {
@@ -25518,6 +25566,13 @@ while True:
         assert!(!workspace_watch_event_is_relevant(&root, &ignored));
         assert!(workspace_watch_event_is_relevant(&root, &source));
         assert!(workspace_watch_event_is_relevant(&root, &dependency));
+
+        let build_output = NotifyEvent::new(notify::EventKind::Any)
+            .add_path(root.join("target/debug/deps/gyro.o"));
+        let build_folder =
+            NotifyEvent::new(notify::EventKind::Any).add_path(root.join("target"));
+        assert!(!workspace_watch_event_is_relevant(&root, &build_output));
+        assert!(workspace_watch_event_is_relevant(&root, &build_folder));
     }
 
     #[test]
@@ -27469,10 +27524,33 @@ while True:
         assert_eq!(usage.model_context_window, None);
     }
 
+    #[test]
+    fn claude_usage_deduplicates_message_snapshots_and_latches_final_total() {
+        let mut state = StreamingCommandState::new();
+        let usage = |output| ProviderContextUsage {
+            input_tokens: Some(100),
+            cached_input_tokens: Some(80),
+            output_tokens: Some(output),
+            reasoning_output_tokens: None,
+            total_tokens: Some(100 + output),
+            model_context_window: None,
+        };
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(10), Some("a"));
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(10), Some("a"));
+        assert_eq!(state.billed_usage.as_ref().unwrap().total_tokens, Some(110));
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(20), Some("a"));
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(5), Some("b"));
+        assert_eq!(state.billed_usage.as_ref().unwrap().total_tokens, Some(225));
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(10), Some("a"));
+        assert_eq!(state.billed_usage.as_ref().unwrap().total_tokens, Some(225), "stale snapshots do not reduce or add spend");
+        state.apply_claude_context_usage(ClaudeUsageFrame::Turn, usage(150), None);
+        state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(99), Some("b"));
+        assert_eq!(state.billed_usage.as_ref().unwrap().total_tokens, Some(250));
+    }
+
     /// A tool-using turn re-sends the conversation on every request, so the
     /// closing frame's totals are a multiple of the window. The meter has to
-    /// keep the last request's occupancy and take only the window from the
-    /// close.
+    /// keep the last request's occupancy and take only the window from the close.
     #[test]
     fn claude_turn_totals_never_replace_the_last_request() {
         let mut state = StreamingCommandState::new();
@@ -27488,7 +27566,7 @@ while True:
                 }
             }))
             .unwrap();
-            state.apply_claude_context_usage(frame, usage);
+            state.apply_claude_context_usage(frame, usage, None);
         }
         let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
             "type": "result",
@@ -27500,7 +27578,7 @@ while True:
             "modelUsage": { "claude-opus-4-5": { "contextWindow": 200000 } }
         }))
         .unwrap();
-        state.apply_claude_context_usage(frame, usage);
+        state.apply_claude_context_usage(frame, usage, None);
 
         let merged = state.context_usage.expect("usage");
         assert_eq!(merged.input_tokens, Some(88_012));
@@ -27519,7 +27597,7 @@ while True:
             "modelUsage": { "claude-opus-4-5": { "contextWindow": 200000 } }
         }))
         .unwrap();
-        state.apply_claude_context_usage(frame, usage);
+        state.apply_claude_context_usage(frame, usage, None);
 
         let merged = state.context_usage.expect("usage");
         assert_eq!(merged.total_tokens, Some(4_120));

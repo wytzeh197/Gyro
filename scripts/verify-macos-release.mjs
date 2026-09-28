@@ -24,6 +24,7 @@ const supportedTargets = new Map([
   ["aarch64-apple-darwin", "arm64"],
   ["x86_64-apple-darwin", "x86_64"],
 ]);
+const signingModes = new Set(["adhoc", "developer-id"]);
 
 function argument(name) {
   const indexes = process.argv.flatMap((value, index) =>
@@ -150,7 +151,7 @@ function lstatExists(path) {
   }
 }
 
-function verifyBundle(appPath, config, target) {
+function verifyBundle(appPath, config, target, signing) {
   const infoPlistPath = join(appPath, "Contents", "Info.plist");
   requireFile(infoPlistPath, "app Info.plist");
 
@@ -226,30 +227,141 @@ function verifyBundle(appPath, config, target) {
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath]);
   const signature = run("codesign", ["--display", "--verbose=4", appPath]);
   const signatureDetails = `${signature.stdout}\n${signature.stderr}`;
-  for (const marker of [
-    `Identifier=${config.identifier}`,
-    "Signature=adhoc",
-    "TeamIdentifier=not set",
-    "Sealed Resources version=",
-  ]) {
-    if (!signatureDetails.includes(marker)) {
-      throw new Error(`bundle signature is missing ${marker}`);
+  if (!signatureDetails.includes(`Identifier=${config.identifier}`)) {
+    throw new Error(`bundle signature is missing Identifier=${config.identifier}`);
+  }
+  if (signing.mode === "developer-id") {
+    verifyDeveloperIdBundle(appPath, signatureDetails, signing);
+  } else {
+    verifyAdhocBundle(signatureDetails);
+  }
+}
+
+function requireMarkers(details, label, required, forbidden) {
+  for (const marker of required) {
+    if (!details.includes(marker)) {
+      throw new Error(`${label} signature is missing ${marker}`);
     }
   }
-  for (const forbidden of [
-    "Authority=",
-    "Developer ID",
-    "linker-signed",
-    "Sealed Resources=none",
-  ]) {
-    if (signatureDetails.includes(forbidden)) {
-      throw new Error(`bundle signature unexpectedly contains ${forbidden}`);
+  for (const marker of forbidden) {
+    if (details.includes(marker)) {
+      throw new Error(`${label} signature unexpectedly contains ${marker}`);
     }
   }
 }
 
-function attachAndVerifyDmg(dmgPath, config, target) {
+// Alpha builds carry a complete ad-hoc signature and nothing that could be
+// mistaken for an Apple-issued identity.
+function verifyAdhocBundle(signatureDetails) {
+  requireMarkers(
+    signatureDetails,
+    "bundle",
+    ["Signature=adhoc", "TeamIdentifier=not set", "Sealed Resources version="],
+    ["Authority=", "Developer ID", "linker-signed", "Sealed Resources=none"],
+  );
+}
+
+// Release builds must be signed by Gyro's Developer ID with a secure
+// timestamp and the hardened runtime, carry a stapled notarization ticket,
+// and pass Gatekeeper exactly as a freshly downloaded copy would.
+function verifyDeveloperIdBundle(appPath, signatureDetails, signing) {
+  requireMarkers(
+    signatureDetails,
+    "bundle",
+    [
+      "Authority=Developer ID Application: ",
+      "Authority=Developer ID Certification Authority",
+      "Authority=Apple Root CA",
+      `TeamIdentifier=${signing.teamId}`,
+      "Timestamp=",
+      "Sealed Resources version=",
+    ],
+    ["Signature=adhoc", "linker-signed", "Sealed Resources=none"],
+  );
+  if (!/flags=0x[0-9a-f]+\([^)]*\bruntime\b[^)]*\)/.test(signatureDetails)) {
+    throw new Error("bundle signature does not enable the hardened runtime");
+  }
+  const entitlements = run("codesign", [
+    "--display",
+    "--entitlements",
+    "-",
+    "--xml",
+    appPath,
+  ]);
+  if (
+    `${entitlements.stdout}\n${entitlements.stderr}`.includes(
+      "com.apple.security.get-task-allow",
+    )
+  ) {
+    throw new Error("bundle is signed with the debugging get-task-allow entitlement");
+  }
+  run("xcrun", ["stapler", "validate", appPath]);
+  const assessment = run("spctl", [
+    "--assess",
+    "--type",
+    "execute",
+    "--verbose=4",
+    appPath,
+  ]);
+  requireGatekeeperSource(assessment, "app bundle");
+}
+
+function requireGatekeeperSource(assessment, label) {
+  const details = `${assessment.stdout}\n${assessment.stderr}`;
+  if (!details.includes("source=Notarized Developer ID")) {
+    throw new Error(
+      `Gatekeeper did not accept the ${label} as notarized Developer ID software:\n${details.trim()}`,
+    );
+  }
+}
+
+function verifyDeveloperIdDmg(dmgPath, signing) {
+  run("codesign", ["--verify", "--strict", "--verbose=4", dmgPath]);
+  const signature = run("codesign", ["--display", "--verbose=4", dmgPath]);
+  requireMarkers(
+    `${signature.stdout}\n${signature.stderr}`,
+    "DMG",
+    [
+      "Authority=Developer ID Application: ",
+      `TeamIdentifier=${signing.teamId}`,
+      "Timestamp=",
+    ],
+    ["Signature=adhoc"],
+  );
+  run("xcrun", ["stapler", "validate", dmgPath]);
+  const assessment = run("spctl", [
+    "--assess",
+    "--type",
+    "open",
+    "--context",
+    "context:primary-signature",
+    "--verbose=4",
+    dmgPath,
+  ]);
+  requireGatekeeperSource(assessment, "DMG");
+}
+
+// The updater installs the app from this archive, so it must hold the same
+// signed (and, for Developer ID builds, stapled) bundle as the DMG.
+function verifyUpdaterArchive(archivePath, config, target, signing) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "gyro-release-updater-"));
+  try {
+    run("tar", ["-xzf", archivePath, "-C", temporaryRoot]);
+    const appName = `${config.productName}.app`;
+    requireEqual(
+      readdirSync(temporaryRoot).join(" "),
+      appName,
+      "updater archive contents",
+    );
+    verifyBundle(join(temporaryRoot, appName), config, target, signing);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function attachAndVerifyDmg(dmgPath, config, target, signing) {
   run("hdiutil", ["verify", dmgPath]);
+  if (signing.mode === "developer-id") verifyDeveloperIdDmg(dmgPath, signing);
 
   const temporaryRoot = mkdtempSync(join(tmpdir(), "gyro-release-dmg-"));
   const mountPath = join(temporaryRoot, "mounted");
@@ -278,7 +390,7 @@ function attachAndVerifyDmg(dmgPath, config, target) {
     if (!lstatSync(appPath).isDirectory()) {
       throw new Error(`${appName} is not an app bundle directory`);
     }
-    verifyBundle(appPath, config, target);
+    verifyBundle(appPath, config, target, signing);
   } catch (error) {
     failure = error;
   } finally {
@@ -302,9 +414,14 @@ function attachAndVerifyDmg(dmgPath, config, target) {
 async function main() {
   if (process.argv.includes("--help")) {
     console.log(`Verify a Gyro macOS release DMG:
-  node scripts/verify-macos-release.mjs --dmg <path> --target <target> [--checksums <SHA256SUMS>]
+  node scripts/verify-macos-release.mjs --dmg <path> --target <target>
+    [--checksums <SHA256SUMS>] [--updater-archive <Gyro.app.tar.gz>]
+    [--signing adhoc|developer-id] [--team-id <TEAMID>]
 
-Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
+Supported targets: ${[...supportedTargets.keys()].join(", ")}
+--signing defaults to adhoc. developer-id requires --team-id and checks the
+Developer ID signature, hardened runtime, timestamp, stapled notarization
+tickets, and Gatekeeper acceptance of both the app and the DMG.`);
     return;
   }
   if (process.platform !== "darwin") {
@@ -314,6 +431,11 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   const dmgArgument = argument("--dmg");
   const target = argument("--target");
   const checksumsArgument = argument("--checksums");
+  const updaterArchiveArgument = argument("--updater-archive");
+  const signing = {
+    mode: argument("--signing") ?? "adhoc",
+    teamId: argument("--team-id"),
+  };
   if (!dmgArgument || !target) {
     throw new Error(
       "use --dmg <path> --target <target> [--checksums <SHA256SUMS>]",
@@ -321,6 +443,15 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   }
   if (!supportedTargets.has(target)) {
     throw new Error(`unsupported release target ${target}`);
+  }
+  if (!signingModes.has(signing.mode)) {
+    throw new Error(`unsupported signing mode ${signing.mode}`);
+  }
+  if (signing.mode === "developer-id" && !/^[A-Z0-9]{10}$/.test(signing.teamId ?? "")) {
+    throw new Error("--signing developer-id requires a 10-character --team-id");
+  }
+  if (signing.mode === "adhoc" && signing.teamId) {
+    throw new Error("--team-id only applies to --signing developer-id");
   }
 
   const dmgPath = resolve(dmgArgument);
@@ -340,9 +471,15 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   if (checksumsArgument) requireFile(checksumsPath, "SHA256SUMS");
 
   await verifyChecksum(dmgPath, checksumsPath);
-  attachAndVerifyDmg(dmgPath, config, target);
+  attachAndVerifyDmg(dmgPath, config, target, signing);
+  if (updaterArchiveArgument) {
+    const archivePath = resolve(updaterArchiveArgument);
+    requireFile(archivePath, "updater archive");
+    verifyUpdaterArchive(archivePath, config, target, signing);
+    console.log(`Verified ${basename(archivePath)} holds the same signed app.`);
+  }
   console.log(
-    `Verified ${basename(dmgPath)} as the ${target} Gyro ${config.version} release DMG.`,
+    `Verified ${basename(dmgPath)} as the ${target} Gyro ${config.version} release DMG (${signing.mode} signing).`,
   );
 }
 

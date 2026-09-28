@@ -13,6 +13,10 @@ not notarized. Users must follow the documented one-time
 [Open Anyway installation flow](install-macos.md). Never tell users to disable
 Gatekeeper or remove quarantine globally.
 
+Stable releases, starting with v0.1.0, are signed with Gyro's Developer ID and
+notarized by Apple, so they open without **Open Anyway**. The release workflow
+refuses to build a stable tag ad-hoc.
+
 ## Release and update channel
 
 The desktop updater and download site both resolve the latest published,
@@ -83,28 +87,49 @@ architecture checksums and generates `gyro.rb` with URLs for the exact tag.
 
 ## macOS integrity contract
 
-Tauri must set `bundle.macOS.signingIdentity` to `-` and
-`bundle.macOS.minimumSystemVersion` to `14.0`. This produces an ad-hoc signature
-without requiring an Apple account. It does not produce Apple trust or
-notarization.
+Tauri keeps `bundle.macOS.signingIdentity` at `-` and
+`bundle.macOS.minimumSystemVersion` at `14.0` in the checked-in config, so local
+and alpha builds never need an Apple account. The release workflow picks one of
+two signing modes per tag:
+
+- **`developer-id`** when every Apple secret below is configured. The workflow
+  imports the certificate into a temporary keychain and exports
+  `APPLE_SIGNING_IDENTITY` and the App Store Connect API key to `tauri build`.
+  Tauri then signs Gyro.app with the hardened runtime and a secure timestamp,
+  notarizes it, and staples the ticket before the DMG and updater archive are
+  packed. The workflow then signs, notarizes, and staples the DMG itself.
+- **`adhoc`** when no Apple secret is configured. This produces a complete
+  ad-hoc signature without Apple trust or notarization.
+
+A partially configured set of Apple secrets fails the run, and a stable tag
+(`vX.Y.Z` with no pre-release suffix) fails unless it resolves to
+`developer-id`.
 
 Before an architecture bundle can be uploaded, the macOS release verifier must:
 
 - run `hdiutil verify` and mount the DMG read-only;
 - require exactly one Gyro.app and an Applications shortcut;
 - pass `codesign --verify --deep --strict` on Gyro.app;
-- confirm an ad-hoc signature with no Developer ID authority or Team ID;
 - confirm bundle identifier `dev.gyro.desktop`, release version, icon, and
   macOS 14 minimum;
-- confirm the expected single architecture for that runner; and
-- verify the final DMG digest recorded in `SHA256SUMS`.
+- confirm the expected single architecture for that runner;
+- repeat the bundle checks on the app inside the updater archive;
+- verify the final DMG digest recorded in `SHA256SUMS`; and
+- check the signature for the build's mode:
+  - **adhoc:** an ad-hoc signature with no Developer ID authority or Team ID;
+  - **developer-id:** a Developer ID Application authority chain and the
+    expected Team ID, a secure timestamp, the hardened runtime, and no
+    `get-task-allow` entitlement. Stapled tickets must pass
+    `stapler validate` on both the app and the DMG. Gatekeeper
+    (`spctl --assess`) must accept the app and the DMG as notarized Developer
+    ID software.
 
 `pnpm release:check` must fail if the Tauri settings or release workflow omit
 these requirements. A partial or malformed signature is a release-blocking
 failure, even when the app launches on the build machine.
 
 The updater archives retain their Tauri updater signatures. Those signatures
-authenticate Gyro-issued updates and are independent of the ad-hoc macOS code
+authenticate Gyro-issued updates and are independent of the macOS code
 signature. Direct app installs and updates must reject missing or invalid
 updater signatures.
 
@@ -123,12 +148,31 @@ The tagged release workflow needs:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secret.
 - `TAURI_UPDATER_PUBLIC_KEY` Actions variable.
 
+Developer ID signing and notarization, required for stable releases, need all
+of these Actions secrets. Set every one of them, or none:
+
+- `APPLE_CERTIFICATE`: the base64-encoded Developer ID Application `.p12`,
+  including its private key.
+- `APPLE_CERTIFICATE_PASSWORD`: the `.p12` export password.
+- `APPLE_SIGNING_IDENTITY`: the full identity, in the form
+  `Developer ID Application: Name (TEAMID)`. The Team ID is read from it.
+- `APPLE_API_ISSUER`: the App Store Connect API issuer ID.
+- `APPLE_API_KEY`: the App Store Connect API key ID.
+- `APPLE_API_PRIVATE_KEY`: the contents of that key's `.p8` file.
+
+Notarization uses the App Store Connect API key with the Developer role, never
+an Apple ID password. Apple secrets reach only the signing and notarization
+steps, never the job-wide environment. The signing keychain and key file
+live in the runner's temporary directory and are deleted when the job ends.
+
 The Homebrew workflows need no secret. Gyro only validates the Formula; the tap
 pulls it with its own `GITHUB_TOKEN`. See `docs/homebrew.md`.
 
-No Apple certificate or notarization secret belongs in the Alpha workflow.
-Keep the updater private key backed up outside the repository; rotate it only
-when no released app trusts the current public key.
+Keep the updater private key, the Developer ID `.p12`, and the API `.p8` backed
+up outside the repository. Rotate the updater key only when no released app
+trusts the current public key. Changing the Developer ID Team ID changes the
+app's code-signing identity, which resets macOS privacy grants such as
+Accessibility.
 
 ### Release immutability and public site
 
@@ -145,9 +189,13 @@ product description.
 
 Each versioned release body must include:
 
-1. **Alpha notice:** macOS 14+, Apple Silicon and Intel, no Apple Developer ID
-   signature or notarization, and a link to the
+1. **Signing notice:** macOS 14+, Apple Silicon and Intel, and the build's
+   signing status. An ad-hoc alpha says it is not Apple-signed or notarized
+   and links the
    [Open Anyway guide](https://github.com/wytzeh197/Gyro/blob/main/docs/install-macos.md).
+   A Developer ID build says it is signed with Gyro's Developer ID and
+   notarized by Apple. `pnpm release:check` enforces the wording that matches
+   `GYRO_MACOS_SIGNING`.
 2. **Direct downloads:** links to both versioned DMGs, labeled by architecture,
    plus the [download site](https://usegyro.io/) as the preferred
    chooser.
@@ -259,8 +307,14 @@ git diff --check
 Manual acceptance must cover:
 
 - both DMGs pass the full macOS integrity verifier and match `SHA256SUMS`;
-- the Apple Silicon DMG installs on a clean macOS 14+ user and reaches
-  **Open Anyway**, not a damaged/corrupt-app failure;
+- the Apple Silicon DMG, downloaded through a browser so it carries quarantine,
+  installs on a clean macOS 14+ user. A Developer ID build opens after the
+  standard "downloaded from the internet" prompt with no **Open Anyway** step,
+  including offline, which exercises the stapled ticket. An ad-hoc alpha
+  reaches **Open Anyway** rather than failing as a damaged or corrupt app;
+- after the first Developer ID build replaces an ad-hoc install, Accessibility
+  has to be granted again and a one-time Keychain prompt may appear. The
+  release notes must say so;
 - the Intel app and CLI execute on the Intel runner or Intel hardware;
 - both generated-Formula installs report the correct version, generate zsh,
   bash, and fish completions, and return `gyro.cli.v1` from `doctor --json`;

@@ -72,9 +72,7 @@ pub fn native_delta(text: &str) {
     });
 }
 pub fn native_usage(tokens: UsageTokens) {
-    if tokens.is_empty() {
-        return;
-    }
+    // An explicit zero is still a reading, not permission to estimate a prompt.
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
             summary.native.reported = Some(tokens);
@@ -124,6 +122,7 @@ pub struct Request {
     output_chars: usize,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    total_tokens: Option<u64>,
     complete: bool,
     rejected: bool,
     unmeasured_content: bool,
@@ -146,6 +145,7 @@ impl Request {
             output_chars: 0,
             input_tokens: None,
             output_tokens: None,
+            total_tokens: None,
             complete: false,
             rejected: false,
             unmeasured_content,
@@ -174,6 +174,9 @@ impl Request {
         self.input_tokens = input.or(self.input_tokens);
         self.output_tokens = output.or(self.output_tokens);
     }
+    pub fn reported_total(&mut self, total: Option<u64>) {
+        self.total_tokens = total.or(self.total_tokens);
+    }
     pub fn rejected(&mut self) {
         self.rejected = true;
     }
@@ -190,15 +193,28 @@ impl Drop for Request {
                 return;
             }
             let estimate = UsageTokens::estimated(self.input_chars, self.output_chars);
+            // A reported total wins over character estimates of missing halves.
+            // Infer a missing side only when subtraction is well-defined.
+            let input = self
+                .input_tokens
+                .or_else(|| self.total_tokens?.checked_sub(self.output_tokens?));
+            let output = self
+                .output_tokens
+                .or_else(|| self.total_tokens?.checked_sub(self.input_tokens?));
             let mut tokens = UsageTokens::measured(
-                Some(self.input_tokens.unwrap_or(estimate.input_tokens)),
+                input.or_else(|| self.total_tokens.is_none().then_some(estimate.input_tokens)),
                 self.cached,
-                Some(self.output_tokens.unwrap_or(estimate.output_tokens)),
+                output.or_else(|| {
+                    self.total_tokens
+                        .is_none()
+                        .then_some(estimate.output_tokens)
+                }),
                 self.reasoning,
-                None,
+                self.total_tokens,
             );
-            tokens.measured =
-                self.complete && self.input_tokens.is_some() && self.output_tokens.is_some();
+            tokens.measured &= self.complete
+                && (self.total_tokens.is_some()
+                    || (self.input_tokens.is_some() && self.output_tokens.is_some()));
             summary.unmeasured_content |= self.unmeasured_content && !tokens.measured;
             add_usage(&mut summary.tokens, tokens);
         });
@@ -255,6 +271,38 @@ fn text_size(value: &Value) -> (usize, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_zero_native_usage_survives_prompt_estimation_and_retries() {
+        let _scope = Scope::start();
+        attempt();
+        native_prompt(&serde_json::json!("x".repeat(4000)));
+        native_usage(UsageTokens::measured(Some(0), None, Some(0), None, Some(0)));
+        let zero = snapshot().unwrap().tokens.unwrap();
+        assert_eq!(zero.total_tokens, 0);
+        assert!(zero.measured);
+        attempt();
+        native_usage(UsageTokens::measured(Some(10), None, Some(5), None, None));
+        assert_eq!(snapshot().unwrap().tokens.unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn reported_totals_survive_partial_duplicate_and_total_only_frames() {
+        for (input, output) in [(Some(100), Some(20)), (Some(100), None), (None, None)] {
+            let _scope = Scope::start();
+            {
+                let mut request = Request::start(&serde_json::json!("x".repeat(80_000)));
+                request.reported(input, output);
+                request.reported_total(Some(150));
+                request.reported_total(Some(150));
+                request.complete(None, None, 4000);
+            }
+            let tokens = snapshot().unwrap().tokens.unwrap();
+            assert_eq!(tokens.total_tokens, 150);
+            assert!(tokens.measured);
+        }
+    }
+
     #[test]
     fn mixed_rounds_and_failed_requests_keep_spend_without_claiming_measurement() {
         let _scope = Scope::start();

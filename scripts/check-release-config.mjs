@@ -74,9 +74,18 @@ if (config.bundle?.createUpdaterArtifacts !== true) {
   );
 }
 
+// The checked-in identity stays ad-hoc so local and alpha builds never need
+// Apple credentials; the release workflow exports APPLE_SIGNING_IDENTITY to
+// switch a build to Developer ID signing and notarization.
 if (config.bundle?.macOS?.signingIdentity !== "-") {
   failures.push(
-    'bundle.macOS.signingIdentity must be "-" for a complete ad-hoc macOS signature.',
+    'bundle.macOS.signingIdentity must stay "-"; Developer ID builds set APPLE_SIGNING_IDENTITY in the release workflow instead.',
+  );
+}
+
+if (config.bundle?.macOS?.hardenedRuntime === false) {
+  failures.push(
+    "bundle.macOS.hardenedRuntime must not be disabled; notarization requires the hardened runtime.",
   );
 }
 
@@ -104,6 +113,19 @@ const versions = new Map([
   ["Tauri config", config.version],
 ]);
 const expectedVersion = rootPackage.version;
+const isStableVersion = /^\d+\.\d+\.\d+$/.test(expectedVersion);
+const signingMode =
+  process.env.GYRO_MACOS_SIGNING || (isStableVersion ? "developer-id" : "adhoc");
+if (!["adhoc", "developer-id"].includes(signingMode)) {
+  failures.push(
+    `GYRO_MACOS_SIGNING must be adhoc or developer-id, not ${signingMode}.`,
+  );
+}
+if (isStableVersion && signingMode !== "developer-id") {
+  failures.push(
+    `Stable release ${expectedVersion} must be Developer ID signed and notarized.`,
+  );
+}
 const releaseNotesPath = resolve(
   repoRoot,
   `docs/releases/v${expectedVersion}.md`,
@@ -125,11 +147,21 @@ if (!existsSync(releaseNotesPath)) {
     "macOS 14+",
     "## Upgrade and rollback",
     "## CLI",
-    "not Apple-signed or notarized",
+    signingMode === "developer-id"
+      ? "notarized by Apple"
+      : "not Apple-signed or notarized",
   ]) {
     if (!releaseNotes.includes(marker)) {
       failures.push(`Versioned release notes are missing ${marker}.`);
     }
+  }
+  if (
+    signingMode === "developer-id" &&
+    releaseNotes.includes("not Apple-signed or notarized")
+  ) {
+    failures.push(
+      "Versioned release notes for a Developer ID build still say it is not Apple-signed or notarized.",
+    );
   }
 }
 const expectedTauriCliVersion = "2.11.4";
@@ -170,7 +202,28 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 }
 
 for (const marker of [
-  "needs: macos",
+  "needs: [signing, macos]",
+  "needs: signing",
+  "GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}",
+  "Resolve Developer ID or ad-hoc signing",
+  "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized",
+  "Import Developer ID certificate",
+  'KEYCHAIN_PATH="$RUNNER_TEMP/gyro-signing.keychain-db"',
+  "security set-key-partition-list",
+  "export APPLE_SIGNING_IDENTITY=",
+  "export APPLE_API_KEY_PATH=",
+  "Sign, notarize, and staple macOS DMG",
+  "codesign --force --timestamp",
+  "xcrun notarytool submit",
+  'if [ "$STATUS" != "Accepted" ]',
+  'xcrun stapler staple "$DMG_PATH"',
+  '--signing "$GYRO_MACOS_SIGNING"',
+  '--team-id "$GYRO_APPLE_TEAM_ID"',
+  "--updater-archive",
+  "Remove signing keychain and notary key",
+  "if: always() && env.GYRO_MACOS_SIGNING == 'developer-id'",
+  'security delete-keychain "$GYRO_KEYCHAIN_PATH"',
+  '--signing "${{ needs.signing.outputs.mode }}"',
   "Verify pinned Tauri release toolchain",
   'tauri --version)" = "tauri-cli 2.11.4"',
   'GYRO_REQUIRE_RELEASE_SECRETS: "1"',
@@ -198,7 +251,7 @@ for (const marker of [
   '--target "${{ matrix.target }}"',
   '--checksums "$DMG_CHECKSUMS"',
   "sha256sum --check SHA256SUMS",
-  "Build GitHub-hosted alpha and sign updater archive",
+  "Build desktop app and sign updater archive",
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
@@ -261,6 +314,16 @@ for (const marker of [
   '"TeamIdentifier=not set"',
   '"Sealed Resources version="',
   '"Developer ID"',
+  '"Authority=Developer ID Application: "',
+  "`TeamIdentifier=${signing.teamId}`",
+  '"Timestamp="',
+  "bundle signature does not enable the hardened runtime",
+  "com.apple.security.get-task-allow",
+  '["stapler", "validate", appPath]',
+  '["stapler", "validate", dmgPath]',
+  '"context:primary-signature"',
+  '"source=Notarized Developer ID"',
+  "verifyUpdaterArchive(archivePath, config, target, signing)",
   'plistValue(infoPlistPath, "CFBundleIdentifier")',
   'plistValue(infoPlistPath, "CFBundleVersion")',
   'plistValue(infoPlistPath, "CFBundleName")',
@@ -301,14 +364,23 @@ for (const marker of [
   }
 }
 
-if (
-  !updaterManifest.includes(
+for (const [marker, meaning] of [
+  [
     "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
-  )
-) {
-  failures.push(
-    "Updater manifest must disclose the unsigned GitHub-hosted alpha status.",
-  );
+    "the ad-hoc alpha status",
+  ],
+  [
+    "Updater archives are signed; app bundles and DMGs are signed with Gyro's Developer ID and notarized by Apple.",
+    "the Developer ID status",
+  ],
+  [
+    "must be Developer ID signed and notarized",
+    "that stable releases refuse ad-hoc signing",
+  ],
+]) {
+  if (!updaterManifest.includes(marker)) {
+    failures.push(`Updater manifest must disclose ${meaning}.`);
+  }
 }
 
 for (const marker of [
@@ -336,19 +408,25 @@ for (const unsafeMarker of [
   }
 }
 
-for (const appleReleaseMarker of [
-  "APPLE_CERTIFICATE",
-  "APPLE_SIGNING_IDENTITY",
-  "APPLE_ID",
-  "APPLE_PASSWORD",
-  "APPLE_TEAM_ID",
-  "notarytool",
-]) {
-  if (releaseWorkflow.includes(appleReleaseMarker)) {
+// Notarization authenticates with an App Store Connect API key only; an
+// Apple ID password would be a personal credential in CI.
+for (const appleIdMarker of ["APPLE_ID", "APPLE_PASSWORD"]) {
+  if (releaseWorkflow.includes(appleIdMarker)) {
     failures.push(
-      `GitHub-hosted alpha workflow must not require Apple release marker ${appleReleaseMarker}.`,
+      `Release workflow must notarize with the App Store Connect API key, not ${appleIdMarker}.`,
     );
   }
+}
+
+// Apple secrets may only reach the steps that sign and notarize, never the
+// job-wide environment where every build script and test could read them.
+const macosJobHeader = releaseWorkflow.match(
+  /\n  macos:\n[\s\S]*?\n    steps:\n/,
+)?.[0];
+if (!macosJobHeader || /secrets\.APPLE_/.test(macosJobHeader)) {
+  failures.push(
+    "Release workflow must scope Apple secrets to individual signing steps, not the macOS job environment.",
+  );
 }
 
 if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {

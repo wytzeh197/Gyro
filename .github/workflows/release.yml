@@ -13,9 +13,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  signing:
+    name: Resolve macOS signing mode
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      # Developer ID signing is all-or-nothing: every Apple secret is present,
+      # or none is and the build stays ad-hoc. A stable tag such as v0.1.0 must
+      # ship Developer ID signed and notarized, never ad-hoc.
+      - name: Resolve Developer ID or ad-hoc signing
+        id: mode
+        run: |
+          set -euo pipefail
+          present=0
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            flag="HAS_${name}"
+            if [ "${!flag}" = "true" ]; then
+              present=$((present + 1))
+            else
+              missing+=("$name")
+            fi
+          done
+          if [ "$present" -eq 6 ]; then
+            MODE="developer-id"
+          elif [ "$present" -eq 0 ]; then
+            MODE="adhoc"
+          else
+            echo "Developer ID signing is partially configured; missing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$MODE" != "developer-id" ]; then
+            echo "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized; missing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+          echo "macOS signing mode: $MODE"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+        env:
+          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          HAS_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+          HAS_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER != '' }}
+          HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' }}
+          HAS_APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY != '' }}
+
   macos:
     name: macOS release candidate (${{ matrix.target }})
+    needs: signing
     runs-on: ${{ matrix.runner }}
+    env:
+      GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,11 +116,106 @@ jobs:
           node scripts/package-cli-release.mjs \
             --verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz" \
             --run
-      - name: Build GitHub-hosted alpha and sign updater archive
-        run: pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
+      # The certificate lives only in a throwaway keychain under RUNNER_TEMP,
+      # and the App Store Connect key only in a 0600 file beside it. Both are
+      # removed by the always-run cleanup step at the end of this job.
+      - name: Import Developer ID certificate
+        if: env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          set -euo pipefail
+          if [[ ! "$APPLE_SIGNING_IDENTITY" =~ ^Developer\ ID\ Application:\ .+\ \(([A-Z0-9]{10})\)$ ]]; then
+            echo "APPLE_SIGNING_IDENTITY must be the full 'Developer ID Application: Name (TEAMID)' identity." >&2
+            exit 1
+          fi
+          TEAM_ID="${BASH_REMATCH[1]}"
+          KEYCHAIN_PATH="$RUNNER_TEMP/gyro-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          CERTIFICATE_PATH="$RUNNER_TEMP/gyro-developer-id.p12"
+          (umask 077; printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH")
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "GYRO_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" -f pkcs12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$CERTIFICATE_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r keychain; do
+            keychain="${keychain#"${keychain%%[![:space:]]*}"}"
+            EXISTING_KEYCHAINS+=("${keychain//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""; then
+            echo "The imported certificate does not contain a valid APPLE_SIGNING_IDENTITY." >&2
+            exit 1
+          fi
+          API_KEY_DIRECTORY="$RUNNER_TEMP/gyro-notary"
+          mkdir -m 700 "$API_KEY_DIRECTORY"
+          API_KEY_PATH="$API_KEY_DIRECTORY/AuthKey_${APPLE_API_KEY}.p8"
+          (umask 077; printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH")
+          echo "GYRO_APPLE_TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
+          echo "GYRO_APPLE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+      # With APPLE_SIGNING_IDENTITY and the App Store Connect key exported,
+      # Tauri signs the app with the hardened runtime and a secure timestamp,
+      # notarizes it, and staples the ticket before the DMG and updater
+      # archive are packed. Without them it keeps the ad-hoc identity "-".
+      - name: Build desktop app and sign updater archive
+        run: |
+          set -euo pipefail
+          if [ "$GYRO_MACOS_SIGNING" = "developer-id" ]; then
+            export APPLE_SIGNING_IDENTITY="$GYRO_APPLE_SIGNING_IDENTITY"
+            export APPLE_API_ISSUER="$GYRO_APPLE_API_ISSUER"
+            export APPLE_API_KEY="$GYRO_APPLE_API_KEY"
+            export APPLE_API_KEY_PATH="$GYRO_APPLE_API_KEY_PATH"
+          fi
+          pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GYRO_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          GYRO_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          GYRO_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      - name: Sign, notarize, and staple macOS DMG
+        if: env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DMGS=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          if [ "${#DMGS[@]}" -ne 1 ]; then
+            echo "Expected exactly one DMG, found ${#DMGS[@]}." >&2
+            exit 1
+          fi
+          DMG_PATH="${DMGS[0]}"
+          codesign --force --timestamp --keychain "$GYRO_KEYCHAIN_PATH" \
+            --sign "$APPLE_SIGNING_IDENTITY" "$DMG_PATH"
+          NOTARY_AUTH=(--key "$GYRO_APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+          SUBMISSION="$RUNNER_TEMP/gyro-dmg-notarization.json"
+          xcrun notarytool submit "$DMG_PATH" "${NOTARY_AUTH[@]}" \
+            --wait --timeout 2h --output-format json > "$SUBMISSION" || true
+          STATUS="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).status ?? ""' "$SUBMISSION" 2>/dev/null || true)"
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "DMG notarization finished with status '${STATUS:-unknown}'." >&2
+            cat "$SUBMISSION" >&2 || true
+            SUBMISSION_ID="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).id ?? ""' "$SUBMISSION" 2>/dev/null || true)"
+            if [ -n "$SUBMISSION_ID" ]; then
+              xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
+            fi
+            exit 1
+          fi
+          xcrun stapler staple "$DMG_PATH"
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
       - name: Verify macOS DMG
         run: |
           set -euo pipefail
@@ -90,10 +233,16 @@ jobs:
             cd "$DMG_DIRECTORY"
             shasum -a 256 "$DMG_NAME"
           ) > "$DMG_CHECKSUMS"
+          SIGNING_ARGS=(--signing "$GYRO_MACOS_SIGNING")
+          if [ "$GYRO_MACOS_SIGNING" = "developer-id" ]; then
+            SIGNING_ARGS+=(--team-id "$GYRO_APPLE_TEAM_ID")
+          fi
           node scripts/verify-macos-release.mjs \
             --dmg "$DMG_PATH" \
             --target "${{ matrix.target }}" \
-            --checksums "$DMG_CHECKSUMS"
+            --checksums "$DMG_CHECKSUMS" \
+            --updater-archive "target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz" \
+            "${SIGNING_ARGS[@]}"
       - name: Collect release assets
         run: |
           mkdir -p release-assets
@@ -107,10 +256,17 @@ jobs:
           path: release-assets/
           if-no-files-found: error
           retention-days: 7
+      - name: Remove signing keychain and notary key
+        if: always() && env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          if [ -n "${GYRO_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$GYRO_KEYCHAIN_PATH" || true
+          fi
+          rm -rf "$RUNNER_TEMP/gyro-notary" "$RUNNER_TEMP/gyro-developer-id.p12"
 
   finalize:
     name: Assemble deterministic update release
-    needs: macos
+    needs: [signing, macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,7 +280,7 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: Build and validate updater manifest
-        run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
+        run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}" --signing "${{ needs.signing.outputs.mode }}"
       - name: Finalize CLI checksums and Homebrew Formula
         run: node scripts/finalize-cli-release.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
       - name: Verify final release checksums

@@ -420,6 +420,11 @@ export function chatGridReducer(
     state.layouts[projectKey] ?? createChatProjectLayout(projectKey);
   let next = current;
   if (action.type === "select-pane") {
+    // A chat never enters another project's grid. Accepting it here and
+    // evicting it later would first replace the pane the user had open.
+    if (chatProjectKey(action.pane.workspacePath) !== projectKey) {
+      return state;
+    }
     const existingIndex = current.slots.findIndex(
       (pane) =>
         pane && chatPaneIdentity(pane) === chatPaneIdentity(action.pane),
@@ -3003,6 +3008,20 @@ export function workbenchReducer(
         ide: { ...state.ide, diagnostics: action.diagnostics },
       };
     case "ide-set-source-control":
+      // Status polls return a fresh object every few seconds; an identical
+      // snapshot must not re-render the workbench. Git stamps `lastCheckedAt`
+      // on every read, so it is left out of the comparison: counting it made
+      // every poll re-render the app and reload the open diff, which showed up
+      // as a hitch every few seconds while scrolling an editor.
+      if (
+        state.ide.sourceControl === action.sourceControl ||
+        JSON.stringify({
+          ...state.ide.sourceControl,
+          lastCheckedAt: undefined,
+        }) === JSON.stringify({ ...action.sourceControl, lastCheckedAt: undefined })
+      ) {
+        return state;
+      }
       return {
         ...state,
         ide: {

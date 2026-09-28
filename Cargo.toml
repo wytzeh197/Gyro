@@ -35,3 +35,9 @@ thiserror = "1.0"
 ureq = { version = "2.12", features = ["json"] }
 url = "2.5"
 uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Dependencies (SQLite, serde_json, walkdir, notify) run unoptimized in
+# `tauri dev` otherwise, which makes the dev app feel far slower than release.
+# Gyro's own crates stay at opt-level 0 so incremental rebuilds stay quick.
+[profile.dev.package."*"]
+opt-level = 2

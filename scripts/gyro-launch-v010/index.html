@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Gyro v0.1.0 launch</title>
+<style>
+  @font-face { font-family: "Inter Tight"; src: url(assets/inter-tight-latin.woff2) format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Inter"; src: url(assets/inter-latin.woff2) format("woff2"); font-weight: 100 900; }
+  :root { --bg:#0a0c0b; --ink:#eef2ef; --dim:#6f7a74; --green:#7cc49b; --green2:#4f9c73; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+  #stage { position: absolute; inset: 0; overflow: hidden; color: var(--ink); font-family: "Inter Tight", "Inter", sans-serif; }
+  #glow { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+          background: radial-gradient(ellipse 55% 60% at 50% 45%, rgba(79,156,115,.16) 0%, rgba(79,156,115,.05) 45%, rgba(0,0,0,0) 75%); }
+  #grain { position: absolute; inset: 0; opacity: .05;
+           background-image: radial-gradient(rgba(255,255,255,.6) 1px, transparent 1px); background-size: 4px 4px; }
+  .l { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; will-change: transform, opacity; }
+  .type { font-weight: 600; letter-spacing: -0.05em; line-height: 1; white-space: nowrap; }
+  .mono { font-family: "DejaVu Sans Mono", monospace; letter-spacing: 0; }
+
+  #rings { width: 560px; height: 560px; perspective: 1400px; }
+  .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(124,196,155,.55); transform-style: preserve-3d; }
+  .ring.r2 { inset: 40px; border-color: rgba(124,196,155,.38); }
+  .ring.r3 { inset: 80px; border-color: rgba(238,242,239,.22); }
+  #core { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+          background: var(--green); box-shadow: 0 0 30px 8px rgba(124,196,155,.35); }
+
+  #term { font-size: 58px; color: var(--ink); line-height: 1.6; }
+  #term .p { color: var(--green); }
+  #term .o { color: var(--green); }
+  #caret { display: inline-block; width: 32px; height: 64px; background: var(--ink); vertical-align: -9px; margin-left: 4px; }
+
+  .word { font-size: 210px; color: var(--ink); }
+  #inone { font-size: 64px; font-weight: 500; letter-spacing: -0.03em; color: var(--green); }
+
+  .shot { width: 1152px; height: 720px; border-radius: 16px; overflow: hidden; background: #111;
+          box-shadow: 0 60px 120px -40px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.09); }
+  .shot img { width: 100%; height: 100%; display: block; }
+  .tag { font-size: 26px; color: var(--green); }
+  .tag::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--green); margin-right: 14px; vertical-align: 3px; }
+
+  #agentsT { font-size: 78px; text-align: center; }
+  #agentsT em { font-style: normal; color: var(--green); }
+  .prov { width: 128px; height: 128px; border-radius: 30px; background: #141816; display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 30px 60px -30px rgba(0,0,0,.9); }
+  .prov img { width: 62px; height: 62px; filter: brightness(0) invert(1); opacity: .92; }
+  #hub { width: 170px; height: 170px; border-radius: 42px; background: #121614; display: flex; align-items: center; justify-content: center;
+         box-shadow: 0 0 0 1px rgba(124,196,155,.35), 0 0 80px -10px rgba(124,196,155,.35); }
+  #hub img { width: 104px; height: 104px; }
+  #orbit { width: 1000px; height: 360px; border-radius: 50%; border: 1.5px dashed rgba(124,196,155,.22); }
+
+  .stmt { font-size: 112px; }
+  .stmt .n { display: block; font-family: "DejaVu Sans Mono", monospace; font-size: 36px; font-weight: 400; letter-spacing: 0; color: var(--green); margin-bottom: 30px; }
+  .stmt em { font-style: normal; color: var(--green); }
+
+  #logo { width: 150px; height: 150px; }
+  #wordmark { display: flex; align-items: center; gap: 30px; }
+  #wordmark span { font-size: 150px; font-weight: 600; letter-spacing: -0.06em; }
+  #wordmark b { font-family: "DejaVu Sans Mono", monospace; font-weight: 400; font-size: 40px; color: #0a0c0b; background: var(--green);
+                border-radius: 12px; padding: 10px 20px; letter-spacing: 0; }
+  #cta { font-family: "Inter", sans-serif; font-size: 34px; font-weight: 450; color: #a9b4ae; letter-spacing: -0.01em; }
+  #cta i { font-style: normal; color: #3f4843; padding: 0 18px; }
+  #cta u { text-decoration: none; color: var(--ink); }
+</style>
+</head>
+<body>
+<main id="stage">
+  <div id="glow" class="l"></div>
+  <div id="grain"></div>
+
+  <div id="rings" class="l"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div id="core"></div></div>
+
+  <div id="term" class="l mono"><div><span class="p">$</span> <span id="typed"></span><span id="caret"></span></div><div id="out" class="o">v0.1.0</div></div>
+
+  <div id="wChat" class="l type word">Chat.</div>
+  <div id="wCli" class="l type word">CLI.</div>
+  <div id="wIde" class="l type word">IDE.</div>
+  <div id="inone" class="l type">In one place.</div>
+
+  <div id="sChat" class="l shot"><img src="assets/current-chat-dark.webp"></div>
+  <div id="sWork" class="l shot"><img src="assets/current-workspace-dark.webp"></div>
+  <div id="sRev" class="l shot"><img src="assets/current-review-dark.webp"></div>
+  <div id="tChat" class="l mono tag">chat</div>
+  <div id="tWork" class="l mono tag">workspace</div>
+  <div id="tRev" class="l mono tag">review</div>
+
+  <div id="agentsT" class="l type">Bring the agents<br><em>you already pay for.</em></div>
+  <div id="orbit" class="l"></div>
+  <div id="p0" class="l prov"><img src="assets/claude.svg"></div>
+  <div id="p1" class="l prov"><img src="assets/codex.svg"></div>
+  <div id="p2" class="l prov"><img src="assets/gemini.svg"></div>
+  <div id="p3" class="l prov"><img src="assets/grok.svg"></div>
+  <div id="p4" class="l prov"><img src="assets/kimi.svg"></div>
+  <div id="p5" class="l prov"><img src="assets/ollama.svg"></div>
+  <div id="hub" class="l"><img src="assets/gyro-logo-transparent.png"></div>
+
+  <div id="st1" class="l type stmt"><span class="n">01</span>Every edit waits<br>for your <em>yes.</em></div>
+  <div id="st2" class="l type stmt"><span class="n">02</span>Risky runs get<br>their own <em>worktree.</em></div>
+  <div id="st3" class="l type stmt"><span class="n">03</span>Open source.<br><em>Apache-2.0.</em></div>
+
+  <img id="logo" class="l" src="assets/gyro-logo-transparent.png">
+  <div id="wordmark" class="l"><span class="type">Gyro</span><b>v0.1.0</b></div>
+  <div id="cta" class="l">Out now for macOS<i>/</i><u>usegyro.io</u></div>
+</main>
+<script src="film.js"></script>
+</body>
+</html>

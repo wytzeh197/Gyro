@@ -22,6 +22,7 @@ import {
 } from "./use-session-context-events";
 import { ComposerContextCandidates } from "@gyro-dev/ui";
 import {
+  isSplitChatLayout,
   restoreCompanionPanes,
   PullRequestForm,
   type PullRequestDraft,
@@ -80,6 +81,11 @@ import {
   useTerminalAttachmentController,
 } from "./terminal-attachment";
 import { isTauriRuntime } from "./tauri-runtime";
+import {
+  sameSessionEvents,
+  useCoalescedByKey,
+  useDebouncedPersist,
+} from "./responsiveness";
 import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
 import {
@@ -142,6 +148,7 @@ import {
   withoutSideChatSessions,
   createNotification,
   createTerminalPane,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   defaultCommandProfiles,
   getProviderModel,
@@ -291,6 +298,7 @@ import {
 } from "@gyro-dev/ui";
 import {
   lazy,
+  memo,
   startTransition,
   Suspense,
   useCallback,
@@ -588,6 +596,7 @@ const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 // The draft key for a chat with no session yet. Shared with the UI package so
 // a drop and the composer holding it always name the same draft.
 const PROVIDER_STREAM_FLUSH_MS = 80;
+
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
@@ -1372,6 +1381,14 @@ export function App() {
   useEffect(() => {
     dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
   }, [companionFocusPaneId]);
+  // Model "follow" reports arrive through a long-lived listener; it reads the
+  // split through this ref so a browser the model drives stays on the backend
+  // instead of covering the transcript of a tiled pane.
+  const isSplitChatViewRef = useRef(false);
+  isSplitChatViewRef.current = isSplitChatLayout({
+    occupiedPaneCount: (activeChatLayout?.slots ?? []).filter(Boolean).length,
+    hasMaximizedPane: Boolean(chatGrid.maximizedPaneId),
+  });
   useModelBrowserReveal({
     activeSessionId,
     dispatch: dispatchWorkbench,
@@ -2458,8 +2475,14 @@ export function App() {
     }
   }, [latestMenuBarOutcome]);
 
+  // The snapshot memo recomputes on every stream flush; only cross IPC when
+  // what the menu bar shows actually changed.
+  const lastMenuBarSnapshotRef = useRef("");
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    const serialized = JSON.stringify(menuBarSnapshot);
+    if (serialized === lastMenuBarSnapshotRef.current) return;
+    lastMenuBarSnapshotRef.current = serialized;
     void invoke("set_menu_bar_snapshot", { snapshot: menuBarSnapshot }).catch(
       () => undefined,
     );
@@ -2482,9 +2505,7 @@ export function App() {
   const selectedTerminalSourceControl = selectedTerminalPane
     ? terminalSourceControlByPane[selectedTerminalPane.id]
     : undefined;
-  useEffect(() => {
-    safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(chatDrafts));
-  }, [chatDrafts]);
+  useDebouncedPersist(chatDrafts, persistChatDrafts);
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_DRAFT_MODES_STORAGE_KEY,
@@ -2665,7 +2686,7 @@ export function App() {
     }
   }, [removedProjectPaths]);
 
-  const refreshEvents = useCallback(
+  const readSessionEvents = useCallback(
     async (sessionId: string) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
@@ -2697,12 +2718,13 @@ export function App() {
           // only grows via load-earlier.
           expandedHistorySessionsRef.current.delete(sessionId);
           replaceSessionContextEvents(sessionId, page.contextEvents);
-          setHasMoreBeforeBySession((current) => ({
-            ...current,
-            [sessionId]: page.hasMoreBefore,
-          }));
-          setEventsForSession(sessionId, (current) =>
-            limitEventsForSession(
+          setHasMoreBeforeBySession((current) =>
+            current[sessionId] === page.hasMoreBefore
+              ? current
+              : { ...current, [sessionId]: page.hasMoreBefore },
+          );
+          setEventsForSession(sessionId, (current) => {
+            const next = limitEventsForSession(
               sessionId,
               preserveDeliveredResponses(
                 markInactiveCapabilityResources(
@@ -2714,8 +2736,11 @@ export function App() {
                 ),
                 current,
               ),
-            ),
-          );
+            );
+            // Re-reading an unchanged transcript keeps the same array so the
+            // chat does not re-render every turn.
+            return sameSessionEvents(current, next) ? current : next;
+          });
         }
       } catch {
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
@@ -2731,6 +2756,7 @@ export function App() {
     },
     [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
   );
+  const refreshEvents = useCoalescedByKey(readSessionEvents);
 
   const loadEarlierEvents = useCallback(
     async (sessionId: string) => {
@@ -3048,7 +3074,10 @@ export function App() {
               label: payload.resource.label,
               paneTab: panel,
             });
-            if (shouldFollow) {
+            if (
+              shouldFollow &&
+              !(panel === "browser" && isSplitChatViewRef.current)
+            ) {
               dispatchWorkbench({ type: "open-tool-panel", tab: panel });
             }
           } else {
@@ -4782,27 +4811,32 @@ export function App() {
           lastRunAt: new Date().toISOString(),
         });
         if (task.group === "test" && testStatus) {
-          const currentChildren =
-            workbench.ide.testTree.find(
-              (item) => item.id === "workspace-test-results",
-            )?.children ?? [];
+          // Update the run test in place. Replacing the tree with only the
+          // tests that ran hid every other discovered test after one run.
+          const suite = workbench.ide.testTree[0];
+          const children = suite?.children ?? [];
           const result = {
             id: task.id,
             label: task.label,
             status: testStatus,
           } as const;
+          const nextChildren = children.some((item) => item.id === task.id)
+            ? children.map((item) => (item.id === task.id ? result : item))
+            : [...children, result];
           dispatchWorkbench({
             type: "ide-set-test-tree",
             tests: [
               {
-                id: "workspace-test-results",
-                label: "Workspace tests",
-                status: testStatus,
-                children: [
-                  ...currentChildren.filter((item) => item.id !== task.id),
-                  result,
-                ],
+                id: suite?.id ?? "workspace-tests",
+                label: suite?.label ?? "Workspace tests",
+                status: nextChildren.some((item) => item.status === "failed")
+                  ? "failed"
+                  : nextChildren.some((item) => item.status === "running")
+                    ? "running"
+                    : testStatus,
+                children: nextChildren,
               },
+              ...workbench.ide.testTree.slice(1),
             ],
           });
         }
@@ -5995,6 +6029,7 @@ export function App() {
     }
     refreshIdeSourceControl(workspaceActionRoot);
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       refreshIdeSourceControl(workspaceActionRoot);
     }, 5_000);
     return () => window.clearInterval(timer);
@@ -6006,6 +6041,7 @@ export function App() {
     void refreshGithub(workspaceActionRoot);
     const timer = window.setInterval(
       () => {
+        if (document.visibilityState !== "visible") return;
         void refreshGithub(workspaceActionRoot);
       },
       hasActiveGithubRun ? 15_000 : 60_000,
@@ -9821,10 +9857,15 @@ export function App() {
         config.requireFileEditApproval;
       const fullAccess =
         overrideContext?.fullAccess ?? Boolean(config.fullAccess);
+      // A chat belongs to the project of the pane it was typed in. The global
+      // workspace can move (Code layout, sidebar) while an already-focused
+      // draft keeps its own project, so never let it pick the project here.
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
         targetSession?.workspacePath ??
-        workspacePath;
+        (!requestedSessionId && activeChatPane?.kind === "draft"
+          ? activeChatPane.workspacePath
+          : workspacePath);
       const turnWorkspaceContext =
         overrideContext?.workspaceContext ??
         (workspaceContextSnapshot &&
@@ -10702,6 +10743,7 @@ export function App() {
       activeSession?.workspacePath,
       activeSessionHasTranscriptEvents,
       activeDraftKey,
+      activeChatPane,
       activeChatAttachments,
       activeChatDraft,
       changeChatMode,
@@ -10736,6 +10778,14 @@ export function App() {
       workspacePath,
     ],
   );
+  // sendDraft changes with every draft and status update. A stable handler
+  // keeps the transcript memo (which lists onContinueChat) from rebuilding
+  // every turn on each render.
+  const sendDraftRef = useRef(sendDraft);
+  sendDraftRef.current = sendDraft;
+  const continueChat = useCallback(() => {
+    void sendDraftRef.current("Continue");
+  }, []);
 
   const handleCouncilAction = useCallback(
     async (action: CouncilActionRequest): Promise<string | void> => {
@@ -14908,6 +14958,9 @@ export function App() {
     }
 
     const interval = window.setInterval(() => {
+      // Output buffers in Rust while hidden; the visibility listener below
+      // catches up the moment the window returns.
+      if (document.visibilityState !== "visible") return;
       for (const paneId of paneIds) {
         void refreshTerminalPane(paneId);
       }
@@ -15276,8 +15329,8 @@ export function App() {
           layout,
         })
       }
-      onOpenDiffInEditor={(path) => {
-        openEditorFile(path);
+      onOpenDiffInEditor={(path, lineNumber, column) => {
+        openEditorLocation(path, lineNumber, column);
         dispatchWorkbench({
           type: "select-workspace-layout",
           layout: "code",
@@ -15292,6 +15345,15 @@ export function App() {
         dispatchWorkbench({ type: "set-pane-tab", tab });
       }}
       onLaunchCliPreset={launchCliPreset}
+      onRunTestTask={(taskId) => {
+        const task = workbench.ide.taskDefinitions.find(
+          (item) => item.id === taskId,
+        );
+        if (task) void runIdeTask(task);
+      }}
+      onSelectOutputChannel={(channelId) =>
+        dispatchWorkbench({ type: "ide-select-output-channel", channelId })
+      }
       onProfileChange={setActiveProfileId}
       onRejectAllDiffs={() =>
         dispatchWorkbench({
@@ -16167,7 +16229,7 @@ export function App() {
       onRemoveAttachment={removeChatAttachment}
       onReusePrompt={updateActiveChatDraft}
       onStopChat={stopActiveChat}
-      onContinueChat={() => void sendDraft("Continue")}
+      onContinueChat={continueChat}
       onCouncilAction={handleCouncilAction}
       onOpenToolPanel={openToolPanel}
       onToggleToolPanel={toggleChatToolPanel}
@@ -16555,7 +16617,7 @@ export function App() {
                     onRemoveAttachment={removeChatAttachment}
                     onReusePrompt={updateActiveChatDraft}
                     onStopChat={stopActiveChat}
-                    onContinueChat={() => void sendDraft("Continue")}
+                    onContinueChat={continueChat}
                     onCouncilAction={handleCouncilAction}
                     onOpenToolPanel={openToolPanel}
                     onToggleToolPanel={toggleChatToolPanel}
@@ -16850,23 +16912,10 @@ export function App() {
               chat's own rail there. */}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
+            // Closed, the panel costs no row: its toggle sits in the status bar.
             workbench.isToolPanelOpen ? (
               renderWorkspaceToolPanel(false)
-            ) : (
-              <nav
-                aria-label="Workspace tools"
-                className="gyro-workspace-tool-launcher"
-              >
-                <button
-                  aria-label="Open the workspace panel"
-                  onClick={toggleChatToolPanel}
-                  title="Open the panel you used last (⌘J)"
-                  type="button"
-                >
-                  Panel
-                </button>
-              </nav>
-            )
+            ) : null
           ) : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
@@ -16906,6 +16955,21 @@ export function App() {
               groupCount={Math.max(workbench.ide.layout.groups.length, 1)}
               ide={workbench.ide}
               isBranchLoading={isBranchLoading}
+              isPanelOpen={workbench.isToolPanelOpen}
+              onShowProblems={() =>
+                dispatchWorkbench({ type: "open-tool-panel", tab: "problems" })
+              }
+              onTogglePanel={toggleChatToolPanel}
+              onDragPanel={(height, phase) => {
+                // Past a short pull the panel snaps open at its minimum and
+                // then follows the pointer; letting go low puts it away.
+                if (height < (phase === "end" ? 96 : 48)) {
+                  dispatchWorkbench({ type: "close-tool-panel" });
+                  return;
+                }
+                dispatchWorkbench({ type: "set-workspace-panel-height", height });
+                dispatchWorkbench({ type: "open-tool-panel" });
+              }}
               onCreateBranch={() =>
                 void createWorkspaceBranch(
                   workbench.ide.sourceControl.branch ?? branchCatalog?.current,
@@ -17316,7 +17380,7 @@ export function App() {
           onRemoveAttachment={removeChatAttachment}
           onReusePrompt={updateActiveChatDraft}
           onStopChat={stopActiveChat}
-          onContinueChat={() => void sendDraft("Continue")}
+          onContinueChat={continueChat}
           onCouncilAction={handleCouncilAction}
           onOpenToolPanel={openToolPanel}
           onToggleToolPanel={toggleChatToolPanel}
@@ -18065,6 +18129,10 @@ function safeSetLocalStorage(key: string, value: string) {
   } catch {
     // Local storage can be unavailable or quota-limited in preview contexts.
   }
+}
+
+function persistChatDrafts(drafts: Record<string, string>) {
+  safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
 }
 
 function flushPersistedWorkbenchState(ref: { current?: WorkbenchState }) {
@@ -19001,14 +19069,24 @@ function savedProjectsFromSessions(
   };
 
   upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
-  recentProjectPaths.forEach((path, index) =>
-    upsertProject(path, new Date(Date.now() - index).toISOString(), {
-      countSession: false,
-    }),
-  );
-  sessions.forEach((session) =>
-    upsertProject(session.workspacePath, session.updatedAt),
-  );
+  // Smoke tests and CLI probes run in system temp folders. They are not
+  // projects the user chose, so only the open workspace may surface one.
+  recentProjectPaths
+    .filter((path) => !isTransientWorkspacePath(path))
+    .forEach((path, index) =>
+      upsertProject(path, new Date(Date.now() - index).toISOString(), {
+        countSession: false,
+      }),
+    );
+  sessions
+    .filter(
+      (session) =>
+        session.origin !== "cli" &&
+        !isTransientWorkspacePath(session.workspacePath),
+    )
+    .forEach((session) =>
+      upsertProject(session.workspacePath, session.updatedAt),
+    );
 
   const currentPath = normalizeProjectPath(currentWorkspacePath);
   return [...projects.values()]
@@ -19142,7 +19220,7 @@ function disposeEditorModels(paths: string[]) {
     .catch(() => undefined);
 }
 
-function MonacoEditorPane({
+function MonacoEditorPaneView({
   buffer,
   fileContent,
   loadState,
@@ -19183,6 +19261,17 @@ function MonacoEditorPane({
     buffer?.truncated ?? fileContent?.truncated,
   );
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  // The pane is memoised and its callbacks arrive as fresh closures, so read
+  // them through refs; handleMount subscribes once and would otherwise keep
+  // the first render's callback.
+  const onChangeRef = useRef(onChange);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onChangeRef.current = onChange;
+  onSelectionChangeRef.current = onSelectionChange;
+  const handleChange = useCallback(
+    (value?: string) => onChangeRef.current(value ?? ""),
+    [],
+  );
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
   const hasMountedRef = useRef(false);
   const [mounted, setMounted] = useState(false);
@@ -19509,15 +19598,15 @@ function MonacoEditorPane({
     editor.onDidChangeCursorSelection((event) => {
       const model = editor.getModel();
       if (!model) {
-        onSelectionChange(undefined);
+        onSelectionChangeRef.current(undefined);
         return;
       }
       const text = model.getValueInRange(event.selection);
       if (!text) {
-        onSelectionChange(undefined);
+        onSelectionChangeRef.current(undefined);
         return;
       }
-      onSelectionChange({
+      onSelectionChangeRef.current({
         path: model.uri.path,
         startLineNumber: event.selection.startLineNumber,
         startColumn: event.selection.startColumn,
@@ -19558,7 +19647,7 @@ function MonacoEditorPane({
           height="100%"
           keepCurrentModel
           language={syntax.language}
-          onChange={(value) => onChange(value ?? "")}
+          onChange={handleChange}
           onMount={handleMount}
           options={editorOptions}
           path={path}
@@ -19569,6 +19658,20 @@ function MonacoEditorPane({
     </div>
   );
 }
+
+// Chat streaming, terminal output and polling re-render App many times a
+// second. Without this every open editor re-rendered with them, which showed
+// up as scroll jank. Callbacks are read through refs inside the pane.
+const MonacoEditorPane = memo(
+  MonacoEditorPaneView,
+  (previous, next) =>
+    (Object.keys(next) as Array<keyof typeof next>).every(
+      (key) =>
+        key === "onChange" ||
+        key === "onSelectionChange" ||
+        Object.is(previous[key], next[key]),
+    ) && Object.keys(previous).length === Object.keys(next).length,
+);
 
 function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
   if (!isRecord(value)) {

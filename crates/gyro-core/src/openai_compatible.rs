@@ -800,6 +800,8 @@ struct WireUsage {
     #[serde(default)]
     completion_tokens: Option<u64>,
     #[serde(default)]
+    total_tokens: Option<u64>,
+    #[serde(default)]
     prompt_tokens_details: Option<WireTokenDetails>,
     #[serde(default)]
     completion_tokens_details: Option<WireTokenDetails>,
@@ -820,6 +822,7 @@ impl WireUsage {
                 .and_then(|detail| detail.reasoning_tokens),
         );
         observation.reported(self.prompt_tokens, self.completion_tokens);
+        observation.reported_total(self.total_tokens);
     }
 }
 
@@ -844,6 +847,35 @@ mod tests {
     use super::*;
     use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
+
+    #[test]
+    fn wire_usage_preserves_totals_and_subset_counts_across_frames() {
+        let _scope = crate::provider_observation::Scope::start();
+        {
+            let mut observation =
+                crate::provider_observation::Request::start(&serde_json::json!([]));
+            for frame in [
+                serde_json::json!({"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 80}}),
+                serde_json::json!({"completion_tokens": 20, "completion_tokens_details": {"reasoning_tokens": 5}, "total_tokens": 150}),
+                serde_json::json!({"total_tokens": 150}),
+            ] {
+                serde_json::from_value::<WireUsage>(frame)
+                    .unwrap()
+                    .observe(&mut observation);
+            }
+            observation.complete(None, None, 0);
+        }
+        let tokens = crate::provider_observation::snapshot()
+            .unwrap()
+            .tokens
+            .unwrap();
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.output_tokens, 20);
+        assert_eq!(tokens.cached_input_tokens, 80);
+        assert_eq!(tokens.reasoning_output_tokens, 5);
+        assert_eq!(tokens.total_tokens, 150);
+        assert!(tokens.measured);
+    }
 
     struct RecordedRequest {
         request_line: String,

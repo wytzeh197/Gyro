@@ -20,6 +20,10 @@ Reuse the current page and observations while they remain valid. Prefer a target
 
 When the user asks to open, view, or check a web app they are building, show it in Gyro Browser rather than launching a separate window. If this chat's page already points at a loopback origin (`localhost`, `127.0.0.1`), reuse it. Otherwise find the dev server URL from the project's scripts, config, or a running terminal; start the server only when none is running, then open that URL and name it in your reply. A native desktop shell such as a Tauri or Electron window is a different surface: Gyro Browser shows its web frontend, not the native window, so say so when that difference matters.
 
+Keep the chat's Browser on the page or component you are actively checking. After changing its files, let hot reload settle or reload, then verify a task-specific heading or control before saying the preview is ready. A successful open or navigation only confirms the request; it does not prove the intended page rendered. If the page is blank, stale, an error, or says “This address opens Gyro”, inspect console/network output and correct the URL or preview entry instead of leaving that page as the result.
+
+When working on Gyro itself, its main app entry deliberately cannot run inside its own Browser. The full `capture.html` harness also replaces native IPC globals and is not compatible with the native Browser. Use a standalone component preview that imports the actual UI being edited and supplies explicit fixture data without booting the desktop app or replacing native globals. Reuse an existing suitable preview before creating one. Label fixture data accurately; it is rendered UI evidence, not live repository or provider state. Keep the working preview open when finishing a visual task.
+
 ## Permissions and failures
 
 Invoke available Gyro tools directly. The capability broker applies the current chat policy and presents required approvals before executing. Do not ask a duplicate approval question in chat. Full access does not bypass browser origin rules or protected fields. Plan mode remains read-only; Council receives context only.

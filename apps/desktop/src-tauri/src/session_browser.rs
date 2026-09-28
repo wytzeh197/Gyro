@@ -946,7 +946,9 @@ pub fn register_bridge_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri
         }
         let app = ctx.app_handle().clone();
         let body = request.into_body();
-        std::thread::spawn(move || {
+        // Chatty pages post a message per log line and request; the shared
+        // blocking pool reuses threads instead of spawning one per message.
+        tauri::async_runtime::spawn_blocking(move || {
             let result = handle_bridge_body(&app, &body);
             match result {
                 Ok(()) => responder.respond(cors_response(200, br#"{"ok":true}"#.to_vec())),
@@ -1041,10 +1043,14 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
         }
         _ => {}
     }
-    let _ = app.emit(
-        "session-browser-event",
-        serde_json::json!({ "sessionId": session_id, "kind": kind }),
-    );
+    // Console and network entries are read on demand from the buffers above;
+    // broadcasting each one only wakes every window for nothing.
+    if !matches!(kind, "console" | "network") {
+        let _ = app.emit(
+            "session-browser-event",
+            serde_json::json!({ "sessionId": session_id, "kind": kind }),
+        );
+    }
     Ok(())
 }
 

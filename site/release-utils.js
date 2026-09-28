@@ -3,6 +3,9 @@ export const LATEST_RELEASE_API =
   "https://api.github.com/repos/wytzeh197/Gyro/releases/latest";
 export const RELEASES_API =
   "https://api.github.com/repos/wytzeh197/Gyro/releases?per_page=30";
+// The changelog groups the whole alpha history, so it asks for GitHub's page maximum.
+export const CHANGELOG_RELEASES_API =
+  "https://api.github.com/repos/wytzeh197/Gyro/releases?per_page=100";
 export const RELEASES_PAGE = `${REPOSITORY}/releases`;
 export const LATEST_RELEASE_PAGE = `${RELEASES_PAGE}/latest`;
 
@@ -264,6 +267,15 @@ export function isPublicAlphaRelease(release) {
   }
   const match = release.tag_name.match(/^v0\.1\.0-alpha\.(\d+)(?:\.\d+)?$/i);
   return match ? Number(match[1]) >= 21 : false;
+}
+
+// Final releases (v0.1.0 onward) carry a plain semver tag and are listed on
+// their own, above the collapsed alpha history.
+export function isPublicStableRelease(release) {
+  if (!isUsableRelease(release) || release.draft || release.prerelease) {
+    return false;
+  }
+  return /^v\d+\.\d+\.\d+$/.test(release.tag_name);
 }
 
 export async function fetchGitHubJson(url) {

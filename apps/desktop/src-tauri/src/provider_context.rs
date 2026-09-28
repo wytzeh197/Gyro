@@ -338,21 +338,22 @@ pub(super) fn provider_billed_usage_from_acp(usage: &Value) -> Option<ProviderCo
         "cachedInputTokens",
     ])
     .unwrap_or_default()
-        + field(&[
+    .saturating_add(
+        field(&[
             "cacheCreationTokens",
             "cachedWriteTokens",
             "cached_write_tokens",
         ])
-        .unwrap_or_default();
-    let output_tokens = field(&["outputTokens", "output_tokens"]).unwrap_or_default();
+        .unwrap_or_default(),
+    );
+    let output_tokens = field(&["outputTokens", "output_tokens"]);
     Some(ProviderContextUsage {
         input_tokens: Some(input_tokens),
         cached_input_tokens: (cached > 0).then_some(cached.min(input_tokens)),
-        output_tokens: Some(output_tokens),
+        output_tokens,
         reasoning_output_tokens: field(&["reasoningTokens", "thoughtTokens", "reasoning_tokens"]),
-        total_tokens: Some(
-            field(&["totalTokens", "total_tokens"]).unwrap_or(input_tokens + output_tokens),
-        ),
+        total_tokens: field(&["totalTokens", "total_tokens"])
+            .or_else(|| output_tokens.map(|output| input_tokens.saturating_add(output))),
         model_context_window: None,
     })
 }
@@ -393,16 +394,18 @@ pub(super) fn provider_context_usage_from_claude_stream(
     let fresh_input = field("input_tokens")?;
     let cache_creation = field("cache_creation_input_tokens").unwrap_or_default();
     let cache_read = field("cache_read_input_tokens").unwrap_or_default();
-    let input_tokens = fresh_input + cache_creation + cache_read;
-    let output_tokens = field("output_tokens").unwrap_or_default();
+    let input_tokens = fresh_input
+        .saturating_add(cache_creation)
+        .saturating_add(cache_read);
+    let output_tokens = field("output_tokens");
     Some((
         frame,
         ProviderContextUsage {
             input_tokens: Some(input_tokens),
-            cached_input_tokens: Some(cache_creation + cache_read),
-            output_tokens: Some(output_tokens),
+            cached_input_tokens: Some(cache_creation.saturating_add(cache_read)),
+            output_tokens,
             reasoning_output_tokens: None,
-            total_tokens: Some(input_tokens + output_tokens),
+            total_tokens: output_tokens.map(|output| input_tokens.saturating_add(output)),
             model_context_window: claude_stream_context_window(value),
         },
     ))

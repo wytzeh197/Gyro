@@ -135,7 +135,7 @@
   --gyro-premium-radius-md: 9px;
   --gyro-premium-radius-lg: 12px;
   --gyro-premium-radius-xl: 14px;
-  --gyro-premium-radius-composer: 22px;
+  --gyro-premium-radius-composer: 18px;
   --gyro-seam-radius: 12px;
   --gyro-radius-xs: var(--gyro-premium-radius-xs);
   --gyro-radius-sm: var(--gyro-premium-radius-sm);
@@ -207,7 +207,7 @@
   --gyro-ide-sidebar-width: 224px;
   --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(32px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(22px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-gap-xs: 4px;
   --gyro-ide-gap-sm: 8px;
@@ -19237,9 +19237,9 @@ textarea:focus-visible,
 .gyro-editor-statusbar {
   border-top: 1px solid var(--gyro-premium-hairline-soft);
   box-sizing: border-box;
-  height: 22px;
-  max-height: 22px;
-  min-height: 22px;
+  height: var(--gyro-ide-status-height);
+  max-height: var(--gyro-ide-status-height);
+  min-height: var(--gyro-ide-status-height);
   overflow: hidden;
 }
 
@@ -35667,7 +35667,7 @@ textarea:focus-visible,
 }
 
 .gyro-chat-start:not(.is-mission) {
-  --gyro-composer-width: 820px;
+  --gyro-composer-width: 720px;
   align-items: center;
   align-self: stretch;
   box-sizing: border-box;
@@ -36340,16 +36340,6 @@ textarea:focus-visible,
   box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
 }
 
-.gyro-workspace-tool-launcher {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 8px;
-  border-top: 1px solid var(--gyro-border-soft);
-  background: var(--gyro-pane);
-}
-
-.gyro-workspace-tool-launcher > button,
 .gyro-empty-actions > button {
   background: transparent;
   border: 0;
@@ -36360,7 +36350,6 @@ textarea:focus-visible,
   padding: 4px 8px;
 }
 
-.gyro-workspace-tool-launcher > button:hover,
 .gyro-empty-actions > button:hover {
   background: var(--gyro-control-hover);
   color: var(--gyro-text);
@@ -36461,38 +36450,38 @@ textarea:focus-visible,
    most: session rails, starter actions, composer controls, tool launchers,
    workspace chrome, and editable Settings rows. */
 :root[data-density="compact"] {
-  --gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1));
-  --gyro-ide-context-height: calc(28px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(20px * var(--gyro-ui-scale, 1));
-  --gyro-ide-control-size: calc(24px * var(--gyro-ui-scale, 1));
-  --gyro-control-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-context-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
+  --gyro-ide-control-size: calc(22px * var(--gyro-ui-scale, 1));
+  --gyro-control-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-icon-target: calc(24px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] {
-  --gyro-ide-tab-height: calc(38px * var(--gyro-ui-scale, 1));
-  --gyro-ide-context-height: calc(34px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
-  --gyro-ide-control-size: calc(28px * var(--gyro-ui-scale, 1));
-  --gyro-control-height: calc(32px * var(--gyro-ui-scale, 1));
-  --gyro-icon-target: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-ide-context-height: calc(30px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-control-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-icon-target: calc(26px * var(--gyro-ui-scale, 1));
 }
 
 /* Code workspaces establish their own compact chrome variables, so restate
    the preference at that surface instead of letting its local defaults mask
    the root-level choice. */
 :root[data-density="compact"] .gyro-workspace-route.is-code {
-  --gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1));
-  --gyro-ide-context-height: calc(28px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(20px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-context-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(22px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-workspace-route.is-code {
-  --gyro-ide-tab-height: calc(38px * var(--gyro-ui-scale, 1));
-  --gyro-ide-context-height: calc(34px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
-  --gyro-ide-control-size: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-ide-context-height: calc(30px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-sidebar-action,
@@ -36501,8 +36490,8 @@ textarea:focus-visible,
 :root[data-density="compact"] .gyro-sidebar-thread,
 :root[data-density="compact"] .gyro-session-row,
 :root[data-density="compact"] .gyro-footer-button {
-  min-height: calc(32px * var(--gyro-ui-scale, 1));
-  padding-block: calc(4px * var(--gyro-ui-scale, 1));
+  min-height: calc(26px * var(--gyro-ui-scale, 1));
+  padding-block: calc(2px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-sidebar-action,
@@ -36511,8 +36500,8 @@ textarea:focus-visible,
 :root[data-density="comfortable"] .gyro-sidebar-thread,
 :root[data-density="comfortable"] .gyro-session-row,
 :root[data-density="comfortable"] .gyro-footer-button {
-  min-height: calc(36px * var(--gyro-ui-scale, 1));
-  padding-block: calc(4px * var(--gyro-ui-scale, 1));
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding-block: calc(3px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-session-row,
@@ -36521,23 +36510,23 @@ textarea:focus-visible,
 }
 
 :root[data-density="comfortable"] .gyro-session-row {
-  min-height: calc(34px * var(--gyro-ui-scale, 1));
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-settings-row,
 :root[data-density="compact"] .gyro-settings-group .gyro-provider-row,
 :root[data-density="compact"] .gyro-provider-table > .gyro-provider-row,
 :root[data-density="compact"] .gyro-workspace-settings-list > label {
-  min-height: calc(60px * var(--gyro-ui-scale, 1));
-  padding-block: calc(12px * var(--gyro-ui-scale, 1));
+  min-height: calc(48px * var(--gyro-ui-scale, 1));
+  padding-block: calc(9px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-settings-row,
 :root[data-density="comfortable"] .gyro-settings-group .gyro-provider-row,
 :root[data-density="comfortable"] .gyro-provider-table > .gyro-provider-row,
 :root[data-density="comfortable"] .gyro-workspace-settings-list > label {
-  min-height: calc(72px * var(--gyro-ui-scale, 1));
-  padding-block: calc(16px * var(--gyro-ui-scale, 1));
+  min-height: calc(56px * var(--gyro-ui-scale, 1));
+  padding-block: calc(12px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-composer-bar {
@@ -36546,26 +36535,26 @@ textarea:focus-visible,
 }
 
 :root[data-density="comfortable"] .gyro-composer-bar {
-  min-height: calc(40px * var(--gyro-ui-scale, 1));
-  padding-block: calc(5px * var(--gyro-ui-scale, 1));
+  min-height: calc(36px * var(--gyro-ui-scale, 1));
+  padding-block: calc(4px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-composer-context-row {
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-composer-context-row {
-  min-height: calc(38px * var(--gyro-ui-scale, 1));
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-chat-tool-launcher button {
-  min-height: calc(36px * var(--gyro-ui-scale, 1));
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
   padding-inline: calc(8px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-chat-tool-launcher button {
-  min-height: calc(44px * var(--gyro-ui-scale, 1));
-  padding-inline: calc(12px * var(--gyro-ui-scale, 1));
+  min-height: calc(36px * var(--gyro-ui-scale, 1));
+  padding-inline: calc(10px * var(--gyro-ui-scale, 1));
 }
 
 /* Browser focus is deliberately not a utility-size rail. When a page is open,
@@ -40139,8 +40128,19 @@ textarea:focus-visible,
   position: relative;
 }
 
-.gyro-scm-history-entry:hover {
+.gyro-scm-history-entry:hover,
+.gyro-scm-history-entry:focus-visible,
+.gyro-scm-history-entry[aria-describedby] {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-scm-history-entry:focus-visible {
+  outline: 1px solid var(--gyro-accent);
+  outline-offset: -1px;
+}
+
+.gyro-scm-history-entry > .gyro-scm-graph-rail {
+  overflow: visible;
 }
 
 .gyro-scm-graph-rail {
@@ -40157,9 +40157,9 @@ textarea:focus-visible,
   top: 0;
   width: 100%;
   fill: none;
-  opacity: 0.55;
-  stroke-width: 1.5px;
-  stroke-linecap: round;
+  opacity: 0.78;
+  stroke-width: 1.75px;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
@@ -40183,7 +40183,104 @@ textarea:focus-visible,
 }
 
 .gyro-scm-history-entry.is-head .gyro-scm-graph-dot {
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 28%, transparent);
+  box-shadow: inset 0 0 0 2px currentColor,
+    0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.gyro-scm-history-entry[aria-describedby] .gyro-scm-graph-dot {
+  box-shadow: inset 0 0 0 2px currentColor,
+    0 0 0 4px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.gyro-scm-commit-card {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--gyro-border);
+  border-radius: 10px;
+  background: var(--gyro-sidebar);
+  color: var(--gyro-text);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 24%), 0 2px 6px rgb(0 0 0 / 12%);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.gyro-scm-commit-card-kind {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-scm-commit-card-kind > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gyro-commit-color);
+}
+
+.gyro-scm-commit-card-kind > code {
+  margin-left: auto;
+  color: var(--gyro-text);
+}
+
+.gyro-scm-commit-card-subject {
+  display: block;
+  margin-top: 10px;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.gyro-scm-commit-card-author {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: 10px;
+  color: var(--gyro-muted);
+}
+
+.gyro-scm-commit-card-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.gyro-scm-commit-card-refs > span {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--gyro-commit-color) 12%, transparent);
+  color: var(--gyro-text);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-scm-commit-card-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--gyro-border-soft);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-scm-commit-card-details dt {
+  color: var(--gyro-muted);
+}
+
+.gyro-scm-commit-card-details dd {
+  margin: 0;
+  font-family: var(--gyro-font-mono, monospace);
 }
 
 .gyro-scm-history-subject {
@@ -41547,13 +41644,13 @@ textarea:focus-visible,
     .gyro-sidebar-thread-main,
     .gyro-footer-button
   ) {
-  border-radius: 6px;
+  border-radius: 7px;
   box-shadow: none;
   color: var(--gyro-sidebar-text);
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  font-weight: 450;
-  letter-spacing: -0.01em;
-  line-height: calc(20px * var(--gyro-ui-scale, 1));
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  line-height: calc(18px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme]
@@ -41595,7 +41692,7 @@ textarea:focus-visible,
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-row {
-  border-radius: 6px;
+  border-radius: 7px;
 }
 
 :root[data-theme]
@@ -41619,22 +41716,22 @@ textarea:focus-visible,
   .gyro-sidebar
   :is(.gyro-sidebar-small-title, .gyro-sidebar-time-group, .gyro-nav-label) {
   color: var(--gyro-faint);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
   letter-spacing: 0;
-  line-height: calc(18px * var(--gyro-ui-scale, 1));
+  line-height: calc(16px * var(--gyro-ui-scale, 1));
   text-transform: none;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-more-button,
 :root[data-theme] .gyro-sidebar .gyro-session-time,
 :root[data-theme] .gyro-sidebar .gyro-sidebar-shortcut {
   color: var(--gyro-faint);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   font-weight: 400;
 }
 
@@ -41740,9 +41837,9 @@ textarea:focus-visible,
   .gyro-user-message-bubble {
   background: var(--gyro-surface-soft);
   border-color: transparent;
-  border-radius: 18px;
-  padding: 13px 17px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.6 var(--gyro-font-sans);
+  border-radius: 16px;
+  padding: 9px 14px;
+  font: calc(14px * var(--gyro-ui-scale, 1))/1.55 var(--gyro-font-sans);
 }
 
 :root[data-theme]
@@ -41753,7 +41850,7 @@ textarea:focus-visible,
   font-size: calc(14px * var(--gyro-ui-scale, 1));
   font-weight: 400;
   letter-spacing: 0;
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 :root[data-theme]
@@ -41761,7 +41858,7 @@ textarea:focus-visible,
   .gyro-chat-run
   .gyro-response-body
   :is(p, li) {
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 :root[data-theme]
@@ -41779,7 +41876,7 @@ textarea:focus-visible,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
   .gyro-response-body {
-  gap: 15px;
+  gap: 11px;
 }
 
 /* Progress stays secondary to the answer; failures retain their own colors. */
@@ -41793,8 +41890,8 @@ textarea:focus-visible,
   .gyro-run.is-segments
   :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
   font-size: calc(13px * var(--gyro-ui-scale, 1));
-  line-height: calc(21px * var(--gyro-ui-scale, 1));
-  min-height: 27px;
+  line-height: calc(20px * var(--gyro-ui-scale, 1));
+  min-height: 26px;
 }
 
 :root[data-theme]
@@ -41812,8 +41909,8 @@ textarea:focus-visible,
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 3px 12px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 28%, transparent);
+  box-shadow: 0 2px 8px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
   filter: none;
 }
 
@@ -41834,8 +41931,8 @@ textarea:focus-visible,
   > .gyro-composer-shell.is-hero.has-provider:focus-within {
   /* Keep the frame neutral when typing or using composer controls. */
   border-color: var(--gyro-border);
-  box-shadow: 0 3px 12px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 28%, transparent);
+  box-shadow: 0 2px 8px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
 }
 
 :root[data-theme]
@@ -41844,8 +41941,8 @@ textarea:focus-visible,
   > .gyro-composer-shell.is-hero.has-provider
   > textarea {
   border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
-  padding: 14px 16px 8px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.55 var(--gyro-font-sans);
+  padding: 12px 14px 6px;
+  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
 }
 
 :root[data-theme]
@@ -41863,14 +41960,14 @@ textarea:focus-visible,
   > .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
   background: transparent;
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(12px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(2px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   :is(.gyro-composer-chip, .gyro-composer-tool) {
-  border-radius: 8px;
+  border-radius: 7px;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 
@@ -41878,10 +41975,10 @@ textarea:focus-visible,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button {
-  height: calc(32px * var(--gyro-ui-scale, 1));
-  min-height: calc(32px * var(--gyro-ui-scale, 1));
-  min-width: 32px;
-  width: 32px;
+  height: calc(28px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  min-width: 28px;
+  width: 28px;
 }
 
 /* Artifacts and completed changes share one restrained card treatment. */
@@ -41890,15 +41987,15 @@ textarea:focus-visible,
   :is(.gyro-chat-artifact, .gyro-chat-run-change-summary.is-complete) {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: none;
 }
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-artifact-header {
-  min-height: 48px;
-  padding-inline: 14px;
+  min-height: 40px;
+  padding-inline: 12px;
 }
 
 :root[data-theme]
@@ -41940,16 +42037,16 @@ textarea:focus-visible,
   > .gyro-chat-environment-popover {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  /* Concentric with its 8px buttons: 8px + 1px border + 8px padding. */
-  border-radius: 17px;
-  box-shadow: 0 12px 36px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 58%, transparent);
-  padding: 8px;
+  /* Concentric with its 7px buttons: 7px + 1px border + 6px padding. */
+  border-radius: 14px;
+  box-shadow: 0 10px 30px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
+  padding: 6px;
 }
 
 :root[data-theme] .gyro-chat-environment-popover > header {
-  min-height: 30px;
-  padding: 0 4px 5px 7px;
+  min-height: 26px;
+  padding: 0 4px 4px 7px;
 }
 
 :root[data-theme] .gyro-chat-environment-popover > header > strong {
@@ -41965,9 +42062,9 @@ textarea:focus-visible,
     .gyro-chat-environment-popover-actions
   )
   > button {
-  border-radius: 8px;
-  min-height: 34px;
-  padding: 7px;
+  border-radius: 7px;
+  min-height: 28px;
+  padding: 5px 7px;
 }
 
 :root[data-theme]
@@ -41993,8 +42090,8 @@ textarea:focus-visible,
 }
 
 :root[data-theme] .gyro-chat-environment-popover-actions {
-  margin-top: 7px;
-  padding-top: 7px;
+  margin-top: 5px;
+  padding-top: 5px;
 }
 
 :root[data-theme] .gyro-chat-environment-popover-sources {
@@ -42011,7 +42108,7 @@ textarea:focus-visible,
     .gyro-chat-surface:is(.is-thread, .is-empty)
     :is(.gyro-chat-start, .gyro-chat-composer-dock)
     > .gyro-composer-shell.is-hero.has-provider {
-    border-radius: 18px;
+    border-radius: 16px;
   }
 
   :root[data-theme]
@@ -42019,7 +42116,7 @@ textarea:focus-visible,
     :is(.gyro-chat-start, .gyro-chat-composer-dock)
     > .gyro-composer-shell.is-hero.has-provider
     > textarea {
-    border-radius: 18px 18px 0 0;
+    border-radius: 16px 16px 0 0;
     padding-inline: 13px;
   }
 
@@ -43195,4 +43292,698 @@ textarea:focus-visible,
   border-radius: 999px;
   height: 26px;
   width: 26px;
+}
+
+
+/* Refined density pass: chrome controls and edited-file rows at the quieter
+   desktop scale. Row heights and type live in the Design polish layer. */
+:root .gyro-app-shell .gyro-chat-thread-identity {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+}
+
+:root .gyro-app-shell :is(.gyro-chat-surface-button, .gyro-sidebar-toggle-button) {
+  border-radius: 7px;
+  height: calc(26px * var(--gyro-ui-scale, 1));
+  min-height: calc(26px * var(--gyro-ui-scale, 1));
+  min-width: calc(26px * var(--gyro-ui-scale, 1));
+}
+
+:root .gyro-app-shell :is(.gyro-change-summary-file > button, .gyro-change-summary-file-static) {
+  min-height: 28px;
+  padding-block: 4px;
+}
+
+/* Quiet workspace status bar: branch and sync on the left; on the right only
+   what needs attention, the file's language, and the panel toggle. Steady
+   details (size, encoding) live in the right group's tooltip. */
+:root .gyro-editor-statusbar.is-quiet {
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  gap: 12px;
+  padding-inline: 6px 10px;
+}
+
+:root .gyro-editor-statusbar.is-quiet .gyro-editor-statusbar-group {
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+:root .gyro-editor-statusbar.is-quiet .gyro-scm-branch-trigger {
+  color: var(--gyro-text);
+}
+
+:root .gyro-editor-statusbar.is-quiet :is(
+    .gyro-editor-statusbar-sync,
+    .gyro-editor-buffer-state,
+    .gyro-editor-statusbar-notice
+  ) {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  padding-inline: 6px;
+  white-space: nowrap;
+}
+
+.gyro-editor-statusbar-sync[data-tone="ok"]::before {
+  background: var(--gyro-success);
+  border-radius: 50%;
+  content: "";
+  height: 6px;
+  width: 6px;
+}
+
+.gyro-editor-statusbar-sync[data-tone="pending"] {
+  color: var(--gyro-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.gyro-editor-statusbar-sync[data-tone="warning"],
+.gyro-editor-statusbar-notice,
+.gyro-editor-statusbar.is-quiet .gyro-editor-buffer-state:is(
+    [data-state="conflict"],
+    [data-state="error"]
+  ) {
+  color: var(--gyro-warn);
+}
+
+:root .gyro-editor-statusbar.is-quiet :is(
+    .gyro-editor-statusbar-problems,
+    .gyro-editor-statusbar-panel-toggle
+  ) {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  display: inline-flex;
+  font: inherit;
+  gap: 4px;
+  height: calc(18px * var(--gyro-ui-scale, 1));
+  padding: 0 6px;
+}
+
+:root .gyro-editor-statusbar.is-quiet .gyro-editor-statusbar-problems {
+  color: var(--gyro-warn);
+}
+
+:root .gyro-editor-statusbar.is-quiet .gyro-editor-statusbar-panel-toggle {
+  justify-content: center;
+  padding: 0;
+  width: calc(22px * var(--gyro-ui-scale, 1));
+}
+
+:root .gyro-editor-statusbar.is-quiet .gyro-editor-statusbar-panel-toggle[aria-pressed="true"] {
+  color: var(--gyro-text);
+}
+
+:root .gyro-editor-statusbar.is-quiet :is(
+    .gyro-editor-statusbar-problems,
+    .gyro-editor-statusbar-panel-toggle
+  ):hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+/* The drawer's edge is a seam, not a grip: an invisible 8px target that shows
+   a hairline on hover, like the chat side panel's resizer. Closed, the same
+   seam sits on the status bar's top edge so the panel can be pulled up. */
+.gyro-editor-statusbar.is-quiet {
+  position: relative;
+}
+
+.gyro-editor-statusbar-panel-edge,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle {
+  background: transparent;
+  cursor: row-resize;
+  height: 8px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: -4px;
+  z-index: 20;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:hover,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:focus-visible {
+  background: transparent;
+  outline: 0;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:hover
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:focus-visible
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable.is-resizing
+  > .gyro-tool-panel-resize-handle
+  > span {
+  background: transparent;
+  border-radius: 0;
+  height: 1px;
+  opacity: 1;
+  transition: background-color calc(120ms * var(--gyro-motion-factor, 1)) ease;
+  width: 100%;
+}
+
+.gyro-editor-statusbar-panel-edge::after {
+  background: transparent;
+  content: "";
+  height: 1px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 4px;
+  transition: background-color calc(120ms * var(--gyro-motion-factor, 1)) ease;
+}
+
+.gyro-editor-statusbar-panel-edge:hover::after,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:hover
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  > .gyro-tool-panel-resize-handle:focus-visible
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable.is-resizing
+  > .gyro-tool-panel-resize-handle
+  > span {
+  background: color-mix(in srgb, var(--gyro-accent) 58%, transparent);
+}
+
+/* Inside the drawer, Review reads like the chat side panel: one flat pane
+   with hairline seams, no cards within the panel, and quiet actions. */
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  :is(
+    .gyro-diff-review,
+    .gyro-diff-main,
+    .gyro-diff-file-list,
+    .gyro-diff-file-list > header,
+    .gyro-inline-diff,
+    .gyro-diff-review-footer,
+    .gyro-diff-empty-footer
+  ) {
+  background: var(--gyro-pane);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  :is(.gyro-diff-main, .gyro-diff-file-list) {
+  border: 0;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review:not(.is-file-list-collapsed)
+  > .gyro-diff-file-list {
+  border-right: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  > .gyro-review-scope {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  min-height: 28px;
+  padding: 0 12px;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  > .gyro-review-scope
+  > strong {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  :is(.gyro-diff-review-footer, .gyro-diff-empty-footer) {
+  border-top: 1px solid var(--gyro-border-soft);
+  min-height: 0;
+  padding: 6px 8px;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  :is(.gyro-secondary-button, .gyro-primary-button),
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-empty-footer
+  .gyro-provider-details
+  > summary {
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  gap: 6px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  .gyro-secondary-button,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-empty-footer
+  .gyro-provider-details
+  > summary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  .gyro-secondary-button:hover,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-empty-footer
+  .gyro-provider-details
+  > summary:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-diff-review
+  :is(.gyro-secondary-button, .gyro-primary-button)
+  > svg {
+  height: 13px;
+  width: 13px;
+}
+
+/* The drawer wears the chat side panel's chrome: a 44px tab strip of quiet
+   pills, then tools that sit flush on the pane with hairline seams instead of
+   inset cards. */
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  gap: 6px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+}
+:root[data-theme] .gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs {
+  gap: 6px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-pane-tabs
+  button {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  gap: 8px;
+  padding: 0 10px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-pane-tabs
+  button:hover:not(.is-active) {
+  background: transparent;
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head
+  .gyro-icon-button {
+  background: transparent;
+  color: var(--gyro-muted);
+  width: 28px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head
+  .gyro-icon-button
+  > svg {
+  height: 14px;
+  width: 14px;
+}
+
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench {
+  background: var(--gyro-pane);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-preview-toolbar {
+  background: var(--gyro-pane);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-nav-group,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-actions,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-device-group {
+  gap: 0;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-device-group {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: 28px;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-preview-toolbar
+  :is(.gyro-browser-nav-group, .gyro-browser-device-group, .gyro-browser-actions)
+  > button {
+  /* The drawer spans the window, so it keeps every control that the
+     narrow-window rule trims from other toolbars. */
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  justify-content: center;
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0;
+  width: 28px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-preview-toolbar
+  :is(.gyro-browser-nav-group, .gyro-browser-device-group, .gyro-browser-actions)
+  > button:hover:not(:disabled),
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-device-group
+  > button.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-preview-toolbar
+  button:disabled {
+  opacity: 0.45;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-url-bar {
+  background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-pane));
+  border: 1px solid transparent;
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  display: flex;
+  gap: 6px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 6px 0 10px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-url-bar:focus-within {
+  background: var(--gyro-pane);
+  border-color: var(--gyro-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gyro-accent) 20%, transparent);
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-url-bar
+  > svg {
+  display: none;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-url-bar
+  input {
+  flex: 1 1 auto;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+  width: 0;
+}
+/* The host kind stays as a quiet word, not a pill. */
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-url-bar
+  > small {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  letter-spacing: 0;
+  padding: 0 4px;
+  text-transform: lowercase;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-frame,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-page.is-desktop,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-placeholder {
+  background: var(--gyro-pane);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+/* Empty state matches the side panel's "Start browsing": a bare glyph and
+   two lines, no tile. */
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-icon {
+  background: transparent;
+  border: 0;
+  height: auto;
+  margin-bottom: 2px;
+  width: auto;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-icon
+  > svg {
+  height: 28px;
+  width: 28px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-body
+  > strong {
+  font-size: calc(16px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-body
+  > p {
+  color: var(--gyro-muted);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-actions
+  > button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  padding: 4px 8px;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-placeholder-actions
+  > button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-resizable
+  .gyro-browser-preview.is-workbench
+  .gyro-browser-statusbar {
+  background: var(--gyro-pane);
+  border-top: 1px solid var(--gyro-border-soft);
+  min-height: 26px;
+  padding: 2px 10px;
+}
+
+/* Output can hold several logs (tasks, tests, GitHub runs); the header picks
+   one. It reads as the header's label, not as a form field. */
+.gyro-output-channel-select {
+  appearance: none;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 6px center;
+  border: 1px solid transparent;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  height: 26px;
+  max-width: 260px;
+  padding: 0 22px 0 6px;
+}
+
+.gyro-output-channel-select:hover {
+  background-color: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-output-channel-select:focus-visible {
+  border-color: var(--gyro-accent);
+  outline: none;
+}
+
+.gyro-test-result:not(:disabled) {
+  cursor: pointer;
+}
+
+/* ---- Responsiveness contract (keep last) ------------------------------------
+   A click should land on the next frame. Surfaces that a click or a view
+   switch brings in appear at once instead of fading or sliding in; motion is
+   kept for popovers. Transitions
+   only tint (background, border, color, opacity) so hover never reflows,
+   re-rasterizes text, or re-lays out the shell. */
+:root .gyro-chat-thread-canvas,
+:root .gyro-chat-composer-dock,
+:root .gyro-chat-turn,
+:root .gyro-chat-run-timeline > .gyro-message.is-assistant,
+:root .gyro-workspace-route.is-thread > .gyro-workspace-primary,
+:root .gyro-workspace-route.is-code > .gyro-workspace-primary,
+:root .gyro-workspace-route.is-terminal-grid > .gyro-workspace-tool-panel,
+:root .gyro-sidebar-persistent-header ~ .gyro-sidebar-actions,
+:root .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
+:root .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
+:root .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list,
+:root .gyro-sidebar-explorer-row {
+  animation: none;
+}
+
+:root :is(
+    button,
+    select,
+    input,
+    textarea,
+    .gyro-tools-card,
+    .gyro-provider-card,
+    .gyro-task-card,
+    .gyro-settings-row,
+    .gyro-provider-row,
+    .gyro-titlebar-switch-option,
+    .gyro-composer-popover .gyro-composer-menu-item
+  ) {
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+:root :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-project-row,
+    .gyro-sidebar-thread,
+    .gyro-sidebar-thread-main,
+    .gyro-session-row,
+    .gyro-footer-button,
+    .gyro-account-button,
+    .gyro-sidebar-section-toggle,
+    .gyro-sidebar-scm-row,
+    .gyro-ide-sidebar-activity button,
+    .gyro-tools-card,
+    .gyro-send-button
+  ):hover {
+  transform: none;
+}
+
+:root .gyro-sidebar-thread-main {
+  transition: background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+:root .gyro-session-actions {
+  backdrop-filter: none;
+  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+/* The shell's columns snap; animating grid-template-columns re-lays out the
+   transcript, editor, and terminal on every frame. */
+:root .gyro-app-shell.is-chat-shell.is-workspace-shell,
+:root .gyro-app-shell.is-workspace-shell .gyro-sidebar-windowbar {
+  transition: none;
+}
+
+/* Menus sit on near-opaque fills, so a heavy blur costs paint without being
+   visible. */
+:root :is(.gyro-session-menu, .gyro-account-menu, .gyro-command-palette) {
+  backdrop-filter: blur(8px);
+}
+
+/* Explorer rows hold no overlays, so their repaints can stay local. Session
+   rows host their own menu and must not clip it. */
+:root .gyro-sidebar-explorer-row {
+  contain: layout paint;
 }

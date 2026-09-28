@@ -196,6 +196,18 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+// A chat from another project must never enter this project's grid, and the
+// refused insert must not displace the pane the user already had open.
+const crossProjectGrid = chatGridReducer(chatGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("stranger", "/private/tmp/gyro-alpha45-smoke"),
+  mode: "replace",
+});
+expect(
+  crossProjectGrid === chatGridState,
+  "Chat grid must refuse a pane whose chat belongs to another project.",
+);
 // Dropping a sidebar chat already open in the split moves its existing pane,
 // preserving the React key, draft ownership and every other conversation.
 let reorderedGrid = chatGridReducer(chatGridState, {
@@ -5172,7 +5184,8 @@ expect(
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
-    appSource.includes('aria-label="Workspace tools"') &&
+    surfaceSource.includes('className="gyro-editor-statusbar-panel-toggle"') &&
+    appSource.includes("onTogglePanel={toggleChatToolPanel}") &&
     !surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
     surfaceSource.includes("headerActions={") &&
     styleSource.includes(".gyro-sidebar-section-heading") &&
@@ -5905,6 +5918,10 @@ expect(
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
+    appSource.includes(
+      '!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>',
+    ) &&
+    appSource.includes('activeChatPane?.kind === "draft"\n          ? activeChatPane.workspacePath') &&
     appSource.includes('"gyro.recent-project-paths"') &&
     appSource.includes("loadRecentProjectPaths") &&
     appSource.includes("setRecentProjectPaths((current)") &&
@@ -6190,7 +6207,7 @@ expect(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
     !tauriConfigSource.includes("GYRO_DEV_UPDATER_PUBKEY") &&
-    releaseWorkflowSource.includes("needs: macos") &&
+    releaseWorkflowSource.includes("needs: [signing, macos]") &&
     releaseWorkflowSource.includes("merge-multiple: true") &&
     releaseWorkflowSource.includes("scripts/create-updater-manifest.mjs") &&
     releaseWorkflowSource.includes('gh release create "$GITHUB_REF_NAME"') &&
@@ -6305,7 +6322,7 @@ expect(
     // The composer measure lives in one token now, not in an inline style that
     // silently outranked the stylesheet.
     !surfaceSource.includes('"min(820px, 100%)"') &&
-    styleSource.includes("--gyro-composer-width: 820px") &&
+    styleSource.includes("--gyro-composer-width: 720px") &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
     styleSource.includes("width: min(860px, 100%)") &&
     !surfaceSource.includes("calc(100vw - 96px)") &&
@@ -8175,8 +8192,8 @@ expect(
       ':root[data-density="comfortable"] .gyro-sidebar-action',
     ) &&
     styleSource.includes(".gyro-composer-context-row") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1))") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(38px * var(--gyro-ui-scale, 1))") &&
+    styleSource.includes("--gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1))") &&
+    styleSource.includes("--gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes(
       ':root[data-density="comfortable"] .gyro-workspace-route.is-code',
     ),

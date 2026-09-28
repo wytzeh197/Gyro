@@ -1,12 +1,15 @@
 import {
-  RELEASES_API,
+  CHANGELOG_RELEASES_API,
   RELEASES_PAGE,
   fetchGitHubJson,
   formatPublishedDate,
   isPublicAlphaRelease,
+  isPublicStableRelease,
   releaseAnchor,
   renderReleaseNotes,
 } from "./release-utils.js";
+
+const ALPHA_GROUP_ID = "alpha";
 
 const list = document.querySelector("[data-changelog-list]");
 const rail = document.querySelector("[data-version-rail]");
@@ -14,18 +17,25 @@ const jump = document.querySelector("[data-version-jump]");
 const status = document.querySelector("[data-changelog-status]");
 const fallback = document.querySelector("[data-changelog-fallback]");
 
-function versionLabel(tag) {
-  return tag.replace(/^v0\.1\.0-/, "");
+// "v0.1.0-alpha.49.7" reads as "Alpha 49.7" in the group summary.
+function alphaLabel(tag) {
+  return tag.replace(/^v0\.1\.0-alpha\./i, "Alpha ");
 }
 
-function appendVersionLink(target, release) {
+function appendLink(target, href, text) {
   const link = document.createElement("a");
-  link.href = `#${releaseAnchor(release.tag_name)}`;
-  link.textContent = versionLabel(release.tag_name);
+  link.href = href;
+  link.textContent = text;
   target.append(link);
 }
 
-function renderRelease(release, index) {
+function byNewest(a, b) {
+  return (
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+  );
+}
+
+function renderRelease(release, kicker) {
   const article = document.createElement("article");
   article.className = "release-entry";
   article.id = releaseAnchor(release.tag_name);
@@ -33,7 +43,7 @@ function renderRelease(release, index) {
   const header = document.createElement("header");
   const label = document.createElement("p");
   label.className = "release-kicker";
-  label.textContent = index === 0 ? "Latest alpha" : "Public alpha";
+  label.textContent = kicker;
   const title = document.createElement("h2");
   title.textContent = release.name || release.tag_name;
   const meta = document.createElement("p");
@@ -54,29 +64,88 @@ function renderRelease(release, index) {
   return article;
 }
 
+// Every alpha sits under one collapsed heading so the page leads with final
+// releases instead of dozens of preview builds.
+function renderAlphaGroup(alphas) {
+  const group = document.createElement("details");
+  group.className = "release-group";
+  group.id = ALPHA_GROUP_ID;
+
+  const summary = document.createElement("summary");
+  const heading = document.createElement("span");
+  heading.className = "release-group-heading";
+  const label = document.createElement("span");
+  label.className = "release-kicker";
+  label.textContent = "Public alpha";
+  const title = document.createElement("span");
+  title.className = "release-group-title";
+  title.textContent = "v0.1.0 Alpha";
+  const meta = document.createElement("span");
+  meta.className = "release-entry-meta";
+  const newest = alphas[0];
+  const oldest = alphas[alphas.length - 1];
+  const range =
+    alphas.length > 1
+      ? `${formatPublishedDate(oldest.published_at)} – ${formatPublishedDate(newest.published_at)}`
+      : formatPublishedDate(newest.published_at);
+  meta.textContent = `${alphas.length} ${alphas.length === 1 ? "release" : "releases"} · latest ${alphaLabel(newest.tag_name)} · ${range}`;
+  heading.append(label, title, meta);
+  summary.append(heading);
+
+  const entries = document.createElement("div");
+  entries.className = "release-group-entries";
+  for (const [index, release] of alphas.entries()) {
+    entries.append(
+      renderRelease(release, index === 0 ? "Latest alpha" : "Public alpha"),
+    );
+  }
+
+  group.append(summary, entries);
+  return group;
+}
+
+// Opens the alpha group when a link or the page URL points inside it, so
+// shared links to a single alpha still land on that release.
+function revealHashTarget() {
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  if (!id) return;
+  const target = document.getElementById(id);
+  const group = target?.closest(".release-group");
+  if (!group) return;
+  group.open = true;
+  target.scrollIntoView();
+}
+
 async function loadChangelog() {
   if (!list || !rail || !jump) return;
   try {
-    const response = await fetchGitHubJson(RELEASES_API);
-    const releases = Array.isArray(response)
-      ? response.filter(isPublicAlphaRelease)
-      : [];
-    releases.sort(
-      (a, b) =>
-        new Date(b.published_at).getTime() - new Date(a.published_at).getTime(),
-    );
-    if (!releases.length) throw new Error("No public alpha releases found");
+    const response = await fetchGitHubJson(CHANGELOG_RELEASES_API);
+    const releases = Array.isArray(response) ? response : [];
+    const stable = releases.filter(isPublicStableRelease).sort(byNewest);
+    const alphas = releases.filter(isPublicAlphaRelease).sort(byNewest);
+    if (!stable.length && !alphas.length) {
+      throw new Error("No public releases found");
+    }
 
     list.replaceChildren();
     rail.replaceChildren();
     jump.replaceChildren();
-    for (const [index, release] of releases.entries()) {
-      appendVersionLink(rail, release);
-      appendVersionLink(jump, release);
-      list.append(renderRelease(release, index));
+    for (const [index, release] of stable.entries()) {
+      const href = `#${releaseAnchor(release.tag_name)}`;
+      appendLink(rail, href, release.tag_name);
+      appendLink(jump, href, release.tag_name);
+      list.append(renderRelease(release, index === 0 ? "Latest" : "Release"));
     }
-    if (status) status.textContent = `${releases.length} releases`;
+    if (alphas.length) {
+      appendLink(rail, `#${ALPHA_GROUP_ID}`, "Alpha");
+      appendLink(jump, `#${ALPHA_GROUP_ID}`, "Alpha");
+      list.append(renderAlphaGroup(alphas));
+    }
+    const total = stable.length + alphas.length;
+    if (status) status.textContent = `${total} releases`;
     if (fallback) fallback.hidden = true;
+    window.addEventListener("hashchange", revealHashTarget);
+    revealHashTarget();
   } catch {
     if (status) status.textContent = "Release history is unavailable.";
     if (fallback) fallback.hidden = false;

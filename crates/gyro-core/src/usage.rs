@@ -144,13 +144,16 @@ impl UsageTokens {
         let output = output_tokens.unwrap_or_default();
         Self {
             input_tokens: input,
-            cached_input_tokens: cached_input_tokens.unwrap_or_default(),
+            cached_input_tokens: cached_input_tokens.unwrap_or_default().min(input),
             output_tokens: output,
-            reasoning_output_tokens: reasoning_output_tokens.unwrap_or_default(),
+            reasoning_output_tokens: reasoning_output_tokens.unwrap_or_default().min(output),
             total_tokens: total_tokens
                 .unwrap_or_default()
                 .max(input.saturating_add(output)),
-            measured: true,
+            measured: (total_tokens.is_some()
+                || (input_tokens.is_some() && output_tokens.is_some()))
+                && total_tokens.is_none_or(|total| total >= input.saturating_add(output))
+                && input.checked_add(output).is_some(),
         }
     }
 
@@ -167,7 +170,7 @@ impl UsageTokens {
             cached_input_tokens: 0,
             output_tokens: output,
             reasoning_output_tokens: 0,
-            total_tokens: input + output,
+            total_tokens: input.saturating_add(output),
             measured: false,
         }
     }
@@ -1131,10 +1134,79 @@ mod tests {
     fn measured_tokens_prefer_the_larger_of_total_and_the_pair() {
         let tokens = UsageTokens::measured(Some(900), Some(100), Some(300), Some(120), Some(50));
         assert_eq!(tokens.total_tokens, 1_200);
-        assert!(tokens.measured);
+        assert!(
+            !tokens.measured,
+            "contradictory totals are not an exact measurement"
+        );
 
         let trusted_total = UsageTokens::measured(Some(10), None, Some(10), None, Some(9_000));
         assert_eq!(trusted_total.total_tokens, 9_000);
+    }
+
+    #[test]
+    fn incomplete_zero_and_overflow_counts_keep_their_provenance() {
+        assert!(!UsageTokens::measured(None, None, None, None, None).measured);
+        assert!(!UsageTokens::measured(Some(12), None, None, None, None).measured);
+        let zero = UsageTokens::measured(Some(0), None, Some(0), None, Some(0));
+        assert!(zero.measured);
+        assert!(zero.is_empty());
+        let total_only = UsageTokens::measured(None, None, None, None, Some(150));
+        assert_eq!(total_only.total_tokens, 150);
+        assert!(total_only.measured);
+        let overflow = UsageTokens::measured(Some(u64::MAX), None, Some(1), None, None);
+        assert_eq!(overflow.total_tokens, u64::MAX);
+        assert!(!overflow.measured);
+        let subsets = UsageTokens::measured(Some(10), Some(99), Some(5), Some(99), None);
+        assert_eq!(subsets.cached_input_tokens, 10);
+        assert_eq!(subsets.reasoning_output_tokens, 5);
+        assert_eq!(subsets.total_tokens, 15);
+    }
+
+    #[test]
+    fn usage_counts_survive_disk_reopen_for_every_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.db");
+        let session_id = Uuid::new_v4();
+        let mut audited = UsageTokens::measured(
+            Some(3_879_281),
+            Some(3_749_120),
+            Some(15_708),
+            Some(2_825),
+            Some(3_894_989),
+        );
+        audited.measured = false; // The original turn lacked a verified baseline.
+        {
+            let conn = Connection::open(&path).unwrap();
+            ensure_usage_schema(&conn).unwrap();
+            for outcome in [
+                UsageOutcome::Done,
+                UsageOutcome::Failed,
+                UsageOutcome::Cancelled,
+            ] {
+                let mut row = entry(session_id, UsageOrigin::Chat, audited);
+                row.outcome = outcome;
+                row.turn_id = Some(Uuid::new_v4());
+                insert_usage_entry(&conn, &row).unwrap();
+            }
+            insert_usage_entry(
+                &conn,
+                &entry(
+                    session_id,
+                    UsageOrigin::Chat,
+                    UsageTokens::measured(Some(0), None, Some(0), None, Some(0)),
+                ),
+            )
+            .unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let totals = session_usage_totals(&conn, session_id).unwrap();
+        assert_eq!(totals.calls, 4);
+        assert_eq!(totals.total_tokens, 3 * 3_894_989);
+        assert_eq!(totals.input_tokens, 3 * 3_879_281);
+        assert_eq!(totals.cached_input_tokens, 3 * 3_749_120);
+        assert_eq!(totals.output_tokens, 3 * 15_708);
+        assert_eq!(totals.measured_calls, 1);
+        assert_eq!(totals.estimated_calls, 3);
     }
 
     #[test]

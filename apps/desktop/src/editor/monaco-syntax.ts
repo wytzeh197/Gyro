@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor";
+import { withJsxTokens } from "./jsx-tokens";
 import { createSyntaxLoader } from "./syntax-loader";
 import type { SyntaxProvider } from "./syntax-loader";
 
@@ -111,6 +112,9 @@ const basic: Record<
   xml: () => import("monaco-editor/esm/vs/basic-languages/xml/xml.js"),
   yaml: () => import("monaco-editor/esm/vs/basic-languages/yaml/yaml.js"),
 };
+// Setting a tokenizer again retokenizes every open model of that language, so
+// each file opened in the same language flashed uncoloured. Install each once.
+const installed = new Set<string>();
 // Optional local grammar adapters can be installed without changing detection or editors.
 let textmateProvider: SyntaxProvider | undefined;
 export function registerTextMateSyntaxProvider(provider: SyntaxProvider) {
@@ -122,12 +126,20 @@ export const loadSyntax = createSyntaxLoader({
     const id = definition.syntax.language;
     if (id === "json") return id; // bundled JSON worker and tokenizer
     if (id === "rust") return "gyro-rust";
+    if (installed.has(id)) return id;
     const module = await basic[id]?.();
     if (!module) return undefined;
+    if (installed.has(id)) return id;
     if (!monaco.languages.getLanguages().some((language) => language.id === id))
       monaco.languages.register({ id });
     monaco.languages.setLanguageConfiguration(id, module.conf);
-    monaco.languages.setMonarchTokensProvider(id, module.language);
+    monaco.languages.setMonarchTokensProvider(
+      id,
+      id === "typescript" || id === "javascript"
+        ? withJsxTokens(module.language)
+        : module.language,
+    );
+    installed.add(id);
     return id;
   },
   custom: async (definition) => {
@@ -137,10 +149,12 @@ export const loadSyntax = createSyntaxLoader({
     const grammar = customGrammars[definition.syntax.language];
     if (!grammar) return undefined;
     const id = `gyro-${definition.syntax.language}`;
+    if (installed.has(id)) return id;
     if (!monaco.languages.getLanguages().some((language) => language.id === id))
       monaco.languages.register({ id });
     monaco.languages.setLanguageConfiguration(id, customConfiguration);
     monaco.languages.setMonarchTokensProvider(id, grammar);
+    installed.add(id);
     return id;
   },
   textmate: (definition) =>

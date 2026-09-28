@@ -50,5 +50,8 @@ export function useSyntax(
         ? "plaintext"
         : (result?.language ?? "plaintext"),
     notice: policy.reason ?? result?.reason,
+    // False until the grammar for `definition` is installed, so a caller can
+    // hold its editor back instead of painting it uncoloured first.
+    ready: policy.limited || policy.binary || !!result,
   };
 }

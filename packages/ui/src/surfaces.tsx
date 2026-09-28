@@ -23,6 +23,7 @@ import {
   isMediaDrag,
 } from "./chat-media-transfer";
 import { ScmFileActions } from "./scm-file-actions";
+import { ScmCommitHover } from "./scm-commit-hover";
 import {
   SidebarProjectCard,
   type SidebarProjectSettings,
@@ -322,6 +323,7 @@ import type {
   IdeAssistantAction,
   IdeContribution,
   IdeState,
+  TestTreeItem,
   IdeViewId,
   LanguageServerState,
   GitReviewActionId,
@@ -3239,7 +3241,7 @@ function scmGraphRows(
 }
 
 /** Lane pitch in the rail, and the padding that keeps lane 0 off the edge. */
-const SCM_GRAPH_LANE_PITCH = 11;
+const SCM_GRAPH_LANE_PITCH = 14;
 const SCM_GRAPH_LANE_INSET = 8;
 
 const scmGraphLaneOffset = (lane: number) =>
@@ -3249,7 +3251,7 @@ const scmGraphLaneOffset = (lane: number) =>
 const scmGraphLaneColor = (lane: number) =>
   SCM_GRAPH_LANE_COLORS[
     Math.min(lane, SCM_GRAPH_LANE_LIMIT - 1) % SCM_GRAPH_LANE_COLORS.length
-  ];
+  ] ?? "#4d9ee0";
 
 /**
  * The refs git prints for a commit, as the chips the graph shows: the checked
@@ -4048,7 +4050,15 @@ function WorkspaceSidebarContent({
   const scmHistoryRailWidth = useMemo(
     () =>
       scmGraphLaneOffset(
-        scmHistoryGraph.reduce((widest, row) => Math.max(widest, row.lane), 0),
+        scmHistoryGraph.reduce(
+          (widest, row) =>
+            Math.max(
+              widest,
+              row.lane,
+              ...row.edges.flatMap((edge) => [edge.from, edge.to]),
+            ),
+          0,
+        ),
       ) + SCM_GRAPH_LANE_INSET,
     [scmHistoryGraph],
   );
@@ -4391,6 +4401,7 @@ function WorkspaceSidebarContent({
           }),
         );
         event.dataTransfer.setData("text/plain", session.id);
+        guardChatDragsOutsideGrid();
         activeSidebarChatDragSessionId = session.id;
         setDraggedSessionId(session.id);
       }}
@@ -5472,7 +5483,9 @@ function WorkspaceSidebarContent({
                           : [];
                         const isHead = refs.some((ref) => ref.kind === "head");
                         return (
-                          <div
+                          <ScmCommitHover
+                            commit={commit}
+                            color={scmGraphLaneColor(row?.lane ?? 0)}
                             className={[
                               "gyro-scm-history-entry",
                               isHead ? "is-head" : "",
@@ -5486,7 +5499,6 @@ function WorkspaceSidebarContent({
                                 "--gyro-scm-graph-width": `${scmHistoryRailWidth}px`,
                               } as CSSProperties
                             }
-                            title={`${commit.subject}\n${commit.author} · ${commit.relativeDate}\n${commit.shortHash}${commit.refs ? `\n${commit.refs}` : ""}`}
                           >
                             <span
                               aria-hidden="true"
@@ -5528,12 +5540,11 @@ function WorkspaceSidebarContent({
                                     stay legible, and scmCommitRefs already
                                     sorts head before tag before branch, so the
                                     row shows the most meaningful one. The rest
-                                    stay in the row's title tooltip. */}
+                                    stay in the commit hover card. */}
                                 {refs.slice(0, 1).map((ref) => (
                                   <span
                                     className={`gyro-scm-history-ref is-${ref.kind}`}
                                     key={`${ref.kind}:${ref.label}`}
-                                    title={ref.label}
                                   >
                                     {ref.kind === "tag" ? (
                                       <Tag size={9} aria-hidden="true" />
@@ -5548,7 +5559,7 @@ function WorkspaceSidebarContent({
                             <small className="gyro-scm-history-author">
                               {commit.author}
                             </small>
-                          </div>
+                          </ScmCommitHover>
                         );
                       })
                     )}
@@ -7687,6 +7698,7 @@ export function ChatGridSurface({
       onPaneDragStart: (event) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData(CHAT_PANE_DRAG_MIME, pane.paneId);
+        guardChatDragsOutsideGrid();
         // Render the targets before the pointer leaves the title bar.
         // Previously the grid consumed pane drops but no chat ever produced
         // this payload, so reordering a split was impossible.
@@ -7738,8 +7750,10 @@ export function ChatGridSurface({
       onDragOverCapture={(event) => {
         const source = chatDragSource(event.dataTransfer);
         if (!source) return;
+        // Always cancel, so the composer underneath cannot accept the drag
+        // as text; a grid with no room left says so with a no-drop cursor.
         event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
+        event.dataTransfer.dropEffect = dropZones.length ? "move" : "none";
         dragPointer.current = { x: event.clientX, y: event.clientY };
         if (source === "session") {
           const sessionId =
@@ -7762,7 +7776,11 @@ export function ChatGridSurface({
       onDropCapture={(event) => {
         if (!chatDragSource(event.dataTransfer)) return;
         // Own the entire grid drop, including floating panels and the gaps
-        // between tiles. A child must not swallow a valid chat drop.
+        // between tiles. A child must not swallow a valid chat drop, and a
+        // drop with no zone (a full row) must not fall through to the
+        // composer, which inserted the chat's id as text.
+        event.preventDefault();
+        event.stopPropagation();
         const zone =
           nearestChatGridDropZone(
             event.currentTarget.querySelectorAll<HTMLElement>(
@@ -7888,6 +7906,30 @@ function chatSessionDragPayload(dataTransfer: DataTransfer) {
     // WebKit may deny reading payload bytes until the drop itself.
     return undefined;
   }
+}
+
+/**
+ * Only the chat grid takes a chat drag. Released anywhere else — a composer
+ * outside the grid, a search field — the webview's default drop inserted the
+ * drag's text (the chat's id). Installed once, on the first chat drag.
+ */
+let chatDragGuardInstalled = false;
+function guardChatDragsOutsideGrid() {
+  if (chatDragGuardInstalled || typeof window === "undefined") return;
+  chatDragGuardInstalled = true;
+  const block = (event: DragEvent) => {
+    if (!event.dataTransfer || !chatDragSource(event.dataTransfer)) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(".gyro-chat-grid")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (event.type === "dragover") event.dataTransfer.dropEffect = "none";
+  };
+  window.addEventListener("dragover", block, true);
+  window.addEventListener("drop", block, true);
 }
 
 function chatDragSource(dataTransfer: DataTransfer) {
@@ -11042,8 +11084,21 @@ function ChatCompanionDock({
   openTabs: ChatCompanionTabId[];
   width?: number;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
   const isBrowserFocus = activeTab === "browser";
+  // A tiled pane caps the floating dock at a narrow card, which is fine for a
+  // file list but renders a website at phone width with a two-row toolbar. The
+  // browser therefore opens across the pane there; the toggle still restores
+  // the compact card, and the choice resets whenever the tool changes.
+  const [expandedChoice, setExpandedChoice] = useState<{
+    tab?: ChatCompanionTabId;
+    expanded: boolean;
+  }>();
+  const isExpanded =
+    expandedChoice && expandedChoice.tab === activeTab
+      ? expandedChoice.expanded
+      : isTiled && isBrowserFocus;
+  const setIsExpanded = (update: (current: boolean) => boolean) =>
+    setExpandedChoice({ tab: activeTab, expanded: update(isExpanded) });
   const dockRef = useRef<HTMLElement | null>(null);
   const widthMode: ChatCompanionWidthMode =
     activeTab === "browser" ? "browser" : "tool";
@@ -13578,8 +13633,12 @@ export function IdeStatusBar({
   selectedPath,
   branchCatalog,
   isBranchLoading = false,
+  isPanelOpen = false,
   onSelectBranch,
   onCreateBranch,
+  onShowProblems,
+  onTogglePanel,
+  onDragPanel,
   languageOverride,
   detectedLanguage,
   onLanguageChange,
@@ -13596,10 +13655,17 @@ export function IdeStatusBar({
   selectedPath?: string;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
+  isPanelOpen?: boolean;
   onSelectBranch?: (branch: string) => void;
   onCreateBranch?: () => void;
+  onShowProblems?: () => void;
+  onTogglePanel?: () => void;
+  /** Drag up from the bar's top edge to pull the closed panel open. Reports
+   *  the height the pointer asks for, measured from the bar's top. */
+  onDragPanel?: (height: number, phase: "move" | "end") => void;
 }) {
   const diagnosticsCount = ide?.diagnostics.length ?? 0;
+  const scm = ide?.sourceControl;
   const review = ide?.tabs.find(
     (tab) => tab.path === ide.activePath,
   )?.sourceControlDiff;
@@ -13615,50 +13681,142 @@ export function IdeStatusBar({
       ? `${formatBytes(activeBuffer.sizeBytes)}${activeBuffer.truncated ? " preview" : ""}`
       : fileContent
         ? `${formatBytes(fileContent.sizeBytes)}${fileContent.truncated ? " preview" : ""}`
-        : selectedPath
-          ? "No preview"
-          : "No file";
-  const branchLabel =
-    ide?.sourceControl.branch ??
-    branchCatalog?.current ??
-    (branchCatalog?.available === false ? "No repository" : "Select branch");
+        : undefined;
+  // Quiet by default: the bar names only what needs attention. Everything
+  // steady (size, encoding, a ready language server) moves to the tooltip.
+  const bufferState = activeBuffer?.status ?? fileLoadState;
+  const bufferNotice =
+    bufferState === "dirty"
+      ? "Unsaved"
+      : bufferState === "saving"
+        ? "Saving…"
+        : bufferState === "conflict"
+          ? "Changed on disk"
+          : bufferState === "error"
+            ? "Couldn't load"
+            : bufferState === "loading"
+              ? "Loading…"
+              : undefined;
+  const sync = !scm?.available || !scm.branch
+    ? undefined
+    : scm.operation
+      ? { label: `${scm.operation[0]!.toUpperCase()}${scm.operation.slice(1)} in progress`, tone: "warning" }
+      : scm.upstreamGone
+        ? { label: "Upstream gone", tone: "warning" }
+        : !scm.upstream
+          ? { label: "Not published", tone: "muted" }
+          : scm.ahead || scm.behind
+            ? {
+                label: [
+                  scm.ahead ? `↑${scm.ahead}` : "",
+                  scm.behind ? `↓${scm.behind}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+                tone: "pending",
+                title: `${scm.ahead} to push, ${scm.behind} to pull from ${scm.upstream}`,
+              }
+            : { label: "Synced", tone: "ok", title: `Up to date with ${scm.upstream}` };
+  const details = [
+    fileSize,
+    editorSelection?.text ? `${editorSelection.text.length} selected` : "",
+    groupCount > 1 ? `${groupCount} editor groups` : "",
+    languageServer ? `Language server ${languageServer.status}` : "",
+    selectedPath ? "UTF-8" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const lspNeedsAttention =
+    languageServer &&
+    !["ready", "starting", "stopped"].includes(languageServer.status);
+
+  const beginPanelDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!onDragPanel || event.button !== 0) return;
+    event.preventDefault();
+    // The panel mounts above the bar mid-drag and this edge unmounts, so
+    // follow the pointer on the window and measure from the bar itself.
+    const top =
+      event.currentTarget.parentElement?.getBoundingClientRect().top ??
+      event.clientY;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const handleMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      onDragPanel(top - moveEvent.clientY, "move");
+    };
+    const handleUp = (upEvent: PointerEvent) => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      onDragPanel(top - upEvent.clientY, "end");
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+  };
 
   return (
-    <footer className="gyro-editor-statusbar" aria-label="Workspace status">
+    <footer className="gyro-editor-statusbar is-quiet" aria-label="Workspace status">
+      {onDragPanel && !isPanelOpen ? (
+        <div
+          aria-hidden="true"
+          className="gyro-editor-statusbar-panel-edge"
+          onDoubleClick={onTogglePanel}
+          onPointerDown={beginPanelDrag}
+          title="Drag up to open the panel"
+        />
+      ) : null}
       <div className="gyro-editor-statusbar-group is-primary">
         <div className="gyro-editor-statusbar-branch">
           <ScmBranchPicker
             branchCatalog={branchCatalog}
-            currentBranch={ide?.sourceControl.branch ?? branchCatalog?.current}
+            currentBranch={scm?.branch ?? branchCatalog?.current}
             disabled={isBranchLoading}
-            error={ide?.sourceControl.error ?? branchCatalog?.error}
+            error={scm?.error ?? branchCatalog?.error}
             isLoading={isBranchLoading}
             onCreateBranch={onCreateBranch}
             onSelectBranch={onSelectBranch}
           />
         </div>
-        <span className="gyro-editor-statusbar-branch-fallback" hidden>
-          <GitBranch size={12} />
-          {branchLabel}
-        </span>
-        <span
-          className="gyro-editor-buffer-state"
-          data-state={activeBuffer?.status ?? fileLoadState}
-        >
-          {activeBuffer?.status ?? fileLoadState}
-        </span>
-        <span title={`${diagnosticsCount} workspace diagnostics`}>
-          <CircleDashed size={11} />
-          {diagnosticsCount} {diagnosticsCount === 1 ? "problem" : "problems"}
-        </span>
-      </div>
-      <div className="gyro-editor-statusbar-group is-secondary">
-        {groupCount > 1 ? <span>{groupCount} groups</span> : null}
-        <span>{fileSize}</span>
-        {editorSelection?.text ? (
-          <span>{editorSelection.text.length} selected</span>
+        {sync ? (
+          <span
+            className="gyro-editor-statusbar-sync"
+            data-tone={sync.tone}
+            title={"title" in sync ? sync.title : sync.label}
+          >
+            {sync.label}
+          </span>
         ) : null}
-        {languageServer ? <span>{languageServer.status} LSP</span> : null}
+      </div>
+      <div
+        className="gyro-editor-statusbar-group is-secondary"
+        title={details || undefined}
+      >
+        {bufferNotice ? (
+          <span className="gyro-editor-buffer-state" data-state={bufferState}>
+            {bufferNotice}
+          </span>
+        ) : null}
+        {lspNeedsAttention ? (
+          <span className="gyro-editor-statusbar-notice">
+            Language server {languageServer.status}
+          </span>
+        ) : null}
+        {diagnosticsCount > 0 ? (
+          <button
+            className="gyro-editor-statusbar-problems"
+            onClick={onShowProblems}
+            title="Show problems"
+            type="button"
+          >
+            <TriangleAlert size={11} aria-hidden="true" />
+            {diagnosticsCount} {diagnosticsCount === 1 ? "problem" : "problems"}
+          </button>
+        ) : null}
         {selectedPath && (
           <LanguagePicker
             detectedLanguage={detectedLanguage}
@@ -13668,7 +13826,20 @@ export function IdeStatusBar({
             onChange={onLanguageChange}
           />
         )}
-        <span>UTF-8</span>
+        {onTogglePanel ? (
+          <button
+            aria-label={
+              isPanelOpen ? "Hide the workspace panel" : "Open the workspace panel"
+            }
+            aria-pressed={isPanelOpen}
+            className="gyro-editor-statusbar-panel-toggle"
+            onClick={onTogglePanel}
+            title={isPanelOpen ? "Hide panel (⌘J)" : "Show panel (⌘J)"}
+            type="button"
+          >
+            <PanelBottom size={13} aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
     </footer>
   );
@@ -15285,6 +15456,8 @@ function WorkbenchPaneContent({
   onBrowserHostBoundsChange,
   browserNativeHost = false,
   browserOverlayOccluded = false,
+  onSelectOutputChannel,
+  onRunTestTask,
 }: {
   terminalPanelActions?: ReactNode;
   onSelectTerminalPanel?: (tab: WorkbenchPaneTab) => void;
@@ -15357,6 +15530,8 @@ function WorkbenchPaneContent({
   onBrowserHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
   ) => void;
+  onSelectOutputChannel?: (channelId: string) => void;
+  onRunTestTask?: (taskId: string) => void;
 }) {
   if (activePaneTab === "diff") {
     return (
@@ -15439,73 +15614,19 @@ function WorkbenchPaneContent({
   }
 
   if (activePaneTab === "test-results") {
-    const tests = (ide?.testTree ?? []).flatMap((item) =>
-      item.children?.length ? item.children : [item],
-    );
     return (
-      <section className="gyro-test-results-pane" aria-label="Test Results">
-        <header>
-          <ListChecks size={15} />
-          <span>{tests.length} tests</span>
-          <small>
-            {tests.filter((test) => test.status === "passed").length} passed ·{" "}
-            {tests.filter((test) => test.status === "failed").length} failed
-          </small>
-        </header>
-        <div className="gyro-test-results-list">
-          {tests.length > 0 ? (
-            tests.map((test) => (
-              <button
-                className={`gyro-test-result is-${test.status}`}
-                disabled={!test.path}
-                key={test.id}
-                onClick={() =>
-                  test.path && onOpenDiffInEditor?.(test.path, 1, 1)
-                }
-                type="button"
-              >
-                {test.status === "passed" ? (
-                  <Check size={13} />
-                ) : test.status === "failed" ? (
-                  <X size={13} />
-                ) : test.status === "running" ? (
-                  <Activity size={13} />
-                ) : (
-                  <CircleDashed size={13} />
-                )}
-                <strong>{test.label}</strong>
-                <span>{test.status}</span>
-              </button>
-            ))
-          ) : (
-            <div className="gyro-panel-empty">
-              Run a discovered test task to populate structured results.
-            </div>
-          )}
-        </div>
-      </section>
+      <TestResultsPane
+        ide={ide}
+        onOpenInEditor={onOpenDiffInEditor}
+        onRunTestTask={onRunTestTask}
+        onSelectOutputChannel={onSelectOutputChannel}
+      />
     );
   }
 
   if (activePaneTab === "output") {
-    const activeChannel =
-      ide?.outputChannels.find(
-        (channel) => channel.id === ide.activeOutputChannelId,
-      ) ?? ide?.outputChannels[0];
     return (
-      <section className="gyro-output-pane" aria-label="Output">
-        <header>
-          <FileText size={15} />
-          <span>{activeChannel?.label ?? "Output"}</span>
-        </header>
-        <pre>
-          {formatOutputForDisplay(
-            (activeChannel?.lines ?? ["No output channel selected."]).join(
-              "\n",
-            ),
-          )}
-        </pre>
-      </section>
+      <OutputPane ide={ide} onSelectOutputChannel={onSelectOutputChannel} />
     );
   }
 
@@ -15544,6 +15665,154 @@ function WorkbenchPaneContent({
       profiles={profiles}
       renderTerminalPaneBody={renderTerminalPaneBody}
     />
+  );
+}
+
+/** Leaf tests, however deeply the runner nested its suites. */
+function flattenTestTree(items: TestTreeItem[]): TestTreeItem[] {
+  return items.flatMap((item) =>
+    item.children?.length ? flattenTestTree(item.children) : [item],
+  );
+}
+
+function TestResultsPane({
+  ide,
+  onOpenInEditor,
+  onRunTestTask,
+  onSelectOutputChannel,
+}: {
+  ide?: IdeState;
+  onOpenInEditor?: (path: string, lineNumber?: number, column?: number) => void;
+  onRunTestTask?: (taskId: string) => void;
+  onSelectOutputChannel?: (channelId: string) => void;
+}) {
+  const tests = flattenTestTree(ide?.testTree ?? []).filter(
+    // An empty suite is a placeholder, not a test anyone can run.
+    (test) => !(test.children && !test.children.length && !test.path),
+  );
+  // Discovered tests are test tasks, so most rows have no file. Such a row
+  // runs its task, and once it has run it shows that task's log instead.
+  const actionFor = (test: TestTreeItem) => {
+    if (test.path) {
+      const path = test.path;
+      return { title: `Open ${path}`, run: () => onOpenInEditor?.(path, 1, 1) };
+    }
+    const task = ide?.taskDefinitions.find((item) => item.id === test.id);
+    if (!task) return undefined;
+    const channelId = task.outputChannelId ?? `task-${task.id}`;
+    const hasLog = ide?.outputChannels.some((item) => item.id === channelId);
+    if (hasLog && test.status !== "unknown" && onSelectOutputChannel) {
+      return {
+        title: `Show ${task.label} output`,
+        run: () => onSelectOutputChannel(channelId),
+      };
+    }
+    if (test.status === "running" || !onRunTestTask) return undefined;
+    return { title: `Run ${task.label}`, run: () => onRunTestTask(task.id) };
+  };
+  return (
+    <section className="gyro-test-results-pane" aria-label="Test Results">
+      <header>
+        <ListChecks size={15} />
+        <span>{tests.length} tests</span>
+        <small>
+          {tests.filter((test) => test.status === "passed").length} passed ·{" "}
+          {tests.filter((test) => test.status === "failed").length} failed
+        </small>
+      </header>
+      <div className="gyro-test-results-list">
+        {tests.length > 0 ? (
+          tests.map((test) => {
+            const action = actionFor(test);
+            return (
+              <button
+                className={`gyro-test-result is-${test.status}`}
+                disabled={!action}
+                key={test.id}
+                onClick={action?.run}
+                title={action?.title}
+                type="button"
+              >
+                {test.status === "passed" ? (
+                  <Check size={13} />
+                ) : test.status === "failed" ? (
+                  <X size={13} />
+                ) : test.status === "running" ? (
+                  <Activity size={13} />
+                ) : (
+                  <CircleDashed size={13} />
+                )}
+                <strong>{test.label}</strong>
+                <span>{test.status === "unknown" ? "not run" : test.status}</span>
+              </button>
+            );
+          })
+        ) : (
+          <div className="gyro-panel-empty">
+            No test tasks found in this workspace.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function OutputPane({
+  ide,
+  onSelectOutputChannel,
+}: {
+  ide?: IdeState;
+  onSelectOutputChannel?: (channelId: string) => void;
+}) {
+  const channels = ide?.outputChannels ?? [];
+  const activeChannel =
+    channels.find((channel) => channel.id === ide?.activeOutputChannelId) ??
+    channels[0];
+  const text = formatOutputForDisplay(
+    (activeChannel?.lines ?? ["No output channel selected."]).join("\n"),
+  );
+  const logRef = useRef<HTMLPreElement>(null);
+  const followRef = useRef(true);
+  // Follow new lines like a log tail, unless the reader scrolled up.
+  useLayoutEffect(() => {
+    const log = logRef.current;
+    if (log && followRef.current) log.scrollTop = log.scrollHeight;
+  }, [text, activeChannel?.id]);
+  return (
+    <section className="gyro-output-pane" aria-label="Output">
+      <header>
+        <FileText size={15} />
+        {channels.length > 1 && onSelectOutputChannel ? (
+          <select
+            aria-label="Output channel"
+            className="gyro-output-channel-select"
+            onChange={(event) => {
+              followRef.current = true;
+              onSelectOutputChannel(event.target.value);
+            }}
+            value={activeChannel?.id}
+          >
+            {channels.map((channel) => (
+              <option key={channel.id} value={channel.id}>
+                {channel.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span>{activeChannel?.label ?? "Output"}</span>
+        )}
+      </header>
+      <pre
+        onScroll={(event) => {
+          const log = event.currentTarget;
+          followRef.current =
+            log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+        }}
+        ref={logRef}
+      >
+        {text}
+      </pre>
+    </section>
   );
 }
 
@@ -15638,6 +15907,8 @@ type WorkspaceToolPanelProps = {
   ) => void;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
+  onSelectOutputChannel?: (channelId: string) => void;
+  onRunTestTask?: (taskId: string) => void;
 };
 
 export function WorkspaceToolPanel({
@@ -15704,6 +15975,8 @@ export function WorkspaceToolPanel({
   onBrowserScreenshot,
   onBrowserOpenExternal,
   onBrowserHostBoundsChange,
+  onSelectOutputChannel,
+  onRunTestTask,
 }: WorkspaceToolPanelProps) {
   const [isResizing, setIsResizing] = useState(false);
   const dragMovedRef = useRef(false);
@@ -15949,6 +16222,8 @@ export function WorkspaceToolPanel({
         onBrowserBack={onBrowserBack}
         onBrowserDeviceChange={onBrowserDeviceChange}
         onBrowserForward={onBrowserForward}
+        onRunTestTask={onRunTestTask}
+        onSelectOutputChannel={onSelectOutputChannel}
         onBrowserHostBoundsChange={onBrowserHostBoundsChange}
         onBrowserNavigate={onBrowserNavigate}
         onBrowserOpenExternal={onBrowserOpenExternal}
