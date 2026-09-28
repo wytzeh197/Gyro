@@ -7,6 +7,13 @@ import {
 } from "../apps/desktop/src/menu-bar-state.ts";
 import { menuBarModelProvider } from "../apps/desktop/src/menu-bar-model-provider.ts";
 
+const notifications = {
+  enabled: true,
+  approvals: true,
+  finished: true,
+  failed: true,
+};
+
 const session = {
   id: "session-1",
   title: "Build the menu bar",
@@ -164,8 +171,49 @@ const attention = deriveMenuBarSnapshot({
   sessions: [session],
   theme: "dark",
   reduceMotion: false,
+  notifications,
 });
 assert.equal(attention.state, "attention");
+// An approval without a provider payload has nothing to answer inline.
+assert.equal(attention.jobs[0].approval, undefined);
+
+const approvalRequest = {
+  id: "approval-3",
+  sessionId: session.id,
+  turnId: "turn-1",
+  createdAt: "2026-07-19T09:00:13.000Z",
+  kind: "approval-requested",
+  message: "Run command",
+  payload: {
+    kind: "provider-tool-approval",
+    approvalId: "approval-uuid",
+    approvalType: "command",
+    command: "pnpm   test\n  --filter desktop",
+    status: "pending",
+  },
+};
+const otherSession = { ...session, id: "session-2", title: "Other chat" };
+const approvalJobs = deriveMenuBarJobs({
+  automations: [],
+  sendingSessionIds: [session.id, otherSession.id],
+  sessionEventsById: {
+    [session.id]: [...runningEvents, approvalRequest],
+    [otherSession.id]: runningEvents.map((event) => ({
+      ...event,
+      sessionId: otherSession.id,
+      createdAt: "2026-07-19T09:05:00.000Z",
+    })),
+  },
+  sessions: [session, otherSession],
+});
+// Waiting work leads even though the other chat started later.
+assert.equal(approvalJobs[0].targetId, session.id);
+assert.deepEqual(approvalJobs[0].approval, {
+  id: "approval-uuid",
+  approvalType: "command",
+  summary: "pnpm test --filter desktop",
+});
+assert.equal(approvalJobs[1].approval, undefined);
 
 const completedEvents = [
   ...runningEvents,
@@ -216,6 +264,7 @@ const complete = deriveMenuBarSnapshot({
   sessionEventsById: { [session.id]: completedEvents },
   sessions: [session],
   theme: "light",
+  notifications,
 });
 assert.equal(complete.state, "complete");
 assert.equal(complete.jobs.length, 1);
@@ -235,6 +284,7 @@ const mixed = deriveMenuBarSnapshot({
   sessionEventsById: { [session.id]: completedEvents },
   sessions: [session],
   theme: "dark",
+  notifications,
 });
 assert.equal(mixed.state, "working");
 assert.equal(mixed.jobs.length, 2);
@@ -248,6 +298,7 @@ const failed = deriveMenuBarSnapshot({
   sessionEventsById: {},
   sessions: [session],
   theme: "dark",
+  notifications,
 });
 assert.equal(failed.state, "attention");
 

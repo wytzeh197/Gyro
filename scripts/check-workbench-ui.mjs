@@ -582,6 +582,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
+  readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
 ].join("\n");
@@ -621,17 +622,19 @@ expect(
   // them; the point of the check is that the two still agree, so it asserts
   // the tokens and the Rust constants rather than literals in each rule.
   // Everything on the surface is border-box, so these are the whole row.
-  menuBarStyleSource.includes("--menu-header: 64px") &&
-    menuBarStyleSource.includes("--menu-row: 60px") &&
-    menuBarStyleSource.includes("--menu-footer: 44px") &&
+  menuBarStyleSource.includes("--menu-header: 52px") &&
+    menuBarStyleSource.includes("--menu-row: 44px") &&
+    menuBarStyleSource.includes("--menu-approval: 92px") &&
+    menuBarStyleSource.includes("--menu-footer: 40px") &&
     menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
     menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-idle p").some((rule) =>
-      rule.includes("margin: 0"),
+    cssRules(menuBarStyleSource, ".gyro-menu-bar-approval").some((rule) =>
+      rule.includes("height: var(--menu-approval)"),
     ) &&
-    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 64.0") &&
-    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 60.0") &&
-    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 52.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0") &&
+    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 40.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&
     // The gutter exists so the CSS drop shadow is not clipped by the window.
@@ -1212,6 +1215,7 @@ const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 // source that holds the code, not on where it used to live.
 const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/desktop_notifications.rs"),
   readRepoFile("apps/desktop/src-tauri/src/automation_scheduler.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_pointer.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_smoke.rs"),
@@ -4045,7 +4049,7 @@ expect(
       'invoke<NotificationPermissionState>("test_notification")',
     ) &&
     surfaceSource.includes("Test notification") &&
-    surfaceSource.includes("Gyro asks only when you run the test") &&
+    surfaceSource.includes("Gyro asks macOS when you send a test") &&
     !tauriSource.includes("body(automation.prompt)") &&
     !tauriSource.includes("body(automation.last_result)"),
   "Background automation outcomes should require explicit native permission and use generic notices without exposing prompts or results.",
@@ -8225,7 +8229,8 @@ expect(
 );
 
 expect(
-  tauriSource.includes('summary("Gyro has a question")') &&
+  tauriSource.includes('"Gyro has a question"') &&
+    tauriSource.includes("notification.summary(&title)") &&
     tauriSource.includes('"gyro://provider-approval-notification-open"') &&
     tauriSource.includes("notify_provider_approval_question") &&
     tauriSource.includes('"developerInstructions": approval_instructions') &&

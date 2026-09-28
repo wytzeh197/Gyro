@@ -137,3 +137,29 @@ export function SettingsSegmented<T extends string>({
     </div>
   );
 }
+
+export function SettingsSwitch({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      aria-checked={checked}
+      aria-label={label}
+      className={`gyro-settings-switch${checked ? " is-on" : ""}`}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      role="switch"
+      type="button"
+    >
+      <span />
+    </button>
+  );
+}

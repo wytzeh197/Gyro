@@ -17,6 +17,7 @@ const EMPTY_SNAPSHOT: MenuBarSnapshot = {
   totalActive: 0,
   theme: "dark",
   reduceMotion: false,
+  notifications: { enabled: true, approvals: true, finished: true, failed: true },
 };
 
 function elapsedLabel(startedAt: string, now: number) {
@@ -33,41 +34,55 @@ function elapsedLabel(startedAt: string, now: number) {
   return `${hours}h ${minutes % 60}m`;
 }
 
-function headerCopy(snapshot: MenuBarSnapshot) {
-  if (snapshot.state === "attention") {
+type HeaderPill = { label: string; tone: "warn" | "danger" | "accent" | "ok" };
+
+function headerSummary(snapshot: MenuBarSnapshot): {
+  title: string;
+  pill?: HeaderPill;
+} {
+  const waiting = snapshot.jobs.filter((job) => job.status === "waiting").length;
+  const running = snapshot.totalActive - waiting;
+  if (snapshot.totalActive > 0) {
+    const parts = [
+      running > 0 ? `${running} running` : "",
+      waiting > 0 ? `${waiting} waiting` : "",
+    ].filter(Boolean);
     return {
-      title: "Needs your attention",
-      detail: snapshot.jobs.some((job) => job.status === "waiting")
-        ? "A Gyro job is waiting for you."
-        : "Recent Gyro work needs review.",
+      title: parts.join(" · "),
+      pill:
+        waiting > 0
+          ? { label: "Needs you", tone: "warn" }
+          : { label: "Working", tone: "accent" },
     };
   }
   if (snapshot.recentOutcome?.status === "failed") {
-    return {
-      title: "Recent issue",
-      detail: "Open the job in Gyro to review what happened.",
-    };
-  }
-  if (snapshot.totalActive > 0) {
-    return {
-      title: `Working on ${snapshot.totalActive} ${snapshot.totalActive === 1 ? "job" : "jobs"}`,
-      detail: "Gyro will keep going in the background.",
-    };
+    return { title: "Recent issue", pill: { label: "Review", tone: "danger" } };
   }
   if (snapshot.state === "complete") {
-    return {
-      title: "Work complete",
-      detail: "Gyro finished the latest job.",
-    };
+    return { title: "Work complete", pill: { label: "Done", tone: "ok" } };
   }
-  return { title: "Gyro is ready", detail: "No background work is active." };
+  return { title: "Gyro is ready" };
 }
 
-function jobStatusLabel(job: MenuBarJob) {
-  if (job.status === "finished") return "Finished";
-  if (job.status === "waiting") return "Waiting";
+function jobMeta(job: MenuBarJob, now: number) {
+  if (job.status === "finished") return "Done";
   if (job.status === "queued") return "Queued";
-  return "Working";
+  if (job.status === "waiting" && !job.approval) return "Waiting";
+  return elapsedLabel(job.startedAt, now);
+}
+
+/** File changes need their diff read, so those only offer to open the chat. */
+function approvalCanBeAnsweredInline(job: MenuBarJob) {
+  return Boolean(job.approval && job.approval.approvalType !== "file-change");
+}
+
+function approvalPrompt(job: MenuBarJob) {
+  const who = job.modelLabel ?? job.providerLabel ?? "The model";
+  if (job.approval?.approvalType === "command") return `${who} wants to run`;
+  if (job.approval?.approvalType === "file-change") {
+    return `${who} wants to change files`;
+  }
+  return `${who} wants to use`;
 }
 
 function GyroMark() {
@@ -123,11 +138,12 @@ export function MenuBarPopover() {
   const [snapshot, setSnapshot] = useState<MenuBarSnapshot>(EMPTY_SNAPSHOT);
   const [now, setNow] = useState(Date.now());
   const [stoppingIds, setStoppingIds] = useState<string[]>([]);
+  const [approvingIds, setApprovingIds] = useState<string[]>([]);
   // Kept in step with MENU_BAR_MAX_VISIBLE_JOBS in menu_bar.rs, which sizes the
   // popover window; anything past the cap is summarised by the "+N more" row.
   const visibleJobs = snapshot.jobs.slice(0, MAX_VISIBLE_JOBS);
   const overflow = Math.max(0, snapshot.jobs.length - visibleJobs.length);
-  const header = useMemo(() => headerCopy(snapshot), [snapshot]);
+  const header = useMemo(() => headerSummary(snapshot), [snapshot]);
   const recentOutcome = snapshot.recentOutcome;
 
   useEffect(() => {
@@ -193,6 +209,19 @@ export function MenuBarPopover() {
     );
   };
 
+  // The resolved approval reaches the main window as a provider-approval
+  // event, and its next snapshot drops the approval from this row.
+  const approveJob = (job: MenuBarJob) => {
+    const approval = job.approval;
+    if (!approval || approvingIds.includes(approval.id)) return;
+    setApprovingIds((current) => [...current, approval.id]);
+    void invoke("resolve_provider_approval", {
+      request: { approvalId: approval.id, decision: "approve" },
+    }).catch(() =>
+      setApprovingIds((current) => current.filter((id) => id !== approval.id)),
+    );
+  };
+
   return (
     <main className="gyro-menu-bar-shell">
       <section
@@ -201,69 +230,95 @@ export function MenuBarPopover() {
       >
         <header className="gyro-menu-bar-header">
           <GyroMark />
-          <div className="gyro-menu-bar-header-copy">
-            <strong>{header.title}</strong>
-            <span>{header.detail}</span>
-          </div>
-          <i aria-label={snapshot.state} data-state={snapshot.state} />
+          <strong>{header.title}</strong>
+          {header.pill ? (
+            <em className="gyro-menu-bar-pill" data-tone={header.pill.tone}>
+              {header.pill.label}
+            </em>
+          ) : null}
         </header>
 
         {visibleJobs.length > 0 ? (
           <div aria-label="Active Gyro jobs" className="gyro-menu-bar-jobs">
             {visibleJobs.map((job) => (
-              <article className="gyro-menu-bar-job" key={job.id}>
-                <button
-                  aria-label={`Open ${job.title}`}
-                  className="gyro-menu-bar-job-main"
-                  onClick={() => openTarget(job)}
-                  type="button"
-                >
-                  {job.kind === "chat" ? (
-                    <ModelMark job={job} />
-                  ) : (
-                    <span
-                      aria-hidden="true"
-                      className="gyro-menu-bar-job-icon is-automation"
-                    >
-                      <svg viewBox="0 0 24 24">
-                        <path d="M20 11a8 8 0 1 0-2.34 5.66" />
-                        <path d="M20 4v7h-7" />
-                      </svg>
-                    </span>
-                  )}
-                  <span className="gyro-menu-bar-job-copy">
-                    <strong>{job.title}</strong>
-                    {job.status !== "finished" ? (
-                      <small title={job.detail}>{job.detail}</small>
-                    ) : null}
-                  </span>
-                  <span className="gyro-menu-bar-job-meta">
-                    <em data-status={job.status}>{jobStatusLabel(job)}</em>
-                    <small>
-                      {job.status === "finished"
-                        ? "Done"
-                        : elapsedLabel(job.startedAt, now)}
-                    </small>
-                  </span>
-                </button>
-                {job.canStop ? (
+              <article
+                className="gyro-menu-bar-job"
+                data-has-approval={job.approval ? "true" : undefined}
+                key={job.id}
+              >
+                <div className="gyro-menu-bar-job-row">
                   <button
-                    aria-label={`Stop ${job.title}`}
-                    className="gyro-menu-bar-stop"
-                    disabled={stoppingIds.includes(job.id)}
-                    onClick={() => stopJob(job)}
-                    title="Stop chat"
+                    aria-label={`Open ${job.title}`}
+                    className="gyro-menu-bar-job-main"
+                    onClick={() => openTarget(job)}
+                    title={job.detail}
                     type="button"
                   >
-                    {stoppingIds.includes(job.id) ? (
-                      <span className="gyro-menu-bar-stop-progress">•••</span>
+                    <i aria-hidden="true" data-status={job.status} />
+                    <strong>{job.title}</strong>
+                    {job.kind === "chat" ? (
+                      <ModelMark job={job} />
                     ) : (
                       <span
                         aria-hidden="true"
-                        className="gyro-menu-bar-stop-icon"
-                      />
+                        className="gyro-menu-bar-job-icon"
+                      >
+                        <svg viewBox="0 0 24 24">
+                          <path d="M20 11a8 8 0 1 0-2.34 5.66" />
+                          <path d="M20 4v7h-7" />
+                        </svg>
+                      </span>
                     )}
+                    <small data-status={job.status}>{jobMeta(job, now)}</small>
                   </button>
+                  {job.canStop ? (
+                    <button
+                      aria-label={`Stop ${job.title}`}
+                      className="gyro-menu-bar-stop"
+                      disabled={stoppingIds.includes(job.id)}
+                      onClick={() => stopJob(job)}
+                      title="Stop chat"
+                      type="button"
+                    >
+                      {stoppingIds.includes(job.id) ? (
+                        <span className="gyro-menu-bar-stop-progress">•••</span>
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="gyro-menu-bar-stop-icon"
+                        />
+                      )}
+                    </button>
+                  ) : (
+                    <span aria-hidden="true" />
+                  )}
+                </div>
+                {job.approval ? (
+                  <div className="gyro-menu-bar-approval">
+                    <p>
+                      <span>{approvalPrompt(job)}</span>
+                      <code title={job.approval.summary}>
+                        {job.approval.summary}
+                      </code>
+                    </p>
+                    <div>
+                      {approvalCanBeAnsweredInline(job) ? (
+                        <button
+                          className="is-primary"
+                          disabled={approvingIds.includes(job.approval.id)}
+                          onClick={() => approveJob(job)}
+                          type="button"
+                        >
+                          {approvingIds.includes(job.approval.id)
+                            ? "Approving…"
+                            : "Approve"}
+                        </button>
+                      ) : null}
+                      <button onClick={() => openTarget(job)} type="button">
+                        {approvalCanBeAnsweredInline(job) ? "Open" : "Review"}
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
               </article>
             ))}
@@ -282,39 +337,36 @@ export function MenuBarPopover() {
             className="gyro-menu-bar-outcome"
             data-status={recentOutcome.status}
             onClick={() => openOutcome(recentOutcome)}
+            title={recentOutcome.detail}
             type="button"
           >
-            <span aria-hidden="true">
-              {recentOutcome.status === "failed" ? "!" : "✓"}
-            </span>
-            <span>
-              <strong>{recentOutcome.title}</strong>
-              <small>{recentOutcome.detail}</small>
-            </span>
+            <i aria-hidden="true" data-status={recentOutcome.status} />
+            <strong>{recentOutcome.title}</strong>
+            <small>
+              {recentOutcome.status === "failed" ? "Failed" : "Done"}
+            </small>
           </button>
-        ) : (
-          <div className="gyro-menu-bar-idle">
-            <span aria-hidden="true">✓</span>
-            <p>
-              <strong>All caught up</strong>
-              <small>Start work in Gyro and its status will appear here.</small>
-            </p>
-          </div>
-        )}
+        ) : null}
 
         <footer className="gyro-menu-bar-footer">
           <button onClick={() => void invoke("show_main_window")} type="button">
             Open Gyro
           </button>
           <button
+            aria-label="Settings"
+            className="gyro-menu-bar-icon-button"
             onClick={() =>
               void invoke("open_menu_bar_target", {
                 target: { kind: "settings", id: "general" },
               })
             }
+            title="Settings"
             type="button"
           >
-            Settings
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+            </svg>
           </button>
         </footer>
       </section>

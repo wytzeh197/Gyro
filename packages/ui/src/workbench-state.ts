@@ -1,5 +1,6 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
 import type {
+  DesktopNotificationPreferences,
   AppDestination,
   Automation,
   AutomationStatus,
@@ -1449,6 +1450,10 @@ export type WorkbenchAction =
   | { type: "set-interface-size"; interfaceSize: InterfaceSize }
   | { type: "set-motion-speed"; motionSpeed: MotionSpeed }
   | { type: "set-menu-bar-visible"; visible: boolean }
+  | {
+      type: "set-desktop-notifications";
+      notifications: Partial<DesktopNotificationPreferences>;
+    }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
   | { type: "set-workspace-panel-height"; height: number }
@@ -2044,6 +2049,17 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           showMenuBarIcon: action.visible,
+        },
+      };
+    case "set-desktop-notifications":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          desktopNotifications: {
+            ...state.preferences.desktopNotifications,
+            ...action.notifications,
+          },
         },
       };
     case "set-workspace-sidebar-hidden":
@@ -4571,6 +4587,18 @@ function normalizeAppearanceColor(value: unknown, fallback: string) {
     : fallback;
 }
 
+/** Every notification kind starts on; macOS permission is the real gate. */
+export function normalizedDesktopNotifications(
+  value: Partial<DesktopNotificationPreferences> | undefined,
+): DesktopNotificationPreferences {
+  return {
+    enabled: value?.enabled !== false,
+    approvals: value?.approvals !== false,
+    finished: value?.finished !== false,
+    failed: value?.failed !== false,
+  };
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -4651,6 +4679,9 @@ function normalizeWorkbenchPreferences(
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
+    desktopNotifications: normalizedDesktopNotifications(
+      preferences?.desktopNotifications,
+    ),
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:
       typeof preferences?.workspaceSidebarWidth === "number" &&

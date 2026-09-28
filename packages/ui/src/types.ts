@@ -539,6 +539,14 @@ export type MenuBarJob = {
   providerLabel?: string;
   modelId?: string;
   modelLabel?: string;
+  /** A pending provider approval the popover can answer inline. */
+  approval?: MenuBarApproval;
+};
+
+export type MenuBarApproval = {
+  id: string;
+  approvalType: string;
+  summary: string;
 };
 
 export type MenuBarOutcome = {
@@ -561,6 +569,15 @@ export type MenuBarSnapshot = {
   recentOutcome?: MenuBarOutcome;
   theme: ResolvedTheme;
   reduceMotion: boolean;
+  notifications: DesktopNotificationPreferences;
+};
+
+/** Which macOS notifications Gyro sends while it is in the background. */
+export type DesktopNotificationPreferences = {
+  enabled: boolean;
+  approvals: boolean;
+  finished: boolean;
+  failed: boolean;
 };
 
 export type DiffSource = "agent-generated" | "user-edited" | "mixed" | "stale";
@@ -1221,6 +1238,7 @@ export type WorkbenchPreferences = {
    */
   dailyPaceWarning: boolean;
   showMenuBarIcon: boolean;
+  desktopNotifications: DesktopNotificationPreferences;
   workspaceSidebarHidden: boolean;
   workspaceSidebarWidth?: number;
   workspacePanelHeight: number;

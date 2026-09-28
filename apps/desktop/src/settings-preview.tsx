@@ -8,6 +8,7 @@ import {
   type MotionSpeed,
   type ThemeMode,
   providersForConfig,
+  type DesktopNotificationPreferences,
   type GyroConfig,
   type ProviderId,
   type SettingsSectionId,
@@ -155,6 +156,12 @@ function Preview() {
     };
   }, []);
   const [menu, setMenu] = useState(true);
+  const [notifications, setNotifications] = useState<DesktopNotificationPreferences>({
+    enabled: true,
+    approvals: true,
+    finished: true,
+    failed: false,
+  });
   const [follow, setFollow] = useState<"off" | "peek" | "follow">("peek");
   const [config, setConfig] = useState<GyroConfig>(() => {
     const empty = {
@@ -292,6 +299,10 @@ function Preview() {
         onDensityChange={setDensity}
         showMenuBarIcon={menu}
         onMenuBarVisibilityChange={setMenu}
+        desktopNotifications={notifications}
+        onDesktopNotificationsChange={(next) =>
+          setNotifications((current) => ({ ...current, ...next }))
+        }
         modelFollow={follow}
         onModelFollowChange={setFollow}
         mainColor={colors[0]}

@@ -33,13 +33,16 @@ const MENU_BAR_CARD_WIDTH: f64 = 372.0;
 #[cfg(target_os = "macos")]
 const MENU_BAR_POPOVER_WIDTH: f64 = MENU_BAR_CARD_WIDTH + MENU_BAR_GUTTER_X * 2.0;
 #[cfg(target_os = "macos")]
-const MENU_BAR_HEADER_HEIGHT: f64 = 64.0;
+const MENU_BAR_HEADER_HEIGHT: f64 = 52.0;
 #[cfg(target_os = "macos")]
-const MENU_BAR_ROW_HEIGHT: f64 = 60.0;
+const MENU_BAR_ROW_HEIGHT: f64 = 44.0;
+/// The inline approval block under a waiting row.
+#[cfg(target_os = "macos")]
+const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0;
 #[cfg(target_os = "macos")]
 const MENU_BAR_OVERFLOW_HEIGHT: f64 = 32.0;
 #[cfg(target_os = "macos")]
-const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0;
+const MENU_BAR_FOOTER_HEIGHT: f64 = 40.0;
 /// Kept in step with the same cap in `MenuBarPopover.tsx`; jobs past it are
 /// summarised by the "+N more" row.
 #[cfg(target_os = "macos")]
@@ -76,6 +79,39 @@ pub struct MenuBarJob {
     pub provider_label: Option<String>,
     pub model_id: Option<String>,
     pub model_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<MenuBarApproval>,
+}
+
+/// A pending provider approval the popover answers inline.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuBarApproval {
+    pub id: String,
+    pub approval_type: String,
+    pub summary: String,
+}
+
+/// Which native notifications Gyro sends, mirrored from Settings. Every kind
+/// defaults on; macOS permission is still required to deliver any of them.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DesktopNotificationPreferences {
+    pub enabled: bool,
+    pub approvals: bool,
+    pub finished: bool,
+    pub failed: bool,
+}
+
+impl Default for DesktopNotificationPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            approvals: true,
+            finished: true,
+            failed: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -99,6 +135,8 @@ pub struct MenuBarSnapshot {
     pub recent_outcome: Option<MenuBarOutcome>,
     pub theme: String,
     pub reduce_motion: bool,
+    #[serde(default)]
+    pub notifications: DesktopNotificationPreferences,
 }
 
 impl Default for MenuBarSnapshot {
@@ -110,6 +148,7 @@ impl Default for MenuBarSnapshot {
             recent_outcome: None,
             theme: "dark".into(),
             reduce_motion: false,
+            notifications: DesktopNotificationPreferences::default(),
         }
     }
 }
@@ -170,6 +209,13 @@ impl Default for MenuBarController {
 }
 
 impl MenuBarController {
+    pub(crate) fn notification_preferences(&self) -> DesktopNotificationPreferences {
+        self.snapshot
+            .lock()
+            .map(|snapshot| snapshot.notifications)
+            .unwrap_or_default()
+    }
+
     fn public_snapshot(&self) -> MenuBarSnapshot {
         let mut snapshot = self
             .snapshot
@@ -218,8 +264,18 @@ impl MenuBarController {
             }
         }
         let state = self.effective_state(&snapshot);
+        // The main window only reports an outcome once it has seen it end,
+        // so a new outcome id is a turn that just finished, not a replay.
+        let new_outcome = snapshot.recent_outcome.clone().filter(|outcome| {
+            self.snapshot.lock().is_ok_and(|stored| {
+                stored.recent_outcome.as_ref().map(|previous| &previous.id) != Some(&outcome.id)
+            })
+        });
         if let Ok(mut stored) = self.snapshot.lock() {
             *stored = snapshot;
+        }
+        if let Some(outcome) = new_outcome.as_ref() {
+            crate::desktop_notifications::notify_chat_outcome(app, outcome);
         }
         if let Ok(mut display_state) = self.display_state.lock() {
             *display_state = state;
@@ -276,16 +332,24 @@ fn emit_snapshot(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 fn popover_height(snapshot: &MenuBarSnapshot) -> f64 {
     let visible_jobs = snapshot.jobs.len().min(MENU_BAR_MAX_VISIBLE_JOBS);
-    // With no jobs the popover shows a single recent-outcome or empty row.
+    let approvals = snapshot.jobs[..visible_jobs]
+        .iter()
+        .filter(|job| job.approval.is_some())
+        .count();
+    // With no jobs the popover shows a recent-outcome row, or nothing at all
+    // when idle.
     let content = if visible_jobs > 0 {
         visible_jobs as f64 * MENU_BAR_ROW_HEIGHT
+            + approvals as f64 * MENU_BAR_APPROVAL_HEIGHT
             + if snapshot.jobs.len() > MENU_BAR_MAX_VISIBLE_JOBS {
                 MENU_BAR_OVERFLOW_HEIGHT
             } else {
                 0.0
             }
-    } else {
+    } else if snapshot.recent_outcome.is_some() {
         MENU_BAR_ROW_HEIGHT
+    } else {
+        0.0
     };
     MENU_BAR_GUTTER_TOP
         + MENU_BAR_HEADER_HEIGHT
@@ -603,6 +667,7 @@ mod tests {
                     provider_label: Some("OpenAI".into()),
                     model_id: Some("gpt-5.6-sol".into()),
                     model_label: Some("GPT-5.6 Sol".into()),
+                    approval: None,
                 })
                 .collect(),
             total_active: statuses.len(),
@@ -670,19 +735,27 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn popover_height_caps_visible_jobs() {
-        // gutters 8 + 24, header 64, footer 44 -> 140 plus the rows.
-        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 200.0);
-        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 200.0);
+        // gutters 8 + 24, header 52, footer 40 -> 124 plus the rows.
+        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 124.0);
+        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 168.0);
         assert_eq!(
             popover_height(&snapshot_with_jobs(&["running", "running"])),
-            260.0
+            212.0
         );
         // Capped at four rows, plus the 32px "+N more" row.
         assert_eq!(
             popover_height(&snapshot_with_jobs(&[
                 "running", "running", "running", "running", "running"
             ])),
-            412.0
+            332.0
         );
+        // A waiting row with an inline approval adds its 92px block.
+        let mut waiting = snapshot_with_jobs(&["waiting", "running"]);
+        waiting.jobs[0].approval = Some(MenuBarApproval {
+            id: "approval-1".into(),
+            approval_type: "command".into(),
+            summary: "pnpm test".into(),
+        });
+        assert_eq!(popover_height(&waiting), 304.0);
     }
 }

@@ -8,8 +8,8 @@
  * as the gap between the menu bar and the card.
  *
  * Every size below comes from the token block on the surface root;
- * `menu_bar.rs` mirrors the gutters, row, header and footer values when it
- * sizes the window. Change them together.
+ * `menu_bar.rs` mirrors the gutters, header, row, approval and footer values
+ * when it sizes the window. Change them together.
  */
 
 :root[data-surface="menu-bar"] {
@@ -19,14 +19,16 @@
   --menu-gutter-top: 8px;
   --menu-gutter-x: 16px;
   --menu-gutter-bottom: 24px;
-  --menu-header: 64px;
-  --menu-row: 60px;
+  --menu-header: 52px;
+  --menu-row: 44px;
+  --menu-approval: 92px;
   --menu-overflow: 32px;
-  --menu-footer: 44px;
-  --menu-inset: 16px;
-  --menu-gap: 12px;
-  --menu-tile: 28px;
-  --menu-stop: 40px;
+  --menu-footer: 40px;
+  --menu-inset: 14px;
+  --menu-gap: 10px;
+  --menu-tile: 24px;
+  --menu-glyph: 16px;
+  --menu-stop: 36px;
   /* Corners track the app's xl/md/sm ladder in packages/ui/src/styles.css.
      Kept as literals because this popover is its own window surface; retune
      them with the ladder so the menu bar never drifts from the app. */
@@ -142,85 +144,69 @@
   font: inherit;
 }
 
-/* Header */
+/* Header — one line: the mark, a count of what is happening, and a pill when
+   something is. Idle has no pill and no body row at all. */
 
 .gyro-menu-bar-header {
   align-items: center;
   display: grid;
   gap: var(--menu-gap);
-  grid-template-columns: var(--menu-tile) minmax(0, 1fr) 8px;
+  grid-template-columns: var(--menu-tile) minmax(0, 1fr) auto;
   height: var(--menu-header);
   padding: 0 var(--menu-inset);
-}
-
-.gyro-menu-bar-header-copy,
-.gyro-menu-bar-outcome span:last-child,
-.gyro-menu-bar-idle p {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
 }
 
 .gyro-menu-bar-header strong {
   font-size: var(--menu-text-lg);
   font-weight: 600;
   line-height: 18px;
-}
-
-.gyro-menu-bar-header span,
-.gyro-menu-bar-idle small,
-.gyro-menu-bar-outcome small {
-  color: var(--menu-muted);
-  font-size: var(--menu-text-sm);
-  line-height: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-menu-bar-header > i {
-  background: var(--menu-neutral);
+.gyro-menu-bar-pill {
+  --tone: var(--menu-neutral);
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
   border-radius: 999px;
-  height: 8px;
-  width: 8px;
+  color: var(--tone);
+  font-size: var(--menu-text-sm);
+  font-style: normal;
+  font-weight: 600;
+  line-height: 20px;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 
-.gyro-menu-bar-header > i[data-state="working"] {
-  background: var(--menu-accent);
+.gyro-menu-bar-pill[data-tone="warn"] {
+  --tone: var(--menu-warn);
 }
 
-.gyro-menu-bar-header > i[data-state="attention"] {
-  background: var(--menu-warn);
+.gyro-menu-bar-pill[data-tone="danger"] {
+  --tone: var(--menu-danger);
 }
 
-.gyro-menu-bar-header > i[data-state="complete"] {
-  background: var(--menu-ok);
+.gyro-menu-bar-pill[data-tone="accent"] {
+  --tone: var(--menu-accent);
 }
 
-/* Icon tiles — one shape for the app mark, provider marks and automations. */
+.gyro-menu-bar-pill[data-tone="ok"] {
+  --tone: var(--menu-ok);
+}
 
-.gyro-menu-bar-brand-mark,
-.gyro-menu-bar-model-mark,
-.gyro-menu-bar-job-icon {
-  align-items: center;
+/* The app mark ships as an opaque square with built-in padding, so it is
+   scaled past the tile and cropped rather than sized by hand. */
+.gyro-menu-bar-brand-mark {
   border: 1px solid var(--menu-border);
-  border-radius: var(--menu-radius-sm);
+  border-radius: var(--menu-radius-xs);
   display: flex;
-  flex: 0 0 auto;
   height: var(--menu-tile);
   justify-content: center;
+  align-items: center;
   overflow: hidden;
   width: var(--menu-tile);
 }
 
-.gyro-menu-bar-model-mark,
-.gyro-menu-bar-job-icon {
-  background: var(--menu-hover);
-  color: var(--menu-copy);
-}
-
-/* The mark ships as an opaque square with built-in padding, so it is scaled
-   past the tile and cropped rather than sized by hand per call site. */
 .gyro-menu-bar-brand-mark img {
   display: block;
   height: 136%;
@@ -228,15 +214,28 @@
   width: 136%;
 }
 
+/* Provider and automation glyphs — small and quiet, so the status dot and
+   the title carry the row. */
+
+.gyro-menu-bar-model-mark,
+.gyro-menu-bar-job-icon {
+  align-items: center;
+  color: var(--menu-muted);
+  display: flex;
+  height: var(--menu-glyph);
+  justify-content: center;
+  width: var(--menu-glyph);
+}
+
 .gyro-menu-bar-model-mark svg,
 .gyro-menu-bar-job-icon svg {
   fill: currentColor;
-  height: 16px;
-  width: 16px;
+  height: 13px;
+  width: 13px;
 }
 
 .gyro-menu-bar-model-mark strong {
-  font-size: var(--menu-text-md);
+  font-size: var(--menu-text-sm);
   font-weight: 600;
   line-height: 1;
 }
@@ -258,35 +257,109 @@
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: 2;
+}
+
+/* Status dots — shared by job rows and the recent-outcome row. */
+
+.gyro-menu-bar-job-main > i,
+.gyro-menu-bar-outcome > i {
+  background: var(--menu-accent);
+  border-radius: 999px;
+  height: 7px;
+  width: 7px;
+}
+
+.gyro-menu-bar-job-main > i[data-status="waiting"] {
+  background: var(--menu-warn);
+}
+
+.gyro-menu-bar-job-main > i[data-status="queued"] {
+  background: var(--menu-neutral);
+}
+
+.gyro-menu-bar-job-main > i[data-status="finished"],
+.gyro-menu-bar-outcome > i[data-status="succeeded"] {
+  background: var(--menu-ok);
+}
+
+.gyro-menu-bar-outcome > i[data-status="failed"] {
+  background: var(--menu-danger);
+}
+
+.gyro-menu-bar-job-main > i[data-status="running"] {
+  animation: gyro-menu-bar-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes gyro-menu-bar-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* Job rows */
 
 .gyro-menu-bar-job {
   border-top: 1px solid var(--menu-rule);
+}
+
+.gyro-menu-bar-job-row {
   display: grid;
   /* The trailing slot is reserved whether or not the job can be stopped, so
-     the status column keeps a straight right edge down the list. */
+     the meta column keeps a straight right edge down the list. */
   grid-template-columns: minmax(0, 1fr) var(--menu-stop);
   height: var(--menu-row);
 }
 
-.gyro-menu-bar-job-main {
+.gyro-menu-bar-job-main,
+.gyro-menu-bar-outcome {
   align-items: center;
   cursor: pointer;
   display: grid;
   gap: var(--menu-gap);
-  grid-template-columns: var(--menu-tile) minmax(0, 1fr) 64px;
+  grid-template-columns: 7px minmax(0, 1fr) var(--menu-glyph) 52px;
   min-width: 0;
   padding: 0 0 0 var(--menu-inset);
   text-align: left;
+}
+
+.gyro-menu-bar-outcome {
+  border-top: 1px solid var(--menu-rule);
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  height: var(--menu-row);
+  padding: 0 var(--menu-inset);
+  width: 100%;
+}
+
+.gyro-menu-bar-job-main strong,
+.gyro-menu-bar-outcome strong {
+  font-size: var(--menu-text-md);
+  font-weight: 500;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-menu-bar-job-main small,
+.gyro-menu-bar-outcome small {
+  color: var(--menu-muted);
+  font-size: var(--menu-text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.gyro-menu-bar-job-main small[data-status="waiting"] {
+  color: var(--menu-warn);
 }
 
 .gyro-menu-bar-job-main:hover,
 .gyro-menu-bar-outcome:hover,
 .gyro-menu-bar-overflow:hover,
 .gyro-menu-bar-footer button:hover,
+.gyro-menu-bar-approval button:hover:not(:disabled),
 .gyro-menu-bar-stop:hover:not(:disabled) {
   background: var(--menu-hover);
 }
@@ -294,67 +367,11 @@
 .gyro-menu-bar-job-main:active,
 .gyro-menu-bar-outcome:active,
 .gyro-menu-bar-footer button:active,
+.gyro-menu-bar-approval button:active:not(:disabled),
 .gyro-menu-bar-stop:active:not(:disabled) {
   background: var(--menu-pressed);
 }
 
-.gyro-menu-bar-job-copy,
-.gyro-menu-bar-job-meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.gyro-menu-bar-job-copy strong {
-  font-size: var(--menu-text-md);
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.gyro-menu-bar-job-copy small,
-.gyro-menu-bar-job-meta small {
-  color: var(--menu-muted);
-  font-size: var(--menu-text-sm);
-  line-height: 16px;
-}
-
-.gyro-menu-bar-job-copy strong,
-.gyro-menu-bar-job-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-menu-bar-job-meta {
-  align-items: flex-end;
-}
-
-.gyro-menu-bar-job-meta em {
-  color: var(--menu-accent);
-  font-size: var(--menu-text-sm);
-  font-style: normal;
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.gyro-menu-bar-job-meta em[data-status="waiting"] {
-  color: var(--menu-warn);
-}
-
-.gyro-menu-bar-job-meta em[data-status="finished"] {
-  color: var(--menu-ok);
-}
-
-.gyro-menu-bar-job-meta em[data-status="queued"] {
-  color: var(--menu-muted);
-}
-
-.gyro-menu-bar-job-meta small {
-  font-variant-numeric: tabular-nums;
-}
-
-/* No divider: only some rows can be stopped, and a rule that comes and goes
-   down the list reads as noise. The reserved gutter does the separating. */
 .gyro-menu-bar-stop {
   color: var(--menu-muted);
   cursor: pointer;
@@ -379,6 +396,85 @@
   opacity: 0.55;
 }
 
+/* Inline approval — sits under its waiting row, fixed at --menu-approval so
+   menu_bar.rs can size the window without measuring. */
+
+.gyro-menu-bar-approval {
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr);
+  height: var(--menu-approval);
+  padding: 0 12px 10px;
+}
+
+.gyro-menu-bar-approval > * {
+  margin: 0;
+}
+
+.gyro-menu-bar-approval > p {
+  background: color-mix(in srgb, var(--menu-warn) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--menu-warn) 22%, transparent);
+  border-bottom: 0;
+  border-radius: var(--menu-radius-sm) var(--menu-radius-sm) 0 0;
+  display: grid;
+  gap: 2px;
+  grid-template-rows: 16px 18px;
+  min-width: 0;
+  padding: 8px 10px 0;
+}
+
+.gyro-menu-bar-approval > p span {
+  color: var(--menu-warn);
+  font-size: var(--menu-text-sm);
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.gyro-menu-bar-approval code {
+  color: var(--menu-copy);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--menu-text-sm);
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-menu-bar-approval > div {
+  align-items: center;
+  background: color-mix(in srgb, var(--menu-warn) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--menu-warn) 22%, transparent);
+  border-radius: 0 0 var(--menu-radius-sm) var(--menu-radius-sm);
+  border-top: 0;
+  display: flex;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.gyro-menu-bar-approval button {
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius-xs);
+  cursor: pointer;
+  font-size: var(--menu-text-md);
+  font-weight: 500;
+  height: 26px;
+  padding: 0 12px;
+}
+
+.gyro-menu-bar-approval button.is-primary {
+  background: var(--menu-copy);
+  border-color: transparent;
+  color: var(--menu-bg);
+}
+
+.gyro-menu-bar-approval button.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--menu-copy) 86%, var(--menu-bg));
+}
+
+.gyro-menu-bar-approval button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .gyro-menu-bar-overflow {
   border-top: 1px solid var(--menu-rule);
   color: var(--menu-muted);
@@ -390,57 +486,6 @@
   width: 100%;
 }
 
-/* Single-row states: recent outcome, and the empty state */
-
-.gyro-menu-bar-outcome,
-.gyro-menu-bar-idle {
-  align-items: center;
-  border-top: 1px solid var(--menu-rule);
-  display: grid;
-  gap: var(--menu-gap);
-  grid-template-columns: var(--menu-tile) minmax(0, 1fr);
-  height: var(--menu-row);
-  padding: 0 var(--menu-inset);
-  text-align: left;
-  width: 100%;
-}
-
-.gyro-menu-bar-outcome {
-  cursor: pointer;
-}
-
-.gyro-menu-bar-outcome > span:first-child,
-.gyro-menu-bar-idle > span {
-  align-items: center;
-  background: color-mix(in srgb, currentColor 14%, transparent);
-  border-radius: 999px;
-  color: var(--menu-ok);
-  display: flex;
-  font-size: var(--menu-text-sm);
-  font-weight: 600;
-  height: var(--menu-tile);
-  justify-content: center;
-  width: var(--menu-tile);
-}
-
-.gyro-menu-bar-outcome[data-status="failed"] > span:first-child {
-  color: var(--menu-danger);
-}
-
-.gyro-menu-bar-outcome strong,
-.gyro-menu-bar-idle strong {
-  font-size: var(--menu-text-md);
-  font-weight: 600;
-  line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-menu-bar-idle p {
-  margin: 0;
-}
-
 /* Footer */
 
 .gyro-menu-bar-footer {
@@ -449,7 +494,7 @@
   display: flex;
   height: var(--menu-footer);
   justify-content: space-between;
-  padding: 0 8px;
+  padding: 0 6px;
 }
 
 .gyro-menu-bar-footer button {
@@ -459,6 +504,24 @@
   font-weight: 500;
   height: 28px;
   padding: 0 8px;
+}
+
+.gyro-menu-bar-footer .gyro-menu-bar-icon-button {
+  color: var(--menu-muted);
+  display: grid;
+  padding: 0;
+  place-items: center;
+  width: 28px;
+}
+
+.gyro-menu-bar-icon-button svg {
+  fill: none;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 15px;
 }
 
 :root[data-surface="menu-bar"] button:focus-visible {

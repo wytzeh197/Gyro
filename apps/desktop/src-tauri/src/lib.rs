@@ -114,6 +114,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, Manager};
+use desktop_notifications::{
+    notification_permission_allows_delivery, notify_automation_outcome,
+    notify_provider_approval_question,
+};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -132,6 +136,7 @@ mod lsp_capability;
 #[cfg(debug_assertions)]
 mod lsp_smoke;
 mod memory_capability;
+mod desktop_notifications;
 mod menu_bar;
 mod provider_timeline;
 mod reply_segments;
@@ -2944,105 +2949,6 @@ fn automation_notification_content(
     }
 }
 
-fn should_show_background_notification(window_visible: bool, window_focused: bool) -> bool {
-    !window_visible || !window_focused
-}
-
-fn app_is_in_background(app: &tauri::AppHandle) -> bool {
-    app.webview_windows().values().all(|window| {
-        should_show_background_notification(
-            window.is_visible().unwrap_or(false),
-            window.is_focused().unwrap_or(false),
-        )
-    })
-}
-
-fn notification_permission_allows_delivery(permission: PermissionState) -> bool {
-    permission == PermissionState::Granted
-}
-
-fn provider_approval_notification_body(
-    approval_type: &str,
-    provider_label: Option<&str>,
-) -> String {
-    let provider = provider_label
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .unwrap_or("Your model");
-    let action = match approval_type {
-        "command" => "run a command",
-        "file-change" => "change files",
-        _ => "use a protected capability",
-    };
-    format!("{provider} wants to {action}. Open this chat to review it.")
-}
-
-fn notify_provider_approval_question(
-    app: &tauri::AppHandle,
-    context: &ProviderApprovalContext,
-    approval_id: Uuid,
-    approval_type: &str,
-) {
-    if !app_is_in_background(app) {
-        return;
-    }
-    let Ok(permission) = app.notification().permission_state() else {
-        return;
-    };
-    if !notification_permission_allows_delivery(permission) {
-        return;
-    }
-    let body =
-        provider_approval_notification_body(approval_type, context.provider_label.as_deref());
-
-    #[cfg(target_os = "macos")]
-    {
-        let app = app.clone();
-        let payload = ProviderApprovalNotificationOpen {
-            session_id: context.session_id.clone(),
-            approval_id: approval_id.to_string(),
-        };
-        std::thread::spawn(move || {
-            let application = if tauri::is_dev() {
-                "com.apple.Terminal".to_string()
-            } else {
-                app.config().identifier.clone()
-            };
-            if let Err(error) = notify_rust::set_application(&application) {
-                eprintln!("could not configure approval notification: {error}");
-            }
-            let mut notification = notify_rust::Notification::new();
-            notification.summary("Gyro has a question").body(&body);
-            match notification.show() {
-                Ok(handle) => handle.wait_for_action(move |action| {
-                    if action == "__closed" {
-                        return;
-                    }
-                    if let Err(error) = restore_main_window(&app) {
-                        eprintln!("could not focus Gyro from approval notification: {error}");
-                    }
-                    if let Err(error) = app.emit(PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT, payload)
-                    {
-                        eprintln!("could not open approval chat from notification: {error}");
-                    }
-                }),
-                Err(error) => eprintln!("could not show approval notification: {error}"),
-            }
-        });
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    if let Err(error) = app
-        .notification()
-        .builder()
-        .title("Gyro has a question")
-        .body(body)
-        .show()
-    {
-        eprintln!("could not show approval notification: {error}");
-    }
-}
-
 #[tauri::command]
 async fn get_notification_permission(app: tauri::AppHandle) -> Result<String, String> {
     app.notification()
@@ -3071,24 +2977,6 @@ async fn test_notification(app: tauri::AppHandle) -> Result<String, String> {
         .show()
         .map_err(to_string)?;
     Ok(permission.to_string())
-}
-
-fn notify_automation_outcome(app: &tauri::AppHandle, automation: &Automation) {
-    let Some((title, body)) = automation_notification_content(automation) else {
-        return;
-    };
-    if !app_is_in_background(app) {
-        return;
-    }
-    let Ok(permission) = app.notification().permission_state() else {
-        return;
-    };
-    if !notification_permission_allows_delivery(permission) {
-        return;
-    }
-    if let Err(error) = app.notification().builder().title(title).body(body).show() {
-        eprintln!("could not show automation notification: {error}");
-    }
 }
 
 fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
@@ -30940,44 +30828,6 @@ while True:
         let mut running = completed;
         running.run_history[0].status = AutomationRunStatus::Running;
         assert!(automation_notification_content(&running).is_none());
-    }
-
-    #[test]
-    fn background_notifications_defer_to_the_focused_app() {
-        assert!(!should_show_background_notification(true, true));
-        assert!(should_show_background_notification(true, false));
-        assert!(should_show_background_notification(false, false));
-        assert!(should_show_background_notification(false, true));
-    }
-
-    #[test]
-    fn automation_notifications_require_explicit_native_permission() {
-        assert!(notification_permission_allows_delivery(
-            PermissionState::Granted
-        ));
-        assert!(!notification_permission_allows_delivery(
-            PermissionState::Denied
-        ));
-        assert!(!notification_permission_allows_delivery(
-            PermissionState::Prompt
-        ));
-        assert!(!notification_permission_allows_delivery(
-            PermissionState::PromptWithRationale
-        ));
-    }
-
-    #[test]
-    fn provider_approval_notifications_are_actionable_and_private() {
-        let command = provider_approval_notification_body("command", Some("Claude"));
-        assert_eq!(
-            command,
-            "Claude wants to run a command. Open this chat to review it."
-        );
-        assert_eq!(
-            provider_approval_notification_body("file-change", Some("OpenAI")),
-            "OpenAI wants to change files. Open this chat to review it."
-        );
-        assert!(!command.contains("/private/workspace"));
     }
 
     fn create_due_stop_condition_automation(paths: &GyroPaths) -> Automation {

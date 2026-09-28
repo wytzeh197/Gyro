@@ -2418,6 +2418,7 @@ export function App() {
       deriveMenuBarSnapshot({
         automations: workbench.automations,
         finishedOutcomes: finishedMenuBarOutcomes,
+        notifications: workbench.preferences.desktopNotifications,
         outcome: menuBarOutcome,
         reduceMotion,
         sendingSessionIds,
@@ -2433,6 +2434,7 @@ export function App() {
       sessionEventsById,
       sessions,
       workbench.automations,
+      workbench.preferences.desktopNotifications,
       resolvedTheme,
     ],
   );
@@ -16996,6 +16998,8 @@ export function App() {
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
+          desktopNotifications={workbench.preferences.desktopNotifications}
+          onDesktopNotificationsChange={(notifications) => dispatchWorkbench({ type: "set-desktop-notifications", notifications })}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onUpdateAction={runUpdateAction}

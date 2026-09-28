@@ -39,8 +39,10 @@ import {
   SettingsGroup,
   SettingsRow,
   SettingsSelect,
+  SettingsSwitch,
   settingsSearchKey,
 } from "./settings-controls";
+import { DesktopNotificationSettings } from "./desktop-notification-settings";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -339,6 +341,7 @@ import type {
   ModelProviderConfig,
   Notification,
   NotificationPermissionState,
+  DesktopNotificationPreferences,
   ProviderId,
   ProviderModel,
   ProviderLedgerSummary,
@@ -396,6 +399,7 @@ import {
   defaultProviderStatuses,
   isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
+  normalizedDesktopNotifications,
   resolveChatGridDropSlot,
 } from "./workbench-state";
 import {
@@ -968,6 +972,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "general",
+    label: "Notifications",
+    detail: "Choose which macOS notifications Gyro sends",
+    keywords: "alerts messages approvals finished failed test",
+  },
+  {
+    section: "general",
     label: "Model activity previews",
     detail: "Choose Off, Peek, or Follow",
     keywords: "model activity preview follow",
@@ -1005,7 +1015,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "general",
     label: "General",
-    detail: "Menu bar visibility and model activity",
+    detail: "Menu bar, notifications, and model activity",
   },
   {
     section: "appearance",
@@ -1149,12 +1159,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     detail: "Mask recognized secret patterns in supported output",
     keywords: "privacy api keys tokens",
   },
-  {
-    section: "permissions",
-    label: "Automation outcomes",
-    detail: "Test system notifications",
-    keywords: "alerts notification",
-  },
+
   {
     section: "updates",
     label: "Updates",
@@ -20794,18 +20799,6 @@ type SettingsPanelProps = {
   config: GyroConfig;
 };
 
-function notificationPermissionDetail(permission: NotificationPermissionState) {
-  switch (permission) {
-    case "granted":
-      return "Enabled by macOS for background automation outcomes.";
-    case "denied":
-      return "Blocked by macOS. Change Gyro's notification access in System Settings.";
-    case "prompt-with-rationale":
-    case "prompt":
-      return "Not enabled yet. Gyro asks only when you run the test.";
-  }
-}
-
 function systemAccessValue(scope: SystemAccessScope) {
   switch (scope.status) {
     case "granted":
@@ -20842,6 +20835,10 @@ type SettingsSurfaceProps = {
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
   onMotionSpeedChange?: (speed: MotionSpeed) => void;
   showMenuBarIcon?: boolean;
+  desktopNotifications?: DesktopNotificationPreferences;
+  onDesktopNotificationsChange?: (
+    preferences: Partial<DesktopNotificationPreferences>,
+  ) => void;
   modelFollow?: ModelFollowMode;
   defaultWorkspaceMode?: WorkbenchMode;
   onModelFollowChange?: (mode: ModelFollowMode) => void;
@@ -21477,6 +21474,8 @@ export function SettingsSurface({
   onInterfaceSizeChange,
   onMotionSpeedChange,
   showMenuBarIcon = true,
+  desktopNotifications = normalizedDesktopNotifications(undefined),
+  onDesktopNotificationsChange,
   modelFollow = "peek",
   defaultWorkspaceMode = "local",
   onModelFollowChange,
@@ -21659,6 +21658,13 @@ export function SettingsSurface({
                 />
               </SettingsRow>
             </SettingsGroup>
+            <DesktopNotificationSettings
+              isTesting={isTestingNotification}
+              permission={notificationPermission}
+              preferences={desktopNotifications}
+              onChange={onDesktopNotificationsChange}
+              onTest={onTestNotification}
+            />
             <SettingsGroup label="Model activity">
               <SettingsRow
                 label="Model activity previews"
@@ -22566,21 +22572,6 @@ export function SettingsSurface({
                 detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
               />
             </SettingsGroup>
-            <SettingsGroup label="System notifications">
-              <SettingsRow
-                label="Automation outcomes"
-                detail={notificationPermissionDetail(notificationPermission)}
-              >
-                <button
-                  className="gyro-secondary-button"
-                  disabled={isTestingNotification || !onTestNotification}
-                  onClick={onTestNotification}
-                  type="button"
-                >
-                  {isTestingNotification ? "Sending..." : "Test notification"}
-                </button>
-              </SettingsRow>
-            </SettingsGroup>
             {systemAccess && systemAccess.length > 0 ? (
               <SettingsGroup label="macOS system access">
                 {systemAccess.map((scope) => (
@@ -23131,33 +23122,6 @@ function SettingsSection({
       </header>
       <div className="gyro-settings-section-body">{children}</div>
     </section>
-  );
-}
-
-
-function SettingsSwitch({
-  checked,
-  disabled,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <button
-      aria-checked={checked}
-      aria-label={label}
-      className={`gyro-settings-switch${checked ? " is-on" : ""}`}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      role="switch"
-      type="button"
-    >
-      <span />
-    </button>
   );
 }
 
