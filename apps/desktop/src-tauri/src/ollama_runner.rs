@@ -87,12 +87,10 @@ pub(super) fn validate_ollama_compatibility_call(
         gyro_core::capability_advertised_for_mode(id, mode),
         "Gyro does not offer this tool in the current chat mode"
     );
-    let schema = desktop_capability_tool_schema(id);
-    validate_compatibility_schema_value(arguments, &schema, "arguments")?;
     Ok(id)
 }
 
-fn validate_compatibility_schema_value(
+pub(super) fn validate_compatibility_schema_value(
     value: &serde_json::Value,
     schema: &serde_json::Value,
     path: &str,
@@ -203,16 +201,10 @@ pub(super) fn run_ollama_chat(
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .ok_or_else(|| anyhow::anyhow!("select an installed Ollama model before sending"))?;
-    let discovery = discover_ollama_models(provider.base_url.as_deref())?;
-    let discovered = discovery
-        .models
-        .iter()
-        .find(|candidate| candidate.id == model)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
-            )
-        })?;
+    let discovered = gyro_core::discover_ollama_model(provider.base_url.as_deref(), model)?
+        .ok_or_else(|| anyhow::anyhow!(
+            "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
+        ))?;
     let expanded = with_browser_attachment_images(request, discovered.supports_images)?;
     let request = &expanded;
     let run_mode = capability_run_mode_for_chat(request.mode);
@@ -539,17 +531,23 @@ pub(super) fn run_ollama_chat(
                 "content": turn.content,
                 "tool_calls": tool_calls,
             }));
+            let mut prepared = Vec::new();
             for call in turn.tool_calls {
-                let Some(capability_id) = provider_reliability::prepare_tool_call(
+                if let Some(id) = provider_reliability::prepare_tool_call(
                     &mut messages,
                     &call.name,
                     &call.arguments,
                     None,
-                ) else {
-                    continue;
-                };
-                let mut response =
-                    invoke_run_capability(app, &request.session_id, capability_id, call.arguments)?;
+                ) {
+                    prepared.push((call, id));
+                }
+            }
+            let batch = prepared
+                .iter()
+                .map(|(call, id)| (*id, call.arguments.clone()))
+                .collect::<Vec<_>>();
+            let results = provider_tool_batch::execute(app, &request.session_id, &batch)?;
+            for ((call, _), mut response) in prepared.into_iter().zip(results) {
                 let image = if discovered.supports_images {
                     browser_result_image(&paths, &response)?
                 } else {
@@ -580,6 +578,7 @@ pub(super) fn run_ollama_chat(
         }
         let response_chars = response.content.chars().count();
         Ok(ProviderRunnerOutput {
+            accounted_usage: None,
             activities: provider_activities_for_response(auto_compactions, &response.content),
             context_usage: Some(ProviderContextUsage {
                 input_tokens: response.input_tokens,

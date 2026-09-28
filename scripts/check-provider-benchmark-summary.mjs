@@ -81,6 +81,9 @@ try {
       ["tool-start", 12, 0],
       ["tool-start", 14, 1],
       ["first-activity", 15],
+      ["first-token", 16],
+      ["broker-tool-start", 16, 2],
+      ["broker-tool-end", 17, 2],
       ["tool-end", 18, 0],
       ["tool-end", 20, 1],
       ["provider-complete", 90],
@@ -90,6 +93,10 @@ try {
       turnId,
       sessionId,
       outcome: "completed",
+      providerRequests: {
+        requests: 3, retries: 1, unmeasuredContent: true,
+        tokens: { inputTokens: 100, outputTokens: 20, totalTokens: 120, measured: false },
+      },
       points: marks.map(([stage, elapsedMs, toolIndex]) => ({
         stage,
         elapsedMs,
@@ -163,6 +170,12 @@ try {
       },
     ],
   });
+  for (const provider of ["ollama", "openrouter"]) {
+    await save(join(root, `benchmark-${provider}.json`), {
+      records: [{ provider, task: "readme", trial: 1, outcome: "unavailable" }],
+    });
+  }
+  await save(join(root, "spec.json"), { providers: [{ id: "ollama" }, { id: "openrouter" }], trials: 5 });
   execFileSync(process.execPath, [
     fileURLToPath(
       new URL("./summarize-provider-benchmark.mjs", import.meta.url),
@@ -177,6 +190,7 @@ try {
       g.provider === "openai" && g.task === "readme" && g.session === "resumed",
   );
   assert.equal(group.medianMs, 150);
+  assert.equal(group.p95Ms, 200);
   assert.equal(group.slowestMs, 200);
   assert.equal(group.correctTiming.medianMs, 100);
   assert.equal(group.incorrect, 1);
@@ -185,8 +199,20 @@ try {
     2,
     "response metadata outranks default status fields",
   );
-  assert.equal(group.retries, 2);
+  assert.equal(group.retries, 3);
   assert.equal(result.excludedRateGuardRecords, 1);
+  assert.equal(result.expectedSlots, 60);
+  assert.ok(result.records.some((r) => r.provider === "ollama"));
+  assert.ok(result.records.some((r) => r.provider === "openrouter"));
+  const observed = result.records.find((r) => r.provider === "openai").timing;
+  assert.equal(observed.firstTokenMs, 16);
+  assert.equal(observed.requestCount, 3);
+  assert.equal(observed.observedUsage.totalTokens, 120);
+  assert.equal(observed.unmeasuredContent, true);
+  assert.equal(observed.toolCount, 2, "broker hooks do not double-count protocol tools");
+  assert.equal(observed.brokerToolCount, 1);
+  assert.deepEqual(observed.toolDurationsMs, [6, 6]);
+  assert.deepEqual(observed.brokerToolDurationsMs, [1]);
   assert.equal(
     result.records.find((r) => r.provider === "anthropic").outcome,
     "unavailable",

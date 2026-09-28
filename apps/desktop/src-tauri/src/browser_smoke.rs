@@ -19,6 +19,13 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
         return Err("native browser smoke requires isolated data and a loopback fixture".into());
     }
     std::fs::create_dir_all(&output)?;
+    // The test explicitly owns this isolated window. Production mouse actions
+    // refuse to activate Gyro, so establish their foreground precondition here.
+    if let Some(window) = app.get_webview_window("main") {
+        window.show()?;
+        window.set_focus()?;
+    }
+
     let app = app.clone();
     std::thread::spawn(move || {
         let result = run(&app, &url, &output);
@@ -120,7 +127,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     // A second read used to clear the map but retain invalid refs on elements.
     wait_page("Browser observation ready")?;
     let button = find("#change-state")?;
-    let clicked = call("click", json!({"ref":button}))?;
+    let clicked = call("click", json!({"ref":button,"actor":"Codex"}))?;
     if clicked["name"] != "Change visible state" {
         return Err(format!("click did not name its element: {clicked}"));
     }
@@ -153,6 +160,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         let outcome = browser_pointer::execute(
             app,
             session,
+            "Claude",
             &json!({
                 "action": action,
                 "captureId": "native-smoke-pointer.png",
@@ -177,6 +185,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     if browser_pointer::execute(
         app,
         session,
+        "Model",
         &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
     )
     .is_ok()
@@ -185,6 +194,13 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     }
     mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
     wait_page("Hover: open")?;
+    let pointer_highlight = capture_session_browser_png(app, session)?;
+    std::fs::write(
+        output.join("browser-smoke-mouse-highlight.png"),
+        pointer_highlight.png,
+    )
+    .map_err(|e| e.to_string())?;
+    call("clearHighlight", json!({}))?;
     mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
     wait_page("Context: opened")?;
     let (canvas_x, canvas_y) = point("#pointer-canvas")?;

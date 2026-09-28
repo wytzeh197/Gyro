@@ -1,3 +1,7 @@
+export { AppearanceContext, useAppearance } from "./appearance-context";
+export { applyAppearancePreferences } from "./appearance-runtime";
+export { interfaceScales } from "./appearance";
+export type { InterfaceSize, MotionSpeed } from "./types";
 export type {
   Automation,
   AutomationRun,

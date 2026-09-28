@@ -565,7 +565,7 @@ impl SessionStore {
             ],
         )?;
 
-        self.append_event(
+        if let Err(error) = self.append_event(
             session.id,
             SessionEventKind::SessionCreated,
             "Session created",
@@ -582,7 +582,32 @@ impl SessionStore {
                 "modelLabel": session.model_label,
                 "reasoningEffort": session.reasoning_effort,
             }),
-        )?;
+        ) {
+            // The session is not usable without its first durable event. A full
+            // disk can reject the JSONL write after SQLite accepted the row.
+            match self.conn.execute(
+                "delete from sessions where id = ?1",
+                params![session.id.to_string()],
+            ) {
+                Ok(_) => {
+                    if let Err(cleanup_error) = std::fs::remove_file(&session.events_path) {
+                        if cleanup_error.kind() != std::io::ErrorKind::NotFound {
+                            eprintln!(
+                                "could not remove incomplete session log {}: {cleanup_error}",
+                                session.events_path.display()
+                            );
+                        }
+                    }
+                }
+                Err(cleanup_error) => {
+                    eprintln!(
+                        "could not remove incomplete session {}: {cleanup_error}",
+                        session.id
+                    );
+                }
+            }
+            return Err(error);
+        }
 
         self.get_session(session.id)?
             .ok_or_else(|| anyhow!("session was not persisted"))
@@ -2726,6 +2751,24 @@ fn payload_with_turn_id(payload: Value, turn_id: Uuid) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_first_event_does_not_leave_an_incomplete_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        std::fs::remove_dir(&paths.sessions_dir).unwrap();
+        std::fs::write(&paths.sessions_dir, b"not a directory").unwrap();
+
+        assert!(store
+            .create_session(temp.path(), SessionOrigin::Desktop, "failed session")
+            .is_err());
+        let count: i64 = store
+            .conn
+            .query_row("select count(*) from sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[test]
     fn creates_session_and_appends_jsonl_events() {

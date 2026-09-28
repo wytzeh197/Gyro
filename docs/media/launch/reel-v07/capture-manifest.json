@@ -1,0 +1,408 @@
+{
+  "schemaVersion": 1,
+  "source": "Gyro running development capture harness; native DOM and canvas, unchanged interior geometry",
+  "url": "http://127.0.0.1:1428/capture.html?scene=chat&theme=light&reset=1&reel=1",
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "deviceScaleFactor": 4
+  },
+  "task": "Limit retries. Add a test.",
+  "session": "ses_capture_1",
+  "capturedAt": "2026-07-25T16:00:00Z",
+  "pages": {
+    "chat": {
+      "targetId": "A255492F0BCE9833A8CF7E4FE2175FEB",
+      "browserContextId": "8AC957C68A66164FFAF8B9B6F26C6009"
+    },
+    "review": {
+      "targetId": "2641D45807382E06E5C20BA5E574E676",
+      "browserContextId": "AD7A5B61BE96684E467C0F24E90E0C80"
+    },
+    "workspace": {
+      "targetId": "7CBA513EF59C7FBD892A0008F091CBE2",
+      "browserContextId": "38E1F9618FC35CEDC43800E90C839E4E"
+    }
+  },
+  "assets": {
+    "window-chat": {
+      "path": "assets/window-chat.png",
+      "source": "chat",
+      "cssRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "scale": 4,
+      "width": 7680,
+      "height": 4320,
+      "sha256": "36553ff7d6cbd0d55a5c0dc2445ba593d30f60b9a499fec874cd688f22a40ceb",
+      "nativePixelCrop": false
+    },
+    "task": {
+      "path": "assets/task.png",
+      "source": "window-chat",
+      "cssRect": {
+        "x": 690,
+        "y": 69,
+        "width": 780,
+        "height": 51
+      },
+      "scale": 4,
+      "width": 3120,
+      "height": 204,
+      "sha256": "a673fd7784ebda95a61ca578074e489207c7be0a6136be3a91d42c0388372ff0",
+      "nativePixelCrop": true,
+      "decodedPixelMD5": "e4621ca1ef56f225c4678a4197623252"
+    },
+    "conversation": {
+      "path": "assets/conversation.png",
+      "source": "window-chat",
+      "cssRect": {
+        "x": 672,
+        "y": 55,
+        "width": 816,
+        "height": 450
+      },
+      "scale": 4,
+      "width": 3264,
+      "height": 1800,
+      "sha256": "d582128193d0a797e24744c290b59dc2ae0276524557444f7fb346c484952b6b",
+      "nativePixelCrop": true,
+      "decodedPixelMD5": "15f3c3f5e5df44755aa7a8e483101f6b"
+    },
+    "window-review": {
+      "path": "assets/window-review.png",
+      "source": "review",
+      "cssRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "scale": 4,
+      "width": 7680,
+      "height": 4320,
+      "sha256": "4810c0a8b6d3b2017f066cc37282b6dd631d3740f41c77919f4b476ff287bb56",
+      "nativePixelCrop": false
+    },
+    "review": {
+      "path": "assets/review.png",
+      "source": "window-review",
+      "cssRect": {
+        "x": 1496,
+        "y": 0,
+        "width": 424,
+        "height": 600
+      },
+      "scale": 4,
+      "width": 1696,
+      "height": 2400,
+      "sha256": "a42ac39e6aaa9e64d3cf87d7aeeb2f1ed56a9e4a966ac7dc5ef21416ab589cf5",
+      "nativePixelCrop": true,
+      "decodedPixelMD5": "dee2a4717c3f8add095afba2beb809b4"
+    },
+    "window-workspace": {
+      "path": "assets/window-workspace.png",
+      "source": "workspace",
+      "cssRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "scale": 4,
+      "width": 7680,
+      "height": 4320,
+      "sha256": "f7e88c6718227571bb99833f3d819dec94501e07dbb95eca3a23d0f41cdc76e4",
+      "nativePixelCrop": false
+    },
+    "code": {
+      "path": "assets/code.png",
+      "source": "window-workspace",
+      "cssRect": {
+        "x": 280,
+        "y": 0,
+        "width": 680,
+        "height": 230
+      },
+      "scale": 4,
+      "width": 2720,
+      "height": 920,
+      "sha256": "db28bd25b34ff329db0e5a788337f97384f1a06bd85b05d3b6a027d9d6d31452",
+      "nativePixelCrop": true,
+      "decodedPixelMD5": "aca1a8691226ee511c33d85650b9a9d7"
+    },
+    "shell": {
+      "path": "assets/shell.png",
+      "source": "window-workspace",
+      "cssRect": {
+        "x": 280,
+        "y": 780,
+        "width": 750,
+        "height": 280
+      },
+      "scale": 4,
+      "width": 3000,
+      "height": 1120,
+      "sha256": "f8b1c56946b55e18affcce9cb56f9e69b27e403640d27f0334347f19df8bfa6c",
+      "nativePixelCrop": true,
+      "decodedPixelMD5": "d1ee66426b0b9c627c5b470bf1b984c0"
+    }
+  },
+  "interactionOrder": [
+    "select seeded task",
+    "send native composer",
+    "fixture complete",
+    "changed-file card",
+    "Review",
+    "Compare current file",
+    "Open file",
+    "Monaco native selection",
+    "workspace Panel",
+    "Shell"
+  ],
+  "typography": {
+    "sans": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "display": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "body": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "bodyBackground": "rgb(247, 249, 252)",
+    "bubbleFont": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "bubbleSize": "14px",
+    "bubbleBackground": "rgb(241, 244, 248)"
+  },
+  "nativeTaskBubble": {
+    "x": 690,
+    "y": 69,
+    "width": 780,
+    "height": 50.671875,
+    "cx": 1080,
+    "cy": 94.3359375
+  },
+  "chatGeometry": {
+    "bubble": {
+      "x": 690,
+      "y": 69,
+      "width": 780,
+      "height": 50.671875,
+      "cx": 1080,
+      "cy": 94.3359375
+    },
+    "change": {
+      "x": 691,
+      "y": 389.265625,
+      "width": 766,
+      "height": 44,
+      "cx": 1074,
+      "cy": 411.265625
+    },
+    "card": [
+      {
+        "cl": "",
+        "text": "src/sync.js\n+1\n−1",
+        "rect": {
+          "x": 691,
+          "y": 389.265625,
+          "width": 766,
+          "height": 44
+        }
+      },
+      {
+        "cl": "gyro-change-summary-file is-reviewable",
+        "text": "src/sync.js\n+1\n−1",
+        "rect": {
+          "x": 691,
+          "y": 389.265625,
+          "width": 778,
+          "height": 44
+        }
+      },
+      {
+        "cl": "gyro-change-summary-files",
+        "text": "src/sync.js\n+1\n−1",
+        "rect": {
+          "x": 691,
+          "y": 388.265625,
+          "width": 778,
+          "height": 45
+        }
+      },
+      {
+        "cl": "gyro-change-summary-details",
+        "text": "src/sync.js\n+1\n−1",
+        "rect": {
+          "x": 691,
+          "y": 388.265625,
+          "width": 778,
+          "height": 45
+        }
+      },
+      {
+        "cl": "gyro-chat-run-change-summary is-complete",
+        "text": "Edited 1 file\n+1\n−1\nUndo\nReview\nsrc/sync.js\n+1\n−1",
+        "rect": {
+          "x": 690,
+          "y": 336.265625,
+          "width": 780,
+          "height": 98
+        }
+      }
+    ]
+  },
+  "reviewClick": {
+    "page": {
+      "x": 1392.09375,
+      "y": 348.765625,
+      "width": 64.90625,
+      "height": 28,
+      "cx": 1424.546875,
+      "cy": 362.765625
+    },
+    "withinConversation": {
+      "x": 752.546875,
+      "y": 307.765625
+    }
+  },
+  "reviewGeometry": [
+    {
+      "cl": "gyro-chat-surface is-thread has-environment has-companion",
+      "rect": {
+        "x": 241,
+        "y": 1,
+        "width": 1678,
+        "height": 1078
+      }
+    },
+    {
+      "cl": "gyro-chat-companion is-review",
+      "rect": {
+        "x": 1499,
+        "y": 1,
+        "width": 420,
+        "height": 1078
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-resizer",
+      "rect": {
+        "x": 1500,
+        "y": 1,
+        "width": 8,
+        "height": 1078
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-tabs",
+      "rect": {
+        "x": 1500,
+        "y": 1,
+        "width": 419,
+        "height": 52
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-tab-list",
+      "rect": {
+        "x": 1510,
+        "y": 12.5,
+        "width": 330,
+        "height": 28
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-tab is-active",
+      "rect": {
+        "x": 1510,
+        "y": 12.5,
+        "width": 156,
+        "height": 28
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-tab-close",
+      "rect": {
+        "x": 1642,
+        "y": 16.5,
+        "width": 20,
+        "height": 20
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-add",
+      "rect": {
+        "x": 1674,
+        "y": 12.5,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-window-actions",
+      "rect": {
+        "x": 1848,
+        "y": 12.5,
+        "width": 61,
+        "height": 28
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-close",
+      "rect": {
+        "x": 1881,
+        "y": 12.5,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "cl": "gyro-chat-companion-content",
+      "rect": {
+        "x": 1500,
+        "y": 53,
+        "width": 419,
+        "height": 1026
+      }
+    },
+    {
+      "cl": "gyro-diff-tree-file is-active",
+      "rect": {
+        "x": 1506,
+        "y": 117,
+        "width": 407,
+        "height": 42
+      }
+    }
+  ],
+  "workspaceGeometry": [
+    {
+      "cl": "monaco-editor no-user-select mac  showUnused showDeprecated vs",
+      "rect": {
+        "x": 284,
+        "y": 30,
+        "width": 1635,
+        "height": 749
+      }
+    },
+    {
+      "cl": "xterm-screen",
+      "rect": {
+        "x": 300,
+        "y": 833,
+        "width": 1604,
+        "height": 215
+      }
+    }
+  ],
+  "fidelity": {
+    "method": "Lossless native pixel regions derived from preserved full app frames; decoded pixel MD5 comparison",
+    "verifiedAssets": [
+      "task",
+      "conversation",
+      "review",
+      "code",
+      "shell"
+    ],
+    "allCropsPixelIdentical": true
+  }
+}

@@ -143,6 +143,23 @@ pub fn discover_ollama_models(base_url: Option<&str>) -> Result<OllamaDiscovery>
     })
 }
 
+/// Resolve only the selected model before a turn. Full catalog enrichment is
+/// reserved for Settings; unrelated installed models must not delay a send.
+pub fn discover_ollama_model(base_url: Option<&str>, model: &str) -> Result<Option<OllamaModel>> {
+    let endpoint = ollama_endpoint(base_url)?;
+    let response = agent()
+        .get(endpoint.join("tags")?.as_str())
+        .call()
+        .map_err(ollama_http_error)?;
+    ensure_loopback_response(&response, &endpoint)?;
+    let tags: OllamaTagsResponse = response.into_json().context("invalid Ollama model list")?;
+    Ok(tags
+        .models
+        .into_iter()
+        .find(|tag| tag.name == model)
+        .map(|tag| enrich_model(&endpoint, tag)))
+}
+
 /// Submit one text-only Ollama chat turn. The caller owns session history and
 /// capability execution; keeping that state in Gyro is what makes runs
 /// resumable even though Ollama itself has no durable conversation cursor.
@@ -183,6 +200,13 @@ where
         |emit| ollama_tool_chat_once(&request, cancellation, emit),
         on_delta,
     )
+    .map_err(|error| {
+        if cancellation.is_cancelled() {
+            anyhow!(OLLAMA_CANCELLED_MESSAGE)
+        } else {
+            error
+        }
+    })
 }
 
 fn ollama_tool_chat_once<F>(
@@ -202,18 +226,26 @@ where
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
+    let payload = ureq::json!({"model": model, "stream": true,
+        "messages": request.messages, "tools": request.tools});
+    let mut observation = None;
     let response = crate::provider_retry::http_response(cancellation, || {
-        chat_agent().post(url.as_str()).send_json(ureq::json!({
-            "model": model,
-            "stream": true,
-            "messages": request.messages,
-            "tools": request.tools
-        }))
+        observation = Some(crate::provider_observation::Request::start(&payload));
+        let response =
+            crate::chat_http::post(&url, "", &payload, cancellation, CHAT_IDLE_TIMEOUT, true);
+        if matches!(&response, Err(ureq::Error::Status(400..=499, _))) {
+            observation.as_mut().unwrap().rejected();
+        }
+        response
     })
     .map_err(ollama_http_error)?;
-    ensure_loopback_response(&response, &endpoint)?;
+    if (300..400).contains(&response.status()) {
+        anyhow::bail!("Ollama redirected the chat request");
+    }
+    ensure_loopback_response_url(response.get_url(), &endpoint)?;
     let mut is_stream = response.content_type().contains("ndjson");
     let mut reader = BufReader::new(response.into_reader());
+    let mut observation = observation.expect("a completed HTTP exchange was observed");
     let mut content = String::new();
     let mut tool_calls = Vec::new();
     let mut input_tokens = None;
@@ -236,6 +268,7 @@ where
         }
         let frame: OllamaChatStreamFrame =
             serde_json::from_str(trimmed).context("invalid Ollama chat response")?;
+        observation.reported(frame.prompt_eval_count, frame.eval_count);
         anyhow::ensure!(
             frame.error.is_none(),
             "Ollama reported a generation error; no tool calls were executed"
@@ -248,6 +281,7 @@ where
         // still requires a final done marker before tool calls can be used.
         is_stream |= frame.done == Some(false);
         if !frame.message.content.is_empty() {
+            observation.delta(&frame.message.content);
             on_delta(&frame.message.content);
             content.push_str(&frame.message.content);
         }
@@ -283,6 +317,12 @@ where
     if content.is_empty() && tool_calls.is_empty() {
         return Err(anyhow!("Ollama finished without a text response"));
     }
+    let output_chars = content.chars().count()
+        + tool_calls
+            .iter()
+            .map(|call| call.name.chars().count() + call.arguments.to_string().chars().count())
+            .sum::<usize>();
+    observation.complete(input_tokens, output_tokens, output_chars);
     Ok(OllamaChatResponse {
         content,
         input_tokens,
@@ -295,22 +335,7 @@ fn agent() -> ureq::Agent {
     agent_with_read_timeout(REQUEST_TIMEOUT)
 }
 
-/// Shared so tool rounds reuse the pooled connection. No overall deadline: a
-/// slow local generation that keeps streaming must not be cut at a wall clock.
-fn chat_agent() -> ureq::Agent {
-    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
-    AGENT
-        .get_or_init(|| {
-            ureq::AgentBuilder::new()
-                .timeout_connect(REQUEST_TIMEOUT)
-                .timeout_read(CHAT_IDLE_TIMEOUT)
-                .timeout_write(CHAT_IDLE_TIMEOUT)
-                .redirects(0)
-                .build()
-        })
-        .clone()
-}
-
+/// Short discovery probes have a total deadline; generation uses chat_http.
 fn agent_with_read_timeout(read_timeout: Duration) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(REQUEST_TIMEOUT)
@@ -322,7 +347,10 @@ fn agent_with_read_timeout(read_timeout: Duration) -> ureq::Agent {
 }
 
 fn ensure_loopback_response(response: &ureq::Response, endpoint: &Url) -> Result<()> {
-    let response_url = Url::parse(response.get_url()).context("invalid Ollama response URL")?;
+    ensure_loopback_response_url(response.get_url(), endpoint)
+}
+fn ensure_loopback_response_url(response_url: &str, endpoint: &Url) -> Result<()> {
+    let response_url = Url::parse(response_url).context("invalid Ollama response URL")?;
     if response_url.host() != endpoint.host()
         || response_url.port_or_known_default() != endpoint.port_or_known_default()
     {
@@ -712,6 +740,65 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert_eq!(error, OLLAMA_CANCELLED_MESSAGE);
+    }
+
+    #[test]
+    fn a_send_enriches_only_the_selected_model() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                requests.push(line.clone());
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let response = if index == 0 {
+                    serde_json::json!({"models": [{"name": "unused-a"}, {"name": "chosen"}, {"name": "unused-b"}]}).to_string()
+                } else {
+                    assert_eq!(
+                        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["model"],
+                        "chosen"
+                    );
+                    serde_json::json!({"capabilities": ["tools", "vision"], "model_info": {"model.context_length": 32768}}).to_string()
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response.len(),
+                    response
+                )
+                .unwrap();
+            }
+            requests
+        });
+        let model = discover_ollama_model(Some(&format!("http://{address}/api")), "chosen")
+            .unwrap()
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/tags"));
+        assert!(requests[1].starts_with("POST /api/show"));
+        assert!(model.supports_tools && model.supports_images);
+        assert_eq!(model.context_window_tokens, Some(32768));
     }
 
     #[test]

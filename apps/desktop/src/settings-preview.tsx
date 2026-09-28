@@ -1,8 +1,11 @@
 // Development-only preview of real settings components with in-memory preferences.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   SettingsSurface,
+  applyAppearancePreferences,
+  type InterfaceSize,
+  type MotionSpeed,
   type ThemeMode,
   providersForConfig,
   type GyroConfig,
@@ -132,6 +135,25 @@ function Preview() {
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
   const [density, setDensity] = useState<"compact" | "comfortable">("compact");
+  const [interfaceSize, setInterfaceSize] = useState<InterfaceSize>("default");
+  const [motionSpeed, setMotionSpeed] = useState<MotionSpeed>("default");
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [systemDark, setSystemDark] = useState(false);
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const dark = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => {
+      setReduceMotion(motion.matches);
+      setSystemDark(dark.matches);
+    };
+    sync();
+    motion.addEventListener("change", sync);
+    dark.addEventListener("change", sync);
+    return () => {
+      motion.removeEventListener("change", sync);
+      dark.removeEventListener("change", sync);
+    };
+  }, []);
   const [menu, setMenu] = useState(true);
   const [follow, setFollow] = useState<"off" | "peek" | "follow">("peek");
   const [config, setConfig] = useState<GyroConfig>(() => {
@@ -163,7 +185,19 @@ function Preview() {
   const updateState = UPDATE_SCENES.find(
     (entry) => entry.id === updateScene,
   )?.state;
-  document.documentElement.dataset.theme = theme === "system" ? "light" : theme;
+  const resolvedTheme =
+    theme === "system" ? (systemDark ? "dark" : "light") : theme;
+  document.documentElement.dataset.theme = resolvedTheme;
+  applyAppearancePreferences(
+    document.documentElement,
+    {
+      interfaceSize,
+      motionSpeed,
+      mainColor: colors[0]!,
+      secondaryColor: colors[1]!,
+    },
+    resolvedTheme,
+  );
   document.documentElement.dataset.density = density;
   // The running app applies the chosen accent at the root, so the preview has
   // to as well — otherwise it cannot show which surfaces follow
@@ -250,6 +284,11 @@ function Preview() {
         themeMode={theme}
         onThemeChange={setTheme}
         density={density}
+        interfaceSize={interfaceSize}
+        onInterfaceSizeChange={setInterfaceSize}
+        motionSpeed={motionSpeed}
+        onMotionSpeedChange={setMotionSpeed}
+        reduceMotion={reduceMotion}
         onDensityChange={setDensity}
         showMenuBarIcon={menu}
         onMenuBarVisibilityChange={setMenu}

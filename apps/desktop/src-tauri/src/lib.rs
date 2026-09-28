@@ -4,11 +4,14 @@ mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod git_read;
 mod model_catalog;
+mod provider_accounting;
 mod provider_activity;
+use provider_accounting::*;
 use provider_activity::*;
 mod context_compaction;
 mod provider_mcp;
 mod provider_reliability;
+mod provider_tool_batch;
 use provider_reliability::{
     is_transient_provider_error, provider_failure_recovery, readable_provider_error,
 };
@@ -34,6 +37,8 @@ use kimi_usage::*;
 mod browser_knowledge;
 mod browser_pointer;
 mod file_patch_counts;
+mod workspace_search;
+use workspace_search::{literal_search_ranges, parse_rg_output};
 
 use anyhow::Context;
 use automation_scheduler::start_automation_scheduler;
@@ -595,6 +600,7 @@ struct ProviderRunControl {
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
+    timing: Mutex<timing::Handle>,
 }
 
 impl Default for ProviderRunControl {
@@ -608,6 +614,7 @@ impl Default for ProviderRunControl {
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
+            timing: Mutex::new(timing::Handle::default()),
         }
     }
 }
@@ -1988,6 +1995,7 @@ struct ProviderChatStreamEvent {
 
 #[derive(Debug)]
 struct ProviderRunnerOutput {
+    accounted_usage: Option<UsageTokens>,
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
     /// What this call billed, for the usage ledger. Absent when the provider
@@ -9891,13 +9899,7 @@ fn run_workspace_rg_search(
     use_regex: bool,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let mut command = command_with_gui_path("rg");
-    command
-        .current_dir(root)
-        .arg("--line-number")
-        .arg("--column")
-        .arg("--no-heading")
-        .arg("--color")
-        .arg("never");
+    command.current_dir(root).arg("--json");
     if !use_regex {
         command.arg("--fixed-strings");
     }
@@ -9915,52 +9917,12 @@ fn run_workspace_rg_search(
         8 * 1024 * 1024,
         64 * 1024,
     ) {
-        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => Ok(parse_rg_output(
-            &output.stdout,
-            query,
-            max_results,
-            use_regex,
-        )),
+        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
+            Ok(parse_rg_output(&output.stdout, max_results))
+        }
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
         Err(error) => Err(error),
     }
-}
-
-fn parse_rg_output(
-    output: &str,
-    query: &str,
-    max_results: usize,
-    use_regex: bool,
-) -> Vec<WorkspaceSearchResult> {
-    // Fixed-string match length is the query length. For regex, rg's column is
-    // the start of the match; without the match end we highlight one character
-    // so the range stays valid rather than inventing a length from the pattern.
-    let highlight_len = if use_regex {
-        1usize
-    } else {
-        query.chars().count().max(1)
-    };
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(4, ':');
-            let path = parts.next()?.trim_start_matches("./").to_string();
-            let line_number = parts.next()?.parse::<usize>().ok()?;
-            let start_column = parts.next()?.parse::<usize>().ok()?;
-            let text = parts.next().unwrap_or_default().to_string();
-            let end_column = start_column + highlight_len;
-            Some(WorkspaceSearchResult {
-                path,
-                line_number,
-                line: text,
-                ranges: vec![WorkspaceSearchRange {
-                    start_column,
-                    end_column,
-                }],
-            })
-        })
-        .take(max_results)
-        .collect()
 }
 
 fn bound_model_search_results(
@@ -10038,7 +10000,7 @@ fn fallback_search_workspace(
         }
         let content = String::from_utf8_lossy(&bytes);
         for (index, line) in content.lines().enumerate() {
-            if let Some(offset) = line.find(query) {
+            if line.contains(query) {
                 let path = entry
                     .path()
                     .strip_prefix(root)?
@@ -10048,10 +10010,7 @@ fn fallback_search_workspace(
                     path,
                     line_number: index + 1,
                     line: line.to_string(),
-                    ranges: vec![WorkspaceSearchRange {
-                        start_column: offset + 1,
-                        end_column: offset + query.len() + 1,
-                    }],
+                    ranges: literal_search_ranges(line, query),
                 });
                 if results.len() >= max_results {
                     return Ok(results);
@@ -12961,78 +12920,6 @@ impl UsageContext {
     }
 }
 
-/// One turn's billed tokens, or the same clearly marked estimate the ledger
-/// uses when a provider reports no counts. Share this with the response event
-/// so the number under the answer agrees with the session total.
-fn provider_turn_tokens(
-    request: &ProviderChatRequest,
-    output: Option<&ProviderRunnerOutput>,
-) -> UsageTokens {
-    output
-        .and_then(|output| output.billed_usage.as_ref())
-        .map(|usage| {
-            UsageTokens::measured(
-                usage.input_tokens,
-                usage.cached_input_tokens,
-                usage.output_tokens,
-                usage.reasoning_output_tokens,
-                usage.total_tokens,
-            )
-        })
-        .filter(|tokens| !tokens.is_empty())
-        .unwrap_or_else(|| {
-            UsageTokens::estimated(
-                request.message.chars().count(),
-                output.map_or(0, |output| output.response.chars().count()),
-            )
-        })
-}
-
-/// Append one provider call to the usage ledger.
-///
-/// Best-effort on purpose: a ledger write that fails must never turn a
-/// completed provider turn into an error the user sees.
-fn record_provider_usage(
-    store: &SessionStore,
-    request: &ProviderChatRequest,
-    usage_context: UsageContext,
-    output: Option<&ProviderRunnerOutput>,
-    outcome: UsageOutcome,
-    wall_ms: u64,
-) {
-    // Before the early return below: a run can name a plan limit and still fail
-    // to produce a usable session id, and that reading is the one worth keeping.
-    if let Some(output) = output {
-        remember_provider_rate_limits_in(store, &request.provider_id, &output.rate_limits);
-    }
-    let Ok(session_id) = parse_uuid(&request.session_id) else {
-        return;
-    };
-    let tokens = provider_turn_tokens(request, output);
-    let entry = UsageEntry {
-        session_id,
-        turn_id: request
-            .turn_id
-            .as_deref()
-            .and_then(|turn_id| parse_uuid(turn_id).ok()),
-        seat_id: usage_context.seat_id,
-        provider_id: request.provider_id.clone(),
-        model_id: request.model_id.clone(),
-        reasoning_effort: request.reasoning_effort.clone(),
-        origin: usage_context.origin,
-        outcome,
-        tokens,
-        wall_ms,
-        retry_count: output.map_or(0, |output| output.retry_count),
-    };
-    if let Err(error) = store.record_usage(&entry) {
-        eprintln!(
-            "provider call completed but its usage was not recorded: {}",
-            gyro_core::security::redact_secrets(&error.to_string())
-        );
-    }
-}
-
 /// Refuse a call that the usage guards say must not start.
 ///
 /// Checked here rather than at each caller so no provider path can be added
@@ -13151,15 +13038,29 @@ fn run_provider_chat_with_retry(
         anyhow::bail!(reason);
     }
     let started = Instant::now();
-    let result = run_provider_chat_with_retry_using(
+    let _observations = gyro_core::provider_observation::Scope::start();
+    provider_accounting::bind_timing(app, &request.session_id);
+    let mut result = run_provider_chat_with_retry_using(
         store,
         request,
         binding,
         |resume_cursor, attempt| {
+            gyro_core::provider_observation::attempt();
             let shown = provider_timeline::item_count(app, &request.session_id);
             let result = run_provider_chat_once(app, request, resume_cursor, attempt);
-            attempt.published_output |=
-                provider_timeline::item_count(app, &request.session_id) != shown;
+            attempt.published_output |= provider_timeline::item_count(app, &request.session_id)
+                != shown
+                || provider_accounting::has_dispatched_tools(app, &request.session_id);
+            if let Ok(output) = &result {
+                if let Some(tokens) = output.accounted_usage.or_else(|| {
+                    output
+                        .billed_usage
+                        .as_ref()
+                        .map(provider_accounting::usage_tokens)
+                }) {
+                    gyro_core::provider_observation::native_usage(tokens);
+                }
+            }
             result
         },
         || {
@@ -13169,6 +13070,13 @@ fn run_provider_chat_with_retry(
     )
     .map_err(|error| anyhow::anyhow!("{error:#}"));
     timing::mark(TimingStage::ProviderComplete);
+    if let Some(summary) = gyro_core::provider_observation::snapshot() {
+        if let Ok(output) = &mut result {
+            output.accounted_usage = summary.tokens.or(output.accounted_usage);
+            output.retry_count = output.retry_count.max(summary.retries);
+        }
+        timing::provider_requests(summary);
+    }
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     match result.as_ref() {
         Ok(output) => record_provider_usage(
@@ -13236,6 +13144,9 @@ where
     let binding_cursor = binding
         .as_ref()
         .and_then(provider_resume_cursor_from_binding);
+    if let Some(stop) = stopped() {
+        anyhow::bail!(stop);
+    }
     let mut attempt = ProviderRunAttempt::default();
     match run_once(binding_cursor.as_ref(), &mut attempt) {
         Ok(mut output) => {
@@ -13245,7 +13156,12 @@ where
         // A dead provider cursor is not a user-visible failure: clear it and
         // immediately retry once without resume. Local history is injected by
         // the runners when resume is absent, so continuity stays in Gyro.
-        Err(error) if binding.is_some() && is_stale_resume_error(&format!("{error:#}")) => {
+        Err(error)
+            if binding.is_some()
+                && !attempt.published_output
+                && stopped().is_none()
+                && is_stale_resume_error(&format!("{error:#}")) =>
+        {
             let session_id =
                 parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
@@ -13359,7 +13275,11 @@ fn persist_failed_provider_attempt(
                 binding.model_id.clone(),
                 binding.model_label.clone(),
                 binding.reasoning_effort.clone(),
-                binding.resume_cursor_json.clone(),
+                attempt
+                    .resume_cursor
+                    .as_ref()
+                    .and_then(|cursor| serde_json::to_value(cursor).ok())
+                    .unwrap_or_else(|| binding.resume_cursor_json.clone()),
                 "failed",
                 last_error,
             );
@@ -13872,6 +13792,7 @@ fn run_kimi_acp_chat(
         .clone();
     let response = gyro_core::sanitize_harness_text(&output.response);
     Ok(ProviderRunnerOutput {
+        accounted_usage: None,
         activities,
         context_usage: None,
         // Grok reports what the prompt billed; agents that report nothing are
@@ -13980,6 +13901,7 @@ fn run_openai_codex_chat(
         can_resume,
     );
 
+    gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
     let mut process = command_for_provider("codex", "openai");
     process.current_dir(cwd);
     let args = codex_chat_args(
@@ -14026,6 +13948,7 @@ fn run_openai_codex_chat(
             let response_chars = response.chars().count();
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
+                accounted_usage: None,
                 activities: provider_activities_for_response(output.activities, &response),
                 context_usage: output.context_usage,
                 billed_usage: output.billed_usage,
@@ -14055,6 +13978,7 @@ fn run_openai_codex_chat(
             let response_chars = stdout.chars().count();
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
+                accounted_usage: None,
                 activities: provider_activities_for_response(output.activities, &stdout),
                 context_usage: output.context_usage,
                 billed_usage: output.billed_usage,
@@ -14089,6 +14013,7 @@ fn run_openai_codex_chat(
         let response_chars = response.chars().count();
         let provider_session_id = output.provider_session_id.clone();
         return Ok(ProviderRunnerOutput {
+            accounted_usage: None,
             activities: provider_activities_for_response(output.activities, &response),
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
@@ -14301,6 +14226,7 @@ fn run_openai_codex_app_server_chat(
         });
 
         timing::mark(TimingStage::ProtocolReady);
+        gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
         let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
         for attachment in request
             .attachments
@@ -14347,6 +14273,8 @@ fn run_openai_codex_app_server_chat(
         let mut completed_activity_ids = HashSet::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
         let mut context_usage = None;
+        let mut billed = provider_accounting::CodexTurnUsage::new(can_resume);
+        let mut provider_turn_id = None;
         let mut turn_started = false;
         let mut completed_artifact_response_at: Option<Instant> = None;
         let mut protocol_messages = 0usize;
@@ -14401,7 +14329,11 @@ fn run_openai_codex_app_server_chat(
                 continue;
             }
             if message.get("id").and_then(serde_json::Value::as_u64) == Some(3) {
-                codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
+                let result = codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
+                provider_turn_id = result
+                    .pointer("/turn/id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
                 turn_started = true;
                 continue;
             }
@@ -14409,6 +14341,17 @@ fn run_openai_codex_app_server_chat(
             let params = message.get("params").cloned().unwrap_or_default();
             match method {
                 "thread/tokenUsage/updated" => {
+                    if turn_started
+                        && params.get("threadId").and_then(serde_json::Value::as_str)
+                            == Some(&thread_id)
+                        && provider_turn_id.as_deref().is_some_and(|id| {
+                            params.get("turnId").and_then(serde_json::Value::as_str) == Some(id)
+                        })
+                    {
+                        if let Some(tokens) = billed.observe(&params) {
+                            gyro_core::provider_observation::native_usage(tokens);
+                        }
+                    }
                     if let Some(usage) = provider_context_usage_from_app_server(&params) {
                         emit_provider_context_usage(app, request, &usage);
                         context_usage = Some(usage);
@@ -14621,10 +14564,10 @@ fn run_openai_codex_app_server_chat(
         }
         let response_chars = response.chars().count();
         Ok(ProviderRunnerOutput {
+            accounted_usage: billed.tokens(),
             activities: provider_activities_for_response(activities, &response),
-            // Codex app-server reports the turn's running total, so the same
-            // reading answers both "how full" and "what it billed".
-            billed_usage: context_usage.clone(),
+            // Last-request occupancy is not the turn's billed usage.
+            billed_usage: None,
             context_usage,
             rate_limits: Vec::new(),
             paused_at_tool_budget: false,
@@ -15857,6 +15800,7 @@ fn run_anthropic_claude_chat(
         request.mode == ChatMode::Normal,
         can_resume,
     );
+    gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
     let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
     let capability_context = active_provider_capability_context(app, &request.session_id)?;
     let permission_mcp_config = Some(desktop_claude_permission_mcp_config(
@@ -15956,6 +15900,7 @@ fn run_anthropic_claude_chat(
         let response_chars = response.chars().count();
         let provider_session_id = session_id.clone();
         return Ok(ProviderRunnerOutput {
+            accounted_usage: None,
             activities: provider_activities_for_response(output.activities, &response),
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
@@ -15995,6 +15940,7 @@ fn run_anthropic_claude_chat(
         let response_chars = response.chars().count();
         let provider_session_id = session_id.clone();
         return Ok(ProviderRunnerOutput {
+            accounted_usage: None,
             activities: provider_activities_for_response(output.activities, &response),
             context_usage: output.context_usage,
             billed_usage: output.billed_usage,
@@ -17935,6 +17881,9 @@ impl StreamingCommandState {
             ClaudeUsageFrame::Turn => self.billed_usage = Some(usage.clone()),
             ClaudeUsageFrame::Request => self.accumulate_billed_usage(&usage),
         }
+        if let Some(usage) = &self.billed_usage {
+            gyro_core::provider_observation::native_usage(provider_accounting::usage_tokens(usage));
+        }
         match frame {
             ClaudeUsageFrame::Request => {
                 let carried_window = self
@@ -19103,6 +19052,8 @@ fn emit_provider_chat_event_with_timeline(
 ) {
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
+        timing::mark(TimingStage::FirstToken);
+        gyro_core::provider_observation::native_delta(text_delta.as_deref().unwrap_or_default());
     }
     let payload = ProviderChatStreamEvent {
         session_id: request.session_id.clone(),
@@ -20171,6 +20122,7 @@ fn capability_event_with_target(
     resource: Option<CapabilityResourceRef>,
     target: Option<&str>,
 ) -> anyhow::Result<SessionEvent> {
+    provider_accounting::tool_timing(call_id, status);
     let event = CapabilityCallEvent {
         schema: CAPABILITY_SCHEMA_V1.into(),
         kind: "capability-call".into(),
@@ -20223,6 +20175,7 @@ fn wait_for_capability_approval(
     scope_kind: &str,
     scope_value: &str,
 ) -> anyhow::Result<CapabilityApprovalDecision> {
+    let _timing = timing::ApprovalScope::start();
     let approval_id = Uuid::new_v4();
     let session_id = Uuid::parse_str(&bound.session_id)?;
     let turn_id = bound.turn_id.as_deref().map(Uuid::parse_str).transpose()?;
@@ -21264,7 +21217,7 @@ fn execute_provider_capability(
                 app,
                 &bound.session_id,
                 "click",
-                serde_json::json!({ "ref": ref_id }),
+                serde_json::json!({ "ref": ref_id, "actor": bound.provider_id }),
             )
             .map_err(anyhow::Error::msg)?;
             let resource = CapabilityResourceRef {
@@ -21280,8 +21233,9 @@ fn execute_provider_capability(
         }
         CapabilityId::BrowserMouse => {
             let owned = require_model_browser_resource(app, bound)?;
-            let outcome = browser_pointer::execute(app, &bound.session_id, arguments)
-                .map_err(anyhow::Error::msg)?;
+            let outcome =
+                browser_pointer::execute(app, &bound.session_id, &bound.provider_id, arguments)
+                    .map_err(anyhow::Error::msg)?;
             let resource = CapabilityResourceRef {
                 id: owned.resource_id,
                 kind: "browser".into(),
@@ -21303,6 +21257,7 @@ fn execute_provider_capability(
                 serde_json::json!({
                     "ref": arguments.get("ref").and_then(serde_json::Value::as_str),
                     "text": text,
+                    "actor": bound.provider_id,
                     "submit": arguments.get("submit").and_then(serde_json::Value::as_bool).unwrap_or(false),
                 }),
             )
@@ -21359,7 +21314,7 @@ fn execute_provider_capability(
                 app,
                 &bound.session_id,
                 "formInput",
-                serde_json::json!({ "ref": ref_id, "value": value }),
+                serde_json::json!({ "ref": ref_id, "value": value, "actor": bound.provider_id }),
             )
             .map_err(anyhow::Error::msg)?;
             if result.get("ok") == Some(&serde_json::Value::Bool(false)) {
@@ -21555,6 +21510,13 @@ fn handle_desktop_provider_capability_request(
             "The capability request did not belong to the active provider run.".into(),
         );
     }
+    let _timing = timing::attach(
+        control
+            .timing
+            .lock()
+            .map(|trace| trace.clone())
+            .unwrap_or_default(),
+    );
     let bound = match control
         .capability_context
         .lock()
@@ -24139,6 +24101,7 @@ mod tests {
             .unwrap();
         let request = provider_chat_request_for(&session, temp.path(), "xai");
         let mut attempts = 0;
+        let stop_checks = std::cell::Cell::new(0);
         let started = Instant::now();
         let error = run_provider_chat_with_retry_using(
             &store,
@@ -24148,7 +24111,11 @@ mod tests {
                 attempts += 1;
                 anyhow::bail!("connection reset by peer");
             },
-            || Some(ProviderStopReason::User.message()),
+            || {
+                let check = stop_checks.get();
+                stop_checks.set(check + 1);
+                (check > 0).then(|| ProviderStopReason::User.message())
+            },
         )
         .unwrap_err();
         assert_eq!(attempts, 1);
@@ -24181,6 +24148,7 @@ mod tests {
                 }
                 assert_eq!(cursor.unwrap().session_id, "acknowledged-session");
                 Ok(ProviderRunnerOutput {
+                    accounted_usage: None,
                     activities: Vec::new(),
                     context_usage: None,
                     billed_usage: None,
@@ -28351,6 +28319,7 @@ while True:
                     anyhow::bail!("Could not resume session: not found");
                 }
                 Ok(ProviderRunnerOutput {
+                    accounted_usage: None,
                     activities: Vec::new(),
                     context_usage: None,
                     billed_usage: None,
@@ -28479,6 +28448,7 @@ while True:
             |resume_cursor, _attempt| {
                 resumed_from = resume_cursor.map(|cursor| cursor.session_id.clone());
                 Ok(ProviderRunnerOutput {
+                    accounted_usage: None,
                     activities: Vec::new(),
                     context_usage: None,
                     billed_usage: None,

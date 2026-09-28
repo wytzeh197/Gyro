@@ -1,3 +1,5 @@
+import { workspaceEditorOptions } from "./editor-presentation";
+import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
 import {
   turnIdFromSessionEvent,
   chatModeEventMessage,
@@ -127,9 +129,12 @@ import {
   chatCompanionReducer,
   chatGridReducer,
   createChatProjectLayout,
+  AppearanceContext,
+  useAppearance,
   createInitialChatCompanionState,
   createInitialChatGridState,
   createInitialWorkbenchState,
+  type WorkbenchAction,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
   resolveChatRailPanel,
@@ -549,22 +554,10 @@ const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
-const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
 
-function systemTheme(): ResolvedTheme {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
-function storedThemeMode(value: unknown): ThemeMode | undefined {
-  return value === "system" || value === "dark" || value === "light"
-    ? value
-    : undefined;
-}
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
@@ -804,6 +797,12 @@ function saveModelUsageMap(usage: ModelUsageMap) {
 
 /** Pane key for the chat surfaces that render outside the tiled grid. */
 const SOLO_CHAT_PANE_ID = "solo-chat";
+const EMPTY_BROWSER_PREVIEW = createInitialWorkbenchState().browserPreview;
+type BrowserOwner = {
+  sessionId: string;
+  workspaceKey: string;
+  draftKey: string;
+};
 
 export function App() {
   const [workbench, dispatchWorkbench] = useReducer(
@@ -811,11 +810,7 @@ export function App() {
     undefined,
     loadInitialWorkbenchState,
   );
-  const themePreference = workbench.preferences.theme;
-  const [systemThemeValue, setSystemThemeValue] =
-    useState<ResolvedTheme>(systemTheme);
-  const resolvedTheme: ResolvedTheme =
-    themePreference === "system" ? systemThemeValue : themePreference;
+  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
   const [sessions, setSessions] = useState<Session[]>([]);
   // Session persistence and title updates must not interrupt live tool events.
   const sessionsRef = useRef(sessions);
@@ -1020,7 +1015,6 @@ export function App() {
   const [finishedMenuBarOutcomes, setFinishedMenuBarOutcomes] = useState<
     MenuBarOutcome[]
   >([]);
-  const [reduceMotion, setReduceMotion] = useState(false);
   const menuBarOutcomeInitializedRef = useRef(false);
   const latestMenuBarOutcomeIdRef = useRef<string>();
   const queuedChatDispatchesRef = useRef(new Set<string>());
@@ -1249,6 +1243,33 @@ export function App() {
     [activeSessionId, sessions],
   );
   const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  const sessionBrowserKey =
+    activeSessionId ??
+    (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
+  const browserPreview =
+    workbench.browserPreviewsBySession?.[sessionBrowserKey] ??
+    EMPTY_BROWSER_PREVIEW;
+  // Each render captures its browser owner, including callbacks completing after
+  // a chat switch. Native events explicitly supply the originating session.
+  const dispatchActiveBrowser = useCallback(
+    (action: WorkbenchAction) => {
+      if (
+        action.type !== "browser-session" &&
+        (action.type.startsWith("browser-") ||
+          action.type === "set-browser-url")
+      ) {
+        dispatchWorkbench({
+          type: "browser-session",
+          sessionId: sessionBrowserKey,
+          action,
+        });
+      } else {
+        dispatchWorkbench(action);
+      }
+    },
+    [sessionBrowserKey],
+  );
+
   // The bottom drawer belongs to the Workspace layouts. A Chat (thread) surface
   // never draws it, so its chats must not offer the control either.
   const isBottomDrawerAvailable = workbench.activeWorkspaceLayout !== "thread";
@@ -1684,7 +1705,11 @@ export function App() {
             notify("command-failed", "Could not close browser", String(error)),
           );
         }
-        dispatchWorkbench({ type: "browser-close" });
+        dispatchWorkbench({
+          type: "browser-session",
+          sessionId,
+          action: { type: "browser-close" },
+        });
       }
     },
     onCloseCompanionDock: () => {
@@ -1713,7 +1738,7 @@ export function App() {
       workbench.activeWorkspaceLayout,
       workbench.lastSessionsLayout,
       workbench.automations,
-      workbench.browserPreview,
+      browserPreview,
       workbench.diffReview,
       workbench.ide,
       workbench.isToolPanelOpen,
@@ -2396,25 +2421,6 @@ export function App() {
   );
 
   useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReduceMotion(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
-    if (themePreference !== "system") {
-      return;
-    }
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const sync = () => setSystemThemeValue(media.matches ? "dark" : "light");
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, [themePreference]);
-
-  useEffect(() => {
     if (!menuBarOutcomeInitializedRef.current) {
       menuBarOutcomeInitializedRef.current = true;
       latestMenuBarOutcomeIdRef.current = latestMenuBarOutcome?.id;
@@ -2997,7 +3003,7 @@ export function App() {
             }));
           }
           // Surface agent screenshots in the Live/Capture toggle + preview card.
-          if (capturePath && isActiveModelWorkspace) {
+          if (capturePath) {
             const width = numberFromUnknown(capture?.width) ?? 0;
             const height = numberFromUnknown(capture?.height) ?? 0;
             const filename =
@@ -3005,18 +3011,23 @@ export function App() {
               capturePath.split(/[/\\]/).pop() ??
               "browser-capture.png";
             dispatchWorkbench({
-              type: "browser-capture-success",
-              capture: {
-                path: capturePath,
-                filename,
-                width,
-                height,
-                createdAt:
-                  stringFromRecord(capture, "createdAt") ??
-                  new Date().toISOString(),
-                src: isTauriRuntime()
-                  ? convertFileSrc(capturePath)
-                  : capturePath,
+              type: "browser-session",
+              sessionId: payload.sessionId,
+              action: {
+                type: "browser-capture-success",
+                capture: {
+                  path: capturePath,
+                  filename,
+                  width,
+                  height,
+                  createdAt:
+                    stringFromRecord(capture, "createdAt") ??
+                    new Date().toISOString(),
+                  src: isTauriRuntime()
+                    ? convertFileSrc(capturePath)
+                    : capturePath,
+                  sourceUrl: url,
+                },
               },
             });
           }
@@ -3132,22 +3143,6 @@ export function App() {
       unlistenResource?.();
     };
   }, [flushProviderStreamBatches, setEventsForSession]);
-
-  useEffect(() => {
-    if (!activeSessionId) return;
-    const browser = browserResourcesBySessionId[activeSessionId];
-    if (browser && workbench.browserPreview.url !== browser.url) {
-      dispatchWorkbench({ type: "set-browser-url", url: browser.url });
-    }
-    // A model terminal is a focus, not a place. Selecting it here moved the
-    // workspace terminal whenever this chat owned one, so clicking a run or
-    // test task could never land on the task's own terminal. Peek and off
-    // leave the workspace alone; Follow rides the capability resource events.
-  }, [
-    activeSessionId,
-    browserResourcesBySessionId,
-    workbench.browserPreview.url,
-  ]);
 
   const scheduleProviderStreamFlush = useCallback(() => {
     if (providerStreamFlushTimerRef.current !== undefined) {
@@ -6804,7 +6799,7 @@ export function App() {
       } else {
         notify("terminal", "Session created", session.title);
       }
-    } catch {
+    } catch (error) {
       const session = createPreviewSession(
         sessionLayout,
         workbench.workspaceMode,
@@ -6818,7 +6813,7 @@ export function App() {
       activeSessionIdRef.current = session.id;
       setActiveSessionId(session.id);
       setEventsForSession(session.id, []);
-      notify("command-failed", "Session fallback", "Created preview session");
+      notify("command-failed", "Chat not saved yet", String(error));
     }
   }, [
     config,
@@ -9787,9 +9782,14 @@ export function App() {
           ? overrideContext.goal
           : activeSessionGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
-      const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
-      const targetSession = targetSessionId
-        ? sessions.find((session) => session.id === targetSessionId)
+      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const previewSessionId =
+        isTauriRuntime() && requestedSessionId?.startsWith("preview-")
+          ? requestedSessionId
+          : undefined;
+      const targetSessionId = previewSessionId ? undefined : requestedSessionId;
+      const targetSession = requestedSessionId
+        ? sessions.find((session) => session.id === requestedSessionId)
         : undefined;
       const targetSessionHasTranscriptEvents = targetSessionId
         ? (sessionEventsById[targetSessionId] ?? []).some(
@@ -9805,7 +9805,7 @@ export function App() {
         ...selectedSessionModelFromConfig(config),
         // Prefer the model bound to this session or draft pane over the global
         // picker — required so split-screen chats keep independent models.
-        ...(targetSessionId
+        ...(requestedSessionId
           ? sessionModelSelectionFromSession(targetSession)
           : chatDraftModels[activeDraftKey]),
         ...overrideContext?.sessionModel,
@@ -10032,10 +10032,11 @@ export function App() {
       };
       const shouldSuggestTitle =
         !isRetry &&
-        shouldSuggestSessionTitle(
-          targetSession,
-          targetSessionHasTranscriptEvents,
-        );
+        (Boolean(previewSessionId) ||
+          shouldSuggestSessionTitle(
+            targetSession,
+            targetSessionHasTranscriptEvents,
+          ));
       const provisionalTitle = shouldSuggestTitle
         ? sessionTitleFromMessage(message)
         : undefined;
@@ -10085,13 +10086,31 @@ export function App() {
             ? workspaceFilesForRoot(session.workspacePath, previewFiles)
             : [],
         );
-        setSessions((current) => [session, ...current]);
-        dispatchChatGrid({
-          type: "migrate-draft-pane",
-          draftKey: activeDraftKey,
-          sessionId: session.id,
-          workspacePath: session.workspacePath,
-        });
+        setSessions((current) => [
+          session,
+          ...current.filter((item) => item.id !== previewSessionId),
+        ]);
+        if (previewSessionId) {
+          optimisticEventsRef.current.delete(previewSessionId);
+          setSessionEventsById((current) => {
+            const next = { ...current };
+            delete next[previewSessionId];
+            return next;
+          });
+          dispatchChatGrid({
+            type: "rekey-session-pane",
+            fromSessionId: previewSessionId,
+            toSessionId: session.id,
+            workspacePath: session.workspacePath,
+          });
+        } else {
+          dispatchChatGrid({
+            type: "migrate-draft-pane",
+            draftKey: activeDraftKey,
+            sessionId: session.id,
+            workspacePath: session.workspacePath,
+          });
+        }
         setChatDraftModels((current) => {
           if (!(activeDraftKey in current)) {
             return current;
@@ -11150,7 +11169,11 @@ export function App() {
         } else if (activity.resource.kind === "browser") {
           const browser = browserResourcesBySessionId[event.sessionId];
           if (browser) {
-            dispatchWorkbench({ type: "browser-navigate", url: browser.url });
+            dispatchWorkbench({
+              type: "browser-session",
+              sessionId: event.sessionId,
+              action: { type: "browser-loaded", url: browser.url },
+            });
             dispatchWorkbench({ type: "open-tool-panel", tab: "browser" });
           }
         } else if (activity.resource.kind === "output") {
@@ -12925,25 +12948,44 @@ export function App() {
     [notify, refreshTerminalPane, workbench.selectedTerminalPaneId],
   );
 
-  const openBrowserPreviewExternal = useCallback(async () => {
-    try {
-      const url = normalizedPreviewUrl(workbench.browserPreview.url);
-      if (isTauriRuntime()) {
-        await openUrl(url);
-      } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+  const openBrowserPreviewExternal = useCallback(
+    async (owner?: BrowserOwner) => {
+      try {
+        const url = normalizedPreviewUrl(
+          owner ? previewForBrowser(owner).url : browserPreview.url,
+        );
+        if (isTauriRuntime()) {
+          await openUrl(url);
+        } else {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+        notify("terminal", "Opened in browser", url);
+      } catch (error) {
+        notify("command-failed", "Browser open failed", String(error));
       }
-      notify("terminal", "Opened in browser", url);
-    } catch (error) {
-      notify("command-failed", "Browser open failed", String(error));
-    }
-  }, [notify, workbench.browserPreview.url]);
+    },
+    [notify, browserPreview.url, workbench.browserPreviewsBySession],
+  );
 
-  const sessionBrowserKey =
-    activeSessionId ??
-    (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
   const sessionBrowserWorkspaceKey =
     activeSession?.workspacePath ?? activeWorkspaceRoot ?? workspacePath ?? "";
+  const activeBrowserOwner = useMemo<BrowserOwner>(
+    () => ({
+      sessionId: sessionBrowserKey,
+      workspaceKey: sessionBrowserWorkspaceKey,
+      draftKey: activeDraftKey,
+    }),
+    [sessionBrowserKey, sessionBrowserWorkspaceKey, activeDraftKey],
+  );
+  const previewForBrowser = (owner: BrowserOwner) =>
+    workbench.browserPreviewsBySession?.[owner.sessionId] ??
+    EMPTY_BROWSER_PREVIEW;
+  const sendBrowserAction = (owner: BrowserOwner, action: WorkbenchAction) =>
+    dispatchWorkbench({
+      type: "browser-session",
+      sessionId: owner.sessionId,
+      action,
+    });
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
     isCommandPaletteOpen ||
@@ -12962,15 +13004,13 @@ export function App() {
         width: number;
         height: number;
       } | null,
+      owner: BrowserOwner = activeBrowserOwner,
     ) => {
-      if (
-        !isTauriRuntime() ||
-        (!sessionBrowserWorkspaceKey && !activeSessionId)
-      ) {
+      if (!isTauriRuntime() || !owner.workspaceKey) {
         return false;
       }
       try {
-        dispatchWorkbench({
+        sendBrowserAction(owner, {
           type: "browser-status",
           status: "loading",
           message: "Loading…",
@@ -12978,8 +13018,8 @@ export function App() {
         });
         await invoke("session_browser_open", {
           request: {
-            sessionId: sessionBrowserKey,
-            workspaceKey: sessionBrowserWorkspaceKey,
+            sessionId: owner.sessionId,
+            workspaceKey: owner.workspaceKey,
             url: normalizedPreviewUrl(url),
             bounds: bounds ?? undefined,
             visible: bounds != null,
@@ -12988,7 +13028,7 @@ export function App() {
         return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
-        dispatchWorkbench({
+        sendBrowserAction(owner, {
           type: "browser-status",
           status: "verification-failed",
           message:
@@ -12998,7 +13038,7 @@ export function App() {
         return false;
       }
     },
-    [activeSessionId, notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
+    [activeBrowserOwner, notify],
   );
 
   const [updateBrowserHostVisibility] = useState(() =>
@@ -13007,78 +13047,88 @@ export function App() {
   const handleBrowserHostBoundsChange = useCallback(
     (
       bounds: { x: number; y: number; width: number; height: number } | null,
+      owner: BrowserOwner = activeBrowserOwner,
     ) => {
       if (!isTauriRuntime()) return;
       return updateBrowserHostVisibility(
-        sessionBrowserKey,
+        owner.sessionId,
         browserOverlayOccluded ? null : bounds,
       );
     },
-    [browserOverlayOccluded, sessionBrowserKey, updateBrowserHostVisibility],
+    [browserOverlayOccluded, activeBrowserOwner, updateBrowserHostVisibility],
   );
 
   const handleBrowserNavigate = useCallback(
-    (url: string) => {
+    (url: string, owner: BrowserOwner = activeBrowserOwner) => {
       try {
         const next = normalizedPreviewUrl(url);
-        dispatchWorkbench({ type: "browser-navigate", url: next });
-        void ensureSessionBrowser(next);
+        sendBrowserAction(owner, { type: "browser-navigate", url: next });
+        void ensureSessionBrowser(next, undefined, owner);
       } catch (error) {
         notify("command-failed", "Browser address is not valid", String(error));
       }
     },
-    [ensureSessionBrowser, notify],
+    [ensureSessionBrowser, notify, activeBrowserOwner],
   );
 
-  const handleBrowserBack = useCallback(() => {
-    dispatchWorkbench({ type: "browser-back" });
-    if (isTauriRuntime()) {
-      void invoke("session_browser_history", {
-        sessionId: sessionBrowserKey,
-        direction: "back",
-      }).catch((error) => {
-        notify("command-failed", "Browser back failed", String(error));
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "verification-failed",
-          message: String(error),
+  const handleBrowserBack = useCallback(
+    (owner: BrowserOwner = activeBrowserOwner) => {
+      sendBrowserAction(owner, { type: "browser-back" });
+      if (isTauriRuntime()) {
+        void invoke("session_browser_history", {
+          sessionId: owner.sessionId,
+          direction: "back",
+        }).catch((error) => {
+          notify("command-failed", "Browser back failed", String(error));
+          sendBrowserAction(owner, {
+            type: "browser-status",
+            status: "verification-failed",
+            message: String(error),
+          });
         });
-      });
-    }
-  }, [notify, sessionBrowserKey]);
+      }
+    },
+    [notify, activeBrowserOwner],
+  );
 
-  const handleBrowserForward = useCallback(() => {
-    dispatchWorkbench({ type: "browser-forward" });
-    if (isTauriRuntime()) {
-      void invoke("session_browser_history", {
-        sessionId: sessionBrowserKey,
-        direction: "forward",
-      }).catch((error) => {
-        notify("command-failed", "Browser forward failed", String(error));
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "verification-failed",
-          message: String(error),
+  const handleBrowserForward = useCallback(
+    (owner: BrowserOwner = activeBrowserOwner) => {
+      sendBrowserAction(owner, { type: "browser-forward" });
+      if (isTauriRuntime()) {
+        void invoke("session_browser_history", {
+          sessionId: owner.sessionId,
+          direction: "forward",
+        }).catch((error) => {
+          notify("command-failed", "Browser forward failed", String(error));
+          sendBrowserAction(owner, {
+            type: "browser-status",
+            status: "verification-failed",
+            message: String(error),
+          });
         });
-      });
-    }
-  }, [notify, sessionBrowserKey]);
+      }
+    },
+    [notify, activeBrowserOwner],
+  );
 
-  const handleBrowserReload = useCallback(() => {
-    dispatchWorkbench({ type: "browser-reload" });
-    if (isTauriRuntime()) {
-      void invoke("session_browser_reload", {
-        sessionId: sessionBrowserKey,
-      }).catch((error) => {
-        notify("command-failed", "Browser reload failed", String(error));
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "verification-failed",
-          message: String(error),
+  const handleBrowserReload = useCallback(
+    (owner: BrowserOwner = activeBrowserOwner) => {
+      sendBrowserAction(owner, { type: "browser-reload" });
+      if (isTauriRuntime()) {
+        void invoke("session_browser_reload", {
+          sessionId: owner.sessionId,
+        }).catch((error) => {
+          notify("command-failed", "Browser reload failed", String(error));
+          sendBrowserAction(owner, {
+            type: "browser-status",
+            status: "verification-failed",
+            message: String(error),
+          });
         });
-      });
-    }
-  }, [notify, sessionBrowserKey]);
+      }
+    },
+    [notify, activeBrowserOwner],
+  );
 
   const toggleBrowserPanel = useCallback(() => {
     dispatchWorkbench({ type: "set-chat-panel" });
@@ -13103,16 +13153,20 @@ export function App() {
         title?: string;
         url?: string;
       }>("session-browser-event", (event) => {
-        if (event.payload.sessionId !== sessionBrowserKey) return;
         if (event.payload.kind === "loaded" && event.payload.url) {
-          dispatchWorkbench({ type: "browser-loaded", url: event.payload.url });
+          dispatchWorkbench({
+            type: "browser-session",
+            sessionId: event.payload.sessionId,
+            action: { type: "browser-loaded", url: event.payload.url },
+          });
         } else if (
           event.payload.kind === "title" &&
           event.payload.title !== undefined
         ) {
           dispatchWorkbench({
-            type: "browser-title",
-            title: event.payload.title,
+            type: "browser-session",
+            sessionId: event.payload.sessionId,
+            action: { type: "browser-title", title: event.payload.title },
           });
         }
       });
@@ -13122,7 +13176,7 @@ export function App() {
     return () => {
       void unlisten.then((dispose) => dispose?.());
     };
-  }, [sessionBrowserKey]);
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -13130,7 +13184,7 @@ export function App() {
   }, [browserOverlayOccluded, sessionBrowserKey, updateBrowserHostVisibility]);
 
   const attachBrowserCaptureToChat = useCallback(
-    async (capture: BrowserPreviewCapture) => {
+    async (capture: BrowserPreviewCapture, owner: BrowserOwner) => {
       if (!isTauriRuntime() || !capture.path) {
         return;
       }
@@ -13139,17 +13193,16 @@ export function App() {
           "prepare_chat_attachment",
           {
             request: {
-              sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+              sessionId: owner.sessionId,
               path: capture.path,
-              workspacePath:
-                activeSession?.workspacePath ?? workspacePath ?? undefined,
+              workspacePath: owner.workspaceKey || undefined,
               kind: "image",
               name: capture.filename || "browser-capture.png",
             },
           },
         );
         setChatAttachments((current) => {
-          const existing = current[activeDraftKey] ?? [];
+          const existing = current[owner.draftKey] ?? [];
           const imageCount = existing.filter(
             (item) => item.kind === "image",
           ).length;
@@ -13167,7 +13220,7 @@ export function App() {
           }
           return {
             ...current,
-            [activeDraftKey]: [
+            [owner.draftKey]: [
               ...existing,
               {
                 ...attachment,
@@ -13180,24 +13233,21 @@ export function App() {
         // Capture view still works without composer attachment.
       }
     },
-    [
-      activeDraftKey,
-      activeSession?.workspacePath,
-      activeSessionId,
-      workspacePath,
-    ],
+    [],
   );
   const captureBrowserPreview = useCallback(
     async (
       action: "capture" | "reveal" | "feedback" = "capture",
       feedback?: BrowserFeedback,
+      owner: BrowserOwner = activeBrowserOwner,
     ) => {
+      const preview = previewForBrowser(owner);
       if (action === "feedback") {
         const draft = browserFeedbackDraft({
-          capture: workbench.browserPreview.latestCapture,
+          capture: preview.latestCapture,
           feedback,
-          attachments: chatAttachments[activeDraftKey] ?? [],
-          fallbackUrl: workbench.browserPreview.url,
+          attachments: chatAttachments[owner.draftKey] ?? [],
+          fallbackUrl: preview.url,
         });
         if (!draft.ok) {
           notify("command-failed", "Browser feedback unavailable", draft.error);
@@ -13205,34 +13255,32 @@ export function App() {
         }
         setChatDrafts((current) => ({
           ...current,
-          [activeDraftKey]: appendFeedback(current[activeDraftKey], draft.note),
+          [owner.draftKey]: appendFeedback(current[owner.draftKey], draft.note),
         }));
         return true;
       }
       if (action === "reveal") {
-        const error = await revealBrowserCapture(
-          workbench.browserPreview.latestCapture?.path,
-        );
+        const error = await revealBrowserCapture(preview.latestCapture?.path);
         if (error)
           notify("command-failed", "Could not reveal screenshot", error);
         return undefined;
       }
-      dispatchWorkbench({ type: "browser-capture-start" });
+      sendBrowserAction(owner, { type: "browser-capture-start" });
       try {
         const captureWithSrc = await captureChatBrowserPage({
-          sessionId: sessionBrowserKey,
-          nativeHost: workbench.browserPreview.nativeHost === true,
-          device: workbench.browserPreview.device,
-          url: workbench.browserPreview.url,
+          sessionId: owner.sessionId,
+          nativeHost: preview.nativeHost === true,
+          device: preview.device,
+          url: preview.url,
         });
-        dispatchWorkbench({
+        sendBrowserAction(owner, {
           type: "browser-capture-success",
           capture: captureWithSrc,
         });
-        await attachBrowserCaptureToChat(captureWithSrc);
+        await attachBrowserCaptureToChat(captureWithSrc, owner);
       } catch (error) {
         const message = String(error);
-        dispatchWorkbench({
+        sendBrowserAction(owner, {
           type: "browser-capture-failure",
           error: message,
         });
@@ -13241,28 +13289,24 @@ export function App() {
       return undefined;
     },
     [
-      activeDraftKey,
+      activeBrowserOwner,
       attachBrowserCaptureToChat,
       chatAttachments,
       notify,
-      sessionBrowserKey,
-      workbench.browserPreview.device,
-      workbench.browserPreview.latestCapture,
-      workbench.browserPreview.nativeHost,
-      workbench.browserPreview.url,
+      workbench.browserPreviewsBySession,
     ],
   );
   useEffect(() => {
-    if (workbench.browserPreview.status !== "loading") return;
+    if (browserPreview.status !== "loading") return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 4_000);
     let disposed = false;
-    const url = normalizedPreviewUrl(workbench.browserPreview.url);
+    const url = normalizedPreviewUrl(browserPreview.url);
 
     // Native button handlers already issue navigation/history/reload commands.
     // Reopening here would turn a history step into a second navigation.
     if (isTauriRuntime() && browserNativeHost) {
-      if (!workbench.browserPreview.nativeHost) void ensureSessionBrowser(url);
+      if (!browserPreview.nativeHost) void ensureSessionBrowser(url);
       return () => {
         disposed = true;
         window.clearTimeout(timeout);
@@ -13302,7 +13346,7 @@ export function App() {
         const message = !result.reachable
           ? browserUnreachableMessage(result.message)
           : browserLiveStatusMessage(url, issueCount);
-        dispatchWorkbench({
+        dispatchActiveBrowser({
           type: "browser-status",
           status,
           message,
@@ -13318,7 +13362,7 @@ export function App() {
           error instanceof DOMException && error.name === "AbortError"
             ? "connection timed out"
             : "connection refused or offline";
-        dispatchWorkbench({
+        dispatchActiveBrowser({
           type: "browser-status",
           status: "verification-failed",
           message: `Unreachable · ${reason}`,
@@ -13334,9 +13378,9 @@ export function App() {
   }, [
     browserNativeHost,
     ensureSessionBrowser,
-    workbench.browserPreview.status,
-    workbench.browserPreview.url,
-    workbench.browserPreview.nativeHost,
+    browserPreview.status,
+    browserPreview.url,
+    browserPreview.nativeHost,
   ]);
 
   useEffect(() => {
@@ -13860,7 +13904,7 @@ export function App() {
           dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
           break;
         case "open-browser-preview":
-          handleBrowserNavigate(workbench.browserPreview.url);
+          handleBrowserNavigate(browserPreview.url);
           break;
         case "show-diffs":
           dispatchWorkbench({
@@ -13924,7 +13968,7 @@ export function App() {
       saveWorkspaceConfiguration,
       splitTerminalPane,
       startNewChat,
-      workbench.browserPreview.url,
+      browserPreview.url,
       resolvedTheme,
       workbench.selectedAutomationId,
       workbench.selectedTaskId,
@@ -14049,47 +14093,6 @@ export function App() {
       cancelled = true;
     };
   }, [syncTerminalSnapshot]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = resolvedTheme;
-    document.documentElement.dataset.density = workbench.preferences.density;
-    document.documentElement.style.setProperty(
-      "--gyro-user-main",
-      workbench.preferences.mainColor,
-    );
-    document.documentElement.style.setProperty(
-      "--gyro-user-secondary",
-      workbench.preferences.secondaryColor,
-    );
-    document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute(
-        "content",
-        resolvedTheme === "light" ? "#f8f9f9" : "#15171a",
-      );
-    safeSetLocalStorage(THEME_STORAGE_KEY, themePreference);
-  }, [
-    resolvedTheme,
-    themePreference,
-    workbench.preferences.density,
-    workbench.preferences.mainColor,
-    workbench.preferences.secondaryColor,
-  ]);
-
-  useEffect(() => {
-    const syncWindowFocus = () => {
-      document.documentElement.dataset.windowActive = document.hasFocus()
-        ? "true"
-        : "false";
-    };
-    syncWindowFocus();
-    window.addEventListener("focus", syncWindowFocus);
-    window.addEventListener("blur", syncWindowFocus);
-    return () => {
-      window.removeEventListener("focus", syncWindowFocus);
-      window.removeEventListener("blur", syncWindowFocus);
-    };
-  }, []);
 
   useEffect(() => {
     pendingWorkbenchPersistRef.current = persistableWorkbench;
@@ -15205,7 +15208,7 @@ export function App() {
     <WorkspaceToolPanel
       activePaneTab={workbench.activePaneTab}
       activeProfileId={activeProfileId}
-      browserPreview={workbench.browserPreview}
+      browserPreview={browserPreview}
       browserNativeHost={browserNativeHost}
       browserOverlayOccluded={browserOverlayOccluded}
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
@@ -15236,18 +15239,18 @@ export function App() {
         })
       }
       onAddTerminalPane={addTerminalPane}
-      onBrowserBack={handleBrowserBack}
+      onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchWorkbench({ type: "browser-device", device })
+        dispatchActiveBrowser({ type: "browser-device", device })
       }
-      onBrowserForward={handleBrowserForward}
+      onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
       onBrowserNavigate={handleBrowserNavigate}
-      onBrowserOpenExternal={openBrowserPreviewExternal}
-      onBrowserReload={handleBrowserReload}
+      onBrowserOpenExternal={() => openBrowserPreviewExternal()}
+      onBrowserReload={() => handleBrowserReload()}
       onBrowserScreenshot={captureBrowserPreview}
       onBrowserUrlChange={(url) =>
-        dispatchWorkbench({ type: "set-browser-url", url })
+        dispatchActiveBrowser({ type: "set-browser-url", url })
       }
       onCollapse={() => dispatchWorkbench({ type: "close-tool-panel" })}
       onCloseTerminalPane={requestCloseTerminalPane}
@@ -15786,6 +15789,14 @@ export function App() {
         dispatchCompanion({ type: "show-launcher", paneId: pane.paneId });
       },
     };
+    const paneBrowserOwner: BrowserOwner = {
+      sessionId:
+        pane.kind === "session"
+          ? pane.sessionId
+          : `workbench:${pane.workspacePath}`,
+      workspaceKey: pane.workspacePath,
+      draftKey: paneDraftKey,
+    };
     return (
       <ChatSurface
         activeChatPanel={panePanel}
@@ -15794,23 +15805,35 @@ export function App() {
         {...paneCompanionProps}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
-        browserPreview={workbench.browserPreview}
+        browserPreview={previewForBrowser(paneBrowserOwner)}
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded || !isFocused}
-        onBrowserBack={handleBrowserBack}
+        onBrowserBack={() => handleBrowserBack(paneBrowserOwner)}
         onBrowserDeviceChange={(device) =>
-          dispatchWorkbench({ type: "browser-device", device })
+          sendBrowserAction(paneBrowserOwner, {
+            type: "browser-device",
+            device,
+          })
         }
-        onBrowserForward={handleBrowserForward}
-        onBrowserHostBoundsChange={
-          isFocused ? handleBrowserHostBoundsChange : undefined
+        onBrowserForward={() => handleBrowserForward(paneBrowserOwner)}
+        onBrowserHostBoundsChange={(bounds) =>
+          handleBrowserHostBoundsChange(
+            isFocused ? bounds : null,
+            paneBrowserOwner,
+          )
         }
-        onBrowserNavigate={handleBrowserNavigate}
-        onBrowserOpenExternal={openBrowserPreviewExternal}
-        onBrowserReload={handleBrowserReload}
-        onBrowserScreenshot={captureBrowserPreview}
+        onBrowserNavigate={(url) =>
+          handleBrowserNavigate(url, paneBrowserOwner)
+        }
+        onBrowserOpenExternal={() =>
+          openBrowserPreviewExternal(paneBrowserOwner)
+        }
+        onBrowserReload={() => handleBrowserReload(paneBrowserOwner)}
+        onBrowserScreenshot={(action, feedback) =>
+          captureBrowserPreview(action, feedback, paneBrowserOwner)
+        }
         onBrowserUrlChange={(url) =>
-          dispatchWorkbench({ type: "set-browser-url", url })
+          sendBrowserAction(paneBrowserOwner, { type: "set-browser-url", url })
         }
         onToggleBrowserPanel={() =>
           paneCompanionProps.onOpenCompanionTab("browser")
@@ -16063,21 +16086,21 @@ export function App() {
       {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
       railDiffTools={railDiffTools}
       railTerminalTools={railTerminalTools}
-      browserPreview={workbench.browserPreview}
+      browserPreview={browserPreview}
       browserNativeHost={browserNativeHost}
       browserOverlayOccluded={browserOverlayOccluded}
-      onBrowserBack={handleBrowserBack}
+      onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchWorkbench({ type: "browser-device", device })
+        dispatchActiveBrowser({ type: "browser-device", device })
       }
-      onBrowserForward={handleBrowserForward}
+      onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
       onBrowserNavigate={handleBrowserNavigate}
-      onBrowserOpenExternal={openBrowserPreviewExternal}
-      onBrowserReload={handleBrowserReload}
+      onBrowserOpenExternal={() => openBrowserPreviewExternal()}
+      onBrowserReload={() => handleBrowserReload()}
       onBrowserScreenshot={captureBrowserPreview}
       onBrowserUrlChange={(url) =>
-        dispatchWorkbench({ type: "set-browser-url", url })
+        dispatchActiveBrowser({ type: "set-browser-url", url })
       }
       onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
@@ -16456,7 +16479,7 @@ export function App() {
                     {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
                     railDiffTools={railDiffTools}
                     railTerminalTools={railTerminalTools}
-                    browserPreview={workbench.browserPreview}
+                    browserPreview={browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
                     config={config}
                     files={files}
@@ -16602,7 +16625,7 @@ export function App() {
               <IdeSurface
                 activePaneTab={workbench.activePaneTab}
                 isToolPanelOpen={workbench.isToolPanelOpen}
-                browserPreview={workbench.browserPreview}
+                browserPreview={browserPreview}
                 diffReview={workbench.diffReview}
                 activeBuffer={activeEditorBuffer}
                 editorSelection={workbench.ide.selection}
@@ -16649,17 +16672,17 @@ export function App() {
                   })
                 }
                 onAddTerminalPane={addTerminalPane}
-                onBrowserBack={handleBrowserBack}
+                onBrowserBack={() => handleBrowserBack()}
                 onBrowserDeviceChange={(device) =>
-                  dispatchWorkbench({ type: "browser-device", device })
+                  dispatchActiveBrowser({ type: "browser-device", device })
                 }
-                onBrowserForward={handleBrowserForward}
+                onBrowserForward={() => handleBrowserForward()}
                 onBrowserNavigate={handleBrowserNavigate}
-                onBrowserOpenExternal={openBrowserPreviewExternal}
-                onBrowserReload={handleBrowserReload}
+                onBrowserOpenExternal={() => openBrowserPreviewExternal()}
+                onBrowserReload={() => handleBrowserReload()}
                 onBrowserScreenshot={captureBrowserPreview}
                 onBrowserUrlChange={(url) =>
-                  dispatchWorkbench({ type: "set-browser-url", url })
+                  dispatchActiveBrowser({ type: "set-browser-url", url })
                 }
                 onAssistantAction={runEditorAssistantAction}
                 onCommentDiff={(path) =>
@@ -16901,6 +16924,11 @@ export function App() {
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
+          interfaceSize={workbench.preferences.interfaceSize}
+          motionSpeed={workbench.preferences.motionSpeed}
+          reduceMotion={reduceMotion}
+          onInterfaceSizeChange={(interfaceSize) => dispatchWorkbench({ type: "set-interface-size", interfaceSize })}
+          onMotionSpeedChange={(motionSpeed) => dispatchWorkbench({ type: "set-motion-speed", motionSpeed })}
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
@@ -17451,7 +17479,7 @@ export function App() {
           })),
         ]}
       >
-        {appChrome}
+        <AppearanceContext.Provider value={appearance}>{appChrome}</AppearanceContext.Provider>
       </ComposerContextCandidates.Provider>
     </TerminalAttachmentActionsContext.Provider>
   );
@@ -17574,6 +17602,7 @@ function loadInitialWorkbenchState(): WorkbenchState {
       lastSessionsLayout,
       automations,
       browserPreview,
+      browserPreviewsBySession: undefined,
       diffReview,
       ide: sanitizeStoredIdeState(parsed.ide, base.ide),
       isToolPanelOpen,
@@ -18095,6 +18124,7 @@ function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
   return {
     ...workbench,
     activeTurn: undefined,
+    browserPreviewsBySession: undefined,
     terminalPanes: workbench.terminalPanes
       .filter((pane) => pane.owner?.kind !== "model")
       .map((pane) => ({
@@ -19189,40 +19219,10 @@ function MonacoEditorPane({
   // @monaco-editor/react calls editor.updateOptions() whenever this object
   // changes identity. A literal here re-configures the editor on every render,
   // which on a keystroke means a full options + layout recompute.
+  const { scale, reduceMotion } = useAppearance();
   const editorOptions = useMemo(
-    () => ({
-      automaticLayout: true,
-      bracketPairColorization: { enabled: !syntax.policy.limited },
-      readOnly: syntax.policy.readOnly,
-      "semanticHighlighting.enabled": !syntax.policy.limited,
-      maxTokenizationLineLength: 20000,
-      fontFamily:
-        "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-      fontLigatures: false,
-      fontSize: 13.5,
-      guides: {
-        bracketPairs: !syntax.policy.limited,
-        indentation: !syntax.policy.limited,
-      },
-      lineHeight: 21,
-      minimap: {
-        enabled: minimapEnabled && !syntax.policy.limited,
-        scale: 0.75,
-      },
-      overviewRulerBorder: false,
-      padding: { top: 8, bottom: 12 },
-      renderWhitespace: "selection" as const,
-      scrollbar: {
-        horizontalScrollbarSize: 10,
-        verticalScrollbarSize: 10,
-      },
-      scrollBeyondLastLine: false,
-      smoothScrolling: true,
-      stickyScroll: { enabled: !syntax.policy.limited, maxLineCount: 3 },
-      tabSize: 2,
-      wordWrap: "off" as const,
-    }),
-    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly],
+    () => workspaceEditorOptions({ scale, reduceMotion, minimapEnabled, limited: syntax.policy.limited, readOnly: syntax.policy.readOnly }),
+    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly, scale, reduceMotion],
   );
 
   useEffect(() => {

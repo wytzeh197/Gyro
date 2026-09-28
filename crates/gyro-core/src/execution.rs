@@ -19,15 +19,26 @@ const EXECUTION_TERMINATION_GRACE: Duration = Duration::from_millis(250);
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
+    wake: Arc<tokio::sync::Notify>,
 }
 
 impl CancellationToken {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        self.wake.notify_waiters();
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn wait_cancelled(&self) {
+        let notified = self.wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !self.is_cancelled() {
+            notified.await;
+        }
     }
 }
 

@@ -71,13 +71,24 @@ A loopback provider needs no API key at all. Every other host must use HTTPS.
 - `POST {base-url}/chat/completions` with `"stream": true`, your messages, and
   the Gyro tools the current mode may grant.
 - `Authorization: Bearer <key>`, when a key is set.
-- `stream_options.include_usage`, so the response reports token counts. A
-  gateway that rejects that field gets one automatic retry without it.
+- `stream_options.include_usage`, so the response reports token counts. An
+  explicit unsupported-field error gets one compatibility retry without that
+  field. A successful negotiation is remembered in memory for 15 minutes,
+  scoped to endpoint, model, and credential identity. A generic HTTP 400 does
+  not trigger this fallback. Explicit reasoning effort is preserved.
 
 Streaming follows Server-Sent Events: `choices[].delta.content` becomes text in
 the chat as it arrives, `choices[].delta.tool_calls` is accumulated across
 frames, and the final `usage` block feeds the local usage ledger. A gateway that
 ignores `stream: true` and answers with one JSON body is still understood.
+Usage accounting includes all observed tool rounds and failed attempts. When
+counts are missing, Gyro estimates the assembled request and observed output;
+image processing and provider-owned context may be unmeasured.
+
+Generation requests reuse pooled connections. Stop interrupts a pending
+connection or silent response body. Transport retries, interrupted-stream
+retries, and optional-field negotiation share a maximum of three retries per
+generation request. A retry never replays a completed tool round.
 
 Tool calls are executed by Gyro, not by the provider: every call goes through
 the same capability broker and approval policy as a call from a local model, and
@@ -109,8 +120,9 @@ Settings reports what the health check found:
 ## Limitations in this release
 
 - The standalone `gyro` CLI can configure these providers, but its chat loop
-  still runs only the subprocess adapters. Use the desktop app to chat.
-- Attachments are not sent: images would need OpenAI `image_url` content parts,
-  which this runner does not build yet.
+  supports subprocess adapters and Ollama, not OpenAI-compatible API execution.
+  Use the desktop app for API chat.
+- Image attachments use OpenAI `image_url` content parts when the selected
+  model supports images. Support still depends on the endpoint and model.
 - There is no plan-window or quota API for these providers, so usage shows the
   spend Gyro observed rather than a remaining allowance.

@@ -42,6 +42,14 @@ OpenAI-compatible endpoints that explicitly reject native tools on the first
 request switch to the same loop. Gyro validates each action against the
 advertised schema and retries one malformed action before reporting failure.
 
+Native API and Ollama tool calls use the same schema validation. Invalid calls
+return a correctable tool error before execution. For a native tool batch,
+contiguous workspace list, search, read-file, and read-range calls may execute
+four at a time, with results returned in call order. Writes, commands, editor
+reads, and browser actions are sequential barriers. Each call still enters the
+capability broker for policy, scope, approval, and cancellation checks. Reads
+remain observations of live disk state, not an atomic workspace snapshot.
+
 ## Code navigation
 
 `gyro_code_definition`, `gyro_code_references`, and `gyro_code_symbols` accept

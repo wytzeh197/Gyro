@@ -54,7 +54,7 @@ textarea:focus-visible {
 }
 
 :root[data-theme="light"] .gyro-root-error {
-  background: #f8f9f9;
+  background: #f7f9fc;
   color: #161b23;
 }
 

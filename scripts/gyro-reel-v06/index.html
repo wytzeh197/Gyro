@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gyro — One task. One workspace. / v06</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#f4f8fd; }
+    #stage { width:1920px; height:1080px; position:absolute; overflow:hidden; transform-origin:0 0; background:radial-gradient(ellipse at 65% 76%,#e7f0fc 0%,#f3f7fc 46%,#f8faff 100%); color:#122943; }
+    .layer { position:absolute; left:0; top:0; transform-origin:0 0; }
+    .type { font-weight:600; letter-spacing:-.057em; line-height:.99; white-space:nowrap; }
+    #opening { font-size:240px; }
+    #opening .word { display:inline-block; }
+    #selection { background:#c5dcfc; border:2px solid #377ce0; }
+    #selection::before,#selection::after { content:""; position:absolute; width:6px; height:20px; background:#377ce0; }
+    #selection::before { left:-4px; top:-3px; } #selection::after { right:-4px; bottom:-3px; }
+    #places { font-size:158px; letter-spacing:-.06em; line-height:.93; }
+    #meet { font-size:144px; line-height:.93; }
+    #statement { font-size:104px; line-height:1.04; letter-spacing:-.062em; }
+    .native { overflow:hidden; background:white; box-shadow:0 32px 74px -34px #234d843e,0 0 0 1px #9cb4d42b; border-radius:12px; }
+    .native img { display:block; width:100%; height:auto; }
+    .window { border-radius:11px; box-shadow:0 44px 84px -30px #1d4a8045,0 0 0 1.4px #95b0d144; }
+    #task { border-radius:22px; box-shadow:0 20px 40px -22px #1d4a8045; background:transparent; }
+    #alignment { border:2px solid #377ce0; border-radius:14px; }
+    #alignment::before { content:""; position:absolute; width:9px; height:9px; background:#377ce0; left:-5px; top:-5px; }
+    #alignment::after { content:""; position:absolute; width:9px; height:9px; background:#377ce0; right:-5px; bottom:-5px; }
+    #cursor { width:28px; height:36px; filter:drop-shadow(0 2px 2px #152b4430); }
+    #brand { display:flex; justify-content:center; gap:29px; align-items:center; width:530px; height:145px; }
+    #brand img { width:126px; height:126px; object-fit:contain; }
+    #brand span { font-size:148px; font-weight:600; letter-spacing:-.065em; }
+    #soon { font-size:37px; letter-spacing:-.025em; font-weight:450; color:#556e8c; width:500px; text-align:center; }
+  </style>
+</head>
+<body>
+<main id="stage">
+  <div id="selection" class="layer"></div>
+  <div id="opening" class="layer type"><span id="one" class="word">One&nbsp;</span><span id="task-word" class="word"><span id="task-text">task</span>.</span></div>
+  <div id="places" class="layer type">Too many<br>places.</div>
+  <div id="task" class="layer native"><img data-asset="task"></div>
+  <div id="code" class="layer native"><img data-asset="code"></div>
+  <div id="shell-fragment" class="layer native"><img data-asset="shell"></div>
+  <div id="alignment" class="layer"></div>
+  <div id="chat-window" class="layer native window"><img data-asset="window-chat"></div>
+  <div id="meet" class="layer type">Meet<br>Gyro.</div>
+  <div id="conversation" class="layer native"><img data-asset="conversation"></div>
+  <div id="review" class="layer native"><img data-asset="review"></div>
+  <div id="file-bridge" class="layer native"><img data-asset="conversation" style="transform:translate(-19px,-334.265625px)"></div>
+  <div id="workspace-window" class="layer native window"><img data-asset="window-workspace"></div>
+  <div id="shell-proof" class="layer native"><img data-asset="shell"></div>
+  <div id="statement" class="layer type">One task.<br>One workspace.</div>
+  <svg id="cursor" class="layer" viewBox="0 0 28 36"><path d="M2 2v27l7-7 5 11 5-2-5-10h10Z" fill="#173450" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>
+  <div id="brand" class="layer"><img src="../../packages/ui/src/assets/gyro-logo-transparent-dark.png"><span>Gyro.</span></div>
+  <div id="soon" class="layer">Coming soon.</div>
+</main>
+<script type="module" src="./film.js"></script>
+</body>
+</html>

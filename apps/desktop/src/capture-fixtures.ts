@@ -18,6 +18,22 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+const isReelCapture = parameters.get("reel") === "1";
+// Opt-in reset for reproducible visual QA. This entry is development-only;
+// normal preview navigation and the shipped app retain their saved state.
+if (parameters.get("reset") === "1" || isReelCapture) {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("gyro.")) localStorage.removeItem(key);
+  }
+  localStorage.setItem(
+    "gyro.workbench-state",
+    JSON.stringify({
+      preferences: { theme, density: parameters.get("density") ?? "compact" },
+      lastSessionsLayout: "thread",
+      isToolPanelOpen: false,
+    }),
+  );
+}
 const isWebsiteCapture = parameters.get("presentation") === "website";
 const supportedScenes = new Set([
   "chat",
@@ -53,6 +69,12 @@ const session = {
   id: SESSION_ID,
   title: "Bound the sync queue retries",
   workspacePath: WORKSPACE,
+  workspaceIdentity: {
+    schema: "gyro.workspace.v2",
+    revision: 1,
+    roots: [{ id: "capture-root", path: WORKSPACE }],
+    activeRootId: "capture-root",
+  },
   origin: "desktop",
   workspaceMode: "local",
   branch: "main",
@@ -266,7 +288,34 @@ if (parameters.get("edge") === "inline-approval") {
 const captureEventsBySessionId = new Map<
   string,
   Array<ReturnType<typeof sessionEvent>>
->([[SESSION_ID, chatEvents]]);
+>([[SESSION_ID, isReelCapture ? [] : chatEvents]]);
+
+// The reel driver uses the real composer and its send handler. Only the fake
+// provider completion is stepped manually, so wall-clock rendering speed
+// cannot change the frame on which the review result appears.
+let completeReelRequest: (() => void) | undefined;
+let reelRequestCompleted = false;
+if (isReelCapture) {
+  Object.defineProperty(window, "__gyroReelFixture", {
+    value: {
+      get pending() {
+        return Boolean(completeReelRequest);
+      },
+      get completed() {
+        return reelRequestCompleted;
+      },
+      complete() {
+        if (!completeReelRequest) return reelRequestCompleted;
+        const complete = completeReelRequest;
+        completeReelRequest = undefined;
+        complete();
+        reelRequestCompleted = true;
+        return true;
+      },
+    },
+    configurable: true,
+  });
+}
 
 const config = {
   telemetryEnabled: false,
@@ -443,6 +492,16 @@ const changedFiles = [
   },
 ];
 
+if (isReelCapture) {
+  changedFiles.splice(0, changedFiles.length, {
+    path: "src/sync.js",
+    state: "modified",
+    staged: false,
+    additions: 1,
+    deletions: 1,
+  });
+}
+
 const sourceControl = {
   provider: "git",
   available: true,
@@ -451,10 +510,14 @@ const sourceControl = {
   ahead: 1,
   behind: 0,
   repoRoot: WORKSPACE,
-  additions: 73,
-  deletions: 6,
+  additions: isReelCapture ? 1 : 73,
+  deletions: isReelCapture ? 1 : 6,
   statsPartial: false,
-  comparedToMain: { additions: 73, deletions: 6, partial: false },
+  comparedToMain: {
+    additions: isReelCapture ? 1 : 73,
+    deletions: isReelCapture ? 1 : 6,
+    partial: false,
+  },
   files: changedFiles,
   lastCheckedAt: NOW,
 };
@@ -528,6 +591,21 @@ const diff = `diff --git a/src/sync.js b/src/sync.js
    }
 `;
 
+const reelDiff = [
+  "diff --git a/src/sync.js b/src/sync.js",
+  "--- a/src/sync.js",
+  "+++ b/src/sync.js",
+  "@@ -1,6 +1,6 @@",
+  ' import { backoff, delay } from "./queue/backoff.js";',
+  " ",
+  "-const MAX_ATTEMPTS = Infinity;",
+  "+const MAX_ATTEMPTS = 5;",
+  " ",
+  " export class SyncQueue {",
+  "   constructor(transport) {",
+  "",
+].join("\n");
+
 function file(relativePath: string, kind: "file" | "directory", depth: number) {
   return {
     path: `${WORKSPACE}/${relativePath}`,
@@ -600,7 +678,18 @@ if (parameters.get("edge") === "multiple-roots") {
   );
 }
 
-const terminalOutput = [
+const terminalOutput = (isReelCapture ? [
+  "$ npm test -- sync.test.js",
+  "",
+  "\u001b[32mPASS\u001b[0m  src/sync.test.js",
+  "  \u001b[32m✓\u001b[0m stops after 5 attempts (128 ms)",
+  "  \u001b[32m✓\u001b[0m backs off exponentially (12 ms)",
+  "",
+  "Tests:       \u001b[32m2 passed\u001b[0m, 2 total",
+  "Time:        1.42 s",
+  "",
+  "$ ",
+] : [
   "$ gyro doctor",
   "workspace store ready",
   "CLI attach socket ready",
@@ -630,7 +719,7 @@ const terminalOutput = [
   "ses_3  Audit provider argument contracts gemini   43h",
   "",
   "$ ",
-].join("\r\n");
+]).join("\r\n");
 
 const governedOutput = [
   "Claude Code v2.1.159",
@@ -727,14 +816,33 @@ const responses: Record<string, unknown> = {
   git_stage: sourceControl,
   git_unstage: sourceControl,
   git_discard: sourceControl,
-  git_diff: { stdout: diff, stderr: "", exitCode: 0 },
+  git_diff: { stdout: isReelCapture ? reelDiff : diff, stderr: "", exitCode: 0 },
+  git_review_content: {
+    original: syncSource.replace(
+      "const MAX_ATTEMPTS = 5;",
+      "const MAX_ATTEMPTS = Infinity;",
+    ),
+    modified: syncSource,
+    ...(isReelCapture ? { unified: reelDiff } : {}),
+  },
+  git_fetch: {
+    output: {
+      stdout: "Capture fixture: remote status checked.",
+      stderr: "",
+      status: "done",
+    },
+    status: sourceControl,
+  },
   git_branches: branches,
   list_workspace_tree: workspaceTree,
   watch_workspace: workspaceTree,
   search_workspace: [
     {
       path: "src/sync.js",
-      lineNumber: 12,
+      lineNumber:
+        syncSource
+          .split("\n")
+          .findIndex((line) => line.includes("async drain()")) + 1,
       line: "  async drain() {",
       ranges: [{ startColumn: 9, endColumn: 14 }],
     },
@@ -745,8 +853,11 @@ const responses: Record<string, unknown> = {
       ranges: [{ startColumn: 17, endColumn: 24 }],
     },
   ],
-  restore_terminal_panes: scene === "cli" ? terminalPanes : [],
-  create_terminal_pane: terminalPanes[0],
+  restore_terminal_panes: isReelCapture
+    ? [terminalPanes[0]]
+    : scene === "cli"
+      ? terminalPanes
+      : [],
   task_discover: [],
   test_discover: [],
   github_status: { available: false },
@@ -803,13 +914,50 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  if (command === "search_workspace") {
+    const request = args?.request as { query: string };
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(request.query, "g");
+    } catch {
+      return [];
+    }
+    const results = responses.search_workspace as Array<{
+      path: string;
+      lineNumber: number;
+      line: string;
+    }>;
+    return results.flatMap((result) => {
+      const ranges = [...result.line.matchAll(pattern)]
+        .filter((match) => match[0].length > 0)
+        .map((match) => ({
+          startColumn: match.index + 1,
+          endColumn: match.index + match[0].length + 1,
+        }));
+      return ranges.length ? [{ ...result, ranges }] : [];
+    });
+  }
+  if (command === "create_terminal_pane") {
+    const request = args?.request as {
+      paneId: string;
+      title?: string;
+      workspacePath?: string;
+    };
+    const pane = {
+      ...terminalPanes[0]!,
+      paneId: request.paneId,
+      title: request.title ?? "Shell",
+      workspacePath: request.workspacePath ?? WORKSPACE,
+    };
+    terminalPanes.push(pane);
+    return pane;
+  }
   // Deterministic folder choice for exercising project editing in browser QA.
   if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
   if (command === "timing_diagnostics_enabled") return false;
   if (command === "prepare_workspace") {
     const request = args?.request as
-      | { runId?: string; workspacePath?: string }
-      | undefined;
+      { runId?: string; workspacePath?: string } | undefined;
     return {
       ...preparation,
       // App accepts progress only for the preparation request it issued.
@@ -916,6 +1064,7 @@ const invoke: Invoke = (command, args) => {
     const sessionId = String(args?.sessionId ?? SESSION_ID);
     return {
       events: captureEventsBySessionId.get(sessionId) ?? [],
+      contextEvents: [],
       hasMoreBefore: false,
     };
   }
@@ -942,6 +1091,23 @@ const invoke: Invoke = (command, args) => {
     sessions = [created, ...sessions];
     captureEventsBySessionId.set(created.id, []);
     return created;
+  }
+  if (command === "append_chat_context_event" && isReelCapture) {
+    const request = args ?? {};
+    const sessionId = String(request.sessionId ?? SESSION_ID);
+    const payload = (request.payload as Record<string, unknown> | undefined) ?? {};
+    const event = captureSessionEvent(
+      sessionId,
+      String(payload.turnId ?? "turn_capture"),
+      String(request.eventKind ?? "chat-mode-changed"),
+      String(request.message ?? "Normal mode enabled"),
+      payload,
+    );
+    captureEventsBySessionId.set(sessionId, [
+      ...(captureEventsBySessionId.get(sessionId) ?? []),
+      event,
+    ]);
+    return event;
   }
   if (command === "append_user_message") {
     const request = args ?? {};
@@ -979,6 +1145,14 @@ const invoke: Invoke = (command, args) => {
     return updated;
   }
   if (command === "summarize_file_changes") {
+    if (isReelCapture) {
+      return [{
+        path: "src/sync.js",
+        contentHash: "capture-reel-sync-limit-5",
+        summary: "Stops retrying after five attempts.",
+        source: "intent",
+      }];
+    }
     return [];
   }
   if (command === "run_provider_chat") {
@@ -989,6 +1163,89 @@ const invoke: Invoke = (command, args) => {
     const providerLabel = String(request.providerLabel ?? "Claude Code");
     const modelLabel = String(request.modelLabel ?? "Claude Opus 5");
     const responseSession = sessions.find((item) => item.id === sessionId);
+    if (isReelCapture) {
+      reelRequestCompleted = false;
+      return new Promise((resolve) => {
+        completeReelRequest = () => {
+          // A real composer creates its optimistic running event at the
+          // current clock time. Completion must be newer than that event or
+          // the UI correctly ignores the fixture's older timing metadata.
+          const completedAt = Date.now();
+          const activityEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "system-event",
+            "Edited src/sync.js",
+            {
+              kind: "provider-activity",
+              activityKind: "file",
+              activityId: "reel-sync-limit",
+              status: "done",
+              label: "Edited src/sync.js",
+              detail: "src/sync.js",
+              path: "src/sync.js",
+              additions: 1,
+              deletions: 1,
+            },
+          );
+          // Review intentionally reads the turn's recorded mutation receipt,
+          // not today's working-tree diff. Give this staged run the same
+          // historical patch that its current editor content represents.
+          const mutationEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "system-event",
+            "Applied the retry limit",
+            {
+              schema: "gyro.mutation.v1",
+              proposalId: "reel-sync-limit",
+              status: "applied",
+              fileChanges: [{
+                path: "src/sync.js",
+                additions: 1,
+                deletions: 1,
+                patch: reelDiff,
+              }],
+            },
+          );
+          const statusEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "system-event",
+            `${providerLabel} finished`,
+            {
+              kind: "provider-status",
+              status: "done",
+              providerId: request.providerId ?? "anthropic",
+              providerLabel,
+              modelLabel,
+              startedAt: new Date(completedAt - 38_000).toISOString(),
+              completedAt: new Date(completedAt).toISOString(),
+              durationMs: 38_000,
+            },
+          );
+          const assistantEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "assistant-message",
+            "Added a **5-attempt limit** with exponential backoff. Both tests pass.\n\nReady for your review.",
+          );
+          captureEventsBySessionId.set(sessionId, [
+            ...(captureEventsBySessionId.get(sessionId) ?? []),
+            activityEvent,
+            mutationEvent,
+            statusEvent,
+            assistantEvent,
+          ]);
+          resolve({
+            activityEvents: [activityEvent, mutationEvent],
+            statusEvent,
+            assistantEvent,
+            session: responseSession ?? null,
+          });
+        };
+      });
+    }
     // Manual steps make streaming placement and the completed review card
     // reproducible without a provider, a real edit, or timing-dependent waits.
     if (parameters.get("edge") === "live-file-changes") {
@@ -1238,7 +1495,15 @@ let callbackId = 0;
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
   value: {
     invoke: (command: string, args?: Record<string, unknown>) =>
-      Promise.resolve(invoke(command, args)),
+      new Promise((resolve, reject) => {
+        window.setTimeout(() => {
+          try {
+            resolve(invoke(command, args));
+          } catch (error) {
+            reject(error);
+          }
+        }, 0);
+      }),
     transformCallback(callback: (payload: unknown) => void) {
       callbackId += 1;
       callbacks.set(callbackId, callback);
@@ -1326,7 +1591,7 @@ if (scene === "companion-layout") {
 }
 
 // Start the approval preview on its seeded conversation instead of a saved draft.
-if (parameters.get("edge") === "inline-approval") {
+if (parameters.get("edge") === "inline-approval" || isReelCapture) {
   const paneId = `session:${SESSION_ID}`;
   localStorage.setItem(
     "gyro.chat-grid-layouts-v1",

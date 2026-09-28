@@ -143,4 +143,31 @@ function splitOf(a, b) {
   );
 }
 
+// A failed native creation can leave a preview chat in a split pane. Sending
+// again must keep that pane focused while it gains a persisted session id.
+{
+  let state = splitOf(session("preview-123"), session("B"));
+  state = chatGridReducer(state, {
+    type: "focus-pane",
+    projectKey: PROJECT,
+    paneId: "session:preview-123",
+  });
+  for (const [fromSessionId, toSessionId] of [
+    ["preview-123", "preview-optimistic"],
+    ["preview-optimistic", "persisted"],
+  ]) {
+    state = chatGridReducer(state, {
+      type: "rekey-session-pane",
+      fromSessionId,
+      toSessionId,
+      workspacePath: PROJECT,
+    });
+  }
+  assert.deepEqual(
+    slots(state).map((pane) => pane?.sessionId ?? null),
+    ["persisted", "B", null, null],
+  );
+  assert.equal(state.layouts[PROJECT].focusedPaneId, "session:preview-123");
+}
+
 console.log("chat split new session: ok");

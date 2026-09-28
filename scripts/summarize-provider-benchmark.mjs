@@ -10,7 +10,7 @@ if (!input || !output)
 const root = resolve(input),
   destination = resolve(output);
 const names = (await readdir(root))
-  .filter((name) => /^benchmark-(xai|openai|anthropic)\.json$/.test(name))
+  .filter((name) => /^benchmark-[a-z0-9-]+\.json$/.test(name))
   .sort();
 const raw = (
   await Promise.all(
@@ -19,6 +19,8 @@ const raw = (
     ),
   )
 ).flatMap((report) => report.records);
+const providers = [...new Set(raw.map((record) => record.provider))].sort();
+const spec = JSON.parse(await readFile(join(root, "spec.json"), "utf8").catch(() => "null"));
 const excluded = raw.filter((r) => r.failureDetail?.includes("safety limit"));
 const records = raw
   .filter((r) => !excluded.includes(r))
@@ -56,6 +58,9 @@ const median = (values) => {
 const stats = (values) => ({
   n: values.filter(Number.isFinite).length,
   medianMs: round(median(values)),
+  p95Ms: values.some(Number.isFinite)
+    ? round(values.filter(Number.isFinite).sort((a, b) => a - b)[Math.ceil(values.filter(Number.isFinite).length * 0.95) - 1])
+    : null,
   slowestMs: values.some(Number.isFinite)
     ? round(Math.max(...values.filter(Number.isFinite)))
     : null,
@@ -71,9 +76,9 @@ function stages(trace) {
     active = new Map();
   for (const p of trace.points) {
     const key = `${p.attempt}:${p.toolIndex}`;
-    if (p.stage === "tool-start") active.set(key, p.elapsedMs);
-    if (p.stage === "tool-end" && active.has(key)) {
-      intervals.push([active.get(key), p.elapsedMs]);
+    if (["tool-start", "broker-tool-start"].includes(p.stage)) active.set(key, p.elapsedMs);
+    if (["tool-end", "broker-tool-end"].includes(p.stage) && active.has(key)) {
+      intervals.push([active.get(key), p.elapsedMs, p.stage === "broker-tool-end"]);
       active.delete(key);
     }
   }
@@ -84,19 +89,30 @@ function stages(trace) {
     if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
   }
+  const protocolIntervals = intervals.filter(([, , broker]) => !broker);
+  const brokerIntervals = intervals.filter(([, , broker]) => broker);
   return {
     workspaceMs: span("workspace-start", "workspace-ready"),
     processSpawnMs: span("process-start", "process-spawned"),
     protocolReadinessMs: span("process-spawned", "protocol-ready"),
     firstActivityMs: first("first-activity"),
+    firstTokenMs: first("first-token"),
+    requestCount: trace.providerRequests?.requests ?? null,
+    observedUsage: trace.providerRequests?.tokens ?? null,
+    unmeasuredContent: trace.providerRequests?.unmeasuredContent ?? null,
+    toolDurationsMs: (protocolIntervals.length ? protocolIntervals : brokerIntervals)
+      .map(([start, end]) => end - start),
+    brokerToolDurationsMs: brokerIntervals.map(([start, end]) => end - start),
     providerPhaseMs: span("prompt-sent", "provider-complete"),
     finalizationMs: span("provider-complete", "complete"),
-    toolCount: trace.points.filter((p) => p.stage === "tool-start").length,
+    toolCount: trace.points.filter((p) => p.stage === "tool-start").length || trace.points.filter((p) => p.stage === "broker-tool-start").length,
+    brokerToolCount: trace.points.filter((p) => p.stage === "broker-tool-start").length,
     toolBusyMs: merged.reduce((sum, [a, b]) => sum + b - a, 0),
     openTools: active.size,
     retriesObserved: Math.max(
       0,
       Math.max(0, ...trace.points.map((p) => p.attempt)) - 1,
+      trace.providerRequests?.retries ?? 0,
     ),
   };
 }
@@ -206,7 +222,7 @@ for (const r of records) {
   const t = byTurn.get(r.turnId);
   if (t) {
     r.timing = stages(t);
-    r.timing.toolSource = "protocol";
+    r.timing.toolSource = r.timing.brokerToolCount > 0 ? "protocol-and-broker" : "protocol";
     // Early Codex traces missed MCP item boundaries. Recover those measurements
     // from the existing capability ledger; never interpret missing hooks as zero work.
     if (r.provider === "openai" && r.timing.toolCount === 0) {
@@ -253,7 +269,7 @@ for (const r of records) {
   }
 }
 const groups = [];
-for (const provider of ["xai", "openai", "anthropic"])
+for (const provider of providers)
   for (const task of ["readme", "code", "follow-up"])
     for (const resumed of [false, true]) {
       const rows = records.filter(
@@ -277,7 +293,7 @@ for (const provider of ["xai", "openai", "anthropic"])
         incorrect: completed.filter((r) => !r.correct || !r.responsePresent)
           .length,
         retries: rows.reduce(
-          (sum, r) => sum + (r.retryCount ?? r.timing?.retriesObserved ?? 0),
+          (sum, r) => sum + Math.max(r.retryCount ?? 0, r.timing?.retriesObserved ?? 0),
           0,
         ),
         actualResumes: rows.filter((r) => r.resumedActual === true).length,
@@ -290,7 +306,7 @@ for (const provider of ["xai", "openai", "anthropic"])
       });
     }
 const stageSummary = {};
-for (const provider of ["xai", "openai"]) {
+for (const provider of providers) {
   const samples = records
     .filter(
       (r) => r.provider === provider && r.outcome === "completed" && r.timing,
@@ -302,6 +318,7 @@ for (const provider of ["xai", "openai"]) {
       "processSpawnMs",
       "protocolReadinessMs",
       "firstActivityMs",
+      "firstTokenMs",
       "providerPhaseMs",
       "finalizationMs",
       "toolBusyMs",
@@ -327,7 +344,7 @@ await writeFile(
       fixture: "meridian-v1",
       build: "debug",
       frontendMeasured: false,
-      expectedSlots: 90,
+      expectedSlots: spec ? spec.providers.length * 3 * 2 * spec.trials : null,
       recordedSlots: records.length,
       excludedRateGuardRecords: excluded.length,
       groups,

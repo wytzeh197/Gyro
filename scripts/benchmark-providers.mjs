@@ -15,7 +15,7 @@ const { values } = parseArgs({
 });
 if (!values.spec) {
   console.log(
-    "Usage: node scripts/benchmark-providers.mjs --spec docs/performance/benchmark-spec.json [--resume TEMP_ROOT] [--skip-build]\nUses configured CLI sign-ins for real, billable provider calls. Never changes the normal Gyro store.",
+    "Usage: node scripts/benchmark-providers.mjs --spec docs/performance/benchmark-spec.json [--resume TEMP_ROOT] [--skip-build]\nUses CLI sign-ins, API preset credentials, or local Ollama for real provider calls that may be billable. Never changes the normal Gyro store.",
   );
   process.exit(0);
 }

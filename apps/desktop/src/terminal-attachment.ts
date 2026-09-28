@@ -225,7 +225,12 @@ export function useTerminalAttachmentController(
         return;
       }
       const draftKey = activeDraftKey;
-      const sessionId = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
+      // A preview chat is local UI state, not a persisted session UUID. Store
+      // its attachments as a draft so the first successful send can migrate them.
+      const sessionId =
+        activeSessionId && !activeSessionId.startsWith("preview-")
+          ? activeSessionId
+          : NEW_CHAT_DRAFT_KEY;
       try {
         const attachment = await invoke<ChatAttachment>(
           "prepare_chat_attachment",

@@ -2,6 +2,11 @@
 
 ## Launch Film
 
+The production plan for the next launch film is in
+[launch-video-plan.md](launch-video-plan.md). It defines the launch promise,
+reference quality bar, timed storyboard, real-UI capture requirements, Astra
+workflow, and acceptance checks.
+
 The canonical repository copy of the current launch film lives with the launch
 documentation:
 

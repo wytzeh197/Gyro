@@ -112,6 +112,6 @@ for (const mode of ["dark", "light"] as const)
 
 export default Editor;
 
-export { DiffEditor } from "@monaco-editor/react";
+export { ManagedDiffEditor as DiffEditor } from "./managed-diff-editor";
 
 export { loadSyntax } from "./editor/monaco-syntax";

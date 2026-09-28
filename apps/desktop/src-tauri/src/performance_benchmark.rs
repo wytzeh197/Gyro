@@ -41,7 +41,14 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         return Err("invalid benchmark bounds".into());
     }
     for provider in &spec.providers {
-        if !matches!(provider.id.as_str(), "xai" | "openai" | "anthropic") {
+        if !GyroConfig::default()
+            .model_providers
+            .iter()
+            .any(|configured| configured.id == provider.id)
+            || gyro_core::provider_descriptor(&provider.id).is_none_or(|descriptor| {
+                descriptor.execution_kind == gyro_core::ProviderExecutionKind::ReadinessOnly
+            })
+        {
             return Err("unsupported benchmark provider".into());
         }
     }
@@ -530,6 +537,7 @@ mod tests {
                         anyhow::bail!("connection reset by peer");
                     }
                     Ok(ProviderRunnerOutput {
+                        accounted_usage: None,
                         activities: Vec::new(),
                         context_usage: None,
                         billed_usage: None,

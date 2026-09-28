@@ -116,11 +116,11 @@ assert.ok(
   "The native browser-opened listener should resolve a reveal decision",
 );
 assert.ok(
-  listener.includes("background: !decision.reveal"),
+  listener.includes("background: !isActive || !decision.reveal"),
   "A suppressed reveal should navigate in the background",
 );
 assert.ok(
-  /if \(decision\.reveal\) \{\s*send\(\{ type: "set-chat-panel", panel: "browser" \}\);/.test(
+  /if \(isActive && decision\.reveal\) \{\s*dispatchRef\.current\(\{ type: "set-chat-panel", panel: "browser" \}\);/.test(
     listener,
   ),
   "The panel should only open when the decision says to reveal",

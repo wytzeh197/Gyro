@@ -109,3 +109,31 @@ export function SettingsGroup({
     </section>
   );
 }
+
+export function SettingsSegmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<{ label: string; value: T }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div aria-label={label} className="gyro-settings-segmented" role="group">
+      {options.map((option) => (
+        <button
+          aria-pressed={value === option.value}
+          className={value === option.value ? "is-active" : ""}
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          type="button"
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}

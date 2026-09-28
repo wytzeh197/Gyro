@@ -1,6 +1,8 @@
 pub mod account;
+mod api_compatibility;
 pub mod automations;
 pub mod capabilities;
+mod chat_http;
 pub mod cli_path;
 pub mod cli_updates;
 pub mod config;
@@ -22,6 +24,7 @@ pub mod paths;
 pub mod policy;
 pub mod provider_contract;
 pub mod provider_health;
+pub mod provider_observation;
 pub mod provider_registry;
 mod provider_retry;
 pub mod provider_stream;
@@ -131,7 +134,7 @@ pub use mutations::{
     ProviderMutationResult,
 };
 pub use ollama::{
-    discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat,
+    discover_ollama_model, discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat,
     ollama_tool_chat_with_progress, OllamaChatRequest, OllamaChatResponse, OllamaDiscovery,
     OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,

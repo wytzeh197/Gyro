@@ -523,18 +523,25 @@ pub(super) fn run_openai_compatible_chat(
                 turn.reasoning_content.as_deref(),
                 tool_calls,
             ));
-            let mut captured_images = Vec::new();
+            let mut prepared = Vec::new();
             for (tool_call_id, name, _arguments, parsed) in calls {
-                let Some(capability_id) = provider_reliability::prepare_tool_call(
+                if let Some(id) = provider_reliability::prepare_tool_call(
                     &mut messages,
                     &name,
                     &parsed,
                     Some(&tool_call_id),
-                ) else {
-                    continue;
-                };
-                let mut capability_response =
-                    invoke_run_capability(app, &request.session_id, capability_id, parsed)?;
+                ) {
+                    prepared.push((tool_call_id, id, parsed));
+                }
+            }
+            let batch = prepared
+                .iter()
+                .map(|(_, id, args)| (*id, args.clone()))
+                .collect::<Vec<_>>();
+            let results = provider_tool_batch::execute(app, &request.session_id, &batch)?;
+            let mut captured_images = Vec::new();
+            for ((tool_call_id, _, _), mut capability_response) in prepared.into_iter().zip(results)
+            {
                 if supports_images {
                     if let Some(image) = browser_result_image(&paths, &capability_response)? {
                         mark_browser_image_attached(&mut capability_response);
@@ -568,6 +575,7 @@ pub(super) fn run_openai_compatible_chat(
         }
         let response_chars = response.content.chars().count();
         Ok(ProviderRunnerOutput {
+            accounted_usage: None,
             activities: provider_activities_for_response(auto_compactions, &response.content),
             context_usage: Some(ProviderContextUsage {
                 input_tokens: response.input_tokens,

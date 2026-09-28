@@ -1,7 +1,7 @@
 .gyro-comparison-review em.is-added,
 .gyro-comparison-review em.is-removed {
   font-style: normal;
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .gyro-comparison-review em.is-added {
@@ -56,7 +56,7 @@
   padding: 4px 12px;
   border: 0;
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 .gyro-comparison-review .gyro-diff-tree {
   overflow: auto;
@@ -90,12 +90,12 @@
   gap: 2px;
 }
 .gyro-review-file-name > strong {
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 550;
 }
 .gyro-review-file-name > span {
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 .gyro-review-file-name > strong,
 .gyro-review-file-name > span {
@@ -141,10 +141,10 @@
   min-width: 0;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
 }
 .gyro-comparison-review .gyro-diff-review-toolbar span {
-  font-size: 11px;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div > span {
   overflow: hidden;
@@ -182,7 +182,7 @@
 .gyro-plain-diff .gyro-plain-diff-hunk .gyro-diff-line {
   grid-template-columns: 42px 42px 20px minmax(0, 1fr);
   padding: 0 12px 0 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   line-height: 1.8;
   border-left: 2px solid transparent;
 }
@@ -191,7 +191,7 @@
 }
 .gyro-plain-diff .gyro-diff-line > .gyro-review-line-number {
   color: var(--gyro-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .gyro-plain-diff .gyro-diff-line > code {

@@ -331,13 +331,15 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
 pub(super) fn validate_tool_call(
     name: &str,
     arguments: &serde_json::Value,
-) -> Result<CapabilityId, &'static str> {
+) -> Result<CapabilityId, String> {
     let id = CapabilityId::from_provider_tool_name(name).ok_or(
         "Unknown Gyro tool. Choose a tool from the supplied tool list. No action was executed.",
     )?;
     if !arguments.is_object() {
-        return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.");
+        return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
+    validate_compatibility_schema_value(arguments, &desktop_capability_tool_schema(id), "arguments")
+        .map_err(|error| format!("Invalid Gyro tool arguments: {error}. Correct the arguments and try again. No action was executed."))?;
     Ok(id)
 }
 
@@ -350,6 +352,16 @@ mod tool_validation_tests {
         let name = CapabilityId::BrowserScreenshot.provider_tool_name();
         assert!(validate_tool_call(name, &serde_json::json!("{partial")).is_err());
         assert!(validate_tool_call(name, &serde_json::json!({})).is_ok());
+        assert!(
+            validate_tool_call("gyro_workspace_read_file", &serde_json::json!({"path": 42}))
+                .is_err()
+        );
+        assert!(validate_tool_call(
+            CapabilityId::WorkspaceRead.provider_tool_name(),
+            &serde_json::json!({})
+        )
+        .unwrap_err()
+        .contains("missing required"));
         let mut messages = vec![serde_json::json!({"role":"tool","content":"prior edit applied"})];
         assert!(
             prepare_tool_call(&mut messages, name, &serde_json::json!("{"), Some("call-2"))
