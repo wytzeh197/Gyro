@@ -15,7 +15,10 @@ function read(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
-const styles = read("packages/ui/src/styles.css");
+const styles = [
+  read("packages/ui/src/tokens.css"),
+  read("packages/ui/src/styles.css"),
+].join("\n");
 const monaco = read("apps/desktop/src/monaco-editor.ts");
 const earlyShell = read("apps/desktop/src/early-shell.css");
 

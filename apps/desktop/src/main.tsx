@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
 import { resolveBootSurface } from "./surface-boundary";
+import "@gyro-dev/ui/tokens.css";
 import "./early-shell.css";
 import "./theme.css";
 

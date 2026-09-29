@@ -598,6 +598,7 @@ const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = [
+  readRepoFile("packages/ui/src/tokens.css"),
   readRepoFile("packages/ui/src/styles.css"),
   readRepoFile("packages/ui/src/appearance.css"),
   readRepoFile("packages/ui/src/chat-design.css"),

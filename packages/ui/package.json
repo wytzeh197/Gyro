@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css",
+    "./tokens.css": "./src/tokens.css",
     "./installed-update.css": "./src/installed-update.css",
     "./context-usage": "./src/context-usage.ts",
     "./workspace-project": "./src/workspace-project.ts"

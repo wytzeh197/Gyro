@@ -1,15 +1,40 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  applyAppearancePreferences,
   gyroLogoMark,
   type MenuBarJob,
   type MenuBarOutcome,
   type MenuBarSnapshot,
+  type WorkbenchPreferences,
 } from "@gyro-dev/ui";
 import { useEffect, useMemo, useState } from "react";
 import { menuBarModelProvider } from "./menu-bar-model-provider";
 
 const MAX_VISIBLE_JOBS = 4;
+
+type StoredAppearance = Pick<
+  WorkbenchPreferences,
+  "interfaceSize" | "motionSpeed" | "mainColor" | "secondaryColor"
+>;
+
+function storedAppearancePreferences(): StoredAppearance | null {
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem("gyro.workbench-state") ?? "null",
+    ) as { preferences?: Partial<StoredAppearance> } | null;
+    const preferences = stored?.preferences;
+    if (!preferences?.mainColor || !preferences.secondaryColor) return null;
+    return {
+      interfaceSize: preferences.interfaceSize ?? "default",
+      motionSpeed: preferences.motionSpeed ?? "default",
+      mainColor: preferences.mainColor,
+      secondaryColor: preferences.secondaryColor,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const EMPTY_SNAPSHOT: MenuBarSnapshot = {
   state: "idle",
@@ -167,7 +192,21 @@ export function MenuBarPopover() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = snapshot.theme;
+    const root = document.documentElement;
+    root.dataset.theme = snapshot.theme;
+    // Same origin as the main window, so the saved appearance is readable
+    // here; applying it lets the shared tokens carry the user's accent and
+    // interface size into the menu bar.
+    const apply = () => {
+      const preferences = storedAppearancePreferences();
+      if (!preferences) return;
+      applyAppearancePreferences(root, preferences, snapshot.theme);
+      root.style.setProperty("--gyro-user-main", preferences.mainColor);
+      root.style.setProperty("--gyro-user-secondary", preferences.secondaryColor);
+    };
+    apply();
+    window.addEventListener("storage", apply);
+    return () => window.removeEventListener("storage", apply);
   }, [snapshot.theme]);
 
   useEffect(() => {

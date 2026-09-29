@@ -29,17 +29,14 @@
   --menu-tile: 24px;
   --menu-glyph: 16px;
   --menu-stop: 36px;
-  /* Corners track the app's xl/md/sm ladder in packages/ui/src/styles.css.
-     Kept as literals because this popover is its own window surface; retune
-     them with the ladder so the menu bar never drifts from the app. */
-  --menu-radius: 14px;
-  --menu-radius-sm: 9px;
-  --menu-radius-xs: 7px;
-
-  /* Type — three sizes, three weights, nothing else. */
-  --menu-text-lg: 13px;
-  --menu-text-md: 12px;
-  --menu-text-sm: 11px;
+  /* Corners and type come straight from the app's tokens (styles.css), so
+     the menu bar can never drift from the app. */
+  --menu-radius: var(--gyro-radius-xl);
+  --menu-radius-sm: var(--gyro-radius-md);
+  --menu-radius-xs: var(--gyro-radius-sm);
+  --menu-text-lg: var(--gyro-type-md);
+  --menu-text-md: var(--gyro-type-sm);
+  --menu-text-sm: var(--gyro-type-xs);
 
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -75,27 +72,30 @@
 }
 
 .gyro-menu-bar-popover {
-  /* Colour — themed; the light block below re-declares only these. */
-  --menu-bg: #161617;
-  --menu-border: rgba(255, 255, 255, 0.11);
-  --menu-rule: rgba(255, 255, 255, 0.075);
-  --menu-copy: #f4f4f5;
-  --menu-muted: #a1a1a6;
-  --menu-hover: rgba(255, 255, 255, 0.065);
-  --menu-pressed: rgba(255, 255, 255, 0.095);
-  --menu-neutral: #77818c;
-  --menu-accent: #6f9df4;
-  --menu-warn: #e4aa52;
-  --menu-ok: #65c68f;
-  --menu-danger: #de7474;
-  --menu-brand-anthropic: #d97757;
-  --menu-brand-gemini: #6d9bf5;
-  --menu-brand-kimi: #3d7eff;
+  /* Colour — the app's theme tokens, which already flip for light mode and
+     carry the user's accent. */
+  --menu-bg: var(--gyro-pane);
+  --menu-border: var(--gyro-hairline-strong);
+  --menu-rule: var(--gyro-hairline-soft);
+  --menu-copy: var(--gyro-text);
+  --menu-muted: var(--gyro-muted);
+  --menu-hover: color-mix(in srgb, var(--gyro-text) 6.5%, transparent);
+  --menu-pressed: color-mix(in srgb, var(--gyro-text) 9.5%, transparent);
+  --menu-neutral: var(--gyro-faint);
+  --menu-accent: var(--gyro-accent);
+  --menu-warn: var(--gyro-warn);
+  --menu-ok: var(--gyro-success);
+  --menu-danger: var(--gyro-danger);
+  --menu-brand-anthropic: var(--gyro-provider-anthropic);
+  --menu-brand-gemini: var(--gyro-provider-gemini);
+  --menu-brand-kimi: var(--gyro-provider-kimi);
 
   background: var(--menu-bg);
   border: 1px solid var(--menu-border);
   border-radius: var(--menu-radius);
-  /* Reach: 20px below, 14px sideways, 8px above — each within its gutter. */
+  /* Its own shadow, not --gyro-elev-pop: the reach (20px below, 14px
+     sideways, 8px above) must stay inside the window gutters menu_bar.rs
+     sizes the transparent window with. */
   box-shadow:
     0 6px 14px rgba(0, 0, 0, 0.34),
     0 2px 4px rgba(0, 0, 0, 0.2);
@@ -105,20 +105,6 @@
 }
 
 :root[data-surface="menu-bar"][data-theme="light"] .gyro-menu-bar-popover {
-  --menu-bg: #fdfdfd;
-  --menu-border: rgba(20, 27, 34, 0.13);
-  --menu-rule: rgba(20, 27, 34, 0.085);
-  --menu-copy: #171b20;
-  --menu-muted: #67717d;
-  --menu-hover: rgba(24, 30, 37, 0.06);
-  --menu-pressed: rgba(24, 30, 37, 0.09);
-  --menu-neutral: #8a929b;
-  --menu-accent: #3b6fd4;
-  --menu-warn: #a8761f;
-  --menu-ok: #2f9463;
-  --menu-danger: #c5514e;
-  --menu-brand-gemini: #3267d6;
-
   box-shadow:
     0 6px 14px rgba(24, 30, 37, 0.16),
     0 2px 4px rgba(24, 30, 37, 0.1);
@@ -148,7 +134,7 @@
 
 .gyro-menu-bar-header strong {
   font-size: var(--menu-text-lg);
-  font-weight: 600;
+  font-weight: var(--gyro-weight-strong);
   line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -162,7 +148,7 @@
   color: var(--tone);
   font-size: var(--menu-text-sm);
   font-style: normal;
-  font-weight: 600;
+  font-weight: var(--gyro-weight-strong);
   line-height: 20px;
   padding: 0 8px;
   white-space: nowrap;
@@ -226,7 +212,7 @@
 
 .gyro-menu-bar-model-mark strong {
   font-size: var(--menu-text-sm);
-  font-weight: 600;
+  font-weight: var(--gyro-weight-strong);
   line-height: 1;
 }
 
@@ -324,7 +310,7 @@
 .gyro-menu-bar-job-main strong,
 .gyro-menu-bar-outcome strong {
   font-size: var(--menu-text-md);
-  font-weight: 500;
+  font-weight: var(--gyro-weight-medium);
   line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -415,7 +401,7 @@
 .gyro-menu-bar-approval > p span {
   color: var(--menu-warn);
   font-size: var(--menu-text-sm);
-  font-weight: 500;
+  font-weight: var(--gyro-weight-medium);
   line-height: 16px;
 }
 
@@ -445,7 +431,7 @@
   border-radius: var(--menu-radius-xs);
   cursor: pointer;
   font-size: var(--menu-text-md);
-  font-weight: 500;
+  font-weight: var(--gyro-weight-medium);
   height: 26px;
   padding: 0 12px;
 }
@@ -491,7 +477,7 @@
   border-radius: var(--menu-radius-xs);
   cursor: pointer;
   font-size: var(--menu-text-md);
-  font-weight: 500;
+  font-weight: var(--gyro-weight-medium);
   height: 28px;
   padding: 0 8px;
 }
