@@ -5620,38 +5620,6 @@ body {
   padding: 0 10px;
 }
 
-.gyro-workspace-settings-editor {
-  min-width: 0;
-  overflow: auto;
-  padding: clamp(24px, 4vw, 52px);
-  background: var(--gyro-workspace-bg);
-}
-
-.gyro-workspace-settings-editor > header {
-  max-width: 760px;
-}
-
-.gyro-workspace-settings-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-}
-
-.gyro-workspace-settings-editor h1 {
-  margin: 0;
-  font-size: var(--gyro-type-xl);
-  letter-spacing: -0.025em;
-}
-
-.gyro-workspace-settings-editor header p {
-  max-width: 620px;
-  margin: 8px 0 0;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-md);
-  line-height: 1.55;
-}
-
 .gyro-workspace-settings-scopes {
   display: inline-flex;
   margin-bottom: 18px;
@@ -5671,63 +5639,11 @@ body {
   font-size: var(--gyro-type-sm);
 }
 
-.gyro-workspace-settings-list {
-  max-width: 760px;
-  overflow: hidden;
-}
-
-.gyro-workspace-settings-list > label {
-  display: grid;
-  grid-template-columns: minmax(210px, 0.9fr) minmax(220px, 1.1fr);
-  gap: 24px;
-  align-items: center;
-}
-
-.gyro-workspace-settings-list > label:last-child {
-  border-bottom: 0;
-}
-
-.gyro-workspace-settings-list label > span {
-  display: grid;
-  gap: 4px;
-}
-
-.gyro-workspace-settings-list strong {
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-sm);
-}
-
-.gyro-workspace-settings-list small {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-  line-height: 1.4;
-}
-
-.gyro-workspace-settings-editor input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 31px;
-  padding: 6px 10px;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-  outline: none;
-  color: var(--gyro-text);
-  background: var(--gyro-control-bg);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-}
-
-.gyro-workspace-settings-editor input:focus {
-  border-color: var(--gyro-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gyro-accent) 20%, transparent);
-}
-
 .gyro-workspace-settings-reset {
   margin-top: 16px;
 }
 
 .gyro-workspace-keybindings {
-  max-width: 760px;
   margin-top: 24px;
 }
 
@@ -5835,44 +5751,7 @@ body {
 }
 
 .gyro-workspace-contributions {
-  max-width: 760px;
   margin-top: 34px;
-}
-
-.gyro-workspace-contributions > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 12px;
-}
-
-.gyro-workspace-contributions h2 {
-  margin: 0;
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-lg);
-}
-
-.gyro-workspace-contributions header p {
-  max-width: 500px;
-  margin: 4px 0 0;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  line-height: 1.45;
-}
-
-.gyro-workspace-contributions > header > button {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  background: var(--gyro-control-bg);
-  font: inherit;
-  font-size: var(--gyro-type-xs);
 }
 
 .gyro-workspace-contribution-error {
@@ -5960,10 +5839,6 @@ body {
 }
 
 @media (max-width: 760px) {
-  .gyro-workspace-settings-list > label {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
 
   .gyro-workspace-settings-scopes {
     display: flex;
@@ -13140,7 +13015,8 @@ button.gyro-settings-row em::after {
   justify-items: start;
 }
 
-.gyro-settings-group > h2 {
+.gyro-settings-group > h2,
+.gyro-settings-group-head > h2 {
   margin: 0;
 }
 
@@ -13245,19 +13121,6 @@ button.gyro-settings-row em::after {
   display: grid;
   gap: 18px;
   padding-bottom: 28px;
-}
-
-.gyro-usage-provider-select {
-  display: grid;
-  gap: 7px;
-}
-
-.gyro-usage-provider-select > span {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
 }
 
 /* Compact sibling of the provider select, sized for a settings row. */
@@ -19637,34 +19500,11 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
-.gyro-settings-content > .gyro-workspace-settings-editor {
-  background: transparent;
-  overflow: visible;
-  padding: 0;
-}
-
 .gyro-workspace-settings-empty {
   margin: -6px 0 16px;
 }
 
 .gyro-workspace-services {
-  max-width: 760px;
-}
-
-.gyro-workspace-services > header {
-  margin-bottom: 12px;
-}
-
-.gyro-workspace-services h2 {
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-lg);
-  margin: 0;
-}
-
-.gyro-workspace-services header p {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  margin: 4px 0 0;
 }
 
 .gyro-workspace-services > div {
@@ -22927,7 +22767,8 @@ button.gyro-settings-row em::after {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.gyro-settings-group > h2 {
+.gyro-settings-group > h2,
+.gyro-settings-group-head > h2 {
   letter-spacing: -0.01em;
 }
 
@@ -24909,47 +24750,13 @@ body,
   gap: 12px;
 }
 
-.gyro-settings-group > h2 {
+.gyro-settings-group > h2,
+.gyro-settings-group-head > h2 {
   color: var(--gyro-text);
   font-size: var(--gyro-type-base);
   font-weight: var(--gyro-weight-medium);
   padding: 0;
   text-transform: none;
-}
-
-.gyro-settings-content > .gyro-workspace-settings-editor {
-  margin: 0;
-  max-width: 780px;
-}
-
-.gyro-workspace-settings-editor > header {
-  margin-bottom: 24px;
-}
-
-.gyro-workspace-settings-eyebrow {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  letter-spacing: -0.01em;
-  text-transform: none;
-}
-
-.gyro-workspace-settings-list {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.gyro-workspace-settings-list > label {
-  background: transparent;
-  border-bottom: 1px solid var(--gyro-border-soft);
-  min-height: 72px;
-  padding: 14px 4px;
-}
-
-.gyro-workspace-settings-list > label:first-child {
-  border-top: 1px solid var(--gyro-border-soft);
 }
 
 .gyro-settings-group-rows {
@@ -25228,16 +25035,14 @@ body,
 
 :root[data-density="compact"] .gyro-settings-row,
 :root[data-density="compact"] .gyro-settings-group .gyro-provider-row,
-:root[data-density="compact"] .gyro-provider-table > .gyro-provider-row,
-:root[data-density="compact"] .gyro-workspace-settings-list > label {
+:root[data-density="compact"] .gyro-provider-table > .gyro-provider-row {
   min-height: calc(48px * var(--gyro-ui-scale, 1));
   padding-block: calc(9px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-settings-row,
 :root[data-density="comfortable"] .gyro-settings-group .gyro-provider-row,
-:root[data-density="comfortable"] .gyro-provider-table > .gyro-provider-row,
-:root[data-density="comfortable"] .gyro-workspace-settings-list > label {
+:root[data-density="comfortable"] .gyro-provider-table > .gyro-provider-row {
   min-height: calc(56px * var(--gyro-ui-scale, 1));
   padding-block: calc(12px * var(--gyro-ui-scale, 1));
 }
@@ -32173,6 +31978,36 @@ body,
 
 .gyro-project-folders > .gyro-project-add-folder {
   margin-top: 4px;
+}
+
+/* One settings page layout: group notes and a heading row with an action,
+   used where a group needs a line of context or a primary control. */
+.gyro-settings-group-note {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-sm);
+  line-height: 1.45;
+  margin: -4px 0 8px;
+  max-width: 64ch;
+}
+
+.gyro-settings-group-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.gyro-settings-group-head > h2 {
+  margin: 0;
+}
+
+/* Settings rows give text fields a steady width, like selects and switches. */
+.gyro-settings-control-column > .gyro-input.gyro-input {
+  width: min(300px, 40vw);
+}
+
+.gyro-settings-section-body > .gyro-workspace-settings-reset {
+  justify-self: end;
 }
 
 /* ==========================================================================

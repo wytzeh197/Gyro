@@ -8152,7 +8152,7 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("gyro-usage-provider-select") &&
+  surfaceSource.includes('aria-label="Usage provider"') &&
     surfaceSource.includes('aria-label="Usage provider"') &&
     surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&

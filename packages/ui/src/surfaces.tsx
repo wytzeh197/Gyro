@@ -12699,21 +12699,30 @@ function WorkspaceSettingsEditor({
   return (
     <section
       aria-labelledby="gyro-workspace-settings-title"
-      className="gyro-workspace-settings-editor"
+      className="gyro-settings-section gyro-workspace-settings-editor"
+      data-setting-key={settingsSearchKey(
+        view === "editor" ? "Editor & Search" : "Tools & Contributions",
+      )}
+      tabIndex={-1}
     >
       <header>
-        <span className="gyro-workspace-settings-eyebrow">
-          <Settings size={13} /> Workspace
-        </span>
-        <h1 id="gyro-workspace-settings-title">
-          {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
-        </h1>
-        <p>
-          {view === "editor"
-            ? "Tune editor and search behavior at user, workspace, or folder scope. Narrower scopes override broader ones."
-            : "Manage workspace commands, language services, and trusted local contributions."}
-        </p>
+        <div>
+          <h1 id="gyro-workspace-settings-title">
+            {view === "editor" ? (
+              <FileText aria-hidden="true" size={18} />
+            ) : (
+              <Blocks aria-hidden="true" size={18} />
+            )}
+            {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
+          </h1>
+          <span>
+            {view === "editor"
+              ? "Tune editor and search behavior for you, this workspace, or one folder. Narrower scopes override broader ones."
+              : "Manage workspace commands, language services, and trusted local contributions."}
+          </span>
+        </div>
       </header>
+      <div className="gyro-settings-section-body">
       {view === "editor" ? (
         <>
           <div
@@ -12763,13 +12772,14 @@ function WorkspaceSettingsEditor({
               </OptionSelect>
             </label>
           ) : null}
-          <div className="gyro-workspace-settings-list">
-            <label>
-              <span>
-                <strong>Files: Exclude</strong>
-                <small>Comma-separated globs hidden from Explorer.</small>
-              </span>
+          <SettingsGroup label="Editor and search">
+            <SettingsRow
+              detail="Comma-separated globs hidden from Explorer."
+              label="Hidden files"
+            >
               <SettingsDraftInput
+                aria-label="Hidden files"
+                className="gyro-input"
                 key={`files-${scope}-${path}`}
                 onCommit={(value) =>
                   update({
@@ -12782,15 +12792,14 @@ function WorkspaceSettingsEditor({
                 placeholder={`${inheritedLabel}: ${inherited.filesExclude.join(", ")}`}
                 value={(settings.filesExclude ?? []).join(", ")}
               />
-            </label>
-            <label>
-              <span>
-                <strong>Search: Exclude</strong>
-                <small>
-                  Comma-separated globs skipped by workspace search.
-                </small>
-              </span>
+            </SettingsRow>
+            <SettingsRow
+              detail="Comma-separated globs skipped by workspace search."
+              label="Search exclusions"
+            >
               <SettingsDraftInput
+                aria-label="Search exclusions"
+                className="gyro-input"
                 key={`search-${scope}-${path}`}
                 onCommit={(value) =>
                   update({
@@ -12803,13 +12812,14 @@ function WorkspaceSettingsEditor({
                 placeholder={`${inheritedLabel}: ${inherited.searchExclude.join(", ")}`}
                 value={(settings.searchExclude ?? []).join(", ")}
               />
-            </label>
-            <label>
-              <span>
-                <strong>Search: Maximum Results</strong>
-                <small>Caps results between 10 and 1,000.</small>
-              </span>
+            </SettingsRow>
+            <SettingsRow
+              detail="Caps results between 10 and 1,000."
+              label="Maximum search results"
+            >
               <SettingsDraftInput
+                aria-label="Maximum search results"
+                className="gyro-input"
                 key={`max-${scope}-${path}`}
                 max={1000}
                 min={10}
@@ -12826,14 +12836,11 @@ function WorkspaceSettingsEditor({
                 type="number"
                 value={settings.searchMaxResults ?? ""}
               />
-            </label>
-            <label>
-              <span>
-                <strong>Editor: Minimap</strong>
-                <small>
-                  Shows a compact document overview beside the editor.
-                </small>
-              </span>
+            </SettingsRow>
+            <SettingsRow
+              detail="Shows a compact document overview beside the editor."
+              label="Minimap"
+            >
               <OptionSelect
                 label="Minimap"
                 onChange={(event) =>
@@ -12860,8 +12867,8 @@ function WorkspaceSettingsEditor({
                 <option value="on">On</option>
                 <option value="off">Off</option>
               </OptionSelect>
-            </label>
-          </div>
+            </SettingsRow>
+          </SettingsGroup>
           {scope !== "user" ? (
             <button
               className="gyro-button is-secondary gyro-workspace-settings-reset"
@@ -12875,15 +12882,13 @@ function WorkspaceSettingsEditor({
         </>
       ) : (
         <>
-          <section className="gyro-workspace-services">
-            <header>
-              <h2>Language services</h2>
-              <p>
-                Detected locally for the active project. Gyro does not
-                auto-install external tools.
-              </p>
-            </header>
-            <div>
+          <section className="gyro-settings-group gyro-workspace-services">
+            <h2>Language services</h2>
+            <p className="gyro-settings-group-note">
+              Detected locally for the active project. Gyro does not
+              auto-install external tools.
+            </p>
+            <div className="gyro-settings-group-rows">
               {languageServers.length > 0 ? (
                 languageServers.map((server) => (
                   <article key={server.id}>
@@ -12895,20 +12900,18 @@ function WorkspaceSettingsEditor({
                   </article>
                 ))
               ) : (
-                <p>No language services detected for the current project.</p>
+                <EmptyState
+                  compact
+                  title="No language services detected for the current project."
+                />
               )}
             </div>
           </section>
-          <section className="gyro-workspace-contributions">
-            <header>
-              <div>
-                <h2>Local contributions</h2>
-                <p>
-                  Declarative commands and views loaded from a local manifest.
-                  Contributions stay disabled until you enable them.
-                </p>
-              </div>
+          <section className="gyro-settings-group gyro-workspace-contributions">
+            <div className="gyro-settings-group-head">
+              <h2>Local contributions</h2>
               <button
+                className="gyro-button is-secondary is-small"
                 onClick={() => contributionInputRef.current?.click()}
                 type="button"
               >
@@ -12936,7 +12939,11 @@ function WorkspaceSettingsEditor({
                 ref={contributionInputRef}
                 type="file"
               />
-            </header>
+            </div>
+            <p className="gyro-settings-group-note">
+              Declarative commands and views loaded from a local manifest.
+              Contributions stay disabled until you enable them.
+            </p>
             {contributionError ? (
               <p className="gyro-workspace-contribution-error" role="alert">
                 {contributionError}
@@ -12969,6 +12976,7 @@ function WorkspaceSettingsEditor({
                   </div>
                   <div className="gyro-workspace-contribution-actions">
                     <button
+                      className="gyro-button is-secondary is-small"
                       disabled={contribution.source === "core"}
                       onClick={() =>
                         onToggleContribution?.(
@@ -12982,7 +12990,7 @@ function WorkspaceSettingsEditor({
                     </button>
                     {contribution.source === "local" ? (
                       <button
-                        className="is-danger"
+                        className="gyro-button is-danger is-small"
                         onClick={() => onRemoveContribution?.(contribution.id)}
                         type="button"
                       >
@@ -12996,6 +13004,7 @@ function WorkspaceSettingsEditor({
           </section>
         </>
       )}
+      </div>
     </section>
   );
 }
@@ -21531,8 +21540,10 @@ export function SettingsSurface({
           >
             {usageProvider ? (
               <div className="gyro-usage-dashboard">
-                <label className="gyro-usage-provider-select">
-                  <span>Provider</span>
+                <SettingsRow
+                  detail="Whose plan windows and spend limits this page shows."
+                  label="Provider"
+                >
                   <SettingsSelect
                     aria-label="Usage provider"
                     value={usageProvider.id}
@@ -21552,7 +21563,7 @@ export function SettingsSurface({
                       </option>
                     ))}
                   </SettingsSelect>
-                </label>
+                </SettingsRow>
                 <div className="gyro-usage-toolbar">
                   <div>
                     <strong>
