@@ -188,11 +188,6 @@
   line-height: 1.6;
   text-align: left;
 }
-.gyro-design-study :is(.gyro-primary-button, .gyro-secondary-button) {
-  border-radius: var(--gyro-radius-sm);
-  min-height: 30px;
-  font-weight: 500;
-}
 .gyro-design-study :is(button, select, .gyro-composer-bar) {
   transition:
     background-color 80ms ease,
@@ -229,9 +224,6 @@
   cursor: pointer;
   font-family: inherit;
   color: inherit;
-}
-.study-workbench .gyro-primary-button {
-  color: var(--gyro-primary-text);
 }
 .study-sidebar {
   width: 223px;

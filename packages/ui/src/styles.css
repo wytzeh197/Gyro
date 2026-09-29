@@ -1341,8 +1341,6 @@ button {
   min-width: 0;
 }
 
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button {
   align-items: center;
   display: inline-flex;
@@ -1350,26 +1348,9 @@ button {
   justify-content: center;
 }
 
-.gyro-primary-button {
-  border: 1px solid var(--gyro-primary-bg);
-  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-primary-button:hover {
-  background: var(--gyro-primary-hover);
-  border-color: var(--gyro-primary-hover);
-}
-
-.gyro-primary-button:disabled,
-.gyro-secondary-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.gyro-secondary-button {
-  border: 1px solid var(--gyro-border-strong);
-  color: var(--gyro-text);
-  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
+.gyro-button.is-primary,
+.gyro-button.is-secondary {
+  display: inline-flex;
 }
 
 .gyro-icon-button {
@@ -2321,7 +2302,7 @@ button {
     display: none;
   }
 
-  .gyro-toolbar-actions .gyro-primary-button {
+  .gyro-toolbar-actions .gyro-button.is-primary {
     display: none;
   }
 }
@@ -4370,7 +4351,7 @@ button {
     display: none;
   }
 
-  .gyro-diff-actions .gyro-secondary-button:first-child {
+  .gyro-diff-actions .gyro-button.is-secondary:first-child {
     display: none;
   }
 
@@ -4635,8 +4616,6 @@ body {
   color: var(--gyro-muted);
 }
 
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button,
 .gyro-chat-tool,
 .gyro-chat-icon-tool,
@@ -4644,12 +4623,10 @@ body {
 .gyro-composer-tool,
 .gyro-browser-preview-toolbar button,
 .gyro-browser-preview-toolbar select,
-.gyro-theme-picker button,
-.gyro-provider-actions .gyro-secondary-button {
+.gyro-theme-picker button {
   border-radius: var(--gyro-radius-sm);
 }
 
-.gyro-secondary-button,
 .gyro-icon-button,
 .gyro-chat-tool,
 .gyro-chat-icon-tool,
@@ -4660,7 +4637,6 @@ body {
   border-color: var(--gyro-border);
 }
 
-.gyro-secondary-button:hover,
 .gyro-icon-button:hover,
 .gyro-chat-tool:hover,
 .gyro-chat-icon-tool:hover,
@@ -8718,9 +8694,6 @@ body {
   color: #f3f0eb;
 }
 
-.gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed):focus-within {
-}
-
 .gyro-chat-start .gyro-composer-bar {
   border: 1px solid #45474d;
   border-top: 0;
@@ -9586,14 +9559,11 @@ body {
       color-mix(in srgb, var(--gyro-inset-highlight) 72%, transparent);
 }
 
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button,
 .gyro-live-pill,
 .gyro-provider-state,
 .gyro-provider-row code,
 .gyro-settings-row em,
-.gyro-provider-actions .gyro-secondary-button,
 .gyro-browser-preview-toolbar button,
 .gyro-composer-popover,
 .gyro-provider-picker .gyro-composer-popover,
@@ -9677,7 +9647,6 @@ body {
 .gyro-provider-card:hover,
 .gyro-settings-row:hover,
 .gyro-provider-row:hover,
-.gyro-secondary-button:hover,
 .gyro-icon-button:hover {
   border-color: transparent;
   box-shadow:
@@ -11023,8 +10992,6 @@ textarea,
     transform var(--gyro-motion) var(--gyro-ease);
 }
 
-.gyro-primary-button:hover:not(:disabled),
-.gyro-secondary-button:hover:not(:disabled),
 .gyro-icon-button:hover:not(:disabled),
 .gyro-composer-chip:hover:not(:disabled),
 .gyro-composer-tool:hover:not(:disabled),
@@ -11985,20 +11952,6 @@ textarea,
   margin-top: 18px;
 }
 
-.gyro-provider-actions .gyro-secondary-button {
-  background: rgba(255, 255, 255, 0.025);
-  border-color: rgba(255, 255, 255, 0.075);
-  border-radius: var(--gyro-radius-md);
-  color: #d8d4cc;
-  font-size: var(--gyro-type-xs);
-  min-height: calc(32px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-provider-actions .gyro-secondary-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.11);
-}
-
 .gyro-settings-surface .gyro-provider-row {
   background: transparent;
   border: 0;
@@ -12027,10 +11980,6 @@ textarea,
   border: 0;
   color: #9ea39d;
   padding: 0;
-}
-
-.gyro-settings-surface .gyro-settings-provider-actions .gyro-secondary-button {
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
 }
 
 @media (max-width: 1120px) {
@@ -12408,8 +12357,7 @@ textarea,
 :root[data-theme="light"] .gyro-provider-hero .gyro-live-pill,
 :root[data-theme="light"] .gyro-provider-card,
 :root[data-theme="light"] .gyro-provider-icon,
-:root[data-theme="light"] .gyro-provider-state,
-:root[data-theme="light"] .gyro-provider-actions .gyro-secondary-button {
+:root[data-theme="light"] .gyro-provider-state {
   background: rgba(255, 255, 255, 0.66);
   border-color: rgba(32, 34, 38, 0.1);
   box-shadow: inset 0 0 0 0.5px rgba(32, 34, 38, 0.08);
@@ -12712,8 +12660,6 @@ textarea,
   box-shadow: none;
 }
 
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button,
 .gyro-composer-chip,
 .gyro-composer-tool,
@@ -12734,8 +12680,6 @@ textarea,
     transform var(--gyro-motion-fast) var(--gyro-ease);
 }
 
-.gyro-primary-button:active:not(:disabled),
-.gyro-secondary-button:active:not(:disabled),
 .gyro-icon-button:active:not(:disabled),
 .gyro-composer-chip:active:not(:disabled),
 .gyro-composer-tool:active:not(:disabled),
@@ -13055,8 +12999,6 @@ textarea,
 .gyro-session-row,
 .gyro-tools-card,
 .gyro-provider-card,
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button,
 .gyro-terminal-pane,
 .gyro-terminal-drag-handle,
@@ -13117,14 +13059,12 @@ textarea,
   box-shadow: none;
 }
 
-.gyro-primary-button,
 .gyro-send-button {
   background: var(--gyro-primary-bg);
   border-color: transparent;
   color: var(--gyro-primary-text);
 }
 
-.gyro-primary-button:hover:not(:disabled),
 .gyro-send-button:hover:not(:disabled) {
   background: var(--gyro-primary-hover);
   border-color: transparent;
@@ -14090,28 +14030,6 @@ button.gyro-settings-row em::after {
   transform: translateX(17px);
 }
 
-.gyro-settings-segmented {
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  display: inline-flex;
-  padding: calc(2px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-settings-segmented button {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-  min-height: calc(26px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(10px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-settings-segmented button.is-active {
-  background: color-mix(in srgb, var(--gyro-text) 13%, transparent);
-  color: var(--gyro-text);
-}
-
 .gyro-settings-status {
   align-items: center;
   color: var(--gyro-muted);
@@ -14706,12 +14624,6 @@ button.gyro-settings-row em::after {
 }
 /* The card's primary step is the app's primary button, sized for a card head:
    one accent, one hover, one focus ring. */
-.gyro-update-actions .gyro-primary-button,
-.gyro-update-actions .gyro-secondary-button {
-  font-size: var(--gyro-type-sm);
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
-}
 .gyro-update-card .is-spinning {
   animation: gyro-update-spin 900ms linear infinite;
 }
@@ -14846,14 +14758,6 @@ button.gyro-settings-row em::after {
 .gyro-settings-confirm-overlay section > div {
   display: flex;
   justify-content: flex-end;
-}
-.gyro-danger-button {
-  background: color-mix(in srgb, #d86464 6%, var(--gyro-surface-soft));
-  border: 0.5px solid color-mix(in srgb, #d86464 45%, var(--gyro-border));
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-danger);
-  min-height: 30px;
-  padding: 0 10px;
 }
 
 /* The Settings nav can say "an update is waiting" on the row itself, so nobody
@@ -15067,19 +14971,6 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
-.gyro-settings-provider-actions .gyro-primary-button,
-.gyro-settings-provider-actions .gyro-secondary-button {
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding-inline: calc(10px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-settings-provider-actions .gyro-primary-button:disabled {
-  background: color-mix(in srgb, #48b87a 14%, var(--gyro-surface-soft));
-  border-color: color-mix(in srgb, #48b87a 30%, var(--gyro-border));
-  color: color-mix(in srgb, #48b87a 76%, var(--gyro-text));
-  opacity: 1;
-}
-
 .gyro-provider-details > summary:hover {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
@@ -15090,15 +14981,9 @@ button.gyro-settings-row em::after {
 
 .gyro-provider-details > summary:focus-visible,
 .gyro-settings-provider-actions button:focus-visible,
-.gyro-settings-switch:focus-visible,
-.gyro-settings-segmented button:focus-visible,
-.gyro-danger-button:focus-visible {
+.gyro-settings-switch:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
-}
-
-.gyro-danger-button:hover:not(:disabled) {
-  background: color-mix(in srgb, #d86464 24%, var(--gyro-surface-soft));
 }
 
 :root[data-theme="light"] .gyro-provider-details > div,
@@ -18581,13 +18466,8 @@ button.gyro-settings-row em::after {
   gap: 6px;
 }
 
-.gyro-plan-usage-notice-actions .gyro-secondary-button {
-  align-items: center;
+.gyro-plan-usage-notice-actions .gyro-button.is-secondary {
   display: inline-flex;
-  font-size: var(--gyro-type-xs);
-  gap: calc(4px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
-  white-space: nowrap;
 }
 
 .gyro-plan-usage-notice-dismiss {
@@ -19603,11 +19483,6 @@ button.gyro-settings-row em::after {
 .gyro-board-actions {
   align-items: center;
   gap: 7px;
-}
-
-.gyro-board-actions .gyro-primary-button,
-.gyro-board-actions .gyro-secondary-button {
-  min-height: calc(32px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-automation-detail {
@@ -23631,9 +23506,6 @@ button.gyro-settings-row em::after {
  * gradients. Type, primitives, empty states, and page chrome share one bar.
  * -------------------------------------------------------------------------- */
 
-.gyro-button,
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button {
   font-family: var(--gyro-font-sans);
   font-size: var(--gyro-type-md);
@@ -23821,20 +23693,6 @@ button.gyro-settings-row em::after {
 
 :root[data-theme="light"] .gyro-provider-health > span.is-checking {
   animation: gyro-provider-checking 1.1s ease-in-out infinite;
-}
-
-:root[data-theme="light"] .gyro-provider-actions .gyro-secondary-button {
-  background: #f7f9fc;
-  border-color: #d9e1ea;
-  box-shadow: none;
-  color: #263241;
-}
-
-:root[data-theme="light"]
-  .gyro-provider-actions
-  .gyro-secondary-button:hover:not(:disabled) {
-  background: #edf2f7;
-  border-color: #cbd5e0;
 }
 
 @keyframes gyro-provider-checking {
@@ -24197,7 +24055,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
 }
 
-.gyro-settings-segmented,
 .gyro-settings-select {
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   border-color: var(--gyro-hairline-strong);
@@ -25487,10 +25344,7 @@ button.gyro-settings-row em::after {
 
 .gyro-sidebar-action.is-settings-page,
 .gyro-sidebar-thread,
-.gyro-primary-button,
-.gyro-secondary-button,
 .gyro-icon-button,
-.gyro-settings-segmented button,
 .gyro-theme-picker button,
 .gyro-color-reset {
   transition:
@@ -25504,20 +25358,6 @@ button.gyro-settings-row em::after {
 .gyro-sidebar-action.is-settings-page.is-active,
 .gyro-sidebar-thread.is-active {
   background: transparent;
-}
-
-.gyro-primary-button:not(:disabled) {
-  box-shadow: none;
-}
-
-.gyro-primary-button:hover:not(:disabled) {
-  box-shadow: none;
-}
-
-.gyro-secondary-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border-color: var(--gyro-border);
-  box-shadow: none;
 }
 
 .gyro-color-control {
@@ -26283,13 +26123,10 @@ body,
 
 @media (prefers-reduced-motion: reduce) {
   .gyro-sidebar-action.is-settings-page,
-  .gyro-sidebar-thread,
-  .gyro-primary-button,
-  .gyro-secondary-button,
-  .gyro-icon-button,
-  .gyro-settings-segmented button,
-  .gyro-theme-picker button,
-  .gyro-color-reset {
+.gyro-sidebar-thread,
+.gyro-icon-button,
+.gyro-theme-picker button,
+.gyro-color-reset {
     transition: none;
   }
 }
@@ -26312,11 +26149,7 @@ body,
   padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
 }
 
-.gyro-settings-surface .gyro-primary-button,
-.gyro-settings-surface .gyro-secondary-button,
-.gyro-settings-surface .gyro-danger-button,
 .gyro-settings-surface .gyro-color-reset,
-.gyro-settings-surface .gyro-settings-segmented button,
 .gyro-cli-launch-focus button {
   border-radius: var(--gyro-radius-sm);
   box-shadow: none;
@@ -28420,9 +28253,6 @@ body,
 }
 .gyro-scm-repository-section > .gyro-sidebar-scm-group-label {
   padding-inline: 8px;
-}
-.gyro-scm-history-resizer:hover,
-.gyro-scm-history-resizer:focus-visible {
 }
 .gyro-scm-history-resizer::after {
   content: "";
@@ -32089,13 +31919,6 @@ body,
     flex: 1 1 100%;
     width: 100%;
   }
-
-  .gyro-settings-segmented {
-    display: flex;
-    flex-wrap: wrap;
-    gap: calc(2px * var(--gyro-ui-scale, 1));
-    max-width: 100%;
-  }
 }
 
 /* Confirmations share a readable measure and remain usable in short windows. */
@@ -33318,10 +33141,6 @@ body,
 
 :root[data-theme]
   .gyro-workspace-tool-panel.is-resizable
-  .gyro-diff-review
-  :is(.gyro-secondary-button, .gyro-primary-button),
-:root[data-theme]
-  .gyro-workspace-tool-panel.is-resizable
   .gyro-diff-empty-footer
   .gyro-provider-details
   > summary {
@@ -33337,10 +33156,6 @@ body,
 
 :root[data-theme]
   .gyro-workspace-tool-panel.is-resizable
-  .gyro-diff-review
-  .gyro-secondary-button,
-:root[data-theme]
-  .gyro-workspace-tool-panel.is-resizable
   .gyro-diff-empty-footer
   .gyro-provider-details
   > summary {
@@ -33349,10 +33164,6 @@ body,
   color: var(--gyro-muted);
 }
 
-:root[data-theme]
-  .gyro-workspace-tool-panel.is-resizable
-  .gyro-diff-review
-  .gyro-secondary-button:hover,
 :root[data-theme]
   .gyro-workspace-tool-panel.is-resizable
   .gyro-diff-empty-footer
@@ -33365,7 +33176,7 @@ body,
 :root[data-theme]
   .gyro-workspace-tool-panel.is-resizable
   .gyro-diff-review
-  :is(.gyro-secondary-button, .gyro-primary-button)
+  :is(.gyro-button.is-secondary, .gyro-button.is-primary)
   > svg {
   height: 13px;
   width: 13px;

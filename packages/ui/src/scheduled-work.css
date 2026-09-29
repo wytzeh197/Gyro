@@ -611,16 +611,6 @@
   min-height: 32px;
   flex-shrink: 0;
 }
-.gyro-scheduled-editor footer .gyro-primary-button {
-  background: var(--gyro-text);
-  border-color: var(--gyro-text);
-  color: var(--gyro-surface);
-  border-radius: 10px;
-  box-shadow: none;
-}
-.gyro-scheduled-editor footer .gyro-primary-button:disabled {
-  opacity: 0.35;
-}
 .gyro-scheduled-panel > .gyro-automation-detail {
   padding: 24px;
 }

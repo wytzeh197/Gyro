@@ -938,8 +938,8 @@ const branchDialogSource = readRepoFile(
 );
 const branchDialogCss = readRepoFile("apps/desktop/src/branch-name-dialog.css");
 expect(
-  branchDialogSource.includes('className="gyro-primary-button"') &&
-    branchDialogSource.includes('className="gyro-secondary-button"') &&
+  branchDialogSource.includes('className="gyro-button is-primary"') &&
+    branchDialogSource.includes('className="gyro-button is-secondary"') &&
     branchDialogSource.includes("<code>{startPoint}</code>") &&
     branchDialogCss.includes("appearance: none") &&
     branchDialogCss.includes("-webkit-appearance: none") &&
@@ -5394,7 +5394,7 @@ expect(
     surfaceSource.includes("Open a project to start coding") &&
     !surfaceSource.includes('className="gyro-ide-project-empty-eyebrow"') &&
     !surfaceSource.includes('className="gyro-ide-project-empty-features"') &&
-    /className="gyro-primary-button"\s+onClick=\{onOpenWorkspace\}/.test(
+    /className="gyro-button is-primary"\s+onClick=\{onOpenWorkspace\}/.test(
       surfaceSource,
     ) &&
     surfaceSource.includes("if (!workspacePath)") &&
@@ -6249,7 +6249,7 @@ expect(
     updatesSectionSource.includes('className="gyro-update-facts"') &&
     updatesSectionSource.includes("updateFactRows.map") &&
     updatesSectionSource.includes(
-      'className="gyro-primary-button gyro-update-card-primary"',
+      'className="gyro-button is-primary gyro-update-card-primary"',
     ) &&
     // The workspace-preparation popover owns .gyro-update-primary and its
     // hardcoded blue; the card must not borrow it.

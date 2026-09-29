@@ -80,7 +80,7 @@ export function DesktopNotificationSettings({
         detail="Sends a sample so you can check how Gyro's notifications look."
       >
         <button
-          className="gyro-secondary-button"
+          className="gyro-button is-secondary"
           disabled={isTesting || !onTest}
           onClick={onTest}
           type="button"

@@ -26,10 +26,6 @@
 
 /* Keep controls together when enlarged, and allow descriptions to wrap. The
    parent Settings container already stacks labels and controls below 560px. */
-:root .gyro-settings-segmented {
-  max-width: 100%;
-  flex-wrap: wrap;
-}
 
 :root .gyro-settings-row > div:first-child {
   min-width: 0;

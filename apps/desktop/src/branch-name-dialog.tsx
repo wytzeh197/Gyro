@@ -76,14 +76,14 @@ export function BranchNameDialog({
         </div>
         <footer>
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             type="button"
             onClick={() => onFinish()}
           >
             Cancel
           </button>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             type="submit"
             disabled={!name.trim()}
           >

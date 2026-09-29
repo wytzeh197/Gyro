@@ -358,12 +358,12 @@ function Prototype() {
                     <p>Checks the edited retry loop in aurora.</p>
                     <div>
                       <button
-                        className="gyro-secondary-button"
+                        className="gyro-button is-secondary"
                         onClick={() => choose("stopped")}
                       >
                         Reject
                       </button>
-                      <button className="gyro-primary-button" onClick={start}>
+                      <button className="gyro-button is-primary" onClick={start}>
                         Allow once
                       </button>
                     </div>

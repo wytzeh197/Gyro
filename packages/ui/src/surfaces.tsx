@@ -7377,7 +7377,7 @@ export function WorkspaceHeader({
             <Folder size={17} />
           </button>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             onClick={onCreateSession}
             type="button"
           >
@@ -13296,7 +13296,7 @@ export function IdeSurface({
             </p>
           </div>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             onClick={onOpenWorkspace}
             type="button"
           >
@@ -14309,7 +14309,7 @@ export function DiffPreview({
       <pre>{preview || "No proposed file edits yet."}</pre>
       <footer>
         <button
-          className="gyro-secondary-button"
+          className="gyro-button is-secondary"
           disabled={!pendingApproval}
           onClick={onReject}
           type="button"
@@ -14317,7 +14317,7 @@ export function DiffPreview({
           Reject
         </button>
         <button
-          className="gyro-primary-button"
+          className="gyro-button is-primary"
           disabled={!pendingApproval}
           onClick={onApprove}
           type="button"
@@ -16514,7 +16514,7 @@ export function AutomationsSurface({
     >
       <div className="gyro-scheduled-titlebar" data-tauri-drag-region>
         <button
-          className="gyro-primary-button"
+          className="gyro-button is-primary"
           type="button"
           disabled={isSaving}
           onClick={() => beginCreate()}
@@ -16926,7 +16926,7 @@ export function AutomationsSurface({
                 {saveError ? <p role="alert">{saveError}</p> : null}
                 <footer>
                   <button
-                    className="gyro-secondary-button"
+                    className="gyro-button is-secondary"
                     type="button"
                     disabled={isSaving}
                     onClick={() => {
@@ -16937,7 +16937,7 @@ export function AutomationsSurface({
                     Cancel
                   </button>
                   <button
-                    className="gyro-primary-button"
+                    className="gyro-button is-primary"
                     disabled={!canCreate || isSaving}
                     type="submit"
                   >
@@ -17037,7 +17037,7 @@ function AutomationDetail({
         </div>
         <div className="gyro-board-actions">
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             disabled={running}
             onClick={onEdit}
             type="button"
@@ -17045,7 +17045,7 @@ function AutomationDetail({
             Edit
           </button>
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             onClick={onToggle}
             type="button"
           >
@@ -17063,7 +17063,7 @@ function AutomationDetail({
                 : "Pause"}
           </button>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             disabled={!canRun}
             onClick={onRun}
             type="button"
@@ -17138,7 +17138,7 @@ function AutomationDetail({
           <span>{automation.lastResult}</span>
         </div>
         <button
-          className="gyro-secondary-button"
+          className="gyro-button is-secondary"
           disabled={automation.triageState !== "needs-review"}
           onClick={onArchive}
           type="button"
@@ -17161,7 +17161,7 @@ function AutomationDetail({
             {run.sessionId ? (
               <button
                 type="button"
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 onClick={() => onOpenSession?.(run.sessionId!)}
               >
                 Open chat
@@ -17403,7 +17403,7 @@ export function ProvidersSurface({
                     </div>
                     <div className="gyro-provider-actions">
                       <button
-                        className="gyro-secondary-button"
+                        className="gyro-button is-secondary"
                         disabled={provider.authStatus === "connecting"}
                         onClick={() => onToggleProvider?.(provider.id)}
                         type="button"
@@ -17411,7 +17411,7 @@ export function ProvidersSurface({
                         {providerPrimaryActionLabel(provider)}
                       </button>
                       <button
-                        className="gyro-secondary-button"
+                        className="gyro-button is-secondary"
                         disabled={
                           provider.authStatus === "connecting" ||
                           status?.connectionStatus === "checking"
@@ -17480,7 +17480,7 @@ export function ProvidersSurface({
             />
           </label>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             disabled={!canQueueHandoff}
             onClick={() =>
               onQueueProviderHandoff?.({
@@ -17550,7 +17550,7 @@ export function ProvidersSurface({
             </span>
           </div>
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             onClick={onAddCustomProfile}
             type="button"
           >
@@ -17760,7 +17760,7 @@ export function DiffReviewSurface({
             </div>
             <div className="gyro-diff-actions">
               <button
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 disabled={!selectedFile}
                 onClick={() =>
                   selectedFile && onOpenInEditor?.(selectedFile.path)
@@ -17771,7 +17771,7 @@ export function DiffReviewSurface({
                 Open editor
               </button>
               <button
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 disabled={!hasFiles}
                 onClick={onUndo}
                 type="button"
@@ -17780,7 +17780,7 @@ export function DiffReviewSurface({
                 Clear review marks
               </button>
               <button
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 disabled={!selectedFile}
                 onClick={() =>
                   selectedFile && onRejectFile?.(selectedFile.path)
@@ -17791,7 +17791,7 @@ export function DiffReviewSurface({
                 Needs follow-up
               </button>
               <button
-                className="gyro-primary-button"
+                className="gyro-button is-primary"
                 disabled={!selectedFile}
                 onClick={() =>
                   selectedFile && onAcceptFile?.(selectedFile.path)
@@ -17904,7 +17904,7 @@ export function DiffReviewSurface({
             </div>
             <div>
               <button
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 disabled={!hasFiles}
                 onClick={onRejectAll}
                 type="button"
@@ -17912,7 +17912,7 @@ export function DiffReviewSurface({
                 Flag all for follow-up
               </button>
               <button
-                className="gyro-primary-button"
+                className="gyro-button is-primary"
                 disabled={!hasFiles}
                 onClick={onAcceptAll}
                 type="button"
@@ -20400,14 +20400,14 @@ export function ModelStandardPromptOverlay({
         </div>
         <div className="gyro-model-standard-actions">
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             onClick={onDismiss}
             type="button"
           >
             No, not now
           </button>
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             onClick={onAccept}
             type="button"
           >
@@ -20910,7 +20910,7 @@ function ProviderApiKeySection({
         </ProviderApiKeyField>
         {canUse && onUseProvider ? (
           <button
-            className="gyro-primary-button"
+            className="gyro-button is-primary"
             type="button"
             onClick={() => onUseProvider(provider.id, modelId!)}
           >
@@ -20963,7 +20963,7 @@ function ProviderApiKeyField({
           value={draft}
         />
         <button
-          className="gyro-primary-button"
+          className="gyro-button is-primary"
           disabled={saving || !onSave || draft.trim().length === 0}
           onClick={async () => {
             if (await onSave?.(draft.trim())) setDraft("");
@@ -20974,7 +20974,7 @@ function ProviderApiKeyField({
         </button>
         {configured ? (
           <button
-            className="gyro-danger-button"
+            className="gyro-button is-danger"
             disabled={saving}
             onClick={() => onClear?.()}
             type="button"
@@ -21053,7 +21053,7 @@ function CustomProviderSection({
                   </span>
                 </div>
                 <button
-                  className="gyro-danger-button"
+                  className="gyro-button is-danger"
                   disabled={busy}
                   onClick={async () => {
                     setError(undefined);
@@ -21112,7 +21112,7 @@ function CustomProviderSection({
           </label>
           <div className="gyro-provider-custom-fetch">
             <button
-              className="gyro-secondary-button"
+              className="gyro-button is-secondary"
               disabled={
                 !onFetchCustomProviderModels ||
                 busy ||
@@ -21157,7 +21157,7 @@ function CustomProviderSection({
           </label>
           <div className="gyro-provider-custom-actions">
             <button
-              className="gyro-primary-button"
+              className="gyro-button is-primary"
               disabled={!canSubmit}
               onClick={async () => {
                 setError(undefined);
@@ -21329,7 +21329,7 @@ function CliLaunchPresetEditor({
       </div>
       <footer>
         <button
-          className="gyro-secondary-button"
+          className="gyro-button is-secondary"
           disabled={total >= CLI_LAUNCH_PRESET_MAX_PANES}
           onClick={addEntry}
           type="button"
@@ -21777,7 +21777,7 @@ export function SettingsSurface({
                       </span>
                     </div>
                     <button
-                      className="gyro-secondary-button"
+                      className="gyro-button is-secondary"
                       disabled={providerUsage.status === "loading"}
                       onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
                       type="button"
@@ -22112,7 +22112,7 @@ export function SettingsSurface({
                     <div className="gyro-settings-provider-actions">
                       {canUseInChat && onUseProvider ? (
                         <button
-                          className="gyro-primary-button"
+                          className="gyro-button is-primary"
                           type="button"
                           onClick={() =>
                             onUseProvider(provider.id, defaultModelId!)
@@ -22128,7 +22128,7 @@ export function SettingsSurface({
                       provider.authStatus === "connected" &&
                       health?.connectionStatus === "failed" ? (
                         <button
-                          className="gyro-secondary-button"
+                          className="gyro-button is-secondary"
                           type="button"
                           onClick={() => onTestProvider?.(provider.id)}
                         >
@@ -22137,7 +22137,7 @@ export function SettingsSurface({
                       ) : null}
                       {provider.id === "ollama" ? (
                         <button
-                          className="gyro-secondary-button"
+                          className="gyro-button is-secondary"
                           disabled={isChecking}
                           onClick={() => onTestProvider?.(provider.id)}
                           type="button"
@@ -22149,7 +22149,7 @@ export function SettingsSurface({
                       needsSignInRepair ||
                       needsModelInstall ? (
                         <button
-                          className="gyro-primary-button"
+                          className="gyro-button is-primary"
                           disabled={
                             isChecking ||
                             needsModelInstall ||
@@ -22198,7 +22198,7 @@ export function SettingsSurface({
                       >
                         <div>
                           <button
-                            className="gyro-secondary-button"
+                            className="gyro-button is-secondary"
                             disabled={isChecking}
                             onClick={() => onTestProvider?.(provider.id)}
                             type="button"
@@ -22214,7 +22214,7 @@ export function SettingsSurface({
                           </span>
                           {provider.authStatus === "connected" ? (
                             <button
-                              className="gyro-danger-button"
+                              className="gyro-button is-danger"
                               onClick={() => onToggleProvider?.(provider.id)}
                               type="button"
                             >
@@ -22492,7 +22492,7 @@ export function SettingsSurface({
                       </span>
                     ) : (
                       <button
-                        className="gyro-secondary-button"
+                        className="gyro-button is-secondary"
                         disabled={!onOpenSystemAccessSettings}
                         onClick={() => onOpenSystemAccessSettings?.(scope.id)}
                         type="button"
@@ -22507,7 +22507,7 @@ export function SettingsSurface({
                   detail="Run after changing Gyro's entries in System Settings."
                 >
                   <button
-                    className="gyro-secondary-button"
+                    className="gyro-button is-secondary"
                     disabled={isCheckingSystemAccess || !onRecheckSystemAccess}
                     onClick={onRecheckSystemAccess}
                     type="button"
@@ -22574,7 +22574,7 @@ export function SettingsSurface({
                 <div className="gyro-update-actions">
                   {canRunUpdateAction && updateState ? (
                     <button
-                      className="gyro-primary-button gyro-update-card-primary"
+                      className="gyro-button is-primary gyro-update-card-primary"
                       onClick={() => onUpdateAction?.(updateState)}
                       type="button"
                     >
@@ -22582,7 +22582,7 @@ export function SettingsSurface({
                     </button>
                   ) : null}
                   <button
-                    className="gyro-secondary-button"
+                    className="gyro-button is-secondary"
                     disabled={isUpdateBusy}
                     onClick={onCheckForUpdates}
                     type="button"
@@ -22746,7 +22746,7 @@ export function SettingsSurface({
                 detail="Creates a redacted bundle for issue reports."
               >
                 <button
-                  className="gyro-secondary-button"
+                  className="gyro-button is-secondary"
                   onClick={onExportDiagnostics}
                   type="button"
                 >
@@ -22762,7 +22762,7 @@ export function SettingsSurface({
                 tone="danger"
               >
                 <button
-                  className="gyro-danger-button"
+                  className="gyro-button is-danger"
                   onClick={() => setIsResetConfirmOpen(true)}
                   type="button"
                 >
@@ -22808,14 +22808,14 @@ export function SettingsSurface({
             </p>
             <div>
               <button
-                className="gyro-secondary-button"
+                className="gyro-button is-secondary"
                 onClick={() => setIsResetConfirmOpen(false)}
                 type="button"
               >
                 Cancel
               </button>
               <button
-                className="gyro-danger-button"
+                className="gyro-button is-danger"
                 onClick={() => {
                   setIsResetConfirmOpen(false);
                   onResetUiState?.();
@@ -23373,7 +23373,7 @@ function PlanUsageNotification({
       <div className="gyro-plan-usage-notice-actions">
         {handoffTarget ? (
           <button
-            className="gyro-secondary-button"
+            className="gyro-button is-secondary"
             onClick={() => {
               onHandoff(handoffTarget.id);
               setNotice(undefined);
