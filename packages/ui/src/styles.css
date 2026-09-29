@@ -2,24 +2,7 @@
 @import "./browser-capture.css";
 @import "./appearance.css";
 
-/*
- System typography keeps every desktop surface consistent. Code and terminals retain their monospace fonts.
- */
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("./assets/fonts/inter-tight-latin.woff2") format("woff2");
-}
+/* System typography (San Francisco) on every desktop surface; code and terminals keep their monospace stack. */
 
 :root {
   color-scheme: dark;
@@ -246,10 +229,7 @@
   --gyro-file-data: #7fbf8f;
   color: var(--gyro-text);
   font-family: var(--gyro-font-sans);
-  font-feature-settings:
-    "cv05" 1,
-    "cv11" 1,
-    "calt" 1;
+  font-feature-settings: "calt" 1;
   font-synthesis: none;
   --gyro-control-height: calc(32px * var(--gyro-ui-scale, 1));
   --gyro-icon-target: calc(28px * var(--gyro-ui-scale, 1));
