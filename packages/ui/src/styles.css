@@ -70,7 +70,6 @@
   --gyro-sidebar-mode-track: #141517;
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
   --gyro-shadow: rgba(0, 0, 0, 0.42);
-  --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -87,9 +86,6 @@
   --gyro-workbench-line: rgba(255, 255, 255, 0.06);
   --gyro-control-bg: #222328;
   --gyro-control-hover: #2d2f35;
-  --gyro-shadow-color: rgba(0, 0, 0, 0.55);
-  --gyro-shadow-color-soft: rgba(0, 0, 0, 0.32);
-  --gyro-shadow-color-lift: rgba(0, 0, 0, 0.42);
   --gyro-hairline: rgba(255, 255, 255, 0.09);
   --gyro-hairline-soft: rgba(255, 255, 255, 0.055);
   --gyro-hairline-strong: rgba(255, 255, 255, 0.15);
@@ -166,8 +162,15 @@
   --gyro-hero-send-hover: #ffffff;
   --gyro-hero-send-text: #141517;
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
-  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 36px -12px rgba(0, 0, 0, 0.55);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.32), 0 18px 44px -12px rgba(0, 0, 0, 0.62);
+  --gyro-hero-shadow: var(--gyro-elev-raised);
+  --gyro-hero-shadow-focus: var(--gyro-elev-raised);
+  /* Elevation. Three shadows for the whole app: raised (composers, floating
+     buttons, the selected segment), pop (menus, popovers, tooltips, overlay
+     rails) and dialog (modals and the command palette). Docked panels and
+     cards are flat and rely on their border. */
+  --gyro-elev-raised: 0 1px 2px rgb(0 0 0 / 0.24), 0 6px 16px -6px rgb(0 0 0 / 0.36);
+  --gyro-elev-pop: 0 1px 2px rgb(0 0 0 / 0.2), 0 14px 36px -10px rgb(0 0 0 / 0.55);
+  --gyro-elev-dialog: 0 2px 6px rgb(0 0 0 / 0.22), 0 32px 80px -20px rgb(0 0 0 / 0.66);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
@@ -802,7 +805,6 @@
   --gyro-segment-active: #ffffff;
   --gyro-segment-active-text: #1b1c1f;
   --gyro-shadow: rgba(24, 24, 28, 0.1);
-  --gyro-heavy-shadow: rgba(24, 24, 28, 0.18);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -851,9 +853,6 @@
   --gyro-workbench-line: rgba(24, 24, 28, 0.08);
   --gyro-control-bg: #f4f4f2;
   --gyro-control-hover: #ebebe8;
-  --gyro-shadow-color: rgba(24, 24, 28, 0.12);
-  --gyro-shadow-color-soft: rgba(24, 24, 28, 0.06);
-  --gyro-shadow-color-lift: rgba(24, 24, 28, 0.09);
   --gyro-hairline: rgba(32, 36, 42, 0.11);
   --gyro-hairline-soft: rgba(32, 36, 42, 0.07);
   --gyro-hairline-strong: rgba(32, 36, 42, 0.16);
@@ -890,8 +889,9 @@
   --gyro-hero-send-hover: #000000;
   --gyro-hero-send-text: #ffffff;
   --gyro-hero-focus-border: var(--gyro-accent);
-  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 28, 0.04), 0 14px 36px -14px rgba(24, 24, 28, 0.16);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 28, 0.05), 0 18px 44px -14px rgba(24, 24, 28, 0.2);
+  --gyro-elev-raised: 0 1px 2px rgb(24 26 32 / 0.05), 0 6px 16px -6px rgb(24 26 32 / 0.1);
+  --gyro-elev-pop: 0 1px 2px rgb(24 26 32 / 0.06), 0 14px 36px -10px rgb(24 26 32 / 0.18);
+  --gyro-elev-dialog: 0 2px 6px rgb(24 26 32 / 0.06), 0 32px 80px -20px rgb(24 26 32 / 0.24);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
@@ -1494,7 +1494,7 @@ button {
   background: color-mix(in srgb, var(--gyro-surface-raised) 88%, transparent);
   border: 1px solid var(--gyro-border);
   border-radius: 999px;
-  box-shadow: 0 10px 28px var(--gyro-shadow);
+  box-shadow: var(--gyro-elev-pop);
   display: flex;
   gap: 8px;
   left: 0;
@@ -1654,7 +1654,7 @@ button {
 
 :root[data-theme="light"] .gyro-cli-update-banner {
   background: color-mix(in srgb, var(--gyro-surface) 94%, #ffffff);
-  box-shadow: 0 12px 30px rgba(32, 40, 52, 0.12);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 :root[data-theme="dark"] .gyro-cli-update-banner {
@@ -4659,8 +4659,7 @@ button {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
   box-shadow:
-    0 28px 88px var(--gyro-shadow-color),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-dialog), inset 0 1px 0 var(--gyro-inset-highlight);
   color: var(--gyro-text);
   display: grid;
   gap: 12px;
@@ -4898,7 +4897,7 @@ body {
 
 .gyro-message.is-user > div:last-child {
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 8px 18px var(--gyro-shadow);
+  box-shadow: none;
 }
 
 .gyro-cli-chat-pane,
@@ -5693,9 +5692,7 @@ body {
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: 16px;
   box-shadow:
-    0 1px 2px rgb(0 0 0 / 12%),
-    0 32px 96px rgb(0 0 0 / 44%),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-dialog), inset 0 1px 0 var(--gyro-inset-highlight);
   max-width: 680px;
   overflow: hidden;
   width: min(680px, calc(100vw - 40px));
@@ -6082,7 +6079,7 @@ body {
   background: color-mix(in srgb, var(--gyro-pane) 98%, transparent);
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-xl);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 38%);
+  box-shadow: var(--gyro-elev-pop);
   display: grid;
   gap: 12px;
   /* Open toward the main pane so the card is not clipped by the window. */
@@ -8107,7 +8104,7 @@ body {
   background: var(--gyro-topbar);
   border-color: var(--gyro-topbar-border);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
+  box-shadow: var(--gyro-elev-pop);
   gap: 0;
   min-width: 190px;
   padding: 4px;
@@ -9128,13 +9125,12 @@ body {
 }
 
 .gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed):focus-within {
-  filter: drop-shadow(0 18px 42px var(--gyro-shadow-color-soft));
 }
 
 .gyro-chat-start .gyro-composer-bar {
   border: 1px solid #45474d;
   border-top: 0;
-  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-raised);
   margin-top: -1px;
 }
 
@@ -9163,8 +9159,7 @@ body {
 
 .gyro-send-button {
   box-shadow:
-    0 10px 22px var(--gyro-shadow-color-soft),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    var(--gyro-elev-raised), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .gyro-send-button:hover {
@@ -9176,7 +9171,7 @@ body {
 }
 
 .gyro-workspace-tool-panel {
-  box-shadow: 0 -18px 36px var(--gyro-shadow-color-soft);
+  box-shadow: none;
 }
 
 .gyro-workspace-tool-panel.is-primary {
@@ -9930,7 +9925,7 @@ body {
   }
 
   .gyro-workspace-tool-panel {
-    box-shadow: 0 -10px 22px var(--gyro-shadow-color-soft);
+    box-shadow: none;
   }
 
   .gyro-browser-preview-toolbar {
@@ -9977,9 +9972,7 @@ body {
 .gyro-tool-detail-panel {
   border-color: transparent;
   box-shadow:
-    0 10px 24px var(--gyro-shadow-color-soft),
-    inset 0 0 0 0.5px var(--gyro-hairline),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    inset 0 0 0 0.5px var(--gyro-hairline), inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
 .gyro-settings-row,
@@ -10023,9 +10016,7 @@ body {
 .gyro-composer-shell,
 .gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
   box-shadow:
-    0 18px 38px var(--gyro-shadow-color-soft),
-    inset 0 0 0 0.5px var(--gyro-hairline-strong),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    var(--gyro-elev-raised), inset 0 0 0 0.5px var(--gyro-hairline-strong), inset 0 1px 0 rgba(255, 255, 255, 0.055);
 }
 
 .gyro-chat-start .gyro-composer-shell textarea,
@@ -10035,7 +10026,7 @@ body {
 }
 
 .gyro-chat-start .gyro-composer-context-row {
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 .gyro-model-chip,
@@ -10096,10 +10087,7 @@ body {
 .gyro-icon-button:hover {
   border-color: transparent;
   box-shadow:
-    0 14px 30px var(--gyro-shadow-color-soft),
-    inset 0 0 0 0.5px var(--gyro-hairline-strong),
-    inset 0 1px 0
-      color-mix(in srgb, var(--gyro-inset-highlight) 86%, transparent);
+    inset 0 0 0 0.5px var(--gyro-hairline-strong), inset 0 1px 0 color-mix(in srgb, var(--gyro-inset-highlight) 86%, transparent);
 }
 
 .gyro-settings-row span,
@@ -10135,8 +10123,7 @@ body {
   border-radius: 999px;
   bottom: calc(100% + 10px);
   box-shadow:
-    0 12px 34px var(--gyro-shadow-color),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-raised), inset 0 1px 0 var(--gyro-inset-highlight);
   color: var(--gyro-text);
   display: flex;
   height: 46px;
@@ -10218,8 +10205,7 @@ body {
 
 .gyro-chat-composer-dock .gyro-send-button {
   box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    var(--gyro-elev-raised), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .gyro-chat-composer-dock .gyro-send-button:hover {
@@ -10474,7 +10460,7 @@ body {
 .gyro-terminal-actions-menu {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  box-shadow: var(--gyro-elev-pop);
   display: grid;
   gap: 2px;
   min-width: 170px;
@@ -10904,7 +10890,7 @@ body {
   border: 1px solid var(--gyro-border-strong);
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface-raised);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 .gyro-explorer-context-menu button {
@@ -12573,8 +12559,7 @@ textarea,
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-context-row {
   box-shadow:
-    0 12px 24px rgba(32, 34, 38, 0.08),
-    inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
+    var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-chip:hover,
@@ -12611,8 +12596,7 @@ textarea,
   .gyro-environment-rail {
   background: #ffffff;
   box-shadow:
-    inset 0 0 0 0.5px rgba(32, 34, 38, 0.12),
-    0 12px 28px rgba(32, 34, 38, 0.08);
+    var(--gyro-elev-pop), inset 0 0 0 0.5px rgba(32, 34, 38, 0.12);
 }
 
 :root[data-theme="light"] .gyro-response-inline-code,
@@ -12728,7 +12712,7 @@ textarea,
 :root[data-theme="light"] .gyro-terminal-actions-menu {
   background: #ffffff;
   border-color: rgba(32, 34, 38, 0.14);
-  box-shadow: 0 14px 32px rgba(32, 34, 38, 0.16);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 :root[data-theme="light"] .gyro-terminal-actions-menu button.is-danger {
@@ -12787,8 +12771,7 @@ textarea,
   background: #ffffff;
   border-color: #d9dde5;
   box-shadow:
-    0 28px 70px rgba(32, 34, 38, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    var(--gyro-elev-dialog), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   color: #1d232c;
 }
 
@@ -12952,7 +12935,7 @@ textarea,
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.44);
+  box-shadow: var(--gyro-elev-pop);
   display: grid;
   gap: 2px;
   min-width: 132px;
@@ -13243,8 +13226,7 @@ textarea:focus-visible,
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-composer);
   box-shadow:
-    0 16px 36px var(--gyro-shadow-color-lift),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-raised), inset 0 1px 0 var(--gyro-inset-highlight);
   filter: none;
 }
 
@@ -13252,9 +13234,7 @@ textarea:focus-visible,
 .gyro-chat-start .gyro-composer-shell:focus-within {
   border-color: var(--gyro-focus-ring);
   box-shadow:
-    0 14px 32px var(--gyro-shadow-color-lift),
-    0 0 0 1px var(--gyro-focus-ring),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-raised), 0 0 0 1px var(--gyro-focus-ring), inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea,
@@ -13739,8 +13719,7 @@ textarea:focus-visible,
   border: 0.5px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    0 18px 54px var(--gyro-shadow-color),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-pop), inset 0 1px 0 var(--gyro-inset-highlight);
   color: var(--gyro-text);
   display: grid;
   gap: 8px;
@@ -14179,8 +14158,7 @@ textarea:focus-visible,
   background: var(--gyro-surface-raised);
   border-color: color-mix(in srgb, var(--gyro-accent) 58%, var(--gyro-border));
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--gyro-accent) 13%, transparent),
-    0 8px 22px var(--gyro-shadow-color-soft);
+    0 0 0 2px color-mix(in srgb, var(--gyro-accent) 13%, transparent);
   color: var(--gyro-muted);
 }
 
@@ -14230,8 +14208,7 @@ textarea:focus-visible,
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
   box-shadow:
-    0 18px 42px color-mix(in srgb, var(--gyro-shadow) 30%, transparent),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-pop), inset 0 1px 0 var(--gyro-inset-highlight);
   display: grid;
   gap: 2px;
   left: 0;
@@ -15014,7 +14991,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-pane);
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  box-shadow: var(--gyro-elev-pop);
   display: grid;
   gap: 9px;
   min-width: 230px;
@@ -15050,7 +15027,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-xl);
-  box-shadow: 0 10px 28px var(--gyro-shadow-color-soft);
+  box-shadow: none;
   display: grid;
   overflow: hidden;
 }
@@ -15540,7 +15517,7 @@ button.gyro-settings-row em::after {
 
 :root[data-theme="light"] .gyro-provider-details > div,
 :root[data-theme="light"] .gyro-settings-confirm-overlay > section {
-  box-shadow: 0 14px 38px rgb(32 42 56 / 18%);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 @media (max-width: 900px) {
@@ -15795,9 +15772,7 @@ button.gyro-settings-row em::after {
   background: #ffffff;
   border-color: #d9dde5;
   box-shadow:
-    0 18px 38px rgba(32, 34, 38, 0.1),
-    inset 0 0 0 0.5px rgba(32, 34, 38, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 :root[data-theme="light"]
@@ -15815,8 +15790,7 @@ button.gyro-settings-row em::after {
   > .gyro-composer-context-row {
   background: rgba(255, 255, 255, 0.74);
   box-shadow:
-    0 12px 24px rgba(32, 34, 38, 0.08),
-    inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
+    var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
 }
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-chip:hover,
@@ -15974,7 +15948,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-picker .gyro-composer-popover {
   backdrop-filter: none;
   border: 1px solid var(--gyro-border-strong);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--gyro-elev-pop);
   opacity: 1;
   z-index: 90;
 }
@@ -15983,7 +15957,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-provider-picker .gyro-composer-popover {
   background: #ffffff;
   border-color: #d5d9e0;
-  box-shadow: 0 16px 36px rgba(31, 41, 55, 0.16);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 .gyro-composer-attachments {
@@ -16309,7 +16283,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-change-summary-actions > button {
   background: #ffffff;
   border-color: #c7d0dc;
-  box-shadow: 0 1px 2px rgba(31, 41, 55, 0.06);
+  box-shadow: none;
 }
 
 :root[data-theme="light"]
@@ -16637,7 +16611,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 8px 22px color-mix(in srgb, #000 12%, transparent);
+  box-shadow: none;
   margin-top: 8px;
   overflow: hidden;
 }
@@ -16878,7 +16852,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-change-summary-details {
   background: #ffffff;
   border-color: #d9dde3;
-  box-shadow: 0 9px 24px rgba(31, 41, 55, 0.08);
+  box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-chat-run-change-summary-trigger {
@@ -17216,7 +17190,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-companion {
   /* Overlay lift, kept as a token so light mode can soften it in one place
      rather than in each of the three fallback breakpoints. */
-  --gyro-companion-shadow: 0 16px 44px rgb(0 0 0 / 44%);
+  --gyro-companion-shadow: var(--gyro-elev-pop);
   align-self: stretch;
   background: var(--gyro-app);
   border: 0;
@@ -17410,7 +17384,7 @@ button.gyro-settings-row em::after {
 
 /* Shared by the dock's own "+" and by the two menus in the chat header. */
 .gyro-chat-companion-menu {
-  --gyro-companion-menu-shadow: 0 16px 38px rgb(0 0 0 / 32%);
+  --gyro-companion-menu-shadow: var(--gyro-elev-pop);
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-lg);
@@ -17767,11 +17741,11 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-chat-companion {
-  --gyro-companion-shadow: 0 14px 34px rgb(15 23 35 / 16%);
+  --gyro-companion-shadow: var(--gyro-elev-pop);
 }
 
 :root[data-theme="light"] .gyro-chat-companion-menu {
-  --gyro-companion-menu-shadow: 0 12px 28px rgb(15 23 35 / 14%);
+  --gyro-companion-menu-shadow: var(--gyro-elev-pop);
 }
 
 @keyframes gyro-chat-turn-enter {
@@ -18574,8 +18548,7 @@ button.gyro-settings-row em::after {
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    0 14px 32px color-mix(in srgb, #000 30%, transparent),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-pop), inset 0 1px 0 var(--gyro-inset-highlight);
   display: grid;
   gap: 2px;
   min-width: 124px;
@@ -18685,7 +18658,7 @@ button.gyro-settings-row em::after {
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
   bottom: calc(100% + 8px);
-  box-shadow: 0 14px 36px rgb(0 0 0 / 30%);
+  box-shadow: var(--gyro-elev-pop);
   box-sizing: border-box;
   color: var(--gyro-text);
   display: flex;
@@ -18801,7 +18774,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 10px 26px rgb(0 0 0 / 26%);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
   line-height: 1.45;
@@ -18816,7 +18789,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-composer-slash-hint-bubble {
   background: #ffffff;
   border-color: #d5d9e0;
-  box-shadow: 0 12px 30px rgb(31 41 55 / 16%);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 .gyro-composer-slash-menu button code {
@@ -18829,7 +18802,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-composer-slash-menu {
   background: #ffffff;
   border-color: #d5d9e0;
-  box-shadow: 0 18px 46px rgb(31 41 55 / 18%);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 @media (max-width: 620px) {
@@ -18915,7 +18888,7 @@ button.gyro-settings-row em::after {
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-sm);
   bottom: calc(100% + 12px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-text);
   font-size: var(--gyro-type-sm);
   line-height: 1.4;
@@ -19292,7 +19265,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-hairline-soft);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 8px 20px var(--gyro-shadow-color-soft);
+  box-shadow: var(--gyro-elev-pop);
   display: grid;
   gap: 12px;
   left: 0;
@@ -20473,7 +20446,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-surface.is-tiled.has-environment .gyro-plan-rail,
 .gyro-chat-surface.is-tiled.has-environment .gyro-browser-rail {
   bottom: 8px;
-  box-shadow: 0 16px 44px rgb(0 0 0 / 44%);
+  box-shadow: var(--gyro-elev-pop);
   grid-area: auto;
   max-width: calc(100% - 16px);
   position: absolute;
@@ -20651,7 +20624,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-composer-context-tooltip {
   background: var(--gyro-surface);
   border-color: var(--gyro-border);
-  box-shadow: 0 16px 36px rgba(32, 40, 52, 0.18);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-text);
 }
 
@@ -20759,7 +20732,7 @@ button.gyro-settings-row em::after {
     var(--gyro-accent) 32%,
     var(--gyro-hairline-strong)
   );
-  box-shadow: 0 5px 14px var(--gyro-shadow-color-soft);
+  box-shadow: none;
   transform: translateY(-1px);
 }
 
@@ -21825,7 +21798,7 @@ button.gyro-settings-row em::after {
   background: #fff;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-raised);
   height: 100%;
   margin: 0 auto;
   max-width: none;
@@ -22240,7 +22213,7 @@ button.gyro-settings-row em::after {
 
 .gyro-browser-page.is-tablet {
   border-radius: var(--gyro-radius-xl);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-raised);
   height: min(100%, 1112px);
   max-width: min(834px, 100%);
   width: 100%;
@@ -22248,7 +22221,7 @@ button.gyro-settings-row em::after {
 
 .gyro-browser-page.is-mobile {
   border-radius: 16px;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-raised);
   height: min(100%, 844px);
   max-width: min(390px, 100%);
   width: 100%;
@@ -22693,7 +22666,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised, var(--gyro-surface, #1a1b1e));
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-pop);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -22813,7 +22786,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-scm-branch-menu {
   background: #fff;
   border-color: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 :root[data-theme="light"] .gyro-scm-branch-item:hover,
@@ -23265,7 +23238,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface, #1a1b1e);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--gyro-elev-pop);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -24149,8 +24122,7 @@ button.gyro-settings-row em::after {
   border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-composer);
   box-shadow:
-    0 18px 44px var(--gyro-shadow-color),
-    inset 0 1px 0 var(--gyro-inset-highlight);
+    var(--gyro-elev-pop), inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
 .gyro-tools-surface,
@@ -24209,7 +24181,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-shell {
   background: #ffffff;
   border-color: #d9e1ea;
-  box-shadow: 0 14px 32px rgba(28, 39, 52, 0.08);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-shell:focus-within,
@@ -24217,7 +24189,7 @@ button.gyro-settings-row em::after {
   .gyro-chat-composer-dock
   .gyro-composer-shell:focus-within {
   border-color: #d9e1ea;
-  box-shadow: 0 14px 32px rgba(28, 39, 52, 0.08);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-context-row,
@@ -24232,8 +24204,7 @@ button.gyro-settings-row em::after {
   background: rgba(255, 255, 255, 0.98);
   border-color: #d9e1ea;
   box-shadow:
-    0 18px 42px rgba(28, 39, 52, 0.14),
-    inset 0 1px 0 #ffffff;
+    var(--gyro-elev-pop), inset 0 1px 0 #ffffff;
 }
 
 :root[data-theme="light"] .gyro-provider-hero {
@@ -24244,7 +24215,6 @@ button.gyro-settings-row em::after {
   background: #ffffff;
   border-color: #dfe6ee;
   box-shadow:
-    0 8px 22px rgba(28, 39, 52, 0.045),
     inset 0 1px 0 #ffffff;
 }
 
@@ -24370,15 +24340,14 @@ button.gyro-settings-row em::after {
   background: var(--gyro-surface-raised);
   border-color: var(--gyro-border);
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.48),
-    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    var(--gyro-elev-pop), inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
 :root[data-theme="dark"] .gyro-scm-branch-menu {
   background: var(--gyro-surface-raised);
   border-color: var(--gyro-border);
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.48),
+    var(--gyro-elev-pop),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
@@ -25332,7 +25301,7 @@ button.gyro-settings-row em::after {
 
 .gyro-image-preview-overlay img {
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 24px 80px rgb(0 0 0 / 48%);
+  box-shadow: var(--gyro-elev-dialog);
   display: block;
   max-height: calc(100vh - 96px);
   max-width: 100%;
@@ -25415,7 +25384,7 @@ button.gyro-settings-row em::after {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 4px 16px rgba(15, 18, 24, 0.08);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-text);
   max-height: calc(100% - 72px);
   overflow: auto;
@@ -26294,7 +26263,7 @@ textarea:focus-visible,
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-text);
   display: block;
   padding: 8px 12px;
@@ -26312,7 +26281,7 @@ textarea:focus-visible,
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 16px 38px var(--gyro-shadow-color-soft);
+  box-shadow: var(--gyro-elev-raised);
   filter: none;
   max-width: var(--gyro-chat-content-width);
   width: min(100%, var(--gyro-chat-content-width));
@@ -26386,7 +26355,7 @@ textarea:focus-visible,
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-xl);
-  box-shadow: 0 16px 36px var(--gyro-shadow-color-soft);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 .gyro-chat-tool-rail > header,
@@ -27206,7 +27175,7 @@ textarea:focus-visible,
 .gyro-chat-surface.has-companion .gyro-composer-shell {
   border: 1px solid var(--gyro-border-soft);
   border-radius: 16px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+  box-shadow: var(--gyro-elev-raised);
   min-width: 0;
   width: 100%;
 }
@@ -27571,7 +27540,7 @@ textarea:focus-visible,
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 12%);
+  box-shadow: var(--gyro-elev-pop);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -27678,7 +27647,6 @@ textarea:focus-visible,
   --gyro-welcome-composer-divider: #ececee;
   --gyro-welcome-composer-muted: #686a6e;
   --gyro-welcome-composer-hover: #f4f4f5;
-  --gyro-welcome-composer-shadow: rgb(24 25 28 / 6%);
 }
 
 :root[data-theme="dark"]
@@ -27689,7 +27657,6 @@ textarea:focus-visible,
   --gyro-welcome-composer-divider: var(--gyro-border);
   --gyro-welcome-composer-muted: var(--gyro-muted);
   --gyro-welcome-composer-hover: var(--gyro-control-hover);
-  --gyro-welcome-composer-shadow: rgb(0 0 0 / 8%);
 }
 
 .gyro-chat-surface.is-empty
@@ -27697,7 +27664,7 @@ textarea:focus-visible,
   > .gyro-composer-shell {
   background: var(--gyro-welcome-composer-surface);
   border-color: var(--gyro-welcome-composer-outline);
-  box-shadow: 0 4px 18px var(--gyro-welcome-composer-shadow);
+  box-shadow: var(--gyro-elev-raised);
   filter: none;
 }
 
@@ -27705,7 +27672,7 @@ textarea:focus-visible,
   > .gyro-chat-start:not(.is-mission)
   > .gyro-composer-shell:focus-within {
   border-color: var(--gyro-welcome-composer-outline);
-  box-shadow: 0 4px 18px var(--gyro-welcome-composer-shadow);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 .gyro-chat-surface.is-empty
@@ -28104,7 +28071,7 @@ textarea:focus-visible,
   color: var(--gyro-text, #d7d9de);
   border: 1px solid var(--gyro-border, #444);
   border-radius: var(--gyro-radius-sm);
-  box-shadow: 0 8px 32px #0005;
+  box-shadow: var(--gyro-elev-pop);
 }
 .gyro-language-menu input {
   width: 100%;
@@ -28382,7 +28349,7 @@ textarea:focus-visible,
   border: 1px solid #e3e4e6;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
+  box-shadow: var(--gyro-elev-raised);
 }
 .gyro-effort-slider input::-moz-range-thumb {
   width: 29.45px;
@@ -28390,7 +28357,7 @@ textarea:focus-visible,
   border: 1px solid #e3e4e6;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
+  box-shadow: var(--gyro-elev-raised);
 }
 .gyro-effort-slider input:focus-visible {
   outline: 1.9px solid #3982fa;
@@ -29918,7 +29885,7 @@ textarea:focus-visible,
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 6px 20px #00000014;
+  box-shadow: var(--gyro-elev-pop);
   pointer-events: auto;
 }
 :root[data-theme] .gyro-terminal-corner-menu p {
@@ -29977,8 +29944,7 @@ textarea:focus-visible,
   border-radius: var(--gyro-radius-lg);
   background: var(--gyro-pane);
   box-shadow:
-    0 8px 28px #00000014,
-    0 2px 6px #00000008;
+    var(--gyro-elev-pop);
 }
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button {
   display: flex;
@@ -30456,7 +30422,7 @@ textarea:focus-visible,
   border-radius: 10px;
   background: var(--gyro-sidebar);
   color: var(--gyro-text);
-  box-shadow: 0 12px 36px rgb(0 0 0 / 24%), 0 2px 6px rgb(0 0 0 / 12%);
+  box-shadow: var(--gyro-elev-pop);
   font-size: var(--gyro-type-sm);
   line-height: 1.5;
   user-select: text;
@@ -30824,7 +30790,7 @@ textarea:focus-visible,
   border-radius: var(--gyro-radius-xl);
   background: var(--gyro-surface);
   color: var(--gyro-text);
-  box-shadow: 0 8px 24px var(--gyro-shadow-color-soft);
+  box-shadow: var(--gyro-elev-pop);
   font-size: var(--gyro-type-md);
 }
 .gyro-project-hover-card button,
@@ -30904,7 +30870,7 @@ textarea:focus-visible,
   border-radius: var(--gyro-radius-xl);
   background: var(--gyro-surface);
   color: var(--gyro-text);
-  box-shadow: 0 16px 48px var(--gyro-shadow-color);
+  box-shadow: var(--gyro-elev-dialog);
   font-family: var(--gyro-font-sans);
   font-size: var(--gyro-type-md);
 }
@@ -31121,7 +31087,7 @@ textarea:focus-visible,
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface);
-  box-shadow: 0 6px 20px var(--gyro-shadow-color-soft);
+  box-shadow: var(--gyro-elev-pop);
   font: var(--gyro-type-sm)/1.4 var(--gyro-font-sans);
 }
 .gyro-scm-file-actions-menu > button {
@@ -31758,7 +31724,7 @@ textarea:focus-visible,
   max-height: none;
   margin: 0;
   z-index: 75;
-  box-shadow: -12px 0 32px rgb(0 0 0 / 18%);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 /* The responsive sidebar disappears below 780px without setting the manual
@@ -32170,8 +32136,7 @@ textarea:focus-visible,
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+  box-shadow: var(--gyro-elev-raised);
   filter: none;
 }
 
@@ -32192,8 +32157,7 @@ textarea:focus-visible,
   > .gyro-composer-shell.is-hero.has-provider:focus-within {
   /* Keep the frame neutral when typing or using composer controls. */
   border-color: var(--gyro-border);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 :root[data-theme]
@@ -32300,8 +32264,7 @@ textarea:focus-visible,
   border: 1px solid var(--gyro-border);
   /* Concentric with its 7px buttons: 7px + 1px border + 6px padding. */
   border-radius: 14px;
-  box-shadow: 0 10px 30px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
+  box-shadow: var(--gyro-elev-pop);
   padding: 6px;
 }
 
@@ -32593,7 +32556,7 @@ textarea:focus-visible,
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 16px 48px var(--gyro-shadow-color);
+  box-shadow: var(--gyro-elev-dialog);
   box-sizing: border-box;
   color: var(--gyro-text);
   max-height: calc(100dvh - 40px);
@@ -32791,7 +32754,7 @@ textarea:focus-visible,
 }
 
 .gyro-terminal-send-selection {
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--gyro-elev-raised);
   position: absolute;
   right: 12px;
   top: 8px;
@@ -32942,8 +32905,7 @@ textarea:focus-visible,
 .gyro-model-rail-tile.is-selected {
   background: var(--gyro-surface-raised, var(--gyro-surface));
   box-shadow:
-    0 0 0 1px var(--gyro-hairline-strong),
-    0 1px 3px rgb(0 0 0 / 8%);
+    var(--gyro-elev-raised), 0 0 0 1px var(--gyro-hairline-strong);
 }
 /* A short accent bar marks the provider being browsed. */
 .gyro-model-rail-tile.is-selected::before {
@@ -34240,4 +34202,13 @@ textarea:focus-visible,
    rows host their own menu and must not clip it. */
 :root .gyro-sidebar-explorer-row {
   contain: layout paint;
+}
+
+/* Elevation: the command palette and destructive confirmations float at
+   dialog level even where older rules group them with menus. */
+:root[data-theme] .gyro-command-palette,
+:root[data-theme] .gyro-project-remove-card {
+  box-shadow:
+    var(--gyro-elev-dialog),
+    inset 0 1px 0 var(--gyro-inset-highlight);
 }

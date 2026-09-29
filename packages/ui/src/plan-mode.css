@@ -4,7 +4,7 @@
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-hairline);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 1px 2px var(--gyro-shadow-color-soft);
+  box-shadow: none;
   color: var(--gyro-text);
   margin: 4px 0 2px;
   min-width: 0;
@@ -414,8 +414,7 @@
 .gyro-plan-panel-views > button[aria-pressed="true"] {
   background: var(--gyro-segment-active);
   box-shadow:
-    0 1px 2px var(--gyro-shadow-color-soft),
-    inset 0 0 0 1px var(--gyro-hairline-soft);
+    var(--gyro-elev-raised), inset 0 0 0 1px var(--gyro-hairline-soft);
   color: var(--gyro-segment-active-text);
 }
 

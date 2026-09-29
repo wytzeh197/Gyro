@@ -12,7 +12,7 @@
   border: 1px solid
     color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border));
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--gyro-elev-raised);
   color: var(--gyro-text);
   display: grid;
   gap: 5px;
@@ -31,7 +31,7 @@
 }
 
 :root[data-theme="light"] .gyro-installed-update-trigger {
-  box-shadow: 0 12px 32px rgba(28, 39, 52, 0.15);
+  box-shadow: var(--gyro-elev-raised);
 }
 
 .gyro-installed-update-trigger:focus-visible,
@@ -138,7 +138,7 @@
   border: 1px solid var(--gyro-border);
   border-radius: 15px;
   bottom: 0;
-  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--gyro-elev-pop);
   color: var(--gyro-text);
   display: grid;
   gap: 14px;
@@ -152,7 +152,7 @@
 }
 
 :root[data-theme="light"] .gyro-installed-update-card {
-  box-shadow: 0 22px 54px rgba(28, 39, 52, 0.2);
+  box-shadow: var(--gyro-elev-pop);
 }
 
 .gyro-installed-update-card-heading {

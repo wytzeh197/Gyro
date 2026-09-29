@@ -5428,7 +5428,7 @@ expect(
   cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
     (rule) =>
       rule.includes("border: 1px solid var(--gyro-hairline-soft)") &&
-      rule.includes("box-shadow: 0 8px 20px var(--gyro-shadow-color-soft)") &&
+      rule.includes("box-shadow: var(--gyro-elev-pop)") &&
       rule.includes("padding: 8px"),
   ) &&
     surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
