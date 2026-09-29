@@ -65,7 +65,7 @@ pub(super) fn execute(
             )
         }
         CapabilityId::WorkspaceDeletePath => {
-            let candidate = assert_workspace_path(&bound.workspace, &path)?;
+            let candidate = assert_workspace_entry(&bound.workspace, &path)?;
             assert_deletable(&candidate, &path, parsed.expected_hash.as_deref())?;
             delete_workspace_path_impl(&WorkspacePathDeleteRequest {
                 workspace_path,
@@ -151,10 +151,14 @@ fn assert_deletable(
     path: &str,
     expected_hash: Option<&str>,
 ) -> anyhow::Result<()> {
-    if !candidate.exists() {
+    let Ok(metadata) = fs::symlink_metadata(candidate) else {
         anyhow::bail!("{path} does not exist");
+    };
+    if metadata.is_symlink() {
+        // Deleting a link removes only the link, never what it points at.
+        return Ok(());
     }
-    if candidate.is_dir() {
+    if metadata.is_dir() {
         // `remove_dir` refuses a populated directory anyway; say why in words
         // the model can act on instead of surfacing a bare OS error.
         if fs::read_dir(candidate)?.next().is_some() {
@@ -321,5 +325,45 @@ mod tests {
         assert!(properties["expectedHash"].is_object());
         assert_eq!(required, vec!["path"]);
         assert!(schema(CapabilityId::WorkspaceRead).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lifecycle_actions_on_a_symlink_never_touch_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let workspace_path = root.to_string_lossy().to_string();
+        fs::write(root.join("AGENTS.md"), "keep").unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join("docs/guide.md"), "keep").unwrap();
+        symlink("AGENTS.md", root.join("CLAUDE.md")).unwrap();
+        symlink("docs", root.join("docs-link")).unwrap();
+
+        assert!(assert_deletable(&root.join("CLAUDE.md"), "CLAUDE.md", None).is_ok());
+        for path in ["CLAUDE.md", "docs-link"] {
+            delete_workspace_path_impl(&WorkspacePathDeleteRequest {
+                workspace_path: workspace_path.clone(),
+                path: path.into(),
+                expected_hash: None,
+            })
+            .unwrap();
+            assert!(fs::symlink_metadata(root.join(path)).is_err(), "{path}");
+        }
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), "keep");
+        assert_eq!(fs::read_to_string(root.join("docs/guide.md")).unwrap(), "keep");
+
+        symlink("AGENTS.md", root.join("CLAUDE.md")).unwrap();
+        rename_workspace_path_impl(&WorkspacePathRenameRequest {
+            workspace_path,
+            from_path: "CLAUDE.md".into(),
+            to_path: "RULES.md".into(),
+        })
+        .unwrap();
+        assert!(fs::symlink_metadata(root.join("RULES.md"))
+            .unwrap()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), "keep");
     }
 }

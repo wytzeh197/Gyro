@@ -2038,7 +2038,8 @@ function isHiddenRunEvent(event: SessionEvent) {
   const label = text(payload, "label") ?? event.message;
   return (
     (label.includes("GYRO_SESSION_TITLE:") ||
-      label.includes("GYRO_ARTIFACTS:")) &&
+      label.includes("GYRO_ARTIFACTS:") ||
+      label.includes("GYRO_QUESTIONS:")) &&
     !stripHiddenControlMarkers(label).trim()
   );
 }

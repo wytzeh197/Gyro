@@ -28,17 +28,22 @@ pub const DEFAULT_BUSY_RETRIES: u32 = 8;
 pub fn configure_connection(conn: &Connection) -> Result<()> {
     conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)
         .context("set sqlite busy_timeout")?;
-    conn.execute_batch(
-        "pragma foreign_keys = on;
-         pragma journal_mode = wal;
-         pragma synchronous = normal;
-         pragma temp_store = memory;
-         pragma cache_size = -65536;
-         pragma mmap_size = 268435456;
-         pragma wal_autocheckpoint = 1000;
-         pragma recursive_triggers = on;",
-    )
-    .context("apply sqlite runtime pragmas")?;
+    // Switching a database into WAL can report SQLITE_BUSY straight away,
+    // without the busy timeout, when the app and the CLI open it together.
+    // Every pragma here is idempotent, so the batch is simply retried.
+    with_busy_retry(|| {
+        conn.execute_batch(
+            "pragma foreign_keys = on;
+             pragma journal_mode = wal;
+             pragma synchronous = normal;
+             pragma temp_store = memory;
+             pragma cache_size = -65536;
+             pragma mmap_size = 268435456;
+             pragma wal_autocheckpoint = 1000;
+             pragma recursive_triggers = on;",
+        )
+        .context("apply sqlite runtime pragmas")
+    })?;
     Ok(())
 }
 
@@ -81,6 +86,26 @@ pub fn is_busy_error(error: &rusqlite::Error) -> bool {
             ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
         ),
         _ => false,
+    }
+}
+
+/// True when an `alter table … add column` lost a race to another process
+/// that added the same column first — the schema is already what we wanted.
+pub fn is_duplicate_column_error(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(_, Some(message)) => {
+            message.contains("duplicate column name")
+        }
+        _ => false,
+    }
+}
+
+/// Add a column, treating "another process already added it" as success.
+pub fn add_column_if_missing(conn: &Connection, table: &str, definition: &str) -> Result<()> {
+    match conn.execute_batch(&format!("alter table {table} add column {definition};")) {
+        Ok(()) => Ok(()),
+        Err(error) if is_duplicate_column_error(&error) => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -154,6 +179,22 @@ mod tests {
         .expect("retry");
         assert_eq!(value, 42);
         assert_eq!(tries, 3);
+    }
+
+    #[test]
+    fn adding_a_column_another_process_already_added_succeeds() {
+        let conn = Connection::open_in_memory().expect("memory db");
+        conn.execute_batch("create table t(id integer primary key);")
+            .expect("create");
+        add_column_if_missing(&conn, "t", "note text").expect("first add");
+        // The second add is what a concurrent opener sees after its
+        // table_info check went stale.
+        let error = conn
+            .execute_batch("alter table t add column note text;")
+            .unwrap_err();
+        assert!(is_duplicate_column_error(&error));
+        add_column_if_missing(&conn, "t", "note text").expect("duplicate add is a no-op");
+        assert!(add_column_if_missing(&conn, "missing", "note text").is_err());
     }
 
     #[test]

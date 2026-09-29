@@ -45,7 +45,7 @@ pub(super) fn execute(
             })
             .map(|control| control.cancellation.clone())
             .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
-        terminal_wait::wait(timeout, &cancellation, || {
+        terminal_wait::wait(timeout, &cancellation, |include_output| {
             let terminals = resources
                 .terminals
                 .lock()
@@ -57,7 +57,7 @@ pub(super) fn execute(
                 anyhow::bail!("terminal resource ownership changed");
             }
             app.state::<TerminalProcessManager>()
-                .read(&owned.pane_id, None)
+                .observe(&owned.pane_id, include_output)
         })?
     } else if request.capability_id == CapabilityId::TerminalRead {
         app.state::<TerminalProcessManager>()

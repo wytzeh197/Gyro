@@ -1034,16 +1034,21 @@ pub fn replace_provider_rate_limits(
     provider_id: &str,
     windows: &[ProviderRateLimitRecord],
 ) -> Result<()> {
-    record_provider_rate_limits(conn, provider_id, windows)?;
+    // One transaction, so a reader never sees the fresh rows next to windows
+    // the same poll has just retired.
+    let transaction =
+        rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    record_provider_rate_limits(&transaction, provider_id, windows)?;
     let kept = windows
         .iter()
         .map(|window| window.window_id.as_str())
         .collect::<Vec<_>>();
     if kept.is_empty() {
-        conn.execute(
+        transaction.execute(
             "delete from provider_rate_limits where provider_id = ?1",
             params![provider_id],
         )?;
+        transaction.commit()?;
         return Ok(());
     }
     let placeholders = (0..kept.len())
@@ -1055,13 +1060,14 @@ pub fn replace_provider_rate_limits(
     for window_id in &kept {
         values.push(window_id);
     }
-    conn.execute(
+    transaction.execute(
         &format!(
             "delete from provider_rate_limits
              where provider_id = ?1 and window_id not in ({placeholders})"
         ),
         values.as_slice(),
     )?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -1077,9 +1083,13 @@ pub fn provider_rate_limits(
     now: DateTime<Utc>,
 ) -> Result<Vec<ProviderRateLimitRecord>> {
     let now = now.to_rfc3339();
+    // resets_at is the provider's own string, so its offset need not be UTC:
+    // compare instants, not text. A value SQLite cannot read as a time keeps
+    // the old text comparison.
     conn.execute(
         "delete from provider_rate_limits
-         where provider_id = ?1 and resets_at is not null and resets_at <= ?2",
+         where provider_id = ?1 and resets_at is not null
+           and coalesce(julianday(resets_at) <= julianday(?2), resets_at <= ?2)",
         params![provider_id, now],
     )?;
     let mut stmt = conn.prepare(
@@ -1960,6 +1970,74 @@ mod tests {
                 .expect("read windows")
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn expiry_compares_reset_instants_across_utc_offsets() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+        let offset_west = chrono::FixedOffset::west_opt(7 * 3600).unwrap();
+        // Two hours ago, written in +09:00: as text it sorts after `now` in
+        // UTC, so it used to be served as live.
+        let expired = (now - chrono::Duration::hours(2))
+            .with_timezone(&offset)
+            .to_rfc3339();
+        // Two hours ahead, written in -07:00: as text it sorts before `now`,
+        // so it used to be deleted while still live.
+        let live = (now + chrono::Duration::hours(2))
+            .with_timezone(&offset_west)
+            .to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[
+                window("five-hour", "exhausted", Some(&expired)),
+                window("weekly", "ok", Some(&live)),
+            ],
+        )
+        .expect("record windows");
+
+        let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
+        assert_eq!(
+            stored
+                .iter()
+                .map(|record| record.window_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["weekly"]
+        );
+    }
+
+    #[test]
+    fn a_failed_replace_leaves_the_previous_reading_whole() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let far_off = (now + chrono::Duration::days(30)).to_rfc3339();
+        record_provider_rate_limits(&conn, "openai", &[window("weekly", "ok", Some(&far_off))])
+            .expect("record windows");
+        // Make the delete half of the replace fail after its upsert ran.
+        conn.execute_batch(
+            "create trigger refuse_rate_limit_delete before delete on provider_rate_limits
+             begin select raise(abort, 'refused'); end;",
+        )
+        .unwrap();
+
+        assert!(replace_provider_rate_limits(
+            &conn,
+            "openai",
+            &[window("monthly", "ok", Some(&far_off))]
+        )
+        .is_err());
+        conn.execute_batch("drop trigger refuse_rate_limit_delete;")
+            .unwrap();
+        let stored = provider_rate_limits(&conn, "openai", now).expect("read windows");
+        assert_eq!(
+            stored
+                .iter()
+                .map(|record| record.window_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["weekly"]
         );
     }
 

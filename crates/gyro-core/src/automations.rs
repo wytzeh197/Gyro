@@ -1030,11 +1030,13 @@ impl AutomationStore {
                 return Ok(());
             }
         }
-        self.conn.execute(
-            &format!("alter table automations add column {column_name} {column_definition}"),
-            [],
-        )?;
-        Ok(())
+        // The app and the CLI can open the database together; whichever adds
+        // the column second finds it already there, which is success.
+        crate::sqlite::add_column_if_missing(
+            &self.conn,
+            "automations",
+            &format!("{column_name} {column_definition}"),
+        )
     }
 }
 

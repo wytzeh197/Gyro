@@ -391,6 +391,23 @@ fn inspect_git(root: &Path, timeout: Duration) -> GitInspection {
     .into_iter()
     .map(OsString::from)
     .collect();
+    // Runs on every turn while the agent may be committing in the same
+    // repository: `GIT_OPTIONAL_LOCKS=0` keeps this read from refreshing the
+    // index under `index.lock`, and the GUI PATH finds Git from a Dock launch.
+    request.env = vec![
+        (
+            OsString::from("PATH"),
+            Some(OsString::from(crate::cli_path::augmented_gui_path())),
+        ),
+        (
+            OsString::from("GIT_OPTIONAL_LOCKS"),
+            Some(OsString::from("0")),
+        ),
+        (
+            OsString::from("GIT_TERMINAL_PROMPT"),
+            Some(OsString::from("0")),
+        ),
+    ];
     request.timeout = timeout;
     request.max_stdout_chars = GIT_MAX_STDOUT_CHARS;
     request.max_stderr_chars = GIT_MAX_STDERR_CHARS;
@@ -547,6 +564,40 @@ mod tests {
         assert_eq!(git.branch.as_deref(), Some("main"));
         assert!(git.dirty_count >= 1);
         assert!(report.briefing().contains("branch main"));
+    }
+
+    #[test]
+    fn git_brief_never_rewrites_the_index() {
+        // A stat-dirty but unchanged file makes a plain `git status` refresh
+        // and rewrite the index under index.lock, which can fail the agent's
+        // concurrent `git commit`. The per-turn check must only read.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.email", "gyro@example.test"]);
+        git(&["config", "user.name", "Gyro"]);
+        fs::write(root.join("README.md"), "hello").unwrap();
+        git(&["add", "README.md"]);
+        git(&["commit", "-m", "init"]);
+        fs::File::options()
+            .write(true)
+            .open(root.join("README.md"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+            .unwrap();
+        let index = fs::read(root.join(".git/index")).unwrap();
+
+        let report = check_workspace(root);
+        assert!(report.git.as_ref().expect("git brief").available);
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
     }
 
     #[test]

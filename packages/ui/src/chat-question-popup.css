@@ -1,35 +1,86 @@
-/* A question takes the composer's place, the way plan approval does: it is
-   rendered inside the composer shell (whose other children hide), so it shares
-   the shell's surface, border, corners and width instead of stacking a second
-   sheet on top of it. */
-.gyro-chat-question-popup {
+/* Questions and the plan decision take the composer's place: they render inside
+   the composer shell (whose other children hide), so they share its surface,
+   border, corners and width instead of stacking a second sheet on top. One
+   question shows at a time; options are rows you click or number-key. */
+.gyro-question-dock {
   box-sizing: border-box;
   color: var(--gyro-text);
   display: flex;
   flex-direction: column;
-  max-height: min(520px, 62vh);
+  gap: 2px;
+  max-height: min(560px, 64vh);
   min-width: 0;
-  padding: 10px 12px 12px;
+  outline: none;
+  padding: 10px 10px 10px;
+  position: relative;
 }
 
-.gyro-chat-question-popup > header {
+/* The card takes focus only so number keys work; the shell already frames
+   it, so no second ring is drawn around the whole card. */
+:root .gyro-question-dock:focus,
+:root .gyro-question-dock:focus-visible {
+  outline: none;
+}
+
+.gyro-question-dock-head {
   align-items: center;
-  color: var(--gyro-faint);
   display: flex;
   flex-shrink: 0;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  gap: 7px;
-  min-height: 24px;
-  padding-left: 4px;
+  gap: 10px;
+  min-height: 28px;
+  padding: 0 0 6px 8px;
 }
 
-.gyro-chat-question-popup > header > span {
-  color: var(--gyro-muted);
+.gyro-question-dock-head h3 {
   flex: 1 1 auto;
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin: 0;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.gyro-chat-question-popup > header > button {
+.gyro-question-dock-pager {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.gyro-question-dock-steps {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 6px;
+}
+
+.gyro-question-dock-steps i {
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  border-radius: 2px;
+  height: 3px;
+  transition: background var(--gyro-premium-motion) var(--gyro-premium-ease);
+  width: 12px;
+}
+
+.gyro-question-dock-steps i.is-done {
+  background: color-mix(in srgb, var(--gyro-text) 42%, transparent);
+}
+
+.gyro-question-dock-steps i.is-current {
+  background: var(--gyro-text);
+}
+
+.gyro-question-dock-count {
+  color: var(--gyro-faint);
+  flex: none;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gyro-question-dock-pager > button,
+.gyro-question-dock-close {
   align-items: center;
   background: transparent;
   border: 0;
@@ -41,115 +92,84 @@
   height: 24px;
   justify-content: center;
   padding: 0;
+  transition:
+    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
   width: 24px;
 }
 
-.gyro-chat-question-popup > header > button:hover,
-.gyro-chat-question-popup > header > button:focus-visible {
-  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
+/* A close control in a card's corner reads as a circle, which no corner
+   radius can mismatch. */
+.gyro-question-dock-close {
+  border-radius: 999px;
 }
 
-.gyro-chat-question-scroll {
+.gyro-question-dock-pager > button:hover:not(:disabled),
+.gyro-question-dock-close:hover:not(:disabled),
+.gyro-question-dock-pager > button:focus-visible,
+.gyro-question-dock-close:focus-visible {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+  outline: none;
+}
+
+.gyro-question-dock-pager > button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.gyro-question-dock-options {
+  display: grid;
+  gap: 2px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 6px 0 2px;
 }
 
-.gyro-chat-question-popup fieldset {
+.gyro-question-option {
+  align-items: start;
+  background: transparent;
   border: 0;
-  margin: 0 0 16px;
-  min-width: 0;
-  padding: 0;
-}
-
-.gyro-chat-question-popup fieldset:last-of-type {
-  margin-bottom: 0;
-}
-
-.gyro-chat-question-popup legend {
-  font-size: calc(15px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.35;
-  margin-bottom: 10px;
-  overflow-wrap: anywhere;
-  padding: 0 4px;
-}
-
-.gyro-chat-question-popup code {
-  background: var(--gyro-code-bg);
-  border-radius: var(--gyro-radius-xs);
-  font-family: var(--gyro-font-mono);
-  font-size: 0.88em;
-  padding: 1px 4px;
-}
-
-.gyro-chat-question-popup strong {
-  font-weight: 600;
-}
-
-.gyro-chat-question-options {
-  display: grid;
-  gap: 2px;
-}
-
-.gyro-chat-question-options label {
-  align-items: flex-start;
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted);
+  color: var(--gyro-text);
   cursor: pointer;
-  display: flex;
+  display: grid;
+  font: inherit;
   font-size: calc(13.5px * var(--gyro-ui-scale, 1));
   gap: 10px;
+  grid-template-columns: 20px minmax(0, 1fr) 14px;
   line-height: 1.45;
-  overflow-wrap: anywhere;
-  padding: 7px 10px 7px 6px;
-  position: relative;
+  padding: 8px 10px 8px 8px;
+  text-align: left;
   transition: background var(--gyro-premium-motion-fast)
     var(--gyro-premium-ease);
 }
 
-.gyro-chat-question-options label:hover {
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  color: var(--gyro-text);
+.gyro-question-option:hover:not(:disabled),
+.gyro-question-option:focus-visible {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  outline: none;
 }
 
-.gyro-chat-question-options label.is-selected {
+.gyro-question-option:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
+}
+
+.gyro-question-option[aria-pressed="true"] {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
 }
 
-.gyro-chat-question-options label > span {
-  flex: 1 1 auto;
-  min-width: 0;
+.gyro-question-option:disabled {
+  cursor: default;
 }
 
-.gyro-chat-question-options label > svg {
-  color: var(--gyro-text);
-  flex: none;
-  margin-top: 3px;
-}
-
-/* The radio stays for keyboard and screen readers; the number is the mark. */
-.gyro-chat-question-options input {
-  height: 1px;
-  margin: 0;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  width: 1px;
-}
-
-.gyro-chat-question-options kbd {
+.gyro-question-option kbd {
   align-items: center;
-  border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-xs);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-soft);
   box-sizing: border-box;
   color: var(--gyro-faint);
   display: inline-flex;
-  flex: none;
   font-family: inherit;
   font-size: calc(11px * var(--gyro-ui-scale, 1));
   font-variant-numeric: tabular-nums;
@@ -158,136 +178,218 @@
   width: 20px;
 }
 
-.gyro-chat-question-options label.is-selected kbd {
+.gyro-question-option[aria-pressed="true"] kbd {
   background: var(--gyro-text);
-  border-color: var(--gyro-text);
+  box-shadow: none;
   color: var(--gyro-app);
 }
 
-.gyro-chat-question-options label:has(input:focus-visible) {
-  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
-}
-
-/* Scoped past the composer's own textarea rules (height, padding, a fixed dark
-   text colour), which reach this card because it sits inside the shell. */
-.gyro-chat-composer-dock
-  .gyro-composer-shell
-  .gyro-chat-question-popup
-  textarea,
-.gyro-chat-question-popup textarea {
-  background: transparent;
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
-  box-sizing: border-box;
-  color: var(--gyro-text);
-  display: block;
-  font: inherit;
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
-  line-height: 1.45;
-  margin-top: 6px;
-  height: 34px;
-  max-height: 140px;
-  min-height: 34px;
-  padding: 6px 10px;
-  resize: none;
-  width: 100%;
-}
-
-.gyro-chat-composer-dock
-  .gyro-composer-shell
-  .gyro-chat-question-popup
-  textarea::placeholder,
-.gyro-chat-question-popup textarea::placeholder {
-  color: var(--gyro-faint);
-  font-size: inherit;
-}
-
-.gyro-chat-question-popup textarea:focus {
-  border-color: var(--gyro-border-strong);
-  outline: none;
-}
-
-.gyro-chat-question-draft,
-.gyro-chat-question-scroll > p[role="alert"] {
-  color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  margin: 10px 4px 0;
+.gyro-question-option-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.gyro-chat-question-scroll > p[role="alert"] {
-  color: var(--gyro-danger);
-}
-
-.gyro-chat-question-popup > footer {
+.gyro-question-option-label {
   align-items: center;
   display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  margin-top: 10px;
-  padding-left: 4px;
+  flex-wrap: wrap;
+  font-weight: 550;
+  gap: 4px 8px;
 }
 
-.gyro-chat-question-popup > footer > span {
+.gyro-question-option small {
+  color: var(--gyro-muted);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+}
+
+.gyro-question-option-badge {
+  background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-success);
+  font-size: calc(10.5px * var(--gyro-ui-scale, 1));
+  font-style: normal;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+  padding: 0 7px;
+}
+
+.gyro-question-option-go {
   color: var(--gyro-faint);
-  flex: 1 1 auto;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: 3px;
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 
-.gyro-chat-question-popup > footer > button {
+.gyro-question-option:hover:not(:disabled) .gyro-question-option-go,
+.gyro-question-option:focus-visible .gyro-question-option-go {
+  opacity: 1;
+  transform: none;
+}
+
+.gyro-question-dock code,
+.gyro-question-answers code {
+  background: var(--gyro-code-bg);
+  border-radius: var(--gyro-radius-xs);
+  font-family: var(--gyro-font-mono);
+  font-size: 0.88em;
+  padding: 1px 4px;
+}
+
+.gyro-question-dock strong {
+  font-weight: 650;
+}
+
+.gyro-question-dock-other {
   align-items: center;
-  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   border-radius: var(--gyro-radius-md);
+  color: var(--gyro-faint);
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 36px;
+  padding: 3px 4px 3px 12px;
+  transition: box-shadow var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
+}
+
+.gyro-question-dock-other:focus-within {
+  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
+}
+
+/* Scoped past the composer's own field rules, which reach this card because
+   it sits inside the shell. */
+.gyro-composer-shell .gyro-question-dock-other input,
+.gyro-question-dock-other input {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--gyro-text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  height: 28px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.gyro-question-dock-other input::placeholder {
+  color: var(--gyro-faint);
+}
+
+.gyro-question-dock-skip {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
   cursor: pointer;
-  display: inline-flex;
   flex: none;
   font: inherit;
   font-size: calc(12.5px * var(--gyro-ui-scale, 1));
-  font-weight: 560;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 12px;
+  font-weight: 550;
+  height: 28px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
-.gyro-chat-question-popup > footer > button.is-secondary {
-  background: transparent;
-  color: var(--gyro-muted);
-}
-
-.gyro-chat-question-popup > footer > button.is-secondary:hover {
+.gyro-question-dock-skip:hover:not(:disabled),
+.gyro-question-dock-skip:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
+  outline: none;
 }
 
-.gyro-chat-question-popup > footer > button.is-primary {
+.gyro-question-dock-send {
+  align-items: center;
   background: var(--gyro-text);
+  border: 0;
+  border-radius: 999px;
   color: var(--gyro-app);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
 }
 
-.gyro-chat-question-popup > footer > button.is-primary:hover:not(:disabled) {
+.gyro-question-dock-send:hover {
   opacity: 0.88;
 }
 
-.gyro-chat-question-popup > footer > button:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.gyro-chat-question-popup > footer > button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
+.gyro-question-dock-send:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
 
-@media (max-width: 520px) {
-  .gyro-chat-question-popup > footer > span {
-    display: none;
+.gyro-question-dock-note {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin: 8px 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.gyro-question-dock-note.is-error {
+  color: var(--gyro-danger);
+}
+
+.gyro-question-dock button:disabled {
+  cursor: default;
+}
+
+.gyro-question-dock.is-pending .gyro-question-option-label {
+  color: var(--gyro-muted);
+}
+
+/* Implementing starts a new turn; a thin running bar says the click landed. */
+.gyro-question-dock-progress {
+  border-radius: 0 0 var(--gyro-radius-composer) var(--gyro-radius-composer);
+  bottom: 0;
+  height: 2px;
+  left: 12px;
+  overflow: hidden;
+  position: absolute;
+  right: 12px;
+}
+
+.gyro-question-dock-progress::after {
+  animation: gyro-question-dock-progress 1.1s ease-in-out infinite;
+  background: var(--gyro-accent);
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
+@keyframes gyro-question-dock-progress {
+  0% {
+    transform: translateX(-100%);
   }
-  .gyro-chat-question-popup > footer > button.is-secondary {
-    margin-left: auto;
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-question-dock-progress::after {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+@media (max-width: 520px) {
+  .gyro-question-dock-steps,
+  .gyro-question-dock.is-plan-decision .gyro-question-dock-count {
+    display: none;
   }
 }

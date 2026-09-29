@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import {
-  parseChatQuestions,
+  formatChatAnswers,
   latestChatQuestions,
+  parseChatAnswers,
+  parseChatQuestions,
+  questionsFromPayload,
 } from "../packages/ui/src/chat-questions.ts";
 
 const sample =
@@ -52,4 +55,64 @@ assert.equal(
   ])?.id,
   "q",
 );
+
+// Prose questions keep their pick when the model tags it.
+assert.deepEqual(
+  parseChatQuestions("Which theme?\n- Light (Recommended)\n- Dark"),
+  [{ title: "Which theme?", options: ["Light", "Dark"], recommended: 0 }],
+);
+
+// Structured questions from the hidden GYRO_QUESTIONS line.
+const payload = {
+  questions: [
+    {
+      question: "Which release?",
+      options: [
+        { label: "Stable", detail: "First public release", recommended: true },
+        { label: "Alpha" },
+      ],
+    },
+    { question: "Only one option", options: [{ label: "Lonely" }] },
+    { options: [{ label: "A" }, { label: "B" }] },
+  ],
+};
+assert.deepEqual(questionsFromPayload(payload), [
+  {
+    title: "Which release?",
+    options: ["Stable", "Alpha"],
+    details: ["First public release", undefined],
+    recommended: 0,
+  },
+]);
+assert.deepEqual(questionsFromPayload({ questions: "nope" }), []);
+assert.deepEqual(questionsFromPayload(undefined), []);
+const structured = {
+  id: "s",
+  kind: "assistant-message",
+  message: "A few decisions first.",
+  payload: { questions: payload },
+};
+assert.equal(latestChatQuestions([structured])?.questions[0]?.title, "Which release?");
+// A marker-only reply still asks, even with no visible text.
+assert.equal(
+  latestChatQuestions([{ ...structured, message: "" }])?.id,
+  "s",
+);
+
+// Answers travel as one message and fold back into the transcript row.
+const answered = formatChatAnswers(
+  [
+    { question: "Which release?", answer: "Stable" },
+    { question: "Which layout?" },
+  ],
+  "Keep the launch small.",
+);
+assert.deepEqual(parseChatAnswers(answered), {
+  answers: [
+    { question: "Which release?", answer: "Stable" },
+    { question: "Which layout?", answer: undefined },
+  ],
+  note: "Keep the launch small.",
+});
+assert.equal(parseChatAnswers("Which release? Stable"), undefined);
 console.log("Chat question detection checks passed.");

@@ -13,8 +13,15 @@ import {
   BrowserCaptureView,
   browserPreviewLocationLabel,
 } from "./browser-capture-view";
-import { latestChatQuestions } from "./chat-questions";
+import { latestChatQuestions, parseChatAnswers } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
+import {
+  ChatQuestionAnswers,
+  ImplementPlanDock,
+  PlanCard,
+  PlanPanelHeader,
+  PlanStepStatus,
+} from "./plan-mode";
 import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
 import { WorkspaceSearchResults } from "./workspace-search-results";
 import {
@@ -8561,7 +8568,6 @@ export function ChatSurface({
       patches?: string[];
     }>
   >();
-  const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
   useEffect(() => {
     setLocalDraft(draft);
@@ -8934,24 +8940,6 @@ export function ChatSurface({
   const isEmptyStart = turns.length === 0 && looseEvents.length === 0;
   const activeRailPanel =
     activeChatPanel ?? (isEnvironmentRailOpen ? "environment" : undefined);
-  useEffect(() => {
-    if (
-      !isPlanReadyForDecision ||
-      !planDecisionKey ||
-      autoOpenedPlanDecisionKeyRef.current === planDecisionKey
-    ) {
-      return;
-    }
-    autoOpenedPlanDecisionKeyRef.current = planDecisionKey;
-    if (activeRailPanel !== "plan") {
-      onTogglePlanPanel?.();
-    }
-  }, [
-    activeRailPanel,
-    isPlanReadyForDecision,
-    onTogglePlanPanel,
-    planDecisionKey,
-  ]);
   // Prefer the turn the provider is still driving. If its status has not landed
   // yet (first paint of a new send), keep the latest turn live so the rail does
   // not settle to "Worked" / "Interrupted" while the backend is still going.
@@ -9093,6 +9081,8 @@ export function ChatSurface({
                 // and imply unfinished work on already-finished messages.
                 turnIndex === turns.length - 1 ? onContinueChat : undefined
               }
+              isPlanInPanel={activeRailPanel === "plan"}
+              onOpenPlanPanel={onTogglePlanPanel}
               plan={sessionPlan}
               previewCapture={
                 browserPreview?.latestCapture
@@ -9208,9 +9198,6 @@ export function ChatSurface({
         sourceControl={sourceControl}
         onPlanItemStatusChange={onPlanItemStatusChange}
         onPlanAction={onPlanAction}
-        isPlanReadyForDecision={isPlanReadyForDecision}
-        isPlanDecisionPending={isPlanDecisionPending}
-        onPlanDecision={handlePlanDecision}
         onGoalAction={onGoalAction}
         editorRequest={planEditorRequest}
         onEditorRequestHandled={onPlanEditorRequestHandled}
@@ -9355,8 +9342,10 @@ export function ChatSurface({
         if (onOpenCompanionTab) onOpenCompanionTab("review");
         else onSelectChatPanel?.("review");
       }}
+      onOpenPlan={onTogglePlanPanel}
       onRunGitAction={railDiffTools?.onRunGitAction}
       onSelectBranch={() => onComposerAction?.("select-branch")}
+      plan={sessionPlan}
       sourceControl={sourceControl}
       terminalPanes={terminalPanes}
       workspacePath={workspacePath}
@@ -9675,6 +9664,20 @@ export function ChatSurface({
                   onSend={onSend}
                   onDismiss={() => setDismissedQuestionId(questionRequest.id)}
                 />
+              ) : isPlanReadyForDecision &&
+                sessionPlan &&
+                !isGoalComposerActive &&
+                queuedMessages.length === 0 ? (
+                <ImplementPlanDock
+                  key={planDecisionKey}
+                  isPending={isPlanDecisionPending}
+                  onDecision={(decision) => void handlePlanDecision(decision)}
+                  onRevise={(message) => {
+                    setDismissedPlanDecisionKey(planDecisionKey);
+                    onSend(message);
+                  }}
+                  plan={sessionPlan}
+                />
               ) : undefined
             }
             attachments={attachments}
@@ -9739,61 +9742,6 @@ export function ChatSurface({
       {environmentPopover}
       {sidePanel}
     </div>
-  );
-}
-
-/** Approval stays beside the plan document and checklist. */
-function PlanDecisionCard({
-  isPending,
-  onDecision,
-  plan,
-}: {
-  isPending: boolean;
-  onDecision: (decision: "approve" | "reject") => void;
-  plan: SessionPlan;
-}) {
-  const stepLabel =
-    plan.items.length > 0
-      ? `${plan.items.length} ${plan.items.length === 1 ? "step" : "steps"}`
-      : undefined;
-  return (
-    <section
-      aria-label="Plan ready for approval"
-      className={`gyro-plan-decision-card${isPending ? " is-pending" : ""}`}
-    >
-      <header className="gyro-plan-decision-head">
-        <Lightbulb aria-hidden="true" size={13} />
-        <span>
-          Plan ready{stepLabel ? <small> · {stepLabel}</small> : null}
-        </span>
-      </header>
-      <footer className="gyro-plan-decision-foot">
-        <span className="gyro-plan-decision-hint">
-          Implementing switches to Normal mode
-        </span>
-        <div className="gyro-plan-decision-actions">
-          <button
-            className="is-secondary"
-            disabled={isPending}
-            onClick={() => onDecision("reject")}
-            type="button"
-          >
-            Keep planning
-          </button>
-          <button
-            className="is-primary"
-            disabled={isPending}
-            onClick={() => onDecision("approve")}
-            type="button"
-          >
-            {isPending ? "Starting…" : "Implement"}
-          </button>
-        </div>
-      </footer>
-      {isPending ? (
-        <span aria-hidden="true" className="gyro-plan-decision-progress" />
-      ) : null}
-    </section>
   );
 }
 
@@ -10234,9 +10182,6 @@ function ChatSidePanel({
   sourceControl,
   onPlanItemStatusChange,
   onPlanAction,
-  isPlanReadyForDecision,
-  isPlanDecisionPending,
-  onPlanDecision,
   editorRequest,
   onEditorRequestHandled,
   onClose,
@@ -10300,9 +10245,6 @@ function ChatSidePanel({
     itemId?: string,
     value?: string,
   ) => void;
-  isPlanReadyForDecision: boolean;
-  isPlanDecisionPending: boolean;
-  onPlanDecision?: (decision: "approve" | "reject") => void;
   onGoalAction?: (
     action: SessionGoalAction,
     value?: string,
@@ -10350,7 +10292,13 @@ function ChatSidePanel({
    * were two arms of one branch, so whichever the model produced last was the
    * only one reachable. The default still follows the plan's shape.
    */
-  const [planView, setPlanView] = useState<"document" | "steps">("document");
+  // Once work on the plan has started, the steps are what matter, so the
+  // panel opens on them; a plan still awaiting a decision opens as a document.
+  const [planView, setPlanView] = useState<"document" | "steps">(() =>
+    sessionPlan?.items.some((item) => item.status !== "todo")
+      ? "steps"
+      : "document",
+  );
   const handledEditorRequestTokenRef = useRef<number>();
   useEffect(() => {
     if (
@@ -10384,6 +10332,9 @@ function ChatSidePanel({
   const changedFiles = reviewFiles || uncommittedFiles;
   const runningPanes = terminalPanes.filter(terminalPaneHasActiveWork).length;
   const planItemCount = sessionPlan?.items.length ?? 0;
+  // Plan only earns a place in Environment once one exists: steps the model
+  // or the user wrote, or a plan document.
+  const hasPlan = planItemCount > 0 || Boolean(sessionPlan?.content);
   const changesLabel =
     pendingDiffs > 0
       ? `${pendingDiffs} pending`
@@ -10403,14 +10354,6 @@ function ChatSidePanel({
     planItemCount > 0
       ? `${planItemCount} ${planItemCount === 1 ? "item" : "items"}`
       : "No items";
-  const completedPlanItems =
-    sessionPlan?.items.filter((item) => item.status === "complete").length ?? 0;
-  const blockedPlanItems =
-    sessionPlan?.items.filter((item) => item.status === "blocked").length ?? 0;
-  const planProgress =
-    planItemCount > 0
-      ? Math.round((completedPlanItems / planItemCount) * 100)
-      : 0;
   // Tools the rail can host itself take the pane over in place. Anything else
   // still hands off to the workspace panel, which means closing the rail.
   const railPanelForTool: Partial<Record<WorkbenchPaneTab, ChatSidePanelId>> = {
@@ -10550,47 +10493,12 @@ function ChatSidePanel({
   ) {
     return (
       <aside className="gyro-plan-rail is-document" aria-label="Plan document">
-        <header>
-          <div>
-            <ListChecks aria-hidden="true" size={15} />
-            <strong>Plan</strong>
-          </div>
-          <div
-            className="gyro-plan-view-toggle"
-            role="group"
-            aria-label="Plan view"
-          >
-            <button
-              aria-pressed="true"
-              onClick={() => setPlanView("document")}
-              type="button"
-            >
-              Document
-            </button>
-            <button
-              aria-pressed="false"
-              onClick={() => setPlanView("steps")}
-              type="button"
-            >
-              Steps
-            </button>
-          </div>
-          <button
-            aria-label="Close plan document"
-            className="gyro-chat-tool-close"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={14} />
-          </button>
-        </header>
-        {isPlanReadyForDecision ? (
-          <PlanDecisionCard
-            isPending={isPlanDecisionPending}
-            onDecision={(decision) => onPlanDecision?.(decision)}
-            plan={sessionPlan}
-          />
-        ) : null}
+        <PlanPanelHeader
+          onClose={onClose}
+          onViewChange={setPlanView}
+          plan={sessionPlan}
+          view="document"
+        />
         <PlanDocument
           content={sessionPlan.content}
           onOpenBrowserUrl={onBrowserNavigate}
@@ -10630,6 +10538,7 @@ function ChatSidePanel({
           changesLabel={changesLabel}
           onOpenFiles={openFiles}
           onOpenTool={openTool}
+          hasPlan={hasPlan}
           onTogglePlan={onTogglePlanPanel}
           pendingDiffs={pendingDiffs}
           planExpanded
@@ -10639,276 +10548,223 @@ function ChatSidePanel({
           terminalLabel={terminalLabel}
           workspacePath={workspacePath}
         />
-        {isPlanReadyForDecision && sessionPlan ? (
-          <PlanDecisionCard
-            isPending={isPlanDecisionPending}
-            onDecision={(decision) => onPlanDecision?.(decision)}
-            plan={sessionPlan}
-          />
-        ) : null}
-        <section className="gyro-plan-harness" aria-label="Plan harness">
-          <header>
-            <div className="gyro-plan-harness-title">
-              <ListChecks size={15} />
-              <div>
-                <strong>{sessionPlan?.title ?? "Plan"}</strong>
-                <span>{planLabel} · model-managed checklist</span>
-              </div>
-            </div>
-            {sessionPlan?.content ? (
-              <div
-                className="gyro-plan-view-toggle"
-                role="group"
-                aria-label="Plan view"
-              >
-                <button
-                  aria-pressed="false"
-                  onClick={() => setPlanView("document")}
-                  type="button"
-                >
-                  Document
-                </button>
-                <button
-                  aria-pressed="true"
-                  onClick={() => setPlanView("steps")}
-                  type="button"
-                >
-                  Steps
-                </button>
-              </div>
-            ) : null}
-            {planItemCount > 0 ? (
-              <strong
-                className="gyro-plan-progress-label"
-                aria-label={`${completedPlanItems} of ${planItemCount} steps completed${blockedPlanItems > 0 ? `, ${blockedPlanItems} blocked` : ""}`}
-                data-blocked={blockedPlanItems > 0 ? "true" : undefined}
-              >
-                {completedPlanItems}/{planItemCount}
-              </strong>
-            ) : null}
-          </header>
-          {planItemCount > 0 ? (
-            <div
-              aria-label={`${planProgress}% of plan complete`}
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={planProgress}
-              className="gyro-plan-progress"
-              role="progressbar"
-            >
-              <span style={{ width: `${planProgress}%` }} />
-            </div>
-          ) : null}
-          <div className="gyro-rail-section">
-            {planEditor?.mode === "add" ? (
-              <form
-                className="gyro-plan-inline-editor"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  submitPlanEditor();
-                }}
-              >
-                <input
-                  aria-label="Plan item title"
-                  autoFocus
-                  maxLength={160}
-                  onChange={(event) =>
-                    setPlanEditor((current) =>
-                      current
-                        ? { ...current, value: event.target.value }
-                        : current,
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setPlanEditor(undefined);
-                  }}
-                  placeholder="Describe the next step"
-                  value={planEditor.value}
-                />
-                <button
-                  aria-label="Save plan item"
-                  disabled={!planEditor.value.trim()}
-                  title="Save plan item"
-                  type="submit"
-                >
-                  <Check size={13} />
-                </button>
-                <button
-                  aria-label="Cancel plan item"
-                  onClick={() => setPlanEditor(undefined)}
-                  title="Cancel"
-                  type="button"
-                >
-                  <X size={13} />
-                </button>
-              </form>
-            ) : (
-              <button
-                className="gyro-rail-row is-action"
-                onClick={() =>
-                  setPlanEditor({ mode: "add", value: "", itemId: undefined })
-                }
-                type="button"
-              >
-                <Plus size={14} />
-                <span>Add plan item</span>
-              </button>
-            )}
-            {sessionPlan && sessionPlan.items.length > 0 ? (
-              sessionPlan.items.map((item) => (
-                <article className="gyro-plan-item" key={item.id}>
-                  <button
-                    aria-label={`Mark ${item.title} ${nextPlanStatus(item.status)}`}
-                    className={`gyro-plan-check is-${item.status}`}
-                    onClick={() =>
-                      onPlanItemStatusChange?.(
-                        item.id,
-                        nextPlanStatus(item.status),
-                      )
-                    }
-                    title={`Mark ${nextPlanStatus(item.status)}`}
-                    type="button"
+        {hasPlan ? (
+          <section
+            className="gyro-plan-harness gyro-plan-steps"
+            aria-label="Plan harness"
+          >
+            <PlanPanelHeader
+              onViewChange={sessionPlan?.content ? setPlanView : undefined}
+              plan={sessionPlan ?? { title: "Plan", items: [] }}
+              variant="section"
+              view="steps"
+            />
+            <div className="gyro-rail-section">
+              {sessionPlan && sessionPlan.items.length > 0 ? (
+                sessionPlan.items.map((item) => (
+                  <article
+                    className={`gyro-plan-item is-${item.status}`}
+                    key={item.id}
                   >
-                    {item.status === "complete" ? (
-                      <Check size={13} />
-                    ) : item.status === "blocked" ? (
-                      <Minus size={13} />
-                    ) : item.status === "in-progress" ? (
-                      <CircleDashed size={13} />
-                    ) : (
-                      <Circle size={13} />
-                    )}
-                  </button>
-                  {planEditor?.mode === "edit" &&
-                  planEditor.itemId === item.id ? (
-                    <form
-                      className="gyro-plan-inline-editor is-item"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        submitPlanEditor();
-                      }}
+                    <button
+                      aria-label={`${item.title}: ${planStatusLabel(item.status)}. Mark ${nextPlanStatus(item.status)}`}
+                      className={`gyro-plan-check is-${item.status}`}
+                      onClick={() =>
+                        onPlanItemStatusChange?.(
+                          item.id,
+                          nextPlanStatus(item.status),
+                        )
+                      }
+                      title={`Mark ${nextPlanStatus(item.status)}`}
+                      type="button"
                     >
-                      <input
-                        aria-label={`Edit ${item.title}`}
-                        autoFocus
-                        maxLength={160}
-                        onChange={(event) =>
-                          setPlanEditor((current) =>
-                            current
-                              ? { ...current, value: event.target.value }
-                              : current,
-                          )
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") setPlanEditor(undefined);
+                      <PlanStepStatus status={item.status} />
+                    </button>
+                    {planEditor?.mode === "edit" &&
+                    planEditor.itemId === item.id ? (
+                      <form
+                        className="gyro-plan-inline-editor is-item"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          submitPlanEditor();
                         }}
-                        value={planEditor.value}
-                      />
-                      <button
-                        aria-label={`Save ${item.title}`}
-                        disabled={!planEditor.value.trim()}
-                        title="Save"
-                        type="submit"
                       >
-                        <Check size={13} />
-                      </button>
-                      <button
-                        aria-label={`Cancel editing ${item.title}`}
-                        onClick={() => setPlanEditor(undefined)}
-                        title="Cancel"
-                        type="button"
-                      >
-                        <X size={13} />
-                      </button>
-                    </form>
-                  ) : (
-                    <>
-                      <div>
-                        <strong>{item.title}</strong>
-                        {item.detail ? <span>{item.detail}</span> : null}
-                      </div>
-                      <small>{planStatusLabel(item.status)}</small>
-                      <div className="gyro-plan-item-actions">
-                        <button
-                          aria-label={`Move ${item.title} up`}
-                          onClick={() => onPlanAction?.("move-up", item.id)}
-                          type="button"
-                        >
-                          <ArrowUp size={11} />
-                        </button>
-                        <button
-                          aria-label={`Move ${item.title} down`}
-                          onClick={() => onPlanAction?.("move-down", item.id)}
-                          type="button"
-                        >
-                          <ChevronDown size={11} />
-                        </button>
-                        <button
+                        <input
                           aria-label={`Edit ${item.title}`}
-                          onClick={() =>
-                            setPlanEditor({
-                              mode: "edit",
-                              itemId: item.id,
-                              value: item.title,
-                            })
-                          }
-                          type="button"
-                        >
-                          <Edit3 size={11} />
-                        </button>
-                        {/* Blocked is a claim about the world, not a stop on
-                            the check button's cycle: one stray click should
-                            never strand a step there. */}
-                        <button
-                          aria-label={
-                            item.status === "blocked"
-                              ? `Unblock ${item.title}`
-                              : `Mark ${item.title} blocked`
-                          }
-                          onClick={() =>
-                            onPlanItemStatusChange?.(
-                              item.id,
-                              item.status === "blocked"
-                                ? "in-progress"
-                                : "blocked",
+                          autoFocus
+                          maxLength={160}
+                          onChange={(event) =>
+                            setPlanEditor((current) =>
+                              current
+                                ? { ...current, value: event.target.value }
+                                : current,
                             )
                           }
-                          title={
-                            item.status === "blocked"
-                              ? "Unblock step"
-                              : "Mark blocked"
-                          }
-                          type="button"
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") setPlanEditor(undefined);
+                          }}
+                          value={planEditor.value}
+                        />
+                        <button
+                          aria-label={`Save ${item.title}`}
+                          disabled={!planEditor.value.trim()}
+                          title="Save"
+                          type="submit"
                         >
-                          {item.status === "blocked" ? (
-                            <RefreshCw size={11} />
-                          ) : (
-                            <Minus size={11} />
-                          )}
+                          <Check size={13} />
                         </button>
                         <button
-                          aria-label={`Remove ${item.title}`}
-                          onClick={() => onPlanAction?.("remove", item.id)}
+                          aria-label={`Cancel editing ${item.title}`}
+                          onClick={() => setPlanEditor(undefined)}
+                          title="Cancel"
                           type="button"
                         >
-                          <Trash2 size={11} />
+                          <X size={13} />
                         </button>
-                      </div>
-                    </>
-                  )}
-                </article>
-              ))
-            ) : (
-              <div className="gyro-plan-empty">
-                <ListChecks size={18} />
-                <strong>No plan yet</strong>
-                <span>
-                  Add steps here or let Gyro build the plan while it works.
-                </span>
-              </div>
-            )}
-          </div>
-        </section>
+                      </form>
+                    ) : (
+                      <>
+                        <div>
+                          <strong>{item.title}</strong>
+                          {item.detail ? <span>{item.detail}</span> : null}
+                        </div>
+                        {item.status === "blocked" ? <small>Blocked</small> : null}
+                        <div className="gyro-plan-item-actions">
+                          <button
+                            aria-label={`Move ${item.title} up`}
+                            onClick={() => onPlanAction?.("move-up", item.id)}
+                            type="button"
+                          >
+                            <ArrowUp size={11} />
+                          </button>
+                          <button
+                            aria-label={`Move ${item.title} down`}
+                            onClick={() => onPlanAction?.("move-down", item.id)}
+                            type="button"
+                          >
+                            <ChevronDown size={11} />
+                          </button>
+                          <button
+                            aria-label={`Edit ${item.title}`}
+                            onClick={() =>
+                              setPlanEditor({
+                                mode: "edit",
+                                itemId: item.id,
+                                value: item.title,
+                              })
+                            }
+                            type="button"
+                          >
+                            <Edit3 size={11} />
+                          </button>
+                          {/* Blocked is a claim about the world, not a stop on
+                              the check button's cycle: one stray click should
+                              never strand a step there. */}
+                          <button
+                            aria-label={
+                              item.status === "blocked"
+                                ? `Unblock ${item.title}`
+                                : `Mark ${item.title} blocked`
+                            }
+                            onClick={() =>
+                              onPlanItemStatusChange?.(
+                                item.id,
+                                item.status === "blocked"
+                                  ? "in-progress"
+                                  : "blocked",
+                              )
+                            }
+                            title={
+                              item.status === "blocked"
+                                ? "Unblock step"
+                                : "Mark blocked"
+                            }
+                            type="button"
+                          >
+                            {item.status === "blocked" ? (
+                              <RefreshCw size={11} />
+                            ) : (
+                              <Minus size={11} />
+                            )}
+                          </button>
+                          <button
+                            aria-label={`Remove ${item.title}`}
+                            onClick={() => onPlanAction?.("remove", item.id)}
+                            type="button"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                ))
+              ) : (
+                <div className="gyro-plan-empty">
+                  <ListChecks size={18} />
+                  <strong>No plan yet</strong>
+                  <span>
+                    Add steps here or let Gyro build the plan while it works.
+                  </span>
+                </div>
+              )}
+              {planEditor?.mode === "add" ? (
+                <form
+                  className="gyro-plan-inline-editor"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    submitPlanEditor();
+                  }}
+                >
+                  <input
+                    aria-label="Plan item title"
+                    autoFocus
+                    maxLength={160}
+                    onChange={(event) =>
+                      setPlanEditor((current) =>
+                        current
+                          ? { ...current, value: event.target.value }
+                          : current,
+                      )
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setPlanEditor(undefined);
+                    }}
+                    placeholder="Describe the next step"
+                    value={planEditor.value}
+                  />
+                  <button
+                    aria-label="Save plan item"
+                    disabled={!planEditor.value.trim()}
+                    title="Save plan item"
+                    type="submit"
+                  >
+                    <Check size={13} />
+                  </button>
+                  <button
+                    aria-label="Cancel plan item"
+                    onClick={() => setPlanEditor(undefined)}
+                    title="Cancel"
+                    type="button"
+                  >
+                    <X size={13} />
+                  </button>
+                </form>
+              ) : (
+                <button
+                  className="gyro-rail-row is-action"
+                  onClick={() =>
+                    setPlanEditor({ mode: "add", value: "", itemId: undefined })
+                  }
+                  type="button"
+                >
+                  <Plus size={14} />
+                  <span>Add step</span>
+                </button>
+              )}
+            </div>
+          </section>
+        ) : null}
       </aside>
     );
   }
@@ -10944,6 +10800,7 @@ function ChatSidePanel({
         changesLabel={changesLabel}
         onOpenFiles={openFiles}
         onOpenTool={openTool}
+        hasPlan={hasPlan}
         onTogglePlan={onTogglePlanPanel}
         pendingDiffs={pendingDiffs}
         planExpanded={false}
@@ -11859,10 +11716,12 @@ function ChatEnvironmentPopover({
   branchItems,
   onBranchAction,
   onClose,
+  onOpenPlan,
   onOpenTab,
   onOpenReview,
   onRunGitAction,
   onSelectBranch,
+  plan,
   sourceControl,
   terminalPanes,
   workspacePath,
@@ -11872,15 +11731,24 @@ function ChatEnvironmentPopover({
   branchItems: ComposerPopoverItem[];
   onBranchAction?: (action: string) => void;
   onClose?: () => void;
+  onOpenPlan?: () => void;
   onOpenTab?: (tab: ChatCompanionTabId) => void;
   onOpenReview?: (scope: ReviewScope) => void;
   onRunGitAction?: (actionId: GitReviewActionId) => void;
   onSelectBranch?: () => void;
+  /** Shown only once a plan exists: steps or a plan document. */
+  plan?: SessionPlan;
   sourceControl?: SourceControlState;
   terminalPanes?: TerminalPane[];
   workspacePath?: string;
 }) {
   const [showBranches, setShowBranches] = useState(false);
+  const planSteps = plan?.items.length ?? 0;
+  const planDone =
+    plan?.items.filter((item) => item.status === "complete").length ?? 0;
+  const isPlanWorking =
+    plan?.items.some((item) => item.status === "in-progress") ?? false;
+  const hasPlan = planSteps > 0 || Boolean(plan?.content);
   const branchMenuId = useId();
   const runningProcesses = (terminalPanes ?? []).filter(
     terminalPaneHasActiveWork,
@@ -12000,6 +11868,28 @@ function ChatEnvironmentPopover({
           <strong title={workspacePath}>{workspaceName(workspacePath)}</strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
+        {hasPlan && onOpenPlan ? (
+          <button
+            aria-label={`Open plan, ${planSteps ? `${planDone} of ${planSteps} steps done` : "plan document"}`}
+            className="gyro-chat-environment-plan-row"
+            onClick={() => {
+              onClose?.();
+              onOpenPlan();
+            }}
+            type="button"
+          >
+            {isPlanWorking ? (
+              <PlanStepStatus status="in-progress" />
+            ) : (
+              <ListChecks size={14} />
+            )}
+            <span>Plan</span>
+            <strong>
+              {planSteps ? `${planDone} of ${planSteps} done` : "Document"}
+            </strong>
+            <ChevronRight aria-hidden="true" size={13} />
+          </button>
+        ) : null}
         <button
           aria-label={`Open changes, ${changesDetail}, ${sourceControlTotalsScope(changeTotals)}`}
           onClick={openReview}
@@ -12112,6 +12002,7 @@ function ChatEnvironmentLauncher({
   changesLabel,
   onOpenFiles,
   onOpenTool,
+  hasPlan,
   onTogglePlan,
   pendingDiffs,
   planExpanded,
@@ -12127,6 +12018,7 @@ function ChatEnvironmentLauncher({
   changesLabel: string;
   onOpenFiles: () => void;
   onOpenTool: (tab: WorkbenchPaneTab) => void;
+  hasPlan: boolean;
   onTogglePlan?: () => void;
   pendingDiffs: number;
   planExpanded: boolean;
@@ -12190,22 +12082,24 @@ function ChatEnvironmentLauncher({
          * button, and the folder it opens is already in the rail header.
          */}
       </button>
-      <button
-        aria-expanded={planExpanded}
-        aria-label={`${planExpanded ? "Collapse" : "Open"} Plan, ${planLabel}`}
-        onClick={onTogglePlan}
-        className={[
-          planItemCount > 0 ? "has-activity" : "",
-          planExpanded ? "is-active" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        type="button"
-      >
-        <ListChecks size={15} />
-        <span>Plan</span>
-        {planItemCount > 0 ? <small>{planLabel}</small> : null}
-      </button>
+      {hasPlan ? (
+        <button
+          aria-expanded={planExpanded}
+          aria-label={`${planExpanded ? "Collapse" : "Open"} Plan, ${planLabel}`}
+          onClick={onTogglePlan}
+          className={[
+            planItemCount > 0 ? "has-activity" : "",
+            planExpanded ? "is-active" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          type="button"
+        >
+          <ListChecks size={15} />
+          <span>Plan</span>
+          {planItemCount > 0 ? <small>{planLabel}</small> : null}
+        </button>
+      ) : null}
     </nav>
   );
 }
@@ -16629,14 +16523,17 @@ export function AutomationsSurface({
             <h1>Automations</h1>
             <p>Schedule project checks and follow-ups.</p>
           </header>
-          <input
-            className="gyro-scheduled-search"
-            type="search"
-            aria-label="Search automations"
-            placeholder="Search automations"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+          <label className="gyro-scheduled-search-field">
+            <Search size={14} aria-hidden="true" />
+            <input
+              className="gyro-scheduled-search"
+              type="search"
+              aria-label="Search automations"
+              placeholder="Search automations"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
           <nav
             className="gyro-scheduled-filters"
             aria-label="Automation status"
@@ -16675,15 +16572,15 @@ export function AutomationsSurface({
                 <CalendarClock size={15} aria-hidden="true" />
                 <span>
                   <strong>{automation.title}</strong>
-                  <small>
-                    {automationScheduleLabel(automation)} ·{" "}
-                    {automation.status === "current"
-                      ? "Active"
-                      : automation.status === "paused"
-                        ? "Paused"
-                        : "Completed"}
-                  </small>
+                  <small>{automationScheduleLabel(automation)}</small>
                 </span>
+                <em className={`gyro-scheduled-status is-${automation.status}`}>
+                  {automation.status === "current"
+                    ? "Active"
+                    : automation.status === "paused"
+                      ? "Paused"
+                      : "Completed"}
+                </em>
                 {automation.unreadResults > 0 && (
                   <b aria-label={`${automation.unreadResults} unread results`}>
                     {automation.unreadResults}
@@ -16705,32 +16602,34 @@ export function AutomationsSurface({
               aria-label="Suggestions"
             >
               <h2>Suggestions</h2>
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() => beginCreate("daily")}
-              >
-                <CalendarClock size={15} />
-                <span>
-                  <strong>Daily project check</strong>
-                  <small>
-                    Review changes and surface what needs attention.
-                  </small>
-                </span>
-                <Plus size={14} />
-              </button>
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() => beginCreate("weekly")}
-              >
-                <GitPullRequest size={15} />
-                <span>
-                  <strong>Weekly code review</strong>
-                  <small>Summarize progress, risks, and next priorities.</small>
-                </span>
-                <Plus size={14} />
-              </button>
+              <div>
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => beginCreate("daily")}
+                >
+                  <CalendarClock size={15} />
+                  <span>
+                    <strong>Daily project check</strong>
+                    <small>
+                      Review changes and surface what needs attention.
+                    </small>
+                  </span>
+                  <Plus size={14} />
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => beginCreate("weekly")}
+                >
+                  <GitPullRequest size={15} />
+                  <span>
+                    <strong>Weekly code review</strong>
+                    <small>Summarize progress, risks, and next priorities.</small>
+                  </span>
+                  <Plus size={14} />
+                </button>
+              </div>
             </section>
           )}
           <p className="gyro-scheduled-local-note">
@@ -27463,6 +27362,8 @@ function ChatTurn({
   onProviderStatusAction,
   onReusePrompt,
   onContinueChat,
+  isPlanInPanel = false,
+  onOpenPlanPanel,
   plan,
   previewCapture,
   sourceControl,
@@ -27504,6 +27405,8 @@ function ChatTurn({
   ) => void | Promise<string | void>;
   onReusePrompt?: (message: string) => void;
   onContinueChat?: () => void;
+  isPlanInPanel?: boolean;
+  onOpenPlanPanel?: () => void;
   plan?: SessionPlan;
   previewCapture?: { src?: string; path?: string };
   sourceControl?: SourceControlState;
@@ -27636,6 +27539,9 @@ function ChatTurn({
   );
   const openTurnChanges = (path?: string) =>
     onOpenChanges?.(path, changedFiles);
+  const questionAnswers = turn.user
+    ? parseChatAnswers(turn.user.message)
+    : undefined;
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
       {isRunning && changedFiles.length > 0 && liveChangesTarget
@@ -27644,7 +27550,9 @@ function ChatTurn({
             liveChangesTarget,
           )
         : null}
-      {turn.user ? (
+      {questionAnswers ? (
+        <ChatQuestionAnswers {...questionAnswers} />
+      ) : turn.user ? (
         <ChatEvent
           event={turn.user}
           onProviderApprovalAction={onProviderApprovalAction}
@@ -27751,6 +27659,19 @@ function ChatTurn({
               </article>
             </div>
           </div>
+        ) : null}
+        {isPlanResponseTurn && plan?.content ? (
+          <PlanCard
+            isOpenInPanel={isPlanInPanel}
+            onOpenInPanel={onOpenPlanPanel}
+            plan={plan}
+          >
+            <PlanDocument
+              content={plan.content}
+              onOpenBrowserUrl={onOpenBrowserUrl}
+              title={plan.title}
+            />
+          </PlanCard>
         ) : null}
         {isCompactionResult ? (
           <div
@@ -28940,8 +28861,7 @@ function stripHiddenSessionTitleMarker(message: string) {
     .filter((line) => {
       const trimmed = line.trim();
       return (
-        !trimmed.startsWith("GYRO_SESSION_TITLE:") &&
-        !trimmed.startsWith("GYRO_ARTIFACTS:")
+        !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS):/.test(trimmed)
       );
     })
     .join("\n")
