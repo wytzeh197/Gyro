@@ -30,6 +30,8 @@ const effects = [];
 const recorded = { configs: 0, normalizations: 0, notifications: [] };
 let nextRefresh = { applied: false, additions: [] };
 let focused = true;
+let notifyFails = false;
+const logged = [];
 
 const documentStub = {
   visibilityState: "visible",
@@ -78,6 +80,7 @@ const sandbox = {
   MODEL_CATALOG_POLL_MS: focusedPollMs,
   MODEL_CATALOG_REFRESH_MS: backgroundPollMs,
   useEffect: (effect) => effects.push(effect),
+  console: { error: (...args) => logged.push(args) },
 };
 runInNewContext(
   ts.transpileModule(`${snippet}\nglobalThis.catalogHook = useModelCatalog;`, {
@@ -116,7 +119,10 @@ sandbox.catalogHook(
     recorded.normalizations += 1;
     return config;
   },
-  (kind, title, detail) => recorded.notifications.push({ kind, title, detail }),
+  (kind, title, detail) => {
+    if (notifyFails) throw new Error("notification center unavailable");
+    recorded.notifications.push({ kind, title, detail });
+  },
 );
 assert.equal(effects.length, 1, "mounting registers one refresh effect");
 const cleanup = effects[0]();
@@ -235,6 +241,22 @@ assert.equal(
   "an unfocused window returns to the slow cadence",
 );
 
+// An update that throws while applying or announcing still schedules the next
+// check, so one bad document cannot stop polling until the window next gains focus.
+notifyFails = true;
+nextRefresh = {
+  applied: true,
+  additions: [
+    { providerId: "openai", providerLabel: "OpenAI", id: "x", displayName: "X" },
+  ],
+};
+await fireTimer();
+notifyFails = false;
+assert.equal(logged.length, 1, "the failure is reported, not swallowed");
+assert.equal(pendingDelay(), backgroundPollMs, "a failed update still reschedules");
+await fireTimer();
+assert.equal(timers.size, 1, "polling continues after the failure");
+
 // Teardown leaves nothing pending, nothing listening, and nothing to refresh
 // even if a listener outlives the hook.
 const leaked = listeners.get("window:focus");
@@ -251,5 +273,5 @@ assert.equal(
 );
 
 console.log(
-  "Model catalog cadence checks passed: focused polling, background fallback, focus and online catch-up, addition announcements, and teardown.",
+  "Model catalog cadence checks passed: focused polling, background fallback, focus and online catch-up, addition announcements, failure recovery, and teardown.",
 );
