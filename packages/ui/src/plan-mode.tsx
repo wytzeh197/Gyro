@@ -111,7 +111,7 @@ export function ImplementPlanDock({
         </span>
         <button
           aria-label="Keep planning"
-          className="gyro-question-dock-close"
+          className="gyro-icon-button is-small gyro-question-dock-close"
           disabled={isPending}
           onClick={() => onDecision("reject")}
           title="Keep planning (Esc)"
@@ -157,14 +157,14 @@ export function ImplementPlanDock({
         {feedback.trim() ? (
           <button
             aria-label="Send plan feedback"
-            className="gyro-question-dock-send"
+            className="gyro-button is-primary is-small gyro-question-dock-send"
             type="submit"
           >
             <ArrowUp size={13} />
           </button>
         ) : (
           <button
-            className="gyro-question-dock-skip"
+            className="gyro-button is-ghost is-small gyro-question-dock-skip"
             disabled={isPending}
             onClick={() => onDecision("reject")}
             type="button"
@@ -277,7 +277,7 @@ export function PlanCard({
       <div className="gyro-plan-card-body">{children}</div>
       <button
         aria-expanded={isExpanded}
-        className="gyro-plan-card-more"
+        className="gyro-icon-button is-small gyro-plan-card-more"
         onClick={() => setIsExpanded((current) => !current)}
         type="button"
       >
@@ -433,7 +433,7 @@ export function PlanPanelHeader({
         {plan.content ? (
           <button
             aria-label={copied ? "Copied" : "Copy plan as Markdown"}
-            className="gyro-plan-panel-action"
+            className="gyro-button is-secondary is-small gyro-plan-panel-action"
             onClick={() => {
               void navigator.clipboard
                 ?.writeText(plan.content ?? "")
@@ -448,7 +448,7 @@ export function PlanPanelHeader({
         {onClose ? (
           <button
             aria-label="Close plan"
-            className="gyro-plan-panel-action"
+            className="gyro-button is-secondary is-small gyro-plan-panel-action"
             onClick={onClose}
             title="Close"
             type="button"

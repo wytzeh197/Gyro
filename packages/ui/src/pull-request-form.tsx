@@ -101,12 +101,12 @@ export function PullRequestForm({
         <div className="gyro-workflow-form-actions">
           <button
             type="button"
-            className="gyro-button"
+            className="gyro-button is-secondary"
             onClick={() => onClose()}
           >
             Cancel
           </button>
-          <button className="gyro-button gyro-button-primary" type="submit">
+          <button className="gyro-button is-primary" type="submit">
             Create pull request
           </button>
         </div>

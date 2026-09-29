@@ -847,7 +847,7 @@ expect(
     surfaceSource.includes("gyro-sidebar-scm-state is-") &&
     surfaceSource.includes('className="gyro-sidebar-scm-stage"') &&
     scmFileActionsSource.includes(
-      'className="gyro-scm-file-actions-trigger"',
+      'className="gyro-icon-button is-small gyro-scm-file-actions-trigger"',
     ) &&
     surfaceSource.includes("function workspaceParentFolder") &&
     cssRules(styleSource, ".gyro-sidebar-scm-row").some(
@@ -5905,7 +5905,7 @@ expect(
     styleSource.includes("button.has-warning > small") &&
     styleSource.includes("minmax(260px, 40vh)") &&
     styleSource.includes("min-height: 36px;") &&
-    styleSource.includes(".gyro-chat-tool-close") &&
+    surfaceSource.includes("gyro-chat-tool-close") &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" })') &&
     surfaceSource.includes('action: "select-workspace"') &&
     surfaceSource.includes('action: "set-workspace-mode:local"') &&

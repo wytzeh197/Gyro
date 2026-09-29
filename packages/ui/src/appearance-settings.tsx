@@ -156,7 +156,7 @@ export function AppearanceSettings({
           detail="Restore Gyro blue and violet."
         >
           <button
-            className="gyro-color-reset"
+            className="gyro-button is-secondary is-small gyro-color-reset"
             disabled={
               mainColor.toLowerCase() === "#0874df" &&
               secondaryColor.toLowerCase() === "#8b6fcb"

@@ -233,7 +233,7 @@ export function ChatQuestionPopup({
         ) : null}
         <button
           aria-label="Dismiss questions"
-          className="gyro-question-dock-close"
+          className="gyro-icon-button is-small gyro-question-dock-close"
           onClick={onDismiss}
           title="Dismiss (Esc)"
           type="button"
@@ -294,14 +294,14 @@ export function ChatQuestionPopup({
         {custom.trim() ? (
           <button
             aria-label="Send this answer"
-            className="gyro-question-dock-send"
+            className="gyro-button is-primary is-small gyro-question-dock-send"
             type="submit"
           >
             <ArrowUp size={13} />
           </button>
         ) : (
           <button
-            className="gyro-question-dock-skip"
+            className="gyro-button is-ghost is-small gyro-question-dock-skip"
             onClick={() => record(null)}
             type="button"
           >

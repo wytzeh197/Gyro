@@ -281,19 +281,8 @@
   position: absolute;
   right: 0;
   top: 0;
-  width: 28px;
-  height: 28px;
-  display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--gyro-muted);
-  cursor: pointer;
   z-index: 2;
-}
-.gyro-scheduled-close:hover {
-  background: var(--gyro-surface-soft);
 }
 .gyro-scheduled-editor {
   align-content: start;

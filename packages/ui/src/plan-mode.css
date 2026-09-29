@@ -118,25 +118,6 @@
   margin-bottom: 12px;
 }
 
-.gyro-plan-card-more {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-faint);
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  gap: 4px;
-  padding: 2px 18px 12px;
-}
-
-.gyro-plan-card-more:hover,
-.gyro-plan-card-more:focus-visible {
-  color: var(--gyro-text);
-}
-
 .gyro-plan-card-more > svg {
   transition: transform var(--gyro-motion) var(--gyro-ease);
 }
@@ -415,32 +396,14 @@
   color: var(--gyro-segment-active-text);
 }
 
-.gyro-plan-panel-views > button:focus-visible,
-.gyro-plan-panel-action:focus-visible {
+.gyro-plan-panel-views > button:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-plan-panel-action {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-faint);
-  cursor: pointer;
   display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  transition:
-    background var(--gyro-motion-fast) var(--gyro-ease),
-    color var(--gyro-motion-fast) var(--gyro-ease);
   width: 28px;
-}
-
-.gyro-plan-panel-action:hover {
-  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
 }
 
 /* Progress rides the header's bottom edge instead of taking its own row. */

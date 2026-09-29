@@ -72,7 +72,7 @@ export function ScmFileActions({
       <button
         ref={trigger}
         type="button"
-        className="gyro-scm-file-actions-trigger"
+        className="gyro-icon-button is-small gyro-scm-file-actions-trigger"
         aria-label={`Actions for ${path}`}
         aria-haspopup="menu"
         aria-expanded={!!position}

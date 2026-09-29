@@ -303,7 +303,7 @@ export function LiveTerminalPaneBody({
         <div className="gyro-terminal-recovery" role="status">
           <span>Previous output · process is no longer running</span>
           <button
-            className="gyro-terminal-reconnect"
+            className="gyro-button is-secondary is-small gyro-terminal-reconnect"
             onClick={(event) => {
               event.stopPropagation();
               onReconnect(pane.id);

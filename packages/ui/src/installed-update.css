@@ -35,7 +35,6 @@
 }
 
 .gyro-installed-update-trigger:focus-visible,
-.gyro-installed-update-dismiss:focus-visible,
 .gyro-installed-update-card button:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
@@ -113,24 +112,9 @@
 }
 
 .gyro-installed-update-dismiss {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 26px;
-  justify-content: center;
   position: absolute;
   right: 7px;
   top: 7px;
-  width: 26px;
-}
-
-.gyro-installed-update-dismiss:hover,
-.gyro-installed-update-card-close:hover {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  color: var(--gyro-text);
 }
 
 .gyro-installed-update-card {
@@ -179,18 +163,9 @@
 }
 
 .gyro-installed-update-card-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
   position: absolute;
   right: 0;
   top: 0;
-  width: 28px;
 }
 
 .gyro-installed-update-eyebrow {
@@ -224,19 +199,6 @@
 }
 
 .gyro-installed-update-done {
-  background: var(--gyro-accent);
-  border: 0;
-  border-radius: 7px;
-  color: #ffffff;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
   justify-self: start;
-  min-height: 30px;
-  padding: 0 14px;
-}
-
-.gyro-installed-update-done:hover {
-  background: var(--gyro-accent-strong);
 }
 

@@ -78,8 +78,7 @@
   white-space: nowrap;
 }
 
-.gyro-question-dock-pager > button,
-.gyro-question-dock-close {
+.gyro-question-dock-pager > button {
   align-items: center;
   background: transparent;
   border: 0;
@@ -97,16 +96,15 @@
   width: 24px;
 }
 
-/* A close control in a card's corner reads as a circle, which no corner
-   radius can mismatch. */
 .gyro-question-dock-close {
-  border-radius: 999px;
+  flex: none;
 }
 
+/* A close control in a card's corner reads as a circle, which no corner
+   radius can mismatch. */
+
 .gyro-question-dock-pager > button:hover:not(:disabled),
-.gyro-question-dock-close:hover:not(:disabled),
-.gyro-question-dock-pager > button:focus-visible,
-.gyro-question-dock-close:focus-visible {
+.gyro-question-dock-pager > button:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
 }
@@ -285,48 +283,13 @@
 }
 
 .gyro-question-dock-skip {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  cursor: pointer;
   flex: none;
-  font: inherit;
-  font-size: var(--gyro-type-md);
-  font-weight: var(--gyro-weight-medium);
-  height: 28px;
-  padding: 0 10px;
-  white-space: nowrap;
-}
-
-.gyro-question-dock-skip:hover:not(:disabled),
-.gyro-question-dock-skip:focus-visible {
-  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
 }
 
 .gyro-question-dock-send {
-  align-items: center;
-  background: var(--gyro-text);
-  border: 0;
-  border-radius: 999px;
-  color: var(--gyro-app);
-  cursor: pointer;
   display: inline-flex;
   flex: none;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
   width: 28px;
-}
-
-.gyro-question-dock-send:hover {
-  opacity: 0.88;
-}
-
-.gyro-question-dock-send:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-question-dock-note {

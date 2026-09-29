@@ -1529,7 +1529,7 @@ export function CliUpdateBanner({
         ) : null}
       </span>
       <button
-        className="gyro-cli-update-banner-action"
+        className="gyro-button is-secondary is-small gyro-cli-update-banner-action"
         disabled={isBusy || !onUpdate}
         onClick={() => onUpdate?.()}
         type="button"
@@ -1538,7 +1538,7 @@ export function CliUpdateBanner({
       </button>
       <button
         aria-label="Dismiss CLI update notice"
-        className="gyro-cli-update-banner-dismiss"
+        className="gyro-icon-button is-small gyro-cli-update-banner-dismiss"
         disabled={isBusy}
         onClick={() => onDismiss?.()}
         type="button"
@@ -1577,7 +1577,7 @@ function ProviderReadinessBanner({
       </span>
       {actionLabel ? (
         <button
-          className="gyro-cli-update-banner-action"
+          className="gyro-button is-secondary is-small gyro-cli-update-banner-action"
           disabled={!onAction}
           onClick={() => onAction?.()}
           type="button"
@@ -2243,7 +2243,7 @@ export function AppChrome({
           {isCompactNavigationOpen ? (
             <button
               aria-label="Close navigation"
-              className="gyro-compact-navigation-close"
+              className="gyro-icon-button is-small gyro-compact-navigation-close"
               onClick={() => setIsCompactNavigationOpen(false)}
               type="button"
             >
@@ -2802,7 +2802,7 @@ function WorkspacePreparationControl({
           ) : null}
           {progress.status === "degraded" || progress.status === "failed" ? (
             <button
-              className="gyro-update-primary"
+              className="gyro-button is-primary is-small gyro-update-primary"
               onClick={onRetry}
               type="button"
             >
@@ -2938,7 +2938,7 @@ function InstalledUpdateNotice({
       </button>
       <button
         aria-label="Dismiss What’s new notice"
-        className="gyro-installed-update-dismiss"
+        className="gyro-icon-button is-small gyro-installed-update-dismiss"
         onClick={onDismiss}
         title="Dismiss"
         type="button"
@@ -2960,7 +2960,7 @@ function InstalledUpdateNotice({
             </span>
             <button
               aria-label="Close What’s new card"
-              className="gyro-installed-update-card-close"
+              className="gyro-icon-button is-small gyro-installed-update-card-close"
               onClick={() => {
                 setIsOpen(false);
                 triggerRef.current?.focus();
@@ -2978,7 +2978,7 @@ function InstalledUpdateNotice({
           </div>
           <div className="gyro-installed-update-notes">{releaseNotes}</div>
           <button
-            className="gyro-installed-update-done"
+            className="gyro-button is-primary is-small gyro-installed-update-done"
             onClick={onDismiss}
             type="button"
           >
@@ -7104,7 +7104,7 @@ function RunTaskRow({
       {onFixWithAi ? (
         <button
           aria-label={`Fix ${task.label} with AI`}
-          className="gyro-run-task-fix"
+          className="gyro-button is-secondary is-small gyro-run-task-fix"
           onClick={onFixWithAi}
           title="Attach this failure to the chat so a model can fix it"
           type="button"
@@ -10030,7 +10030,7 @@ function ChatSurfaceControls({
           aria-label="Environment"
           aria-pressed={isEnvironmentOpen === true}
           className={[
-            "gyro-chat-surface-button",
+            "gyro-icon-button gyro-chat-surface-button",
             isEnvironmentOpen ? "is-active" : "",
           ]
             .filter(Boolean)
@@ -10047,7 +10047,7 @@ function ChatSurfaceControls({
           aria-label="Toggle bottom drawer"
           aria-pressed={isToolPanelOpen}
           className={[
-            "gyro-chat-surface-button",
+            "gyro-icon-button gyro-chat-surface-button",
             isToolPanelOpen ? "is-active" : "",
           ]
             .filter(Boolean)
@@ -10063,7 +10063,7 @@ function ChatSurfaceControls({
         <button
           aria-label={isDockOpen ? "Hide companion" : "Show companion"}
           aria-pressed={isDockOpen}
-          className={["gyro-chat-surface-button", isDockOpen ? "is-active" : ""]
+          className={["gyro-icon-button gyro-chat-surface-button", isDockOpen ? "is-active" : ""]
             .filter(Boolean)
             .join(" ")}
           onClick={onToggleDock}
@@ -10080,7 +10080,7 @@ function ChatSurfaceControls({
             aria-haspopup="menu"
             aria-label="More chat surfaces"
             className={[
-              "gyro-chat-surface-button",
+              "gyro-icon-button gyro-chat-surface-button",
               drawerHasModelActivity ? "has-model-activity" : "",
             ]
               .filter(Boolean)
@@ -10529,7 +10529,7 @@ function ChatSidePanel({
           </div>
           <button
             aria-label="Close environment"
-            className="gyro-chat-tool-close"
+            className="gyro-icon-button is-small gyro-chat-tool-close"
             onClick={onClose}
             type="button"
           >
@@ -10790,7 +10790,7 @@ function ChatSidePanel({
         {onClose ? (
           <button
             aria-label="Close environment"
-            className="gyro-chat-tool-close"
+            className="gyro-icon-button is-small gyro-chat-tool-close"
             onClick={onClose}
             type="button"
           >
@@ -11137,7 +11137,7 @@ function ChatCompanionDock({
           ) : null}
           <button
             aria-label="Hide companion"
-            className="gyro-chat-companion-close"
+            className="gyro-icon-button is-small gyro-chat-companion-close"
             onClick={onClose}
             title="Hide companion"
             type="button"
@@ -12852,7 +12852,7 @@ function WorkspaceSettingsEditor({
           </div>
           {scope !== "user" ? (
             <button
-              className="gyro-workspace-settings-reset"
+              className="gyro-button is-secondary gyro-workspace-settings-reset"
               disabled={Object.keys(settings).length === 0}
               onClick={() => update({})}
               type="button"
@@ -16647,7 +16647,7 @@ export function AutomationsSurface({
             aria-label={isCreating ? "Automation setup" : "Automation details"}
           >
             <button
-              className="gyro-scheduled-close"
+              className="gyro-icon-button is-small gyro-scheduled-close"
               aria-label="Close automation details"
               type="button"
               disabled={isSaving}
@@ -18865,7 +18865,7 @@ function ResizableBrowserRail({
           </div>
           <button
             aria-label="Close browser"
-            className="gyro-chat-tool-close"
+            className="gyro-icon-button is-small gyro-chat-tool-close"
             onClick={onClose}
             type="button"
           >
@@ -19180,7 +19180,7 @@ export function BrowserPreviewSurface({
           </form>
           {isChat ? (
             <button
-              className="gyro-browser-menu-trigger"
+              className="gyro-icon-button gyro-browser-menu-trigger"
               aria-label="Browser options"
               title="Browser options"
               aria-expanded={isBrowserMenuOpen}
@@ -19280,7 +19280,7 @@ export function BrowserPreviewSurface({
             </button>
             <button
               aria-label="Open in system browser"
-              className="gyro-browser-external-button"
+              className="gyro-icon-button gyro-browser-external-button"
               disabled={isBlank}
               onClick={onOpenExternal}
               title="Open in system browser"
@@ -19299,7 +19299,7 @@ export function BrowserPreviewSurface({
             </span>
             {onStopAgent ? (
               <button
-                className="gyro-browser-agent-stop"
+                className="gyro-button is-secondary is-small gyro-browser-agent-stop"
                 onClick={onStopAgent}
                 title="Stop the current response"
                 type="button"
@@ -22714,7 +22714,7 @@ export function SettingsSurface({
                 detail="All sessions and terminal layouts are stored on this Mac."
               >
                 <button
-                  className="gyro-copy-value"
+                  className="gyro-button is-ghost is-small gyro-copy-value"
                   onClick={() =>
                     void copySettingsPath("~/Library/Application Support/Gyro")
                   }
@@ -22729,7 +22729,7 @@ export function SettingsSurface({
                 detail="Diagnostics are local until explicitly exported."
               >
                 <button
-                  className="gyro-copy-value"
+                  className="gyro-button is-ghost is-small gyro-copy-value"
                   onClick={() =>
                     void copySettingsPath(
                       "~/Library/Application Support/Gyro/logs",
@@ -23386,7 +23386,7 @@ function PlanUsageNotification({
         ) : null}
         <button
           aria-label="Dismiss usage notice"
-          className="gyro-plan-usage-notice-dismiss"
+          className="gyro-icon-button is-small gyro-plan-usage-notice-dismiss"
           onClick={() => setNotice(undefined)}
           type="button"
         >
@@ -26664,7 +26664,7 @@ const ChatEvent = memo(function ChatEvent({
               </div>
               <button
                 aria-label="Close details"
-                className="gyro-tool-detail-close"
+                className="gyro-icon-button is-small gyro-tool-detail-close"
                 onClick={() => setIsDetailOpen(false)}
                 type="button"
               >

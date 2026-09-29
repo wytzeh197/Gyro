@@ -1207,44 +1207,11 @@ button {
 }
 
 .gyro-cli-update-banner-action {
-  background: var(--gyro-primary-bg);
-  border: 0;
-  border-radius: 999px;
-  color: var(--gyro-primary-text);
   flex: 0 0 auto;
-  font: inherit;
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  min-height: 28px;
-  padding: 0 12px;
-  white-space: nowrap;
-}
-
-.gyro-cli-update-banner-action:hover:not(:disabled) {
-  background: var(--gyro-primary-hover);
-}
-
-.gyro-cli-update-banner-action:disabled {
-  cursor: progress;
-  opacity: 0.72;
 }
 
 .gyro-cli-update-banner-dismiss {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 999px;
-  color: var(--gyro-faint);
-  display: inline-flex;
   flex: 0 0 auto;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
-.gyro-cli-update-banner-dismiss:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  color: var(--gyro-text);
 }
 
 .gyro-cli-update-banner[data-phase="failed"] {
@@ -1577,21 +1544,6 @@ button {
   font-size: var(--gyro-type-xs);
 }
 
-.gyro-tool-detail-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 24px;
-  justify-content: center;
-  width: 24px;
-}
-
-.gyro-tool-detail-close:hover {
-  color: var(--gyro-text);
-}
-
 .gyro-tool-detail-grid {
   display: grid;
   gap: 8px;
@@ -1677,32 +1629,11 @@ button {
 }
 
 .gyro-chat-surface-button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-muted);
-  display: inline-grid;
-  height: 28px;
-  justify-content: center;
-  min-width: 28px;
-  padding: 0;
   position: relative;
-}
-
-.gyro-chat-surface-button:hover,
-.gyro-chat-surface-button.is-active {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--gyro-text);
 }
 
 /* The header has several icon controls. Label the two that change the whole
    work area so they do not read as generic window chrome. */
-.gyro-chat-surface-button:has(.gyro-chat-surface-button-label) {
-  display: inline-flex;
-  gap: 5px;
-  padding-inline: 8px;
-  width: auto;
-}
 
 .gyro-send-button {
   border: 0;
@@ -5760,10 +5691,7 @@ body {
 }
 
 .gyro-workspace-preparation-popover > .gyro-update-primary {
-  align-items: center;
   display: inline-flex;
-  gap: 6px;
-  justify-content: center;
 }
 
 .gyro-sidebar-restore-cluster .gyro-workspace-preparation {
@@ -6055,17 +5983,6 @@ body {
 
 .gyro-workspace-settings-reset {
   margin-top: 16px;
-  padding: 8px 12px;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  background: var(--gyro-surface-raised);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-}
-
-.gyro-workspace-settings-reset:disabled {
-  opacity: 0.45;
 }
 
 .gyro-workspace-keybindings {
@@ -6591,24 +6508,6 @@ body {
 }
 
 .gyro-chat-tool-rail > header strong {
-  color: var(--gyro-text);
-}
-
-.gyro-chat-tool-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 26px;
-  justify-content: center;
-  padding: 0;
-  width: 26px;
-}
-
-.gyro-chat-tool-close:hover {
-  background: var(--gyro-control-hover);
   color: var(--gyro-text);
 }
 
@@ -10163,22 +10062,10 @@ body {
 }
 
 .gyro-terminal-reconnect {
-  align-items: center;
   bottom: 10px;
-  color: #dce3ec;
   display: inline-flex;
-  font-size: var(--gyro-type-sm);
-  height: 28px;
-  justify-content: center;
-  padding: 0 10px;
   position: absolute;
   right: 10px;
-}
-
-.gyro-terminal-reconnect:hover {
-  background: rgba(38, 43, 51, 0.96);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
 }
 
 .gyro-xterm-host .xterm {
@@ -10952,7 +10839,6 @@ body {
 .gyro-session-action,
 .gyro-terminal-toolbar button,
 .gyro-terminal-drag-handle,
-.gyro-terminal-reconnect,
 .gyro-sidebar-search-form,
 .gyro-sidebar-scm-row,
 .gyro-problem-row {
@@ -12271,18 +12157,6 @@ textarea,
   color: #171a20;
 }
 
-:root[data-theme="light"] .gyro-terminal-reconnect {
-  background: rgba(255, 255, 255, 0.94);
-  border-color: rgba(32, 34, 38, 0.14);
-  color: #20242b;
-}
-
-:root[data-theme="light"] .gyro-terminal-reconnect:hover {
-  background: #f1f2f4;
-  border-color: rgba(32, 34, 38, 0.2);
-  color: #111827;
-}
-
 :root[data-theme="light"] .gyro-cli-launch-preset,
 :root[data-theme="light"] .gyro-cli-launch-preset-row select,
 :root[data-theme="light"] .gyro-cli-launch-stepper,
@@ -12533,27 +12407,9 @@ textarea,
   background: color-mix(in srgb, #5f8fff 20%, transparent);
 }
 
-.gyro-sidebar-update-button:focus-visible,
-.gyro-update-primary:focus-visible {
+.gyro-sidebar-update-button:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
-}
-
-.gyro-update-primary {
-  background: #668ff5;
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  color: #fff;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  min-height: 32px;
-  padding: 8px 10px;
-}
-
-.gyro-update-primary:disabled {
-  cursor: wait;
-  opacity: 0.7;
 }
 
 @keyframes gyro-update-spin {
@@ -12648,8 +12504,7 @@ textarea,
 .gyro-cli-launch-preset-row select,
 .gyro-cli-launch-stepper,
 .gyro-cli-launch-focus,
-.gyro-sidebar-search-form,
-.gyro-terminal-reconnect {
+.gyro-sidebar-search-form {
   background: color-mix(
     in srgb,
     var(--gyro-surface-raised) 84%,
@@ -12668,8 +12523,7 @@ textarea,
 .gyro-cli-launch-stepper button,
 .gyro-cli-launch-focus button,
 .gyro-pane-tabs button,
-.gyro-terminal-tab,
-.gyro-chat-surface-button {
+.gyro-terminal-tab {
   border-radius: var(--gyro-radius-sm);
   transition:
     background-color var(--gyro-motion-fast) var(--gyro-ease),
@@ -12932,8 +12786,7 @@ textarea,
 }
 
 .gyro-pane-tabs button.is-active,
-.gyro-terminal-tab.is-active,
-.gyro-chat-surface-button.is-active {
+.gyro-terminal-tab.is-active {
   background: var(--gyro-surface-soft);
   border-color: var(--gyro-hairline-strong);
   box-shadow: inset 0 -1px 0 var(--gyro-accent);
@@ -13051,8 +12904,7 @@ textarea,
 .gyro-provider-session-row,
 .gyro-profile-table-row,
 .gyro-cli-launch-preset,
-.gyro-sidebar-search-form,
-.gyro-terminal-reconnect {
+.gyro-sidebar-search-form {
   border-color: var(--gyro-hairline-soft);
   border-width: 0.5px;
   border-radius: var(--gyro-radius-md);
@@ -14722,13 +14574,7 @@ button.gyro-settings-row em::after {
   padding: 5px 8px;
 }
 .gyro-copy-value {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-muted);
   display: inline-flex;
-  gap: 8px;
-  padding: 5px 0;
 }
 .gyro-settings-confirm-overlay {
   align-items: center;
@@ -16833,8 +16679,7 @@ button.gyro-settings-row em::after {
   position: relative;
 }
 
-.gyro-chat-companion-add > button,
-.gyro-chat-companion-close {
+.gyro-chat-companion-add > button {
   align-items: center;
   background: transparent;
   border: 0;
@@ -16848,8 +16693,11 @@ button.gyro-settings-row em::after {
   width: 28px;
 }
 
-.gyro-chat-companion-add > button:hover,
-.gyro-chat-companion-close:hover {
+.gyro-chat-companion-close {
+  flex: 0 0 auto;
+}
+
+.gyro-chat-companion-add > button:hover {
   background: var(--gyro-control-hover);
   color: var(--gyro-text);
 }
@@ -18468,24 +18316,6 @@ button.gyro-settings-row em::after {
 
 .gyro-plan-usage-notice-actions .gyro-button.is-secondary {
   display: inline-flex;
-}
-
-.gyro-plan-usage-notice-dismiss {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-muted);
-  cursor: pointer;
-  display: inline-flex;
-  justify-content: center;
-  padding: 4px;
-}
-
-.gyro-plan-usage-notice-dismiss:hover,
-.gyro-plan-usage-notice-dismiss:focus-visible {
-  background: color-mix(in srgb, var(--gyro-muted) 16%, transparent);
-  color: var(--gyro-text);
 }
 
 @media (max-width: 620px) {
@@ -20528,12 +20358,6 @@ button.gyro-settings-row em::after {
 
 .gyro-thread-topbar-actions {
   gap: 6px;
-}
-
-.gyro-chat-thread-topbar .gyro-chat-surface-button {
-  border-radius: var(--gyro-radius-md);
-  height: 28px;
-  min-width: 28px;
 }
 
 .gyro-chat-thread-topbar .gyro-thread-project-icon {
@@ -25345,8 +25169,7 @@ button.gyro-settings-row em::after {
 .gyro-sidebar-action.is-settings-page,
 .gyro-sidebar-thread,
 .gyro-icon-button,
-.gyro-theme-picker button,
-.gyro-color-reset {
+.gyro-theme-picker button {
   transition:
     background-color var(--gyro-motion) var(--gyro-ease),
     border-color var(--gyro-motion) var(--gyro-ease),
@@ -25420,33 +25243,7 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-color-reset {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border: 1px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
   display: inline-flex;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
-}
-
-.gyro-color-reset:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border-color: var(--gyro-border);
-}
-
-.gyro-color-reset:disabled {
-  cursor: default;
-  opacity: 0.46;
-}
-
-.gyro-color-reset:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Shared hierarchy -------------------------------------------------------- */
@@ -26125,8 +25922,7 @@ body,
   .gyro-sidebar-action.is-settings-page,
 .gyro-sidebar-thread,
 .gyro-icon-button,
-.gyro-theme-picker button,
-.gyro-color-reset {
+.gyro-theme-picker button {
     transition: none;
   }
 }
@@ -26149,7 +25945,6 @@ body,
   padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
 }
 
-.gyro-settings-surface .gyro-color-reset,
 .gyro-cli-launch-focus button {
   border-radius: var(--gyro-radius-sm);
   box-shadow: none;
@@ -27259,7 +27054,9 @@ body,
 }
 .gyro-sidebar-section
   .gyro-scm-panel
-  .gyro-sidebar-scm-row:is(:hover, :focus-within),
+  .gyro-sidebar-scm-row:is(:hover, :focus-within) {
+  grid-template-columns: minmax(0, 1fr) 20px 20px 12px;
+}
 .gyro-sidebar-section
   .gyro-scm-panel
   .gyro-sidebar-scm-row:has(
@@ -30440,22 +30237,6 @@ body,
   place-items: center;
   width: 20px;
   min-width: 0;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--gyro-radius-xs);
-  background: transparent;
-  color: var(--gyro-muted);
-  opacity: 0;
-}
-.gyro-sidebar-scm-row:is(:hover, :focus-within)
-  > .gyro-scm-file-actions-trigger,
-.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] {
-  opacity: 1;
-}
-.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger:hover,
-.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] {
-  background: var(--gyro-surface-soft);
 }
 .gyro-scm-file-actions-menu {
   position: fixed;
@@ -30562,19 +30343,7 @@ body,
 }
 
 .gyro-browser-agent-stop {
-  background: transparent;
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  cursor: pointer;
   flex: 0 0 auto;
-  font: inherit;
-  height: 24px;
-  padding: 0 10px;
-}
-
-.gyro-browser-agent-stop:hover {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
 
 @keyframes gyro-browser-agent-pulse {
@@ -30620,7 +30389,6 @@ body,
   .gyro-browser-preview.is-chat
   .gyro-browser-nav-group
   > button,
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-menu-trigger,
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > button {
   background: transparent;
   border: 0;
@@ -30636,9 +30404,6 @@ body,
   .gyro-browser-preview.is-chat
   .gyro-browser-nav-group
   > button:hover:not(:disabled),
-.gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-menu-trigger:hover,
 .gyro-chat-companion
   .gyro-browser-preview.is-chat
   .gyro-url-bar
@@ -31901,7 +31666,6 @@ body,
 
 @container gyro-settings (max-width: 560px) {
   .gyro-settings-row:has(.gyro-copy-value, .gyro-settings-segmented) {
-    gap: calc(12px * var(--gyro-ui-scale, 1));
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -31989,8 +31753,7 @@ body,
 /* Responsive CSS can hide the sidebar without changing the desktop preference.
    Keep a separate, reversible route back to navigation at that breakpoint. */
 .gyro-compact-navigation-toolbar,
-.gyro-compact-navigation-backdrop,
-.gyro-compact-navigation-close {
+.gyro-compact-navigation-backdrop {
   display: none;
 }
 
@@ -32014,8 +31777,7 @@ body,
     right: 0;
   }
 
-  .gyro-compact-navigation-toolbar > button,
-  .gyro-compact-navigation-close {
+  .gyro-compact-navigation-toolbar > button {
     align-items: center;
     background: var(--gyro-app);
     border: 0;
@@ -32030,8 +31792,7 @@ body,
     padding: 0 8px;
   }
 
-  .gyro-compact-navigation-toolbar > button:hover,
-  .gyro-compact-navigation-close:hover {
+  .gyro-compact-navigation-toolbar > button:hover {
     background: var(--gyro-control-hover);
     color: var(--gyro-text);
   }
@@ -32076,7 +31837,6 @@ body,
   }
 
   .gyro-compact-navigation-close {
-    background: transparent;
     position: absolute;
     right: 10px;
     top: 8px;
@@ -32093,7 +31853,6 @@ body,
   grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
-.gyro-run-task-fix,
 .gyro-transcript-attachment-rerun,
 .gyro-terminal-send-selection {
   align-items: center;
@@ -32113,14 +31872,17 @@ body,
   white-space: nowrap;
 }
 
-.gyro-run-task-fix:hover,
+.gyro-run-task-fix {
+  display: inline-flex;
+  flex: none;
+}
+
 .gyro-transcript-attachment-rerun:hover,
 .gyro-terminal-send-selection:hover {
   background: var(--gyro-sidebar-soft);
   border-color: var(--gyro-border);
 }
 
-.gyro-run-task-fix:focus-visible,
 .gyro-transcript-attachment-rerun:focus-visible,
 .gyro-terminal-send-selection:focus-visible,
 .gyro-composer-attachment-preview-toggle:focus-visible {
@@ -32895,9 +32657,6 @@ body,
 }
 
 :root .gyro-app-shell :is(.gyro-chat-surface-button, .gyro-sidebar-toggle-button) {
-  border-radius: 7px;
-  height: calc(26px * var(--gyro-ui-scale, 1));
-  min-height: calc(26px * var(--gyro-ui-scale, 1));
   min-width: calc(26px * var(--gyro-ui-scale, 1));
 }
 
@@ -33576,6 +33335,15 @@ body,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
+/* Source Control row actions stay hidden until the row is hovered or focused. */
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger {
+  opacity: 0;
+}
+.gyro-sidebar-scm-row:is(:hover, :focus-within) > .gyro-scm-file-actions-trigger,
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+
 /* ==========================================================================
    Primitives — the one definition of each shared control (primitives.tsx).
    This section is last on purpose: a primitive wins ties against the older
@@ -33696,6 +33464,13 @@ body,
   box-shadow: none;
   color: var(--gyro-text);
   transform: none;
+}
+
+.gyro-icon-button.gyro-icon-button.is-active,
+.gyro-icon-button.gyro-icon-button[aria-pressed="true"],
+.gyro-icon-button.gyro-icon-button[aria-expanded="true"] {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 
 .gyro-icon-button.gyro-icon-button:disabled {
