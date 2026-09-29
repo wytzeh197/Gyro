@@ -42,19 +42,30 @@ A model entry looks like this (illustrative ID, not a real model):
 }
 ```
 
-Run `node --experimental-strip-types scripts/check-model-catalog.mjs`.
+Run `node --experimental-strip-types scripts/check-model-catalog.mjs`. Besides
+validating the document, it requires every published entry to reach a picker: a
+known provider, an `insertBefore` that names a model, a client revision some
+release supports, and `contextWindowTokens`, `supportedReasoningEfforts`, and
+`defaultReasoningEffort` filled in (an entry replaces bundled metadata whole).
 Verify the model ID and options against the actual supported integration before
-publishing. Deploying the site is a separate release action; editing this file
+publishing, for example with `claude -p ok --model <id> --output-format json`,
+whose `modelUsage` reports the context window the CLI really gives that ID. Deploying the site is a separate release action; editing this file
 does not publish it.
 
 Commit the change, deploy it with `pnpm site:deploy`, then confirm what is
-actually live:
+actually live. The deploy first runs `verify-model-catalog.mjs --local`, which
+refuses a catalog the app's parser rejects, a catalog that differs from `HEAD`,
+and any uncommitted change under `site/`, since the deploy uploads the working
+tree. Both modes warn when `origin/main` records a different catalog: merge
+promptly, or the next deploy from a clean main checkout withdraws it.
 
 ```bash
 pnpm catalog:verify
 ```
 
-It fails when the served document differs from the one `HEAD` records. That is
+It fails when the served document differs from the one `HEAD` records, when the
+app's parser rejects it, or when it is not served as JSON with at most a
+one-minute cache. That is
 the failure mode to avoid: a catalog published from an uncommitted working tree
 is withdrawn the next time someone deploys from a clean checkout, and the
 deployed bytes are the only copy of it. It needs the network, so it is not part
@@ -94,17 +105,24 @@ whole document atomically.
 
 ## Scope and release requirements
 
-From revision 2 the native runner keeps its own copy of the catalog. Every
-fetch the picker makes also installs the document in the runner and saves it to
-`model-catalog.json` in Gyro's data directory, so it survives a restart without a
-network. The Codex and Grok runners take a model's allowed reasoning levels from
+From revision 2 the native runner keeps its own copy of the catalog. The native
+fetch only returns the document; the picker validates it, puts it into effect,
+and then hands it to the runner (`install_model_catalog`) with its rollout
+bucket, both for a fresh fetch and for the cached copy restored at startup. So
+the runner holds exactly the picker's catalog: never a document the picker
+refused, and never an entry outside this installation's rollout. The runner
+saves it to `model-catalog.json`, and the bucket to `model-catalog.bucket`, in
+Gyro's data directory, so it survives a restart without a network. The Codex and Grok runners take a model's allowed reasoning levels from
 `supportedReasoningEfforts`, and context tracking takes its window from
 `contextWindowTokens`, before falling back to the bundled tables. So an ordinary
 new model for an existing provider needs only a catalog entry at
-`minClientRevision: 2` with both fields filled in, and no app release. The runner
-applies the same `minClientRevision` gate as the picker; a Rust test keeps the
-two revision constants equal, and another checks that `site/model-catalog.json`
-parses natively.
+`minClientRevision: 2` with both fields filled in, and no app release. The runner's
+parser validates exactly what the picker's does. `scripts/fixtures/
+model-catalog-parity.json` lists documents both must accept or both reject, and
+the TypeScript and Rust tests each run it. A Rust test keeps the two revision
+constants equal, and another checks that `site/model-catalog.json` parses
+natively. `cargo test --lib the_live_catalog -- --ignored` fetches the live
+document through the runner's own transport and checks it matches the commit.
 
 The catalog does not install or upgrade provider CLIs, change authentication,
 add runners, or add CLI flags. Runtime-reported context limits remain

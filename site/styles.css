@@ -3320,7 +3320,7 @@ summary:focus-visible {
   overflow-anchor: none;
 }
 .home-page .agents-section {
-  padding: 88px 0;
+  padding: 64px 0;
   border-top: 1px solid var(--line);
 }
 .home-page .agents-section .section-heading {
@@ -3330,7 +3330,7 @@ summary:focus-visible {
   margin: 0 0 34px;
 }
 .home-page .agents-section h2 {
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 500;
   letter-spacing: -0.025em;
 }
@@ -3342,12 +3342,12 @@ summary:focus-visible {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 20px 34px;
+  gap: 16px 28px;
 }
 .home-page .agent-tile {
   padding: 0;
-  min-width: 90px;
-  gap: 12px;
+  min-width: 80px;
+  gap: 9px;
   flex-direction: column;
   border: 0;
   background: none;
@@ -3356,8 +3356,8 @@ summary:focus-visible {
   background: none;
   border: 0;
   border-radius: 0;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
 }
 .home-page .agent-name {
   font-size: 13px;
@@ -3375,11 +3375,11 @@ summary:focus-visible {
 }
 .home-page .product-section {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   align-items: start;
-  column-gap: 48px;
-  row-gap: 36px;
-  padding: 120px 0 100px;
+  column-gap: 40px;
+  row-gap: 28px;
+  padding: 88px 0 80px;
   border-top: 0;
 }
 .home-page .product-section > .section-heading {
@@ -3394,7 +3394,7 @@ summary:focus-visible {
 }
 .home-page .section-heading h2,
 .ownership-heading h2 {
-  font-size: clamp(36px, 4.2vw, 56px);
+  font-size: clamp(32px, 3.7vw, 48px);
   font-weight: 500;
   line-height: 1.08;
   letter-spacing: -0.045em;
@@ -3419,8 +3419,8 @@ summary:focus-visible {
   flex-direction: column;
   align-items: stretch;
   text-align: left;
-  gap: 9px;
-  padding: 19px 18px;
+  gap: 7px;
+  padding: 15px 14px;
   border: 1px solid transparent;
   border-radius: 9px;
   background: transparent;
@@ -3445,7 +3445,7 @@ summary:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
 }
 .switcher-title > span {
@@ -3492,8 +3492,8 @@ summary:focus-visible {
   padding: 0 0 4px;
 }
 .home-page .surface-copy h3 {
-  margin: 0 0 8px;
-  font-size: 22px;
+  margin: 0 0 6px;
+  font-size: 19px;
   font-weight: 500;
   letter-spacing: -0.025em;
 }
@@ -3501,7 +3501,7 @@ summary:focus-visible {
   margin: 0;
   max-width: 64ch;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.65;
 }
 .home-page .surface-visual {
@@ -3647,7 +3647,7 @@ summary:focus-visible {
   font-size: 13px;
 }
 .home-page .download-section {
-  padding: 88px 0;
+  padding: 64px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -3655,8 +3655,8 @@ summary:focus-visible {
 .home-page .download-shell {
   display: grid;
   max-width: none;
-  grid-template-columns: minmax(0, 1fr) 440px;
-  gap: 80px;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 56px;
   align-items: center;
 }
 .home-page .download-heading {
@@ -3670,14 +3670,14 @@ summary:focus-visible {
   filter: var(--mark-filter);
 }
 .home-page .download-heading h2 {
-  font-size: clamp(40px, 4.4vw, 62px);
+  font-size: clamp(36px, 3.8vw, 50px);
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 1.06;
 }
 .home-page .download-heading > p {
-  margin-top: 24px;
-  font-size: 16px;
+  margin-top: 18px;
+  font-size: 15px;
 }
 .home-page .download-heading .text-link {
   display: inline-block;
@@ -3688,7 +3688,7 @@ summary:focus-visible {
   width: 100%;
 }
 .home-page .macos-card {
-  padding: 28px;
+  padding: 22px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
@@ -3707,19 +3707,19 @@ summary:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1.35fr;
   align-items: start;
-  gap: 80px;
-  padding-block: 100px;
+  gap: 56px;
+  padding-block: 72px;
 }
 .home-page .help-section h2 {
   max-width: 10ch;
-  font-size: 40px;
+  font-size: 34px;
 }
 .home-page .detail-list {
   margin: 0;
 }
 .home-page .detail-list summary {
-  padding-block: 20px;
-  font-size: 15px;
+  padding-block: 16px;
+  font-size: 14px;
 }
 .home-page .site-footer {
   padding-bottom: 0;
@@ -4638,5 +4638,370 @@ summary:focus-visible {
   .proof-strip svg {
     width: 26px;
     height: 26px;
+  }
+}
+
+/* Homepage sizing pass: bring display type and section spacing back in scale. */
+.home-page .hero {
+  padding-top: clamp(36px, 4.5vw, 60px);
+}
+.home-page .hero h1 {
+  font-size: clamp(46px, 4.8vw, 60px);
+  line-height: 1.04;
+}
+.home-page .hero-description {
+  font-size: clamp(16px, 1.35vw, 18px);
+}
+.home-page .hero-intro .button-primary,
+.home-page .download-section .button-download {
+  min-height: 46px;
+  padding-inline: 18px;
+  font-size: 14px;
+}
+.home-page .product-stage {
+  margin-top: clamp(24px, 2.8vw, 38px);
+}
+.proof-strip {
+  margin-top: 28px;
+  padding-bottom: 32px;
+}
+.proof-strip strong {
+  font-size: 14px;
+}
+.proof-strip span {
+  font-size: 13px;
+}
+.proof-strip svg {
+  width: 26px;
+  height: 26px;
+}
+.home-page .ownership-section {
+  gap: clamp(24px, 4vw, 56px);
+  padding-block: clamp(48px, 5.5vw, 68px);
+}
+.ownership-copy h2 {
+  font-size: clamp(34px, 4vw, 48px);
+}
+.ownership-copy > p:not(.eyebrow, .ownership-note, .ownership-links) {
+  font-size: 15px;
+}
+.ownership-visual {
+  padding: clamp(10px, 1.5vw, 18px);
+  border-radius: 14px;
+}
+.ownership-visual svg {
+  max-height: 300px;
+}
+.home-page .product-section {
+  padding-block: clamp(52px, 6vw, 72px);
+}
+.home-page .product-section > .section-heading h2,
+.home-page .help-section h2 {
+  font-size: clamp(30px, 3.5vw, 44px);
+}
+.home-page .agents-section {
+  padding-block: 48px;
+}
+.home-page .agents-section h2 {
+  font-size: 22px;
+}
+.home-page .agents-section .section-heading {
+  margin-bottom: 24px;
+}
+.home-page .surface-copy h3 {
+  font-size: 18px;
+}
+.home-page .surface-copy p {
+  font-size: 13px;
+}
+.workspace-switcher button {
+  padding: 12px;
+}
+.switcher-title {
+  font-size: 13px;
+}
+.home-page .download-section {
+  padding-block: 52px;
+}
+.home-page .download-heading h2 {
+  font-size: clamp(34px, 3.6vw, 46px);
+}
+.home-page .macos-card {
+  padding: 20px;
+}
+.home-page .help-section {
+  gap: 44px;
+  padding-block: 60px;
+}
+.home-page .detail-list summary {
+  padding-block: 14px;
+}
+.footer-signature {
+  font-size: clamp(26px, 3.2vw, 34px);
+}
+
+@media (max-width: 720px) {
+  .home-page .hero {
+    padding-top: 30px;
+  }
+  .home-page .hero h1 {
+    font-size: clamp(34px, 9vw, 44px);
+  }
+  .home-page .hero-description {
+    font-size: 16px;
+  }
+  .home-page .hero-intro .button-primary,
+  .home-page .download-section .button-download {
+    min-height: 44px;
+  }
+  .home-page .product-stage {
+    margin-top: 24px;
+  }
+  .home-page .ownership-section {
+    gap: 24px;
+    padding-block: 44px;
+  }
+  .ownership-copy h2 {
+    font-size: clamp(32px, 8vw, 40px);
+  }
+  .home-page .product-section {
+    padding-block: 44px;
+    gap: 20px;
+  }
+  .home-page .product-section > .section-heading h2,
+  .home-page .help-section h2 {
+    font-size: 32px;
+  }
+  .home-page .agents-section {
+    padding-block: 40px;
+  }
+  .home-page .surface-copy h3 {
+    font-size: 18px;
+  }
+  .home-page .download-section,
+  .home-page .help-section {
+    padding-block: 44px;
+  }
+  .home-page .download-shell,
+  .home-page .help-section {
+    gap: 28px;
+  }
+  .home-page .macos-card {
+    padding: 16px;
+  }
+}
+
+/* Match the app screenshots to their macOS window frame. */
+.home-page .hero-shot-frame,
+.home-page .surface-visual {
+  position: relative;
+  container-type: inline-size;
+}
+.home-page .hero-shot-frame::before,
+.home-page .surface-visual::before {
+  --traffic-light-size: 10px;
+  --traffic-light-step: 16px;
+  --traffic-light-second-step: 32px;
+  --traffic-light-half: 5px;
+  position: absolute;
+  z-index: 2;
+  top: max(0px, calc(1.65cqw - var(--traffic-light-half)));
+  left: 15px;
+  width: var(--traffic-light-size);
+  height: var(--traffic-light-size);
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: var(--traffic-light-step) 0 0 #febc2e,
+    var(--traffic-light-second-step) 0 0 #28c840;
+  content: "";
+  pointer-events: none;
+}
+.home-page .surface-visual-chat::before,
+.home-page .surface-visual-review::before {
+  top: max(0px, calc(1.5cqw - 5px));
+}
+.home-page .surface-visual-workspace::before {
+  top: max(0px, calc(1.15cqw + 1px));
+}
+
+@media (max-width: 720px) {
+  .home-page .hero-shot-frame::before,
+  .home-page .surface-visual::before {
+    --traffic-light-size: 4px;
+    --traffic-light-step: 7px;
+    --traffic-light-second-step: 14px;
+    --traffic-light-half: 2px;
+    left: 7px;
+  }
+
+  .home-page .hero-shot-frame::before {
+    top: max(0px, calc(1.65cqw - var(--traffic-light-half)));
+  }
+  .home-page .surface-visual-chat::before,
+  .home-page .surface-visual-review::before {
+    top: max(0px, calc(1.5cqw - var(--traffic-light-half)));
+  }
+  .home-page .surface-visual-workspace::before {
+    top: max(0px, calc(1.15cqw + 1px));
+  }
+}
+
+/*
+ * Homepage polish: one display scale for every section heading, a roomier
+ * hero, and a provider roster that reads as a set of cards rather than a
+ * footnote. Kept as the last layer so it wins over the passes above.
+ */
+.home-page .hero h1 {
+  font-size: clamp(46px, 5.6vw, 76px);
+  font-weight: 640;
+  line-height: 1;
+  letter-spacing: -0.052em;
+  text-wrap: balance;
+}
+.home-page .hero-intro {
+  max-width: 760px;
+  margin-top: 20px;
+}
+.home-page .hero-description {
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: clamp(17px, 1.45vw, 20px);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.home-page .hero-intro .hero-actions {
+  margin-top: 26px;
+}
+.home-page .hero-note {
+  margin-top: 14px;
+}
+
+.home-page .ownership-copy h2,
+.home-page .product-section > .section-heading h2,
+.home-page .agents-section h2,
+.home-page .download-heading h2,
+.home-page .help-section h2 {
+  font-family: var(--display);
+  font-size: clamp(32px, 3.8vw, 48px);
+  font-weight: 620;
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.home-page .help-section h2 {
+  max-width: 9ch;
+}
+.home-page .ownership-copy .eyebrow {
+  color: var(--quiet);
+}
+
+.home-page .surface-copy h3 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.home-page .surface-copy p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.home-page .agents-section {
+  padding-block: clamp(56px, 6vw, 88px);
+}
+.home-page .agents-section .section-heading {
+  margin-bottom: clamp(28px, 3vw, 40px);
+}
+.home-page .agent-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.home-page .agent-tile {
+  min-width: 0;
+  padding: 26px 12px 20px;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 2px var(--shadow-card);
+}
+.home-page .agent-tile:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 10px 28px -14px var(--shadow-lift);
+  transform: translateY(-2px);
+}
+.home-page .agent-tile {
+  transition:
+    border-color 160ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+}
+.home-page .agent-mark {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+.home-page .agent-name {
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.home-page .download-stack > .release-meta {
+  justify-content: center;
+  text-align: center;
+}
+.home-page .footer-signature {
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+.home-page .detail-list summary {
+  font-size: 15px;
+  font-weight: 600;
+  padding-block: 18px;
+}
+
+@media (max-width: 900px) {
+  .home-page .agent-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .home-page .hero h1 {
+    font-size: clamp(38px, 11vw, 50px);
+  }
+  .home-page .hero-description {
+    font-size: 17px;
+  }
+  .home-page .ownership-copy h2,
+  .home-page .product-section > .section-heading h2,
+  .home-page .agents-section h2,
+  .home-page .download-heading h2,
+  .home-page .help-section h2 {
+    font-size: clamp(30px, 8.5vw, 38px);
+  }
+  .home-page .agent-grid {
+    gap: 8px;
+  }
+  .home-page .agent-tile {
+    padding: 16px 6px 12px;
+    gap: 10px;
+    border-radius: 14px;
+  }
+  .home-page .agent-mark {
+    width: 38px;
+    height: 38px;
+  }
+  .home-page .agent-name {
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page .agent-tile:hover {
+    transform: none;
   }
 }

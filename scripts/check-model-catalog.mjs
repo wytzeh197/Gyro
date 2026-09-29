@@ -305,6 +305,7 @@ assert.deepEqual(anthropicIds(), [
   "claude-opus-5-5",
   "claude-opus-5",
   "claude-opus-4-8",
+  "claude-sonnet-5-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
 ]);
@@ -346,6 +347,105 @@ applyModelCatalog(
 );
 assert.equal(anthropicIds().at(-1), "claude-mythos");
 reset();
+
+// The picker and the runner must accept and reject the same documents, or
+// the runner can hold a catalog the picker refused. model_catalog.rs runs the
+// same fixture.
+const parity = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/model-catalog-parity.json", import.meta.url),
+    "utf8",
+  ),
+);
+for (const { name, valid, raw } of parity.cases) {
+  if (valid) assert.doesNotThrow(() => parseModelCatalog(raw), name);
+  else assert.throws(() => parseModelCatalog(raw), undefined, name);
+}
+assert.throws(() =>
+  parseModelCatalog(
+    document(Array.from({ length: 501 }, (_, i) => ({ ...entry, id: "m" + i }))),
+  ),
+);
+
+// The runner receives exactly the documents the picker puts into effect, with
+// the picker's bucket, and nothing the picker refused.
+{
+  const handed = [];
+  const store = memory();
+  store.setItem(MODEL_CATALOG_CACHE_KEY + ".bucket", "42");
+  store.setItem(MODEL_CATALOG_CACHE_KEY, document([]));
+  let served = document([]);
+  const handoff = createModelCatalogClient(
+    store,
+    async () => served,
+    Math.random,
+    (raw, bucket) => handed.push([raw, bucket]),
+  );
+  handoff.restore();
+  assert.deepEqual(handed, [[document([]), 42]]);
+  await handoff.refresh(); // unchanged
+  served = "broken";
+  await handoff.refresh(); // refused
+  assert.equal(handed.length, 1);
+  served = document([entry]);
+  assert.equal((await handoff.refresh()).applied, true);
+  assert.deepEqual(handed.at(-1), [document([entry]), 42]);
+  reset();
+
+  // A runner that cannot take the document leaves the picker's copy in effect.
+  const failing = createModelCatalogClient(
+    memory(),
+    async () => document([entry]),
+    () => 0,
+    () => {
+      throw new Error("runner unavailable");
+    },
+  );
+  assert.equal((await failing.refresh()).applied, true);
+  assert.ok(hasModel());
+  reset();
+}
+
+// Every published entry must reach a picker. A typo in a provider or an
+// anchor is otherwise silent: the document is valid and the model never shows.
+{
+  const published = parseModelCatalog(
+    readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+  );
+  const bundledIds = new Map(
+    providerCatalog.map((p) => [p.id, p.models.map((m) => m.id)]),
+  );
+  for (const model of published.models) {
+    const label = `${model.providerId}/${model.id}`;
+    const known = bundledIds.get(model.providerId);
+    assert.ok(
+      known && model.providerId !== "ollama",
+      `${label}: providerId is not a catalog provider, so no picker shows it`,
+    );
+    assert.ok(
+      model.minClientRevision <= MODEL_CATALOG_CLIENT_REVISION,
+      `${label}: needs client revision ${model.minClientRevision}, which no release supports yet`,
+    );
+    const siblings = new Set([
+      ...known,
+      ...published.models
+        .filter((other) => other.providerId === model.providerId)
+        .map((other) => other.id),
+    ]);
+    assert.ok(
+      !model.insertBefore || siblings.has(model.insertBefore),
+      `${label}: insertBefore "${model.insertBefore}" names no model`,
+    );
+    // An entry replaces bundled metadata whole, so these are never optional.
+    for (const field of [
+      "contextWindowTokens",
+      "supportedReasoningEfforts",
+      "defaultReasoningEffort",
+    ]) {
+      assert.ok(model[field] !== undefined, `${label}: ${field} is missing`);
+    }
+  }
+}
 
 console.log(
   "Model catalog validation, picker merge, picker order, rollback, rollout, cache, offline, and addition-announcement checks passed.",

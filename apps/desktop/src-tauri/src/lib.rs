@@ -22544,6 +22544,7 @@ pub fn run() {
             get_provider_capability_support,
             list_provider_capability_support,
             model_catalog::fetch_model_catalog,
+            model_catalog::install_model_catalog,
             get_provider_usage,
             get_session_usage_totals,
             get_usage_safety_snapshot,
