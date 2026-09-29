@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { Dialog } from "./primitives";
 import "./workflow-forms.css";
 export type PullRequestDraft = {
   title: string;
@@ -15,90 +16,10 @@ export function PullRequestForm({
   onClose: (draft?: PullRequestDraft) => void;
 }) {
   const [value, setValue] = useState(initial);
-  const formRef = useRef<HTMLFormElement>(null);
   return (
-    <div
-      className="gyro-workflow-overlay"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          onClose();
-        }
-        if (event.key === "Tab") {
-          const elements = Array.from(
-            formRef.current?.querySelectorAll<HTMLElement>(
-              "input,textarea,select,button",
-            ) ?? [],
-          ).filter((node) => !node.hasAttribute("disabled"));
-          const first = elements[0],
-            last = elements.at(-1);
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last?.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first?.focus();
-          }
-        }
-      }}
-    >
-      <form
-        ref={formRef}
-        className="gyro-workflow-form gyro-workflow-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Create pull request"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (value.title.trim())
-            onClose({ ...value, title: value.title.trim() });
-        }}
-      >
-        <h2>Create pull request</h2>
-        <label>
-          Title
-          <input
-            autoFocus
-            required
-            value={value.title}
-            onChange={(e) => setValue({ ...value, title: e.target.value })}
-          />
-        </label>
-        <label>
-          Description
-          <textarea
-            rows={7}
-            value={value.body}
-            onChange={(e) => setValue({ ...value, body: e.target.value })}
-          />
-        </label>
-        <div className="gyro-workflow-form-row">
-          <label>
-            Base branch
-            <input
-              placeholder="Repository default"
-              value={value.base}
-              onChange={(e) => setValue({ ...value, base: e.target.value })}
-            />
-          </label>
-          <label>
-            Head branch
-            <input
-              value={value.head}
-              onChange={(e) => setValue({ ...value, head: e.target.value })}
-            />
-          </label>
-        </div>
-        <label>
-          <input
-            type="checkbox"
-            checked={value.draft}
-            onChange={(e) => setValue({ ...value, draft: e.target.checked })}
-          />{" "}
-          Create as draft
-        </label>
-        <p>Continue comments, review, and merge on GitHub.</p>
-        <div className="gyro-workflow-form-actions">
+    <Dialog
+      actions={
+        <>
           <button
             type="button"
             className="gyro-button is-secondary"
@@ -106,11 +27,80 @@ export function PullRequestForm({
           >
             Cancel
           </button>
-          <button className="gyro-button is-primary" type="submit">
+          <button
+            className="gyro-button is-primary"
+            disabled={!value.title.trim()}
+            form="gyro-pull-request-form"
+            type="submit"
+          >
             Create pull request
           </button>
+        </>
+      }
+      className="gyro-workflow-dialog"
+      closeLabel="Cancel"
+      description="Continue comments, review, and merge on GitHub."
+      onClose={() => onClose()}
+      onKeyDown={(event) => event.stopPropagation()}
+      open
+      size="wide"
+      title="Create pull request"
+    >
+      <form
+        className="gyro-workflow-form"
+        id="gyro-pull-request-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (value.title.trim())
+            onClose({ ...value, title: value.title.trim() });
+        }}
+      >
+        <label className="gyro-field">
+          Title
+          <input
+            className="gyro-input"
+            required
+            value={value.title}
+            onChange={(e) => setValue({ ...value, title: e.target.value })}
+          />
+        </label>
+        <label className="gyro-field">
+          Description
+          <textarea
+            className="gyro-input"
+            rows={7}
+            value={value.body}
+            onChange={(e) => setValue({ ...value, body: e.target.value })}
+          />
+        </label>
+        <div className="gyro-workflow-form-row">
+          <label className="gyro-field">
+            Base branch
+            <input
+              className="gyro-input"
+              placeholder="Repository default"
+              value={value.base}
+              onChange={(e) => setValue({ ...value, base: e.target.value })}
+            />
+          </label>
+          <label className="gyro-field">
+            Head branch
+            <input
+              className="gyro-input"
+              value={value.head}
+              onChange={(e) => setValue({ ...value, head: e.target.value })}
+            />
+          </label>
         </div>
+        <label className="gyro-field is-inline">
+          <input
+            type="checkbox"
+            checked={value.draft}
+            onChange={(e) => setValue({ ...value, draft: e.target.checked })}
+          />
+          Create as draft
+        </label>
       </form>
-    </div>
+    </Dialog>
   );
 }

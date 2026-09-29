@@ -1,3 +1,4 @@
+import { Dialog } from "./primitives";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -228,7 +229,6 @@ function ProjectEditDialog({
   onSave: (name: string, folders: string[], primaryFolder: string) => void;
   onRemove?: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [draftName, setDraftName] = useState(name);
   const [draftFolders, setDraftFolders] = useState(folders);
   const [draftPrimary, setDraftPrimary] = useState(
@@ -236,9 +236,6 @@ function ProjectEditDialog({
   );
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   const addFolder = async () => {
     setPicking(true);
     setError("");
@@ -252,26 +249,43 @@ function ProjectEditDialog({
       setPicking(false);
     }
   };
-  return createPortal(
-    <dialog
-      ref={dialog}
+  return (
+    <Dialog
+      actions={
+        <>
+          <button
+            className="gyro-button is-ghost is-start gyro-project-remove"
+            type="button"
+            disabled={!onRemove}
+            onClick={() => {
+              onClose();
+              onRemove?.();
+            }}
+          >
+            Remove local project
+          </button>
+          <button className="gyro-button is-secondary" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="gyro-button is-primary gyro-project-save"
+            form="gyro-project-edit-form"
+            type="submit"
+            disabled={!draftName.trim() || picking}
+          >
+            Save
+          </button>
+        </>
+      }
       className="gyro-project-edit-dialog"
-      aria-labelledby="gyro-project-edit-title"
-      onCancel={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          const r = event.currentTarget.getBoundingClientRect();
-          if (
-            event.clientX < r.left ||
-            event.clientX > r.right ||
-            event.clientY < r.top ||
-            event.clientY > r.bottom
-          )
-            onClose();
-        }
-      }}
+      closeLabel="Close edit project"
+      onClose={onClose}
+      onKeyDown={(event) => event.stopPropagation()}
+      open
+      title="Edit project"
     >
       <form
+        id="gyro-project-edit-form"
         onSubmit={(event) => {
           event.preventDefault();
           if (!draftName.trim() || picking) return;
@@ -279,33 +293,23 @@ function ProjectEditDialog({
           onClose();
         }}
       >
-        <header>
-          <h2 id="gyro-project-edit-title">Edit project</h2>
-          <button
-            type="button"
-            aria-label="Close edit project"
-            onClick={onClose}
-          >
-            <X size={17} />
-          </button>
-        </header>
-        <div className="gyro-project-name-input">
-          <Folder size={18} />
+        <label className="gyro-field">
+          Name
           <input
-            autoFocus
+            className="gyro-input"
             aria-label="Project name"
             value={draftName}
             maxLength={120}
             onChange={(event) => setDraftName(event.target.value)}
             required
           />
-        </div>
-        <label className="gyro-project-folders-label">Source folders</label>
+        </label>
+        <span className="gyro-project-folders-label">Source folders</span>
         <div className="gyro-project-folders">
           {[path, ...draftFolders.filter((folder) => folder !== path)].map(
             (folder) => (
               <div className="gyro-project-folder" key={folder} title={folder}>
-                <Folder size={18} />
+                <Folder size={16} />
                 <span>
                   {folder.split(/[\\/]/).filter(Boolean).at(-1) ?? folder}
                 </span>
@@ -316,7 +320,7 @@ function ProjectEditDialog({
                     </small>
                   ) : (
                     <button
-                      className="gyro-project-make-primary"
+                      className="gyro-button is-ghost is-small gyro-project-make-primary"
                       type="button"
                       aria-label={`Make ${folder} primary`}
                       onClick={() => setDraftPrimary(folder)}
@@ -325,6 +329,7 @@ function ProjectEditDialog({
                     </button>
                   ))}
                 <button
+                  className="gyro-icon-button is-small"
                   type="button"
                   disabled={folder === path}
                   aria-label={`Remove folder ${folder}`}
@@ -340,49 +345,23 @@ function ProjectEditDialog({
                     if (folder === draftPrimary) setDraftPrimary(path);
                   }}
                 >
-                  <X size={16} />
+                  <X size={14} />
                 </button>
               </div>
             ),
           )}
           <button
-            className="gyro-project-add-folder"
+            className="gyro-button is-secondary is-small gyro-project-add-folder"
             type="button"
             disabled={picking || draftFolders.length >= 19}
             onClick={() => void addFolder()}
           >
-            <FolderPlus size={19} />
+            <FolderPlus size={14} />
             {picking ? "Choosing folder…" : "Add folder"}
           </button>
         </div>
         {error && <p role="alert">{error}</p>}
-        <footer>
-          <button
-            className="gyro-project-remove"
-            type="button"
-            disabled={!onRemove}
-            onClick={() => {
-              onClose();
-              onRemove?.();
-            }}
-          >
-            Remove local project
-          </button>
-          <div>
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="gyro-project-save"
-              type="submit"
-              disabled={!draftName.trim() || picking}
-            >
-              Save
-            </button>
-          </div>
-        </footer>
       </form>
-    </dialog>,
-    document.body,
+    </Dialog>
   );
 }

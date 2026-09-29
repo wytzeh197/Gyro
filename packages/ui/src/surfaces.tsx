@@ -4,7 +4,7 @@ import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { ToastStack } from "./toast-stack";
-import { EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
+import { Dialog, EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -20390,54 +20390,30 @@ export function ModelStandardPromptOverlay({
   onDismiss,
 }: ModelStandardPromptOverlayProps) {
   return (
-    <div
-      aria-modal="true"
-      className="gyro-model-standard-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onDismiss();
-        }
-      }}
-      role="dialog"
-    >
-      <section
-        aria-label={`Make ${modelLabel} standard`}
-        className="gyro-model-standard-card"
-      >
-        <div className="gyro-model-standard-head">
-          <div className="gyro-model-standard-icon">
-            <ProviderLogo providerId={providerId} />
-          </div>
-          <div>
-            <span>{providerLabel}</span>
-            <h2>You use {modelLabel} a lot.</h2>
-          </div>
-        </div>
-        <p>
-          Make it the model Gyro starts with for new chats and provider
-          handoffs?
-        </p>
-        <div className="gyro-model-standard-meta">
-          Selected {selectionCount} times
-        </div>
-        <div className="gyro-model-standard-actions">
-          <button
-            className="gyro-button is-secondary"
-            onClick={onDismiss}
-            type="button"
-          >
+    <Dialog
+      actions={
+        <>
+          <button className="gyro-button is-secondary" onClick={onDismiss} type="button">
             No, not now
           </button>
           <button
             className="gyro-button is-primary"
+            data-autofocus
             onClick={onAccept}
             type="button"
           >
             Yes, make standard
           </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      className="gyro-model-standard-dialog"
+      closeLabel="Not now"
+      description={`${providerLabel} · selected ${selectionCount} times. Make it the model Gyro starts with for new chats and provider handoffs?`}
+      icon={<ProviderLogo providerId={providerId} />}
+      onClose={onDismiss}
+      open
+      title={`You use ${modelLabel} a lot.`}
+    />
   );
 }
 
@@ -20461,48 +20437,29 @@ export function ProjectRemoveConfirmOverlay({
       ? `${sessionCount} chat${sessionCount === 1 ? "" : "s"} will be hidden in the app.`
       : "This project will be hidden from the app.";
   return (
-    <div
-      aria-modal="true"
-      className="gyro-project-remove-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onKeep();
-        }
-      }}
-      role="dialog"
-    >
-      <section
-        aria-label={`Remove ${projectLabel} from Gyro app`}
-        className="gyro-project-remove-card"
-      >
-        <h2>Remove from Gyro app?</h2>
-        <p>
-          Remove <strong>{projectLabel}</strong> from the Gyro app.{" "}
-          {sessionCopy}
-        </p>
-        <p className="gyro-project-remove-note">
-          Nothing will be deleted from your Mac.
-        </p>
-        {projectPath ? <code>{projectPath}</code> : null}
-        <div className="gyro-project-remove-actions">
-          <button
-            autoFocus
-            className="gyro-project-remove-keep"
-            onClick={onKeep}
-            type="button"
-          >
+    <Dialog
+      actions={
+        <>
+          <button className="gyro-button is-secondary" onClick={onKeep} type="button">
             Keep
           </button>
-          <button
-            className="gyro-project-remove-confirm"
-            onClick={onRemove}
-            type="button"
-          >
+          <button className="gyro-button is-danger" onClick={onRemove} type="button">
             Remove from app
           </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      className="gyro-project-remove-dialog"
+      closeLabel="Keep"
+      description={`Remove ${projectLabel} from the Gyro app. ${sessionCopy} Nothing will be deleted from your Mac.`}
+      icon={<Folder size={16} />}
+      onClose={onKeep}
+      open
+      role="alertdialog"
+      title="Remove from Gyro app?"
+      tone="danger"
+    >
+      {projectPath ? <code className="gyro-dialog-path">{projectPath}</code> : null}
+    </Dialog>
   );
 }
 
@@ -20517,50 +20474,28 @@ export function TerminalTerminateConfirmOverlay({
   onCancel,
   onTerminate,
 }: TerminalTerminateConfirmOverlayProps) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   return (
-    <div
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onCancel();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Terminate ${terminalLabel}`}
-        className="gyro-terminal-terminate-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <Terminal size={16} />
-          <h2>Terminate terminal?</h2>
-        </div>
-        <p>
-          <strong>{terminalLabel}</strong> is still running. Its process will
-          stop and the pane will close.
-        </p>
-        <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={onCancel} type="button">
+    <Dialog
+      actions={
+        <>
+          <button className="gyro-button is-secondary" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="is-danger" onClick={onTerminate} type="button">
+          <button className="gyro-button is-danger" onClick={onTerminate} type="button">
             Terminate
           </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      className="gyro-terminal-terminate-dialog"
+      closeLabel="Cancel"
+      description={`${terminalLabel} is still running. Its process will stop and the pane will close.`}
+      icon={<Terminal size={16} />}
+      onClose={onCancel}
+      open
+      role="alertdialog"
+      title="Terminate terminal?"
+      tone="danger"
+    />
   );
 }
 
@@ -20585,59 +20520,36 @@ export function ChatCloseConfirmOverlay({
   onKeepRunning,
   onStopAndClose,
 }: ChatCloseConfirmOverlayProps) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   return (
-    <div
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onCancel();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Close ${chatLabel}`}
-        className="gyro-terminal-terminate-card gyro-chat-close-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <MessageSquare size={16} />
-          <h2>Stop this chat?</h2>
-        </div>
-        <p>
-          <strong>{chatLabel}</strong> still has work running
-          {hasModelTerminal ? " and a model-owned terminal" : ""}. Closing the
-          pane without stopping leaves it using power in the background.
-        </p>
-        <div className="gyro-terminal-terminate-actions gyro-chat-close-actions">
-          <button onClick={onCancel} type="button">
+    <Dialog
+      actions={
+        <>
+          <button className="gyro-button is-ghost" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button onClick={onKeepRunning} type="button">
+          <button className="gyro-button is-secondary" onClick={onKeepRunning} type="button">
             Keep running
           </button>
           <button
-            autoFocus
-            className="is-danger"
+            className="gyro-button is-danger"
+            data-autofocus
             onClick={onStopAndClose}
             type="button"
           >
             Stop and close
           </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      className="gyro-chat-close-dialog"
+      closeLabel="Cancel"
+      description={`${chatLabel} still has work running${hasModelTerminal ? " and a model-owned terminal" : ""}. Closing the pane without stopping leaves it using power in the background.`}
+      icon={<MessageSquare size={16} />}
+      onClose={onCancel}
+      open
+      role="alertdialog"
+      title="Stop this chat?"
+      tone="danger"
+    />
   );
 }
 
@@ -20663,61 +20575,39 @@ export function SessionDeleteConfirmOverlay({
   onCancel,
   onDelete,
 }: SessionDeleteConfirmOverlayProps) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   return (
-    <div
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onCancel();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Delete ${chatLabel}`}
-        className="gyro-terminal-terminate-card gyro-chat-delete-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <Trash2 size={16} />
-          <h2>Delete this chat?</h2>
-        </div>
-        <p>
-          Deleting <strong>{chatLabel}</strong> removes its messages and saved
-          attachments from Gyro, and this can't be undone. Files in the project
-          are not touched.
-        </p>
-        {isWorking ? (
-          <p className="gyro-chat-delete-note">
-            This chat is still working. Stop its turn before deleting it.
-          </p>
-        ) : null}
-        <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={onCancel} type="button">
+    <Dialog
+      actions={
+        <>
+          <button className="gyro-button is-secondary" onClick={onCancel} type="button">
             Cancel
           </button>
           <button
-            className="is-danger"
+            className="gyro-button is-danger"
             disabled={isWorking}
             onClick={onDelete}
             type="button"
           >
             Delete chat
           </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      className="gyro-chat-delete-dialog"
+      closeLabel="Cancel"
+      description={`Deleting ${chatLabel} removes its messages and saved attachments from Gyro, and this can't be undone. Files in the project are not touched.`}
+      icon={<Trash2 size={16} />}
+      onClose={onCancel}
+      open
+      role="alertdialog"
+      title="Delete this chat?"
+      tone="danger"
+    >
+      {isWorking ? (
+        <p className="gyro-dialog-note">
+          This chat is still working. Stop its turn before deleting it.
+        </p>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -21494,7 +21384,6 @@ export function SettingsSurface({
       providerUsage?.status !== "error" &&
       localUsageWindows.length > 0);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
-  const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const copySettingsPath = async (path: string) => {
     try {
@@ -21506,36 +21395,6 @@ export function SettingsSurface({
       );
     }
   };
-  useEffect(() => {
-    if (!isResetConfirmOpen) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const dialog = resetDialogRef.current;
-    dialog?.querySelector<HTMLButtonElement>("button")?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setIsResetConfirmOpen(false);
-      }
-      if (event.key === "Tab") {
-        const buttons = dialog?.querySelectorAll<HTMLButtonElement>("button");
-        if (!buttons?.length) return;
-        const first = buttons[0];
-        const last = buttons[buttons.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      previous?.focus();
-    };
-  }, [isResetConfirmOpen]);
 
   const isCheckingUpdate = updateState?.status === "checking";
   // One level drives the card's mark and the status dot, so "waiting for you"
@@ -22814,48 +22673,37 @@ export function SettingsSurface({
           </SettingsSection>
         ) : null}
       </section>
-      {isResetConfirmOpen ? (
-        <div
-          className="gyro-settings-confirm-overlay"
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget)
-              setIsResetConfirmOpen(false);
-          }}
-        >
-          <section
-            aria-label="Reset UI state"
-            aria-modal="true"
-            ref={resetDialogRef}
-            role="alertdialog"
-          >
-            <h2>Reset UI state?</h2>
-            <p>
-              This clears layout and presentation preferences. Workspace files,
-              sessions, and provider credentials stay untouched.
-            </p>
-            <div>
-              <button
-                className="gyro-button is-secondary"
-                onClick={() => setIsResetConfirmOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="gyro-button is-danger"
-                onClick={() => {
-                  setIsResetConfirmOpen(false);
-                  onResetUiState?.();
-                }}
-                type="button"
-              >
-                Reset UI state
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+      <Dialog
+        actions={
+          <>
+            <button
+              className="gyro-button is-secondary"
+              onClick={() => setIsResetConfirmOpen(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="gyro-button is-danger"
+              onClick={() => {
+                setIsResetConfirmOpen(false);
+                onResetUiState?.();
+              }}
+              type="button"
+            >
+              Reset UI state
+            </button>
+          </>
+        }
+        className="gyro-settings-confirm-dialog"
+        closeLabel="Cancel"
+        description="This clears layout and presentation preferences. Workspace files, sessions, and provider credentials stay untouched."
+        onClose={() => setIsResetConfirmOpen(false)}
+        open={isResetConfirmOpen}
+        role="alertdialog"
+        title="Reset UI state?"
+        tone="danger"
+      />
     </div>
   );
 }

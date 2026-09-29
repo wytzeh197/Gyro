@@ -1,70 +1,16 @@
+/* Pull request form body; the shell is the shared Dialog. */
 .gyro-workflow-form {
   display: grid;
   gap: 14px;
-  padding: 20px;
-  margin: 12px;
-  border: 1px solid var(--gyro-border, #8884);
-  border-radius: 12px;
-  max-width: 760px;
-  background: var(--gyro-surface, transparent);
 }
-.gyro-workflow-form h2,
-.gyro-workflow-form p {
-  margin: 0;
-}
-.gyro-workflow-form label {
-  display: grid;
-  gap: 6px;
-  font-size: var(--gyro-type-md);
-  min-width: 0;
-}
-.gyro-workflow-form input,
-.gyro-workflow-form textarea {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 9px 10px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--gyro-border, #8886);
-  border-radius: 6px;
-  font: inherit;
-}
+
 .gyro-workflow-form-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
-.gyro-workflow-form-row > label {
+
+.gyro-workflow-form-row > .gyro-field {
   flex: 1;
   min-width: 140px;
-}
-.gyro-workflow-form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.gyro-workflow-form button {
-  padding: 7px 11px;
-  border: 1px solid var(--gyro-border, #8884);
-  border-radius: 6px;
-}
-.gyro-workflow-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--gyro-z-dialog) + 5);
-  display: grid;
-  place-items: center;
-  background: #0006;
-}
-.gyro-workflow-overlay .gyro-workflow-form {
-  width: min(680px, 90vw);
-  max-height: 85vh;
-  overflow: auto;
-  background: var(--gyro-surface);
-  color: var(--gyro-text, inherit);
-}
-
-.gyro-workflow-form input[type="checkbox"] {
-  width: auto;
 }

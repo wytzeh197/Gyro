@@ -4058,96 +4058,11 @@ button {
   padding: 8px;
 }
 
-.gyro-model-standard-overlay {
-  align-items: center;
-  background: var(--gyro-scrim);
-  display: grid;
-  inset: 0;
-  justify-items: center;
-  padding: 24px;
-  position: fixed;
-  z-index: var(--gyro-z-dialog);
-}
-
 /* This is a modal, not a docked panel: it keeps its own elevation in both
    themes rather than inheriting the flat-panel treatment further down. */
-.gyro-model-standard-card {
-  background: var(--gyro-surface);
-  border: 1px solid var(--gyro-border-soft);
-  box-shadow:
-    var(--gyro-elev-dialog), inset 0 1px 0 var(--gyro-inset-highlight);
-  color: var(--gyro-text);
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  width: min(390px, calc(100vw - 40px));
-}
-
-.gyro-model-standard-head {
-  align-items: center;
-  display: grid;
-  gap: 11px;
-  grid-template-columns: 38px minmax(0, 1fr);
-}
-
-.gyro-model-standard-icon {
-  align-items: center;
-  background: var(--gyro-surface-soft);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  display: grid;
-  height: 38px;
-  justify-items: center;
-  width: 38px;
-}
-
-.gyro-model-standard-icon .gyro-provider-logo {
-  height: 22px;
-  width: 22px;
-}
-
-.gyro-model-standard-head span,
-.gyro-model-standard-meta {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-model-standard-head h2 {
-  font-size: var(--gyro-type-lg);
-  letter-spacing: 0;
-  line-height: 1.2;
-  margin: 1px 0 0;
-}
-
-.gyro-model-standard-card p {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-md);
-  line-height: 1.5;
-  margin: 0;
-}
 
 /* Sits on a tinted chip rather than the card, so it steps up from the faint
    eyebrow tone to clear AA contrast against that chip. */
-.gyro-model-standard-meta {
-  background: var(--gyro-surface-soft);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted);
-  justify-self: start;
-  padding: 5px 8px;
-}
-
-.gyro-model-standard-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.gyro-model-standard-actions button {
-  min-height: 34px;
-}
 
 .gyro-command-list button {
   align-items: center;
@@ -8441,8 +8356,7 @@ body {
   color: var(--gyro-text);
 }
 
-.gyro-command-overlay,
-.gyro-model-standard-overlay {
+.gyro-command-overlay {
   backdrop-filter: blur(6px);
 }
 
@@ -8621,8 +8535,7 @@ body {
 .gyro-provider-picker .gyro-composer-popover,
 .gyro-session-menu,
 .gyro-command-palette,
-.gyro-terminal-actions-menu,
-.gyro-project-remove-card {
+.gyro-terminal-actions-menu {
   animation: gyro-premium-pop-in var(--gyro-motion-fast)
     var(--gyro-ease) both;
 }
@@ -9115,8 +9028,7 @@ body {
   .gyro-composer-popover,
 .gyro-session-menu,
 .gyro-command-palette,
-.gyro-terminal-actions-menu,
-.gyro-project-remove-card {
+.gyro-terminal-actions-menu {
     animation-duration: 1ms !important;
   }
 }
@@ -10691,8 +10603,7 @@ textarea,
 
 /* The brand tint mixes into the panel behind it, so these tiles stay light in
    the light theme instead of punching a dark square into the surface. */
-.gyro-provider-icon:has(.gyro-provider-logo.is-openai),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-openai) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-openai) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-openai) 10%,
@@ -10704,8 +10615,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-anthropic),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-anthropic) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-anthropic) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-anthropic) 13%,
@@ -10717,8 +10627,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-gemini),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-gemini) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-gemini) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-gemini) 12%,
@@ -10730,8 +10639,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-kimi),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-kimi) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-kimi) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-kimi) 11%,
@@ -10744,8 +10652,7 @@ textarea,
 }
 
 /* Monochrome provider marks need a quiet matching well, not a logo tile. */
-.gyro-provider-icon:has(.gyro-provider-logo.is-ollama),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-ollama) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-ollama) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-ollama) 8%,
@@ -10757,8 +10664,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-xai),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-xai) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-xai) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-xai) 8%,
@@ -10770,8 +10676,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-cursor),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-cursor) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-cursor) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-cursor) 8%,
@@ -10783,8 +10688,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-opencode),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-opencode) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-opencode) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-opencode) 8%,
@@ -10796,8 +10700,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-deepseek),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-deepseek) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-deepseek) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-deepseek) 12%,
@@ -10809,8 +10712,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-mistral),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-mistral) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-mistral) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-mistral) 12%,
@@ -10822,8 +10724,7 @@ textarea,
     inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
-.gyro-provider-icon:has(.gyro-provider-logo.is-openrouter),
-.gyro-model-standard-icon:has(.gyro-provider-logo.is-openrouter) {
+.gyro-provider-icon:has(.gyro-provider-logo.is-openrouter) {
   background: color-mix(
     in srgb,
     var(--gyro-provider-openrouter) 8%,
@@ -10845,8 +10746,7 @@ textarea,
 .gyro-composer-popover,
 .gyro-provider-picker,
 .gyro-session-menu,
-.gyro-command-palette,
-.gyro-model-standard-card {
+.gyro-command-palette {
   animation: gyro-premium-pop-in var(--gyro-motion)
     var(--gyro-ease) both;
 }
@@ -11215,202 +11115,7 @@ textarea,
   color: #ff6b6b;
 }
 
-.gyro-project-remove-overlay {
-  align-items: center;
-  backdrop-filter: blur(6px);
-  background: rgba(0, 0, 0, 0.58);
-  display: grid;
-  inset: 0;
-  justify-items: center;
-  padding: 24px;
-  position: fixed;
-  z-index: calc(var(--gyro-z-dialog) + 1);
-}
-
-.gyro-project-remove-card {
-  color: #f1eee9;
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  width: min(380px, calc(100vw - 40px));
-}
-
-.gyro-project-remove-card h2 {
-  font-size: var(--gyro-type-lg);
-  letter-spacing: 0;
-  line-height: 1.2;
-  margin: 0;
-}
-
-.gyro-project-remove-card p {
-  color: #c8c4bd;
-  font-size: var(--gyro-type-md);
-  line-height: 1.5;
-  margin: 0;
-}
-
-.gyro-project-remove-note {
-  color: #9da3ad;
-}
-
-.gyro-project-remove-card strong {
-  color: #f1eee9;
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-project-remove-card code {
-  background: #292a2e;
-  border-radius: var(--gyro-radius-md);
-  color: #aeb3bb;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: var(--gyro-type-xs);
-  overflow-wrap: anywhere;
-  padding: 6px 8px;
-}
-
-.gyro-project-remove-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.gyro-project-remove-actions button {
-  border-radius: var(--gyro-radius-md);
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  min-height: 34px;
-}
-
-.gyro-project-remove-keep {
-  background: #2b2d31;
-  border: 1px solid #3d4047;
-  color: #e2dfd8;
-}
-
-.gyro-project-remove-keep:hover,
-.gyro-project-remove-keep:focus-visible {
-  background: #34363b;
-  color: #f5f2ec;
-}
-
-.gyro-project-remove-confirm {
-  background: #c73636;
-  border: 1px solid #e05a5a;
-  color: #fff7f7;
-}
-
-.gyro-project-remove-confirm:hover,
-.gyro-project-remove-confirm:focus-visible {
-  background: #dd4646;
-}
-
-.gyro-terminal-terminate-overlay {
-  align-items: center;
-  backdrop-filter: blur(5px);
-  background: rgba(0, 0, 0, 0.48);
-  display: grid;
-  inset: 0;
-  justify-items: center;
-  padding: 20px;
-  position: fixed;
-  z-index: calc(var(--gyro-z-dialog) + 2);
-}
-
-.gyro-terminal-terminate-card {
-  background: color-mix(in srgb, var(--gyro-surface-raised) 96%, #000 4%);
-  border: 0.5px solid var(--gyro-border);
-  color: var(--gyro-text);
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  width: min(340px, calc(100vw - 40px));
-}
-
-.gyro-terminal-terminate-heading {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.gyro-terminal-terminate-heading svg {
-  color: var(--gyro-accent);
-}
-
-.gyro-terminal-terminate-card h2 {
-  font-size: var(--gyro-type-base);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0;
-  margin: 0;
-}
-
-.gyro-terminal-terminate-card p {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-  line-height: 1.5;
-  margin: 0;
-}
-
-.gyro-terminal-terminate-card strong {
-  color: var(--gyro-text);
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-terminal-terminate-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.gyro-terminal-terminate-actions button {
-  background: var(--gyro-surface-soft);
-  border: 0.5px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  min-height: 30px;
-  padding: 0 12px;
-}
-
-.gyro-terminal-terminate-actions button:hover,
-.gyro-terminal-terminate-actions button:focus-visible {
-  background: var(--gyro-control-hover);
-}
-
-.gyro-terminal-terminate-actions button.is-danger {
-  background: color-mix(in srgb, var(--gyro-danger) 78%, #5f1717 22%);
-  border-color: color-mix(in srgb, var(--gyro-danger) 66%, #fff 8%);
-  color: #fff;
-}
-
-.gyro-terminal-terminate-actions button.is-danger:hover,
-.gyro-terminal-terminate-actions button.is-danger:focus-visible {
-  background: color-mix(in srgb, var(--gyro-danger) 88%, #fff 12%);
-}
-
-.gyro-chat-close-card {
-  width: min(380px, calc(100vw - 40px));
-}
-
-.gyro-chat-close-actions {
-  flex-wrap: wrap;
-}
-
-.gyro-chat-delete-card {
-  width: min(380px, calc(100vw - 40px));
-}
-
 /* Deletion language is red, so the trash mark leads the confirm. */
-.gyro-chat-delete-card .gyro-terminal-terminate-heading svg {
-  color: var(--gyro-danger);
-}
-
-.gyro-chat-delete-card .gyro-terminal-terminate-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.gyro-chat-delete-note {
-  color: var(--gyro-warn);
-}
 
 .gyro-chat-load-earlier {
   display: flex;
@@ -11927,60 +11632,11 @@ textarea,
   color: #171a20;
 }
 
-:root[data-theme="light"] .gyro-project-remove-overlay {
-  background: rgba(17, 24, 39, 0.22);
-}
-
-:root[data-theme="light"] .gyro-project-remove-card {
-  background: #ffffff;
-  border-color: #d9dde5;
-  box-shadow:
-    var(--gyro-elev-dialog), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  color: #1d232c;
-}
-
-:root[data-theme="light"] .gyro-project-remove-card p {
-  color: #5f6672;
-}
-
-:root[data-theme="light"] .gyro-project-remove-note {
-  color: #6b7280;
-}
-
-:root[data-theme="light"] .gyro-project-remove-card strong {
-  color: #151a21;
-}
-
-:root[data-theme="light"] .gyro-project-remove-card code {
-  background: #f1f3f6;
-  color: #4b5563;
-}
-
-:root[data-theme="light"] .gyro-project-remove-keep {
-  background: #f7f8fa;
-  border-color: #d9dde5;
-  color: #20242b;
-}
-
-:root[data-theme="light"] .gyro-project-remove-keep:hover,
-:root[data-theme="light"] .gyro-project-remove-keep:focus-visible {
-  background: #eceff3;
-  color: #111827;
-}
-
 :root[data-theme="light"] .gyro-provider-hero,
 :root[data-theme="light"] .gyro-provider-card-head,
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row,
 :root[data-theme="light"] .gyro-settings-surface .gyro-provider-row {
   border-color: rgba(32, 34, 38, 0.1);
-}
-
-:root[data-theme="light"] .gyro-provider-card,
-:root[data-theme="light"] .gyro-provider-icon,
-:root[data-theme="light"] .gyro-provider-state {
-  background: rgba(255, 255, 255, 0.66);
-  border-color: rgba(32, 34, 38, 0.1);
-  box-shadow: inset 0 0 0 0.5px rgba(32, 34, 38, 0.08);
 }
 
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row strong,
@@ -12284,8 +11940,7 @@ textarea,
 .gyro-composer-popover,
 .gyro-provider-picker .gyro-composer-popover,
 .gyro-session-menu,
-.gyro-command-palette,
-.gyro-project-remove-card {
+.gyro-command-palette {
   border-radius: var(--gyro-radius-lg);
 }
 
@@ -12500,14 +12155,6 @@ textarea,
 .gyro-tools-panel,
 .gyro-settings-content {
   color: var(--gyro-text);
-}
-
-.gyro-tools-card,
-.gyro-settings-section,
-.gyro-provider-card,
-.gyro-automation-fact,
-.gyro-model-standard-card {
-  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-settings-section > header,
@@ -14204,35 +13851,6 @@ button.gyro-settings-row em::after {
 .gyro-copy-value {
   display: inline-flex;
 }
-.gyro-settings-confirm-overlay {
-  align-items: center;
-  background: rgb(0 0 0 / 48%);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  position: fixed;
-  z-index: calc(var(--gyro-z-dialog) + 3);
-}
-.gyro-settings-confirm-overlay > section {
-  background: var(--gyro-pane);
-  border: 0.5px solid var(--gyro-hairline-strong);
-  max-width: 420px;
-  padding: 22px;
-}
-.gyro-settings-confirm-overlay h2 {
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-lg);
-  margin: 0;
-}
-.gyro-settings-confirm-overlay p {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-  line-height: 1.55;
-}
-.gyro-settings-confirm-overlay section > div {
-  display: flex;
-  justify-content: flex-end;
-}
 
 /* The Settings nav can say "an update is waiting" on the row itself, so nobody
    has to open Updates to find out. The row grows a third track only when the
@@ -14412,8 +14030,7 @@ button.gyro-settings-row em::after {
   outline-offset: var(--gyro-focus-offset);
 }
 
-:root[data-theme="light"] .gyro-provider-details > div,
-:root[data-theme="light"] .gyro-settings-confirm-overlay > section {
+:root[data-theme="light"] .gyro-provider-details > div {
   box-shadow: var(--gyro-elev-pop);
 }
 
@@ -17033,9 +16650,7 @@ button.gyro-settings-row em::after {
 .gyro-provider-policy,
 .gyro-diff-file-list,
 .gyro-diff-main,
-.gyro-browser-preview,
-.gyro-settings-confirm-overlay > section,
-.gyro-terminal-terminate-card {
+.gyro-browser-preview {
   border-color: var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
   box-shadow: none;
@@ -22884,7 +22499,6 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-command-palette,
-.gyro-project-remove-card,
 .gyro-session-menu,
 .gyro-composer-popover {
   background: var(--gyro-surface-raised);
@@ -29388,8 +29002,7 @@ body,
   box-shadow: var(--gyro-elev-pop);
   font-size: var(--gyro-type-md);
 }
-.gyro-project-hover-card button,
-.gyro-project-edit-dialog button {
+.gyro-project-hover-card button {
   cursor: pointer;
   font: inherit;
 }
@@ -29452,193 +29065,21 @@ body,
   color: inherit;
   text-align: left;
 }
-.gyro-project-hover-card button:hover,
-.gyro-project-edit-dialog button:hover {
+.gyro-project-hover-card button:hover {
   background: var(--gyro-surface-soft);
 }
-.gyro-project-edit-dialog {
-  box-sizing: border-box;
-  width: min(480px, calc(100vw - 32px));
-  max-height: calc(100vh - 40px);
-  padding: 20px;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-xl);
-  background: var(--gyro-surface);
-  color: var(--gyro-text);
-  box-shadow: var(--gyro-elev-dialog);
-  font-family: var(--gyro-font-sans);
-  font-size: var(--gyro-type-md);
-}
-.gyro-project-edit-dialog::backdrop {
-  background: #0003;
-}
-.gyro-project-edit-dialog header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.gyro-project-edit-dialog h2 {
-  margin: 0;
-  font-size: var(--gyro-type-lg);
-  font-weight: var(--gyro-weight-strong);
-}
-.gyro-project-edit-dialog header button,
-.gyro-project-folder button {
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--gyro-muted);
-  padding: 5px;
-  border-radius: var(--gyro-radius-xs);
-}
-.gyro-project-name-input {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-surface-raised);
-  overflow: hidden;
-}
-.gyro-project-name-input > svg {
-  box-sizing: content-box;
-  padding: 12px;
-  border-right: 1px solid var(--gyro-border);
-  flex-shrink: 0;
-}
-.gyro-project-name-input input {
-  width: 100%;
-  min-width: 0;
-  padding: 12px 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  outline-offset: -3px;
-}
-.gyro-project-folders-label {
-  display: block;
-  margin: 15px 0 10px;
-}
-.gyro-project-folders {
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-surface-raised);
-  overflow: hidden;
-}
-.gyro-project-folder,
-.gyro-project-add-folder {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  min-height: 42px;
-  box-sizing: border-box;
-}
-.gyro-project-folder {
-  border-bottom: 1px solid var(--gyro-border);
-}
-.gyro-project-folder > svg,
-.gyro-project-add-folder > svg {
-  color: var(--gyro-muted);
-  flex-shrink: 0;
-}
-.gyro-project-folder span {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gyro-project-add-folder {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-}
-.gyro-project-edit-dialog footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-top: 21px;
-}
-.gyro-project-edit-dialog footer > div {
-  display: flex;
-  gap: 10px;
-}
-.gyro-project-edit-dialog footer button {
-  padding: 8px 16px;
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  background: transparent;
-  color: var(--gyro-muted);
-}
-.gyro-project-edit-dialog footer .gyro-project-remove {
-  background: color-mix(in srgb, var(--gyro-danger) 9%, transparent);
-  color: var(--gyro-danger);
-}
-.gyro-project-edit-dialog footer .gyro-project-save {
-  background: var(--gyro-text);
-  color: var(--gyro-surface);
-}
-.gyro-project-edit-dialog button:disabled,
 .gyro-project-hover-card button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-@media (max-width: 480px) {
-  .gyro-project-edit-dialog footer {
-    flex-wrap: wrap;
-  }
-  .gyro-project-edit-dialog footer > div {
-    margin-left: auto;
-  }
-}
-
-.gyro-project-folder .gyro-project-primary-badge {
-  flex-shrink: 0;
-}
-.gyro-project-folder .gyro-project-make-primary {
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-surface-soft);
-  color: var(--gyro-text);
-  line-height: 1.3;
 }
 
 .gyro-project-hover-card {
   font-family: var(--gyro-font-sans);
   line-height: 1.4;
 }
-.gyro-project-edit-dialog :is(button, input):focus-visible,
 .gyro-project-hover-card button:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
-}
-.gyro-project-edit-dialog .gyro-project-name-input:focus-within {
-  border-color: var(--gyro-accent);
-}
-.gyro-project-edit-dialog .gyro-project-name-input input:focus-visible {
-  outline: none;
-}
-.gyro-project-edit-dialog .gyro-project-folders-label {
-  font-weight: var(--gyro-weight-medium);
-}
-.gyro-project-edit-dialog .gyro-project-folder > button:last-child {
-  width: 26px;
-  height: 26px;
-}
-.gyro-project-edit-dialog .gyro-project-folder button:disabled {
-  opacity: 0.3;
-}
-.gyro-project-edit-dialog footer button {
-  min-height: 32px;
-}
-.gyro-project-edit-dialog footer .gyro-project-save:hover:not(:disabled) {
-  opacity: 0.85;
 }
 
 /* Project cards and dialogs inherit the shared light palette. */
@@ -30962,10 +30403,7 @@ body,
 }
 
 .gyro-settings-surface
-  :is(input, textarea, select, button, summary):focus-visible,
-.gyro-settings-confirm-overlay button:focus-visible,
-.gyro-terminal-terminate-actions button:focus-visible,
-.gyro-project-remove-actions button:focus-visible {
+  :is(input, textarea, select, button, summary):focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
 }
@@ -31116,17 +30554,6 @@ body,
   font-size: var(--gyro-type-md);
   line-height: 1.6;
   overflow-wrap: anywhere;
-}
-
-.gyro-settings-confirm-overlay section > div,
-.gyro-terminal-terminate-actions,
-.gyro-project-remove-actions {
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.gyro-chat-close-actions {
-  overflow: visible;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -32675,8 +32102,7 @@ body,
 
 /* Elevation: the command palette and destructive confirmations float at
    dialog level even where older rules group them with menus. */
-:root[data-theme] .gyro-command-palette,
-:root[data-theme] .gyro-project-remove-card {
+:root[data-theme] .gyro-command-palette {
   box-shadow:
     var(--gyro-elev-dialog),
     inset 0 1px 0 var(--gyro-inset-highlight);
@@ -32698,6 +32124,55 @@ body,
 
 .gyro-cli-launch-preset-row > .gyro-select > .gyro-select-trigger.gyro-select-trigger {
   width: 100%;
+}
+
+/* Edit project dialog: the folder list inside the shared Dialog. */
+.gyro-project-edit-dialog form {
+  display: grid;
+  gap: 14px;
+}
+
+.gyro-project-folders-label {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
+  margin-bottom: -8px;
+}
+
+.gyro-project-folders {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.gyro-project-folder {
+  align-items: center;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  display: flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 10px;
+  width: 100%;
+}
+
+.gyro-project-folder > svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+
+.gyro-project-folder > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-project-folders > .gyro-project-add-folder {
+  margin-top: 4px;
 }
 
 /* ==========================================================================
@@ -33332,6 +32807,75 @@ body,
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.gyro-dialog.is-wide {
+  max-width: min(640px, calc(100vw - 32px));
+}
+
+.gyro-dialog-actions > .is-start {
+  margin-right: auto;
+}
+
+.gyro-dialog-path {
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-type-sm);
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+}
+
+.gyro-dialog-note {
+  color: var(--gyro-warn);
+  margin: 0;
+}
+
+/* Form field and text input. */
+.gyro-field {
+  color: var(--gyro-muted);
+  display: grid;
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-field.is-inline {
+  align-items: center;
+  display: flex;
+  font-weight: var(--gyro-weight-regular);
+  gap: 8px;
+}
+
+.gyro-input.gyro-input {
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-regular);
+  min-height: var(--gyro-control-height);
+  padding: 6px 10px;
+  width: 100%;
+}
+
+textarea.gyro-input.gyro-input {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.gyro-input.gyro-input:focus-visible {
+  border-color: var(--gyro-focus-ring);
+  outline: none;
+}
+
+.gyro-input.gyro-input::placeholder {
+  color: var(--gyro-faint);
 }
 
 /* Toasts. */

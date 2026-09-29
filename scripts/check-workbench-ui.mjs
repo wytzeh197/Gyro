@@ -933,21 +933,37 @@ expect(
     ).some((rule) => rule.includes("background: #fff")),
   "The branch picker menu should portal above the commit form so long names are not clipped.",
 );
+// Confirmations and form dialogs share the one Dialog shell (primitives.tsx).
+expect(
+  [
+    'title="Remove from Gyro app?"',
+    "title={`You use ${modelLabel} a lot.`}",
+    'title="Terminate terminal?"',
+    'title="Stop this chat?"',
+    'title="Delete this chat?"',
+    'title="Reset UI state?"',
+  ].every((title) => surfaceSource.includes(title)) &&
+    (surfaceSource.match(/<Dialog\b/g) ?? []).length >= 6 &&
+    surfaceSource.includes("Nothing will be deleted from your Mac.") &&
+    !surfaceSource.includes("gyro-terminal-terminate-overlay") &&
+    !surfaceSource.includes("gyro-settings-confirm-overlay"),
+  "Confirmations should use the shared Dialog shell with their original copy.",
+);
 const branchDialogSource = readRepoFile(
   "apps/desktop/src/branch-name-dialog.tsx",
 );
-const branchDialogCss = readRepoFile("apps/desktop/src/branch-name-dialog.css");
 expect(
   branchDialogSource.includes('className="gyro-button is-primary"') &&
     branchDialogSource.includes('className="gyro-button is-secondary"') &&
     branchDialogSource.includes("<code>{startPoint}</code>") &&
-    branchDialogCss.includes("appearance: none") &&
-    branchDialogCss.includes("-webkit-appearance: none") &&
-    branchDialogCss.includes("var(--gyro-surface") &&
-    branchDialogCss.includes("var(--gyro-scrim") &&
-    branchDialogCss.includes("backdrop-filter: blur(6px)") &&
-    !branchDialogCss.includes("background: canvas") &&
-    !branchDialogCss.includes("--gyro-topbar"),
+    branchDialogSource.includes("<Dialog") &&
+    branchDialogSource.includes('className="gyro-input"') &&
+    cssRules(styleSource, ".gyro-dialog::backdrop").some((rule) =>
+      rule.includes("var(--gyro-scrim)"),
+    ) &&
+    cssRules(styleSource, ".gyro-dialog-panel").some((rule) =>
+      rule.includes("var(--gyro-surface-raised)"),
+    ),
   "The new-branch dialog should use Gyro overlay, type, and buttons instead of native system chrome.",
 );
 expect(
@@ -5555,12 +5571,7 @@ expect(
     surfaceSource.includes("Trash2") &&
     surfaceSource.includes("Remove from Gyro app?") &&
     surfaceSource.includes("Nothing will be deleted from your Mac.") &&
-    surfaceSource.includes("Remove from app") &&
-    styleSource.includes(".gyro-project-remove-overlay") &&
-    styleSource.includes(".gyro-project-remove-note") &&
-    styleSource.includes(".gyro-project-remove-confirm") &&
-    styleSource.includes(".gyro-project-remove-keep"),
-  "Projects should expose a remove-from-app action with a screen-level confirmation that does not imply local deletion.",
+    surfaceSource.includes("Remove from app") && "Projects should expose a remove-from-app action with a screen-level confirmation that does not imply local deletion.",
 );
 expect(
   typeSource.includes('| "tools"') &&
@@ -6892,10 +6903,8 @@ expect(
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
     surfaceSource.includes("export function ModelStandardPromptOverlay") &&
-    surfaceSource.includes("You use {modelLabel} a lot.") &&
     surfaceSource.includes("Yes, make standard") &&
     surfaceSource.includes("No, not now") &&
-    styleSource.includes(".gyro-model-standard-overlay") &&
     appSource.includes("MODEL_STANDARD_PROMPT_THRESHOLD = 3") &&
     appSource.includes("MODEL_USAGE_STORAGE_KEY") &&
     appSource.includes("recordModelSelection") &&
@@ -7604,10 +7613,7 @@ expect(
 
 expect(
   surfaceSource.includes("export function SessionDeleteConfirmOverlay") &&
-    surfaceSource.includes("gyro-chat-delete-card") &&
     surfaceSource.includes("Delete this chat?") &&
-    styleSource.includes(".gyro-chat-delete-card") &&
-    styleSource.includes(".gyro-chat-delete-note") &&
     surfaceSource.includes("setSessionDeleteCandidate({") &&
     surfaceSource.includes("<SessionDeleteConfirmOverlay") &&
     surfaceSource.includes("onDeleteSession?.(candidate.id)"),
@@ -8188,8 +8194,7 @@ expect(
 expect(
   surfaceSource.includes('role="switch"') &&
     surfaceSource.includes("Require command approval") &&
-    surfaceSource.includes("Automatic update checks") &&
-    surfaceSource.includes("gyro-settings-confirm-overlay"),
+    surfaceSource.includes("Automatic update checks"),
   "Settings should use semantic switches for persisted booleans and confirm destructive resets.",
 );
 

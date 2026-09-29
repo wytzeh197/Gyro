@@ -667,6 +667,8 @@ export function Dialog({
   role = "dialog",
   closeLabel = "Close",
   dismissible = true,
+  size = "default",
+  onKeyDown,
 }: {
   open: boolean;
   onClose: () => void;
@@ -681,6 +683,10 @@ export function Dialog({
   closeLabel?: string;
   /** Show the close button and allow Escape / backdrop to dismiss. */
   dismissible?: boolean;
+  /** "wide" for dialogs that hold a form. */
+  size?: "default" | "wide";
+  /** Lets a form dialog keep app shortcuts from firing while typing. */
+  onKeyDown?: (event: KeyboardEvent<HTMLDialogElement>) => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -693,9 +699,13 @@ export function Dialog({
     if (!dialog || !open) return undefined;
     const previous = document.activeElement as HTMLElement | null;
     if (!dialog.open) dialog.showModal();
-    const first = dialog.querySelector<HTMLElement>(
-      "[data-autofocus], input:not([type='hidden']):not(:disabled), textarea:not(:disabled), .gyro-dialog-actions .is-primary:not(:disabled), .gyro-dialog-actions .is-danger:not(:disabled), .gyro-dialog-actions button:not(:disabled)",
-    );
+    // An explicit data-autofocus wins; otherwise the first field, otherwise
+    // the first action (the safe one in destructive confirmations).
+    const first =
+      dialog.querySelector<HTMLElement>("[data-autofocus]:not(:disabled)") ??
+      dialog.querySelector<HTMLElement>(
+        "input:not([type='hidden']):not(:disabled), textarea:not(:disabled), .gyro-dialog-actions button:not(:disabled)",
+      );
     first?.focus();
     return () => {
       if (dialog.open) dialog.close();
@@ -709,7 +719,13 @@ export function Dialog({
       aria-describedby={description ? descriptionId : undefined}
       aria-labelledby={titleId}
       aria-modal="true"
-      className={cx("gyro-dialog", tone && `is-${tone}`, className)}
+      className={cx(
+        "gyro-dialog",
+        tone && `is-${tone}`,
+        size === "wide" && "is-wide",
+        className,
+      )}
+      onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
         if (dismissible) onCloseRef.current();
