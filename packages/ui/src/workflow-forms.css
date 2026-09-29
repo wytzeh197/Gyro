@@ -19,8 +19,7 @@
   min-width: 0;
 }
 .gyro-workflow-form input,
-.gyro-workflow-form textarea,
-.gyro-workflow-form select {
+.gyro-workflow-form textarea {
   box-sizing: border-box;
   width: 100%;
   padding: 9px 10px;

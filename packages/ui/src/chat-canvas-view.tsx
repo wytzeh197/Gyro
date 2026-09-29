@@ -1,3 +1,4 @@
+import { OptionSelect } from "./primitives";
 import { useState } from "react";
 import { CanvasPreview } from "./canvas-preview-view";
 import { ChatArtifactContent } from "./chat-artifacts";
@@ -48,7 +49,8 @@ export function ChatCanvas({
       ) : (
         <>
           <header className="gyro-canvas-toolbar">
-            <select
+            <OptionSelect
+              size="small"
               aria-label="Canvas item"
               value={artifact.id}
               onChange={(event) => {
@@ -61,7 +63,7 @@ export function ChatCanvas({
                   {item.title}
                 </option>
               ))}
-            </select>
+            </OptionSelect>
             {artifact.kind === "canvas" && artifact.format === "html" ? (
               <div
                 className="gyro-segmented is-small gyro-canvas-view-switch"

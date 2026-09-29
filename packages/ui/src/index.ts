@@ -9,6 +9,8 @@ export {
   EmptyState,
   IconButton,
   iconButtonClass,
+  OptionSelect,
+  optionsFromChildren,
   Segmented,
   SelectMenu,
   Skeleton,

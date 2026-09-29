@@ -597,16 +597,6 @@
   display: flex;
   flex-direction: row;
 }
-.gyro-scheduled-setting select {
-  width: auto;
-  max-width: 72%;
-  height: 32px;
-  padding: 4px 0 4px 8px;
-  border: 0;
-  text-align: right;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-}
 .gyro-scheduled-setting button {
   display: inline-flex;
   align-items: center;

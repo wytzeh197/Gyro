@@ -1,3 +1,4 @@
+import { OptionSelect } from "./primitives";
 import { useMemo, useState } from "react";
 import { canvasPreviewDocument } from "./canvas-preview";
 
@@ -19,7 +20,8 @@ export function CanvasPreview({
     <div className="gyro-canvas-preview">
       <div className="gyro-canvas-preview-tools">
         <span>Interactive preview</span>
-        <select
+        <OptionSelect
+          size="small"
           aria-label="Preview width"
           value={size}
           onChange={(event) => setSize(event.target.value)}
@@ -28,7 +30,7 @@ export function CanvasPreview({
           <option value="375">Mobile · 375px</option>
           <option value="768">Tablet · 768px</option>
           <option value="1280">Desktop · 1280px</option>
-        </select>
+        </OptionSelect>
         <button type="button" onClick={() => setRestart((value) => value + 1)}>
           Restart
         </button>

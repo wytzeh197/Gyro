@@ -508,7 +508,6 @@ body {
 
 button,
 input,
-select,
 textarea {
   font: inherit;
 }
@@ -2525,8 +2524,7 @@ button {
   white-space: nowrap;
 }
 
-.gyro-browser-preview-toolbar button,
-.gyro-browser-preview-toolbar select {
+.gyro-browser-preview-toolbar button {
   font-size: var(--gyro-type-sm);
   min-height: 28px;
   white-space: nowrap;
@@ -3057,15 +3055,6 @@ button {
 
 .gyro-browser-preview-toolbar button:disabled {
   opacity: 0.35;
-}
-
-.gyro-browser-preview-toolbar select {
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-sm);
-  height: 28px;
-  max-width: 110px;
-  padding: 0 8px;
 }
 
 .gyro-browser-device-group,
@@ -3951,8 +3940,7 @@ button {
   text-transform: uppercase;
 }
 
-.gyro-provider-handoff-form input,
-.gyro-provider-handoff-form select {
+.gyro-provider-handoff-form input {
   height: 32px;
   min-width: 0;
   padding: 0 10px;
@@ -4535,7 +4523,6 @@ body {
 .gyro-composer-chip,
 .gyro-composer-tool,
 .gyro-browser-preview-toolbar button,
-.gyro-browser-preview-toolbar select,
 .gyro-theme-picker button {
   border-radius: var(--gyro-radius-sm);
 }
@@ -4544,7 +4531,6 @@ body {
 .gyro-chat-tool,
 .gyro-chat-icon-tool,
 .gyro-browser-preview-toolbar button,
-.gyro-browser-preview-toolbar select,
 .gyro-theme-picker button {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border);
@@ -5887,10 +5873,6 @@ body {
   font-size: var(--gyro-type-sm);
 }
 
-.gyro-workspace-settings-folder select {
-  min-width: 220px;
-}
-
 .gyro-workspace-settings-list {
   max-width: 760px;
   overflow: hidden;
@@ -5923,8 +5905,7 @@ body {
   line-height: 1.4;
 }
 
-.gyro-workspace-settings-editor input,
-.gyro-workspace-settings-editor select {
+.gyro-workspace-settings-editor input {
   box-sizing: border-box;
   width: 100%;
   min-height: 31px;
@@ -5938,8 +5919,7 @@ body {
   font-size: var(--gyro-type-sm);
 }
 
-.gyro-workspace-settings-editor input:focus,
-.gyro-workspace-settings-editor select:focus {
+.gyro-workspace-settings-editor input:focus {
   border-color: var(--gyro-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--gyro-accent) 20%, transparent);
 }
@@ -9411,9 +9391,7 @@ body {
 .gyro-profile-table-row,
 .gyro-browser-skeleton span,
 .gyro-terminal-empty,
-.gyro-browser-preview-toolbar select,
-.gyro-provider-handoff-form input,
-.gyro-provider-handoff-form select {
+.gyro-provider-handoff-form input {
   border-color: transparent;
   box-shadow:
     inset 0 0 0 0.5px var(--gyro-hairline-soft),
@@ -9855,13 +9833,6 @@ body {
   min-width: 0;
 }
 
-.gyro-terminal-toolbar select {
-  font: inherit;
-  height: 30px;
-  min-width: 0;
-  padding: 0 28px 0 10px;
-}
-
 .gyro-terminal-toolbar button,
 .gyro-terminal-drag-handle {
   align-items: center;
@@ -10098,15 +10069,6 @@ body {
 
 .gyro-cli-launch-preset-row {
   gap: 8px;
-}
-
-.gyro-cli-launch-preset-row select {
-  color: #dfe5ee;
-  flex: 1;
-  font: inherit;
-  height: 30px;
-  min-width: 0;
-  padding: 0 8px;
 }
 
 .gyro-cli-launch-stepper,
@@ -10425,7 +10387,6 @@ body {
 }
 
 .gyro-run-command-form input,
-.gyro-run-command-form select,
 .gyro-run-command-filter {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
@@ -10820,7 +10781,6 @@ body {
 }
 
 button,
-select,
 input,
 textarea,
 .gyro-tools-card,
@@ -12044,8 +12004,7 @@ textarea,
   border-color: rgba(32, 34, 38, 0.12);
 }
 
-:root[data-theme="light"] .gyro-terminal-pane header,
-:root[data-theme="light"] .gyro-terminal-toolbar select {
+:root[data-theme="light"] .gyro-terminal-pane header {
   background: #f1f2f4;
   border-color: rgba(32, 34, 38, 0.12);
   color: #20242b;
@@ -12118,7 +12077,6 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-cli-launch-preset,
-:root[data-theme="light"] .gyro-cli-launch-preset-row select,
 :root[data-theme="light"] .gyro-cli-launch-stepper,
 :root[data-theme="light"] .gyro-cli-launch-focus {
   background: #ffffff;
@@ -12459,8 +12417,6 @@ textarea,
 .gyro-provider-session-row,
 .gyro-profile-table-row,
 .gyro-cli-launch-preset,
-.gyro-terminal-toolbar select,
-.gyro-cli-launch-preset-row select,
 .gyro-cli-launch-stepper,
 .gyro-cli-launch-focus,
 .gyro-sidebar-search-form {
@@ -12745,10 +12701,7 @@ textarea,
 
 .gyro-pane-tabs button.is-active,
 .gyro-terminal-tab.is-active {
-  background: var(--gyro-surface-soft);
   border-color: var(--gyro-hairline-strong);
-  box-shadow: inset 0 -1px 0 var(--gyro-accent);
-  color: var(--gyro-text);
 }
 
 .gyro-empty-row,
@@ -13889,31 +13842,7 @@ button.gyro-settings-row em::after {
   text-transform: uppercase;
 }
 
-.gyro-usage-provider-select select {
-  background: var(--gyro-surface-soft);
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  font: inherit;
-  min-height: 42px;
-  padding: 0 12px;
-  width: 100%;
-}
-
 /* Compact sibling of the provider select, sized for a settings row. */
-.gyro-settings-select {
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(8px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-settings-select:disabled {
-  color: var(--gyro-faint);
-}
 
 .gyro-provider-api-key-section {
   padding: 16px 18px 18px;
@@ -13932,10 +13861,6 @@ button.gyro-settings-row em::after {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.gyro-provider-api-key-row > select {
-  flex: 0 0 auto;
 }
 
 .gyro-provider-api-key-row > input {
@@ -14726,50 +14651,6 @@ button.gyro-settings-row em::after {
  * Sits in a table row rather than a form, so the control stays visually quiet
  * until hover or focus — a hairline field, not a filled input.
  */
-.gyro-provider-default-model select {
-  appearance: none;
-  background:
-    linear-gradient(
-        45deg,
-        transparent 50%,
-        color-mix(in srgb, var(--gyro-muted) 82%, transparent) 50%
-      )
-      calc(100% - 13px) calc(50% + 1px) / 5px 5px no-repeat,
-    linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--gyro-muted) 82%, transparent) 50%,
-        transparent 50%
-      )
-      calc(100% - 8px) calc(50% + 1px) / 5px 5px no-repeat,
-    var(--gyro-surface-soft);
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  max-width: 100%;
-  min-height: 30px;
-  padding: 0 26px 0 10px;
-  text-overflow: ellipsis;
-  transition:
-    background-color var(--gyro-motion) var(--gyro-ease),
-    border-color var(--gyro-motion) var(--gyro-ease);
-  width: 100%;
-}
-
-.gyro-provider-default-model select:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--gyro-accent) 42%, var(--gyro-border));
-}
-
-.gyro-provider-default-model select:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
-}
-
-.gyro-provider-row.is-readiness-only .gyro-provider-default-model select {
-  opacity: 0.72;
-}
 
 .gyro-settings-provider-actions > button {
   white-space: nowrap;
@@ -14820,10 +14701,6 @@ button.gyro-settings-row em::after {
   .gyro-provider-table > .gyro-provider-row > .gyro-provider-default-model {
     justify-self: start;
     max-width: 100%;
-  }
-
-  .gyro-provider-default-model select {
-    width: auto;
   }
 
   .gyro-settings-provider-actions {
@@ -21233,11 +21110,6 @@ button.gyro-settings-row em::after {
    a #101010 app), so the CLI read cooler than every surface around it. Same
    roles, app tokens. The Light overrides above are more specific and still
    own their side. */
-.gyro-terminal-toolbar select {
-  background: var(--gyro-control-bg);
-  border-color: var(--gyro-hairline-strong);
-  color: var(--gyro-text);
-}
 
 .gyro-terminal-toolbar button,
 .gyro-terminal-drag-handle {
@@ -23292,8 +23164,7 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-url-bar,
-.gyro-provider-handoff-form input,
-.gyro-provider-handoff-form select {
+.gyro-provider-handoff-form input {
   background: var(--gyro-control-bg);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
@@ -23830,11 +23701,6 @@ button.gyro-settings-row em::after {
   padding: 0;
   font-size: var(--gyro-type-base);
   color: var(--gyro-muted);
-}
-
-.gyro-settings-select {
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border-color: var(--gyro-hairline-strong);
 }
 
 .gyro-theme-picker button {
@@ -25880,22 +25746,6 @@ body,
 }
 
 /* Shared native desktop controls and the new compact tool entry points. */
-
-.gyro-settings-surface select.gyro-settings-select,
-.gyro-workspace-settings-editor select.gyro-settings-select {
-  appearance: auto;
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-  box-shadow: none;
-  color: var(--gyro-text);
-  font: var(--gyro-type-md) var(--gyro-font-sans);
-  height: var(--gyro-control-height);
-  min-height: var(--gyro-control-height);
-  max-width: 100%;
-  min-width: 0;
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
-}
 
 .gyro-settings-disclosure {
   border-top: 1px solid var(--gyro-border-soft);
@@ -31471,14 +31321,6 @@ body,
   padding: 7px 10px;
 }
 
-.gyro-settings-surface .gyro-provider-default-model select {
-  appearance: auto;
-  /* Compact rows are 28px high. Keep the existing height, but leave enough
-     room for the text instead of inheriting 14px of vertical field padding. */
-  padding-block: 3px;
-  line-height: calc(20px * var(--gyro-ui-scale, 1));
-}
-
 .gyro-settings-surface .gyro-provider-custom-form textarea {
   font-family: var(--gyro-mono);
   line-height: 1.55;
@@ -31600,11 +31442,6 @@ body,
 
   .gyro-provider-custom-form {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .gyro-provider-api-key-row > select {
-    flex: 1 1 100%;
-    width: 100%;
   }
 }
 
@@ -33229,6 +33066,15 @@ body,
   opacity: 1;
 }
 
+/* The launch preset's profile picker fills its row, like the stepper beside it. */
+.gyro-cli-launch-preset-row > .gyro-select {
+  flex: 1 1 auto;
+}
+
+.gyro-cli-launch-preset-row > .gyro-select > .gyro-select-trigger.gyro-select-trigger {
+  width: 100%;
+}
+
 /* ==========================================================================
    Primitives — the one definition of each shared control (primitives.tsx).
    This section is last on purpose: a primitive wins ties against the older
@@ -33466,26 +33312,28 @@ body,
   opacity: 0.45;
 }
 
-.gyro-select-trigger > span {
+.gyro-select-trigger.gyro-select-trigger > span {
+  color: inherit;
+  font: inherit;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-select-trigger > span > em {
+.gyro-select-trigger.gyro-select-trigger > span > em {
   color: var(--gyro-muted);
   font-style: normal;
   margin-right: 6px;
 }
 
-.gyro-select-trigger > svg {
+.gyro-select-trigger.gyro-select-trigger > svg {
   color: var(--gyro-muted);
   flex: none;
   transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 
-.gyro-select-trigger.is-open > svg {
+.gyro-select-trigger.gyro-select-trigger.is-open > svg {
   transform: rotate(180deg);
 }
 
@@ -33612,7 +33460,7 @@ body,
 }
 
 /* Badge and status dot share one tone vocabulary. */
-.gyro-badge {
+.gyro-badge.gyro-badge {
   --gyro-tone: var(--gyro-muted);
   align-items: center;
   background: color-mix(in srgb, var(--gyro-tone) 12%, transparent);
@@ -33628,7 +33476,7 @@ body,
   white-space: nowrap;
 }
 
-.gyro-dot {
+.gyro-dot.gyro-dot {
   --gyro-tone: var(--gyro-faint);
   background: var(--gyro-tone);
   border-radius: 50%;
@@ -33638,19 +33486,19 @@ body,
   width: 7px;
 }
 
-:is(.gyro-badge, .gyro-dot)[data-tone="accent"] {
+:is(.gyro-badge.gyro-badge, .gyro-dot.gyro-dot)[data-tone="accent"] {
   --gyro-tone: var(--gyro-accent);
 }
 
-:is(.gyro-badge, .gyro-dot)[data-tone="success"] {
+:is(.gyro-badge.gyro-badge, .gyro-dot.gyro-dot)[data-tone="success"] {
   --gyro-tone: var(--gyro-success);
 }
 
-:is(.gyro-badge, .gyro-dot)[data-tone="warn"] {
+:is(.gyro-badge.gyro-badge, .gyro-dot.gyro-dot)[data-tone="warn"] {
   --gyro-tone: var(--gyro-warn);
 }
 
-:is(.gyro-badge, .gyro-dot)[data-tone="danger"] {
+:is(.gyro-badge.gyro-badge, .gyro-dot.gyro-dot)[data-tone="danger"] {
   --gyro-tone: var(--gyro-danger);
 }
 
@@ -33665,7 +33513,7 @@ body,
 }
 
 /* Empty state: icon, one line, optional action. */
-.gyro-empty-state {
+.gyro-empty-state.gyro-empty-state {
   align-items: center;
   color: var(--gyro-muted);
   display: flex;
@@ -33687,18 +33535,19 @@ body,
   max-width: 44ch;
 }
 
-.gyro-empty-state-copy > strong {
+.gyro-empty-state.gyro-empty-state .gyro-empty-state-copy > strong {
   color: var(--gyro-text);
   font-size: var(--gyro-type-md);
   font-weight: var(--gyro-weight-medium);
 }
 
-.gyro-empty-state-copy > span {
+.gyro-empty-state.gyro-empty-state .gyro-empty-state-copy > span {
+  color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
   line-height: 1.45;
 }
 
-.gyro-empty-state.is-compact {
+.gyro-empty-state.gyro-empty-state.is-compact {
   align-items: flex-start;
   flex-direction: row;
   gap: 8px;
@@ -33707,7 +33556,7 @@ body,
   text-align: left;
 }
 
-.gyro-empty-state.is-compact .gyro-empty-state-copy > strong {
+.gyro-empty-state.gyro-empty-state.is-compact .gyro-empty-state-copy > strong {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
   font-weight: var(--gyro-weight-regular);

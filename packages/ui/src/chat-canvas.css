@@ -18,7 +18,6 @@
   flex-wrap: wrap;
 }
 
-.gyro-canvas-toolbar select,
 .gyro-canvas-request input {
   flex: 1;
   min-width: 120px;

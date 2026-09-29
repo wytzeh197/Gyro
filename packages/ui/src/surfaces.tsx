@@ -4,6 +4,7 @@ import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { ToastStack } from "./toast-stack";
+import { OptionSelect } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -5670,7 +5671,7 @@ function WorkspaceSidebarContent({
                     value={runCommandLabelDraft}
                   />
                   <div className="gyro-run-command-form-row">
-                    <select
+                    <OptionSelect
                       aria-label="Command group"
                       onChange={(event) =>
                         setRunCommandGroupDraft(
@@ -5683,7 +5684,7 @@ function WorkspaceSidebarContent({
                       <option value="test">Test</option>
                       <option value="build">Build</option>
                       <option value="dev">Dev</option>
-                    </select>
+                    </OptionSelect>
                     <button
                       onClick={() => {
                         setIsAddingRunCommand(false);
@@ -12741,7 +12742,8 @@ function WorkspaceSettingsEditor({
           {scope === "folder" && workspaceRoots.length > 0 ? (
             <label className="gyro-workspace-settings-folder">
               <span>Folder</span>
-              <select
+              <OptionSelect
+                label="Folder"
                 onChange={(event) => setFolderPath(event.target.value)}
                 value={folderPath}
               >
@@ -12750,7 +12752,7 @@ function WorkspaceSettingsEditor({
                     {root.split("/").filter(Boolean).at(-1) ?? root}
                   </option>
                 ))}
-              </select>
+              </OptionSelect>
             </label>
           ) : null}
           <div className="gyro-workspace-settings-list">
@@ -12824,7 +12826,8 @@ function WorkspaceSettingsEditor({
                   Shows a compact document overview beside the editor.
                 </small>
               </span>
-              <select
+              <OptionSelect
+                label="Minimap"
                 onChange={(event) =>
                   update({
                     ...settings,
@@ -12848,7 +12851,7 @@ function WorkspaceSettingsEditor({
                 </option>
                 <option value="on">On</option>
                 <option value="off">Off</option>
-              </select>
+              </OptionSelect>
             </label>
           </div>
           {scope !== "user" ? (
@@ -15688,7 +15691,8 @@ function OutputPane({
       <header>
         <FileText size={15} />
         {channels.length > 1 && onSelectOutputChannel ? (
-          <select
+          <OptionSelect
+            size="small"
             aria-label="Output channel"
             className="gyro-output-channel-select"
             onChange={(event) => {
@@ -15702,7 +15706,7 @@ function OutputPane({
                 {channel.label}
               </option>
             ))}
-          </select>
+          </OptionSelect>
         ) : (
           <span>{activeChannel?.label ?? "Output"}</span>
         )}
@@ -17449,7 +17453,8 @@ export function ProvidersSurface({
         <div className="gyro-provider-handoff-form">
           <label>
             <span>From</span>
-            <select
+            <OptionSelect
+                label="From"
               onChange={(event) => setFromProviderId(event.target.value)}
               value={fromProviderId}
             >
@@ -17458,11 +17463,12 @@ export function ProvidersSurface({
                   {provider.displayName}
                 </option>
               ))}
-            </select>
+            </OptionSelect>
           </label>
           <label>
             <span>To</span>
-            <select
+            <OptionSelect
+                label="To"
               onChange={(event) => setToProviderId(event.target.value)}
               value={toProviderId}
             >
@@ -17471,7 +17477,7 @@ export function ProvidersSurface({
                   {provider.displayName}
                 </option>
               ))}
-            </select>
+            </OptionSelect>
           </label>
           <label className="is-wide">
             <span>Context</span>
@@ -21846,7 +21852,6 @@ export function SettingsSurface({
               >
                 <SettingsSelect
                   aria-label="Daily token budget"
-                  className="gyro-settings-select"
                   disabled={!usageProvider}
                   onChange={(event) =>
                     usageProvider &&

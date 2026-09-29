@@ -1,6 +1,8 @@
 import { Check, ChevronDown, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
+  Children,
+  isValidElement,
   useEffect,
   useId,
   useLayoutEffect,
@@ -438,6 +440,81 @@ export function SelectMenu({
           )
         : null}
     </div>
+  );
+}
+
+function optionText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(optionText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node))
+    return optionText(node.props.children);
+  return "";
+}
+
+/** Reads `<option>` children the way a native <select> would. */
+export function optionsFromChildren(children: ReactNode): SelectMenuOption[] {
+  const options: SelectMenuOption[] = [];
+  const visit = (node: ReactNode) =>
+    Children.forEach(node, (child) => {
+      if (!isValidElement<{
+        value?: string | number;
+        children?: ReactNode;
+        disabled?: boolean;
+      }>(child))
+        return;
+      if (child.type === "option") {
+        const label = optionText(child.props.children).replace(/\s+/g, " ").trim();
+        options.push({
+          value: String(child.props.value ?? label),
+          label,
+          disabled: child.props.disabled,
+        });
+      } else if (child.props.children) {
+        visit(child.props.children);
+      }
+    });
+  visit(children);
+  return options;
+}
+
+/**
+ * SelectMenu with a native-select call shape: `<option>` children and an
+ * onChange that receives `{ target: { value } }`, so existing <select>
+ * markup moves over without rewriting its handlers.
+ */
+export function OptionSelect({
+  label,
+  "aria-label": ariaLabel,
+  value,
+  onChange,
+  children,
+  disabled,
+  className,
+  size,
+  showLabel,
+}: {
+  label?: string;
+  "aria-label"?: string;
+  value: string | number | undefined;
+  onChange?: (event: { target: { value: string } }) => void;
+  children: ReactNode;
+  disabled?: boolean;
+  className?: string;
+  size?: ControlSize;
+  showLabel?: boolean;
+}) {
+  return (
+    <SelectMenu
+      className={className}
+      disabled={disabled}
+      label={label ?? ariaLabel ?? "Choose"}
+      onChange={(next) => onChange?.({ target: { value: next } })}
+      options={optionsFromChildren(children)}
+      showLabel={showLabel}
+      size={size}
+      value={String(value ?? "")}
+    />
   );
 }
 

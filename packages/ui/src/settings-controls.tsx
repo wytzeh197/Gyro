@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Segmented } from "./primitives";
+import { OptionSelect, Segmented } from "./primitives";
 
 /**
  * The settings controls every section is built from.
@@ -24,15 +24,8 @@ export function settingsSearchKey(label: string) {
     .replace(/^-|-$/g, "");
 }
 
-export function SettingsSelect(props: ComponentProps<"select">) {
-  return (
-    <select
-      {...props}
-      className={["gyro-settings-select", props.className]
-        .filter(Boolean)
-        .join(" ")}
-    />
-  );
+export function SettingsSelect(props: ComponentProps<typeof OptionSelect>) {
+  return <OptionSelect {...props} />;
 }
 
 export function SettingsRow({
