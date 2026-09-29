@@ -4763,7 +4763,7 @@ expect(
     appSource.includes("completedSessionIds={unreadCompletedSessionIds}") &&
     surfaceSource.includes("isUnreadComplete") &&
     surfaceSource.includes('"Chat completed, unread"') &&
-    surfaceSource.includes('className="gyro-session-complete-dot"') &&
+    surfaceSource.includes('className="gyro-dot gyro-session-complete-dot"') &&
     styleSource.includes(".gyro-session-time.is-complete") &&
     styleSource.includes(".gyro-session-complete-dot") &&
     styleSource.includes("background: var(--gyro-update-blue)"),
@@ -6265,7 +6265,7 @@ expect(
     styleSource.includes(
       '.gyro-update-card[data-level="critical"] .gyro-update-mark',
     ) &&
-    styleSource.includes(".gyro-settings-status.is-info i") &&
+    surfaceSource.includes('status === "info"\n                  ? "accent"') &&
     styleSource.includes(
       "@media (prefers-reduced-motion: reduce) {\n  .gyro-update-card .is-spinning",
     ) &&

@@ -264,7 +264,7 @@ export function ChatQuestionPopup({
                 <span className="gyro-question-option-label">
                   <InlineMarkdown text={option} />
                   {isRecommended ? (
-                    <em className="gyro-question-option-badge">Recommended</em>
+                    <em className="gyro-badge gyro-question-option-badge" data-tone="success">Recommended</em>
                   ) : null}
                 </span>
                 {detail ? (

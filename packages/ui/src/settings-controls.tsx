@@ -94,7 +94,7 @@ export function SettingsGroup({
       {badge ? (
         <h2>
           {label}
-          <span className="gyro-settings-group-badge">{badge}</span>
+          <span className="gyro-badge gyro-settings-group-badge">{badge}</span>
         </h2>
       ) : (
         <h2>{label}</h2>

@@ -311,7 +311,7 @@ function ProjectEditDialog({
                 </span>
                 {draftFolders.length > 0 &&
                   (folder === draftPrimary ? (
-                    <small className="gyro-project-primary-badge">
+                    <small className="gyro-badge gyro-project-primary-badge">
                       Primary
                     </small>
                   ) : (

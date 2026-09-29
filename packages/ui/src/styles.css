@@ -308,14 +308,6 @@
   color: var(--gyro-danger, #ef7d7d);
 }
 
-.gyro-council-badge {
-  border-radius: 999px;
-  background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
-  color: var(--gyro-accent, #7aa7ff);
-  font-size: var(--gyro-type-xs);
-  padding: 2px 8px;
-}
-
 .gyro-council-meta {
   color: var(--gyro-muted, #b3b3b3);
   font-size: var(--gyro-type-sm);
@@ -744,30 +736,7 @@ button {
 }
 
 .gyro-session-badge {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  color: var(--gyro-muted);
   display: inline-flex;
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-medium);
-  gap: 3px;
-  letter-spacing: 0.01em;
-  line-height: 1;
-  padding: 2px 6px;
-}
-
-.gyro-session-badge.is-agent-workspace {
-  background: rgba(88, 140, 255, 0.12);
-  border-color: rgba(88, 140, 255, 0.24);
-  color: #9bb8ff;
-}
-
-.gyro-session-badge.is-cli {
-  background: rgba(120, 200, 160, 0.1);
-  border-color: rgba(120, 200, 160, 0.22);
-  color: #8fd6b0;
 }
 
 .gyro-session-row.is-active,
@@ -1419,9 +1388,7 @@ button {
 }
 
 .gyro-live-pill {
-  align-items: center;
   display: inline-flex;
-  gap: 5px;
   margin: 0;
 }
 
@@ -1904,8 +1871,6 @@ button {
 }
 
 .gyro-cli-chat-pane > header span:not(.gyro-live-pill) {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-type-xs);
   margin-top: 1px;
 }
 
@@ -2359,14 +2324,6 @@ button {
 
 .gyro-status-chip.is-danger strong {
   color: var(--gyro-danger);
-}
-
-.gyro-live-pill.is-running {
-  border-color: rgba(216, 212, 204, 0.32);
-}
-
-.gyro-live-pill.is-waiting {
-  border-color: rgba(255, 143, 61, 0.38);
 }
 
 .gyro-ring {
@@ -3481,11 +3438,15 @@ button {
   font-size: var(--gyro-type-base);
 }
 
-.gyro-provider-hero span:not(.gyro-live-pill),
 .gyro-profile-mapping header span {
   color: var(--gyro-muted);
   display: block;
   font-size: var(--gyro-type-sm);
+  margin-top: 2px;
+}
+
+.gyro-provider-hero span:not(.gyro-live-pill) {
+  display: block;
   margin-top: 2px;
 }
 
@@ -3903,8 +3864,7 @@ button {
   padding: 0 10px;
 }
 
-.gyro-provider-handoff-panel > header strong,
-.gyro-provider-handoff-panel > header span:not(.gyro-live-pill) {
+.gyro-provider-handoff-panel > header strong {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -3913,8 +3873,13 @@ button {
 }
 
 .gyro-provider-handoff-panel > header span:not(.gyro-live-pill) {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gyro-provider-handoff-panel > header span:not(.gyro-live-pill) {
   margin-top: 2px;
 }
 
@@ -4362,14 +4327,12 @@ body {
 }
 
 .gyro-status-chip,
-.gyro-live-pill,
 .gyro-preview-tag,
 .gyro-provider-state {
   border-radius: 999px;
 }
 
 .gyro-status-chip.is-info,
-.gyro-live-pill.is-running,
 .gyro-context-metric.is-slate,
 .gyro-provider-state.is-enabled {
   box-shadow: inset 0 0 0 1px
@@ -4502,7 +4465,6 @@ body {
 }
 
 .gyro-status-chip,
-.gyro-live-pill,
 .gyro-preview-tag,
 .gyro-provider-state {
   background: var(--gyro-control-bg);
@@ -4511,7 +4473,6 @@ body {
 }
 
 .gyro-status-chip.is-success,
-.gyro-live-pill.is-running,
 .gyro-provider-state.is-enabled,
 .gyro-context-metric.is-slate {
   color: var(--gyro-muted);
@@ -6124,19 +6085,7 @@ body {
   font-size: var(--gyro-type-xs);
 }
 
-.gyro-workspace-contribution-title em {
-  padding: 2px 5px;
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-muted);
-  background: var(--gyro-surface-soft);
-  font-size: var(--gyro-type-xs);
-  font-style: normal;
-  text-transform: uppercase;
-}
 
-.gyro-workspace-contribution-title em.is-local {
-  color: var(--gyro-accent);
-}
 
 .gyro-workspace-contribution-permissions {
   display: flex;
@@ -6146,16 +6095,6 @@ body {
   padding-left: 25px;
 }
 
-.gyro-workspace-contribution-permissions span {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 5px;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-}
 
 .gyro-workspace-contribution-actions {
   display: flex;
@@ -7318,17 +7257,8 @@ body {
 /* Workers under a mission sit a step deeper than project-level chats. */
 
 .gyro-thread-mode-badge {
-  align-items: center;
-  background: rgba(88, 140, 255, 0.12);
-  border: 1px solid rgba(88, 140, 255, 0.24);
-  border-radius: 999px;
-  color: #9bb8ff;
   display: inline-flex;
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-medium);
-  gap: 5px;
   margin-left: 8px;
-  padding: 3px 8px;
   vertical-align: middle;
 }
 
@@ -7762,21 +7692,6 @@ body {
   flex-wrap: wrap;
   gap: 0 6px;
   min-width: 0;
-}
-
-.gyro-composer-menu-badge {
-  color: color-mix(
-    in srgb,
-    var(--gyro-muted, #8f949c) 70%,
-    var(--gyro-text, #d9d6d0) 30%
-  );
-  font-size: var(--gyro-type-sm);
-  font-style: normal;
-  font-weight: var(--gyro-weight-medium);
-  letter-spacing: 0;
-  line-height: 1.2;
-  text-transform: none;
-  white-space: nowrap;
 }
 
 .gyro-composer-menu-item.is-warning:disabled {
@@ -8646,7 +8561,6 @@ body {
 }
 
 .gyro-chat-thread-topbar > div:first-child span.gyro-thread-mode-badge {
-  align-items: center;
   display: inline-flex;
 }
 
@@ -9400,7 +9314,6 @@ body {
 }
 
 .gyro-icon-button,
-.gyro-live-pill,
 .gyro-provider-state,
 .gyro-provider-row code,
 .gyro-settings-row em,
@@ -11627,11 +11540,6 @@ textarea,
   min-height: 0;
 }
 
-.gyro-provider-hero .gyro-live-pill {
-  background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(255, 255, 255, 0.07);
-}
-
 .gyro-provider-boundary {
   display: none;
 }
@@ -12145,7 +12053,6 @@ textarea,
   border-color: rgba(32, 34, 38, 0.1);
 }
 
-:root[data-theme="light"] .gyro-provider-hero .gyro-live-pill,
 :root[data-theme="light"] .gyro-provider-card,
 :root[data-theme="light"] .gyro-provider-icon,
 :root[data-theme="light"] .gyro-provider-state {
@@ -12863,7 +12770,6 @@ textarea,
 }
 
 .gyro-tools-card:nth-child(2) > svg,
-.gyro-live-pill.is-running,
 .gyro-ring.is-done,
 .gyro-provider-state.is-enabled,
 .gyro-provider-health > span.is-connected {
@@ -12871,9 +12777,7 @@ textarea,
 }
 
 .gyro-tools-card:nth-child(3) > svg,
-.gyro-ring.is-running,
-.gyro-live-pill.is-waiting,
-.gyro-live-pill.is-blocked {
+.gyro-ring.is-running {
   color: var(--gyro-warn);
 }
 
@@ -13701,21 +13605,8 @@ button.gyro-settings-row em::after {
 /* Marks a group that is visible but not yet usable, so the badge reads as
    state rather than decoration. */
 .gyro-settings-group-badge {
-  background: color-mix(
-    in srgb,
-    var(--gyro-status-experimental) 16%,
-    transparent
-  );
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-status-experimental);
   display: inline-block;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.05em;
   margin-top: 5px;
-  padding: 2px 6px;
-  text-transform: uppercase;
-  white-space: nowrap;
   width: fit-content;
 }
 
@@ -13801,27 +13692,12 @@ button.gyro-settings-row em::after {
   gap: 7px;
 }
 
-.gyro-settings-status i {
-  background: var(--gyro-faint);
-  border-radius: 50%;
-  height: 7px;
-  width: 7px;
-}
 
-.gyro-settings-status.is-good i {
-  background: #48b87a;
-}
 .gyro-settings-status.is-warning i {
   background: #d59b45;
 }
-.gyro-settings-status.is-critical i {
-  background: #d86464;
-}
 /* "Gyro is working on it, or waiting for you." Drawn in the user's accent so
    one status never needs a second set of colours. */
-.gyro-settings-status.is-info i {
-  background: var(--gyro-accent);
-}
 
 .gyro-usage-dashboard {
   display: grid;
@@ -14317,14 +14193,6 @@ button.gyro-settings-row em::after {
   font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.02em;
 }
-.gyro-update-channel {
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: 999px;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-medium);
-  padding: 2px 8px;
-}
 /* The status word beside the version is .gyro-settings-status — the same dot
    ramp the provider rows use — so Settings keeps one status vocabulary. */
 .gyro-update-summary {
@@ -14585,10 +14453,6 @@ button.gyro-settings-row em::after {
   gap: 7px;
 }
 
-.gyro-settings-status i {
-  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 9%, transparent);
-  flex: none;
-}
 
 .gyro-provider-table.is-native-list {
   border-bottom: 0.5px solid var(--gyro-hairline-strong);
@@ -17385,12 +17249,7 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-session-complete-dot {
-  background: var(--gyro-update-blue);
-  border-radius: 999px;
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--gyro-update-blue) 14%, transparent);
   display: block;
-  height: 8px;
   width: 8px;
 }
 
@@ -19025,15 +18884,7 @@ button.gyro-settings-row em::after {
 
 .gyro-surface-page-badge,
 .gyro-live-pill {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border: 1px solid var(--gyro-hairline-strong);
-  border-radius: 999px;
-  color: var(--gyro-muted);
   flex: 0 0 auto;
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  line-height: calc(24px * var(--gyro-ui-scale, 1));
-  padding: 0 10px;
 }
 
 /* Tool launcher */
@@ -20811,9 +20662,6 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-model-activity-dot {
-  background: var(--gyro-primary-bg);
-  border-radius: 999px;
-  height: 6px;
   position: absolute;
   right: 2px;
   top: 3px;
@@ -28206,12 +28054,7 @@ body,
 .gyro-composer-popover
   .gyro-composer-menu-item.is-branch
   .gyro-composer-menu-badge {
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-muted);
   flex: none;
-  font-size: var(--gyro-type-sm);
-  padding: 0 5px;
 }
 
 .gyro-composer-menu-footer {
@@ -29954,12 +29797,6 @@ body,
 
 .gyro-project-folder .gyro-project-primary-badge {
   flex-shrink: 0;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
-  padding: 5px 10px;
-  color: var(--gyro-muted);
-  font: inherit;
-  line-height: 1.3;
 }
 .gyro-project-folder .gyro-project-make-primary {
   flex-shrink: 0;
@@ -30089,10 +29926,7 @@ body,
 }
 
 .gyro-browser-agent-dot {
-  background: var(--gyro-accent);
-  border-radius: 50%;
   flex: 0 0 auto;
-  height: 7px;
   width: 7px;
 }
 
@@ -33462,6 +33296,8 @@ body,
 /* Badge and status dot share one tone vocabulary. */
 .gyro-badge.gyro-badge {
   --gyro-tone: var(--gyro-muted);
+  font-style: normal;
+  text-transform: none;
   align-items: center;
   background: color-mix(in srgb, var(--gyro-tone) 12%, transparent);
   border-radius: 999px;

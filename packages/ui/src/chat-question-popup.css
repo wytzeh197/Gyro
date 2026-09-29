@@ -201,18 +201,6 @@
   line-height: 1.45;
 }
 
-.gyro-question-option-badge {
-  background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
-  border-radius: 999px;
-  color: var(--gyro-success);
-  font-size: var(--gyro-type-xs);
-  font-style: normal;
-  font-weight: var(--gyro-weight-medium);
-  letter-spacing: 0.01em;
-  line-height: 1.6;
-  padding: 0 7px;
-}
-
 .gyro-question-option-go {
   color: var(--gyro-faint);
   margin-top: 3px;

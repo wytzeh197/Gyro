@@ -6694,7 +6694,7 @@ function SessionSidebarRow({
             <span className="gyro-session-badges" aria-hidden="true">
               {isAgentWorkspace ? (
                 <span
-                  className="gyro-session-badge is-agent-workspace"
+                  className="gyro-badge gyro-session-badge is-agent-workspace"
                   title="Agent workspace — private branch under Gyro"
                 >
                   <GitBranch size={10} />
@@ -6703,7 +6703,7 @@ function SessionSidebarRow({
               ) : null}
               {isCliOrigin ? (
                 <span
-                  className="gyro-session-badge is-cli"
+                  className="gyro-badge gyro-session-badge is-cli"
                   title="Started from the gyro CLI"
                 >
                   <Terminal size={10} />
@@ -6739,7 +6739,11 @@ function SessionSidebarRow({
           {isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
           ) : isUnreadComplete ? (
-            <span aria-hidden="true" className="gyro-session-complete-dot" />
+            <span
+              aria-hidden="true"
+              className="gyro-dot gyro-session-complete-dot"
+              data-tone="accent"
+            />
           ) : (
             relativeSessionTime(session.updatedAt)
           )}
@@ -9565,7 +9569,8 @@ export function ChatSurface({
           />
           {workspaceMode === "worktree" ? (
             <span
-              className="gyro-thread-mode-badge is-agent-workspace"
+              className="gyro-badge gyro-thread-mode-badge is-agent-workspace"
+              data-tone="accent"
               title={workspaceModeTechnicalHint("worktree")}
             >
               <GitBranch aria-hidden="true" size={11} />
@@ -10096,7 +10101,11 @@ function ChatSurfaceControls({
           >
             <MoreHorizontal size={16} />
             {drawerHasModelActivity ? (
-              <span aria-hidden="true" className="gyro-model-activity-dot" />
+              <span
+                aria-hidden="true"
+                className="gyro-dot is-pulsing gyro-model-activity-dot"
+                data-tone="accent"
+              />
             ) : null}
           </button>
           {openMenu === "overflow" ? (
@@ -12948,13 +12957,13 @@ function WorkspaceSettingsEditor({
                           : (contribution.manifestName ?? "local manifest")}
                       </small>
                     </span>
-                    <em className={`is-${contribution.source}`}>
-                      {contribution.source}
+                    <em className={`gyro-badge is-${contribution.source}`}>
+                      {contribution.source === "core" ? "Core" : "Local"}
                     </em>
                   </div>
                   <div className="gyro-workspace-contribution-permissions">
                     {contribution.permissions.map((permission) => (
-                      <span key={permission}>
+                      <span className="gyro-badge" key={permission}>
                         <ShieldCheck size={10} /> {permission}
                       </span>
                     ))}
@@ -16224,7 +16233,7 @@ export function ToolsSurface({
               <p>Plan work, schedule runs, and manage your agent stack.</p>
             </div>
           </div>
-          <span className="gyro-surface-page-badge">2 surfaces</span>
+          <span className="gyro-badge gyro-surface-page-badge">2 surfaces</span>
         </header>
         <div className="gyro-tools-grid">
           <button
@@ -17290,7 +17299,9 @@ export function ProvidersSurface({
             </p>
           </div>
         </div>
-        <span className="gyro-live-pill">{enabledProviderCount} connected</span>
+        <span className="gyro-badge gyro-live-pill" data-tone="success">
+          {enabledProviderCount} connected
+        </span>
       </header>
 
       <section className="gyro-provider-boundary" aria-label="Auth boundary">
@@ -17446,7 +17457,7 @@ export function ProvidersSurface({
               thread context.
             </span>
           </div>
-          <span className="gyro-live-pill">
+          <span className="gyro-badge gyro-live-pill">
             {providerSessions.length} local
           </span>
         </header>
@@ -19299,7 +19310,11 @@ export function BrowserPreviewSurface({
         </div>
         {isChat && agentActivity ? (
           <div className="gyro-browser-agent-strip" role="status">
-            <span aria-hidden="true" className="gyro-browser-agent-dot" />
+            <span
+              aria-hidden="true"
+              className="gyro-dot is-pulsing gyro-browser-agent-dot"
+              data-tone="accent"
+            />
             <span className="gyro-browser-agent-text">
               <strong>Browser</strong>
               <span>{agentActivity}</span>
@@ -22553,7 +22568,7 @@ export function SettingsSurface({
                     <strong className="gyro-update-version">
                       {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
                     </strong>
-                    <span className="gyro-update-channel">Public Alpha</span>
+                    <span className="gyro-badge gyro-update-channel">Public Alpha</span>
                     <SettingsStatus status={updateLevel}>
                       {updateStatusLabel(updateState)}
                     </SettingsStatus>
@@ -23047,7 +23062,21 @@ function SettingsStatus({
 }) {
   return (
     <span className={`gyro-settings-status is-${status}`}>
-      <i aria-hidden="true" />
+      <i
+        aria-hidden="true"
+        className="gyro-dot"
+        data-tone={
+          status === "good"
+            ? "success"
+            : status === "warning"
+              ? "warn"
+              : status === "critical"
+                ? "danger"
+                : status === "info"
+                  ? "accent"
+                  : "neutral"
+        }
+      />
       {children}
     </span>
   );
@@ -23788,7 +23817,7 @@ function ComposerPopover({
               )}
             </strong>
             {item.badge ? (
-              <em className="gyro-composer-menu-badge">{item.badge}</em>
+              <em className="gyro-badge gyro-composer-menu-badge">{item.badge}</em>
             ) : null}
           </span>
           {item.detail ? <small>{item.detail}</small> : null}
@@ -28466,7 +28495,7 @@ function CouncilResponseCard({
             {payload.status}
           </span>
           {payload.retry ? (
-            <span className="gyro-council-badge">re-synth</span>
+            <span className="gyro-badge gyro-council-badge" data-tone="accent">re-synth</span>
           ) : null}
         </div>
         <p className="gyro-council-meta">
