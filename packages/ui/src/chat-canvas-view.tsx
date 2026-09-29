@@ -1,4 +1,4 @@
-import { OptionSelect } from "./primitives";
+import { EmptyState, OptionSelect } from "./primitives";
 import { useState } from "react";
 import { CanvasPreview } from "./canvas-preview-view";
 import { ChatArtifactContent } from "./chat-artifacts";
@@ -39,13 +39,11 @@ export function ChatCanvas({
   return (
     <section className="gyro-canvas" aria-label="Canvas">
       {!artifact ? (
-        <div className="gyro-thread-empty">
-          <strong>A place to work beside chat</strong>
-          <p>
-            Build an interface, try an idea, or work on a document here. Ask the
-            model to create something, then refine it together.
-          </p>
-        </div>
+        <EmptyState
+          className="gyro-thread-empty"
+          detail="Build an interface, try an idea, or work on a document here. Ask the model to create something, then refine it together."
+          title="A place to work beside chat"
+        />
       ) : (
         <>
           <header className="gyro-canvas-toolbar">

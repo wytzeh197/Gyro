@@ -16847,8 +16847,8 @@ export function App() {
                   return review ? (
                     <Suspense
                       fallback={
-                        <div className="gyro-code-empty">
-                          Loading diff editor...
+                        <div className="gyro-empty-state gyro-code-empty">
+                          Loading diff editor…
                         </div>
                       }
                     >
@@ -19620,18 +19620,18 @@ function MonacoEditorPaneView({
   };
 
   if (!path) {
-    return <div className="gyro-code-empty">Select a workspace file.</div>;
+    return <div className="gyro-empty-state gyro-code-empty">Select a workspace file.</div>;
   }
   // Only swap the placeholder in before the first mount. Doing it on every load
   // tears the editor down and rebuilds it — including the font measurement —
   // each time a tab is opened.
   if (loadState === "loading" && !hasMountedRef.current) {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
+    return <div className="gyro-empty-state gyro-code-empty">Loading file preview…</div>;
   }
 
   if (syntax.policy.binary || loadState === "error")
     return (
-      <div className="gyro-code-empty" role="status">
+      <div className="gyro-empty-state gyro-code-empty" role="status">
         {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
       </div>
     );
@@ -19643,7 +19643,7 @@ function MonacoEditorPaneView({
         </div>
       )}
       <Suspense
-        fallback={<div className="gyro-code-empty">Loading editor...</div>}
+        fallback={<div className="gyro-empty-state gyro-code-empty">Loading editor…</div>}
       >
         <MonacoEditor
           height="100%"

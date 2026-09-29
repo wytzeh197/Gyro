@@ -1,3 +1,4 @@
+import { EmptyState, Spinner } from "./primitives";
 import { FileDiff, GitPullRequest } from "lucide-react";
 import "./review-design.css";
 import { useEffect, useMemo, useState } from "react";
@@ -93,7 +94,7 @@ export function GitComparisonReview({
         </header>
         <div className="gyro-diff-tree" aria-label="Select a file">
           {!hasFiles ? (
-            <div className="gyro-diff-tree-empty">
+            <div className="gyro-empty-state is-compact gyro-diff-tree-empty">
               {listing.limitation ?? empty.detail}
             </div>
           ) : (
@@ -146,11 +147,12 @@ export function GitComparisonReview({
             workspacePath={workspacePath}
           />
         ) : (
-          <div className="gyro-diff-empty-state">
-            <GitPullRequest size={18} />
-            <strong>{empty.title}</strong>
-            <span>{listing.limitation ?? empty.detail}</span>
-          </div>
+          <EmptyState
+            className="gyro-diff-empty-state"
+            detail={listing.limitation ?? empty.detail}
+            icon={<GitPullRequest size={18} />}
+            title={empty.title}
+          />
         )}
       </section>
     </div>
@@ -171,7 +173,11 @@ function ScopedDiffPane({
             ? "Current working tree comparison"
             : "Recorded changes from this turn"}
         </strong>
-        <button type="button" onClick={() => setShowCurrent(!showCurrent)}>
+        <button
+          className="gyro-button is-secondary is-small"
+          type="button"
+          onClick={() => setShowCurrent(!showCurrent)}
+        >
           {showCurrent ? "Back to recorded turn" : "Compare current file"}
         </button>
       </div>
@@ -186,21 +192,22 @@ function ScopedDiffPane({
           />
         ))
       ) : (
-        <div className="gyro-diff-empty-state">
-          <strong>Historical diff unavailable</strong>
-          <span>
-            This turn recorded the file and its counts, but no patch was saved.
-            The current working tree may have changed since then.
-          </span>
-          {props.onOpenFile ? (
-            <button
-              type="button"
-              onClick={() => props.onOpenFile?.(props.file.path)}
-            >
-              Open current file
-            </button>
-          ) : null}
-        </div>
+        <EmptyState
+          action={
+            props.onOpenFile ? (
+              <button
+                className="gyro-button is-secondary is-small"
+                type="button"
+                onClick={() => props.onOpenFile?.(props.file.path)}
+              >
+                Open current file
+              </button>
+            ) : null
+          }
+          className="gyro-diff-empty-state"
+          detail="This turn recorded the file and its counts, but no patch was saved. The current working tree may have changed since then."
+          title="Historical diff unavailable"
+        />
       )}
     </div>
   );
@@ -284,32 +291,41 @@ function ComparisonDiffPane({
         </div>
       </div>
       {state.kind === "loading" ? (
-        <div className="gyro-diff-empty-state" role="status">
-          <FileDiff size={18} />
-          <strong>Loading changes…</strong>
-          <span>
-            Reading {relative} for {scopeLabel}.
-          </span>
-        </div>
+        <EmptyState
+          className="gyro-diff-empty-state"
+          detail={`Reading ${relative} for ${scopeLabel}.`}
+          icon={<Spinner size={16} />}
+          role="status"
+          title="Loading changes…"
+        />
       ) : state.kind === "failed" ? (
-        <div className="gyro-diff-empty-state" role="alert">
-          <FileDiff size={18} />
-          <strong>Could not load this diff</strong>
-          <span>{state.message}</span>
-          <div className="gyro-plain-diff-actions">
-            <button
-              onClick={() => setReload((value) => value + 1)}
-              type="button"
-            >
-              Try again
-            </button>
-            {onOpenFile ? (
-              <button onClick={() => onOpenFile(file.path)} type="button">
-                Open file
+        <EmptyState
+          action={
+            <div className="gyro-plain-diff-actions">
+              <button
+                className="gyro-button is-secondary is-small"
+                onClick={() => setReload((value) => value + 1)}
+                type="button"
+              >
+                Try again
               </button>
-            ) : null}
-          </div>
-        </div>
+              {onOpenFile ? (
+                <button
+                  className="gyro-button is-ghost is-small"
+                  onClick={() => onOpenFile(file.path)}
+                  type="button"
+                >
+                  Open file
+                </button>
+              ) : null}
+            </div>
+          }
+          className="gyro-diff-empty-state"
+          detail={state.message}
+          icon={<FileDiff size={18} />}
+          role="alert"
+          title="Could not load this diff"
+        />
       ) : state.result.notice && !state.result.unified ? (
         <div className="gyro-diff-empty-state" role="status">
           <FileDiff size={18} />

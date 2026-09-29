@@ -515,7 +515,7 @@
 }
 
 .gyro-plan-step-status.is-in-progress svg {
-  animation: gyro-chat-activity-spin 0.9s linear infinite;
+  animation: gyro-spin 0.9s linear infinite;
 }
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item > div {
@@ -650,7 +650,7 @@
 }
 
 .gyro-chat-environment-plan-row > .gyro-plan-step-status svg {
-  animation: gyro-chat-activity-spin 0.9s linear infinite;
+  animation: gyro-spin 0.9s linear infinite;
   height: 14px;
   width: 14px;
 }

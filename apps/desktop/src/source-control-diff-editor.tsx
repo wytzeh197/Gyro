@@ -209,11 +209,11 @@ function SourceControlDiffEditor({
         </div>
       ) : null}
       {loading ? (
-        <div className="gyro-code-empty" role="status">
+        <div className="gyro-empty-state gyro-code-empty" role="status">
           Loading changes…
         </div>
       ) : unavailable ? (
-        <div className="gyro-code-empty" role="alert">
+        <div className="gyro-empty-state gyro-code-empty" role="alert">
           <strong>Could not display this diff</strong>
           <span>{error || content?.notice}</span>
           <div className="gyro-plain-diff-actions">
@@ -229,7 +229,7 @@ function SourceControlDiffEditor({
           </div>
         </div>
       ) : empty ? (
-        <div className="gyro-code-empty" role="status">
+        <div className="gyro-empty-state gyro-code-empty" role="status">
           <strong>No text changes in this comparison</strong>
           <span>
             The file is present on both sides with identical contents.
@@ -306,7 +306,7 @@ function SourceControlDiffEditor({
           />
         </div>
       ) : (
-        <div className="gyro-code-empty" role="status">
+        <div className="gyro-empty-state gyro-code-empty" role="status">
           Loading changes…
         </div>
       )}

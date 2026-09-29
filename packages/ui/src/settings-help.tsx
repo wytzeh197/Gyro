@@ -1,3 +1,4 @@
+import { EmptyState } from "./primitives";
 import { useId, useState } from "react";
 import { ArrowRight, ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
 import type { SettingsSectionId } from "./types";
@@ -236,19 +237,23 @@ export function SettingsHelp({
           </section>
         ))}
         {!count && (
-          <div className="gyro-help-empty">
-            <strong>No matching answers</strong>
-            <p>Try a shorter search or browse all topics.</p>
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                setTopic("All topics");
-              }}
-            >
-              Show all questions
-            </button>
-          </div>
+          <EmptyState
+            action={
+              <button
+                className="gyro-button is-secondary is-small"
+                type="button"
+                onClick={() => {
+                  setQuery("");
+                  setTopic("All topics");
+                }}
+              >
+                Show all questions
+              </button>
+            }
+            className="gyro-help-empty"
+            detail="Try a shorter search or browse all topics."
+            title="No matching answers"
+          />
         )}
       </div>
       <section className="gyro-help-resources" aria-label="Guides and support">

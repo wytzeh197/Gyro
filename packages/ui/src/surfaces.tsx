@@ -4,7 +4,7 @@ import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { ToastStack } from "./toast-stack";
-import { OptionSelect } from "./primitives";
+import { EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -640,7 +640,7 @@ function ChatSwitcher({
               ))}
             </>
           ) : (
-            <div className="gyro-chat-switcher-empty">
+            <div className="gyro-empty-state is-compact gyro-chat-switcher-empty">
               No other chats in this project
             </div>
           )}
@@ -2370,15 +2370,13 @@ export function AppChrome({
                           );
                         })
                       ) : (
-                        <div className="gyro-settings-search-empty">
-                          <Search size={16} />
-                          <span>
-                            <strong>No matching settings</strong>
-                            <small>
-                              Try a control, feature, or related term.
-                            </small>
-                          </span>
-                        </div>
+                        <EmptyState
+                          className="gyro-settings-search-empty"
+                          compact
+                          detail="Try a control, feature, or related term."
+                          icon={<Search size={14} />}
+                          title="No matching settings"
+                        />
                       )}
                     </div>
                   ) : null}
@@ -9109,7 +9107,7 @@ export function ChatSurface({
           );
         })}
         {turns.length === 0 && looseEvents.length === 0 ? (
-          <div className="gyro-thread-empty">Start with a request.</div>
+          <EmptyState className="gyro-thread-empty" title="Start with a request." />
         ) : null}
       </>
     ),
@@ -10715,13 +10713,12 @@ function ChatSidePanel({
                   </article>
                 ))
               ) : (
-                <div className="gyro-plan-empty">
-                  <ListChecks size={18} />
-                  <strong>No plan yet</strong>
-                  <span>
-                    Add steps here or let Gyro build the plan while it works.
-                  </span>
-                </div>
+                <EmptyState
+                  className="gyro-plan-empty"
+                  detail="Add steps here or let Gyro build the plan while it works."
+                  icon={<ListChecks size={18} />}
+                  title="No plan yet"
+                />
               )}
               {planEditor?.mode === "add" ? (
                 <form
@@ -11338,20 +11335,22 @@ function CompanionFiles({
 }) {
   if (!workspacePath) {
     return (
-      <div className="gyro-companion-empty">
-        <Folder size={22} />
-        <strong>No project selected</strong>
-        <span>Open a folder to browse its files here.</span>
-      </div>
+      <EmptyState
+        className="gyro-companion-empty"
+        detail="Open a folder to browse its files here."
+        icon={<Folder size={20} />}
+        title="No project selected"
+      />
     );
   }
   if (!files.length) {
     return (
-      <div className="gyro-companion-empty">
-        <Folder size={22} />
-        <strong>Nothing to show yet</strong>
-        <span>{workspaceName(workspacePath)} has no readable files.</span>
-      </div>
+      <EmptyState
+        className="gyro-companion-empty"
+        detail={`${workspaceName(workspacePath)} has no readable files.`}
+        icon={<Folder size={20} />}
+        title="Nothing to show yet"
+      />
     );
   }
   return (
@@ -12428,7 +12427,7 @@ export function CliWorkspaceSurface({
                 </button>
               ))
             ) : (
-              <div className="gyro-empty-row">No CLI tasks yet</div>
+              <div className="gyro-empty-state is-compact gyro-empty-row">No CLI tasks yet</div>
             )}
           </div>
           <div className="gyro-compact-section">
@@ -12744,7 +12743,7 @@ function WorkspaceSettingsEditor({
             )}
           </div>
           {!workspacePath ? (
-            <p className="gyro-workspace-settings-empty">
+            <p className="gyro-empty-state is-compact gyro-workspace-settings-empty">
               Open a project to configure workspace and folder overrides.
             </p>
           ) : null}
@@ -14133,9 +14132,9 @@ function EditorGroupPane({
             onSelectionChange: onEditorSelectionChange ?? (() => undefined),
           })
         ) : fileLoadState === "loading" ? (
-          <div className="gyro-code-empty">Loading file preview...</div>
+          <div className="gyro-empty-state gyro-code-empty">Loading file preview…</div>
         ) : fileLoadState === "error" ? (
-          <div className="gyro-code-empty">
+          <div className="gyro-empty-state gyro-code-empty" role="alert">
             {fileError || "File preview failed."}
           </div>
         ) : activePath && fileContent?.path === activePath ? (
@@ -14143,7 +14142,7 @@ function EditorGroupPane({
             <code>{fileContent.content}</code>
           </pre>
         ) : (
-          <div className="gyro-code-empty is-placeholder">
+          <div className="gyro-empty-state gyro-code-empty is-placeholder">
             {emptyPrompt === "Select a changed file to review" ? (
               <FileDiff aria-hidden="true" size={18} />
             ) : (
@@ -14218,7 +14217,7 @@ export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
       </header>
       <div className="gyro-panel-body">
         {files.length === 0 ? (
-          <div className="gyro-empty-row">
+          <div className="gyro-empty-state is-compact gyro-empty-row">
             Open a workspace to inspect files
           </div>
         ) : (
@@ -14525,7 +14524,7 @@ function TerminalDiffControl({
                 </button>
               ))
             ) : (
-              <div className="gyro-terminal-diff-empty">Working tree clean</div>
+              <div className="gyro-empty-state is-compact gyro-terminal-diff-empty">Working tree clean</div>
             )}
           </div>
           {sourceControl.files.length > files.length ? (
@@ -15520,7 +15519,7 @@ function WorkbenchPaneContent({
               </button>
             ))
           ) : (
-            <div className="gyro-panel-empty">
+            <div className="gyro-empty-state is-compact gyro-panel-empty">
               No diagnostics yet. Language server status will appear here when
               configured.
             </div>
@@ -15665,7 +15664,7 @@ function TestResultsPane({
             );
           })
         ) : (
-          <div className="gyro-panel-empty">
+          <div className="gyro-empty-state is-compact gyro-panel-empty">
             No test tasks found in this workspace.
           </div>
         )}
@@ -17166,7 +17165,7 @@ function AutomationDetail({
         <strong>Run history</strong>
         <p>Execution requires Gyro to remain running.</p>
         {history.length === 0 ? (
-          <div className="gyro-empty-row">No runs recorded yet</div>
+          <div className="gyro-empty-state is-compact gyro-empty-row">No runs recorded yet</div>
         ) : null}
         {history.map((run) => (
           <div className="gyro-automation-run" key={run.id}>
@@ -17518,7 +17517,7 @@ export function ProvidersSurface({
             <strong>Active sessions</strong>
             <div className="gyro-provider-session-list">
               {providerSessions.length === 0 ? (
-                <div className="gyro-empty-row">No provider sessions yet</div>
+                <div className="gyro-empty-state is-compact gyro-empty-row">No provider sessions yet</div>
               ) : null}
               {providerSessions.slice(0, 4).map((session) => (
                 <div className="gyro-provider-session-row" key={session.id}>
@@ -17538,7 +17537,7 @@ export function ProvidersSurface({
             <strong>Recent handoffs</strong>
             <div className="gyro-provider-session-list">
               {providerHandoffs.length === 0 ? (
-                <div className="gyro-empty-row">No handoffs queued yet</div>
+                <div className="gyro-empty-state is-compact gyro-empty-row">No handoffs queued yet</div>
               ) : null}
               {providerHandoffs.slice(0, 4).map((handoff) => (
                 <div className="gyro-provider-session-row" key={handoff.id}>
@@ -17738,7 +17737,7 @@ export function DiffReviewSurface({
           role="tree"
         >
           {diffTree.length === 0 ? (
-            <div className="gyro-diff-tree-empty">No file changes yet.</div>
+            <div className="gyro-empty-state is-compact gyro-diff-tree-empty">No file changes yet.</div>
           ) : (
             diffTree.map((node) =>
               renderDiffTreeNode({
@@ -17826,7 +17825,7 @@ export function DiffReviewSurface({
           {selectedFile ? (
             <>
               {selectedFile.lines.length === 0 ? (
-                <div className="gyro-diff-tree-empty">
+                <div className="gyro-empty-state is-compact gyro-diff-tree-empty">
                   No text preview available for this file.
                 </div>
               ) : null}
@@ -18112,7 +18111,7 @@ function ScmBranchPicker({
                 Create new branch…
               </button>
               {branches.length === 0 ? (
-                <div className="gyro-scm-branch-empty">
+                <div className="gyro-empty-state is-compact gyro-scm-branch-empty">
                   {branchCatalog?.error ?? error ?? "No local branches found."}
                 </div>
               ) : (
@@ -18344,7 +18343,7 @@ function GithubSidebarPanel({
                       );
                     })
                   ) : (
-                    <div className="gyro-sidebar-mini-copy">Loading jobs…</div>
+                    <Skeleton label="Loading jobs" lines={3} />
                   )}
                   <div className="gyro-sidebar-github-actions">
                     <button
@@ -20282,11 +20281,12 @@ export function CommandPaletteOverlay({
           role="listbox"
         >
           {visibleEntries.length === 0 ? (
-            <div className="gyro-global-search-empty">
-              <Search size={18} />
-              <strong>No results for “{query.trim()}”</strong>
-              <span>Try a file, project, session title, or Gyro action.</span>
-            </div>
+            <EmptyState
+              className="gyro-global-search-empty"
+              detail="Try a file, project, session title, or Gyro action."
+              icon={<Search size={18} />}
+              title={`No results for “${query.trim()}”`}
+            />
           ) : null}
           {groups.map((group) => (
             <section className="gyro-global-search-group" key={group.id}>
@@ -21787,29 +21787,37 @@ export function SettingsSurface({
                   </div>
                 ) : providerUsage?.status === "loading" ||
                   providerUsage?.status === "error" ? (
-                  <div className="gyro-usage-empty" role="status">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>
-                        {providerUsage.status === "loading"
-                          ? "Loading provider allowance…"
-                          : "Provider allowance could not be loaded"}
-                      </strong>
-                      <span>
-                        {providerUsage.error ??
-                          "Connect or refresh this provider to load plan usage."}
-                      </span>
-                    </div>
-                    <button
-                      className="gyro-button is-secondary"
-                      disabled={providerUsage.status === "loading"}
-                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
-                      type="button"
-                    >
-                      <RefreshCw size={14} />
-                      Refresh
-                    </button>
-                  </div>
+                  <EmptyState
+                    action={
+                      <button
+                        className="gyro-button is-secondary is-small"
+                        disabled={providerUsage.status === "loading"}
+                        onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
+                        type="button"
+                      >
+                        <RefreshCw size={14} />
+                        Refresh
+                      </button>
+                    }
+                    className="gyro-usage-empty"
+                    detail={
+                      providerUsage.error ??
+                      "Connect or refresh this provider to load plan usage."
+                    }
+                    icon={
+                      providerUsage.status === "loading" ? (
+                        <Spinner size={16} />
+                      ) : (
+                        <Gauge size={20} />
+                      )
+                    }
+                    role={providerUsage.status === "loading" ? "status" : "alert"}
+                    title={
+                      providerUsage.status === "loading"
+                        ? "Loading provider allowance…"
+                        : "Provider allowance could not be loaded"
+                    }
+                  />
                 ) : /* No plan windows to show — fall back to what Gyro measured
                      itself. This is the only usage view Gemini has, and the
                      fallback for every provider whose live read failed. */
@@ -21832,25 +21840,22 @@ export function SettingsSurface({
                     ))}
                   </div>
                 ) : (
-                  <div className="gyro-usage-empty" role="status">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>No usage recorded yet</strong>
-                      <span>
-                        Start a chat or refresh to check provider usage.
-                      </span>
-                    </div>
-                  </div>
+                  <EmptyState
+                    className="gyro-usage-empty"
+                    detail="Start a chat or refresh to check provider usage."
+                    icon={<Gauge size={20} />}
+                    role="status"
+                    title="No usage recorded yet"
+                  />
                 )}
               </div>
             ) : (
-              <div className="gyro-usage-empty">
-                <Gauge size={22} />
-                <div>
-                  <strong>No providers configured</strong>
-                  <span>Connect a provider to inspect reported usage.</span>
-                </div>
-              </div>
+              <EmptyState
+                className="gyro-usage-empty"
+                detail="Connect a provider to inspect reported usage."
+                icon={<Gauge size={20} />}
+                title="No providers configured"
+              />
             )}
             <SettingsGroup label="Spend limits">
               <SettingsRow
@@ -23777,7 +23782,7 @@ function ComposerPopover({
       {searchable &&
       needle &&
       !listItems.some((item) => item.kind === "branch") ? (
-        <div className="gyro-composer-menu-empty">No matching branches</div>
+        <div className="gyro-empty-state is-compact gyro-composer-menu-empty">No matching branches</div>
       ) : null}
       {listItems.map(renderItem)}
       {footerItems.length ? (
@@ -28199,7 +28204,9 @@ function ChangeSummaryDiff({
   return (
     <div className="gyro-change-summary-diff">
       {state.status === "loading" ? (
-        <p className="gyro-change-summary-diff-note">Loading the change…</p>
+        <p className="gyro-change-summary-diff-note" role="status">
+          <Spinner size={12} /> Loading the change…
+        </p>
       ) : null}
       {state.status === "failed" ? (
         <p className="gyro-change-summary-diff-note">{state.error}</p>
@@ -28553,7 +28560,7 @@ function CouncilResponseCard({
               {expanded ? (
                 <div className="gyro-council-seat-body">
                   {loadingSeatId === seat.id ? (
-                    <p className="gyro-muted">Loading seat output…</p>
+                    <Skeleton label="Loading seat output" lines={4} />
                   ) : (
                     <pre className="gyro-council-seat-output">{body}</pre>
                   )}

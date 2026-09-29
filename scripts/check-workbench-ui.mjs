@@ -1144,7 +1144,7 @@ expect(
   surfaceSource.includes("function clampWorkspacePreparationPopover") &&
     surfaceSource.includes("popover.style.transform") &&
     surfaceSource.includes('window.addEventListener("resize", place)') &&
-    styleSource.includes("gyro-preparation-spin") &&
+    styleSource.includes("@keyframes gyro-spin") &&
     styleSource.includes("max-height: min(420px, calc(100dvh - 16px));") &&
     styleSource.includes("right: auto;") &&
     styleSource.includes("bottom: calc(100% + 8px);"),
