@@ -76,7 +76,8 @@
   background: var(--gyro-surface);
 }
 .gyro-scheduled-search:focus-visible {
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-scheduled-filters {
   display: inline-flex;
@@ -368,8 +369,8 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 .gyro-scheduled-page :is(button, input, select, textarea):focus-visible {
-  outline: 2px solid var(--gyro-muted);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 @media (max-width: 850px) {
   .gyro-scheduled-panel {
@@ -799,8 +800,8 @@
 }
 
 .gyro-automation-choice-search:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-automation-choice-list {
@@ -852,7 +853,6 @@
 
 .gyro-automation-choice-option:hover,
 .gyro-automation-choice-option:focus-visible {
-  outline: none;
   background: var(--gyro-surface-soft);
 }
 

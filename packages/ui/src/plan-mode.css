@@ -65,7 +65,6 @@
 .gyro-plan-card-actions > button:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
-  outline: none;
 }
 
 /* The preview fades out through a mask, so it reads the same on any surface
@@ -136,7 +135,6 @@
 .gyro-plan-card-more:hover,
 .gyro-plan-card-more:focus-visible {
   color: var(--gyro-text);
-  outline: none;
 }
 
 .gyro-plan-card-more > svg {
@@ -220,7 +218,6 @@
 .gyro-question-answers-toggle:hover,
 .gyro-question-answers-toggle:focus-visible {
   color: var(--gyro-text);
-  outline: none;
 }
 
 .gyro-question-answers-toggle > svg:first-child {
@@ -420,8 +417,8 @@
 
 .gyro-plan-panel-views > button:focus-visible,
 .gyro-plan-panel-action:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-plan-panel-action {
@@ -553,8 +550,8 @@
 }
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-check:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Scoped through the check button so the steps list's generic span rules

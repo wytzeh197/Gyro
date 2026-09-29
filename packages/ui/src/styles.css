@@ -71,6 +71,12 @@
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
   --gyro-shadow: rgba(0, 0, 0, 0.42);
   --gyro-focus-ring: var(--gyro-accent);
+  /* One focus ring: 2px in the focus colour, outside the control, or inside
+     it (inset) for rows in lists, menus and tabs where an outer ring would
+     be clipped. The rule itself lives in theme.css so it covers first paint. */
+  --gyro-focus-width: 2px;
+  --gyro-focus-offset: 2px;
+  --gyro-focus-offset-inset: -2px;
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
@@ -5169,7 +5175,8 @@ body {
 }
 
 .gyro-browser-rail-resize-handle:focus-visible {
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-browser-rail .gyro-browser-preview {
@@ -6227,19 +6234,6 @@ body {
   color: var(--gyro-text);
 }
 
-:where(
-  button,
-  input,
-  textarea,
-  select,
-  summary,
-  [role="treeitem"],
-  [tabindex]
-):focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 1px;
-}
-
 .gyro-sidebar-explorer-row {
   padding-block: 0;
 }
@@ -7015,8 +7009,8 @@ body {
 }
 
 .gyro-ide-project-empty > button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Chat tool chooser */
@@ -7078,7 +7072,8 @@ body {
 
 .gyro-chat-tool-launcher button:focus-visible {
   border-color: var(--gyro-focus-ring);
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-chat-tool-launcher button:hover > svg {
@@ -7276,6 +7271,8 @@ body {
   height: 24px;
   opacity: 0.9;
   top: calc(50% - 12px);
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-action,
@@ -8456,8 +8453,8 @@ body {
 }
 
 .gyro-chat-start .gyro-composer-shell button:focus-visible {
-  box-shadow: 0 0 0 1px rgba(241, 238, 233, 0.18);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-chat-start .gyro-composer-context-row .gyro-composer-chip {
@@ -10156,8 +10153,8 @@ body {
 }
 
 .gyro-chat-jump-to-bottom:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 58%, transparent);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -13002,8 +12999,8 @@ textarea,
 
 .gyro-sidebar-update-button:focus-visible,
 .gyro-update-primary:focus-visible {
-  outline: 2px solid #6d98ff;
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-update-primary {
@@ -13166,16 +13163,6 @@ textarea,
 .gyro-command-palette,
 .gyro-project-remove-card {
   border-radius: var(--gyro-radius-lg);
-}
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[role="button"]:focus-visible,
-[role="tab"]:focus-visible {
-  outline: 1px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
 }
 
 /* Chat */
@@ -15356,6 +15343,8 @@ button.gyro-settings-row em::after {
 .gyro-settings-group .gyro-provider-row:has(:focus-visible),
 .gyro-provider-table > .gyro-provider-row:has(:focus-visible) {
   background: color-mix(in srgb, var(--gyro-accent) 6%, transparent);
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-settings-status {
@@ -15478,8 +15467,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-provider-default-model select:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 78%, white 10%);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-provider-row.is-readiness-only .gyro-provider-default-model select {
@@ -15516,8 +15505,8 @@ button.gyro-settings-row em::after {
 .gyro-settings-switch:focus-visible,
 .gyro-settings-segmented button:focus-visible,
 .gyro-danger-button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 78%, white 10%);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-danger-button:hover:not(:disabled) {
@@ -16387,8 +16376,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-chat-run-change-summary-trigger:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-chat-run-change-summary-trigger strong {
@@ -16548,8 +16537,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-keep-alive-actions > button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 @keyframes gyro-keep-alive-pulse {
@@ -16991,8 +16980,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-goal-strip-actions button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-goal-strip[data-status="complete"] .gyro-goal-strip-text {
@@ -17256,7 +17245,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-chat-companion-resizer:focus-visible {
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-chat-companion.is-resizing {
@@ -18887,9 +18877,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-composer-context-wheel:focus-visible {
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--gyro-accent) 48%, transparent);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-composer-context-tooltip {
@@ -19259,9 +19248,8 @@ button.gyro-settings-row em::after {
 .gyro-app-shell.is-chat-shell
   .gyro-session-row.is-active
   .gyro-sidebar-thread-main:focus-visible {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-focus-ring) 34%, transparent);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 /* Sessions combines Chat and CLI navigation without merging their canvases. */
@@ -19311,7 +19299,6 @@ button.gyro-settings-row em::after {
 .gyro-sidebar-cli-profiles button:hover,
 .gyro-sidebar-cli-profiles button:focus-visible {
   background: var(--gyro-control-hover);
-  outline: 0;
 }
 
 .gyro-sidebar-new-session-menu button:disabled {
@@ -19396,8 +19383,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-sidebar-new-session-menu button:focus-visible {
-  outline: 2px solid var(--gyro-muted);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-sidebar-session-group.is-more > button > svg {
@@ -19964,8 +19951,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-tools-card:focus-visible {
-  box-shadow: 0 0 0 3px var(--gyro-focus-ring);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-tools-card-icon {
@@ -20129,9 +20116,8 @@ button.gyro-settings-row em::after {
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-explorer-tree
   .gyro-sidebar-row.gyro-sidebar-explorer-row[aria-selected="true"]:focus-visible {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-accent) 78%, transparent);
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-workspace-route.is-code .gyro-editor-groups .gyro-editor-pane {
@@ -21429,8 +21415,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-workspace-activity-rail button:focus-visible {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-app-shell.is-workspace-shell .gyro-sidebar-windowbar {
@@ -25129,8 +25115,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-composer-popover .gyro-composer-menu-item:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--gyro-hairline-strong);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 /* Current value of a setting: bright enough to read at a glance. The label
@@ -25270,8 +25256,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-transcript-image-preview:focus-visible {
-  box-shadow: 0 0 0 2px var(--gyro-accent);
-  outline: 0;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-transcript-image-preview > img {
@@ -25468,7 +25454,6 @@ button.gyro-settings-row em::after {
 .gyro-chat-environment-popover-rows > button:hover,
 .gyro-chat-environment-popover-rows > button:focus-visible {
   background: var(--gyro-control-hover);
-  outline: 0;
 }
 
 .gyro-chat-environment-popover-rows > button > svg:first-child {
@@ -25536,7 +25521,6 @@ button.gyro-settings-row em::after {
 .gyro-chat-environment-popover-notice:hover,
 .gyro-chat-environment-popover-notice:focus-visible {
   background: color-mix(in srgb, var(--gyro-warn) 16%, transparent);
-  outline: 0;
 }
 
 .gyro-chat-environment-popover-notice > svg {
@@ -25583,7 +25567,6 @@ button.gyro-settings-row em::after {
 .gyro-chat-environment-popover-actions > button:not(:disabled):hover,
 .gyro-chat-environment-popover-actions > button:focus-visible {
   background: var(--gyro-control-hover);
-  outline: 0;
 }
 
 /* A blocked row still names its reason rather than going silent, so it dims
@@ -25726,8 +25709,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-composer-blocker > button:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Failed turns are one recovery card instead of a detached label, a narrow
@@ -26006,8 +25989,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-color-control input:focus-visible + .gyro-color-swatch {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-color-control code {
@@ -26044,8 +26027,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-color-reset:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Shared hierarchy -------------------------------------------------------- */
@@ -26063,17 +26046,6 @@ body,
 .gyro-settings-surface {
   background: var(--gyro-app);
   color: var(--gyro-text);
-}
-
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[role="button"]:focus-visible,
-[tabindex="0"]:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
 }
 
 .gyro-sidebar,
@@ -26245,8 +26217,8 @@ textarea:focus-visible,
 }
 
 .gyro-chat-start-workspace-name:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 5px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-chat-start-workspace-popup {
@@ -27893,8 +27865,8 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-row:focus-within {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-sidebar-section
   .gyro-scm-panel
@@ -28011,8 +27983,8 @@ textarea:focus-visible,
 }
 .gyro-review-toolbar > button:focus-visible,
 .gyro-scm-history > summary:focus-visible {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 @media (max-width: 800px) {
   .gyro-review-toolbar > button > span {
@@ -28113,8 +28085,8 @@ textarea:focus-visible,
 .gyro-language-menu [role="option"]:hover,
 .gyro-language-menu [role="option"]:focus-visible {
   background: #8883;
-  outline: 1px solid var(--gyro-accent, #79c0ff);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-language-menu [aria-selected="true"] {
   background: #8882;
@@ -28249,8 +28221,8 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 .gyro-effort-slider-header button:focus-visible {
-  outline: 1.9px solid #3982fa;
-  outline-offset: 2.85px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 .gyro-effort-slider {
   position: relative;
@@ -28369,8 +28341,8 @@ textarea:focus-visible,
   box-shadow: var(--gyro-elev-raised);
 }
 .gyro-effort-slider input:focus-visible {
-  outline: 1.9px solid #3982fa;
-  outline-offset: 3.8px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 .gyro-effort-slider input:disabled {
   cursor: default;
@@ -28532,8 +28504,8 @@ textarea:focus-visible,
 }
 .gyro-inline-approval-actions button:focus-visible,
 .gyro-inline-approval summary:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 .gyro-inline-approval.is-approved .gyro-inline-approval-status svg,
 .gyro-inline-approval.is-applied .gyro-inline-approval-status svg {
@@ -28587,8 +28559,8 @@ textarea:focus-visible,
   color: var(--gyro-muted);
 }
 .gyro-help-search:focus-within {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 .gyro-help-search input {
   min-width: 0;
@@ -28757,8 +28729,8 @@ textarea:focus-visible,
 .gyro-help button:focus-visible,
 .gyro-help summary:focus-visible,
 .gyro-help a:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
   border-radius: var(--gyro-radius-xs);
 }
 .gyro-help-footer {
@@ -28873,7 +28845,6 @@ textarea:focus-visible,
 }
 .gyro-scm-history-resizer:hover,
 .gyro-scm-history-resizer:focus-visible {
-  outline: none;
 }
 .gyro-scm-history-resizer::after {
   content: "";
@@ -29090,8 +29061,8 @@ textarea:focus-visible,
 .gyro-run-task-main:focus-visible,
 .gyro-run-command-filter:focus-visible,
 .gyro-run-task-remove:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 /* The conversation header always separates its chrome from the transcript. */
@@ -29778,8 +29749,8 @@ textarea:focus-visible,
   border: 0;
 }
 :root[data-theme] .gyro-terminal-tab > button:focus-visible {
-  outline: 2px solid var(--gyro-accent, #3974d5);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button {
   border: 0;
@@ -30361,8 +30332,8 @@ textarea:focus-visible,
 }
 
 .gyro-scm-history-entry:focus-visible {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-scm-history-entry > .gyro-scm-graph-rail {
@@ -30778,8 +30749,8 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 .gyro-theme-picker button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 4px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
   border-radius: var(--gyro-radius-lg);
 }
 .gyro-settings-group-rows > .gyro-theme-picker:first-child {
@@ -31035,8 +31006,8 @@ textarea:focus-visible,
 }
 .gyro-project-edit-dialog :is(button, input):focus-visible,
 .gyro-project-hover-card button:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 .gyro-project-edit-dialog .gyro-project-name-input:focus-within {
   border-color: var(--gyro-accent);
@@ -31116,10 +31087,12 @@ textarea:focus-visible,
 }
 .gyro-scm-file-actions-menu > button:is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--gyro-danger) 9%, transparent);
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-scm-file-actions-menu > button:focus-visible {
-  outline: 1px solid var(--gyro-focus-ring);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-scm-file-actions-menu > button:disabled {
   opacity: 0.45;
@@ -31295,8 +31268,8 @@ textarea:focus-visible,
   .gyro-browser-preview.is-chat
   .gyro-browser-preview-toolbar
   button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 /* Keep the complete patch legible in both the narrow Review rail and editor. */
@@ -32318,8 +32291,8 @@ textarea:focus-visible,
   )
   > button:focus-visible {
   background: var(--gyro-control-hover);
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: -2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 :root[data-theme] .gyro-chat-environment-popover-actions {
@@ -32438,8 +32411,8 @@ textarea:focus-visible,
 .gyro-settings-confirm-overlay button:focus-visible,
 .gyro-terminal-terminate-actions button:focus-visible,
 .gyro-project-remove-actions button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 3px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-provider-api-key-section,
@@ -32758,8 +32731,8 @@ textarea:focus-visible,
 .gyro-transcript-attachment-rerun:focus-visible,
 .gyro-terminal-send-selection:focus-visible,
 .gyro-composer-attachment-preview-toggle:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-terminal-send-selection {
@@ -32972,8 +32945,8 @@ textarea:focus-visible,
 .gyro-model-rail-tile:focus-visible,
 .gyro-model-rail-model:focus-visible,
 .gyro-model-rail-empty button:focus-visible {
-  outline: 1.9px solid var(--gyro-model-rail-accent);
-  outline-offset: -1.9px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-model-rail-pane {
@@ -33660,7 +33633,6 @@ textarea:focus-visible,
   .gyro-workspace-tool-panel.is-resizable
   > .gyro-tool-panel-resize-handle:focus-visible {
   background: transparent;
-  outline: 0;
 }
 
 :root[data-theme]
@@ -34120,7 +34092,8 @@ textarea:focus-visible,
 
 .gyro-output-channel-select:focus-visible {
   border-color: var(--gyro-accent);
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-test-result:not(:disabled) {

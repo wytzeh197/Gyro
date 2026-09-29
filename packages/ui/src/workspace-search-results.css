@@ -130,6 +130,6 @@
 }
 
 .gyro-workspace-search-results button:focus-visible {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }

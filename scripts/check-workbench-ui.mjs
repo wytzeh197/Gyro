@@ -7695,7 +7695,8 @@ expect(
     appSource.includes('"--gyro-user-secondary"') &&
     styleSource.includes("Large surfaces stay neutral") &&
     !styleSource.includes("var(--gyro-secondary-accent) 1.5%") &&
-    styleSource.includes("outline: 2px solid var(--gyro-accent)"),
+    styleSource.includes("--gyro-focus-width: 2px;") &&
+    !styleSource.includes("outline: 1px solid var(--gyro-focus-ring)"),
   "The premium graphite system should keep one token authority with thin hairlines, fast motion, and dark/light accent parity.",
 );
 

@@ -37,8 +37,8 @@
 .gyro-installed-update-trigger:focus-visible,
 .gyro-installed-update-dismiss:focus-visible,
 .gyro-installed-update-card button:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-installed-update-icon,

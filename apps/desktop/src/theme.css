@@ -6,19 +6,24 @@ button {
   cursor: pointer;
 }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
-}
-
-:root[data-theme="light"] button:focus-visible,
-:root[data-theme="light"] input:focus-visible,
-:root[data-theme="light"] select:focus-visible,
-:root[data-theme="light"] textarea:focus-visible {
-  outline-color: var(--gyro-focus-ring);
+/* The single focus ring for the whole app. Components only choose an inset
+   offset where an outer ring would be clipped; see --gyro-focus-* tokens. */
+:where(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="tab"],
+    [role="option"],
+    [role="menuitem"],
+    [role="treeitem"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+  outline: var(--gyro-focus-width, 2px) solid var(--gyro-focus-ring, #4d9cf2);
+  outline-offset: var(--gyro-focus-offset, 2px);
 }
 
 .gyro-root-error {

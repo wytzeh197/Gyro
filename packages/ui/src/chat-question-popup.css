@@ -19,7 +19,6 @@
    it, so no second ring is drawn around the whole card. */
 :root .gyro-question-dock:focus,
 :root .gyro-question-dock:focus-visible {
-  outline: none;
 }
 
 .gyro-question-dock-head {
@@ -110,7 +109,6 @@
 .gyro-question-dock-close:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
-  outline: none;
 }
 
 .gyro-question-dock-pager > button:disabled {
@@ -148,11 +146,11 @@
 .gyro-question-option:hover:not(:disabled),
 .gyro-question-option:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  outline: none;
 }
 
 .gyro-question-option:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-question-option[aria-pressed="true"] {
@@ -305,7 +303,6 @@
 .gyro-question-dock-skip:focus-visible {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
-  outline: none;
 }
 
 .gyro-question-dock-send {
@@ -328,8 +325,8 @@
 }
 
 .gyro-question-dock-send:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-question-dock-note {
