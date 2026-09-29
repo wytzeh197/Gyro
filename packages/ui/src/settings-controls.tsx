@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { Segmented } from "./primitives";
 
 /**
  * The settings controls every section is built from.
@@ -122,19 +123,7 @@ export function SettingsSegmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div aria-label={label} className="gyro-settings-segmented" role="group">
-      {options.map((option) => (
-        <button
-          aria-pressed={value === option.value}
-          className={value === option.value ? "is-active" : ""}
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
+    <Segmented label={label} onChange={onChange} options={options} value={value} />
   );
 }
 

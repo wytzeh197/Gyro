@@ -715,156 +715,27 @@
   background: var(--gyro-surface-soft);
 }
 
-.gyro-automation-choice {
+.gyro-select.gyro-automation-choice {
   display: flex;
   justify-content: flex-end;
   min-width: 0;
   max-width: 72%;
 }
 
-.gyro-scheduled-setting .gyro-automation-choice-trigger {
-  max-width: 100%;
-  min-height: 34px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 6px 9px;
+/* Setting rows show the value right-aligned and quiet until hovered. */
+.gyro-scheduled-setting .gyro-automation-choice .gyro-select-trigger {
+  background: transparent;
+  border-color: transparent;
   justify-content: flex-end;
-  color: var(--gyro-text);
+  min-height: 34px;
+  min-width: 0;
   text-align: right;
-  transition:
-    background-color var(--gyro-motion-fast) var(--gyro-ease),
-    border-color var(--gyro-motion-fast) var(--gyro-ease);
 }
 
-.gyro-automation-choice-trigger > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-automation-choice-trigger svg {
-  flex: none;
-  color: var(--gyro-muted);
-  transition: transform var(--gyro-motion) var(--gyro-ease);
-}
-
-.gyro-automation-choice-trigger.is-open svg {
-  transform: rotate(180deg);
-}
-
-.gyro-scheduled-setting .gyro-automation-choice-trigger:hover,
-.gyro-scheduled-setting .gyro-automation-choice-trigger.is-open {
+.gyro-scheduled-setting .gyro-automation-choice .gyro-select-trigger:hover:not(:disabled),
+.gyro-scheduled-setting .gyro-automation-choice .gyro-select-trigger.is-open {
   background: var(--gyro-surface-soft);
   border-color: var(--gyro-border);
-}
-
-.gyro-automation-choice-menu {
-  position: fixed;
-  z-index: calc(var(--gyro-z-popover) + 4);
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 6px;
-  overflow: hidden;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: 12px;
-  background: var(--gyro-surface-raised);
-  color: var(--gyro-text);
-  box-shadow: var(--gyro-elev-pop);
-  animation: gyro-automation-menu-in var(--gyro-motion)
-    var(--gyro-ease) both;
-}
-
-@keyframes gyro-automation-menu-in {
-  from {
-    transform: translateY(-4px) scale(0.99);
-  }
-  to {
-    transform: translateY(0) scale(1);
-  }
-}
-
-.gyro-automation-choice-search {
-  box-sizing: border-box;
-  flex: none;
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid var(--gyro-border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: var(--gyro-pane);
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-}
-
-.gyro-automation-choice-search:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset-inset);
-}
-
-.gyro-automation-choice-list {
-  min-height: 0;
-  overflow: auto;
-}
-
-.gyro-automation-choice-option {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 36px;
-  border: 0;
-  border-radius: 7px;
-  padding: 7px 9px;
-  background: transparent;
-  color: var(--gyro-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.gyro-automation-choice-option > span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.gyro-automation-choice-option strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  white-space: nowrap;
-}
-
-.gyro-automation-choice-option small {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-}
-
-.gyro-automation-choice-option svg {
-  flex: none;
-  color: var(--gyro-accent);
-}
-
-.gyro-automation-choice-option:hover,
-.gyro-automation-choice-option:focus-visible {
-  background: var(--gyro-surface-soft);
-}
-
-.gyro-automation-choice-option.is-selected {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
-}
-
-.gyro-automation-choice-empty {
-  margin: 0;
-  padding: 12px 9px;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
 }
 
 .gyro-scheduled-conditional {
@@ -955,14 +826,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .gyro-scheduled-page .gyro-scheduled-setting,
-  .gyro-scheduled-page .gyro-automation-choice-trigger,
-  .gyro-scheduled-page .gyro-automation-choice-trigger svg,
+  .gyro-scheduled-page .gyro-select-trigger,
+  .gyro-scheduled-page .gyro-select-trigger svg,
   .gyro-scheduled-page .gyro-scheduled-advanced summary,
   .gyro-scheduled-page .gyro-scheduled-advanced summary svg,
   .gyro-scheduled-page .gyro-scheduled-intent :is(input, textarea) {
     transition: none;
   }
-  .gyro-automation-choice-menu,
+  .gyro-select-menu,
   .gyro-scheduled-conditional,
   .gyro-scheduled-advanced[open] > label {
     animation: none;

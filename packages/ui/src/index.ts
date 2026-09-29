@@ -1,5 +1,25 @@
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
+export {
+  Badge,
+  Button,
+  buttonClass,
+  Dialog,
+  Dot,
+  EmptyState,
+  IconButton,
+  iconButtonClass,
+  Segmented,
+  SelectMenu,
+  Skeleton,
+  Spinner,
+  type ButtonVariant,
+  type ControlSize,
+  type SegmentedOption,
+  type SelectMenuOption,
+  type Tone,
+} from "./primitives";
+export { ToastStack, toastTone, visibleToasts } from "./toast-stack";
 export { interfaceScales } from "./appearance";
 export type { InterfaceSize, MotionSpeed } from "./types";
 export type {

@@ -3,6 +3,7 @@ import { SettingsSegmented } from "./settings-controls";
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
+import { ToastStack } from "./toast-stack";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -2628,6 +2629,10 @@ export function AppChrome({
         ) : null}
         {children}
       </main>
+      <ToastStack
+        notifications={notifications}
+        onDismiss={onDismissNotification}
+      />
     </div>
   );
 }
