@@ -335,21 +335,6 @@
   min-height: 110px;
   resize: vertical;
 }
-.gyro-scheduled-editor .gyro-automation-create-context {
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--gyro-border);
-  border-radius: 8px;
-  background: transparent;
-  display: grid;
-  gap: 8px;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  overflow-wrap: anywhere;
-}
-.gyro-scheduled-editor .gyro-automation-create-fields {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 14px;
-}
 .gyro-scheduled-editor footer {
   display: flex;
   justify-content: flex-end;
@@ -565,16 +550,6 @@
   font-size: calc(11px * var(--gyro-ui-scale, 1));
   line-height: 1.4;
 }
-.gyro-scheduled-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 .gyro-scheduled-settings-section {
   margin-top: 8px;
 }
@@ -588,8 +563,7 @@
   border: 1px solid var(--gyro-border);
   border-radius: 14px;
 }
-.gyro-scheduled-setting,
-.gyro-scheduled-editor .gyro-automation-create-fields > label {
+.gyro-scheduled-setting {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -613,27 +587,6 @@
   padding: 6px 0;
   font: inherit;
   cursor: pointer;
-}
-.gyro-scheduled-editor .gyro-automation-create-fields {
-  display: contents;
-}
-.gyro-scheduled-editor
-  .gyro-automation-create-fields:last-child
-  > label:last-child {
-  border-bottom: 0;
-}
-.gyro-scheduled-editor .gyro-automation-create-fields :is(input, select) {
-  width: auto;
-  max-width: 70%;
-  min-width: 0;
-  text-align: right;
-  height: 32px;
-  padding: 4px 0 4px 8px;
-  border: 0;
-  border-radius: 4px;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  color: var(--gyro-muted);
-  background: transparent;
 }
 .gyro-scheduled-advanced {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
@@ -720,8 +673,7 @@
   padding: 0 10px;
 }
 
-.gyro-scheduled-setting,
-.gyro-scheduled-editor .gyro-automation-create-fields > label {
+.gyro-scheduled-setting {
   min-height: 48px;
   padding: 0 4px;
 }

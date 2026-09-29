@@ -132,11 +132,7 @@
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
-  .gyro-message.is-assistant,
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-assistant-response {
+  .gyro-message.is-assistant {
   font: calc(14.5px * var(--gyro-ui-scale, 1))/1.65 var(--gyro-font-sans);
   text-align: left;
 }

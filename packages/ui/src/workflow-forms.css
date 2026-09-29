@@ -45,8 +45,7 @@
   gap: 8px;
   justify-content: flex-end;
 }
-.gyro-workflow-form button,
-.gyro-task-card button {
+.gyro-workflow-form button {
   padding: 7px 11px;
   border: 1px solid var(--gyro-border, #8884);
   border-radius: 6px;
@@ -69,19 +68,4 @@
 
 .gyro-workflow-form input[type="checkbox"] {
   width: auto;
-}
-
-.gyro-task-project-heading {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
-  padding: 12px 16px 0;
-  overflow-wrap: anywhere;
-  color: var(--gyro-muted);
-}
-.gyro-task-meta-grid {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  color: var(--gyro-muted);
 }

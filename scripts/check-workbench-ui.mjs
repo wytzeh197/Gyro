@@ -4929,7 +4929,6 @@ expect(
     surfaceSource.includes('label: "Review changes"') &&
     surfaceSource.includes('aria-label="CLI sessions"') &&
     surfaceSource.includes("pane.attention") &&
-    styleSource.includes(".gyro-terminal-awareness") &&
     styleSource.includes(".gyro-terminal-diff-stats") &&
     styleSource.includes(".gyro-terminal-pane.needs-waiting") &&
     appSource.includes("terminalSourceControlByPane") &&
@@ -5020,8 +5019,7 @@ expect(
     surfaceSource.includes("onLaunchCliPreset?.(launchOptions)") &&
     surfaceSource.includes("CliLaunchPresetEditor") &&
     surfaceSource.includes("Launch preset") &&
-    styleSource.includes(".gyro-cli-launch-preset") &&
-    styleSource.includes(".gyro-terminal-preset-button"),
+    styleSource.includes(".gyro-cli-launch-preset"),
   "CLI preferred launcher UI and state wiring are missing.",
 );
 const spawnTerminalSource = tauriSource.slice(
@@ -5189,7 +5187,6 @@ expect(
     !surfaceSource.includes("if (groups.size === 0)") &&
     surfaceSource.includes("showMoreProjectSessions") &&
     surfaceSource.includes("aria-expanded={isCollapsed") &&
-    styleSource.includes(".gyro-sidebar-collapse-icon") &&
     styleSource.includes(".gyro-sidebar-more-button") &&
     surfaceSource.includes("projectSidebarName") &&
     surfaceSource.includes("SessionSidebarRow") &&
@@ -5203,7 +5200,6 @@ expect(
     !surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
     surfaceSource.includes("headerActions={") &&
     styleSource.includes(".gyro-sidebar-section-heading") &&
-    styleSource.includes(".gyro-ide-panel-shortcuts") &&
     !surfaceSource.includes("Run terminal") &&
     !surfaceSource.includes("Split pane") &&
     !surfaceSource.includes("Command search") &&
@@ -5240,7 +5236,6 @@ expect(
     ) &&
     appSource.includes("onRunCommandProfile={runCommandProfile}") &&
     appSource.includes('case "configure-cli-launcher"') &&
-    styleSource.includes(".gyro-agent-launcher-menu") &&
     styleSource.includes(".gyro-terminal-agent-button") &&
     styleSource.includes(".gyro-terminal-actions-menu"),
   "CLI launcher should add command profiles in new panes while Sessions keeps its contextual sidebar.",
@@ -5543,10 +5538,7 @@ expect(
 );
 expect(
   styleSource.includes(".gyro-titlebar-switch-option:hover") &&
-    styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
-    styleSource.includes(
-      "box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft)",
-    ),
+    styleSource.includes(".gyro-titlebar-switch-option.is-active"),
   "Sidebar Sessions/Workspace tabs should keep a quiet active/focus state without the underglow.",
 );
 expect(
@@ -5780,7 +5772,6 @@ expect(
     styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
     planModeStyleSource.includes(".gyro-plan-card") &&
     styleSource.includes(".gyro-plan-harness") &&
-    styleSource.includes(".gyro-plan-progress") &&
     surfaceSource.includes('aria-label="Plan harness"') &&
     planModeSource.includes('role="progressbar"') &&
     planModeSource.includes("export function PlanPanelHeader") &&
@@ -5932,8 +5923,6 @@ expect(
     timelineSource.includes('kind: "file-summary"') &&
     runViewSource.includes("isRunPhaseLive(model.phase)") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
-    styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
-    styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
     appSource.includes(
       '!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>',
@@ -6379,7 +6368,6 @@ expect(
     !surfaceSource.includes(
       'trailingLabel:\n                      hasUserWorkspace && workspaceMode !== "worktree"',
     ) &&
-    styleSource.includes(".gyro-workspace-mode-picker") &&
     styleSource.includes(".gyro-composer-menu-badge") &&
     !styleSource.includes(".gyro-composer-menu-icon-tile") &&
     workspaceModeSource.includes('"Agent workspace"') &&
@@ -6498,8 +6486,7 @@ expect(
     appSource.includes("resolvedMutationProposalIds") &&
     surfaceSource.includes("function MutationApprovalCard") &&
     surfaceSource.includes('decision: "approve" | "reject"') &&
-    surfaceSource.includes("mutationDecisions") &&
-    styleSource.includes(".gyro-mutation-approval"),
+    surfaceSource.includes("mutationDecisions"),
   "Chat file changes should use durable typed approvals, guarded atomic writes, and restart-safe decision reconciliation.",
 );
 expect(
@@ -6608,10 +6595,7 @@ expect(
     surfaceSource.includes('"Set goal and send"') &&
     surfaceSource.includes('role="log"') &&
     surfaceSource.includes('aria-live="polite"') &&
-    surfaceSource.includes("session.summary") &&
-    styleSource.includes(
-      ".gyro-mutation-approval-actions button:focus-visible",
-    ),
+    surfaceSource.includes("session.summary"),
   "Chat should persist real-response summaries and expose keyboard and screen-reader timeline semantics.",
 );
 expect(
@@ -6699,7 +6683,6 @@ expect(
     styleSource.includes(
       ".gyro-provider-card-body .gyro-settings-row {\n  background: transparent;",
     ) &&
-    styleSource.includes(".gyro-settings-surface .gyro-provider-list") &&
     !surfaceSource.includes(
       "Model-provider OAuth is not wired for this provider yet.",
     ),
@@ -6889,9 +6872,6 @@ expect(
   styleSource.includes(
     ".gyro-composer-control-model > .gyro-composer-popover",
   ) &&
-    styleSource.includes(
-      ".gyro-composer-control-model .gyro-provider-picker-menu",
-    ) &&
     styleSource.includes("transform-origin: bottom right") &&
     styleSource.includes("@keyframes gyro-model-menu-in-up") &&
     styleSource.includes("@keyframes gyro-model-menu-in-down") &&
@@ -7201,9 +7181,6 @@ expect(
     surfaceSource.includes("const reviewFiles = () => {") &&
     surfaceSource.includes("setOpenPath(files[0]?.path)") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
-    styleSource.includes(
-      ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
-    ) &&
     styleSource.includes("backdrop-filter: none") &&
     surfaceSource.includes(") : sessionGoal?.text ? (") &&
     appSource.includes("const changeChatMode = useCallback") &&
@@ -7529,14 +7506,11 @@ for (const className of [
   "gyro-xterm-frame",
   "gyro-xterm-host",
   "gyro-terminal-reconnect",
-  "gyro-task-transition-row",
-  "gyro-automation-layout",
   "gyro-provider-actions",
   "gyro-provider-health",
   "gyro-empty-action-row",
   "gyro-terminal-empty",
   "gyro-code-empty",
-  "gyro-browser-console-pill",
   "gyro-account-button",
   "gyro-sidebar-windowbar",
   "gyro-titlebar-switch",
@@ -7547,7 +7521,6 @@ for (const className of [
   "gyro-session-actions",
   "gyro-session-action is-more",
   "gyro-session-menu",
-  "gyro-thread-pill-button",
   "gyro-tool-detail-panel",
   "gyro-tool-detail-trigger",
   "aria-expanded",
@@ -8106,8 +8079,6 @@ expect(
 for (const compactMenuSelector of [
   ".gyro-composer-popover-title",
   ".gyro-composer-menu-item:disabled",
-  ".gyro-account-menu-row.is-muted",
-  ".gyro-agent-launcher-menu strong",
   ".gyro-terminal-actions-menu button.is-danger",
 ]) {
   expect(

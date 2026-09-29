@@ -198,10 +198,6 @@
     background-color 80ms ease,
     border-color 130ms ease;
 }
-.gyro-design-study .gyro-run-file-list {
-  border-color: var(--study-line);
-  border-radius: var(--gyro-radius-lg);
-}
 @media (max-width: 1050px) {
   #gyro-study-controls {
     gap: 10px;
