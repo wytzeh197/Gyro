@@ -53,7 +53,7 @@
 .gyro-workflow-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: calc(var(--gyro-z-dialog) + 5);
   display: grid;
   place-items: center;
   background: #0006;

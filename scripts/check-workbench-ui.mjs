@@ -739,7 +739,7 @@ expect(
     (rule) =>
       rule.includes("overflow: visible") &&
       rule.includes("position: relative") &&
-      rule.includes("z-index: 80"),
+      rule.includes("z-index: calc(var(--gyro-z-dropdown) + 12)"),
   ) &&
     cssRules(
       styleSource,
@@ -752,7 +752,7 @@ expect(
       (rule) =>
         rule.includes("position: absolute") &&
         rule.includes("right: 14px") &&
-        rule.includes("z-index: 100"),
+        rule.includes("z-index: calc(var(--gyro-z-dropdown) + 16)"),
     ),
   "The Environment popover should layer above the chat canvas without becoming a persistent column.",
 );
@@ -919,7 +919,7 @@ expect(
       (rule) =>
         rule.includes("position: fixed") &&
         rule.includes("isolation: isolate") &&
-        rule.includes("z-index: 80"),
+        rule.includes("z-index: calc(var(--gyro-z-dropdown) + 12)"),
     ) &&
     cssRules(styleSource, ".gyro-scm-branch-item span").some(
       (rule) =>
@@ -5784,7 +5784,7 @@ expect(
     styleSource.includes(".gyro-chat-environment-popover {") &&
     styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
     styleSource.includes("padding-top: 60px;") &&
-    styleSource.includes("z-index: 71;") &&
+    styleSource.includes("z-index: calc(var(--gyro-z-dropdown) + 10);") &&
     styleSource.includes("cursor: pointer;"),
   "AI model checklist plan events should be typed, persisted, derived, and visible in the right panel.",
 );
@@ -7204,14 +7204,14 @@ expect(
   styleSource.includes(
     ".gyro-composer-shell > .gyro-composer-bar,\n.gyro-chat-start",
   ) &&
-    styleSource.includes("z-index: 120") &&
+    styleSource.includes("z-index: calc(var(--gyro-z-dropdown) + 17)") &&
     styleSource.includes(
       ".gyro-composer-control:has(.gyro-composer-popover, .gyro-provider-picker)",
     ) &&
     styleSource.includes(
       ".gyro-app-shell.is-sidebar-hidden.is-thread-layout\n  .gyro-chat-surface.is-thread:not(.is-tiled)\n  > .gyro-chat-thread-topbar",
     ) &&
-    styleSource.lastIndexOf("z-index: 120") >
+    styleSource.lastIndexOf("z-index: calc(var(--gyro-z-dropdown) + 17)") >
       styleSource.lastIndexOf("/* Ordered chat activity"),
   "Composer menus should stay above the composer and hidden-sidebar chat titles should clear native window controls.",
 );

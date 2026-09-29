@@ -14021,7 +14021,7 @@ function EditorGroupPane({
                 position: "fixed",
                 right: "auto",
                 width: 200,
-                zIndex: 180,
+                zIndex: "var(--gyro-z-popover)",
                 left: Math.max(
                   8,
                   Math.min(actionMenu.x, window.innerWidth - 216),
