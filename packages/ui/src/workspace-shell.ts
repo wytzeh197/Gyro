@@ -328,3 +328,78 @@ export function workspaceCommandForKeybinding(
     );
   });
 }
+
+export type KeybindingPlatform = "mac" | "other";
+
+/** Two bindings collide when every modifier and the key match. */
+export function workspaceKeybindingSignature(binding: WorkspaceKeybinding) {
+  return [
+    binding.primary ? "primary" : "",
+    binding.control ? "control" : "",
+    binding.shift ? "shift" : "",
+    binding.alt ? "alt" : "",
+    binding.key.toLowerCase(),
+  ].join("+");
+}
+
+const macKeyNames: Readonly<Record<string, string>> = {
+  " ": "Space",
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
+  arrowup: "↑",
+  backspace: "⌫",
+  delete: "⌦",
+  end: "↘",
+  enter: "↩",
+  escape: "⎋",
+  home: "↖",
+  pagedown: "⇟",
+  pageup: "⇞",
+  tab: "⇥",
+};
+
+const otherKeyNames: Readonly<Record<string, string>> = {
+  " ": "Space",
+  arrowdown: "Down",
+  arrowleft: "Left",
+  arrowright: "Right",
+  arrowup: "Up",
+  escape: "Esc",
+  pagedown: "PageDown",
+  pageup: "PageUp",
+};
+
+/**
+ * The one notation every shortcut in Gyro is shown in. On a Mac the modifiers
+ * are the menu glyphs in Apple's order -- ⌃ ⌥ ⇧ ⌘ -- run together with the
+ * key, as in ⇧⌘F. Elsewhere they are words joined by "+", as in Ctrl+Shift+F.
+ */
+export function formatWorkspaceKeybinding(
+  binding: WorkspaceKeybinding,
+  platform: KeybindingPlatform,
+) {
+  const key = binding.key.toLowerCase();
+  const keyLabel =
+    (platform === "mac" ? macKeyNames : otherKeyNames)[key] ??
+    (key.length === 1
+      ? key.toUpperCase()
+      : key.charAt(0).toUpperCase() + key.slice(1));
+  if (platform === "mac") {
+    return [
+      binding.control ? "⌃" : "",
+      binding.alt ? "⌥" : "",
+      binding.shift ? "⇧" : "",
+      binding.primary ? "⌘" : "",
+      keyLabel,
+    ].join("");
+  }
+  return [
+    binding.primary || binding.control ? "Ctrl" : "",
+    binding.alt ? "Alt" : "",
+    binding.shift ? "Shift" : "",
+    keyLabel,
+  ]
+    .filter(Boolean)
+    .join("+");
+}

@@ -44,6 +44,7 @@ import {
   type TerminalSplitLayout,
 } from "./terminal-layout";
 import { SettingsHelp } from "./settings-help";
+import { WorkspaceKeyboardSettings } from "./keyboard-settings";
 import {
   SettingsGroup,
   SettingsRow,
@@ -13112,29 +13113,6 @@ function parsedLocalIdeContribution(
   };
 }
 
-function workspaceKeybindingSignature(binding: WorkspaceKeybinding) {
-  return [
-    binding.primary ? "primary" : "",
-    binding.control ? "control" : "",
-    binding.shift ? "shift" : "",
-    binding.alt ? "alt" : "",
-    binding.key.toLowerCase(),
-  ].join("+");
-}
-
-function workspaceKeybindingLabel(binding: WorkspaceKeybinding) {
-  const mac = isMacPlatform();
-  return [
-    binding.primary ? (mac ? "⌘" : "Ctrl") : "",
-    binding.control ? "Ctrl" : "",
-    binding.alt ? (mac ? "⌥" : "Alt") : "",
-    binding.shift ? (mac ? "⇧" : "Shift") : "",
-    binding.key.length === 1 ? binding.key.toUpperCase() : binding.key,
-  ]
-    .filter(Boolean)
-    .join(mac ? "" : "+");
-}
-
 type IdeSurfaceProps = {
   files: WorkspaceFile[];
   ide?: IdeState;
@@ -22555,51 +22533,12 @@ export function SettingsSurface({
           <SettingsSection
             icon={CommandIcon}
             title="Keyboard"
-            description="View app shortcuts and customize workspace shortcuts."
+            description="Change workspace shortcuts and look up the built-in ones."
           >
             <WorkspaceKeyboardSettings
               keybindings={workspaceKeybindings}
               onKeybindingChange={onWorkspaceKeybindingChange}
             />
-            <h2 className="gyro-settings-subheading">Built-in app shortcuts</h2>
-            {(
-              [
-                {
-                  label: "Navigation",
-                  items: [
-                    ["Command palette", "Cmd+Shift+P"],
-                    ["Search everything", "Cmd+K"],
-                    ["Find files", "Cmd+P"],
-                    ["Open settings", "Cmd+,"],
-                  ],
-                },
-                {
-                  label: "Chats",
-                  items: [
-                    ["New chat", "Cmd+N"],
-                    ["Show chats", "Cmd+1"],
-                    ["Show terminals", "Cmd+2"],
-                    ["Show Workspace", "Cmd+3"],
-                  ],
-                },
-                {
-                  label: "Terminal",
-                  items: [["New terminal", "Cmd+T"]],
-                },
-              ] as Array<{ label: string; items: Array<[string, string]> }>
-            ).map((group) => (
-              <SettingsGroup key={group.label} label={group.label}>
-                {group.items.map(([label, value]) => (
-                  <SettingsRow
-                    detail="Read-only app shortcut"
-                    key={label}
-                    label={label}
-                  >
-                    <kbd className="gyro-settings-key">{value}</kbd>
-                  </SettingsRow>
-                ))}
-              </SettingsGroup>
-            ))}
           </SettingsSection>
         ) : null}
 
@@ -22756,133 +22695,6 @@ export function SettingsPanel({ config }: SettingsPanelProps) {
             connected
           </strong>
         </div>
-      </div>
-    </section>
-  );
-}
-
-function WorkspaceKeyboardSettings({
-  keybindings = {},
-  onKeybindingChange,
-}: {
-  keybindings?: Record<string, WorkspaceKeybinding | null>;
-  onKeybindingChange?: (
-    commandId: string,
-    binding?: WorkspaceKeybinding | null,
-  ) => void;
-}) {
-  const [bindingError, setBindingError] = useState("");
-  return (
-    <section className="gyro-workspace-keybindings">
-      <header>
-        <div>
-          <h2>Keyboard shortcuts</h2>
-          <p>
-            Focus a shortcut and press a combination with Cmd or Ctrl. Backspace
-            clears it; the reset button restores its default.
-          </p>
-        </div>
-        <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
-      </header>
-      {bindingError ? <p role="alert">{bindingError}</p> : null}
-      <div>
-        {workspaceCommandRegistry.map((command) => {
-          const hasOverride = command.id in keybindings;
-          const binding = hasOverride
-            ? keybindings[command.id]
-            : command.keybinding;
-          const collision = binding
-            ? workspaceCommandRegistry.find((candidate) => {
-                if (candidate.id === command.id) return false;
-                const candidateBinding =
-                  candidate.id in keybindings
-                    ? keybindings[candidate.id]
-                    : candidate.keybinding;
-                return (
-                  candidateBinding &&
-                  workspaceKeybindingSignature(candidateBinding) ===
-                    workspaceKeybindingSignature(binding)
-                );
-              })
-            : undefined;
-          return (
-            <label key={command.id}>
-              <span>
-                <strong>{command.label}</strong>
-                <small>
-                  {collision
-                    ? `Conflicts with ${collision.label}`
-                    : command.description}
-                </small>
-              </span>
-              <input
-                aria-label={`Keybinding for ${command.label}`}
-                className={collision ? "is-conflict" : undefined}
-                onKeyDown={(event) => {
-                  if (event.key === "Tab") return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setBindingError("");
-                  if (event.key === "Escape") {
-                    event.currentTarget.blur();
-                    return;
-                  }
-                  if (
-                    (event.key === "Backspace" || event.key === "Delete") &&
-                    !event.metaKey &&
-                    !event.ctrlKey &&
-                    !event.altKey
-                  ) {
-                    onKeybindingChange?.(command.id, null);
-                    return;
-                  }
-                  if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) {
-                    return;
-                  }
-                  const mac = isMacPlatform();
-                  if (!event.metaKey && !event.ctrlKey) {
-                    setBindingError(
-                      "Include Cmd or Ctrl so the shortcut does not interfere with typing.",
-                    );
-                    return;
-                  }
-                  if (
-                    (mac ? event.metaKey : event.ctrlKey) &&
-                    ["k", "p", "s"].includes(event.key.toLowerCase())
-                  ) {
-                    setBindingError(
-                      "That combination is reserved for search, the command palette, or saving. Choose another shortcut.",
-                    );
-                    return;
-                  }
-                  onKeybindingChange?.(command.id, {
-                    key: event.key.toLowerCase(),
-                    primary: mac ? event.metaKey : event.ctrlKey,
-                    control: mac ? event.ctrlKey : false,
-                    shift: event.shiftKey,
-                    alt: event.altKey,
-                  });
-                }}
-                placeholder="Unassigned"
-                readOnly
-                value={binding ? workspaceKeybindingLabel(binding) : ""}
-              />
-              {hasOverride ? (
-                <button
-                  aria-label={`Reset keybinding for ${command.label}`}
-                  onClick={() => {
-                    setBindingError("");
-                    onKeybindingChange?.(command.id, undefined);
-                  }}
-                  title="Reset to default"
-                  type="button"
-                >
-                  <RefreshCw size={12} />
-                </button>
-              ) : null}
-            </label>
-          );
-        })}
       </div>
     </section>
   );
