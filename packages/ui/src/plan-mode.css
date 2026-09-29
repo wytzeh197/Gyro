@@ -2,9 +2,9 @@
    panel renders, previewed until it is expanded or moved to the panel. */
 .gyro-plan-card {
   background: var(--gyro-surface);
-  border: 1px solid var(--gyro-premium-hairline);
+  border: 1px solid var(--gyro-hairline);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 1px 2px var(--gyro-premium-shadow-soft);
+  box-shadow: 0 1px 2px var(--gyro-shadow-color-soft);
   color: var(--gyro-text);
   margin: 4px 0 2px;
   min-width: 0;
@@ -13,7 +13,7 @@
 
 .gyro-plan-card-head {
   align-items: center;
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  border-bottom: 1px solid var(--gyro-hairline-soft);
   color: var(--gyro-muted);
   display: flex;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
@@ -56,8 +56,8 @@
   justify-content: center;
   padding: 0;
   transition:
-    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
   width: 26px;
 }
 
@@ -140,7 +140,7 @@
 }
 
 .gyro-plan-card-more > svg {
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-plan-card.is-expanded .gyro-plan-card-more > svg {
@@ -235,7 +235,7 @@
 
 .gyro-question-answers-chevron {
   color: var(--gyro-faint);
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-question-answers.is-expanded .gyro-question-answers-chevron {
@@ -243,7 +243,7 @@
 }
 
 .gyro-question-answers-list {
-  border-left: 1px solid var(--gyro-premium-hairline);
+  border-left: 1px solid var(--gyro-hairline);
   display: grid;
   gap: 10px;
   margin: 6px 0 4px 6px;
@@ -283,7 +283,7 @@
 
 .gyro-plan-rail > .gyro-plan-panel-head.is-panel {
   background: var(--gyro-app);
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  border-bottom: 1px solid var(--gyro-hairline-soft);
   min-height: 56px;
   padding: 0 10px 0 14px;
 }
@@ -330,7 +330,7 @@
   align-items: center;
   background: var(--gyro-control-bg);
   border-radius: var(--gyro-radius-md);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-hairline-soft);
   color: var(--gyro-muted);
   display: inline-flex;
   flex: none;
@@ -380,7 +380,7 @@
 .gyro-plan-panel-views {
   background: var(--gyro-segment-bg);
   border-radius: var(--gyro-radius-md);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-hairline-soft);
   display: inline-flex;
   gap: 2px;
   margin-right: 4px;
@@ -402,8 +402,8 @@
   height: 24px;
   padding: 0 9px;
   transition:
-    background var(--gyro-premium-motion) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background var(--gyro-motion) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
   white-space: nowrap;
 }
 
@@ -414,8 +414,8 @@
 .gyro-plan-panel-views > button[aria-pressed="true"] {
   background: var(--gyro-segment-active);
   box-shadow:
-    0 1px 2px var(--gyro-premium-shadow-soft),
-    inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+    0 1px 2px var(--gyro-shadow-color-soft),
+    inset 0 0 0 1px var(--gyro-hairline-soft);
   color: var(--gyro-segment-active-text);
 }
 
@@ -437,8 +437,8 @@
   justify-content: center;
   padding: 0;
   transition:
-    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
   width: 28px;
 }
 
@@ -461,7 +461,7 @@
   background: var(--gyro-status-success);
   display: block;
   height: 100%;
-  transition: width var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+  transition: width var(--gyro-motion-slow) var(--gyro-ease);
 }
 
 /* A narrow panel keeps the switch as icons so the title keeps its room. */
@@ -481,7 +481,7 @@
   background: transparent;
   border: 0;
   border-radius: 0;
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  border-top: 1px solid var(--gyro-hairline-soft);
   grid-template-rows: auto minmax(0, 1fr);
   padding: 12px 4px 16px;
 }
@@ -506,8 +506,8 @@
   grid-template-columns: 20px minmax(0, 1fr) auto;
   padding: 8px 8px;
   position: relative;
-  transition: background var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
+  transition: background var(--gyro-motion-fast)
+    var(--gyro-ease);
 }
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item + .gyro-plan-item {
@@ -522,7 +522,7 @@
 
 /* The track: from under this step's mark to the next step's mark. */
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item::before {
-  background: var(--gyro-premium-hairline);
+  background: var(--gyro-hairline);
   bottom: -10px;
   content: "";
   left: calc(8px + 9.5px);
@@ -571,8 +571,8 @@
   height: 16px;
   justify-content: center;
   transition:
-    background var(--gyro-premium-motion) var(--gyro-premium-ease),
-    box-shadow var(--gyro-premium-motion) var(--gyro-premium-ease);
+    background var(--gyro-motion) var(--gyro-ease),
+    box-shadow var(--gyro-motion) var(--gyro-ease);
   width: 16px;
 }
 

@@ -59,7 +59,7 @@
   background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
   border-radius: 2px;
   height: 3px;
-  transition: background var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: background var(--gyro-motion) var(--gyro-ease);
   width: 12px;
 }
 
@@ -93,8 +93,8 @@
   justify-content: center;
   padding: 0;
   transition:
-    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
   width: 24px;
 }
 
@@ -141,8 +141,8 @@
   line-height: 1.45;
   padding: 8px 10px 8px 8px;
   text-align: left;
-  transition: background var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
+  transition: background var(--gyro-motion-fast)
+    var(--gyro-ease);
 }
 
 .gyro-question-option:hover:not(:disabled),
@@ -223,8 +223,8 @@
   opacity: 0;
   transform: translateX(-3px);
   transition:
-    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+    opacity var(--gyro-motion-fast) var(--gyro-ease),
+    transform var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-question-option:hover:not(:disabled) .gyro-question-option-go,
@@ -257,8 +257,8 @@
   margin-top: 6px;
   min-height: 36px;
   padding: 3px 4px 3px 12px;
-  transition: box-shadow var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
+  transition: box-shadow var(--gyro-motion-fast)
+    var(--gyro-ease);
 }
 
 .gyro-question-dock-other:focus-within {

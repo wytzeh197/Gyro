@@ -2,13 +2,13 @@
    prompt uses the same overlay language as project-remove and model-standard. */
 .gyro-branch-name-dialog {
   appearance: none;
-  background: var(--gyro-premium-panel, var(--gyro-surface-raised));
-  border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border));
+  background: var(--gyro-surface, var(--gyro-surface-raised));
+  border: 1px solid var(--gyro-border-soft, var(--gyro-border));
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    0 28px 88px var(--gyro-premium-shadow, rgba(0, 0, 0, 0.44)),
-    inset 0 1px 0 var(--gyro-premium-inset-highlight, rgba(255, 255, 255, 0.04));
-  color: var(--gyro-premium-text, var(--gyro-text));
+    0 28px 88px var(--gyro-shadow-color, rgba(0, 0, 0, 0.44)),
+    inset 0 1px 0 var(--gyro-inset-highlight, rgba(255, 255, 255, 0.04));
+  color: var(--gyro-text, var(--gyro-text));
   color-scheme: inherit;
   font-family: var(--gyro-font-sans);
   font-size: var(--gyro-font-support, 13px);
@@ -38,7 +38,7 @@
 }
 
 .gyro-branch-name-dialog p {
-  color: var(--gyro-premium-muted, var(--gyro-muted));
+  color: var(--gyro-muted, var(--gyro-muted));
   font-size: 13px;
   line-height: 1.5;
   margin: 0;
@@ -46,9 +46,9 @@
 }
 
 .gyro-branch-name-dialog code {
-  background: var(--gyro-premium-control, var(--gyro-surface-soft));
+  background: var(--gyro-surface-soft, var(--gyro-surface-soft));
   border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-premium-text, var(--gyro-text));
+  color: var(--gyro-text, var(--gyro-text));
   font-family: var(--gyro-font-mono, "SFMono-Regular", Consolas, monospace);
   font-size: 11px;
   overflow-wrap: anywhere;
@@ -61,18 +61,18 @@
 }
 
 .gyro-branch-name-dialog label {
-  color: var(--gyro-premium-text, var(--gyro-text));
+  color: var(--gyro-text, var(--gyro-text));
   font-size: 12px;
   font-weight: 650;
 }
 
 .gyro-branch-name-dialog input {
   appearance: none;
-  background: var(--gyro-premium-control, var(--gyro-surface-soft));
-  border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border-soft));
+  background: var(--gyro-surface-soft, var(--gyro-surface-soft));
+  border: 1px solid var(--gyro-border-soft, var(--gyro-border-soft));
   border-radius: var(--gyro-radius-sm);
   box-shadow: none;
-  color: var(--gyro-premium-text, var(--gyro-text));
+  color: var(--gyro-text, var(--gyro-text));
   font: inherit;
   min-height: var(--gyro-control-height, 32px);
   min-width: 0;

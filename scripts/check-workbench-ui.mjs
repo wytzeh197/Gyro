@@ -942,7 +942,7 @@ expect(
     branchDialogSource.includes("<code>{startPoint}</code>") &&
     branchDialogCss.includes("appearance: none") &&
     branchDialogCss.includes("-webkit-appearance: none") &&
-    branchDialogCss.includes("var(--gyro-premium-panel") &&
+    branchDialogCss.includes("var(--gyro-surface") &&
     branchDialogCss.includes("var(--gyro-scrim") &&
     branchDialogCss.includes("backdrop-filter: blur(6px)") &&
     !branchDialogCss.includes("background: canvas") &&
@@ -987,7 +987,7 @@ expect(
       ) &&
       (rail.match(/:root\[data-theme="light"\]/g) ?? []).length === 1 &&
       rail.includes("var(--gyro-success)") &&
-      rail.includes("var(--gyro-premium-hairline-strong)")
+      rail.includes("var(--gyro-hairline-strong)")
     );
   })(),
   "The run rail should be token-only so light mode falls out of the token flip.",
@@ -5171,7 +5171,7 @@ expect(
     surfaceSource.includes("appShellRef.current?.style.setProperty") &&
     styleSource.includes(".gyro-ide-sidebar-resizer") &&
     styleSource.includes(
-      "grid-template-columns var(--gyro-premium-motion-slow)",
+      "grid-template-columns var(--gyro-motion-slow)",
     ) &&
     styleSource.includes("will-change: grid-template-columns") &&
     surfaceSource.includes('label="Sessions"') &&
@@ -5427,8 +5427,8 @@ const chatSidebarSource = surfaceSource.slice(
 expect(
   cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
     (rule) =>
-      rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
-      rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
+      rule.includes("border: 1px solid var(--gyro-hairline-soft)") &&
+      rule.includes("box-shadow: 0 8px 20px var(--gyro-shadow-color-soft)") &&
       rule.includes("padding: 8px"),
   ) &&
     surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
@@ -7662,7 +7662,7 @@ expect(
     styleSource.includes("font-weight: 450") &&
     styleSource.includes("font-weight: 500") &&
     styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
-    styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
+    styleSource.includes("transition: transform var(--gyro-motion)") &&
     styleSource.includes("@keyframes gyro-native-surface-enter"),
   "Sessions and Workspace switching should use centered reference typography, the shared sliding indicator, and restrained surface motion.",
 );
@@ -7670,10 +7670,10 @@ expect(
 expect(
   (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
     styleSource.includes(
-      "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
+      "--gyro-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 9px") &&
-    styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
+    styleSource.includes("--gyro-radius-md: 9px") &&
+    styleSource.includes("--gyro-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
     styleSource.includes("--gyro-app: #141517") &&
     styleSource.includes("--gyro-pane: #17181b") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
@@ -7683,7 +7683,7 @@ expect(
     styleSource.includes(':root[data-theme="light"]') &&
     styleSource.includes("--gyro-app: #f9f9f8") &&
     styleSource.includes("--gyro-sidebar: #f2f2f0") &&
-    styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
+    styleSource.includes("--gyro-hairline: rgba(32, 36, 42, 0.11)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
     surfaceSource.includes('label="Main color"') &&
@@ -7822,7 +7822,7 @@ expect(
     ) &&
     workspaceRailFoundation.includes("pointer-events: none") &&
     workspaceRailFoundation.includes(
-      "visibility 0s linear var(--gyro-premium-motion-slow)",
+      "visibility 0s linear var(--gyro-motion-slow)",
     ) &&
     workspaceRailFoundation.includes(
       "@media (prefers-reduced-motion: reduce)",
@@ -8033,7 +8033,7 @@ expect(
     ) &&
     styleSource.includes("Hero composer: one coherent surface") &&
     styleSource.includes(
-      "border-top: 1px solid var(--gyro-premium-hairline-soft)",
+      "border-top: 1px solid var(--gyro-hairline-soft)",
     ),
   "The hero composer should render as one bordered surface without nested card borders.",
 );
