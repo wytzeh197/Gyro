@@ -63,7 +63,11 @@ export function ChatCanvas({
               ))}
             </select>
             {artifact.kind === "canvas" && artifact.format === "html" ? (
-              <div className="gyro-canvas-view-switch" aria-label="Canvas view">
+              <div
+                className="gyro-segmented is-small gyro-canvas-view-switch"
+                role="group"
+                aria-label="Canvas view"
+              >
                 <button
                   type="button"
                   aria-pressed={!codeIds[artifact.id]}

@@ -407,7 +407,7 @@ export function PlanPanelHeader({
         {onViewChange ? (
           <div
             aria-label="Plan view"
-            className="gyro-plan-panel-views"
+            className="gyro-segmented is-small gyro-plan-panel-views"
             role="group"
           >
             <button

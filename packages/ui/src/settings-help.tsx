@@ -180,7 +180,7 @@ export function SettingsHelp({
         </nav>
       )}
       <div
-        className="gyro-help-topics"
+        className="gyro-segmented gyro-help-topics"
         role="group"
         aria-label="Filter help topics"
       >

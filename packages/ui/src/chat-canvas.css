@@ -90,12 +90,6 @@
 }
 .gyro-canvas-view-switch {
   display: flex;
-  gap: 2px;
-}
-.gyro-canvas-view-switch button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, var(--gyro-pane));
-  color: var(--gyro-accent);
-  border-color: color-mix(in srgb, var(--gyro-accent) 35%, transparent);
 }
 .gyro-canvas-body.is-preview {
   display: flex;

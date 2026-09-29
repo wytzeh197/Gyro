@@ -12709,7 +12709,8 @@ function WorkspaceSettingsEditor({
         <>
           <div
             aria-label="Settings scope"
-            className="gyro-workspace-settings-scopes"
+            className="gyro-segmented gyro-workspace-settings-scopes"
+            role="group"
           >
             {(["user", "workspace", "folder"] as WorkspaceSettingScope[]).map(
               (item) => (
@@ -16540,7 +16541,7 @@ export function AutomationsSurface({
             />
           </label>
           <nav
-            className="gyro-scheduled-filters"
+            className="gyro-segmented gyro-scheduled-filters"
             aria-label="Automation status"
           >
             {(
@@ -19203,7 +19204,7 @@ export function BrowserPreviewSurface({
           >
             {hasCapture ? (
               <div
-                className="gyro-browser-view-group"
+                className="gyro-segmented is-small gyro-browser-view-group"
                 role="group"
                 aria-label="Preview mode"
               >
@@ -19228,7 +19229,7 @@ export function BrowserPreviewSurface({
               </div>
             ) : null}
             <div
-              className="gyro-browser-device-group"
+              className="gyro-segmented is-small gyro-browser-device-group"
               role="group"
               aria-label="Device size"
             >
@@ -21337,12 +21338,13 @@ function CliLaunchPresetEditor({
           <Plus size={14} />
           Add profile
         </button>
-        <div
-          className="gyro-cli-launch-focus"
-          role="group"
-          aria-label="Focus pane"
-        >
-          <span>Focus after launch</span>
+        <div className="gyro-cli-launch-focus">
+          <span id="gyro-cli-launch-focus-label">Focus after launch</span>
+          <div
+            aria-labelledby="gyro-cli-launch-focus-label"
+            className="gyro-segmented is-small"
+            role="group"
+          >
           <button
             aria-pressed={preset.focus === "first"}
             className={preset.focus === "first" ? "is-active" : ""}
@@ -21359,6 +21361,7 @@ function CliLaunchPresetEditor({
           >
             Last
           </button>
+          </div>
         </div>
       </footer>
     </div>

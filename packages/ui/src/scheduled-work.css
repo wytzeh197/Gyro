@@ -82,35 +82,7 @@
 .gyro-scheduled-filters {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 2px;
   margin: 16px 0 18px;
-  padding: 3px;
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-segment-bg);
-  box-shadow: inset 0 0 0 1px var(--gyro-hairline-soft);
-}
-.gyro-scheduled-filters button {
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  background: transparent;
-  color: var(--gyro-muted);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  padding: 5px 12px;
-  cursor: pointer;
-  transition:
-    background-color var(--gyro-motion) var(--gyro-ease),
-    color var(--gyro-motion-fast) var(--gyro-ease);
-}
-.gyro-scheduled-filters button:hover {
-  color: var(--gyro-text);
-}
-.gyro-scheduled-filters button[aria-pressed="true"] {
-  background: var(--gyro-segment-active);
-  color: var(--gyro-segment-active-text);
-  box-shadow:
-    var(--gyro-elev-raised), inset 0 0 0 1px var(--gyro-hairline-soft);
 }
 /* Scheduled work and suggestions sit in grouped cards: one hairline frame,
    rows divided by inset rules, like a native settings list. */
@@ -418,10 +390,6 @@
 .gyro-scheduled-page.has-detail .gyro-scheduled-filters {
   order: -1;
   margin: 0 0 12px;
-  gap: 0;
-}
-.gyro-scheduled-page.has-detail .gyro-scheduled-filters button {
-  padding: 6px 9px;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-search-field {
   flex-shrink: 0;

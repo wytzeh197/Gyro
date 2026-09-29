@@ -283,10 +283,6 @@
   width: 24px;
 }
 
-.gyro-plan-panel-head.is-section .gyro-plan-panel-views > button {
-  padding: 0 7px;
-}
-
 .gyro-plan-panel-head.is-section .gyro-plan-panel-views > button > span {
   display: none;
 }
@@ -356,49 +352,12 @@
 }
 
 .gyro-plan-panel-views {
-  background: var(--gyro-segment-bg);
-  border-radius: var(--gyro-radius-md);
-  box-shadow: inset 0 0 0 1px var(--gyro-hairline-soft);
   display: inline-flex;
-  gap: 2px;
   margin-right: 4px;
-  padding: 2px;
 }
 
 .gyro-plan-panel-views > button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  cursor: pointer;
   display: inline-flex;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  gap: 5px;
-  height: 24px;
-  padding: 0 9px;
-  transition:
-    background var(--gyro-motion) var(--gyro-ease),
-    color var(--gyro-motion-fast) var(--gyro-ease);
-  white-space: nowrap;
-}
-
-.gyro-plan-panel-views > button:hover {
-  color: var(--gyro-text);
-}
-
-.gyro-plan-panel-views > button[aria-pressed="true"] {
-  background: var(--gyro-segment-active);
-  box-shadow:
-    var(--gyro-elev-raised), inset 0 0 0 1px var(--gyro-hairline-soft);
-  color: var(--gyro-segment-active-text);
-}
-
-.gyro-plan-panel-views > button:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-plan-panel-action {
