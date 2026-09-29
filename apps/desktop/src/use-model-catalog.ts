@@ -15,6 +15,11 @@ const client = createModelCatalogClient(
     setItem: (key, value) => window.localStorage.setItem(key, value),
   },
   () => invoke<string>("fetch_model_catalog"),
+  undefined,
+  // The runner installs only documents the picker accepted, with its bucket.
+  (raw, bucket) => {
+    void invoke("install_model_catalog", { raw, bucket }).catch(() => {});
+  },
 );
 
 export function restoreModelCatalog() {
@@ -73,10 +78,14 @@ export function useModelCatalog(
             notify("provider", title, detail);
           }
         }
+      } catch (error) {
+        console.error("Model catalog update failed", error);
       } finally {
         ticking = false;
+        // Scheduled even when applying or announcing throws, so one bad
+        // update cannot stop the checks until the window next gains focus.
+        if (!cancelled) schedule(cadence());
       }
-      if (!cancelled) schedule(cadence());
     };
     const refreshNow = () => void tick();
     const onVisibilityChange = () => {

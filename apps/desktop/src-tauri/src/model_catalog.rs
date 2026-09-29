@@ -27,19 +27,32 @@ pub(crate) struct CatalogModelProfile {
 
 type Profiles = HashMap<(String, String), CatalogModelProfile>;
 
+/// Fetch the published document. Nothing is installed here: the picker
+/// validates it first and hands it back through `install_model_catalog`.
 #[tauri::command]
 pub async fn fetch_model_catalog() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let raw = fetch_catalog()?;
-        // The runner keeps its own copy, so automations and the menu bar see
-        // the same models as the picker, and a restart without a network
-        // still runs them correctly. A document the runner cannot read is
-        // left to the picker's own validation and changes nothing here.
-        if let Ok(profiles) = parse_profiles(&raw) {
-            install(profiles);
-            persist(&raw);
-        }
-        Ok(raw)
+    tauri::async_runtime::spawn_blocking(fetch_catalog)
+        .await
+        .map_err(|error| format!("model catalog worker failed: {error}"))?
+}
+
+/// Install a document the picker has already put into effect.
+///
+/// The runner keeps its own copy, so automations and the menu bar see the same
+/// models as the picker, and a restart without a network still runs them
+/// correctly. Taking it from the picker, with the picker's rollout bucket,
+/// means the runner never holds a document the picker refused or an entry this
+/// installation is not rolled out to.
+#[tauri::command]
+pub async fn install_model_catalog(raw: String, bucket: u8) -> Result<(), String> {
+    if bucket > 99 {
+        return Err("model catalog: invalid rollout bucket".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let profiles = parse_profiles(&raw, bucket)?;
+        install(profiles);
+        persist(&raw, bucket);
+        Ok(())
     })
     .await
     .map_err(|error| format!("model catalog worker failed: {error}"))?
@@ -73,8 +86,17 @@ fn profiles() -> &'static RwLock<Profiles> {
     static PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
     PROFILES.get_or_init(|| {
         let restored = cache_path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|raw| parse_profiles(&raw).ok())
+            .and_then(|path| {
+                let raw = std::fs::read_to_string(&path).ok()?;
+                // Caches written before the bucket was saved apply as bucket 0,
+                // which is what they meant then: every entry, whatever the rollout.
+                let bucket = std::fs::read_to_string(path.with_extension("bucket"))
+                    .ok()
+                    .and_then(|bucket| bucket.trim().parse::<u8>().ok())
+                    .filter(|bucket| *bucket <= 99)
+                    .unwrap_or(0);
+                parse_profiles(&raw, bucket).ok()
+            })
             .unwrap_or_default();
         RwLock::new(restored)
     })
@@ -96,35 +118,48 @@ fn cache_path() -> Option<PathBuf> {
         .map(|paths| paths.base_dir.join("model-catalog.json"))
 }
 
-fn persist(raw: &str) {
+fn persist(raw: &str, bucket: u8) {
     let Some(path) = cache_path() else {
         return;
     };
     let Some(parent) = path.parent() else {
         return;
     };
-    // A focused app refreshes once a minute; an unchanged catalog costs no write.
-    if std::fs::read_to_string(&path).is_ok_and(|current| current == raw) {
+    let _ = std::fs::create_dir_all(parent);
+    // The bucket goes first: a crash between the two writes then leaves the
+    // previous document read with the current bucket, never the reverse.
+    write_atomically(&path.with_extension("bucket"), &bucket.to_string());
+    write_atomically(&path, raw);
+}
+
+/// Written beside the target and renamed over it, so a crash mid-write leaves
+/// the previous copy rather than a torn file. An unchanged file costs no write.
+fn write_atomically(path: &std::path::Path, contents: &str) {
+    if std::fs::read_to_string(path).is_ok_and(|current| current == contents) {
         return;
     }
-    // Written beside the target and renamed over it, so a crash mid-write
-    // leaves the previous copy rather than a torn document.
-    let _ = std::fs::create_dir_all(parent);
-    let staging = path.with_extension("json.partial");
-    if std::fs::write(&staging, raw).is_ok() && std::fs::rename(&staging, &path).is_err() {
+    let mut staging = path.as_os_str().to_owned();
+    staging.push(".partial");
+    let staging = PathBuf::from(staging);
+    if std::fs::write(&staging, contents).is_ok() && std::fs::rename(&staging, path).is_err() {
         let _ = std::fs::remove_file(&staging);
     }
 }
 
 /// Read the runtime facts out of a catalog document.
 ///
-/// Mirrors the picker's validation for the fields it reads, and like it
-/// rejects the whole document on bad data, so the runner never holds a
-/// catalog the picker refused. A disabled catalog yields no profiles: the
-/// picker falls back to the bundled models, and so does the runner.
-fn parse_profiles(raw: &str) -> Result<Profiles, String> {
+/// Validates exactly what `parseModelCatalog` in packages/ui validates, so the
+/// two accept and reject the same documents; `scripts/fixtures/
+/// model-catalog-parity.json` holds the cases both sides are tested against.
+/// Entries are kept only where the picker offers them: an enabled document,
+/// this installation's rollout bucket, and a client revision this build meets.
+fn parse_profiles(raw: &str, bucket: u8) -> Result<Profiles, String> {
     let invalid = |what: &str| format!("model catalog: invalid {what}");
+    if raw.len() as u64 > MAX_CATALOG_BYTES {
+        return Err(invalid("size"));
+    }
     let document: serde_json::Value = serde_json::from_str(raw).map_err(|_| invalid("document"))?;
+    let document = document.as_object().ok_or_else(|| invalid("document"))?;
     if document.get("schema").and_then(|value| value.as_str()) != Some(CATALOG_SCHEMA) {
         return Err(invalid("schema"));
     }
@@ -138,27 +173,41 @@ fn parse_profiles(raw: &str) -> Result<Profiles, String> {
         .filter(|models| models.len() <= 500)
         .ok_or_else(|| invalid("models"))?;
     let mut profiles = Profiles::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut entries: Vec<((String, String), u64, CatalogModelProfile)> =
+        Vec::with_capacity(models.len());
     for model in models {
-        let text = |key: &str| {
-            model
-                .get(key)
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| invalid(key))
-        };
-        let provider_id = text("providerId")?.to_string();
-        let model_id = text("id")?.to_ascii_lowercase();
-        let min_revision = model
-            .get("minClientRevision")
-            .and_then(|value| value.as_u64())
-            .filter(|revision| *revision >= 1)
+        let model = model.as_object().ok_or_else(|| invalid("model"))?;
+        let field = |key: &str| model.get(key);
+        let provider_id =
+            catalog_text(field("providerId"), 64).ok_or_else(|| invalid("providerId"))?;
+        let model_id = catalog_text(field("id"), 200)
+            .filter(|id| catalog_model_id(id))
+            .ok_or_else(|| invalid("id"))?;
+        let key = (provider_id.to_string(), model_id.to_ascii_lowercase());
+        if !seen.insert(key.clone()) {
+            return Err(invalid("duplicate model"));
+        }
+        catalog_text(field("displayName"), 120).ok_or_else(|| invalid("displayName"))?;
+        let min_revision = catalog_integer(field("minClientRevision"), 1, 1_000_000)
             .ok_or_else(|| invalid("minClientRevision"))?;
-        let efforts = match model.get("supportedReasoningEfforts") {
+        for (key, max) in [("description", 600), ("insertBefore", 200)] {
+            if let Some(value) = field(key) {
+                catalog_text(Some(value), max).ok_or_else(|| invalid(key))?;
+            }
+        }
+        let context_window = match field("contextWindowTokens") {
+            None => None,
+            Some(value) => Some(
+                catalog_integer(Some(value), 1, 100_000_000)
+                    .ok_or_else(|| invalid("contextWindowTokens"))?,
+            ),
+        };
+        let efforts = match field("supportedReasoningEfforts") {
             None => None,
             Some(value) => {
                 let list = value.as_array().ok_or_else(|| invalid("efforts"))?;
-                let mut efforts = Vec::with_capacity(list.len());
+                let mut efforts: Vec<String> = Vec::with_capacity(list.len());
                 for effort in list {
                     let effort = effort
                         .as_str()
@@ -172,37 +221,77 @@ fn parse_profiles(raw: &str) -> Result<Profiles, String> {
                 Some(efforts)
             }
         };
-        let context_window = match model.get("contextWindowTokens") {
-            None => None,
-            Some(value) => Some(
-                value
-                    .as_u64()
-                    .filter(|tokens| (1..=100_000_000).contains(tokens))
-                    .ok_or_else(|| invalid("contextWindowTokens"))?,
-            ),
-        };
-        let key = (provider_id, model_id);
-        if profiles.contains_key(&key) {
-            return Err(invalid("duplicate model"));
+        if let Some(default) = field("defaultReasoningEffort") {
+            let supported = default
+                .as_str()
+                .zip(efforts.as_ref())
+                .is_some_and(|(default, efforts)| efforts.iter().any(|effort| effort == default));
+            if !supported {
+                return Err(invalid("defaultReasoningEffort"));
+            }
         }
+        entries.push((
+            key,
+            min_revision,
+            CatalogModelProfile {
+                supported_reasoning_efforts: efforts,
+                context_window_tokens: context_window,
+            },
+        ));
+    }
+    catalog_text(document.get("revision"), 120).ok_or_else(|| invalid("revision"))?;
+    let rollout = catalog_integer(document.get("rolloutPercentage"), 0, 100)
+        .ok_or_else(|| invalid("rolloutPercentage"))?;
+    if !enabled || u64::from(bucket) >= rollout {
+        return Ok(profiles);
+    }
+    for (key, min_revision, profile) in entries {
         // An entry for a later client describes handling this build lacks, so
         // it stays out of the runner just as it stays out of the picker.
-        if enabled && min_revision <= CLIENT_REVISION {
-            profiles.insert(
-                key,
-                CatalogModelProfile {
-                    supported_reasoning_efforts: efforts,
-                    context_window_tokens: context_window,
-                },
-            );
+        if min_revision <= CLIENT_REVISION {
+            profiles.insert(key, profile);
         }
     }
     Ok(profiles)
 }
 
+/// The picker's `text()`: a non-blank string of at most `max` UTF-16 units
+/// with no control characters. Kept untrimmed, as the picker keeps it.
+fn catalog_text(value: Option<&serde_json::Value>, max: usize) -> Option<&str> {
+    let value = value?.as_str()?;
+    let blank = value
+        .trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+        .is_empty();
+    (!blank && value.encode_utf16().count() <= max && !value.chars().any(|c| c.is_ascii_control()))
+        .then_some(value)
+}
+
+/// The picker's `integer()`. JSON has one number type, so `2.0` is the
+/// integer 2 there and must be here too.
+fn catalog_integer(value: Option<&serde_json::Value>, min: u64, max: u64) -> Option<u64> {
+    let value = value?;
+    let number = value.as_u64().or_else(|| {
+        value
+            .as_f64()
+            .filter(|number| {
+                number.fract() == 0.0 && *number >= 0.0 && *number <= 9_007_199_254_740_991.0
+            })
+            .map(|number| number as u64)
+    })?;
+    (min..=max).contains(&number).then_some(number)
+}
+
+/// The picker's model ID pattern, `^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]*$`, which
+/// keeps an ID from ever reading as a CLI flag.
+fn catalog_model_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || "._:/@+-".contains(c))
+}
+
 #[cfg(test)]
 pub(crate) fn install_for_test(raw: &str) {
-    install(parse_profiles(raw).expect("test catalog parses"));
+    install(parse_profiles(raw, 0).expect("test catalog parses"));
 }
 
 fn fetch_catalog() -> Result<String, String> {
@@ -251,11 +340,14 @@ mod tests {
 
     #[test]
     fn a_catalog_entry_carries_its_runtime_facts() {
-        let profiles = parse_profiles(&document(
-            r#"{"providerId":"openai","id":"GPT-9","displayName":"GPT-9","minClientRevision":2,
+        let profiles = parse_profiles(
+            &document(
+                r#"{"providerId":"openai","id":"GPT-9","displayName":"GPT-9","minClientRevision":2,
                 "contextWindowTokens":400000,"supportedReasoningEfforts":["low","ultra"]},
                {"providerId":"xai","id":"grok-9","displayName":"Grok 9","minClientRevision":1}"#,
-        ))
+            ),
+            0,
+        )
         .unwrap();
         assert_eq!(
             profiles[&("openai".into(), "gpt-9".into())],
@@ -274,11 +366,11 @@ mod tests {
     fn entries_for_a_later_client_and_disabled_catalogs_are_left_out() {
         let later =
             r#"{"providerId":"openai","id":"gpt-9","displayName":"GPT-9","minClientRevision":99}"#;
-        assert!(parse_profiles(&document(later)).unwrap().is_empty());
+        assert!(parse_profiles(&document(later), 0).unwrap().is_empty());
         let current =
             r#"{"providerId":"openai","id":"gpt-9","displayName":"GPT-9","minClientRevision":1}"#;
         let disabled = document(current).replace(r#""enabled":true"#, r#""enabled":false"#);
-        assert!(parse_profiles(&disabled).unwrap().is_empty());
+        assert!(parse_profiles(&disabled, 0).unwrap().is_empty());
     }
 
     #[test]
@@ -291,9 +383,51 @@ mod tests {
             r#"{"providerId":"openai","id":"a","displayName":"A","minClientRevision":1},
                {"providerId":"openai","id":"A","displayName":"A","minClientRevision":1}"#,
         ] {
-            assert!(parse_profiles(&document(bad)).is_err(), "accepted: {bad}");
+            assert!(
+                parse_profiles(&document(bad), 0).is_err(),
+                "accepted: {bad}"
+            );
         }
-        assert!(parse_profiles(r#"{"schema":"other","enabled":true,"models":[]}"#).is_err());
+        assert!(parse_profiles(r#"{"schema":"other","enabled":true,"models":[]}"#, 0).is_err());
+    }
+
+    /// The picker runs the same fixture, so a document one side refuses is
+    /// refused by both.
+    #[test]
+    fn the_runner_and_the_picker_agree_on_every_parity_case() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../scripts/fixtures/model-catalog-parity.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 40);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let raw = case["raw"].as_str().unwrap();
+            let valid = case["valid"].as_bool().unwrap();
+            assert_eq!(parse_profiles(raw, 0).is_ok(), valid, "{name}");
+        }
+        let many: Vec<String> = (0..501)
+            .map(|i| format!(r#"{{"providerId":"openai","id":"m{i}","displayName":"M","minClientRevision":1}}"#))
+            .collect();
+        assert!(parse_profiles(&document(&many.join(",")), 0).is_err());
+        let padded = document("").replace(
+            r#""models":[]"#,
+            &format!(r#""models":[]{}"#, " ".repeat(256 * 1024)),
+        );
+        assert!(parse_profiles(&padded, 0).is_err());
+    }
+
+    /// A partial rollout reaches the runner only where it reaches the picker.
+    #[test]
+    fn the_runner_follows_the_rollout_bucket() {
+        let raw = document(
+            r#"{"providerId":"openai","id":"gpt-9","displayName":"GPT-9","minClientRevision":1}"#,
+        )
+        .replace(r#""rolloutPercentage":100"#, r#""rolloutPercentage":10"#);
+        assert_eq!(parse_profiles(&raw, 9).unwrap().len(), 1);
+        assert!(parse_profiles(&raw, 10).unwrap().is_empty());
+        assert!(parse_profiles(&raw, 99).unwrap().is_empty());
     }
 
     /// The only test that installs a catalog, since the store is shared by
@@ -341,11 +475,24 @@ mod tests {
         );
     }
 
+    /// The live document through the real transport: no redirect, within the
+    /// size limit, and readable by the runner. Needs the network, so it runs
+    /// only on request: `cargo test --lib the_live_catalog -- --ignored`.
+    #[test]
+    #[ignore]
+    fn the_live_catalog_is_fetched_and_parsed() {
+        let raw = fetch_catalog().expect("the live catalog is reachable");
+        let profiles = parse_profiles(&raw, 0).expect("the live catalog parses");
+        let published =
+            parse_profiles(include_str!("../../../../site/model-catalog.json"), 0).unwrap();
+        assert_eq!(profiles, published, "the live catalog is the committed one");
+    }
+
     /// The published catalog must always parse here, or every published model
     /// silently falls back to the runner's bundled tables.
     #[test]
     fn the_published_catalog_parses() {
         let raw = include_str!("../../../../site/model-catalog.json");
-        assert!(parse_profiles(raw).is_ok());
+        assert!(parse_profiles(raw, 0).is_ok());
     }
 }

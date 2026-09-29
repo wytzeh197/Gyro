@@ -85,7 +85,9 @@ export function parseModelCatalog(raw: string): ModelCatalog {
     const id = text(model.id, 200);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]*$/.test(id))
       throw new Error("Invalid model id");
-    const key = providerId + "/" + id;
+    // The runner looks models up case-insensitively, so IDs that differ only
+    // in case would be one model there and two here.
+    const key = providerId + "/" + id.toLowerCase();
     if (seen.has(key)) throw new Error("Duplicate model");
     seen.add(key);
     const result: CatalogModel = {
@@ -299,11 +301,19 @@ export type ModelCatalogRefresh = {
 /** A refresh that changed nothing, or failed and left the last catalog in place. */
 const noChange = (): ModelCatalogRefresh => ({ applied: false, additions: [] });
 
-/** Dependencies are injected so offline startup and failed refreshes can be tested. */
+/**
+ * Dependencies are injected so offline startup and failed refreshes can be tested.
+ *
+ * `onApply` receives every document this client puts into effect, from the
+ * cache or the network, only after it has been validated. The desktop app
+ * hands it to the runner, so the runner holds exactly the catalog the picker
+ * shows, for the same rollout bucket, and never one the picker refused.
+ */
 export function createModelCatalogClient(
   storage: Storage,
   fetchCatalog: () => Promise<string>,
   random = Math.random,
+  onApply: (raw: string, bucket: number) => void = () => {},
 ) {
   let initialized = false;
   let pending: Promise<ModelCatalogRefresh> | undefined;
@@ -326,6 +336,14 @@ export function createModelCatalogClient(
       /* Private/full storage: use this session. */
     }
   };
+  // A runner that cannot take the document must not undo the picker's copy.
+  const handOff = (raw: string) => {
+    try {
+      onApply(raw, bucket);
+    } catch {
+      /* The runner keeps its previous catalog. */
+    }
+  };
   function restore() {
     if (initialized) return;
     initialized = true;
@@ -340,6 +358,7 @@ export function createModelCatalogClient(
         applyModelCatalog(catalog, bucket);
         active = cached;
         applied = catalog;
+        handOff(cached);
       } catch {
         /* Bundled models remain available if cache is corrupt. */
       }
@@ -358,6 +377,7 @@ export function createModelCatalogClient(
         active = raw;
         applied = catalog;
         write(MODEL_CATALOG_CACHE_KEY, raw);
+        handOff(raw);
         return { applied: true, additions };
       } catch {
         return noChange(); // Preserve the last working catalog on any transport/validation failure.
