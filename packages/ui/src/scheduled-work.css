@@ -267,10 +267,6 @@
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-body {
   display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-  width: calc(100% - 48px);
-  max-width: 1200px;
-  gap: 30px;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-heading h1 {
   font-size: calc(20px * var(--gyro-ui-scale, 1));
@@ -300,8 +296,6 @@
   background: var(--gyro-surface-soft);
 }
 .gyro-scheduled-editor {
-  display: grid;
-  gap: 20px;
   align-content: start;
 }
 .gyro-scheduled-editor > header {
@@ -353,7 +347,6 @@
   overflow-wrap: anywhere;
 }
 .gyro-scheduled-editor .gyro-automation-create-fields {
-  display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 14px;
 }
@@ -362,7 +355,6 @@
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--gyro-border);
-  padding-top: 16px;
 }
 .gyro-scheduled-editor footer button {
   min-height: 32px;
@@ -396,13 +388,6 @@
   outline-offset: 3px;
 }
 @media (max-width: 850px) {
-  .gyro-scheduled-page.has-detail .gyro-scheduled-body {
-    display: block;
-    width: calc(100% - 40px);
-  }
-  .gyro-scheduled-page.has-detail .gyro-scheduled-index {
-    display: none;
-  }
   .gyro-scheduled-panel {
     border-left: 0;
     padding-left: 0;
@@ -602,7 +587,6 @@
 .gyro-scheduled-settings-group {
   border: 1px solid var(--gyro-border);
   border-radius: 14px;
-  padding: 0 14px;
 }
 .gyro-scheduled-setting,
 .gyro-scheduled-editor .gyro-automation-create-fields > label {
@@ -610,7 +594,6 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  min-height: 42px;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   border-bottom: 1px solid var(--gyro-border-soft);
 }
@@ -658,7 +641,6 @@
 }
 .gyro-scheduled-advanced summary {
   cursor: pointer;
-  padding: 4px;
 }
 .gyro-scheduled-advanced label {
   margin: 8px 4px;

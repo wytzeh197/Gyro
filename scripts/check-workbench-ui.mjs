@@ -4385,7 +4385,7 @@ expect(
     appSource.includes("sendingSessionIdsRef.current.has(turn.sessionId)") &&
     // Composer/transcript gutters follow the pane, not the window width.
     styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
-    styleSource.includes("padding: 18px clamp(24px, 8%, 120px) 22px") &&
+    styleSource.includes("padding-inline: clamp(14px, 4%, 44px)") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
     tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     tauriSource.includes(
@@ -7105,7 +7105,7 @@ expect(
 );
 expect(
   styleSource.includes(
-    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding-inline: clamp(12px, 3vw, 32px);",
+    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding: 8px clamp(16px, 5cqi, 44px) 12px;",
   ) &&
     styleSource.includes(
       ".gyro-chat-surface.is-tiled .gyro-thread-body,\n  .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n    padding-inline: 10px;",
@@ -7345,11 +7345,11 @@ expect(
     surfaceSource.includes(
       'className="gyro-sidebar-restore-button gyro-sidebar-toggle-button"',
     ) &&
-    cssRules(styleSource, ".gyro-sidebar-restore-cluster").some(
-      (rule) =>
-        rule.includes("height: 52px") &&
-        rule.includes("padding-left: 90px") &&
-        rule.includes("position: fixed"),
+    ((rules) =>
+      rules.includes("height: 48px") &&
+      rules.includes("padding-left: 90px") &&
+      rules.includes("position: fixed"))(
+      cssRules(styleSource, ".gyro-sidebar-restore-cluster").join("\n"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-restore-button").some(
       (rule) =>
@@ -8333,10 +8333,10 @@ expect(
     styleSource.includes(
       ':root[data-theme="light"] .gyro-composer-context-bar',
     ) &&
-    cssRules(styleSource, ".gyro-composer-context-bar").some(
-      (rule) =>
-        rule.includes("height: 5px") &&
-        rule.includes("var(--gyro-premium-hairline-soft)"),
+    ((rules) =>
+      rules.includes("height: 3px") &&
+      rules.includes("color-mix(in srgb, var(--gyro-muted) 20%, transparent)"))(
+      cssRules(styleSource, ".gyro-composer-context-bar").join("\n"),
     ) &&
     styleSource.includes("var(--gyro-accent-strong)") &&
     styleSource.includes("min-width: 316px") &&

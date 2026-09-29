@@ -648,9 +648,7 @@
 /* Tools float over the row end on hover and take the Blocked tag's place. */
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item-actions {
   align-self: center;
-  background: var(--gyro-app);
   border-radius: var(--gyro-radius-sm);
-  box-shadow: -8px 0 8px var(--gyro-app);
   grid-column: 3;
   grid-row: 1;
   opacity: 0;
