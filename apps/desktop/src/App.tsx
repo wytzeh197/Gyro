@@ -6793,7 +6793,7 @@ export function App() {
         type: "complete-onboarding-step",
         step: "first-session",
       });
-      notify("terminal", "Session created", session.title);
+      notify("terminal", "Chat created", session.title);
       return;
     }
     try {
@@ -6833,7 +6833,7 @@ export function App() {
             : "Private branch under Gyro — main project stays untouched.",
         );
       } else {
-        notify("terminal", "Session created", session.title);
+        notify("terminal", "Chat created", session.title);
       }
     } catch (error) {
       const session = createPreviewSession(
@@ -16444,7 +16444,7 @@ export function App() {
       onSelectWorkspaceLayout={selectWorkspaceLayout}
       onSettingsBack={returnFromSettings}
       settingsBackLabel={
-        activeWorkspaceLayout === "code" ? "Workspace" : "Sessions"
+        activeWorkspaceLayout === "code" ? "Workspace" : "Chats"
       }
       onSettingsSectionChange={(section: SettingsSectionId) =>
         dispatchWorkbench({ type: "set-settings-section", section })

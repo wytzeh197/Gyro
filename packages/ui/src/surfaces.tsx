@@ -2211,10 +2211,10 @@ export function AppChrome({
                 starting a chat should not require bringing the sidebar back. */}
             {!isIdeSurface && activeDestination !== "settings" ? (
               <button
-                aria-label="New session"
+                aria-label="New chat"
                 className="gyro-sidebar-restore-button gyro-sidebar-new-session-shortcut"
                 onClick={onCreateSession}
-                title="New session"
+                title="New chat"
                 type="button"
               >
                 <SquarePen size={16} strokeWidth={1.5} />
@@ -4475,7 +4475,7 @@ function WorkspaceSidebarContent({
           >
             <SidebarModeRow
               icon={<MessageSquare size={15} strokeWidth={1.5} />}
-              label="Sessions"
+              label="Chats"
               isActive={isSessionsSidebar}
               onClick={onSelectSessions}
             />
@@ -5966,7 +5966,7 @@ function WorkspaceSidebarContent({
                 type="button"
               >
                 <Plus size={15} />
-                New Session
+                New chat
               </button>
               {newSessionMenuView !== "closed" ? (
                 <div
@@ -6412,19 +6412,26 @@ function WorkspaceSidebarContent({
                   </div>
                 );
               })}
-              <section
-                aria-label="Recent chats"
-                className="gyro-sidebar-recents"
-              >
-                <div className="gyro-sidebar-small-title">Recents</div>
-                {unprojectedRecentSessions.length > 0 ? (
-                  unprojectedRecentSessions.map((session) =>
-                    renderSessionRow(session),
-                  )
-                ) : (
-                  <div className="gyro-sidebar-recents-empty">No chats yet</div>
-                )}
-              </section>
+              {/* Recents holds chats outside any project; with projects listed
+                  above, an empty "No chats yet" there only contradicts them. */}
+              {unprojectedRecentSessions.length > 0 ||
+              sidebarProjectGroups.length === 0 ? (
+                <section
+                  aria-label="Recent chats"
+                  className="gyro-sidebar-recents"
+                >
+                  <div className="gyro-sidebar-small-title">Recents</div>
+                  {unprojectedRecentSessions.length > 0 ? (
+                    unprojectedRecentSessions.map((session) =>
+                      renderSessionRow(session),
+                    )
+                  ) : (
+                    <div className="gyro-empty-state is-compact gyro-sidebar-recents-empty">
+                      No chats yet
+                    </div>
+                  )}
+                </section>
+              ) : null}
             </div>
           )}
         </>
@@ -20141,7 +20148,7 @@ export function CommandPaletteOverlay({
     return [
       { id: "files", label: "Files", hits: rank(fileRanker, 8) },
       { id: "projects", label: "Projects", hits: rank(projectRanker, 8) },
-      { id: "sessions", label: "Sessions", hits: rank(sessionRanker, 8) },
+      { id: "sessions", label: "Chats", hits: rank(sessionRanker, 8) },
       { id: "actions", label: "Actions", hits: rank(actionRanker, 8) },
     ].filter((group) => group.hits.length > 0);
   }, [
@@ -22571,7 +22578,7 @@ export function SettingsSurface({
                   ],
                 },
                 {
-                  label: "Sessions",
+                  label: "Chats",
                   items: [
                     ["New chat", "Cmd+N"],
                     ["Show chats", "Cmd+1"],

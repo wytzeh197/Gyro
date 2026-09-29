@@ -8,7 +8,7 @@ export function EarlyShell() {
       <aside className="gyro-early-shell-sidebar" aria-hidden="true">
         <div className="gyro-early-shell-brand">Gyro</div>
         <div className="gyro-early-shell-nav">
-          <span>New Session</span>
+          <span>New chat</span>
           <span>Search</span>
         </div>
         <div className="gyro-early-shell-footer">

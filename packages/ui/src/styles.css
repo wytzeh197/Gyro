@@ -24293,7 +24293,8 @@ body,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row.is-active,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread.is-active,
 .gyro-app-shell.is-chat-shell .gyro-session-row.is-active {
-  background: transparent;
+  /* Selected reads one step stronger than hover (5%), not bold alone. */
+  background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
   box-shadow: none;
   color: var(--gyro-text);
 }

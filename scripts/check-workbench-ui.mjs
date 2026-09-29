@@ -5191,7 +5191,7 @@ expect(
       "grid-template-columns var(--gyro-motion-slow)",
     ) &&
     styleSource.includes("will-change: grid-template-columns") &&
-    surfaceSource.includes('label="Sessions"') &&
+    surfaceSource.includes('label="Chats"') &&
     surfaceSource.includes('label="Workspace"') &&
     !surfaceSource.includes('label="IDE"') &&
     surfaceSource.indexOf('aria-label="Primary surfaces"') <
@@ -5658,7 +5658,7 @@ expect(
     !surfaceSource.includes('activeIdeView === "settings"') &&
     !surfaceSource.includes('ide?.activeView === "settings"') &&
     appSource.includes(
-      'activeWorkspaceLayout === "code" ? "Workspace" : "Sessions"',
+      'activeWorkspaceLayout === "code" ? "Workspace" : "Chats"',
     ) &&
     appSource.includes("onSettingsBack={returnFromSettings}") &&
     reducerSource.includes(
