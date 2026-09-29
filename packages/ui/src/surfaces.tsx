@@ -2920,19 +2920,16 @@ function InstalledUpdateNotice({
         ref={triggerRef}
         type="button"
       >
-        <span className="gyro-installed-update-brand">
-          <span className="gyro-installed-update-icon" aria-hidden="true">
-            <img src={gyroLogoTransparentLight} alt="" />
-          </span>
-          <span>Gyro</span>
+        <span aria-hidden="true" className="gyro-dot" data-tone="accent" />
+        <span
+          className="gyro-installed-update-title"
+          title={`Gyro ${version}: ${preview}`}
+        >
+          Updated to {version.replace(/^\d+\.\d+\.\d+-/, "")}
         </span>
-        <span className="gyro-installed-update-title">What’s new</span>
-        <span className="gyro-installed-update-compact-version">
-          Version {version}
-        </span>
-        <span className="gyro-installed-update-preview">{preview}</span>
         <span className="gyro-installed-update-action">
-          See what’s new <ArrowRight size={13} aria-hidden="true" />
+          <span className="gyro-visually-hidden">See what’s new</span>
+          <ArrowRight size={13} aria-hidden="true" />
         </span>
       </button>
       <button
@@ -2971,7 +2968,6 @@ function InstalledUpdateNotice({
             </button>
           </div>
           <div className="gyro-installed-update-card-intro">
-            <span className="gyro-installed-update-eyebrow">GYRO UPDATE</span>
             <h2>What’s new</h2>
             <p className="gyro-installed-update-version">Version {version}</p>
           </div>

@@ -7,40 +7,29 @@
   z-index: 2;
 }
 
+/* One quiet row above Settings: "Updated to 0.1.0-alpha.50 · What's new". */
 .gyro-installed-update-trigger {
-  background: var(--gyro-surface-raised);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border));
-  border-radius: 12px;
-  box-shadow: var(--gyro-elev-raised);
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
-  display: grid;
-  gap: 5px;
-  padding: 15px 14px 13px;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: var(--gyro-type-sm);
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 32px 0 10px;
   text-align: left;
   width: 100%;
 }
 
 .gyro-installed-update-trigger:hover,
-.gyro-installed-update-trigger:focus-visible {
-  background: color-mix(
-    in srgb,
-    var(--gyro-accent) 5%,
-    var(--gyro-surface-raised)
-  );
+.gyro-installed-update-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
 }
 
-:root[data-theme="light"] .gyro-installed-update-trigger {
-  box-shadow: var(--gyro-elev-raised);
-}
-
-.gyro-installed-update-trigger:focus-visible,
-.gyro-installed-update-card button:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
-}
-
-.gyro-installed-update-icon,
 .gyro-installed-update-card-icon {
   align-items: center;
   display: inline-flex;
@@ -48,73 +37,33 @@
   justify-content: center;
 }
 
-.gyro-installed-update-icon {
-  height: 42px;
-  width: 42px;
-}
-
-.gyro-installed-update-icon img {
-  height: 31px;
-  width: 31px;
-}
-
-.gyro-installed-update-brand {
-  color: var(--gyro-text);
-  display: grid;
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  gap: 3px;
-  min-width: 0;
-}
-
-.gyro-installed-update-brand .gyro-installed-update-icon {
-  justify-self: center;
-}
-
-.gyro-installed-update-icon img,
 .gyro-installed-update-card-icon img {
   display: block;
 }
 
-.gyro-installed-update-compact-version {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  line-height: 1.2;
-}
-
 .gyro-installed-update-title {
-  font-size: var(--gyro-type-base);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: -0.015em;
-  line-height: 1.2;
-}
-
-.gyro-installed-update-preview {
-  color: var(--gyro-muted);
-  display: -webkit-box;
-  font-size: var(--gyro-type-xs);
-  line-height: 1.35;
-  margin-top: 3px;
+  flex: 1;
+  font-weight: var(--gyro-weight-medium);
+  min-width: 0;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-installed-update-action {
   align-items: center;
   color: var(--gyro-accent);
   display: inline-flex;
+  flex: none;
   font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  gap: 4px;
-  justify-self: start;
-  margin-top: 4px;
+  font-weight: var(--gyro-weight-medium);
+  gap: 3px;
 }
 
 .gyro-installed-update-dismiss {
   position: absolute;
-  right: 7px;
-  top: 7px;
+  right: 4px;
+  top: 4px;
 }
 
 .gyro-installed-update-card {
@@ -157,7 +106,6 @@
   width: 41px;
 }
 
-:root[data-theme="light"] .gyro-installed-update-icon img,
 :root[data-theme="light"] .gyro-installed-update-card-icon img {
   filter: brightness(0);
 }
@@ -166,13 +114,6 @@
   position: absolute;
   right: 0;
   top: 0;
-}
-
-.gyro-installed-update-eyebrow {
-  color: var(--gyro-accent);
-  font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.1em;
 }
 
 .gyro-installed-update-card h2 {

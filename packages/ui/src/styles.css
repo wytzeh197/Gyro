@@ -32011,6 +32011,16 @@ body,
   justify-self: end;
 }
 
+.gyro-visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 /* ==========================================================================
    Primitives — the one definition of each shared control (primitives.tsx).
    This section is last on purpose: a primitive wins ties against the older
