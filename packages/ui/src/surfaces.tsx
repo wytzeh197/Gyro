@@ -201,11 +201,11 @@ import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
-  diffPreviewLines,
   fileReviewDecisions,
   isKeptCurrent,
 } from "./file-review";
-import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
+import type { FileReviewRecord } from "./file-review";
+import { PlainDiffView } from "./plain-diff-view";
 import {
   isAppliedFileMutationEvent,
   totalFileChangeCounts,
@@ -27404,14 +27404,22 @@ function ChatTurn({
   const responsePayload = responseEvent
     ? eventPayloadRecord(responseEvent)
     : undefined;
-  const responseTokenReading = responseEvent
-    ? turnTokenReadingForResponse(
-        turnTokensFromValue(responsePayload?.turnTokens) ?? turn.turnTokens,
-        turnTokensFromValue(responsePayload?.contextUsage),
-        turn.user?.message ?? "",
-        responseEvent.message,
-      )
-    : undefined;
+  const responseTurnTokens =
+    turnTokensFromValue(responsePayload?.turnTokens) ?? turn.turnTokens;
+  const responseRequestTokens = turnTokensFromValue(
+    responsePayload?.contextUsage,
+  );
+  // With nothing recorded there is no reading to show: the footer stays quiet
+  // instead of printing "Usage unavailable" under every answer.
+  const responseTokenReading =
+    responseEvent && (responseTurnTokens || responseRequestTokens)
+      ? turnTokenReadingForResponse(
+          responseTurnTokens,
+          responseRequestTokens,
+          turn.user?.message ?? "",
+          responseEvent.message,
+        )
+      : undefined;
   // `/compact` produces no answer, only its compaction step. Without a result
   // line the finished turn reads as an empty, stalled response.
   const isCompactionResult =
@@ -27425,8 +27433,8 @@ function ChatTurn({
   // summary and file review answer "what changed"; the final response answers
   // whether the request is actually done and names any remaining caveat.
   const shouldShowFinalResponse = Boolean(responseEvent);
-  // Offer Continue when the turn produced anything the user might resume from —
-  // a text answer, or work that stopped before an answer (empty void + tools).
+  // The turn produced something the user might resume from — a text answer, or
+  // work that stopped before an answer (empty void + tools).
   const canContinue =
     !isRunning &&
     !isCompactionResult &&
@@ -27479,14 +27487,13 @@ function ChatTurn({
               >
                 {turnTokensLabel(turn.turnTokens)}
               </span>
-            ) : canContinue ? (
+            ) : canContinue && !hasResponse ? (
+              // Only a turn that stopped before answering offers Continue; an
+              // answered turn continues from the composer like any other.
               <button
+                className="gyro-button is-ghost is-small"
                 onClick={onContinueChat}
-                title={
-                  hasResponse
-                    ? "Continue this chat"
-                    : "Resume this turn from where it left off"
-                }
+                title="Resume this turn from where it left off"
                 type="button"
               >
                 Continue
@@ -27622,13 +27629,13 @@ function ChatTurn({
             isSummarizing={fileReview?.isSummarizing}
             onAsk={fileReview?.onAsk}
             onKeep={fileReview?.onKeep}
-            onLoadChangeDiff={async (path) => {
+            onLoadChangePatches={async (path) => {
               const patches = turnReviewPatches(turn.timelineEvents, path);
               if (!patches.length)
                 throw new Error(
                   "Historical diff unavailable. Open Review to compare the current file separately.",
                 );
-              return patches.join("\n");
+              return patches;
             }}
             onReview={openTurnChanges}
             onUndo={onUndoChanges}
@@ -27681,7 +27688,7 @@ function ChatRunChangeSummary({
   isSummarizing = false,
   onAsk,
   onKeep,
-  onLoadChangeDiff,
+  onLoadChangePatches,
   onReview,
   onUndo,
   summaries,
@@ -27697,7 +27704,8 @@ function ChatRunChangeSummary({
   isSummarizing?: boolean;
   onAsk?: (path: string) => void;
   onKeep?: (path: string, contentHash?: string) => void;
-  onLoadChangeDiff?: (path: string) => Promise<string>;
+  /** Each recorded patch for the path, rendered one after another. */
+  onLoadChangePatches?: (path: string) => Promise<string[]>;
   onReview?: (path?: string) => void;
   onUndo?: () => void;
   summaries?: Map<string, FileReviewSummary>;
@@ -27709,7 +27717,7 @@ function ChatRunChangeSummary({
   const hiddenCount = files.length - 6;
   const totals = totalFileChangeCounts(files);
   const fileLabel = files.length === 1 ? "file" : "files";
-  const canExpandDiff = Boolean(onLoadChangeDiff);
+  const canExpandDiff = Boolean(onLoadChangePatches);
   const reviewFiles = () => {
     if (canExpandDiff) {
       setOpenPath(files[0]?.path);
@@ -27738,23 +27746,38 @@ function ChatRunChangeSummary({
           <strong>
             Edited {files.length} {fileLabel}
           </strong>
-          <small>
-            <FileChangeCountBadges counts={totals} />
-            {keptCount > 0 ? (
-              <em className="is-kept">
-                {keptCount} of {files.length} kept
-              </em>
-            ) : null}
-          </small>
+          {/* One count per line: the header totals several files, and a single
+              file's count is already on its own row below. A total that cannot
+              be measured says nothing here; each row says so for its file. */}
+          {(files.length > 1 && totals) || keptCount > 0 ? (
+            <small>
+              {files.length > 1 ? (
+                <FileChangeCountBadges counts={totals} showUnknown={false} />
+              ) : null}
+              {keptCount > 0 ? (
+                <em className="is-kept">
+                  {keptCount} of {files.length} kept
+                </em>
+              ) : null}
+            </small>
+          ) : null}
         </div>
         <span className="gyro-change-summary-actions">
           {onUndo ? (
-            <button onClick={onUndo} type="button" className="is-undo">
-              Undo <RotateCcw aria-hidden="true" size={13} />
+            <button
+              className="gyro-button is-secondary is-small"
+              onClick={onUndo}
+              type="button"
+            >
+              Undo
             </button>
           ) : null}
           {onReview || canExpandDiff ? (
-            <button onClick={reviewFiles} type="button">
+            <button
+              className="gyro-button is-secondary is-small"
+              onClick={reviewFiles}
+              type="button"
+            >
               Review
             </button>
           ) : null}
@@ -27805,9 +27828,9 @@ function ChatRunChangeSummary({
                       {contents}
                     </div>
                   )}
-                  {isOpen && onLoadChangeDiff ? (
+                  {isOpen && onLoadChangePatches ? (
                     <ChangeSummaryDiff
-                      onLoad={onLoadChangeDiff}
+                      onLoad={onLoadChangePatches}
                       path={file.path}
                     />
                   ) : null}
@@ -27884,9 +27907,9 @@ function ChatRunChangeSummary({
                     )
                   ) : null}
                 </span>
-                {isOpen && onLoadChangeDiff ? (
+                {isOpen && onLoadChangePatches ? (
                   <ChangeSummaryDiff
-                    onLoad={onLoadChangeDiff}
+                    onLoad={onLoadChangePatches}
                     path={file.path}
                   />
                 ) : null}
@@ -28023,18 +28046,21 @@ function SessionGoalStrip({
   );
 }
 
-/** The change itself, inline, so reading a file does not leave the thread. */
+/**
+ * The change itself, inline, so reading a file does not leave the thread.
+ * Drawn by the review panel's reader, so the chat shows the same hunks, line
+ * numbers and gutters — and never the raw `diff --git` / `---` / `+++` headers.
+ */
 function ChangeSummaryDiff({
   onLoad,
   path,
 }: {
-  onLoad: (path: string) => Promise<string>;
+  onLoad: (path: string) => Promise<string[]>;
   path: string;
 }) {
   const [state, setState] = useState<{
     status: "loading" | "ready" | "failed";
-    lines?: DiffPreviewLine[];
-    truncated?: boolean;
+    patches?: string[];
     error?: string;
   }>({ status: "loading" });
 
@@ -28042,10 +28068,12 @@ function ChangeSummaryDiff({
     let cancelled = false;
     setState({ status: "loading" });
     onLoad(path).then(
-      (diff) => {
+      (patches) => {
         if (cancelled) return;
-        const { lines, truncated } = diffPreviewLines(diff);
-        setState({ status: "ready", lines, truncated });
+        setState({
+          status: "ready",
+          patches: patches.filter((patch) => patch.trim().length > 0),
+        });
       },
       (error: unknown) => {
         if (cancelled) return;
@@ -28063,6 +28091,7 @@ function ChangeSummaryDiff({
     };
   }, [onLoad, path]);
 
+  const patches = state.patches ?? [];
   return (
     <div className="gyro-change-summary-diff">
       {state.status === "loading" ? (
@@ -28073,47 +28102,26 @@ function ChangeSummaryDiff({
       {state.status === "failed" ? (
         <p className="gyro-change-summary-diff-note">{state.error}</p>
       ) : null}
-      {state.status === "ready" && state.lines?.length ? (
-        <div className="gyro-change-summary-diff-scroll">
-          <code>
-            {state.lines.map((line, index) => (
-              <span
-                className={diffPreviewLineClass(line.kind)}
-                key={`${index}-${line.text}`}
-              >
-                {line.text || " "}
-              </span>
-            ))}
-          </code>
-        </div>
-      ) : null}
-      {state.status === "ready" && !state.lines?.length ? (
+      {state.status === "ready"
+        ? patches.map((patch, index) => (
+            <PlainDiffView
+              diff={patch}
+              key={index}
+              notice={
+                patches.length > 1
+                  ? `Recorded edit ${index + 1} of ${patches.length}`
+                  : undefined
+              }
+            />
+          ))
+        : null}
+      {state.status === "ready" && !patches.length ? (
         <p className="gyro-change-summary-diff-note">
           No text change to show here.
         </p>
       ) : null}
-      {state.truncated ? (
-        <p className="gyro-change-summary-diff-note">
-          Shortened. Open Changes for the whole file.
-        </p>
-      ) : null}
     </div>
   );
-}
-
-function diffPreviewLineClass(kind: DiffPreviewLine["kind"]) {
-  switch (kind) {
-    case "added":
-      return "is-added";
-    case "removed":
-      return "is-removed";
-    case "hunk":
-      return "is-hunk";
-    case "meta":
-      return "is-meta";
-    default:
-      return undefined;
-  }
 }
 
 function formatMessageTime(value: string) {

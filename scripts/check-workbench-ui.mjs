@@ -4548,6 +4548,15 @@ expect(
     !styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
     ) &&
+    // The answer's copy action and token count reveal with their whole turn
+    // (hover or focus), and the latest turn always shows them.
+    styleSource.includes(".gyro-chat-turn:hover .gyro-response-actions") &&
+    styleSource.includes(
+      ".gyro-chat-turn:focus-within .gyro-response-actions",
+    ) &&
+    styleSource.includes(
+      ".gyro-chat-turn:not(:has(~ .gyro-chat-turn)) .gyro-response-actions",
+    ) &&
     typeSource.includes("ProviderChatStreamEvent") &&
     typeSource.includes("ProviderResumeCursor") &&
     tauriSource.includes("SessionEventKind::AssistantMessage") &&
@@ -8460,6 +8469,32 @@ expect(
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
   "Live file changes lead the composer dock above queued turns, without negative-margin overlap, and completed edits retain their file review card.",
+);
+
+expect(
+  // The sent prompt is a content-width bubble, not a full-width bar.
+  !chatDesignSource.includes("justify-content: stretch") &&
+    /div\.gyro-user-message-content:last-child \{[^}]*max-width: 75%;[^}]*width: fit-content;/.test(
+      chatDesignSource,
+    ) &&
+    // Continue is offered only by a turn that stopped before answering, as a
+    // quiet ghost button; an unmeasured turn prints no "Usage unavailable".
+    surfaceSource.includes("canContinue && !hasResponse ? (") &&
+    surfaceSource.includes('className="gyro-button is-ghost is-small"') &&
+    surfaceSource.includes(
+      "responseEvent && (responseTurnTokens || responseRequestTokens)",
+    ) &&
+    // One count per line in the edited-files card, and Undo matches Review.
+    surfaceSource.includes("(files.length > 1 && totals) || keptCount > 0 ? (") &&
+    !surfaceSource.includes('className="is-undo"') &&
+    !styleSource.includes(".gyro-change-summary-actions > button") &&
+    // The inline change is drawn by the review panel's reader, so git file
+    // headers never reach the chat.
+    surfaceSource.includes('import { PlainDiffView } from "./plain-diff-view"') &&
+    surfaceSource.includes("onLoadChangePatches") &&
+    !surfaceSource.includes("diffPreviewLineClass") &&
+    !styleSource.includes(".gyro-change-summary-diff-scroll"),
+  "A finished turn reads quietly: a content-width prompt bubble, Continue only when the turn stopped short, no empty usage label, one change count per line with matched Undo and Review, and the inline diff drawn like the review panel.",
 );
 
 expect(
