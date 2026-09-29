@@ -16,7 +16,7 @@
   border-bottom: 1px solid var(--gyro-hairline-soft);
   color: var(--gyro-muted);
   display: flex;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   gap: 6px;
   min-height: 38px;
   padding: 0 6px 0 12px;
@@ -29,7 +29,7 @@
 
 .gyro-plan-card-kind {
   color: var(--gyro-text);
-  font-weight: 560;
+  font-weight: var(--gyro-weight-medium);
 }
 
 .gyro-plan-card-steps {
@@ -89,15 +89,15 @@
 }
 
 .gyro-plan-card-body .gyro-plan-document h1 {
-  font-size: calc(18px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-type-lg);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.02em;
   margin-bottom: 12px;
 }
 
 .gyro-plan-card-body .gyro-plan-document h2 {
-  font-size: calc(14.5px * var(--gyro-ui-scale, 1));
-  font-weight: 620;
+  font-size: var(--gyro-type-base);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.01em;
   margin-bottom: 6px;
   margin-top: 18px;
@@ -105,7 +105,7 @@
 
 .gyro-plan-card-body .gyro-plan-document p,
 .gyro-plan-card-body .gyro-plan-document li {
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   line-height: 1.55;
 }
 
@@ -127,8 +127,8 @@
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
   gap: 4px;
   padding: 2px 18px 12px;
 }
@@ -159,8 +159,8 @@
   cursor: pointer;
   display: flex;
   font: inherit;
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 560;
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-medium);
   gap: 8px;
   min-height: 38px;
   padding: 0 12px;
@@ -183,8 +183,8 @@
 .gyro-plan-card-fold > small {
   color: var(--gyro-faint);
   flex: none;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 400;
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-regular);
   margin-left: auto;
 }
 
@@ -252,13 +252,13 @@
 
 .gyro-question-answers-list dt {
   color: var(--gyro-muted);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   line-height: 1.45;
 }
 
 .gyro-question-answers-list dd {
   color: var(--gyro-text);
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   line-height: 1.45;
   margin: 2px 0 0;
   overflow-wrap: anywhere;
@@ -347,8 +347,8 @@
 
 .gyro-plan-panel-title strong {
   color: var(--gyro-text);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.01em;
   line-height: 1.3;
   overflow: hidden;
@@ -358,7 +358,7 @@
 
 .gyro-plan-panel-title small {
   color: var(--gyro-faint);
-  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
   overflow: hidden;
@@ -396,8 +396,8 @@
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
   gap: 5px;
   height: 24px;
   padding: 0 9px;
@@ -608,8 +608,8 @@
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item strong {
   color: var(--gyro-text);
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
-  font-weight: 450;
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-regular);
   line-height: 20px;
   overflow: visible;
   text-overflow: clip;
@@ -617,7 +617,7 @@
 }
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item.is-in-progress strong {
-  font-weight: 600;
+  font-weight: var(--gyro-weight-strong);
 }
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item.is-complete strong {
@@ -626,7 +626,7 @@
 
 .gyro-plan-harness.gyro-plan-steps .gyro-plan-item > div > span {
   color: var(--gyro-faint);
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   line-height: 1.45;
   white-space: normal;
 }
@@ -636,8 +636,8 @@
   background: var(--gyro-warn-soft);
   border-radius: 999px;
   color: var(--gyro-warn);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-type-xs);
+  font-weight: var(--gyro-weight-medium);
   grid-column: 3;
   grid-row: 1;
   line-height: 20px;
@@ -687,7 +687,7 @@
   color: var(--gyro-faint);
   column-gap: 12px;
   display: grid;
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   grid-template-columns: 20px minmax(0, 1fr);
   justify-items: start;
   margin-top: 4px;

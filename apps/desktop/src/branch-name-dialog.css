@@ -11,7 +11,7 @@
   color: var(--gyro-text, var(--gyro-text));
   color-scheme: inherit;
   font-family: var(--gyro-font-sans);
-  font-size: var(--gyro-font-support, 13px);
+  font-size: var(--gyro-type-md, 13px);
   margin: auto;
   max-height: calc(100dvh - 32px);
   overflow: auto;

@@ -1,7 +1,7 @@
 .gyro-workspace-search-results {
   min-width: 0;
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
 }
 
 .gyro-workspace-search-summary {
@@ -54,7 +54,7 @@
   flex-shrink: 0;
   max-width: 65%;
   overflow: hidden;
-  font-weight: 550;
+  font-weight: var(--gyro-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -64,7 +64,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   direction: rtl;
   text-align: left;
   text-overflow: ellipsis;
@@ -78,7 +78,7 @@
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface-soft);
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -112,7 +112,7 @@
   flex-shrink: 0;
   min-width: 20px;
   color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

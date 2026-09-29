@@ -62,8 +62,8 @@
 .gyro-installed-update-brand {
   color: var(--gyro-text);
   display: grid;
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-type-xs);
+  font-weight: var(--gyro-weight-strong);
   gap: 3px;
   min-width: 0;
 }
@@ -79,13 +79,13 @@
 
 .gyro-installed-update-compact-version {
   color: var(--gyro-muted);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   line-height: 1.2;
 }
 
 .gyro-installed-update-title {
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-type-base);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.015em;
   line-height: 1.2;
 }
@@ -93,7 +93,7 @@
 .gyro-installed-update-preview {
   color: var(--gyro-muted);
   display: -webkit-box;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   line-height: 1.35;
   margin-top: 3px;
   overflow: hidden;
@@ -105,8 +105,8 @@
   align-items: center;
   color: var(--gyro-accent);
   display: inline-flex;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-type-xs);
+  font-weight: var(--gyro-weight-strong);
   gap: 4px;
   justify-self: start;
   margin-top: 4px;
@@ -195,13 +195,13 @@
 
 .gyro-installed-update-eyebrow {
   color: var(--gyro-accent);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  font-weight: 750;
+  font-size: var(--gyro-type-xs);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: 0.1em;
 }
 
 .gyro-installed-update-card h2 {
-  font-size: calc(20px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xl);
   letter-spacing: -0.03em;
   line-height: 1.2;
   margin: 5px 0 3px;
@@ -209,14 +209,14 @@
 
 .gyro-installed-update-version {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   margin: 0;
 }
 
 .gyro-installed-update-notes {
   border-top: 1px solid var(--gyro-border-soft);
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   line-height: 1.55;
   overflow-wrap: anywhere;
   padding-top: 13px;
@@ -229,8 +229,8 @@
   border-radius: 7px;
   color: #ffffff;
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-strong);
   justify-self: start;
   min-height: 30px;
   padding: 0 14px;

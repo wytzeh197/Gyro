@@ -7659,8 +7659,8 @@ expect(
   ) &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes("justify-content: center") &&
-    styleSource.includes("font-weight: 450") &&
-    styleSource.includes("font-weight: 500") &&
+    styleSource.includes("font-weight: var(--gyro-weight-regular)") &&
+    styleSource.includes("font-weight: var(--gyro-weight-medium)") &&
     styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes("transition: transform var(--gyro-motion)") &&
     styleSource.includes("@keyframes gyro-native-surface-enter"),
@@ -8418,9 +8418,9 @@ expect(
 
 expect(
   styleSource.includes("Conversation text shares the body scale") &&
-    styleSource.includes("--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));") &&
+    styleSource.includes("--gyro-type-base: calc(14px * var(--gyro-ui-scale, 1));") &&
     styleSource.includes(
-      "font-size: var(--gyro-font-body);\n  line-height: 1.6;",
+      "font-size: var(--gyro-type-base);\n  line-height: 1.6;",
     ) &&
     styleSource.includes(".gyro-user-message-bubble p") &&
     styleSource.includes(".gyro-run-row-detail") &&

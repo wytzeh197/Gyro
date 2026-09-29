@@ -33,8 +33,8 @@
 
 .gyro-question-dock-head h3 {
   flex: 1 1 auto;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
+  font-size: var(--gyro-type-base);
+  font-weight: var(--gyro-weight-strong);
   letter-spacing: -0.01em;
   line-height: 1.4;
   margin: 0;
@@ -74,7 +74,7 @@
 .gyro-question-dock-count {
   color: var(--gyro-faint);
   flex: none;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -135,7 +135,7 @@
   cursor: pointer;
   display: grid;
   font: inherit;
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   gap: 10px;
   grid-template-columns: 20px minmax(0, 1fr) 14px;
   line-height: 1.45;
@@ -171,7 +171,7 @@
   color: var(--gyro-faint);
   display: inline-flex;
   font-family: inherit;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   font-variant-numeric: tabular-nums;
   height: 20px;
   justify-content: center;
@@ -195,13 +195,13 @@
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  font-weight: 550;
+  font-weight: var(--gyro-weight-medium);
   gap: 4px 8px;
 }
 
 .gyro-question-option small {
   color: var(--gyro-muted);
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   line-height: 1.45;
 }
 
@@ -209,9 +209,9 @@
   background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
   border-radius: 999px;
   color: var(--gyro-success);
-  font-size: calc(10.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-xs);
   font-style: normal;
-  font-weight: 550;
+  font-weight: var(--gyro-weight-medium);
   letter-spacing: 0.01em;
   line-height: 1.6;
   padding: 0 7px;
@@ -243,7 +243,7 @@
 }
 
 .gyro-question-dock strong {
-  font-weight: 650;
+  font-weight: var(--gyro-weight-strong);
 }
 
 .gyro-question-dock-other {
@@ -275,7 +275,7 @@
   color: var(--gyro-text);
   flex: 1 1 auto;
   font: inherit;
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-md);
   height: 28px;
   min-width: 0;
   outline: none;
@@ -294,8 +294,8 @@
   cursor: pointer;
   flex: none;
   font: inherit;
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-medium);
   height: 28px;
   padding: 0 10px;
   white-space: nowrap;
@@ -334,7 +334,7 @@
 
 .gyro-question-dock-note {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-type-sm);
   margin: 8px 8px 0;
   overflow-wrap: anywhere;
 }
