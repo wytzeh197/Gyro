@@ -1195,7 +1195,7 @@ button {
 }
 
 :root[data-theme="light"] .gyro-cli-update-banner {
-  background: color-mix(in srgb, var(--gyro-surface) 94%, #ffffff);
+  background: var(--gyro-surface);
   box-shadow: var(--gyro-elev-pop);
 }
 
@@ -8749,7 +8749,7 @@ body {
 :root[data-theme="light"]
   .gyro-chat-surface.has-environment
   .gyro-plan-rail.is-document {
-  background: #ffffff;
+  background: var(--gyro-surface);
 }
 
 @media (max-width: 980px) {
@@ -9154,7 +9154,7 @@ body {
 }
 
 .gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs button.is-active {
-  background: #25272b;
+  background: var(--gyro-surface-raised);
   color: #e7e2da;
 }
 
