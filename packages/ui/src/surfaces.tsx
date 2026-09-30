@@ -4,7 +4,7 @@ import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { ToastStack } from "./toast-stack";
-import { Dialog, EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
+import { Button, Dialog, EmptyState, OptionSelect, Segmented, SelectMenu, Skeleton, Spinner } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -16296,6 +16296,13 @@ const automationTimeZoneOptions = Array.from(
   ]),
 ).map((timezone) => ({ value: timezone, label: timezone }));
 
+const automationStatusFilters: Array<{ value: Automation["status"] | ""; label: string }> = [
+  { value: "", label: "All" },
+  { value: "current", label: "Active" },
+  { value: "paused", label: "Paused" },
+  { value: "completed", label: "Completed" },
+];
+
 function isValidAutomationTimeZone(timezone: string) {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
@@ -16537,95 +16544,118 @@ export function AutomationsSurface({
     <div
       className={`gyro-scheduled-page${isCreating || detailOpen ? " has-detail" : ""}`}
     >
-      <div className="gyro-scheduled-titlebar" data-tauri-drag-region>
-        <button
-          className="gyro-button is-primary"
-          type="button"
-          disabled={isSaving}
-          onClick={() => beginCreate()}
-        >
-          Create automation
-        </button>
-      </div>
+      <div className="gyro-scheduled-titlebar" data-tauri-drag-region />
       <div className="gyro-scheduled-body">
         <section className="gyro-scheduled-index" aria-label="Scheduled work">
           <header className="gyro-scheduled-heading">
-            <h1>Automations</h1>
-            <p>Schedule project checks and follow-ups.</p>
+            <div>
+              <h1>Automations</h1>
+              <p>Schedule project checks and follow-ups.</p>
+            </div>
+            <Button variant="primary" disabled={isSaving} onClick={() => beginCreate()}>
+              Create automation
+            </Button>
           </header>
-          <label className="gyro-scheduled-search-field">
-            <Search size={14} aria-hidden="true" />
-            <input
-              className="gyro-scheduled-search"
-              type="search"
-              aria-label="Search automations"
-              placeholder="Search automations"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
+          {/* Search and filters appear once there is something to narrow, and
+              stay while a query or filter is active so it can be cleared. */}
+          {automations.length > 0 || query || statusFilter ? (
+            <>
+              <label className="gyro-scheduled-search-field">
+                <Search size={14} aria-hidden="true" />
+                <input
+                  className="gyro-scheduled-search"
+                  type="search"
+                  aria-label="Search automations"
+                  placeholder="Search automations"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </label>
+              {/* Beside an open panel the list column is too narrow for four
+                  segments, so the same filter becomes a menu there. */}
+              {isCreating || detailOpen ? (
+                <SelectMenu
+                  className="gyro-scheduled-filters"
+                  label="Status"
+                  onChange={(value) => setStatusFilter(value as typeof statusFilter)}
+                  options={automationStatusFilters}
+                  showLabel
+                  size="small"
+                  value={statusFilter}
+                />
+              ) : (
+                <Segmented
+                  className="gyro-scheduled-filters"
+                  label="Automation status"
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                  options={automationStatusFilters}
+                />
+              )}
+            </>
+          ) : null}
+          {visibleAutomations.length ? (
+            <div className="gyro-scheduled-list">
+              {visibleAutomations.map((automation) => (
+                <button
+                  type="button"
+                  className={`gyro-scheduled-item${detailOpen && !isCreating && automation.id === selectedAutomation?.id ? " is-selected" : ""}`}
+                  key={automation.id}
+                  onClick={() => {
+                    onSelectAutomation?.(automation.id);
+                    setIsCreating(false);
+                    setDetailOpen(true);
+                  }}
+                  disabled={isSaving}
+                >
+                  <CalendarClock size={15} aria-hidden="true" />
+                  <span>
+                    <strong>{automation.title}</strong>
+                    <small>{automationScheduleLabel(automation)}</small>
+                  </span>
+                  <em className={`gyro-scheduled-status is-${automation.status}`}>
+                    {automation.status === "current"
+                      ? "Active"
+                      : automation.status === "paused"
+                        ? "Paused"
+                        : "Completed"}
+                  </em>
+                  {automation.unreadResults > 0 && (
+                    <b aria-label={`${automation.unreadResults} unread results`}>
+                      {automation.unreadResults}
+                    </b>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : query || statusFilter ? (
+            <EmptyState
+              action={
+                <Button
+                  size="small"
+                  variant="ghost"
+                  onClick={() => {
+                    setQuery("");
+                    setStatusFilter("");
+                  }}
+                >
+                  Show all
+                </Button>
+              }
+              className="gyro-scheduled-empty"
+              compact
+              icon={<Search size={14} />}
+              title="No matching automations"
             />
-          </label>
-          <nav
-            className="gyro-segmented gyro-scheduled-filters"
-            aria-label="Automation status"
-          >
-            {(
-              [
-                ["", "All"],
-                ["current", "Active"],
-                ["paused", "Paused"],
-                ["completed", "Completed"],
-              ] as const
-            ).map(([status, label]) => (
-              <button
-                type="button"
-                key={status}
-                aria-pressed={statusFilter === status}
-                onClick={() => setStatusFilter(status)}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-          <div className="gyro-scheduled-list">
-            {visibleAutomations.map((automation) => (
-              <button
-                type="button"
-                className={`gyro-scheduled-item${detailOpen && !isCreating && automation.id === selectedAutomation?.id ? " is-selected" : ""}`}
-                key={automation.id}
-                onClick={() => {
-                  onSelectAutomation?.(automation.id);
-                  setIsCreating(false);
-                  setDetailOpen(true);
-                }}
-                disabled={isSaving}
-              >
-                <CalendarClock size={15} aria-hidden="true" />
-                <span>
-                  <strong>{automation.title}</strong>
-                  <small>{automationScheduleLabel(automation)}</small>
-                </span>
-                <em className={`gyro-scheduled-status is-${automation.status}`}>
-                  {automation.status === "current"
-                    ? "Active"
-                    : automation.status === "paused"
-                      ? "Paused"
-                      : "Completed"}
-                </em>
-                {automation.unreadResults > 0 && (
-                  <b aria-label={`${automation.unreadResults} unread results`}>
-                    {automation.unreadResults}
-                  </b>
-                )}
-              </button>
-            ))}
-            {!visibleAutomations.length && (
-              <p className="gyro-scheduled-empty">
-                {query || statusFilter
-                  ? "No matching automations"
-                  : "No scheduled work yet"}
-              </p>
-            )}
-          </div>
+          ) : (
+            <EmptyState
+              className="gyro-scheduled-empty"
+              compact={isCreating || detailOpen}
+              detail="Start from a suggestion below, or create your own."
+              icon={<CalendarClock size={isCreating || detailOpen ? 14 : 20} />}
+              title="No automations yet"
+            />
+          )}
           {!query && !statusFilter && (
             <section
               className="gyro-scheduled-suggestions"
