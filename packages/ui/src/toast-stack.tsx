@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties, RefObject } from "react";
 import type { Notification, NotificationKind } from "./types";
 
@@ -63,8 +64,9 @@ export function ToastStack({
     stackRef,
     toasts.map((toast) => toast.id).join(" "),
   );
+  const modal = useOpenModal();
   if (!onDismiss) return null;
-  return (
+  const stack = (
     <section
       aria-label="Notifications"
       className="gyro-toast-stack"
@@ -80,6 +82,35 @@ export function ToastStack({
       ))}
     </section>
   );
+  return modal ? createPortal(stack, modal) : stack;
+}
+
+/*
+ * A modal <dialog> sits in the browser's top layer and makes everything
+ * outside it inert, so no z-index lifts the stack over it. While one is open
+ * the stack moves inside it, where it stays readable and dismissible.
+ */
+function useOpenModal() {
+  const [modal, setModal] = useState<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    const find = () => {
+      const open = document.querySelectorAll<HTMLDialogElement>("dialog[open]");
+      setModal(
+        [...open].reverse().find((dialog) => dialog.matches(":modal")) ?? null,
+      );
+    };
+    find();
+    // Dialogs portal to <body>; showModal() and close() flip `open`.
+    const mounts = new MutationObserver(find);
+    const toggles = new MutationObserver(find);
+    mounts.observe(document.body, { childList: true });
+    toggles.observe(document.body, { attributeFilter: ["open"], subtree: true });
+    return () => {
+      mounts.disconnect();
+      toggles.disconnect();
+    };
+  }, []);
+  return modal;
 }
 
 /*
