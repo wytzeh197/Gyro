@@ -1269,7 +1269,7 @@ assert.equal(
     call("d", { kind: "read", path: "a.ts" }),
     call("e", { kind: "tool", name: "Skill" }),
   ]),
-  "Ran 3 commands, Read 1 file, 1 other tool call",
+  "Ran 3 commands, read 1 file, 1 other tool call",
   "kinds keep first-seen order, reads count distinct paths, repeats count calls",
 );
 assert.equal(
@@ -1280,7 +1280,7 @@ assert.equal(
     call("d", { kind: "search", query: "todo" }),
     call("e", { kind: "tool", name: "Skill", status: "failed" }),
   ]),
-  "Ran 1 command, Read 1 file, Edited 1 file, 2 other tool calls, 1 failed",
+  "Ran 1 command, read 1 file, edited 1 file, 2 other tool calls, 1 failed",
   "a fourth kind should fold into other calls and a failure should be named",
 );
 assert.equal(
@@ -1290,18 +1290,18 @@ assert.equal(
 );
 assert.deepEqual(
   splitSegmentSummary(
-    "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls, 3 failed",
+    "Ran 14 commands, ran 8 searches, read 7 files, 55 other tool calls, 3 failed",
   ),
   {
-    lead: "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls",
+    lead: "Ran 14 commands, ran 8 searches, read 7 files, 55 other tool calls",
     failed: "3 failed",
   },
   "only the failure clause of a summary should be separable for emphasis",
 );
 assert.deepEqual(
-  splitSegmentSummary("Ran 3 commands, Read 1 file, 1 other tool call"),
+  splitSegmentSummary("Ran 3 commands, read 1 file, 1 other tool call"),
   {
-    lead: "Ran 3 commands, Read 1 file, 1 other tool call",
+    lead: "Ran 3 commands, read 1 file, 1 other tool call",
     failed: null,
   },
 );

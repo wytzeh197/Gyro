@@ -234,7 +234,7 @@ export function runWorkGroupText(group: WorkGroup): RunRowText {
  *
  * Narration is the story; the tool calls under it are how. So the run reads as
  * say → work → say → work, and a finished work stretch folds to one summary
- * line ("Ran 3 commands, Read 1 file") that opens onto its calls. Approvals
+ * line ("Ran 3 commands, read 1 file") that opens onto its calls. Approvals
  * split a stretch like narration does, because work after a decision is a
  * different stretch of work.
  */
@@ -295,7 +295,7 @@ const SEGMENT_PHRASES = {
 const SEGMENT_NAMED_PARTS = 3;
 
 /**
- * One line for a finished stretch of work: "Ran 3 commands, Read 1 file,
+ * One line for a finished stretch of work: "Ran 3 commands, read 1 file,
  * 3 other tool calls".
  *
  * Kinds are named in the order they first happened, so the line retells the
@@ -360,13 +360,18 @@ export function summarizeSegment(steps: RunStep[]): string {
   if (failed > 0) {
     parts.push(`${failed} failed`);
   }
-  return parts.join(", ");
+  // Sentence case: only the line's first verb keeps its capital.
+  return parts
+    .map((part, index) =>
+      index === 0 ? part : part.charAt(0).toLowerCase() + part.slice(1),
+    )
+    .join(", ");
 }
 
 /**
  * Split a segment summary so only the failure clause can be emphasized.
  *
- * The rest of the line is ordinary work ("Ran 14 commands, Read 7 files").
+ * The rest of the line is ordinary work ("Ran 14 commands, read 7 files").
  * "3 failed" is the only part that should read as a problem.
  */
 export function splitSegmentSummary(summary: string): {

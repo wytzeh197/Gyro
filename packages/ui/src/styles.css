@@ -866,11 +866,13 @@ button {
   position: absolute;
   right: 5px;
   top: calc(100% + 5px);
-  width: 124px;
+  min-width: 124px;
+  width: max-content;
   z-index: var(--gyro-z-dropdown);
 }
 
 .gyro-session-menu button {
+  white-space: nowrap;
   border: 0;
   border-radius: var(--gyro-radius-sm);
   font-size: var(--gyro-type-sm);
@@ -11169,8 +11171,12 @@ textarea,
     var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
 }
 
-:root[data-theme="light"] .gyro-chat-start .gyro-composer-chip:hover,
-:root[data-theme="light"] .gyro-chat-start .gyro-composer-tool:hover {
+:root[data-theme="light"]
+  .gyro-chat-start
+  :is(.gyro-composer-chip, .gyro-composer-tool):is(
+    :hover,
+    [aria-expanded="true"]
+  ) {
   background: rgba(31, 41, 55, 0.06);
   color: #151a21;
 }
@@ -14093,8 +14099,8 @@ button.gyro-settings-row em::after {
   min-height: calc(28px * var(--gyro-ui-scale, 1));
 }
 
-.gyro-chat-start .gyro-composer-chip:hover,
-.gyro-chat-start .gyro-composer-tool:hover {
+.gyro-chat-start .gyro-composer-chip:is(:hover, [aria-expanded="true"]),
+.gyro-chat-start .gyro-composer-tool:is(:hover, [aria-expanded="true"]) {
   background: var(--gyro-hero-hover);
   color: var(--gyro-hero-hover-text);
 }
@@ -16204,6 +16210,11 @@ button.gyro-settings-row em::after {
   color: var(--gyro-text);
 }
 
+/* Faint text drops below 4.5:1 on the selected fill. */
+.gyro-composer-menu-item:is(:hover, .is-active) small {
+  color: var(--gyro-muted);
+}
+
 .gyro-composer-menu-item:disabled,
 .gyro-composer-menu-item.is-provider:disabled strong {
   color: color-mix(in srgb, var(--gyro-faint) 82%, var(--gyro-muted) 18%);
@@ -16239,7 +16250,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-composer-menu-item > svg:last-child {
-  color: var(--gyro-warn);
+  /* The check follows its row, so only the direct-permission row is amber. */
+  color: inherit;
 }
 
 /* Permission picker: opaque, roomy, and intentionally orange. */
@@ -19030,7 +19042,9 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-chip,
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-tool,
 :root[data-theme="light"] .gyro-chat-start .gyro-model-chip,
-:root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-chip,
+:root[data-theme="light"]
+  .gyro-chat-composer-dock
+  .gyro-composer-chip:not(.is-goal[aria-pressed="true"], .is-council),
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-model-chip {
   color: var(--gyro-hero-muted);
@@ -25831,7 +25845,8 @@ body,
   grid-template-columns: 14px minmax(0, 1fr) 20px 20px 12px;
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-row.is-active {
-  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  /* 10% keeps the folder path and status letter at 4.5:1 in both themes. */
+  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
 }
 /* One ring: the file name is the row's main action, so its keyboard focus
    rings the whole row (inset) instead of the button; the row's ⋯ and −
@@ -26436,6 +26451,20 @@ body,
   color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
   padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+}
+.gyro-inline-approval-files summary::-webkit-details-marker {
+  display: none;
+}
+.gyro-inline-approval-files summary > svg {
+  margin-top: 0;
+  transition: transform var(--gyro-motion) var(--gyro-ease);
+}
+.gyro-inline-approval-files details[open] > summary > svg {
+  transform: rotate(90deg);
 }
 .gyro-inline-approval-footer {
   display: flex;
@@ -27133,7 +27162,7 @@ body,
 }
 
 .gyro-composer-menu-footer {
-  background: var(--gyro-surface-raised);
+  background: inherit;
   border-top: 1px solid var(--gyro-border-soft);
   bottom: -5px;
   padding-bottom: 5px;
@@ -27147,7 +27176,7 @@ body,
 }
 
 .gyro-composer-popover .gyro-composer-menu-item.is-branch-action {
-  border: 1px solid var(--gyro-border-soft);
+  border: 1px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: flex;
@@ -31114,7 +31143,6 @@ body,
 }
 
 .gyro-project-picker .gyro-composer-popover-title {
-  color: var(--gyro-text);
   font-size: var(--gyro-type-sm);
   font-weight: var(--gyro-weight-strong);
   padding: 5px 8px 7px;

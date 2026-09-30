@@ -191,13 +191,12 @@
   color: var(--gyro-muted);
   cursor: pointer;
   display: flex;
-  font:
-    calc(14px * var(--gyro-ui-scale, 1)) / calc(20px * var(--gyro-ui-scale, 1))
+  font: var(--gyro-type-md) / calc(20px * var(--gyro-ui-scale, 1))
     var(--gyro-font-sans);
   gap: 8px;
   letter-spacing: -0.005em;
   max-width: 100%;
-  min-height: 25px;
+  min-height: 26px;
   padding: 0;
   text-align: left;
 }
