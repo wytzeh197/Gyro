@@ -13,6 +13,8 @@
  * session, repository, or provider account.
  */
 
+import desktopPackage from "../package.json";
+
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 
 const parameters = new URLSearchParams(location.search);
@@ -954,8 +956,9 @@ const invoke: Invoke = (command, args) => {
   }
   // Deterministic folder choice for exercising project editing in browser QA.
   if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
-  // A fixed demo build, so Settings > Updates can name the installed version.
-  if (command === "plugin:app|version") return "0.1.0-alpha.49.3";
+  // The version being built, so Settings > Updates and Help name the release
+  // these screenshots come from rather than a stale one.
+  if (command === "plugin:app|version") return desktopPackage.version;
   if (command === "timing_diagnostics_enabled") return false;
   if (command === "prepare_workspace") {
     const request = args?.request as

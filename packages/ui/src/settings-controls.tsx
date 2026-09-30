@@ -56,8 +56,13 @@ export function SettingsRow({
       <div>
         <strong>
           {label}
+          {/* A real space keeps "Label Value" apart in copied text and for
+              screen readers; the dot between them is drawn by CSS. */}
           {value ? (
-            <small className="gyro-settings-info-value">{value}</small>
+            <>
+              {" "}
+              <small className="gyro-settings-info-value">{value}</small>
+            </>
           ) : null}
         </strong>
         <span>{detail}</span>

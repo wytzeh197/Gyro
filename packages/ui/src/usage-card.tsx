@@ -78,7 +78,9 @@ export function UsageCard({
       className={`gyro-usage-card is-${severity}`}
       data-visualization={visualization}
     >
-      <strong className="gyro-usage-card-label">{window.label}</strong>
+      <strong className="gyro-usage-card-label" title={window.label}>
+        {window.label}
+      </strong>
       {visualization === "wheels" ? (
         <div
           className="gyro-usage-wheel"

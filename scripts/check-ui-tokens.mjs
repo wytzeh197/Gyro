@@ -77,6 +77,35 @@ expect(
   "Every agent state that carries meaning needs a light-theme value; the dark ramp drops to roughly 2:1 on white.",
 );
 
+// Appearance draws both theme cards from fixed copies of each palette (the
+// active theme cannot supply the other one), so the copies must match the
+// real tokens or the previews quietly stop showing what each theme looks like.
+const tokensSource = read("packages/ui/src/tokens.css");
+const darkThemeBlock = tokensSource.match(/:root\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+const tokenValue = (block, name) =>
+  block.match(new RegExp(`\\n\\s*--${name}:\\s*([^;]+);`))?.[1]?.trim();
+for (const [preview, token] of [
+  ["app", "gyro-app"],
+  ["sidebar", "gyro-sidebar"],
+  ["surface", "gyro-surface"],
+  ["border", "gyro-border"],
+  ["text", "gyro-text"],
+  ["muted", "gyro-muted"],
+  ["bubble", "gyro-user-bubble"],
+]) {
+  for (const [palette, block] of [
+    ["dark", darkThemeBlock],
+    ["light", lightThemeBlock ?? ""],
+  ]) {
+    const copy = tokenValue(darkThemeBlock, `gyro-theme-preview-${palette}-${preview}`);
+    const real = tokenValue(block, token);
+    expect(
+      Boolean(copy) && copy === real,
+      `--gyro-theme-preview-${palette}-${preview} (${copy}) must equal the ${palette} theme's --${token} (${real}).`,
+    );
+  }
+}
+
 const allowedGradient = [
   /transparent,\s*rgba\(0,\s*0,\s*0/,
   /transparent,\s*var\(--gyro-surface-raised\)/,

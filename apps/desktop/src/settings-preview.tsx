@@ -151,13 +151,16 @@ function Preview() {
             ? "usage-limits"
             : "appearance",
   );
-  // ?permission=prompt|denied|granted previews each macOS notification state.
-  const [permission, setPermission] = useState<NotificationPermissionState>(
-    () =>
-      (new URLSearchParams(location.search).get(
-        "permission",
-      ) as NotificationPermissionState | null) ?? "prompt",
-  );
+  // ?permission=prompt|denied|granted|checking previews each macOS
+  // notification state; "checking" is the moment before macOS answers.
+  const [permission, setPermission] = useState<
+    NotificationPermissionState | undefined
+  >(() => {
+    const requested = new URLSearchParams(location.search).get("permission");
+    return requested === "checking"
+      ? undefined
+      : ((requested as NotificationPermissionState | null) ?? "prompt");
+  });
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );

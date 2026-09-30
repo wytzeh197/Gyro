@@ -2,11 +2,13 @@ import type {
   DesktopNotificationPreferences,
   NotificationPermissionState,
 } from "./types";
+import { Spinner } from "./primitives";
 import { SettingsGroup, SettingsRow, SettingsSwitch } from "./settings-controls";
 
 type DesktopNotificationSettingsProps = {
   preferences: DesktopNotificationPreferences;
-  permission: NotificationPermissionState;
+  /** Undefined until macOS has answered, so nothing claims a state early. */
+  permission?: NotificationPermissionState;
   isTesting: boolean;
   onChange?: (preferences: Partial<DesktopNotificationPreferences>) => void;
   onTest?: () => void;
@@ -14,8 +16,9 @@ type DesktopNotificationSettingsProps = {
 
 /** What macOS allows right now, set beside the label. Once it is allowed the
     switch says everything, so there is no extra fact to show. */
-function permissionValue(permission: NotificationPermissionState) {
+function permissionValue(permission?: NotificationPermissionState) {
   switch (permission) {
+    case undefined:
     case "granted":
       return undefined;
     case "denied":
@@ -26,8 +29,10 @@ function permissionValue(permission: NotificationPermissionState) {
   }
 }
 
-function permissionDetail(permission: NotificationPermissionState) {
+function permissionDetail(permission?: NotificationPermissionState) {
   switch (permission) {
+    case undefined:
+      return "Checking whether macOS allows Gyro's notifications.";
     case "granted":
       return "Allowed by macOS. Gyro only notifies you while it's in the background.";
     case "denied":
@@ -89,7 +94,9 @@ export function DesktopNotificationSettings({
         value={permissionValue(permission)}
         detail={permissionDetail(permission)}
       >
-        {allowed ? (
+        {permission === undefined ? (
+          <Spinner label="Checking notification permission" />
+        ) : allowed ? (
           <SettingsSwitch
             checked={preferences.enabled}
             label="Send macOS notifications"

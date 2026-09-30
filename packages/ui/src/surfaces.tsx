@@ -1042,7 +1042,9 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     section: "appearance",
     label: "Main color",
     detail: "Customize Gyro's main and secondary accents",
-    keywords: "main secondary accent brand palette color",
+    // Reset colors only appears beside these once they differ from the
+    // defaults, so "reset" finds the colours themselves.
+    keywords: "main secondary accent brand palette colors reset default",
   },
   {
     section: "appearance",
@@ -1067,12 +1069,6 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     label: "Secondary color",
     detail: "Supporting icons, badges, and quiet highlights",
     keywords: "accent palette color",
-  },
-  {
-    section: "appearance",
-    label: "Default palette",
-    detail: "Restore Gyro blue and violet",
-    keywords: "reset colors",
   },
   {
     section: "usage-limits",
@@ -21323,7 +21319,7 @@ export function SettingsSurface({
   onCliLaunchPresetChange,
   onResetUiState,
   onExportDiagnostics,
-  notificationPermission = "prompt",
+  notificationPermission,
   isTestingNotification = false,
   onTestNotification,
   systemAccess,

@@ -1,5 +1,6 @@
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties, type RefObject } from "react";
 import { RotateCcw } from "lucide-react";
+import { appearanceAccentProperties } from "./appearance";
 import type {
   InterfaceSize,
   MotionSpeed,
@@ -45,6 +46,15 @@ export function AppearanceSettings({
   onMotionSpeedChange,
   onAppearanceColorsChange,
 }: AppearanceSettingsProps) {
+  // Reset unmounts itself once the palette is back to default, so focus moves
+  // to the Main color control instead of falling back to the page.
+  const mainColorInputRef = useRef<HTMLInputElement>(null);
+  // Each preview's accent is the one that theme will really paint: the same
+  // contrast-adjusted value the app applies, not a fixed mix of the pick.
+  const previewAccent = (palette: "light" | "dark") =>
+    appearanceAccentProperties(mainColor, secondaryColor, palette)[
+      "--gyro-accent"
+    ];
   return (
     <>
       <SettingsGroup label="Theme">
@@ -71,10 +81,14 @@ export function AppearanceSettings({
             >
               <span aria-hidden="true" className="gyro-theme-preview">
                 <ThemePreviewWindow
+                  accent={previewAccent(mode === "dark" ? "dark" : "light")}
                   palette={mode === "dark" ? "dark" : "light"}
                 />
                 {mode === "system" ? (
-                  <ThemePreviewWindow palette="dark" />
+                  <ThemePreviewWindow
+                    accent={previewAccent("dark")}
+                    palette="dark"
+                  />
                 ) : null}
               </span>
               <span className="gyro-theme-picker-label">{label}</span>
@@ -139,6 +153,7 @@ export function AppearanceSettings({
         >
           <AppearanceColorControl
             color={mainColor}
+            inputRef={mainColorInputRef}
             label="Main color"
             onChange={(color) =>
               onAppearanceColorsChange?.(color, secondaryColor)
@@ -163,12 +178,13 @@ export function AppearanceSettings({
           >
             <button
               className="gyro-button is-secondary is-small gyro-color-reset"
-              onClick={() =>
+              onClick={() => {
                 onAppearanceColorsChange?.(
                   DEFAULT_MAIN_COLOR,
                   DEFAULT_SECONDARY_COLOR,
-                )
-              }
+                );
+                mainColorInputRef.current?.focus();
+              }}
               type="button"
             >
               <RotateCcw aria-hidden="true" size={13} />
@@ -185,9 +201,19 @@ export function AppearanceSettings({
     chats, a message and its reply, and the composer whose send button carries
     the main colour. The System card stacks both and shows the dark half on
     the right. */
-function ThemePreviewWindow({ palette }: { palette: "light" | "dark" }) {
+function ThemePreviewWindow({
+  accent,
+  palette,
+}: {
+  accent: string;
+  palette: "light" | "dark";
+}) {
   return (
-    <span className="gyro-theme-preview-window" data-palette={palette}>
+    <span
+      className="gyro-theme-preview-window"
+      data-palette={palette}
+      style={{ "--preview-accent": accent } as CSSProperties}
+    >
       <span className="gyro-theme-preview-sidebar">
         <i />
         <i className="is-active" />
@@ -209,10 +235,12 @@ function ThemePreviewWindow({ palette }: { palette: "light" | "dark" }) {
 
 function AppearanceColorControl({
   color,
+  inputRef,
   label,
   onChange,
 }: {
   color: string;
+  inputRef?: RefObject<HTMLInputElement>;
   label: string;
   onChange: (color: string) => void;
 }) {
@@ -223,6 +251,7 @@ function AppearanceColorControl({
     >
       <input
         aria-label={label}
+        ref={inputRef}
         onChange={(event) => onChange(event.target.value)}
         type="color"
         value={color}

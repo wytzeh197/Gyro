@@ -13111,6 +13111,8 @@ button.gyro-settings-row em::after {
    one status never needs a second set of colours. */
 
 .gyro-usage-dashboard {
+  /* Usage rows query this width; see the gyro-usage-cards rules. */
+  container: gyro-usage / inline-size;
   display: grid;
   gap: 18px;
   padding-bottom: 28px;
@@ -13336,8 +13338,11 @@ button.gyro-settings-row em::after {
 
 /* Each plan or spend window is one compact row, not a tall card. Bars: one
    bordered list, name | bar | amount | status, whose rows share one set of
-   columns (subgrid) so every bar starts and ends on the same line. Wheels:
-   small tiles with the ring beside the name. */
+   columns (subgrid) so every bar starts and ends on the same line. The name
+   column takes its natural width (up to 40%) and the bar takes what is left,
+   so names are never cut off. Wheels: small tiles with the ring beside the
+   name. The layout follows the room the dashboard has (the gyro-usage
+   container), not the window width. */
 .gyro-usage-cards {
   display: grid;
   gap: 10px;
@@ -13347,9 +13352,7 @@ button.gyro-settings-row em::after {
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
   gap: 0;
-  grid-template-columns:
-    minmax(120px, 1fr) minmax(96px, 2fr) minmax(0, auto)
-    minmax(0, auto);
+  grid-template-columns: fit-content(40%) minmax(96px, 1fr) auto auto;
 }
 
 .gyro-usage-card {
@@ -13384,14 +13387,14 @@ button.gyro-settings-row em::after {
   row-gap: 2px;
 }
 
+/* A long window name wraps; it is never truncated. */
 .gyro-usage-card-label {
   color: var(--gyro-text);
   font-size: var(--gyro-type-md);
   font-weight: var(--gyro-weight-medium);
+  line-height: 1.3;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .gyro-usage-card-status {
   justify-self: end;
@@ -13424,6 +13427,40 @@ button.gyro-settings-row em::after {
 }
 .gyro-usage-card[data-visualization="wheels"] > .gyro-usage-card-status {
   grid-area: status;
+}
+/* Too narrow for two tiles side by side: one tile per row. */
+@container gyro-usage (max-width: 640px) {
+  .gyro-usage-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Too narrow for name | bar | amount | status on one line: each bar row
+   stacks, name and status over the bar, amount below. */
+@container gyro-usage (max-width: 560px) {
+  .gyro-usage-cards:has(> .gyro-usage-card[data-visualization="bars"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-usage-card[data-visualization="bars"] {
+    grid-template-areas:
+      "label status"
+      "bar bar"
+      "meta meta";
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-label {
+    grid-area: label;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-bar {
+    grid-area: bar;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-meta {
+    grid-area: meta;
+    text-align: left;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-status {
+    grid-area: status;
+  }
 }
 
 .gyro-usage-bar {
@@ -13785,34 +13822,6 @@ button.gyro-settings-row em::after {
   .gyro-settings-control-column {
     border-left: 0;
     padding-left: 0;
-  }
-  .gyro-usage-cards {
-    grid-template-columns: 1fr;
-  }
-  /* Narrow: each bar row stacks, name and status over the bar, amount below. */
-  .gyro-usage-cards:has(> .gyro-usage-card[data-visualization="bars"]) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .gyro-usage-card[data-visualization="bars"] {
-    grid-template-areas:
-      "label status"
-      "bar bar"
-      "meta meta";
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 8px;
-  }
-  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-label {
-    grid-area: label;
-  }
-  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-bar {
-    grid-area: bar;
-  }
-  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-meta {
-    grid-area: meta;
-    text-align: left;
-  }
-  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-status {
-    grid-area: status;
   }
   .gyro-usage-toolbar {
     align-items: flex-start;
@@ -22877,7 +22886,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-md);
   font-weight: var(--gyro-weight-regular);
-  margin-left: 6px;
+  margin-left: 2px;
 }
 
 .gyro-settings-row strong > .gyro-settings-info-value::before {
@@ -28779,7 +28788,6 @@ body,
   --preview-text: var(--gyro-theme-preview-dark-text);
   --preview-muted: var(--gyro-theme-preview-dark-muted);
   --preview-bubble: var(--gyro-theme-preview-dark-bubble);
-  --preview-accent: var(--gyro-theme-preview-dark-accent);
 }
 .gyro-theme-preview-window[data-palette="light"] {
   --preview-app: var(--gyro-theme-preview-light-app);
@@ -28789,7 +28797,6 @@ body,
   --preview-text: var(--gyro-theme-preview-light-text);
   --preview-muted: var(--gyro-theme-preview-light-muted);
   --preview-bubble: var(--gyro-theme-preview-light-bubble);
-  --preview-accent: var(--gyro-theme-preview-light-accent);
 }
 /* System: the dark window covers the right half of the light one. */
 .gyro-theme-preview-window + .gyro-theme-preview-window {
