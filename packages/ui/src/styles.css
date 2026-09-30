@@ -14665,10 +14665,14 @@ button.gyro-settings-row em::after {
   gap: 10px;
 }
 
+/* Title and total share one line; the total only appears for several files. */
 .gyro-chat-run-change-summary > header > div {
-  display: grid;
-  gap: 4px;
+  align-items: baseline;
+  column-gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
   min-width: 0;
+  row-gap: 2px;
 }
 
 .gyro-chat-run-change-summary > header strong {
@@ -14677,19 +14681,6 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-run-change-summary > header small {
   color: var(--gyro-faint);
-}
-
-.gyro-change-summary-actions > button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  min-height: 28px;
-  padding: 0 10px;
-}
-
-.gyro-change-summary-actions > button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
 }
 
 .gyro-change-summary-file:has(.gyro-change-summary-diff) > button {
@@ -14702,58 +14693,8 @@ button.gyro-settings-row em::after {
   flex: 0 0 auto;
 }
 
-.gyro-change-summary-diff-scroll code {
-  display: block;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: var(--gyro-type-xs);
-  line-height: calc(18px * var(--gyro-ui-scale, 1));
-  min-width: max-content;
-  padding: 10px 0;
-}
-
-.gyro-change-summary-diff-scroll code > span {
-  display: block;
-  min-height: 18px;
-  padding: 0 12px;
-  white-space: pre;
-}
-
-.gyro-change-summary-diff-scroll code > span.is-added {
-  background: color-mix(in srgb, var(--gyro-success) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-success) 82%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-removed {
-  background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-danger) 82%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-hunk {
-  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
-  color: color-mix(in srgb, var(--gyro-accent) 70%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-meta {
-  color: var(--gyro-faint);
-}
-
 :root[data-theme="light"] .gyro-chat-run-change-summary > header {
   background: var(--gyro-surface);
-}
-
-:root[data-theme="light"] .gyro-change-summary-actions > button {
-  background: #ffffff;
-  border-color: #c7d0dc;
-  box-shadow: none;
-}
-
-:root[data-theme="light"]
-  .gyro-chat-run-change-summary
-  > header
-  .gyro-change-summary-actions
-  > button:hover {
-  background: #f1f5f9;
-  border-color: #aeb9c7;
 }
 
 :root[data-theme="light"] .gyro-change-summary-file > button {
@@ -14769,35 +14710,6 @@ button.gyro-settings-row em::after {
   > button {
   background: #eef2f6;
   border-bottom-color: #d6dde6;
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code {
-  color: #3f4d5f;
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code > span.is-meta {
-  color: #718096;
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code > span.is-hunk {
-  background: #e8f0fb;
-  color: #315c91;
-}
-
-:root[data-theme="light"]
-  .gyro-change-summary-diff-scroll
-  code
-  > span.is-added {
-  background: #e7f3eb;
-  color: #23643b;
-}
-
-:root[data-theme="light"]
-  .gyro-change-summary-diff-scroll
-  code
-  > span.is-removed {
-  background: #f9e8ea;
-  color: #96313a;
 }
 
 /* End-of-turn file summary. The default is deliberately as small as the
@@ -15034,20 +14946,6 @@ button.gyro-settings-row em::after {
   }
 }
 
-.gyro-chat-run-change-summary.is-complete
-  .gyro-change-summary-actions
-  > button {
-  background: transparent;
-  border-color: var(--gyro-border-soft);
-  font-size: var(--gyro-type-md);
-}
-
-.gyro-chat-run-change-summary.is-complete
-  .gyro-change-summary-actions
-  > .is-undo {
-  border-color: transparent;
-}
-
 .gyro-chat-run-change-summary.is-complete .gyro-change-summary-details {
   background: transparent;
   border: 0;
@@ -15108,13 +15006,6 @@ button.gyro-settings-row em::after {
   align-items: center;
   display: inline-flex;
   gap: 8px;
-}
-
-.gyro-change-summary-actions > button {
-  align-items: center;
-  display: inline-flex;
-  gap: 5px;
-  justify-content: center;
 }
 
 .gyro-change-summary-files {
@@ -15275,9 +15166,22 @@ button.gyro-settings-row em::after {
   grid-column: 1 / -1;
 }
 
-.gyro-change-summary-diff-scroll {
+/* The inline change uses the review panel's reader. Every recorded edit of
+   the file shares one bounded box, so a long or often-edited file scrolls in
+   place instead of stretching the turn. */
+.gyro-change-summary-diff-edits {
   max-height: 320px;
   overflow: auto;
+}
+
+/* Grid, not the review pane's flex column: an auto-height card must size each
+   reader to its hunks instead of collapsing them to the flex basis. */
+.gyro-change-summary-diff-edits > .gyro-plain-diff:not(.is-empty) {
+  display: grid;
+}
+
+.gyro-change-summary-diff-edits > .gyro-plain-diff + .gyro-plain-diff {
+  border-top: 1px solid var(--gyro-hairline-soft);
 }
 
 .gyro-change-summary-diff-note {
@@ -17597,7 +17501,6 @@ button.gyro-settings-row em::after {
   font-size: var(--gyro-type-base);
 }
 
-.gyro-change-summary-actions > button,
 .gyro-change-summary-file > button {
   font-size: var(--gyro-type-md);
 }
@@ -22250,7 +22153,7 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
-/* Keep the usage reading aligned with the always-visible copy action. */
+/* Keep the usage reading aligned with the copy action beside it. */
 .gyro-response-actions .gyro-message-token-count {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
@@ -22258,19 +22161,20 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
-.gyro-run-header-actions button {
-  background: none;
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  padding: 3px 10px;
+/* An answer's copy action and token count wait for the reader. They show
+   while the turn is hovered or holds focus, and always on the latest turn —
+   the one most likely to be copied. The row keeps its height either way, so
+   nothing shifts when it appears. A council footer carries real actions and
+   stays visible. */
+.gyro-chat-turn .gyro-response-actions:not(.gyro-council-actions) {
+  opacity: 0;
+  transition: opacity var(--gyro-motion-fast) var(--gyro-ease);
 }
 
-.gyro-run-header-actions button:hover {
-  color: var(--gyro-text);
+.gyro-chat-turn:hover .gyro-response-actions,
+.gyro-chat-turn:focus-within .gyro-response-actions,
+.gyro-chat-turn:not(:has(~ .gyro-chat-turn)) .gyro-response-actions {
+  opacity: 1;
 }
 
 /* --------------------------------------------------------------------------

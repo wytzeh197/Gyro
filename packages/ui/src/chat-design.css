@@ -75,20 +75,21 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-turn
   > .gyro-message.is-user {
-  justify-content: stretch;
+  justify-items: end;
   margin-bottom: 16px;
 }
 
+/* The sent prompt is a bubble the size of what was said, on the right — not a
+   full-width bar that reads like another input field. */
 :root[data-theme]
   .gyro-chat-surface
   .gyro-chat-transcript
   .gyro-message.is-user
   > div.gyro-user-message-content:last-child {
-  align-items: stretch;
-  justify-items: stretch;
-  max-width: 100%;
+  justify-items: end;
+  max-width: 75%;
   position: relative;
-  width: 100%;
+  width: fit-content;
 }
 
 :root[data-theme]

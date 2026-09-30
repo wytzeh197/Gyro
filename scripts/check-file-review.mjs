@@ -9,7 +9,7 @@ import { filesForReviewScope } from "../packages/ui/src/review-scope.ts";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
-  diffPreviewLines,
+  diffPreviewPatches,
   fileReviewDecisions,
   isKeptCurrent,
   latestFileReviewTurn,
@@ -380,7 +380,7 @@ for (const activityKind of ["edit", "delete", "move"]) {
   assert.match(renderCounts(totalFileChangeCounts(run.files)), />\+0<.*>−3</);
 }
 
-const preview = diffPreviewLines(
+const preview = diffPreviewPatches([
   [
     "diff --git a/src/a.ts b/src/a.ts",
     "index 1111111..2222222 100644",
@@ -392,20 +392,34 @@ const preview = diffPreviewLines(
     "+const b = 3;",
     "",
   ].join("\n"),
-);
+  // Nothing to draw: a mode-only change is dropped, not shown as empty.
+  ["diff --git a/run.sh b/run.sh", "old mode 100644", "new mode 100755"].join(
+    "\n",
+  ),
+]);
 assert.equal(preview.truncated, false);
+assert.equal(preview.total, 1, "only a patch with hunks counts as an edit");
 assert.deepEqual(
-  preview.lines.map((line) => line.kind),
-  ["meta", "meta", "meta", "meta", "hunk", "context", "removed", "added"],
-  "file headers are metadata, not added and removed content",
+  preview.patches,
+  ["@@ -1,3 +1,4 @@\n const a = 1;\n-const b = 2;\n+const b = 3;"],
+  "file headers never reach the inline preview",
 );
 
-const long = diffPreviewLines(
-  Array.from({ length: 40 }, (_, index) => `+line ${index}`).join("\n"),
-  10,
+const hunk = (start) =>
+  [`@@ -${start},4 +${start},4 @@`, ...Array.from({ length: 4 }, (_, i) => `+line ${start + i}`)].join("\n");
+const long = diffPreviewPatches([hunk(1), hunk(10), hunk(20)], 7);
+assert.equal(long.total, 3);
+assert.equal(long.truncated, true, "the capped preview says so, rather than silently ending");
+assert.deepEqual(
+  long.patches.map((patch) => patch.split("\n").length),
+  [5, 2],
+  "the cap counts drawn rows across every recorded edit",
 );
-assert.equal(long.lines.length, 10, "the inline preview is capped");
-assert.equal(long.truncated, true, "and says so, rather than silently ending");
+assert.equal(
+  diffPreviewPatches([hunk(1)], 5).truncated,
+  false,
+  "a preview that fits exactly is not shortened",
+);
 
 // --- Ask AI ------------------------------------------------------------------
 // Prefill only: the prompt is a question opener the user finishes and sends.
