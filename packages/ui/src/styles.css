@@ -22345,7 +22345,7 @@ button.gyro-settings-row em::after {
   .gyro-chat-start
   .gyro-composer-shell.is-provider-collapsed,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-shell {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d9e1ea;
   box-shadow: var(--gyro-elev-raised);
 }
@@ -22380,7 +22380,6 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-provider-card {
-  background: #ffffff;
   border-color: #dfe6ee;
   box-shadow:
     inset 0 1px 0 #ffffff;
@@ -25607,11 +25606,11 @@ body,
 /* The welcome composer is one surface. Its context controls are supporting
    metadata, not a separate tinted tray or a second floating card. */
 .gyro-chat-surface.is-empty > .gyro-chat-start:not(.is-mission) {
-  --gyro-welcome-composer-surface: #fff;
+  --gyro-welcome-composer-surface: var(--gyro-hero-composer);
   --gyro-welcome-composer-outline: #dedfe1;
   --gyro-welcome-composer-divider: #ececee;
   --gyro-welcome-composer-muted: #686a6e;
-  --gyro-welcome-composer-hover: #f4f4f5;
+  --gyro-welcome-composer-hover: var(--gyro-control-bg);
 }
 
 :root[data-theme="dark"]
@@ -26084,7 +26083,7 @@ body,
   opacity: 0.75;
 }
 [data-theme="light"] .gyro-language-menu {
-  background: #fff;
+  background: var(--gyro-surface);
   color: #24272d;
 }
 .gyro-syntax-editor {
@@ -29886,11 +29885,11 @@ body,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   :is(.gyro-chat-start, .gyro-chat-composer-dock)
   > .gyro-composer-shell.is-hero.has-provider {
-  background: #ffffff;
+  background: var(--gyro-surface);
 }
 
 :root[data-theme="light"] .gyro-chat-message-queue {
-  background: #fcfcfd;
+  background: var(--gyro-surface);
 }
 
 :root[data-theme]
