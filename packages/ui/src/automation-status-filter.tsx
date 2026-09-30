@@ -33,6 +33,10 @@ function segmentedWidth(segmented: HTMLElement) {
   );
 }
 
+/** The filter control (segments or menu) rendered in the list column. */
+const filterIn = (container: HTMLElement | null) =>
+  container?.querySelector<HTMLElement>(":scope > .gyro-scheduled-filters");
+
 /**
  * The automation status filter. It is a segmented row while the list column
  * has room for every segment on one line, and the same filter as a menu when
@@ -53,9 +57,30 @@ export function AutomationStatusFilter({
   const [asMenu, setAsMenu] = useState(false);
   // Measured one-line width per size, kept while the menu stands in for it.
   const segmentsWidth = useRef<Partial<Record<ControlSize, number>>>({});
+  // Swapping controls unmounts the focused one; this carries focus across.
+  const refocus = useRef(false);
+  // Runs before the measuring effect, so a swap that is undone in the same
+  // commit still hands focus on to whichever control ends up rendered.
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    const filter = filterIn(containerRef.current);
+    (asMenu
+      ? filter?.querySelector<HTMLElement>(":scope > button")
+      : filter?.querySelector<HTMLElement>('[aria-pressed="true"]') ??
+        filter?.querySelector<HTMLElement>("button")
+    )?.focus();
+  }, [asMenu, containerRef]);
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const swap = (next: boolean) => {
+      if (next === asMenu) return;
+      if (filterIn(container)?.contains(document.activeElement)) {
+        refocus.current = true;
+      }
+      setAsMenu(next);
+    };
     const measure = () => {
       const segmented = container.querySelector<HTMLElement>(
         ":scope > .gyro-segmented.gyro-scheduled-filters",
@@ -74,12 +99,14 @@ export function AutomationStatusFilter({
       const available =
         container.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
       // A hidden column (clientWidth 0) keeps its current control.
-      if (!container.clientWidth || !needed) return;
+      if (!container.clientWidth) return;
+      // No one-line width for this size yet (the menu was chosen at the other
+      // size): show the segments so they get measured. If they do not fit,
+      // the next pass swaps back to the menu before paint.
+      if (!needed) return swap(false);
       // Going back to segments needs a little spare room, so a scrollbar that
       // appears or disappears with the switch cannot flip it back and forth.
-      setAsMenu((current) =>
-        current ? needed > available - 16 : wraps || needed > available,
-      );
+      swap(asMenu ? needed > available - 16 : wraps || needed > available);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
