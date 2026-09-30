@@ -206,6 +206,14 @@ import {
   stripHiddenControlMarkers,
 } from "./chat-commentary";
 import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
+import { useChatEnvironmentPopover } from "./use-chat-environment-popover";
+import {
+  ChatSessionActionsContext,
+  ChatSessionActionsProvider,
+  ChatTitleActionItems,
+  chatTitleActions,
+  type ChatTitleActions,
+} from "./chat-title-actions";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
@@ -2630,7 +2638,16 @@ export function AppChrome({
             data-tauri-drag-region
           />
         ) : null}
-        {children}
+        <ChatSessionActionsProvider
+          onDeleteSession={onDeleteSession}
+          onPinSession={onPinSession}
+          onRenameSession={onRenameSession}
+          pinnedSessionIds={pinnedSessionIds}
+          sendingSessionIds={sendingSessionIds}
+          sessions={sessions}
+        >
+          {children}
+        </ChatSessionActionsProvider>
       </main>
       <ToastStack
         notifications={notifications}
@@ -8581,6 +8598,10 @@ export function ChatSurface({
   onTogglePlanPanel,
   onPlanEditorRequestHandled,
 }: ChatSurfaceProps) {
+  const titleActions = chatTitleActions(
+    useContext(ChatSessionActionsContext),
+    paneKey,
+  );
   const [localDraft, setLocalDraft] = useState(draft);
   const [goalDraft, setGoalDraft] = useState<string>();
   const [goalSaveNotice, setGoalSaveNotice] = useState("");
@@ -9211,8 +9232,22 @@ export function ChatSurface({
   const environmentBranchLabel =
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
-  const isEnvironmentPopoverOpen =
-    !isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel;
+  // The Environment card rests open only where it clears the conversation
+  // column; anywhere narrower it is a popover that Escape or a click outside
+  // closes.
+  const environment = useChatEnvironmentPopover({
+    activeRailPanel,
+    isCompanionPanel,
+    isEmptyStart,
+    onToggleEnvironmentRail,
+    paneKey,
+  });
+  const isEnvironmentPopoverOpen = environment.isOpen;
+  const environmentPopoverRef = useOutsidePointerDismiss<HTMLElement>(
+    environment.isPopover,
+    environment.dismiss,
+    environment.buttonRef,
+  );
   const legacySidePanel =
     activeRailPanel && railPanel !== "tools" && railPanel !== "environment" ? (
       <ChatSidePanel
@@ -9368,7 +9403,7 @@ export function ChatSurface({
         workspacePath,
       })}
       onBranchAction={onComposerAction}
-      onClose={onToggleEnvironmentRail}
+      onClose={environment.close}
       onOpenTab={onOpenCompanionTab}
       onOpenReview={(scope) => {
         setReviewScope(scope);
@@ -9380,6 +9415,7 @@ export function ChatSurface({
       onRunGitAction={railDiffTools?.onRunGitAction}
       onSelectBranch={() => onComposerAction?.("select-branch")}
       plan={sessionPlan}
+      popoverRef={environmentPopoverRef}
       sourceControl={sourceControl}
       terminalPanes={terminalPanes}
       workspacePath={workspacePath}
@@ -9566,6 +9602,7 @@ export function ChatSurface({
       onDragEnterCapture={handleMediaDragOver}
       onDragOverCapture={handleMediaDragOver}
       onDropCapture={handleMediaDrop}
+      ref={environment.setSurface}
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
@@ -9577,6 +9614,7 @@ export function ChatSurface({
           />
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           <ChatSurfaceControls
+            chatActions={titleActions}
             isDockOpen={isCompanionPanel}
             isPlanOpen={activeRailPanel === "plan"}
             isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
@@ -9587,8 +9625,9 @@ export function ChatSurface({
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={false}
             showEnvironmentInOverflow={false}
-            showOverflow={!isCompanionPanel}
+            showOverflow={!isCompanionPanel || titleActions !== undefined}
             showPanel={false}
+            showPlanInOverflow={!isCompanionPanel}
             showToolPanelInOverflow={false}
           />
           {workspaceMode === "worktree" ? (
@@ -9605,6 +9644,7 @@ export function ChatSurface({
         </div>
         <div className="gyro-thread-topbar-actions">
           <ChatSurfaceControls
+            environmentButtonRef={environment.buttonRef}
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
             isPlanOpen={activeRailPanel === "plan"}
@@ -9614,7 +9654,9 @@ export function ChatSurface({
             onToggleDock={
               isCompanionPanel ? closeCompanion : onReopenCompanionDock
             }
-            onToggleEnvironmentRail={onToggleEnvironmentRail}
+            onToggleEnvironmentRail={
+              onToggleEnvironmentRail ? environment.toggle : undefined
+            }
             onTogglePlanPanel={onTogglePlanPanel}
             onToggleToolPanel={onToggleToolPanel}
             planItemCount={sessionPlan?.items.length ?? 0}
@@ -9998,8 +10040,11 @@ export type ModelFocusPeekContent = {
 /**
  * The thread header keeps three compact surface controls: Environment, the
  * bottom drawer, and the companion. The companion owns its own tool launcher.
+ * The title's "More" menu adds the chat's own actions under its surfaces.
  */
 function ChatSurfaceControls({
+  chatActions,
+  environmentButtonRef,
   isDockOpen,
   isEnvironmentOpen,
   isPlanOpen,
@@ -10016,9 +10061,13 @@ function ChatSurfaceControls({
   showEnvironmentInOverflow = true,
   showOverflow = true,
   showPanel = true,
+  showPlanInOverflow = true,
   showToolPanel = false,
   showToolPanelInOverflow = true,
 }: {
+  chatActions?: ChatTitleActions;
+  /** Lets the Environment popover treat its own button as inside it. */
+  environmentButtonRef?: RefObject<HTMLButtonElement>;
   isDockOpen: boolean;
   isEnvironmentOpen?: boolean;
   isPlanOpen: boolean;
@@ -10035,19 +10084,37 @@ function ChatSurfaceControls({
   showEnvironmentInOverflow?: boolean;
   showOverflow?: boolean;
   showPanel?: boolean;
+  showPlanInOverflow?: boolean;
   showToolPanel?: boolean;
   showToolPanelInOverflow?: boolean;
 }) {
   const [openMenu, setOpenMenu] = useState<"overflow">();
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const overflowButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     openMenu !== undefined,
     () => setOpenMenu(undefined),
   );
+  // The menu row that asked is gone by the time the dialog closes, so a
+  // cancelled Delete hands focus back to the menu's own button.
+  const cancelDelete = () => {
+    setIsDeleteConfirmOpen(false);
+    requestAnimationFrame(() => overflowButtonRef.current?.focus());
+  };
   // Peripheral awareness: the surface holding the model's latest work gets a
   // dot, so it can be found without anything moving on its own.
   const drawerHasModelActivity = Boolean(
     modelFocus?.paneTab && !isToolPanelOpen,
   );
+  const showEnvironmentItem = Boolean(
+    showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail,
+  );
+  const hasSurfaceItems =
+    showPlanInOverflow || showToolPanelInOverflow || showEnvironmentItem;
+  const runMenuAction = (action?: () => void) => {
+    setOpenMenu(undefined);
+    action?.();
+  };
 
   return (
     <div
@@ -10066,6 +10133,7 @@ function ChatSurfaceControls({
             .filter(Boolean)
             .join(" ")}
           onClick={onToggleEnvironmentRail}
+          ref={environmentButtonRef}
           title="Environment"
           type="button"
         >
@@ -10108,7 +10176,7 @@ function ChatSurfaceControls({
           <button
             aria-expanded={openMenu === "overflow"}
             aria-haspopup="menu"
-            aria-label="More chat surfaces"
+            aria-label="More chat actions"
             className={[
               "gyro-icon-button gyro-chat-surface-button",
               drawerHasModelActivity ? "has-model-activity" : "",
@@ -10120,6 +10188,7 @@ function ChatSurfaceControls({
                 current === "overflow" ? undefined : "overflow",
               )
             }
+            ref={overflowButtonRef}
             title="More"
             type="button"
           >
@@ -10134,19 +10203,18 @@ function ChatSurfaceControls({
           </button>
           {openMenu === "overflow" ? (
             <div className="gyro-chat-companion-menu is-header" role="menu">
-              <button
-                aria-pressed={isPlanOpen}
-                onClick={() => {
-                  setOpenMenu(undefined);
-                  onTogglePlanPanel?.();
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <ListChecks size={14} />
-                <span>Plan checklist</span>
-                {planItemCount > 0 ? <small>{planItemCount}</small> : null}
-              </button>
+              {showPlanInOverflow ? (
+                <button
+                  aria-pressed={isPlanOpen}
+                  onClick={() => runMenuAction(onTogglePlanPanel)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <ListChecks size={14} />
+                  <span>Plan checklist</span>
+                  {planItemCount > 0 ? <small>{planItemCount}</small> : null}
+                </button>
+              ) : null}
               {showToolPanelInOverflow ? (
                 <button
                   aria-pressed={isToolPanelOpen}
@@ -10164,14 +10232,9 @@ function ChatSurfaceControls({
                   ) : null}
                 </button>
               ) : null}
-              {showEnvironmentInOverflow &&
-              !isDockOpen &&
-              onToggleEnvironmentRail ? (
+              {showEnvironmentItem ? (
                 <button
-                  onClick={() => {
-                    setOpenMenu(undefined);
-                    onToggleEnvironmentRail();
-                  }}
+                  onClick={() => runMenuAction(onToggleEnvironmentRail)}
                   role="menuitem"
                   type="button"
                 >
@@ -10179,10 +10242,32 @@ function ChatSurfaceControls({
                   <span>Environment</span>
                 </button>
               ) : null}
+              {chatActions ? (
+                <ChatTitleActionItems
+                  actions={chatActions}
+                  hasItemsAbove={hasSurfaceItems}
+                  onClose={() => setOpenMenu(undefined)}
+                  onRequestDelete={() => setIsDeleteConfirmOpen(true)}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
       ) : null}
+      {isDeleteConfirmOpen && chatActions?.onDelete
+        ? createPortal(
+            <SessionDeleteConfirmOverlay
+              chatLabel={chatActions.label}
+              isWorking={chatActions.isWorking}
+              onCancel={cancelDelete}
+              onDelete={() => {
+                setIsDeleteConfirmOpen(false);
+                chatActions.onDelete?.();
+              }}
+            />,
+            document.body,
+          )
+        : null}
       {showClose && onCloseChat ? (
         <button
           aria-label="Close chat"
@@ -11764,6 +11849,7 @@ function ChatEnvironmentPopover({
   onRunGitAction,
   onSelectBranch,
   plan,
+  popoverRef,
   sourceControl,
   terminalPanes,
   workspacePath,
@@ -11780,6 +11866,7 @@ function ChatEnvironmentPopover({
   onSelectBranch?: () => void;
   /** Shown only once a plan exists: steps or a plan document. */
   plan?: SessionPlan;
+  popoverRef?: RefObject<HTMLElement>;
   sourceControl?: SourceControlState;
   terminalPanes?: TerminalPane[];
   workspacePath?: string;
@@ -11836,7 +11923,11 @@ function ChatEnvironmentPopover({
     : sourceControlTotalsLabel(changeTotals);
 
   return (
-    <aside aria-label="Environment" className="gyro-chat-environment-popover">
+    <aside
+      aria-label="Environment"
+      className="gyro-chat-environment-popover"
+      ref={popoverRef}
+    >
       <header>
         <strong>Environment</strong>
         <button

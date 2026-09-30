@@ -16,6 +16,7 @@ import {
   clampBrowserCompanionWidth,
   clampChatCompanionWidth,
   chatEnvironmentPaneKey,
+  chatEnvironmentRestsBesideColumn,
   createInitialChatCompanionState,
   defaultChatEnvironmentVisible,
   discardedSideChatSessionIds,
@@ -525,6 +526,30 @@ assert.equal(
     }),
     "environment",
     "closing the dock hands the rail back to the Environment",
+  );
+}
+
+// --- The Environment card rests only beside the column ---------------------
+
+{
+  // The card floats over the chat, so it may rest open only where the free
+  // width right of the centred 780px column holds its 330px of room. The
+  // numbers are the default window widths minus the 241px sidebar.
+  const rests = (surfaceWidth, columnWidth = 780, space = 330) =>
+    chatEnvironmentRestsBesideColumn({ columnWidth, space, surfaceWidth });
+  assert.equal(rests(1199), false, "a 1440px window covers the transcript");
+  assert.equal(rests(875), false, "a 1100px window covers the transcript");
+  assert.equal(rests(1440), true, "exactly the room it needs is enough");
+  assert.equal(rests(1679), true, "a 1920px window leaves room beside it");
+  assert.equal(
+    rests(440, undefined, 0),
+    true,
+    "a card in its own row needs no room beside the column",
+  );
+  assert.equal(
+    chatEnvironmentRestsBesideColumn({ space: 330, surfaceWidth: 1679 }),
+    false,
+    "a column without a pixel width fills the surface",
   );
 }
 
