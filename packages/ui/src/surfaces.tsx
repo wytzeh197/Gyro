@@ -201,6 +201,7 @@ import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
+  diffPreviewPatches,
   fileReviewDecisions,
   isKeptCurrent,
 } from "./file-review";
@@ -27394,6 +27395,12 @@ function ChatTurn({
     () => (fileReview ? fileReviewDecisions(turn.timelineEvents) : undefined),
     [fileReview, turn.timelineEvents],
   );
+  // Read straight from the turn's receipts, so the inline diff renders in place
+  // and keeps its reader state (wrap, page) when the turn re-renders.
+  const changePatches = useCallback(
+    (path: string) => turnReviewPatches(turn.timelineEvents, path),
+    [turn.timelineEvents],
+  );
   const fileReviewSummaries = useMemo(() => {
     if (!fileReview?.summaries) return undefined;
     return new Map(
@@ -27441,6 +27448,11 @@ function ChatTurn({
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0) &&
     runModel.phase.name === "done";
+  const toolBudgetNotice =
+    providerStatus?.recoveryKind === "tool-budget" ||
+    providerStatus?.recoveryKind === "partial-answer"
+      ? (providerStatus.recoveryMessage ?? providerStatus.error ?? undefined)
+      : undefined;
   // A turn the provider never closed out can be resent; a cancelled one cannot
   // be reconnected. Both decisions stay here because they need the status event
   // the run model deliberately does not carry.
@@ -27487,9 +27499,11 @@ function ChatTurn({
               >
                 {turnTokensLabel(turn.turnTokens)}
               </span>
-            ) : canContinue && !hasResponse ? (
-              // Only a turn that stopped before answering offers Continue; an
-              // answered turn continues from the composer like any other.
+            ) : canContinue && !responseEvent && !toolBudgetNotice ? (
+              // Only a turn that stopped before answering offers Continue —
+              // narration before tools is not an answer. An answered turn
+              // continues from the composer, and a budget notice carries its
+              // own Continue.
               <button
                 className="gyro-button is-ghost is-small"
                 onClick={onContinueChat}
@@ -27536,14 +27550,7 @@ function ChatTurn({
           renderSay={(text) =>
             renderAssistantInlineContent(text, onOpenBrowserUrl)
           }
-          toolBudgetNotice={
-            providerStatus?.recoveryKind === "tool-budget" ||
-            providerStatus?.recoveryKind === "partial-answer"
-              ? (providerStatus.recoveryMessage ??
-                providerStatus.error ??
-                undefined)
-              : undefined
-          }
+          toolBudgetNotice={toolBudgetNotice}
           toolBudgetNoticeTitle={
             providerStatus?.recoveryKind === "partial-answer"
               ? "Answer may be cut off"
@@ -27629,14 +27636,7 @@ function ChatTurn({
             isSummarizing={fileReview?.isSummarizing}
             onAsk={fileReview?.onAsk}
             onKeep={fileReview?.onKeep}
-            onLoadChangePatches={async (path) => {
-              const patches = turnReviewPatches(turn.timelineEvents, path);
-              if (!patches.length)
-                throw new Error(
-                  "Historical diff unavailable. Open Review to compare the current file separately.",
-                );
-              return patches;
-            }}
+            changePatches={changePatches}
             onReview={openTurnChanges}
             onUndo={onUndoChanges}
             summaries={fileReviewSummaries}
@@ -27688,7 +27688,7 @@ function ChatRunChangeSummary({
   isSummarizing = false,
   onAsk,
   onKeep,
-  onLoadChangePatches,
+  changePatches,
   onReview,
   onUndo,
   summaries,
@@ -27704,8 +27704,8 @@ function ChatRunChangeSummary({
   isSummarizing?: boolean;
   onAsk?: (path: string) => void;
   onKeep?: (path: string, contentHash?: string) => void;
-  /** Each recorded patch for the path, rendered one after another. */
-  onLoadChangePatches?: (path: string) => Promise<string[]>;
+  /** Each recorded patch for the path, drawn one after another inline. */
+  changePatches?: (path: string) => string[];
   onReview?: (path?: string) => void;
   onUndo?: () => void;
   summaries?: Map<string, FileReviewSummary>;
@@ -27717,7 +27717,7 @@ function ChatRunChangeSummary({
   const hiddenCount = files.length - 6;
   const totals = totalFileChangeCounts(files);
   const fileLabel = files.length === 1 ? "file" : "files";
-  const canExpandDiff = Boolean(onLoadChangePatches);
+  const canExpandDiff = Boolean(changePatches);
   const reviewFiles = () => {
     if (canExpandDiff) {
       setOpenPath(files[0]?.path);
@@ -27828,9 +27828,9 @@ function ChatRunChangeSummary({
                       {contents}
                     </div>
                   )}
-                  {isOpen && onLoadChangePatches ? (
+                  {isOpen && changePatches ? (
                     <ChangeSummaryDiff
-                      onLoad={onLoadChangePatches}
+                      patches={changePatches}
                       path={file.path}
                     />
                   ) : null}
@@ -27907,9 +27907,9 @@ function ChatRunChangeSummary({
                     )
                   ) : null}
                 </span>
-                {isOpen && onLoadChangePatches ? (
+                {isOpen && changePatches ? (
                   <ChangeSummaryDiff
-                    onLoad={onLoadChangePatches}
+                    patches={changePatches}
                     path={file.path}
                   />
                 ) : null}
@@ -28052,72 +28052,49 @@ function SessionGoalStrip({
  * numbers and gutters — and never the raw `diff --git` / `---` / `+++` headers.
  */
 function ChangeSummaryDiff({
-  onLoad,
+  patches: patchesFor,
   path,
 }: {
-  onLoad: (path: string) => Promise<string[]>;
+  patches: (path: string) => string[];
   path: string;
 }) {
-  const [state, setState] = useState<{
-    status: "loading" | "ready" | "failed";
-    patches?: string[];
-    error?: string;
-  }>({ status: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-    onLoad(path).then(
-      (patches) => {
-        if (cancelled) return;
-        setState({
-          status: "ready",
-          patches: patches.filter((patch) => patch.trim().length > 0),
-        });
-      },
-      (error: unknown) => {
-        if (cancelled) return;
-        setState({
-          status: "failed",
-          error:
-            error instanceof Error
-              ? error.message
-              : "The change could not be loaded.",
-        });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [onLoad, path]);
-
-  const patches = state.patches ?? [];
+  // Rendered in place, never behind a loading state, so each reader stays
+  // mounted — and keeps its wrap and page — when the turn re-renders.
+  const recorded = useMemo(() => patchesFor(path), [patchesFor, path]);
+  const { patches, total, truncated } = useMemo(
+    () => diffPreviewPatches(recorded),
+    [recorded],
+  );
   return (
     <div className="gyro-change-summary-diff">
-      {state.status === "loading" ? (
-        <p className="gyro-change-summary-diff-note" role="status">
-          <Spinner size={12} /> Loading the change…
+      {!recorded.length ? (
+        <p className="gyro-change-summary-diff-note">
+          Historical diff unavailable. Open Review to compare the current file
+          separately.
         </p>
-      ) : null}
-      {state.status === "failed" ? (
-        <p className="gyro-change-summary-diff-note">{state.error}</p>
-      ) : null}
-      {state.status === "ready"
-        ? patches.map((patch, index) => (
+      ) : patches.length ? (
+        // One bounded box for every recorded edit of the file.
+        <div className="gyro-change-summary-diff-edits">
+          {patches.map((patch, index) => (
             <PlainDiffView
               diff={patch}
               key={index}
               notice={
-                patches.length > 1
-                  ? `Recorded edit ${index + 1} of ${patches.length}`
+                total > 1
+                  ? `Recorded edit ${index + 1} of ${total}`
                   : undefined
               }
             />
-          ))
-        : null}
-      {state.status === "ready" && !patches.length ? (
+          ))}
+        </div>
+      ) : (
         <p className="gyro-change-summary-diff-note">
           No text change to show here.
+        </p>
+      )}
+      {truncated ? (
+        <p className="gyro-change-summary-diff-note">
+          Shortened. Open Review for the whole file.
         </p>
       ) : null}
     </div>

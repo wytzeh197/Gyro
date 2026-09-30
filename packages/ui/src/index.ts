@@ -263,7 +263,7 @@ export {
   askAboutFilePrompt,
   changeSummaryLine,
   diffHunks,
-  diffPreviewLines,
+  diffPreviewPatches,
   fileReviewDecisions,
   isKeptCurrent,
   latestFileReviewTurn,

@@ -15078,18 +15078,22 @@ button.gyro-settings-row em::after {
   grid-column: 1 / -1;
 }
 
-/* The inline change uses the review panel's reader; inside a chat card it
-   is bounded so a long diff scrolls in place instead of stretching the turn. */
-.gyro-change-summary-diff > .gyro-plain-diff:not(.is-empty) {
+/* The inline change uses the review panel's reader. Every recorded edit of
+   the file shares one bounded box, so a long or often-edited file scrolls in
+   place instead of stretching the turn. */
+.gyro-change-summary-diff-edits {
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* Grid, not the review pane's flex column: an auto-height card must size each
+   reader to its hunks instead of collapsing them to the flex basis. */
+.gyro-change-summary-diff-edits > .gyro-plain-diff:not(.is-empty) {
   display: grid;
 }
 
-.gyro-change-summary-diff > .gyro-plain-diff + .gyro-plain-diff {
+.gyro-change-summary-diff-edits > .gyro-plain-diff + .gyro-plain-diff {
   border-top: 1px solid var(--gyro-hairline-soft);
-}
-
-.gyro-change-summary-diff .gyro-plain-diff > .gyro-plain-diff-hunks {
-  max-height: 320px;
 }
 
 .gyro-change-summary-diff-note {
@@ -22161,7 +22165,7 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
-/* C5: an answer's copy action and token count wait for the reader. They show
+/* An answer's copy action and token count wait for the reader. They show
    while the turn is hovered or holds focus, and always on the latest turn —
    the one most likely to be copied. The row keeps its height either way, so
    nothing shifts when it appears. A council footer carries real actions and

@@ -121,23 +121,46 @@ export type DiffPreviewKind = "added" | "removed" | "hunk" | "meta" | "context";
 export type DiffPreviewLine = { text: string; kind: DiffPreviewKind };
 
 /**
- * Split a unified diff into rows the card can paint.
+ * The recorded patches a chat card draws inline, bounded.
  *
- * Capped, because an inline preview inside a chat turn is a look, not the diff
- * viewer: past the cap the reader is sent to Changes instead of scrolling a
- * chat bubble.
+ * Capped by drawn rows (hunk headers plus their lines) across every recorded
+ * edit, because an inline preview inside a chat turn is a look, not the diff
+ * viewer: past the cap the reader is sent to Review instead of scrolling a
+ * chat card. A patch with nothing to draw (binary, mode-only, identical
+ * content) is dropped rather than shown as an empty comparison, and `total`
+ * counts the patches that do draw. Each kept patch is rewritten as its hunks
+ * only, so git file headers never reach the card.
  */
-export function diffPreviewLines(
-  diff: string,
+export function diffPreviewPatches(
+  patches: readonly string[],
   limit = 240,
-): { lines: DiffPreviewLine[]; truncated: boolean } {
-  const raw = diff.replace(/\r\n?/g, "\n").split("\n");
-  while (raw.length && !raw[raw.length - 1]?.trim()) raw.pop();
-  const lines: DiffPreviewLine[] = raw.slice(0, limit).map((text) => ({
-    text,
-    kind: diffLineKind(text),
-  }));
-  return { lines, truncated: raw.length > limit };
+): { patches: string[]; total: number; truncated: boolean } {
+  const drawable = patches
+    .map((patch) => diffHunks(patch))
+    .filter((hunks) => hunks.length > 0);
+  const kept: string[] = [];
+  let budget = limit;
+  let truncated = false;
+  for (const hunks of drawable) {
+    const rows: string[] = [];
+    for (const hunk of hunks) {
+      // A hunk needs its header and at least one line to be worth drawing.
+      if (budget < 2) {
+        truncated = true;
+        break;
+      }
+      const lines = hunk.lines.slice(0, budget - 1);
+      rows.push(hunk.header, ...lines.map((line) => line.text));
+      budget -= 1 + lines.length;
+      if (lines.length < hunk.lines.length) {
+        truncated = true;
+        break;
+      }
+    }
+    if (rows.length) kept.push(rows.join("\n"));
+    if (truncated) break;
+  }
+  return { patches: kept, total: drawable.length, truncated };
 }
 
 export type DiffHunk = {

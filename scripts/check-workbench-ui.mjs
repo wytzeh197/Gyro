@@ -8477,9 +8477,12 @@ expect(
     /div\.gyro-user-message-content:last-child \{[^}]*max-width: 75%;[^}]*width: fit-content;/.test(
       chatDesignSource,
     ) &&
-    // Continue is offered only by a turn that stopped before answering, as a
-    // quiet ghost button; an unmeasured turn prints no "Usage unavailable".
-    surfaceSource.includes("canContinue && !hasResponse ? (") &&
+    // Continue is offered only by a turn that stopped before its final answer
+    // (narration before tools is not an answer), as a quiet ghost button; an
+    // unmeasured turn prints no "Usage unavailable".
+    surfaceSource.includes(
+      "canContinue && !responseEvent && !toolBudgetNotice ? (",
+    ) &&
     surfaceSource.includes('className="gyro-button is-ghost is-small"') &&
     surfaceSource.includes(
       "responseEvent && (responseTurnTokens || responseRequestTokens)",
@@ -8489,10 +8492,14 @@ expect(
     !surfaceSource.includes('className="is-undo"') &&
     !styleSource.includes(".gyro-change-summary-actions > button") &&
     // The inline change is drawn by the review panel's reader, so git file
-    // headers never reach the chat.
+    // headers never reach the chat. It renders from the turn's receipts in
+    // place (no loader to remount it), bounded, in one shared scroll box.
     surfaceSource.includes('import { PlainDiffView } from "./plain-diff-view"') &&
-    surfaceSource.includes("onLoadChangePatches") &&
+    surfaceSource.includes("changePatches={changePatches}") &&
+    surfaceSource.includes("diffPreviewPatches(recorded)") &&
+    !surfaceSource.includes("onLoadChangePatches") &&
     !surfaceSource.includes("diffPreviewLineClass") &&
+    styleSource.includes(".gyro-change-summary-diff-edits {") &&
     !styleSource.includes(".gyro-change-summary-diff-scroll"),
   "A finished turn reads quietly: a content-width prompt bubble, Continue only when the turn stopped short, no empty usage label, one change count per line with matched Undo and Review, and the inline diff drawn like the review panel.",
 );
