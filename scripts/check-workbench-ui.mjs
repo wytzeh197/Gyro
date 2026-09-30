@@ -7022,10 +7022,13 @@ expect(
     surfaceSource.includes('className="gyro-composer-menu-caret"') &&
     surfaceSource.includes("const preferredProviderPlacement") &&
     surfaceSource.includes("setProviderPopoverPlacement") &&
+    // Same preferred side as the other composer menus: down from the start
+    // screen's composer, up from the docked one.
+    /const preferredProviderPlacement\s*=\s*menuPlacement;/.test(surfaceSource) &&
     !surfaceSource.includes(
       'const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up")',
     ),
-  "The model menu should hold one width, animate from its anchor, keep carets neutral, and flip when it cannot open down.",
+  "The model menu should hold one width, animate from its anchor, keep carets neutral, open on the same side as the other composer menus, and flip when that side lacks room.",
 );
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
@@ -8473,6 +8476,12 @@ expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
     // The meter renders only a reading above 0%; an empty ring is hidden.
     surfaceSource.includes("contextUsage && contextUsage.percent > 0") &&
+    // Plan limits stay reachable without a reading: a gauge opens the card.
+    /\{shownContextUsage \|\| limitWindows\.length > 0 \?/.test(surfaceSource) &&
+    surfaceSource.includes('className="gyro-composer-plan-usage"') &&
+    styleSource.includes(
+      ".gyro-composer-context-tooltip > .gyro-composer-limit-summary:first-child",
+    ) &&
     surfaceSource.includes("shownContextUsage.remainingLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
     // Hovering a model in the picker must not open the context card over it.
@@ -8511,6 +8520,15 @@ expect(
     desktopRustSource.includes("provider_context_usage_from_codex_exec") &&
     desktopRustSource.includes('"contextUsage".into()'),
   "Composer context usage should prefer provider telemetry and render a readable detail card.",
+);
+
+expect(
+  // keepInBounds caps the approval menu's height in a short pane, so the
+  // capped menu must scroll rather than clip its last mode.
+  cssRules(styleSource, ".gyro-chat-composer-dock .gyro-approval-picker").some(
+    (rule) => /overflow-y:\s*auto/.test(rule) && !/overflow:\s*hidden/.test(rule),
+  ),
+  "The approval menu should scroll when its height is capped.",
 );
 
 expect(

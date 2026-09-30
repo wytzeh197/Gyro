@@ -16234,7 +16234,9 @@ button.gyro-settings-row em::after {
 .gyro-chat-composer-dock .gyro-approval-picker {
   background: #1b1f25;
   min-width: 240px;
-  overflow: hidden;
+  /* keepInBounds caps the height in a short pane; scroll to the last mode. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 :root[data-theme="light"] .gyro-approval-picker {
@@ -17226,6 +17228,55 @@ button.gyro-settings-row em::after {
 .gyro-composer-context-wheel:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset-inset);
+}
+
+/* Before the thread has a context reading, a quiet gauge stands in for the
+   ring so plan limits stay one hover away. */
+.gyro-composer-plan-usage {
+  align-items: center;
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  transition: color var(--gyro-motion) var(--gyro-ease);
+  width: 20px;
+}
+
+.gyro-composer-context-meter:hover .gyro-composer-plan-usage,
+.gyro-composer-plan-usage:focus-visible {
+  color: var(--gyro-text);
+}
+
+.gyro-composer-plan-usage:focus-visible {
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset-inset);
+}
+
+.gyro-composer-plan-usage[data-severity="warning"] {
+  color: var(--gyro-warn);
+}
+
+.gyro-composer-plan-usage[data-severity="critical"] {
+  color: var(--gyro-danger);
+}
+
+.gyro-composer-context-tooltip > .gyro-composer-limit-summary:first-child {
+  border-top: 0;
+}
+
+/* The start composer's menus hang down over the empty page, not over the
+   headline; its usage card does the same. */
+.gyro-chat-start .gyro-composer-context-tooltip {
+  bottom: auto;
+  top: calc(100% + 12px);
+  transform: translateY(-3px);
+}
+
+.gyro-chat-start .gyro-composer-context-tooltip::after {
+  bottom: auto;
+  top: -4px;
+  transform: rotate(225deg);
 }
 
 .gyro-composer-context-tooltip {

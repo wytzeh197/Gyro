@@ -25069,10 +25069,11 @@ function Composer({
     "aria-expanded": activePopover === popover,
     "aria-haspopup": "menu" as const,
   });
-  const preferredProviderPlacement =
-    popoverPlacement ?? (hasEffortChoice ? "up" : isHero ? "down" : "up");
-  // Prefer the space above the effort chip. Measure the current panel so
-  // taller model lists can flip to the side with room in a short window.
+  // The model and effort card prefers the same side as every other composer
+  // menu, so on the start screen it hangs below instead of over the headline.
+  // Measure the current panel so taller model lists can flip to the side with
+  // room in a short window.
+  const preferredProviderPlacement = menuPlacement;
   const [providerPopoverPlacement, setProviderPopoverPlacement] = useState<
     "up" | "down"
   >(preferredProviderPlacement);
@@ -25091,32 +25092,39 @@ function Composer({
     const anchor = scope.getBoundingClientRect();
     const bounds = clippingBounds(panel);
     const gap = 6;
+    // Hanging down, the card clears the composer's own border by the same
+    // 8px as the other composer menus instead of sitting on it.
+    const downGap = 8;
     const edgePad = 12;
     panel.style.maxHeight = "";
-    // Keep the model list anchored to the same bottom edge as the slider.
-    // Long lists scroll into the available space instead of jumping below it.
-    const roomAbove = anchor.top - bounds.top - gap - edgePad;
-    if (
-      isModelRailPane &&
-      preferredProviderPlacement === "up" &&
-      roomAbove >= 96
-    ) {
-      panel.style.maxHeight = `${roomAbove}px`;
-      setProviderPopoverPlacement("up");
-      return;
-    }
-    const height = panel.offsetHeight;
-    const fitsBelow = anchor.bottom + gap + height <= bounds.bottom - edgePad;
-    const fitsAbove = anchor.top - gap - height >= bounds.top + edgePad;
-    setProviderPopoverPlacement(
-      preferredProviderPlacement === "down"
-        ? fitsBelow || !fitsAbove
-          ? "down"
-          : "up"
-        : fitsAbove || !fitsBelow
-          ? "up"
-          : "down",
+    panel.style.top = "";
+    const shellBottom = scope
+      .closest(".gyro-composer-shell")
+      ?.getBoundingClientRect().bottom;
+    const downOffset = Math.max(
+      0,
+      Math.round((shellBottom ?? anchor.bottom) - anchor.bottom),
     );
+    const roomAbove = anchor.top - bounds.top - gap - edgePad;
+    const roomBelow =
+      bounds.bottom - anchor.bottom - downOffset - downGap - edgePad;
+    const height = panel.offsetHeight;
+    const preferred = preferredProviderPlacement;
+    const preferredRoom = preferred === "up" ? roomAbove : roomBelow;
+    const oppositeRoom = preferred === "up" ? roomBelow : roomAbove;
+    // The model list keeps the slider's side while that side leaves it a
+    // usable list, scrolling into the space instead of jumping across.
+    // Anything else takes the side it fits on, else the roomier one.
+    const keepsSide = isModelRailPane
+      ? preferredRoom >= Math.min(height, 280) || preferredRoom >= oppositeRoom
+      : height <= preferredRoom ||
+        (height > oppositeRoom && preferredRoom >= oppositeRoom);
+    const direction = keepsSide ? preferred : preferred === "up" ? "down" : "up";
+    const room = Math.max(0, direction === "up" ? roomAbove : roomBelow);
+    if (isModelRailPane || height > room) panel.style.maxHeight = `${room}px`;
+    if (direction === "down")
+      panel.style.top = `calc(100% + ${downGap + downOffset}px)`;
+    setProviderPopoverPlacement(direction);
   }, [
     activePopover,
     isModelMenuAdvancedOpen,
@@ -25848,7 +25856,7 @@ function Composer({
           </button>
         ) : null}
         <div className="gyro-composer-spacer" />
-        {shownContextUsage ? (
+        {shownContextUsage || limitWindows.length > 0 ? (
           <div
             className="gyro-composer-context-meter"
             // Opening the meter asks for the plan's current level; the account
@@ -25856,6 +25864,7 @@ function Composer({
             onFocus={refreshContextMeterUsage}
             onPointerEnter={refreshContextMeterUsage}
           >
+            {shownContextUsage ? (
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
               aria-label={shownContextUsage.label}
@@ -25873,11 +25882,31 @@ function Composer({
             >
               <span />
             </div>
+            ) : (
+              /* No context reading yet, but the plan's limits are known: a
+                 gauge keeps them one hover away without a ring claiming 0%. */
+              <span
+                aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
+                aria-label="Plan usage"
+                className="gyro-composer-plan-usage"
+                data-severity={
+                  limitWindows.find((window) => window.severity === "critical")
+                    ?.severity ??
+                  limitWindows.find((window) => window.severity === "warning")
+                    ?.severity
+                }
+                role="img"
+                tabIndex={0}
+              >
+                <Gauge aria-hidden="true" size={14} />
+              </span>
+            )}
             <div
               className="gyro-composer-context-tooltip"
               id={`${popoverBaseId}-context-usage-tooltip`}
               role="tooltip"
             >
+              {shownContextUsage ? (
               <section className="gyro-composer-context-section">
                 <header>
                   <div className="gyro-composer-context-heading">
@@ -25912,6 +25941,7 @@ function Composer({
                   <span style={{ width: `${shownContextUsage.percent}%` }} />
                 </div>
               </section>
+              ) : null}
               {limitWindows.length > 0 || providerUsage ? (
                 <section
                   aria-label="Plan usage limits"

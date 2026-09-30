@@ -863,7 +863,18 @@ const responses: Record<string, unknown> = {
   task_discover: [],
   test_discover: [],
   github_status: { available: false },
-  get_provider_usage: { providerId: "anthropic", windows: [], fetchedAt: NOW },
+  // `usage=1` adds plan windows, for checking the composer's plan usage card.
+  get_provider_usage: {
+    providerId: "anthropic",
+    windows:
+      parameters.get("usage") === "1"
+        ? [
+            { id: "five-hour", label: "5-hour", usedPercent: 42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() },
+            { id: "weekly", label: "Weekly", usedPercent: 81, status: "warning", resetsAt: new Date(Date.now() + 259_200_000).toISOString() },
+          ]
+        : [],
+    fetchedAt: NOW,
+  },
   get_notification_permission: "granted",
   get_project_capability_policy: {
     schema: "gyro.capability.v1",
