@@ -3,8 +3,9 @@ import { SettingsSegmented } from "./settings-controls";
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
+import { AutomationStatusFilter, type AutomationStatusFilterValue } from "./automation-status-filter.tsx";
 import { ToastStack } from "./toast-stack";
-import { Button, Dialog, Dot, EmptyState, OptionSelect, Segmented, SelectMenu, Skeleton, Spinner } from "./primitives";
+import { Button, Dialog, Dot, EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -198,7 +199,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
@@ -5143,7 +5144,7 @@ function WorkspaceSidebarContent({
                       <div className="gyro-sidebar-commit-actions">
                         {showSourceControlSyncButton ? (
                           <button
-                            className="gyro-button is-primary"
+                            className="gyro-button is-primary is-small"
                             disabled={
                               isSourceControlSyncing || isRemoteChecking
                             }
@@ -5184,7 +5185,7 @@ function WorkspaceSidebarContent({
                           sourceControlPublished &&
                           ide?.sourceControl.available === true ? (
                           <button
-                            className="gyro-button is-secondary"
+                            className="gyro-button is-secondary is-small"
                             disabled={
                               isRemoteChecking || isSourceControlSyncing
                             }
@@ -5199,8 +5200,8 @@ function WorkspaceSidebarContent({
                           <button
                             className={
                               sourceControlCommitReady
-                                ? "gyro-button is-primary"
-                                : "gyro-button is-secondary"
+                                ? "gyro-button is-primary is-small"
+                                : "gyro-button is-secondary is-small"
                             }
                             disabled={
                               !sourceControlMessage.trim() ||
@@ -5526,7 +5527,7 @@ function WorkspaceSidebarContent({
                             the remote, prove there is history; it just has
                             not arrived with this status yet. */}
                         {sourceControlAhead > 0 || sourceControlPublished
-                          ? "History hasn't loaded yet. Refresh to load it."
+                          ? "History hasn't loaded yet."
                           : "No commits yet."}
                       </p>
                     ) : (
@@ -16391,13 +16392,6 @@ const automationTimeZoneOptions = Array.from(
   ]),
 ).map((timezone) => ({ value: timezone, label: timezone }));
 
-const automationStatusFilters: Array<{ value: Automation["status"] | ""; label: string }> = [
-  { value: "", label: "All" },
-  { value: "current", label: "Active" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-];
-
 function isValidAutomationTimeZone(timezone: string) {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
@@ -16504,9 +16498,10 @@ export function AutomationsSurface({
   const [editingId, setEditingId] = useState<string>();
   const [detailOpen, setDetailOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Automation["status"] | "">(
-    "",
-  );
+  const [statusFilter, setStatusFilter] =
+    useState<AutomationStatusFilterValue>("");
+  const indexRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [calendar, setCalendar] = useState<
     import("./types.ts").CalendarSchedule
   >({
@@ -16641,7 +16636,11 @@ export function AutomationsSurface({
     >
       <div className="gyro-scheduled-titlebar" data-tauri-drag-region />
       <div className="gyro-scheduled-body">
-        <section className="gyro-scheduled-index" aria-label="Scheduled work">
+        <section
+          className="gyro-scheduled-index"
+          aria-label="Scheduled work"
+          ref={indexRef}
+        >
           <header className="gyro-scheduled-heading">
             <div>
               <h1>Automations</h1>
@@ -16662,31 +16661,18 @@ export function AutomationsSurface({
                   type="search"
                   aria-label="Search automations"
                   placeholder="Search automations"
+                  ref={searchRef}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </label>
-              {/* Beside an open panel the list column is too narrow for four
-                  segments, so the same filter becomes a menu there. */}
-              {isCreating || detailOpen ? (
-                <SelectMenu
-                  className="gyro-scheduled-filters"
-                  label="Status"
-                  onChange={(value) => setStatusFilter(value as typeof statusFilter)}
-                  options={automationStatusFilters}
-                  showLabel
-                  size="small"
-                  value={statusFilter}
-                />
-              ) : (
-                <Segmented
-                  className="gyro-scheduled-filters"
-                  label="Automation status"
-                  value={statusFilter}
-                  onChange={setStatusFilter}
-                  options={automationStatusFilters}
-                />
-              )}
+              {/* Segments while the list column fits them; a menu when not. */}
+              <AutomationStatusFilter
+                containerRef={indexRef}
+                onChange={setStatusFilter}
+                size={isCreating || detailOpen ? "small" : "medium"}
+                value={statusFilter}
+              />
             </>
           ) : null}
           {visibleAutomations.length ? (
@@ -16730,8 +16716,19 @@ export function AutomationsSurface({
                   size="small"
                   variant="ghost"
                   onClick={() => {
-                    setQuery("");
-                    setStatusFilter("");
+                    // The list replaces this button, so render it now and
+                    // keep keyboard focus in the column: search, else the
+                    // first suggestion when nothing is left to search.
+                    flushSync(() => {
+                      setQuery("");
+                      setStatusFilter("");
+                    });
+                    (
+                      searchRef.current ??
+                      indexRef.current?.querySelector<HTMLElement>(
+                        ".gyro-scheduled-suggestions button",
+                      )
+                    )?.focus();
                   }}
                 >
                   Show all

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
 import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
@@ -518,6 +518,74 @@ function cssRules(source, selector) {
   return rules;
 }
 
+// Every block in a stylesheet with the preludes around it (outer rules for
+// native nesting, @media, @supports), so a nested rule is judged in context.
+function cssBlocks(source) {
+  const blocks = [];
+  const stack = [];
+  let buffer = "";
+  for (const char of source.replace(/\/\*[\s\S]*?\*\//g, "")) {
+    if (char === "{") {
+      stack.push({ prelude: buffer.trim(), body: "" });
+      buffer = "";
+    } else if (char === ";" || char === "}") {
+      if (stack.length) stack.at(-1).body += `${buffer};`;
+      buffer = "";
+      if (char === "}" && stack.length) {
+        const block = stack.pop();
+        blocks.push({
+          chain: [...stack.map((frame) => frame.prelude), block.prelude],
+          body: block.body,
+        });
+      }
+    } else {
+      buffer += char;
+    }
+  }
+  return blocks;
+}
+
+// The full selectors a block applies to: comma lists split outside parens,
+// nested selectors joined to their parents (`&` or an implied descendant).
+function cssBlockSelectors({ chain }) {
+  const split = (list) => {
+    const selectors = [""];
+    let depth = 0;
+    for (const char of list) {
+      if (char === "(") depth += 1;
+      if (char === ")") depth -= 1;
+      if (char === "," && depth === 0) selectors.push("");
+      else selectors[selectors.length - 1] += char;
+    }
+    return selectors.map((selector) => selector.trim());
+  };
+  return chain
+    .filter((prelude) => !prelude.startsWith("@"))
+    .reduce(
+      (parents, prelude) =>
+        parents.flatMap((parent) =>
+          split(prelude).map((selector) =>
+            !parent
+              ? selector
+              : selector.includes("&")
+                ? selector.replaceAll("&", parent)
+                : `${parent} ${selector}`,
+          ),
+        ),
+      [""],
+    )
+    .filter(Boolean);
+}
+
+function cssBlockProperties({ body }) {
+  return body
+    .split(";")
+    .map((declaration) =>
+      declaration.slice(0, declaration.indexOf(":")).trim().toLowerCase(),
+    )
+    .filter(Boolean);
+}
+
 expect(
   canSendChat(true) &&
     canSendChat(true, "/tmp/gyro-session-1783969000000") &&
@@ -873,23 +941,74 @@ expect(
   "Workspace Source Control files should use compact single-line rows with stable actions.",
 );
 // Commit is the shared primary button only with a message and staged files;
-// otherwise it is the secondary primitive (disabled without a message), and no
-// contextual rule repaints the commit actions over the primitives.
+// otherwise it is the secondary primitive (disabled without a message). All
+// three actions (commit, sync, check) are the small gyro-button, and no rule in
+// any UI stylesheet restyles anything inside the commit actions: whatever the
+// selector shape (`> button`, `> .is-primary`, ` :disabled`, `> *`, nested
+// `& > button`, inside @media), a rule that reaches past the container may
+// only place its children (grid-*, *-self, order, margin), never paint or size
+// them over the primitive.
 const compactSurfaceSource = surfaceSource.replace(/\s+/g, " ");
+const commitActionsStart = surfaceSource.indexOf(
+  'className="gyro-sidebar-commit-actions"',
+);
+const commitActionButtonClasses =
+  surfaceSource
+    .slice(commitActionsStart, surfaceSource.indexOf("</form>", commitActionsStart))
+    .match(/"gyro-button[^"]*"/g) ?? [];
+const allUiStyleSource = ["packages/ui/src", "apps/desktop/src"]
+  .flatMap((dir) =>
+    readdirSync(resolve(repoRoot, dir), { recursive: true })
+      .filter((file) => file.endsWith(".css"))
+      .map((file) => readRepoFile(`${dir}/${file}`)),
+  )
+  .join("\n");
+// A compound on the container followed by a child or descendant compound.
+const commitActionsDescendant =
+  /commit-actions(?![\w-])(?:\([^()]*\)|[^\s>~+(])*(?:\s*>\s*|\s+)[^\s>~+]/;
+const placementOnlyProperty =
+  /^(?:grid(?:-[a-z-]+)?|(?:justify|align|place)-self|order|margin(?:-[a-z-]+)?)$/;
+const commitActionOverrides = (css) =>
+  cssBlocks(css).filter(
+    (block) =>
+      cssBlockSelectors(block).some((selector) =>
+        commitActionsDescendant.test(selector),
+      ) &&
+      cssBlockProperties(block).some(
+        (property) => !placementOnlyProperty.test(property),
+      ),
+  );
+// The guard itself: it must catch these shapes and let the container be.
+const commitActionGuardCatches = [
+  ".gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-actions > button { min-height: 28px; }",
+  ".gyro-sidebar-commit-actions > button:not(.is-secondary) { color: red }",
+  ".gyro-sidebar-commit-actions > .is-primary { background: red }",
+  ".gyro-sidebar-commit-actions :disabled { opacity: 0.4 }",
+  ".gyro-sidebar-commit-actions button{height:28px}",
+  ".gyro-sidebar-commit-actions { & > button { line-height: 28px } }",
+  ".gyro-scm-panel { .gyro-sidebar-commit-actions .gyro-button { box-shadow: none } }",
+  "@media (max-width: 900px) { .x, .gyro-sidebar-commit-actions > * { block-size: 28px } }",
+].every((css) => commitActionOverrides(css).length === 1);
+const commitActionGuardAllows = [
+  ".gyro-sidebar-commit-actions { display: grid; gap: 4px; padding: 0 8px }",
+  ".gyro-sidebar-commit-actions:not(.a, .b) { background: none }",
+  ".gyro-sidebar-commit-actions { &:focus-within { outline: 0 } }",
+  ".gyro-sidebar-commit-actions + .gyro-sidebar-scm-sync { padding: 0 }",
+  ".gyro-sidebar-commit-actions > button { grid-column: 1 / -1; margin-top: 2px }",
+].every((css) => commitActionOverrides(css).length === 0);
 expect(
-  surfaceSource.includes('className="gyro-sidebar-commit-actions"') &&
+  commitActionsStart !== -1 &&
     compactSurfaceSource.includes(
       "const sourceControlCommitReady = sourceControlMessage.trim().length > 0 && stagedSourceControlFiles.length > 0;",
     ) &&
     compactSurfaceSource.includes(
-      'className={ sourceControlCommitReady ? "gyro-button is-primary" : "gyro-button is-secondary" }',
+      'className={ sourceControlCommitReady ? "gyro-button is-primary is-small" : "gyro-button is-secondary is-small" }',
     ) &&
-    !cssRules(styleSource, ".gyro-sidebar-commit-actions > button").some(
-      (rule) => /background|opacity/.test(rule),
-    ) &&
-    !/commit-actions\s*>\s*button(:not\(\.is-secondary\)|\.is-secondary)/.test(
-      styleSource,
-    ),
+    commitActionButtonClasses.length === 4 &&
+    commitActionButtonClasses.every((name) => / is-small\b/.test(name)) &&
+    commitActionGuardCatches &&
+    commitActionGuardAllows &&
+    commitActionOverrides(allUiStyleSource).length === 0,
   "Disabled Source Control commits should look unavailable instead of like a primary action.",
 );
 
@@ -916,10 +1035,42 @@ expect(
 
 // History never says "No commits yet." beside "1 commit to push": a branch with
 // commits to push, or one already on the remote, says history has not loaded.
+// The detailed read that brings history is already queued, so the copy does
+// not send the user to a refresh.
 expect(
   surfaceSource.includes("sourceControlAhead > 0 || sourceControlPublished") &&
-    surfaceSource.includes("History hasn't loaded yet. Refresh to load it."),
+    surfaceSource.includes('"History hasn\'t loaded yet."') &&
+    !surfaceSource.includes("Refresh to load it."),
   "Source Control history should not claim there are no commits while commits wait to push.",
+);
+
+// Automations: the status filter collapses to a menu from the list column's
+// measured width, not whenever a panel is open. A size it has not measured yet
+// (the menu was chosen beside a panel, then the panel closed) shows the
+// segments again so they get measured, instead of keeping the menu for good.
+// Swapping controls hands keyboard focus to the new one, and "Show all" keeps
+// focus in the column instead of dropping it to <body>.
+const automationStatusFilterSource = readRepoFile(
+  "packages/ui/src/automation-status-filter.tsx",
+);
+expect(
+  automationStatusFilterSource.includes("new ResizeObserver(measure)") &&
+    automationStatusFilterSource.includes("wraps || needed > available") &&
+    automationStatusFilterSource.includes("if (!needed) return swap(false);") &&
+    !automationStatusFilterSource.includes("!container.clientWidth || !needed") &&
+    automationStatusFilterSource.includes(
+      "if (filterIn(container)?.contains(document.activeElement)) {",
+    ) &&
+    automationStatusFilterSource.includes('[aria-pressed="true"]') &&
+    compactSurfaceSource.includes(
+      '<AutomationStatusFilter containerRef={indexRef} onChange={setStatusFilter} size={isCreating || detailOpen ? "small" : "medium"} value={statusFilter} />',
+    ) &&
+    !/isCreating \|\| detailOpen \? \( <SelectMenu/.test(compactSurfaceSource) &&
+    compactSurfaceSource.includes(
+      'flushSync(() => { setQuery(""); setStatusFilter(""); });',
+    ) &&
+    compactSurfaceSource.includes("searchRef.current ?? indexRef.current?.querySelector"),
+  "Automation filters should fit the list column and Show all should keep focus.",
 );
 
 // The review diff's change count is unknown until Monaco's worker answers, so
