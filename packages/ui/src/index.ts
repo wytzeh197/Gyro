@@ -22,6 +22,7 @@ export {
   type Tone,
 } from "./primitives";
 export { ToastStack, toastTone, visibleToasts } from "./toast-stack";
+export { requestText, TextPromptHost, type TextPromptOptions } from "./text-prompt";
 export { interfaceScales } from "./appearance";
 export type { InterfaceSize, MotionSpeed } from "./types";
 export type {

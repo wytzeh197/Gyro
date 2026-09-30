@@ -11,8 +11,10 @@ import {
   SelectMenu,
   Skeleton,
   Spinner,
+  TextPromptHost,
   ToastStack,
   createNotification,
+  requestText,
   type Notification,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
@@ -154,6 +156,7 @@ function Gallery() {
       </Row>
       <Row title="Dialog">
         <Button onClick={() => setDialog(true)}>Open dialog</Button>
+        <Button onClick={openTextPrompt}>Open text prompt</Button>
       </Row>
       <Dialog
         actions={
@@ -172,6 +175,7 @@ function Gallery() {
         title="Delete “Bound the sync queue retries”?"
         tone="danger"
       />
+      <TextPromptHost />
       <ToastStack
         notifications={notes}
         onDismiss={(id) => setNotes((all) => all.filter((note) => note.id !== id))}
@@ -180,4 +184,17 @@ function Gallery() {
   );
 }
 
+function openTextPrompt() {
+  void requestText({
+    title: "Rename terminal",
+    label: "Terminal name",
+    initial: "zsh — gyro",
+    confirmLabel: "Rename",
+  });
+}
+
 createRoot(document.getElementById("root")!).render(<Gallery />);
+// ?prompt=1 opens the styled text prompt (requestText) for review.
+if (new URLSearchParams(location.search).get("prompt") === "1") {
+  setTimeout(openTextPrompt, 0);
+}
