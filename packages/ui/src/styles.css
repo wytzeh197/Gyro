@@ -19047,7 +19047,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-chat-start .gyro-model-chip,
 :root[data-theme="light"]
   .gyro-chat-composer-dock
-  .gyro-composer-chip:not(.is-goal[aria-pressed="true"], .is-council),
+  .gyro-composer-chip:where(:not(.is-goal[aria-pressed="true"], .is-council)),
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-model-chip {
   color: var(--gyro-hero-muted);

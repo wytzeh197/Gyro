@@ -36,25 +36,33 @@ export function toastTone(kind: NotificationKind): ToastTone | null {
   return TOAST_TONE[kind] ?? null;
 }
 
-const isProviderToast = (notification: Notification) =>
-  notification.kind === "provider" || notification.kind === "provider-ready";
+const isConnectingToast = (notification: Notification) =>
+  notification.kind === "provider" &&
+  /^(Connecting provider|Checking Codex sign-in)$/.test(notification.title);
 
 export function visibleToasts(
   notifications: Notification[],
   mountedAt: number,
 ): Notification[] {
-  // A provider result replaces its "Connecting provider" toast; the list is
-  // newest first, so only the first provider toast survives.
-  const newestProvider = notifications.find(
-    (notification) => !notification.read && isProviderToast(notification),
+  // A provider result replaces its "Connecting provider" toast. The list is
+  // newest first, so a connecting toast after the first result is stale.
+  const firstResult = notifications.findIndex(
+    (notification) =>
+      !notification.read &&
+      (notification.kind === "provider-ready" ||
+        notification.kind === "approval"),
   );
   return notifications
     .filter(
-      (notification) =>
+      (notification, index) =>
         !notification.read &&
         toastTone(notification.kind) !== null &&
         Date.parse(notification.createdAt) >= mountedAt &&
-        (!isProviderToast(notification) || notification === newestProvider),
+        !(
+          firstResult >= 0 &&
+          index > firstResult &&
+          isConnectingToast(notification)
+        ),
     )
     .slice(0, MAX_VISIBLE)
     .reverse();
@@ -70,11 +78,12 @@ export function ToastStack({
   const [mountedAt] = useState(() => Date.now() - 1000);
   const toasts = visibleToasts(notifications, mountedAt);
   const stackRef = useRef<HTMLElement>(null);
+  const modal = useOpenModal();
   const offset = useComposerClearance(
     stackRef,
     toasts.map((toast) => toast.id).join(" "),
+    modal,
   );
-  const modal = useOpenModal();
   if (!onDismiss) return null;
   const stack = (
     <section
@@ -132,6 +141,8 @@ function useOpenModal() {
 function useComposerClearance(
   stackRef: RefObject<HTMLElement | null>,
   toastKey: string,
+  // Portalling into a modal remounts the stack, so measure the new element.
+  modal: HTMLDialogElement | null,
 ) {
   const [offset, setOffset] = useState(0);
   const offsetRef = useRef(0);
@@ -177,7 +188,7 @@ function useComposerClearance(
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [stackRef, toastKey]);
+  }, [stackRef, toastKey, modal]);
   return offset;
 }
 

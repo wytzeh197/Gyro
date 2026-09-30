@@ -23727,6 +23727,10 @@ function providerCredentialSummary(secretStorage?: string) {
   return "Gyro stores readiness only.";
 }
 
+/** The status column starts with the label; mid-sentence uses keep it lowercase. */
+const upperFirst = (text: string) =>
+  text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
  * What the connection column may claim.
  *
@@ -23734,9 +23738,6 @@ function providerCredentialSummary(secretStorage?: string) {
  * support it. Reading `authStatus` alone is what let Settings report a verified
  * Claude Code sign-in while every send in chat came back rejected.
  */
-/** The status column starts with the label; mid-sentence uses keep it lowercase. */
-const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-
 function providerConnectionLabel(
   provider: Pick<ModelProviderConfig, "authStatus" | "enabled"> & {
     id: ProviderId;
@@ -28930,7 +28931,9 @@ function mutationApprovalFromEvent(
 function isPendingApprovalEvent(event: SessionEvent) {
   const provider = providerApprovalFromEvent(event);
   return provider
-    ? provider.status === "pending" && provider.approvalType !== "capability"
+    ? provider.status === "pending" &&
+        provider.approvalType !== "capability" &&
+        stringFromEventPayload(eventPayloadRecord(event), "status") !== "expired"
     : mutationApprovalFromEvent(event)?.status === "pending";
 }
 
