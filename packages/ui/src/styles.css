@@ -17261,8 +17261,10 @@ button.gyro-settings-row em::after {
   width: 20px;
 }
 
-.gyro-composer-context-meter:hover .gyro-composer-plan-usage,
-.gyro-composer-plan-usage:focus-visible {
+/* Brighten only the neutral gauge; a warning or critical tint holds on
+   hover and focus alike. */
+.gyro-composer-context-meter:hover .gyro-composer-plan-usage:not([data-severity]),
+.gyro-composer-plan-usage:not([data-severity]):focus-visible {
   color: var(--gyro-text);
 }
 
@@ -17284,14 +17286,16 @@ button.gyro-settings-row em::after {
 }
 
 /* The start composer's menus hang down over the empty page, not over the
-   headline; its usage card does the same. */
-.gyro-chat-start .gyro-composer-context-tooltip {
+   headline; its usage card does the same when placeComposerContextCard
+   measures room for it below, and opens up otherwise. */
+.gyro-composer-context-meter[data-placement="down"] .gyro-composer-context-tooltip {
   bottom: auto;
   top: calc(100% + 12px);
   transform: translateY(-3px);
 }
 
-.gyro-chat-start .gyro-composer-context-tooltip::after {
+.gyro-composer-context-meter[data-placement="down"]
+  .gyro-composer-context-tooltip::after {
   bottom: auto;
   top: -4px;
   transform: rotate(225deg);

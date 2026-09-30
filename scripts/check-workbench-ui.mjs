@@ -7089,6 +7089,9 @@ expect(
     // Same preferred side as the other composer menus: down from the start
     // screen's composer, up from the docked one.
     /const preferredProviderPlacement\s*=\s*menuPlacement;/.test(surfaceSource) &&
+    // Below the start composer the model list keeps the effort card's side
+    // with a few scrolling rows rather than flipping up over the headline.
+    /const usableListRoom = preferred === "down" \? 160 : 280;/.test(surfaceSource) &&
     !surfaceSource.includes(
       'const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up")',
     ),
@@ -8563,7 +8566,31 @@ expect(
     surfaceSource.includes("contextUsage && contextUsage.percent > 0") &&
     // Plan limits stay reachable without a reading: a gauge opens the card.
     /\{shownContextUsage \|\| limitWindows\.length > 0 \?/.test(surfaceSource) &&
-    surfaceSource.includes('className="gyro-composer-plan-usage"') &&
+    // Gauge and ring are one focusable node, so the first reading swapping
+    // one for the other keeps keyboard focus.
+    /shownContextUsage\s*\?\s*"gyro-composer-context-wheel"\s*:\s*"gyro-composer-plan-usage"/.test(
+      surfaceSource,
+    ) &&
+    /role=\{shownContextUsage \? "progressbar" : "img"\}/.test(surfaceSource) &&
+    // Hover and focus brighten only the neutral gauge; a warning or critical
+    // tint holds either way.
+    styleSource.includes(
+      ".gyro-composer-context-meter:hover .gyro-composer-plan-usage:not([data-severity]),",
+    ) &&
+    !styleSource.includes(
+      ".gyro-composer-context-meter:hover .gyro-composer-plan-usage,",
+    ) &&
+    // The usage card cannot scroll, so its side is measured: down from the
+    // start composer only when it fits there, else up.
+    surfaceSource.includes("function placeComposerContextCard(") &&
+    surfaceSource.includes("meter.dataset.placement = keepsSide") &&
+    /onFocus=\{openContextMeter\}\s+onPointerEnter=\{openContextMeter\}/.test(
+      surfaceSource,
+    ) &&
+    styleSource.includes(
+      '.gyro-composer-context-meter[data-placement="down"] .gyro-composer-context-tooltip {',
+    ) &&
+    !styleSource.includes(".gyro-chat-start .gyro-composer-context-tooltip") &&
     styleSource.includes(
       ".gyro-composer-context-tooltip > .gyro-composer-limit-summary:first-child",
     ) &&
