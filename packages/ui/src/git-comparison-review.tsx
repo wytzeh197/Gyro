@@ -273,10 +273,10 @@ function ComparisonDiffPane({
   const relative = workspaceRelativeFilePath(file.path, workspacePath);
   const scopeLabel =
     comparison === "branch"
-      ? "main ↔ Working Tree"
+      ? "main ↔ working tree"
       : comparison === "index"
-        ? "HEAD ↔ Index"
-        : "Index ↔ Working Tree";
+        ? "HEAD ↔ index"
+        : "Index ↔ working tree";
 
   return (
     <div className="gyro-comparison-diff-pane">

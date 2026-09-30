@@ -251,7 +251,7 @@ function Prototype() {
             </button>
           </div>
           <button className="study-nav" onClick={() => choose("idle")}>
-            ＋ <span>New Session</span>
+            ＋ <span>New session</span>
           </button>
           <button
             className="study-nav"

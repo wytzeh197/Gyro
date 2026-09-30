@@ -57,7 +57,7 @@ export function ChatKeepAlive({
         {onOpen ? (
           <button
             onClick={() => onOpen(watch.paneId)}
-            title={`Show ${watch.title} in Terminal`}
+            title={`Show ${watch.title} in terminal`}
             type="button"
           >
             <SquareTerminal aria-hidden="true" size={13} />

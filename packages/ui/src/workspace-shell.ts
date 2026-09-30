@@ -70,7 +70,7 @@ export const workspaceViewContainers: readonly WorkspaceViewContainerContributio
     },
     {
       id: "source-control",
-      label: "Source Control",
+      label: "Source control",
       icon: "source-control",
       order: 30,
       placement: "primary",
@@ -78,7 +78,7 @@ export const workspaceViewContainers: readonly WorkspaceViewContainerContributio
     },
     {
       id: "run-test",
-      label: "Run and Test",
+      label: "Run and test",
       icon: "run-test",
       order: 40,
       placement: "primary",
@@ -108,14 +108,14 @@ export const workspacePanelContributions: readonly WorkspacePanelContribution[] 
     { id: "terminal", label: "Terminal", icon: "terminal", order: 20 },
     { id: "browser", label: "Browser", icon: "browser", order: 30 },
     { id: "problems", label: "Problems", icon: "problems", order: 40 },
-    { id: "test-results", label: "Test Results", icon: "run-test", order: 50 },
+    { id: "test-results", label: "Test results", icon: "run-test", order: 50 },
     { id: "output", label: "Output", icon: "output", order: 60 },
   ] as const;
 
 export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   {
     id: "open-workspace",
-    label: "Workspace: Open Project",
+    label: "Workspace: Open project",
     description: "Choose a local project folder",
     icon: "explorer",
     keywords: "workspace root folder add",
@@ -124,7 +124,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "toggle-workspace-trust",
-    label: "Workspace: Toggle Restricted Mode",
+    label: "Workspace: Toggle restricted mode",
     description: "Allow or pause executable project features",
     icon: "settings",
     keywords: "trust security safe commands",
@@ -134,7 +134,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "add-workspace-folder",
-    label: "Workspace: Add Folder",
+    label: "Workspace: Add folder",
     description: "Add another project root to this workspace",
     icon: "explorer",
     keywords: "multi root project folder",
@@ -144,7 +144,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "open-workspace-file",
-    label: "Workspace: Open Workspace File",
+    label: "Workspace: Open workspace file",
     description: "Open a saved multi-root workspace definition",
     icon: "explorer",
     keywords: "gyro workspace json multi root",
@@ -153,7 +153,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "save-workspace-file",
-    label: "Workspace: Save Workspace As",
+    label: "Workspace: Save workspace as",
     description: "Save the current folder set as a workspace file",
     icon: "explorer",
     keywords: "gyro workspace json multi root",
@@ -163,8 +163,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "view-explorer",
-    label: "View: Show Explorer",
-    description: "Open the Explorer view container",
+    label: "View: Show explorer",
+    description: "Open the explorer view container",
     icon: "explorer",
     keywords: "files tree",
     destination: "workspace",
@@ -173,7 +173,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "search-files",
-    label: "View: Search in Files",
+    label: "View: Search in files",
     description: "Find text across the workspace",
     icon: "search",
     keywords: "code find text",
@@ -185,8 +185,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "view-source-control",
-    label: "View: Show Source Control",
-    description: "Open the Source Control view container",
+    label: "View: Show source control",
+    description: "Open the source control view container",
     icon: "source-control",
     keywords: "git scm changes",
     destination: "workspace",
@@ -195,7 +195,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "view-run-test",
-    label: "View: Show Run and Test",
+    label: "View: Show run and test",
     description: "Open tasks, tests, and debug sessions",
     icon: "run-test",
     keywords: "tasks tests debug",
@@ -205,8 +205,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "view-ai",
-    label: "View: Show AI Tools",
-    description: "Open Workspace AI tools and activity",
+    label: "View: Show AI tools",
+    description: "Open workspace AI tools and activity",
     icon: "ai",
     keywords: "agent assistant tools",
     destination: "workspace",
@@ -215,7 +215,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "new-terminal",
-    label: "Terminal: Create New Terminal",
+    label: "Terminal: Create new terminal",
     description: "Open a local shell pane",
     icon: "terminal",
     keywords: "shell console",
@@ -229,7 +229,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "split-terminal",
-    label: "Terminal: Split Terminal",
+    label: "Terminal: Split terminal",
     description: "Split the active terminal pane",
     icon: "terminal",
     destination: "workspace",
@@ -242,8 +242,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "show-diffs",
-    label: "View: Show Diff",
-    description: "Review Workspace changes",
+    label: "View: Show diff",
+    description: "Review workspace changes",
     icon: "diff",
     destination: "workspace",
     layout: "code",
@@ -252,7 +252,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "open-browser-preview",
-    label: "View: Show Browser Preview",
+    label: "View: Show browser preview",
     description: "Inspect a local web application",
     icon: "browser",
     destination: "workspace",
@@ -262,8 +262,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "show-problems",
-    label: "View: Show Problems",
-    description: "Inspect Workspace diagnostics",
+    label: "View: Show problems",
+    description: "Inspect workspace diagnostics",
     icon: "problems",
     destination: "workspace",
     layout: "code",
@@ -274,8 +274,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "show-output",
-    label: "View: Show Output",
-    description: "Inspect Workspace output channels",
+    label: "View: Show output",
+    description: "Inspect workspace output channels",
     icon: "output",
     destination: "workspace",
     layout: "code",
@@ -284,7 +284,7 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "run-tests",
-    label: "Test: Run Workspace Tests",
+    label: "Test: Run workspace tests",
     description: "Run the detected test task",
     icon: "run-test",
     keywords: "validate check",

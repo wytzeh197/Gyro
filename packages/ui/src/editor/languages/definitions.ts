@@ -4,7 +4,7 @@ import type { LanguageDefinition } from "./types";
 export const languageDefinitions: LanguageDefinition[] = [
   {
     id: "plaintext",
-    name: "Plain Text",
+    name: "Plain text",
     syntax: {
       type: "plaintext",
     },
@@ -356,7 +356,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "dotenv",
-    name: "Environment Variables",
+    name: "Environment variables",
     syntax: {
       type: "custom",
       language: "dotenv",
@@ -759,7 +759,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "requirements",
-    name: "Python Requirements",
+    name: "Python requirements",
     syntax: {
       type: "custom",
       language: "requirements",
@@ -840,7 +840,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "shell",
-    name: "Shell Script",
+    name: "Shell script",
     syntax: {
       type: "monaco",
       language: "shell",
@@ -882,7 +882,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "bat",
-    name: "Windows Batch",
+    name: "Windows batch",
     syntax: {
       type: "monaco",
       language: "bat",
@@ -942,7 +942,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "helm",
-    name: "Helm Template",
+    name: "Helm template",
     syntax: {
       type: "textmate",
       grammar: "helm",
@@ -1015,7 +1015,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "pbxproj",
-    name: "Xcode Project",
+    name: "Xcode project",
     syntax: {
       type: "textmate",
       grammar: "pbxproj",
@@ -1025,7 +1025,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "yarnlock",
-    name: "Yarn Lockfile",
+    name: "Yarn lockfile",
     syntax: {
       type: "custom",
       language: "yarnlock",
@@ -1035,7 +1035,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "bunlock",
-    name: "Bun Lockfile",
+    name: "Bun lockfile",
     syntax: {
       type: "custom",
       language: "jsonc",
@@ -1045,7 +1045,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gomod",
-    name: "Go Module",
+    name: "Go module",
     syntax: {
       type: "custom",
       language: "gomod",
@@ -1056,7 +1056,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gosum",
-    name: "Go Checksums",
+    name: "Go checksums",
     syntax: {
       type: "plaintext",
     },
@@ -1065,7 +1065,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "rubybundler",
-    name: "Bundler Lockfile",
+    name: "Bundler lockfile",
     syntax: {
       type: "plaintext",
     },
@@ -1364,7 +1364,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "godotshader",
-    name: "Godot Shader",
+    name: "Godot shader",
     syntax: {
       type: "textmate",
       grammar: "godotshader",
@@ -1664,7 +1664,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gitignore",
-    name: "Git Ignore",
+    name: "Git ignore",
     syntax: {
       type: "custom",
       language: "gitignore",
@@ -1674,7 +1674,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gitattributes",
-    name: "Git Attributes",
+    name: "Git attributes",
     syntax: {
       type: "custom",
       language: "gitignore",
@@ -1684,7 +1684,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gitcommit",
-    name: "Git Commit Message",
+    name: "Git commit message",
     syntax: {
       type: "custom",
       language: "gitcommit",
@@ -1694,7 +1694,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "gitrebase",
-    name: "Git Rebase",
+    name: "Git rebase",
     syntax: {
       type: "custom",
       language: "gitrebase",
@@ -1704,7 +1704,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "diff",
-    name: "Diff / Patch",
+    name: "Diff / patch",
     syntax: {
       type: "custom",
       language: "diff",
@@ -1776,7 +1776,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "media",
-    name: "Audio / Video",
+    name: "Audio / video",
     syntax: {
       type: "plaintext",
     },
@@ -1795,7 +1795,7 @@ export const languageDefinitions: LanguageDefinition[] = [
   },
   {
     id: "binary",
-    name: "Binary File",
+    name: "Binary file",
     syntax: {
       type: "plaintext",
     },

@@ -4,9 +4,9 @@ export function comparisonScopeLabel(
   comparison?: "working-tree" | "index" | "branch",
   staged = false,
 ) {
-  if (comparison === "branch") return "main ↔ Working Tree";
-  if (comparison === "index" || staged) return "HEAD ↔ Index";
-  return "Index ↔ Working Tree";
+  if (comparison === "branch") return "main ↔ working tree";
+  if (comparison === "index" || staged) return "HEAD ↔ index";
+  return "Index ↔ working tree";
 }
 
 export function ScmReviewToolbar({

@@ -62,7 +62,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I manage usage and budgets?",
         answer:
-          "Open Settings → Usage Limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Estimated usage is labelled; billing and account allowances are managed by your provider.",
+          "Open Settings → Usage limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Estimated usage is labelled; billing and account allowances are managed by your provider.",
         section: "usage-limits",
       },
       {
@@ -112,7 +112,7 @@ const resources = [
 const sectionLabels: Partial<Record<SettingsSectionId, string>> = {
   providers: "Providers",
   permissions: "Permissions",
-  "usage-limits": "Usage Limits",
+  "usage-limits": "Usage limits",
   updates: "Updates",
   advanced: "Advanced",
 };
@@ -149,7 +149,7 @@ export function SettingsHelp({
         <input
           id={searchId}
           type="search"
-          aria-label="Search Help"
+          aria-label="Search help"
           placeholder="Search questions, permissions, providers…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

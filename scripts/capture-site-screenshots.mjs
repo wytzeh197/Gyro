@@ -331,7 +331,7 @@ const steps = {
   openSourceControl: `
     (() => {
       const view = document.querySelector(
-        '.gyro-workspace-activity-rail button[aria-label^="Source Control"]',
+        '.gyro-workspace-activity-rail button[aria-label^="Source control"]',
       );
       if (!view) return 'missing:source-control';
       view.click();

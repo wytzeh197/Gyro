@@ -923,7 +923,7 @@ const settingsSidebarItems: Array<{
   id: SettingsSectionId;
   label: string;
   icon: IconComponent;
-  group: "Preferences" | "AI & Agents" | "Workspace" | "System";
+  group: "Preferences" | "AI & agents" | "Workspace" | "System";
 }> = [
   {
     id: "general",
@@ -945,37 +945,37 @@ const settingsSidebarItems: Array<{
   },
   {
     id: "usage-limits",
-    label: "Usage Limits",
+    label: "Usage limits",
     icon: Gauge,
-    group: "AI & Agents",
+    group: "AI & agents",
   },
   {
     id: "providers",
     label: "Providers",
     icon: KeyRound,
-    group: "AI & Agents",
+    group: "AI & agents",
   },
   {
     id: "cli-profiles",
-    label: "CLI Profiles",
+    label: "CLI profiles",
     icon: Terminal,
-    group: "AI & Agents",
+    group: "AI & agents",
   },
   {
     id: "permissions",
     label: "Permissions",
     icon: LockKeyhole,
-    group: "AI & Agents",
+    group: "AI & agents",
   },
   {
     id: "editor-workspace",
-    label: "Editor & Search",
+    label: "Editor & search",
     icon: FileText,
     group: "Workspace",
   },
   {
     id: "tools-contributions",
-    label: "Tools & Contributions",
+    label: "Tools & contributions",
     icon: Blocks,
     group: "Workspace",
   },
@@ -1030,13 +1030,13 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "editor-workspace",
-    label: "Editor & Search",
+    label: "Editor & search",
     detail: "Editor, Explorer, and search behavior by workspace scope",
     keywords: "workspace folder minimap exclude maximum results",
   },
   {
     section: "tools-contributions",
-    label: "Tools & Contributions",
+    label: "Tools & contributions",
     detail: "Language servers, workspace commands, and local contributions",
     keywords: "extensions manifests lsp",
   },
@@ -1090,7 +1090,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "usage-limits",
-    label: "Usage Limits",
+    label: "Usage limits",
     detail: "Provider allowance, spend, and local guardrails",
     keywords: "daily budget cap tokens",
   },
@@ -1126,7 +1126,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "providers",
-    label: "Model Council",
+    label: "Model council",
     detail: "Parallel multi-provider synthesis — coming soon",
     keywords: "council multi model ensemble synthesize preset coming soon",
   },
@@ -1138,7 +1138,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "cli-profiles",
-    label: "CLI Profiles",
+    label: "CLI profiles",
     detail: "Configure launch presets and saved terminal commands",
     keywords: "shell command agent",
   },
@@ -2578,7 +2578,7 @@ export function AppChrome({
           ) : null}
           {isIdeSurface ? (
             <div
-              aria-label="Resize Workspace sidebar"
+              aria-label="Resize workspace sidebar"
               aria-orientation="vertical"
               aria-valuemax={ideSidebarMaximumWidth}
               aria-valuemin={ideSidebarMinimumWidth}
@@ -2596,7 +2596,7 @@ export function AppChrome({
               onPointerUp={endIdeSidebarResize}
               role="separator"
               tabIndex={0}
-              title="Resize Workspace sidebar"
+              title="Resize workspace sidebar"
             />
           ) : null}
         </aside>
@@ -3069,7 +3069,7 @@ function SettingsSidebarContent({
         aria-label="Settings pages"
         className="gyro-sidebar-actions is-settings-pages"
       >
-        {(["Preferences", "AI & Agents", "Workspace", "System"] as const).map(
+        {(["Preferences", "AI & agents", "Workspace", "System"] as const).map(
           (group) => {
             const items = settingsSidebarItems.filter(
               (item) => item.group === group,
@@ -4803,7 +4803,7 @@ function WorkspaceSidebarContent({
                       (item) => item.path === explorerContextMenu.path,
                     )?.kind === "file"
                       ? "Open"
-                      : "New File"}
+                      : "New file"}
                   </button>
                   <button
                     onClick={() => {
@@ -4836,7 +4836,7 @@ function WorkspaceSidebarContent({
                     {files.find(
                       (item) => item.path === explorerContextMenu.path,
                     )?.isWorkspaceRoot
-                      ? "Remove Folder from Workspace"
+                      ? "Remove folder from workspace"
                       : "Delete"}
                   </button>
                 </div>
@@ -5671,7 +5671,7 @@ function WorkspaceSidebarContent({
                 </div>
               }
               meta={String(ide?.taskDefinitions.length ?? 0)}
-              title="Run and Test"
+              title="Run and test"
             >
               {isAddingRunCommand ? (
                 <form
@@ -6009,7 +6009,7 @@ function WorkspaceSidebarContent({
               </button>
               {newSessionMenuView !== "closed" ? (
                 <div
-                  aria-label="Create Chat or CLI session"
+                  aria-label="Create chat or CLI session"
                   className="gyro-sidebar-new-session-menu is-root"
                   role="menu"
                 >
@@ -6019,7 +6019,7 @@ function WorkspaceSidebarContent({
                     role="group"
                   >
                     <button
-                      aria-label="New Chat"
+                      aria-label="New chat"
                       onClick={() => {
                         setNewSessionMenuView("closed");
                         onCreateSession();
@@ -6028,7 +6028,7 @@ function WorkspaceSidebarContent({
                       type="button"
                     >
                       <MessageSquare size={15} />
-                      <strong>New Chat</strong>
+                      <strong>New chat</strong>
                     </button>
                   </div>
                   <div
@@ -7547,10 +7547,10 @@ export function ChatUtilityBar({
           <Folder size={16} />
         </button>
         <button
-          aria-label="New Chat"
+          aria-label="New chat"
           className="gyro-chat-icon-tool"
           onClick={() => onCreateSession?.()}
-          title="New Chat"
+          title="New chat"
           type="button"
         >
           <Edit3 size={16} />
@@ -9482,7 +9482,7 @@ export function ChatSurface({
         ) : null}
         <section
           className={["gyro-chat-start"].filter(Boolean).join(" ")}
-          aria-label="New Chat"
+          aria-label="New chat"
           style={{ width: "min(860px, 100%)" }}
         >
           {
@@ -12167,7 +12167,7 @@ function ChatEnvironmentLauncher({
   return (
     <nav className="gyro-chat-tool-launcher" aria-label="Environment tools">
       <button
-        aria-label={`Open Changes, ${changesLabel}`}
+        aria-label={`Open changes, ${changesLabel}`}
         onClick={() => onOpenTool("diff")}
         className={
           pendingDiffs > 0 || changedFiles > 0 ? "has-activity" : undefined
@@ -12179,7 +12179,7 @@ function ChatEnvironmentLauncher({
         {changesLabel === "No changes" ? null : <small>{changesLabel}</small>}
       </button>
       <button
-        aria-label={`Open Terminal, ${terminalLabel}`}
+        aria-label={`Open terminal, ${terminalLabel}`}
         onClick={() => onOpenTool("terminal")}
         className={runningPanes > 0 ? "has-activity" : undefined}
         type="button"
@@ -12189,7 +12189,7 @@ function ChatEnvironmentLauncher({
         {terminalLabel === "Ready" ? null : <small>{terminalLabel}</small>}
       </button>
       <button
-        aria-label={`Open Browser, ${browserLabel}`}
+        aria-label={`Open browser, ${browserLabel}`}
         className={
           browserPreview?.status === "console-error" ||
           browserPreview?.status === "verification-failed"
@@ -12206,7 +12206,7 @@ function ChatEnvironmentLauncher({
         {browserLabel === "Idle" ? null : <small>{browserLabel}</small>}
       </button>
       <button
-        aria-label={`Open Files, ${workspaceName(workspacePath)}`}
+        aria-label={`Open files, ${workspaceName(workspacePath)}`}
         onClick={onOpenFiles}
         type="button"
       >
@@ -12221,7 +12221,7 @@ function ChatEnvironmentLauncher({
       {hasPlan ? (
         <button
           aria-expanded={planExpanded}
-          aria-label={`${planExpanded ? "Collapse" : "Open"} Plan, ${planLabel}`}
+          aria-label={`${planExpanded ? "Collapse" : "Open"} plan, ${planLabel}`}
           onClick={onTogglePlan}
           className={[
             planItemCount > 0 ? "has-activity" : "",
@@ -12823,7 +12823,7 @@ function WorkspaceSettingsEditor({
       aria-labelledby="gyro-workspace-settings-title"
       className="gyro-settings-section gyro-workspace-settings-editor"
       data-setting-key={settingsSearchKey(
-        view === "editor" ? "Editor & Search" : "Tools & Contributions",
+        view === "editor" ? "Editor & search" : "Tools & contributions",
       )}
       tabIndex={-1}
     >
@@ -12835,7 +12835,7 @@ function WorkspaceSettingsEditor({
             ) : (
               <Blocks aria-hidden="true" size={18} />
             )}
-            {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
+            {view === "editor" ? "Editor & search" : "Tools & contributions"}
           </h1>
           <span>
             {view === "editor"
@@ -13018,7 +13018,7 @@ function WorkspaceSettingsEditor({
                       <strong>{server.languageId}</strong>
                       <small>{server.message ?? server.command}</small>
                     </span>
-                    <em data-status={server.status}>{server.status}</em>
+                    <em data-status={server.status}>{server.status.replace("-", " ").replace(/^./, (c) => c.toUpperCase())}</em>
                   </article>
                 ))
               ) : (
@@ -13488,7 +13488,7 @@ export function IdeSurface({
           <aside className="gyro-workspace-trust-banner" role="status">
             <LockKeyhole size={14} />
             <span>
-              <strong>Restricted Mode</strong>
+              <strong>Restricted mode</strong>
               Tasks, terminals, language servers, and debug adapters are paused
               for this folder.
             </span>
@@ -14649,7 +14649,7 @@ function TerminalDiffControl({
               }}
               type="button"
             >
-              Review in Workspace
+              Review in workspace
               <ArrowRight size={13} />
             </button>
           </footer>
@@ -14675,7 +14675,7 @@ function cliLaunchPresetLabel(
     const profile = profiles.find((item) => item.id === entry?.profileId);
     const profileLabel = profile?.displayName ?? "preset";
     if (entry?.profileId === "shell" && entry.count === 1) {
-      return "New Terminal";
+      return "New terminal";
     }
     return entry && entry.count > 1
       ? `Start ${profileLabel} x${entry.count}`
@@ -15735,7 +15735,7 @@ function TestResultsPane({
     return { title: `Run ${task.label}`, run: () => onRunTestTask(task.id) };
   };
   return (
-    <section className="gyro-test-results-pane" aria-label="Test Results">
+    <section className="gyro-test-results-pane" aria-label="Test results">
       <header>
         <ListChecks size={15} />
         <span>{tests.length} tests</span>
@@ -17425,7 +17425,7 @@ export function ProvidersSurface({
           </span>
           <div>
             <span className="gyro-surface-page-eyebrow">Agent stack</span>
-            <h1>Agents &amp; Providers</h1>
+            <h1>Agents &amp; providers</h1>
             <p>
               Gyro local access stays separate from provider CLI, SDK, and env
               auth. Manage models without blurring local trust boundaries.
@@ -19310,12 +19310,12 @@ export function BrowserPreviewSurface({
             />
             <small className={isLocalPreview ? "is-local" : "is-web"}>
               {showingCapture
-                ? "capture"
+                ? "Capture"
                 : useNativeHost
-                  ? "native"
+                  ? "Native"
                   : isLocalPreview
-                    ? "local"
-                    : "web"}
+                    ? "Local"
+                    : "Web"}
             </small>
             {isChat ? (
               <button
@@ -20342,9 +20342,9 @@ export function CommandPaletteOverlay({
       <div
         aria-label={
           mode === "commands"
-            ? "Command Palette"
+            ? "Command palette"
             : mode === "files"
-              ? "Quick Open"
+              ? "Quick open"
               : "Search Gyro"
         }
         className={[
@@ -21663,7 +21663,7 @@ export function SettingsSurface({
         {activeSection === "usage-limits" ? (
           <SettingsSection
             icon={Gauge}
-            title="Usage Limits"
+            title="Usage limits"
             description="Local guardrails for agent runs, command output, and provider spend."
           >
             {usageProvider ? (
@@ -21924,7 +21924,7 @@ export function SettingsSurface({
                 detail="Multiple CLI agents stay explicit until provider health is stable."
               />
             </SettingsGroup>
-            <SettingsGroup label="Auto Context Compact">
+            <SettingsGroup label="Auto context compact">
               <SettingsRow
                 label="Auto-compact context"
                 detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
@@ -22262,7 +22262,7 @@ export function SettingsSurface({
             {COUNCIL_COMING_SOON ? (
               <details className="gyro-settings-disclosure">
                 <summary>
-                  Model Council <span>Coming soon</span>
+                  Model council <span>Coming soon</span>
                 </summary>
                 <p>
                   Compare answers from multiple providers in one conversation.
@@ -22274,10 +22274,10 @@ export function SettingsSurface({
                 badge={
                   COUNCIL_COMING_SOON ? COUNCIL_COMING_SOON_LABEL : undefined
                 }
-                label="Model Council"
+                label="Model council"
               >
                 <SettingsRow
-                  label="Enable Council mode"
+                  label="Enable council mode"
                   detail={
                     COUNCIL_COMING_SOON
                       ? "Parallel multi-provider answers with synthesis. Still in development and not yet available to run."
@@ -22285,7 +22285,7 @@ export function SettingsSurface({
                   }
                 >
                   <SettingsSwitch
-                    label="Enable Council mode"
+                    label="Enable council mode"
                     checked={normalizedCouncilConfig(config.council).enabled}
                     disabled={COUNCIL_COMING_SOON}
                     onChange={(checked) =>
@@ -22301,10 +22301,10 @@ export function SettingsSurface({
                 </SettingsRow>
                 <SettingsRow
                   label="Default preset"
-                  detail="Which council membership to use when you enable Council mode."
+                  detail="Which council membership to use when you enable council mode."
                 >
                   <SettingsSelect
-                    aria-label="Default Council preset"
+                    aria-label="Default council preset"
                     disabled={COUNCIL_COMING_SOON}
                     onChange={(event) =>
                       onConfigChange?.({
@@ -22379,8 +22379,8 @@ export function SettingsSurface({
         {activeSection === "cli-profiles" ? (
           <SettingsSection
             icon={Terminal}
-            title="CLI Profiles"
-            description="Choose which saved command profiles open with New Terminal, and how many panes to create."
+            title="CLI profiles"
+            description="Choose which saved command profiles open with New terminal, and how many panes to create."
           >
             <SettingsGroup label="Launch preset">
               <CliLaunchPresetEditor
@@ -25327,7 +25327,7 @@ function Composer({
           <Users size={13} />
           <span>
             {!councilEnabled
-              ? "Model Council is disabled in Settings → Providers."
+              ? "Model council is disabled in Settings → Providers."
               : councilPreflightLabel(councilResolution)}
           </span>
           {councilResolution.seats.length > 0 ? (
@@ -25809,7 +25809,7 @@ function Composer({
         {chatMode === "plan" ? (
           <button
             aria-label={
-              isSending ? "Remove Plan from next message" : "Remove Plan mode"
+              isSending ? "Remove plan from next message" : "Remove plan mode"
             }
             aria-pressed="true"
             className="gyro-composer-chip is-plan"
@@ -25817,7 +25817,7 @@ function Composer({
             title={
               isSending
                 ? "Plan applies to the next message"
-                : "Remove Plan mode"
+                : "Remove plan mode"
             }
             type="button"
           >
@@ -25833,11 +25833,11 @@ function Composer({
           </button>
         ) : chatMode === "council" ? (
           <button
-            aria-label="Remove Council mode"
+            aria-label="Remove council mode"
             aria-pressed="true"
             className="gyro-composer-chip is-council"
             onClick={() => onComposerAction?.("set-chat-mode-normal")}
-            title="Remove Council mode — multi-model parallel answers with synthesis"
+            title="Remove council mode — multi-model parallel answers with synthesis"
             type="button"
           >
             <Users size={13} />
@@ -26184,7 +26184,7 @@ function Composer({
                   : !hasReadyProvider
                     ? "Connect a provider before sending"
                     : chatMode === "council" && !hasUserWorkspace
-                      ? "Choose a folder for Council"
+                      ? "Choose a folder for council"
                       : isBranchLoading
                         ? "Wait for the branch switch to finish"
                         : isSending
@@ -26421,7 +26421,7 @@ const ChatEvent = memo(function ChatEvent({
       >
         {isUser || isAssistant ? null : (
           <div className="gyro-message-meta">
-            {event.kind.replaceAll("-", " ")}
+            {event.kind.replaceAll("-", " ").replace(/^./, (c) => c.toUpperCase())}
           </div>
         )}
         {isAssistant ? (
@@ -26690,7 +26690,7 @@ function CapabilityActivityCard({
     >
       <span className="gyro-capability-activity-icon">{icon}</span>
       <div>
-        <strong>{activity.capabilityId.replaceAll("-", " ")}</strong>
+        <strong>{activity.capabilityId.replaceAll("-", " ").replace(/^./, (c) => c.toUpperCase())}</strong>
         <span>{activity.summary}</span>
         {activity.resource ? <small>{activity.resource.label}</small> : null}
       </div>
@@ -28264,7 +28264,7 @@ function CouncilResponseCard({
       <header className="gyro-council-header">
         <div className="gyro-council-title-row">
           <Users size={15} />
-          <strong>Model Council</strong>
+          <strong>Model council</strong>
           <span className={`gyro-council-status is-${payload.status}`}>
             {payload.status}
           </span>
@@ -28916,7 +28916,7 @@ function providerApprovalFromEvent(
         capabilityId === "workspace-read-editor"
           ? "The model requested live text from your editor. Review the text below before sharing it."
           : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
-      risk: "This capability is restricted to the owning Chat and project.",
+      risk: "This capability is restricted to the owning chat and project.",
       changes: previewPath ? [{ path: previewPath }] : [],
       status: "pending",
     };

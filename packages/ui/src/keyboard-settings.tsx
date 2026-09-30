@@ -48,7 +48,7 @@ const builtInShortcutGroups: Array<{ label: string; rows: ShortcutRow[] }> = [
       },
       {
         name: "Open settings",
-        detail: "Go to Settings",
+        detail: "Go to settings",
         binding: { key: ",", primary: true },
       },
     ],
@@ -72,8 +72,8 @@ const builtInShortcutGroups: Array<{ label: string; rows: ShortcutRow[] }> = [
         binding: { key: "2", primary: true },
       },
       {
-        name: "Show Workspace",
-        detail: "Switch to the Workspace editor",
+        name: "Show workspace",
+        detail: "Switch to the workspace editor",
         binding: { key: "3", primary: true },
       },
     ],
@@ -83,7 +83,7 @@ const builtInShortcutGroups: Array<{ label: string; rows: ShortcutRow[] }> = [
     rows: [
       {
         name: "Save file",
-        detail: "Save the open file in the Workspace editor",
+        detail: "Save the open file in the workspace editor",
         binding: { key: "s", primary: true },
       },
     ],
