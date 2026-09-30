@@ -12220,7 +12220,7 @@ function ChatEnvironmentLauncher({
       {hasPlan ? (
         <button
           aria-expanded={planExpanded}
-          aria-label={`${planExpanded ? "Collapse" : "Open"} Plan, ${planLabel}`}
+          aria-label={`${planExpanded ? "Collapse" : "Open"} plan, ${planLabel}`}
           onClick={onTogglePlan}
           className={[
             planItemCount > 0 ? "has-activity" : "",
@@ -13017,7 +13017,7 @@ function WorkspaceSettingsEditor({
                       <strong>{server.languageId}</strong>
                       <small>{server.message ?? server.command}</small>
                     </span>
-                    <em data-status={server.status}>{server.status}</em>
+                    <em data-status={server.status}>{server.status.replace("-", " ").replace(/^./, (c) => c.toUpperCase())}</em>
                   </article>
                 ))
               ) : (
@@ -26402,7 +26402,7 @@ const ChatEvent = memo(function ChatEvent({
       >
         {isUser || isAssistant ? null : (
           <div className="gyro-message-meta">
-            {event.kind.replaceAll("-", " ")}
+            {event.kind.replaceAll("-", " ").replace(/^./, (c) => c.toUpperCase())}
           </div>
         )}
         {isAssistant ? (

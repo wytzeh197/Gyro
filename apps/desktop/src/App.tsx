@@ -685,7 +685,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: ["login"],
       command: "grok",
-      displayName: "xAI Login",
+      displayName: "xAI login",
       id: "xai-login",
       workingDirectory: null,
     };
@@ -7515,7 +7515,7 @@ export function App() {
         notify(
           "command-failed",
           `${profile.displayName}: ${resolved.launchUnavailableReason}`,
-          "Check this provider in Settings before launching its CLI.",
+          "Check this provider in settings before launching its CLI.",
         );
         return false;
       }
@@ -8762,7 +8762,7 @@ export function App() {
         notify(
           "command-failed",
           "No editor to capture",
-          "Open a project file in Workspace first",
+          "Open a project file in the workspace first",
         );
         return;
       }

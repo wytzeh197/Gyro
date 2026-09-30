@@ -14533,7 +14533,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-text);
   font-size: var(--gyro-type-sm);
   font-weight: var(--gyro-weight-strong);
-  text-transform: capitalize;
 }
 
 .gyro-capability-activity span,
@@ -19585,7 +19584,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-xs);
   font-style: normal;
-  text-transform: capitalize;
 }
 
 .gyro-workspace-services article em[data-status="ready"] {

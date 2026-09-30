@@ -275,7 +275,7 @@ function ComparisonDiffPane({
     comparison === "branch"
       ? "main ↔ working tree"
       : comparison === "index"
-        ? "HEAD ↔ Index"
+        ? "HEAD ↔ index"
         : "Index ↔ working tree";
 
   return (

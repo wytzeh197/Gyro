@@ -108,7 +108,7 @@ function ChatArtifactCard({
         <div className="gyro-chat-artifact-body">
           <ChatArtifactContent actions={actions} artifact={artifact} />
           {actions?.onOpenCanvas && ["canvas", "table", "diagram"].includes(artifact.kind) ? (
-            <ArtifactFooterAction label="Open in Canvas" onClick={() => actions.onOpenCanvas?.(artifact.id)} />
+            <ArtifactFooterAction label="Open in canvas" onClick={() => actions.onOpenCanvas?.(artifact.id)} />
           ) : null}
         </div>
       ) : null}
@@ -125,7 +125,7 @@ export function ChatArtifactContent({
 }) {
   if (artifact.kind === "canvas") {
     if (artifact.format === "html") {
-      return <p>Interactive UI · Open in Canvas to preview and refine.</p>;
+      return <p>Interactive UI · Open in canvas to preview and refine.</p>;
     }
     return <pre className={`gyro-canvas-document is-${artifact.format}`}>{artifact.content}</pre>;
   }

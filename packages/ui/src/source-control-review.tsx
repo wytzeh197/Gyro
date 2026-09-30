@@ -5,7 +5,7 @@ export function comparisonScopeLabel(
   staged = false,
 ) {
   if (comparison === "branch") return "main ↔ working tree";
-  if (comparison === "index" || staged) return "HEAD ↔ Index";
+  if (comparison === "index" || staged) return "HEAD ↔ index";
   return "Index ↔ working tree";
 }
 

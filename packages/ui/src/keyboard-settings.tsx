@@ -48,7 +48,7 @@ const builtInShortcutGroups: Array<{ label: string; rows: ShortcutRow[] }> = [
       },
       {
         name: "Open settings",
-        detail: "Go to Settings",
+        detail: "Go to settings",
         binding: { key: ",", primary: true },
       },
     ],
