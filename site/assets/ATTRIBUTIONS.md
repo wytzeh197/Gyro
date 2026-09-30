@@ -32,20 +32,39 @@ local provider and contain no customer, account, or private repository data.
 
 ## Provider marks
 
-The Kimi and Grok marks on the homepage come from
-[@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT), inlined as SVG.
-The Claude, Gemini, Ollama, Cursor, and OpenCode marks come from Simple Icons
-16.27.1 (CC0-1.0). The ChatGPT mark is `openai-icon` from
-[Gil Barbara's logos](https://github.com/gilbarbara/logos) (CC0-1.0). Cursor and
-OpenCode are shown with a "Coming soon" badge and are not yet supported. Each
-mark is a trademark of its owner; they appear here only to identify the
-providers Gyro supports, and imply no affiliation or endorsement.
+The homepage's agent rotator shows eleven marks. Each was checked against its
+owner's current brand source in September 2026:
 
-Claude uses its brand hex `#d97757`. Gemini is drawn as its spark and filled
-with an SVG gradient running violet to blue across the mark, matching how Google
-renders it; the stops (`#9061c4`, `#5b83d8`, `#2e93e3`) are sampled to that
-appearance rather than taken from a published spec. OpenAI, xAI, Moonshot, and
-Ollama publish black-and-white marks with no brand colour, so ChatGPT, Grok,
-Kimi, and Ollama follow the page's text colour and flip with the theme — except
-the accent dot on Kimi's K, which is set to `#3b82f6`. Cursor and OpenCode stay
-grey while they are unsupported.
+- **Claude Code**: the Claude starburst from Simple Icons 16.33.0 (CC0-1.0),
+  in its brand hex `#d97757`. It matches the claude.com favicon.
+- **Codex**: the Codex glyph that OpenAI ships in its own desktop app
+  (`codex-new.svg`). Monochrome, so it follows the page's text colour.
+- **Gemini CLI**: Google's current four-colour Gemini spark,
+  `gemini_sparkle_4g` from gstatic.com (the gemini.google.com icon). It is
+  served unaltered as a 160px PNG (`agents/gemini-spark.png`), because Google
+  publishes no vector for it.
+- **Grok Build**: the Grok mark from
+  [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT), matching
+  grok.com's favicon. Monochrome.
+- **Kimi Code**: the Kimi "K" from @lobehub/icons (MIT), matching kimi.com's own
+  icon set. The accent dot is Kimi's `#1783ff`.
+- **Cursor**: the cube from Simple Icons 16.33.0, matching cursor.com/brand.
+  Monochrome.
+- **OpenCode**: the two-tone frame from opencode.ai/brand. The dark variant is
+  `#f1ecec` on `#4b4646`; the light variant is `#211e1e` on `#cfcecd`.
+- **Ollama**: the llama from Simple Icons 16.33.0, matching ollama.com.
+  Monochrome.
+- **OpenRouter**: the glyph from openrouter.ai/brand (the July 2026 refresh).
+  Monochrome.
+- **DeepSeek**: the whale from Simple Icons 16.33.0, in DeepSeek's `#4d6bfe`.
+- **Mistral**: the pixel M from Simple Icons 16.33.0, filled with the five
+  colour rows of mistral.ai/brand: `#ffaf00`, `#ff8205`, `#fa500f`, `#e61400`,
+  `#c5001b`. Mistral asks that its mark is not recoloured, so it is never shown
+  in a single custom colour.
+
+In the roster under the headline, resting marks are flattened to one ink so
+they dim evenly. The active mark and any mark under the pointer always show
+their own colours.
+
+Each mark is a trademark of its owner. They appear here only to identify the
+providers Gyro supports, and imply no affiliation or endorsement.
