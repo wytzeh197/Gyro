@@ -15808,6 +15808,19 @@ button.gyro-settings-row em::after {
   background: var(--gyro-control-hover);
 }
 
+/* C8: the title menu groups the chat's own actions below its surfaces, with
+   Delete set apart the way the sidebar's chat menu marks it. */
+.gyro-chat-companion-menu > [role="separator"] {
+  background: var(--gyro-hairline-strong);
+  height: 1px;
+  margin: 4px 6px;
+}
+
+.gyro-chat-companion-menu button.is-danger,
+.gyro-chat-companion-menu button.is-danger > svg {
+  color: var(--gyro-danger);
+}
+
 .gyro-chat-surface-menu-anchor {
   display: inline-flex;
   position: relative;
@@ -23603,6 +23616,14 @@ button.gyro-settings-row em::after {
   top: 14px;
 }
 
+/* C9: in a thread the card floats over the conversation instead of reserving
+   a column, so opening it never moves the transcript or the composer. It stops
+   above the measured composer dock, which keeps Send reachable however long
+   the card grows; the card scrolls instead. */
+.gyro-chat-surface.is-thread > .gyro-chat-environment-popover {
+  max-height: calc(100% - 64px - var(--gyro-composer-dock-height, 160px));
+}
+
 .gyro-chat-environment-popover > header,
 .gyro-chat-environment-popover-sources > header,
 .gyro-chat-environment-popover-rows > button {
@@ -25778,13 +25799,7 @@ body,
   color: var(--gyro-text);
 }
 
-/* The Environment popover overlays an embedded chat. Desktop window width
-   must never reserve a second column inside a narrow workspace sidebar. */
-:is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-  --gyro-environment-popover-gutter: 0px;
-}
-
+/* An embedded chat's canvas shrinks with the workspace sidebar it lives in. */
 :is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
   .gyro-chat-surface.is-thread
   > .gyro-chat-thread-canvas {
@@ -27122,28 +27137,6 @@ body,
 /* The conversation header always separates its chrome from the transcript. */
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-border-soft);
-}
-
-/* A temporary Environment card reserves only the conversation canvas beneath
-   the header. This keeps the transcript and composer centered in the remaining
-   pane, while the top bar still spans the full window. */
-@media (min-width: 981px) {
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-    --gyro-environment-popover-gutter: 322px;
-  }
-
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-    > .gyro-chat-thread-canvas {
-    box-sizing: border-box;
-    padding-right: var(--gyro-environment-popover-gutter);
-  }
-
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-    > .gyro-chat-thread-canvas
-    > .gyro-chat-composer-dock {
-    right: var(--gyro-environment-popover-gutter);
-    width: auto;
-  }
 }
 
 .gyro-chat-environment-popover .gyro-environment-branch-menu {
@@ -31053,7 +31046,6 @@ body,
   > .gyro-chat-thread-canvas {
   grid-column: 1;
   grid-row: 3;
-  padding-right: 0;
 }
 
 .gyro-sidebar-ai-chat

@@ -183,10 +183,13 @@ export function useChatTranscriptScroll({
           dockBounds.bottom -
             (composer?.getBoundingClientRect().top ?? dockBounds.top),
         )}px`;
-        transcript.style.setProperty(
-          "--gyro-composer-dock-height",
-          `${Math.ceil(dockBounds.height)}px`,
-        );
+        const dockHeight = `${Math.ceil(dockBounds.height)}px`;
+        transcript.style.setProperty("--gyro-composer-dock-height", dockHeight);
+        // The Environment card floats beside the transcript rather than in
+        // it, and uses the same measurement to stop above the composer.
+        transcript
+          .closest<HTMLElement>(".gyro-chat-surface")
+          ?.style.setProperty("--gyro-composer-dock-height", dockHeight);
         dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
       }
       pinToBottom();

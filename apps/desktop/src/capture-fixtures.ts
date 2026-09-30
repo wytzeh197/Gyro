@@ -1034,6 +1034,16 @@ const invoke: Invoke = (command, args) => {
     captureEventsBySessionId.delete(sessionId);
     return hadSession;
   }
+  if (command === "rename_session") {
+    const sessionId = String(args?.sessionId ?? "");
+    const current = sessions.find((item) => item.id === sessionId);
+    if (!current) {
+      throw new Error("capture session not found");
+    }
+    const renamed = { ...current, title: String(args?.title ?? current.title) };
+    sessions = sessions.map((item) => (item.id === sessionId ? renamed : item));
+    return renamed;
+  }
   if (command === "get_session_usage_totals") {
     return emptyUsageTotals;
   }

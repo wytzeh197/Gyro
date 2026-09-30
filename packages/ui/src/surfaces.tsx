@@ -199,6 +199,13 @@ import {
 } from "./chat-commentary";
 import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
+  ChatSessionActionsContext,
+  ChatSessionActionsProvider,
+  ChatTitleActionItems,
+  chatTitleActions,
+  type ChatTitleActions,
+} from "./chat-title-actions";
+import {
   askAboutFilePrompt,
   changeSummaryLine,
   diffPreviewLines,
@@ -2626,7 +2633,16 @@ export function AppChrome({
             data-tauri-drag-region
           />
         ) : null}
-        {children}
+        <ChatSessionActionsProvider
+          onDeleteSession={onDeleteSession}
+          onPinSession={onPinSession}
+          onRenameSession={onRenameSession}
+          pinnedSessionIds={pinnedSessionIds}
+          sendingSessionIds={sendingSessionIds}
+          sessions={sessions}
+        >
+          {children}
+        </ChatSessionActionsProvider>
       </main>
       <ToastStack
         notifications={notifications}
@@ -8558,6 +8574,10 @@ export function ChatSurface({
   onTogglePlanPanel,
   onPlanEditorRequestHandled,
 }: ChatSurfaceProps) {
+  const titleActions = chatTitleActions(
+    useContext(ChatSessionActionsContext),
+    paneKey,
+  );
   const [localDraft, setLocalDraft] = useState(draft);
   const [goalDraft, setGoalDraft] = useState<string>();
   const [goalSaveNotice, setGoalSaveNotice] = useState("");
@@ -9554,6 +9574,7 @@ export function ChatSurface({
           />
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           <ChatSurfaceControls
+            chatActions={titleActions}
             isDockOpen={isCompanionPanel}
             isPlanOpen={activeRailPanel === "plan"}
             isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
@@ -9564,8 +9585,9 @@ export function ChatSurface({
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={false}
             showEnvironmentInOverflow={false}
-            showOverflow={!isCompanionPanel}
+            showOverflow={!isCompanionPanel || titleActions !== undefined}
             showPanel={false}
+            showPlanInOverflow={!isCompanionPanel}
             showToolPanelInOverflow={false}
           />
           {workspaceMode === "worktree" ? (
@@ -9975,8 +9997,10 @@ export type ModelFocusPeekContent = {
 /**
  * The thread header keeps three compact surface controls: Environment, the
  * bottom drawer, and the companion. The companion owns its own tool launcher.
+ * The title's "More" menu adds the chat's own actions under its surfaces.
  */
 function ChatSurfaceControls({
+  chatActions,
   isDockOpen,
   isEnvironmentOpen,
   isPlanOpen,
@@ -9993,9 +10017,11 @@ function ChatSurfaceControls({
   showEnvironmentInOverflow = true,
   showOverflow = true,
   showPanel = true,
+  showPlanInOverflow = true,
   showToolPanel = false,
   showToolPanelInOverflow = true,
 }: {
+  chatActions?: ChatTitleActions;
   isDockOpen: boolean;
   isEnvironmentOpen?: boolean;
   isPlanOpen: boolean;
@@ -10012,10 +10038,12 @@ function ChatSurfaceControls({
   showEnvironmentInOverflow?: boolean;
   showOverflow?: boolean;
   showPanel?: boolean;
+  showPlanInOverflow?: boolean;
   showToolPanel?: boolean;
   showToolPanelInOverflow?: boolean;
 }) {
   const [openMenu, setOpenMenu] = useState<"overflow">();
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     openMenu !== undefined,
     () => setOpenMenu(undefined),
@@ -10025,6 +10053,15 @@ function ChatSurfaceControls({
   const drawerHasModelActivity = Boolean(
     modelFocus?.paneTab && !isToolPanelOpen,
   );
+  const showEnvironmentItem = Boolean(
+    showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail,
+  );
+  const hasSurfaceItems =
+    showPlanInOverflow || showToolPanelInOverflow || showEnvironmentItem;
+  const runMenuAction = (action?: () => void) => {
+    setOpenMenu(undefined);
+    action?.();
+  };
 
   return (
     <div
@@ -10085,7 +10122,7 @@ function ChatSurfaceControls({
           <button
             aria-expanded={openMenu === "overflow"}
             aria-haspopup="menu"
-            aria-label="More chat surfaces"
+            aria-label="More chat actions"
             className={[
               "gyro-icon-button gyro-chat-surface-button",
               drawerHasModelActivity ? "has-model-activity" : "",
@@ -10111,19 +10148,18 @@ function ChatSurfaceControls({
           </button>
           {openMenu === "overflow" ? (
             <div className="gyro-chat-companion-menu is-header" role="menu">
-              <button
-                aria-pressed={isPlanOpen}
-                onClick={() => {
-                  setOpenMenu(undefined);
-                  onTogglePlanPanel?.();
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <ListChecks size={14} />
-                <span>Plan checklist</span>
-                {planItemCount > 0 ? <small>{planItemCount}</small> : null}
-              </button>
+              {showPlanInOverflow ? (
+                <button
+                  aria-pressed={isPlanOpen}
+                  onClick={() => runMenuAction(onTogglePlanPanel)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <ListChecks size={14} />
+                  <span>Plan checklist</span>
+                  {planItemCount > 0 ? <small>{planItemCount}</small> : null}
+                </button>
+              ) : null}
               {showToolPanelInOverflow ? (
                 <button
                   aria-pressed={isToolPanelOpen}
@@ -10141,14 +10177,9 @@ function ChatSurfaceControls({
                   ) : null}
                 </button>
               ) : null}
-              {showEnvironmentInOverflow &&
-              !isDockOpen &&
-              onToggleEnvironmentRail ? (
+              {showEnvironmentItem ? (
                 <button
-                  onClick={() => {
-                    setOpenMenu(undefined);
-                    onToggleEnvironmentRail();
-                  }}
+                  onClick={() => runMenuAction(onToggleEnvironmentRail)}
                   role="menuitem"
                   type="button"
                 >
@@ -10156,10 +10187,32 @@ function ChatSurfaceControls({
                   <span>Environment</span>
                 </button>
               ) : null}
+              {chatActions ? (
+                <ChatTitleActionItems
+                  actions={chatActions}
+                  hasItemsAbove={hasSurfaceItems}
+                  onClose={() => setOpenMenu(undefined)}
+                  onRequestDelete={() => setIsDeleteConfirmOpen(true)}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
       ) : null}
+      {isDeleteConfirmOpen && chatActions?.onDelete
+        ? createPortal(
+            <SessionDeleteConfirmOverlay
+              chatLabel={chatActions.label}
+              isWorking={chatActions.isWorking}
+              onCancel={() => setIsDeleteConfirmOpen(false)}
+              onDelete={() => {
+                setIsDeleteConfirmOpen(false);
+                chatActions.onDelete?.();
+              }}
+            />,
+            document.body,
+          )
+        : null}
       {showClose && onCloseChat ? (
         <button
           aria-label="Close chat"

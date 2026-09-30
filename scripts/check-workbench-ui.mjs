@@ -5332,13 +5332,30 @@ expect(
 
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
-    styleSource.includes("--gyro-environment-popover-gutter: 322px") &&
+    !styleSource.includes("--gyro-environment-popover-gutter") &&
     styleSource.includes(
-      "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
+      ".gyro-chat-surface.is-thread > .gyro-chat-environment-popover {\n  max-height: calc(100% - 64px - var(--gyro-composer-dock-height, 160px));",
     ) &&
-    styleSource.includes("right: var(--gyro-environment-popover-gutter)") &&
-    styleSource.includes("width: auto;"),
-  "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
+    surfaceSource.includes(
+      '.closest<HTMLElement>(".gyro-chat-surface")\n          ?.style.setProperty("--gyro-composer-dock-height", dockHeight);',
+    ),
+  "The temporary Environment popover should float over the conversation without moving the transcript or composer, and stop above the measured composer dock so Send stays reachable.",
+);
+
+const chatTitleActionsSource = readRepoFile(
+  "packages/ui/src/chat-title-actions.tsx",
+);
+expect(
+  surfaceSource.includes("onDeleteSession={onDeleteSession}\n          onPinSession={onPinSession}\n          onRenameSession={onRenameSession}") &&
+    surfaceSource.includes("chatActions={titleActions}") &&
+    surfaceSource.includes("<ChatTitleActionItems") &&
+    chatTitleActionsSource.includes("<span>Rename chat</span>") &&
+    chatTitleActionsSource.includes('actions.isPinned ? "Unpin chat" : "Pin chat"') &&
+    chatTitleActionsSource.includes("<span>Delete chat</span>") &&
+    /isDeleteConfirmOpen && chatActions\?\.onDelete[\s\S]{0,120}<SessionDeleteConfirmOverlay/.test(
+      surfaceSource,
+    ),
+  "The chat title menu should offer Rename, Pin and Delete through the sidebar's own callbacks, and confirm Delete first.",
 );
 
 expect(
