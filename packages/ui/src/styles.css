@@ -5643,113 +5643,6 @@ body {
   margin-top: 16px;
 }
 
-.gyro-workspace-keybindings {
-  margin-top: 24px;
-}
-
-.gyro-workspace-keybindings > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 12px;
-}
-
-.gyro-workspace-keybindings h2 {
-  margin: 0;
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-lg);
-}
-
-.gyro-workspace-keybindings header p {
-  margin: 4px 0 0;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-base);
-}
-
-.gyro-workspace-keybindings header kbd {
-  min-width: 28px;
-  padding: 4px 8px;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-  background: var(--gyro-control-bg);
-  text-align: center;
-}
-
-.gyro-workspace-keybindings > div {
-  overflow: hidden;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-lg);
-  background: color-mix(in srgb, var(--gyro-surface-raised) 90%, transparent);
-}
-
-.gyro-workspace-keybindings label {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 28px;
-  gap: 12px;
-  align-items: center;
-  min-height: 60px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--gyro-border);
-}
-
-.gyro-workspace-keybindings label:last-child {
-  border-bottom: 0;
-}
-
-.gyro-workspace-keybindings label > span {
-  display: grid;
-  gap: 3px;
-}
-
-.gyro-workspace-keybindings label strong {
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-base);
-}
-
-.gyro-workspace-keybindings label small {
-  overflow: hidden;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-workspace-keybindings input {
-  text-align: center;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--gyro-type-md);
-  height: var(--gyro-control-height);
-  color: var(--gyro-text);
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-sm);
-}
-
-.gyro-workspace-keybindings input.is-conflict {
-  border-color: var(--gyro-danger);
-}
-
-.gyro-workspace-keybindings label > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 25px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--gyro-radius-xs);
-  color: var(--gyro-muted);
-  background: transparent;
-}
-
-.gyro-workspace-keybindings label > button:hover {
-  color: var(--gyro-text);
-  background: var(--gyro-surface-soft);
-}
-
 .gyro-workspace-contributions {
   margin-top: 34px;
 }
@@ -5847,10 +5740,6 @@ body {
   .gyro-workspace-settings-scopes button {
     min-width: 0;
     flex: 1;
-  }
-
-  .gyro-workspace-keybindings label {
-    grid-template-columns: minmax(0, 1fr) 120px 25px;
   }
 }
 
@@ -13702,14 +13591,129 @@ button.gyro-settings-row em::after {
     transition: none;
   }
 }
-.gyro-settings-key {
-  background: var(--gyro-surface-soft);
-  border: 0.5px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  font-family: var(--gyro-mono);
+/* C16: Settings > Keyboard. Built-in keys and editable shortcuts share one
+   key chip, so every combination on the page reads in the same glyphs. */
+.gyro-keyboard-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.gyro-keyboard-toolbar > .gyro-input.gyro-keyboard-filter {
+  appearance: none;
+  flex: 0 1 calc(280px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+}
+
+.gyro-keyboard-toolbar > p,
+.gyro-keyboard-builtin-head > p {
+  color: var(--gyro-muted);
   font-size: var(--gyro-type-sm);
-  padding: 5px 8px;
+  margin: 0;
+}
+
+.gyro-keyboard-builtin-head {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.gyro-settings-key,
+.gyro-keybinding-input {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-hairline-strong);
+  border-radius: var(--gyro-radius-sm);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-regular);
+  letter-spacing: 0.06em;
+  min-width: calc(96px * var(--gyro-ui-scale, 1));
+  text-align: center;
+}
+
+.gyro-settings-key {
+  display: inline-block;
+  line-height: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0 8px;
+}
+
+.gyro-keybinding-field {
+  display: grid;
+  position: relative;
+}
+
+.gyro-keybinding-input {
+  caret-color: transparent;
+  cursor: pointer;
+  height: calc(26px * var(--gyro-ui-scale, 1));
+  padding: 0 8px;
+  width: calc(96px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-keybinding-input::placeholder {
+  color: var(--gyro-faint);
+  letter-spacing: normal;
+}
+
+/* An unset shortcut stays quiet -- no chip, only a dash -- until the row is
+   hovered or the field is focused, when it shows as a field to press keys in. */
+.gyro-keybinding-input:placeholder-shown {
+  background: transparent;
+  border-color: transparent;
+}
+
+.gyro-settings-row:not(:hover)
+  .gyro-keybinding-input:placeholder-shown:not(:focus)::placeholder {
+  color: transparent;
+}
+
+.gyro-settings-row:not(:hover)
+  .gyro-keybinding-field:has(> :placeholder-shown:not(:focus))::after {
+  color: var(--gyro-faint);
+  content: "—";
+  content: "—" / "";
+  display: grid;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Focus and conflict borders match row hover's weight and come after it. */
+.gyro-settings-row:hover .gyro-keybinding-input,
+.gyro-settings-row .gyro-keybinding-input:focus {
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border-strong);
+}
+
+.gyro-settings-row .gyro-keybinding-input:focus {
+  border-color: var(--gyro-focus-ring);
+}
+
+.gyro-settings-row .gyro-keybinding-input[aria-invalid="true"] {
+  border-color: var(--gyro-danger);
+}
+
+.gyro-settings-row:has(.gyro-keybinding-input[aria-invalid="true"])
+  > div:first-child
+  > span {
+  color: var(--gyro-danger);
+}
+
+/* A key chip is narrow enough to stay beside its label in a small window,
+   where other settings rows stack their control underneath. */
+@media (max-width: 760px) {
+  .gyro-settings-row:has(.gyro-keybinding-field, .gyro-settings-key) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .gyro-settings-row:has(.gyro-keybinding-field, .gyro-settings-key)
+    > .gyro-settings-control-column {
+    justify-content: flex-end;
+  }
 }
 .gyro-copy-value {
   display: inline-flex;

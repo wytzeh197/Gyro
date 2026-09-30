@@ -36,6 +36,7 @@ import {
   normalizedGlobalSearchText,
 } from "../packages/ui/src/global-search.ts";
 import {
+  formatWorkspaceKeybinding,
   workspaceCommandForKeybinding,
   workspaceCommandRegistry,
   workspacePanelContributions,
@@ -583,6 +584,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/settings-controls.tsx"),
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
+  readRepoFile("packages/ui/src/keyboard-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
 ].join("\n");
@@ -2465,7 +2467,8 @@ expect(
       (contribution) =>
         contribution.id === "example.local-tools" && contribution.enabled,
     ) &&
-    surfaceSource.includes("Keyboard shortcuts") &&
+    surfaceSource.includes("export function WorkspaceKeyboardSettings(") &&
+    surfaceSource.includes("onKeybindingChange?.(command.id, binding);") &&
     surfaceSource.includes("Install from manifest") &&
     surfaceSource.includes("parsedLocalIdeContribution") &&
     surfaceSource.includes("Contributions stay disabled until you enable them"),
@@ -7897,6 +7900,63 @@ expect(
     appSource.includes("workspaceCommandForKeybinding(") &&
     appSource.includes("runCommandPaletteCommand(workspaceCommand.id)"),
   "Workspace command keybindings should resolve from the shared registry with exact platform modifiers.",
+);
+
+// Settings > Keyboard shows every combination -- editable or built in -- in
+// one notation: macOS glyphs in Apple's ⌃⌥⇧⌘ order, or Ctrl+Shift+Key
+// elsewhere. Rows sit under their command group without the "View:" prefix,
+// unset shortcuts read as a quiet dash, and a filter narrows rows by name.
+const keyboardSettingsSource = readRepoFile(
+  "packages/ui/src/keyboard-settings.tsx",
+);
+expect(
+  formatWorkspaceKeybinding({ key: "f", primary: true, shift: true }, "mac") ===
+    "⇧⌘F" &&
+    formatWorkspaceKeybinding(
+      { key: "`", control: true, shift: true },
+      "mac",
+    ) === "⌃⇧`" &&
+    formatWorkspaceKeybinding(
+      { key: "p", primary: true, alt: true, control: true, shift: true },
+      "mac",
+    ) === "⌃⌥⇧⌘P" &&
+    formatWorkspaceKeybinding({ key: "arrowup", primary: true }, "mac") ===
+      "⌘↑" &&
+    formatWorkspaceKeybinding(
+      { key: "f", primary: true, shift: true },
+      "other",
+    ) === "Ctrl+Shift+F" &&
+    formatWorkspaceKeybinding({ key: ",", primary: true }, "other") ===
+      "Ctrl+," &&
+    workspaceCommandRegistry
+      .filter((command) => command.shortcut && command.keybinding)
+      .every(
+        (command) =>
+          formatWorkspaceKeybinding(command.keybinding, "mac") ===
+          command.shortcut.mac,
+      ) &&
+    keyboardSettingsSource.includes(
+      "formatWorkspaceKeybinding(row.binding, platform)",
+    ) &&
+    keyboardSettingsSource.includes(
+      "? formatWorkspaceKeybinding(binding, platform)",
+    ) &&
+    !/Cmd\+|Ctrl\+/.test(
+      keyboardSettingsSource.slice(
+        keyboardSettingsSource.indexOf("const builtInShortcutGroups"),
+        keyboardSettingsSource.indexOf("function keybindingPlatform"),
+      ),
+    ) &&
+    keyboardSettingsSource.includes('command.label.indexOf(": ")') &&
+    keyboardSettingsSource.includes('placeholder="Filter shortcuts"') &&
+    keyboardSettingsSource.includes(
+      'className="gyro-input gyro-keyboard-filter"',
+    ) &&
+    !keyboardSettingsSource.includes("Unassigned") &&
+    styleSource.includes('content: "—" / "";') &&
+    styleSource.includes(".gyro-settings-key,\n.gyro-keybinding-input {") &&
+    !styleSource.includes(".gyro-workspace-keybindings"),
+  "Settings > Keyboard should group shortcuts, filter them by name, show unset ones as a quiet dash, and print every combination in one glyph notation.",
 );
 
 expect(
