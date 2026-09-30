@@ -1121,10 +1121,13 @@ expect(
         rule.includes("overflow-wrap: anywhere") &&
         rule.includes("white-space: normal"),
     ) &&
-    cssRules(
+    cssRules(styleSource, ".gyro-scm-branch-menu").some((rule) =>
+      rule.includes("background: var(--gyro-surface-raised"),
+    ) &&
+    !cssRules(
       styleSource,
       ':root[data-theme="light"] .gyro-scm-branch-menu',
-    ).some((rule) => rule.includes("background: #fff")),
+    ).some((rule) => rule.includes("background:")),
   "The branch picker menu should portal above the commit form so long names are not clipped.",
 );
 // Confirmations and form dialogs share the one Dialog shell (primitives.tsx).
