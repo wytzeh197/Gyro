@@ -1,4 +1,11 @@
-import { Check, FileText, Folder, ShieldCheck, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  FileText,
+  Folder,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useId, type ReactNode } from "react";
 
 type ApprovalStatus =
@@ -69,7 +76,10 @@ export function InlineApprovalCard({
                 </span>
                 {file.diff ? (
                   <details>
-                    <summary>Review changes</summary>
+                    <summary>
+                      <ChevronRight size={14} aria-hidden="true" />
+                      Review changes
+                    </summary>
                     <pre>{file.diff}</pre>
                   </details>
                 ) : null}

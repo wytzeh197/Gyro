@@ -4809,12 +4809,15 @@ expect(
     // Completed chats lead with the final answer; the work stays expandable.
     // Live work and failures remain visible.
     runViewSource.includes("showThinkingPulse") &&
+    // A pending approval holds the finished run open and withholds Continue.
     runViewSource.includes(
-      "const [isCollapsed, setIsCollapsed] = useState(isDone)",
+      "const [isCollapsed, setIsCollapsed] = useState(isDone && !keepOpen)",
     ) &&
     !runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes('const isDone = model.phase.name === "done"') &&
-    runViewSource.includes("setIsCollapsed(isDone)") &&
+    runViewSource.includes("setIsCollapsed(isDone && !keepOpen)") &&
+    surfaceSource.includes("keepOpen={hasPendingApproval}") &&
+    surfaceSource.includes("!hasPendingApproval &&") &&
     runViewSource.includes("const showSteps = isLive || !isCollapsed") &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&

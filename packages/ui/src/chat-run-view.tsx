@@ -129,6 +129,8 @@ export type ChatRunProps = {
    * phase view ("Reviewed workspace") for surfaces that want the coarser story.
    */
   layout?: "segments" | "groups";
+  /** Holds a finished run open, e.g. while an approval in it still waits. */
+  keepOpen?: boolean;
 };
 
 type WorkStep = Extract<RunStep, { kind: "work" }>;
@@ -153,15 +155,16 @@ export function ChatRun({
   toolBudgetNoticeTitle,
   onContinueAfterToolBudget,
   layout = "segments",
+  keepOpen = false,
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
   // A finished turn leads with its final response. Work remains available
   // behind the header; live work and failures stay open for visibility.
   const isDone = model.phase.name === "done";
-  const [isCollapsed, setIsCollapsed] = useState(isDone);
+  const [isCollapsed, setIsCollapsed] = useState(isDone && !keepOpen);
   useEffect(() => {
-    setIsCollapsed(isDone);
-  }, [isLive, isDone]);
+    setIsCollapsed(isDone && !keepOpen);
+  }, [isLive, isDone, keepOpen]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
   const isSegments = layout === "segments";
@@ -463,7 +466,7 @@ function RunWorkGroup({
 }
 
 /**
- * A finished stretch of work as one line — "Ran 3 commands, Read 1 file ›" —
+ * A finished stretch of work as one line — "Ran 3 commands, read 1 file ›" —
  * that opens onto the exact calls behind it.
  */
 function RunSegmentSummary({
@@ -620,7 +623,7 @@ function RunCallRow({
             <em className="is-added">+{lineStats.additions}</em>
           ) : null}
           {lineStats.deletions > 0 ? (
-            <em className="is-removed">-{lineStats.deletions}</em>
+            <em className="is-removed">−{lineStats.deletions}</em>
           ) : null}
         </span>
       ) : null}
@@ -779,7 +782,7 @@ function RunRow({
               <em className="is-added">+{lineStats.additions}</em>
             ) : null}
             {lineStats.deletions > 0 ? (
-              <em className="is-removed">-{lineStats.deletions}</em>
+              <em className="is-removed">−{lineStats.deletions}</em>
             ) : null}
           </span>
         ) : null}

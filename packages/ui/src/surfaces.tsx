@@ -27389,9 +27389,14 @@ function ChatTurn({
   const shouldShowFinalResponse = Boolean(responseEvent);
   // The turn produced something the user might resume from — a text answer, or
   // work that stopped before an answer (empty void + tools).
+  // A decision still waiting keeps its card in view and the turn unfinished.
+  const hasPendingApproval = runModel.steps.some(
+    (step) => step.kind === "ask" && isPendingApprovalEvent(step.event),
+  );
   const canContinue =
     !isRunning &&
     !isCompactionResult &&
+    !hasPendingApproval &&
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0) &&
     runModel.phase.name === "done";
@@ -27438,6 +27443,7 @@ function ChatTurn({
       <div className="gyro-chat-run">
         <ChatRun
           aggregateFileStats={aggregateFileStats}
+          keepOpen={hasPendingApproval}
           headerActions={
             isRunning && turn.turnTokens ? (
               <span
@@ -28918,6 +28924,14 @@ function mutationApprovalFromEvent(
         : "pending",
     error: stringFromEventPayload(payload, "error"),
   };
+}
+
+/** Capability approvals only wait inside a live invoke, so they never count. */
+function isPendingApprovalEvent(event: SessionEvent) {
+  const provider = providerApprovalFromEvent(event);
+  return provider
+    ? provider.status === "pending" && provider.approvalType !== "capability"
+    : mutationApprovalFromEvent(event)?.status === "pending";
 }
 
 function providerApprovalFromEvent(
