@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/gyro-logo.png" />
-    <meta name="theme-color" content="#181818" />
+    <meta name="theme-color" content="#141517" />
     <title>Gyro</title>
     <style>
       /* Quiet themed canvas only — no boot gate. First paint is the early
          chat shell from main.tsx. */
       html,
       body {
-        background: #181818;
+        background: #141517;
         color: #f0f0f0;
         height: 100%;
         margin: 0;
@@ -21,7 +21,7 @@
       }
       html[data-theme="light"],
       html[data-theme="light"] body {
-        background: #f7f9fc;
+        background: #f9f9f8;
         color: #161b23;
       }
     </style>
@@ -32,7 +32,7 @@
         document.documentElement.dataset.theme = theme;
         document
           .querySelector('meta[name="theme-color"]')
-          ?.setAttribute("content", theme === "light" ? "#f7f9fc" : "#181818");
+          ?.setAttribute("content", theme === "light" ? "#f9f9f8" : "#141517");
       } catch (_) {}
     </script>
   </head>

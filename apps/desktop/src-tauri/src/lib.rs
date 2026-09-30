@@ -151,6 +151,7 @@ use provider_identity::provider_model_identity;
 mod source_control_review;
 mod system_access;
 mod terminal_capability;
+mod terminal_process;
 mod terminal_wait;
 mod workspace_capability_list;
 mod workspace_capability_read;
@@ -179,6 +180,7 @@ const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
 const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+const MAX_PROVIDER_STDOUT_FRAME_BYTES: usize = 48 * 1024 * 1024;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 10;
@@ -202,6 +204,9 @@ const MAX_BROWSER_PREVIEW_CAPTURES: usize = 20;
 const MAX_CONCURRENT_BROWSER_PREVIEWS: usize = 2;
 const MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE: usize = 32;
 const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Program output a DAP request keeps while it waits for its response. Events
+/// never count toward MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE; time bounds the rest.
+const MAX_DAP_OUTPUT_EVENT_BYTES: usize = 4 * 1024 * 1024;
 // Codex app-server can legitimately return a multi-megabyte JSONL frame (for
 // example, a completed item with rich tool output). Keep this aligned with the
 // bounded queue budget: the aggregate protocol budget below still bounds a
@@ -1414,7 +1419,7 @@ struct DebugSessionResult {
 
 #[derive(Clone, Default)]
 struct TerminalProcessManager {
-    processes: Arc<Mutex<HashMap<String, TerminalProcess>>>,
+    processes: Arc<Mutex<HashMap<String, terminal_process::TerminalPane>>>,
 }
 
 #[derive(Clone, Default)]
@@ -1429,6 +1434,8 @@ struct DebugAdapterProcess {
     next_sequence: u64,
     name: String,
     adapter: String,
+    /// A launched debuggee is ours to terminate on stop; an attached one is not.
+    launched: bool,
 }
 
 impl Drop for DebugAdapterProcess {
@@ -2161,190 +2168,6 @@ struct DiagnosticsSessionSummary {
 struct DiagnosticsExportResult {
     path: String,
     bundle: DiagnosticsExportBundle,
-}
-
-struct TerminalProcess {
-    request: TerminalPaneRequest,
-    working_directory: Option<PathBuf>,
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
-    child: Box<dyn portable_pty::Child + Send>,
-    output: Arc<Mutex<TerminalOutputBuffer>>,
-    status: String,
-    exit_code: Option<i32>,
-    cols: u16,
-    rows: u16,
-    terminated: bool,
-}
-
-#[derive(Default)]
-struct TerminalOutputBuffer {
-    bytes: VecDeque<u8>,
-    revision: u64,
-    reader_finished: bool,
-}
-
-impl Drop for TerminalProcess {
-    fn drop(&mut self) {
-        terminate_terminal_process(self);
-    }
-}
-
-impl TerminalProcessManager {
-    fn create(&self, request: TerminalPaneRequest) -> anyhow::Result<TerminalPaneSnapshot> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        if let Some(mut existing) = processes.remove(&request.pane_id) {
-            terminate_terminal_process(&mut existing);
-        }
-        if processes.len() >= MAX_TERMINAL_PROCESSES {
-            anyhow::bail!("terminal process limit reached; close a terminal pane first");
-        }
-        let mut process = spawn_terminal_process(request)?;
-        let snapshot = snapshot_terminal_process(&mut process, None);
-        processes.insert(process.request.pane_id.clone(), process);
-        Ok(snapshot)
-    }
-
-    fn write(&self, pane_id: &str, input: &str) -> anyhow::Result<TerminalPaneSnapshot> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        let process = processes
-            .get_mut(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        if process.status == "done" || process.status == "failed" {
-            anyhow::bail!("terminal pane stdin is closed");
-        }
-        process.writer.write_all(input.as_bytes())?;
-        process.writer.flush()?;
-        Ok(snapshot_terminal_process(process, None))
-    }
-
-    fn read(
-        &self,
-        pane_id: &str,
-        known_output_revision: Option<u64>,
-    ) -> anyhow::Result<TerminalPaneSnapshot> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        let process = processes
-            .get_mut(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        Ok(snapshot_terminal_process(process, known_output_revision))
-    }
-
-    fn resize(&self, pane_id: &str, cols: u16, rows: u16) -> anyhow::Result<TerminalPaneSnapshot> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        let process = processes
-            .get_mut(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        process.cols = cols;
-        process.rows = rows;
-        process.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-        Ok(snapshot_terminal_process(process, None))
-    }
-
-    fn has_foreground_job(&self, pane_id: &str) -> anyhow::Result<bool> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        let process = processes
-            .get_mut(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        let snapshot = snapshot_terminal_process(process, None);
-        if snapshot.status != "running" {
-            return Ok(false);
-        }
-        Ok(snapshot.has_foreground_job.unwrap_or(true))
-    }
-
-    fn stop(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        let process = processes
-            .get_mut(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        terminate_terminal_process(process);
-        process.status = "failed".into();
-        Ok(snapshot_terminal_process(process, None))
-    }
-
-    /// Closes a pane, returning the governed session it held so the caller can
-    /// retire its approval authority.
-    fn close(&self, pane_id: &str) -> anyhow::Result<Option<String>> {
-        let mut process = {
-            let mut processes = self
-                .processes
-                .lock()
-                .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-            processes
-                .remove(pane_id)
-                .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?
-        };
-        let governed_session = process
-            .request
-            .governance
-            .as_ref()
-            .map(|governance| governance.session_id.clone());
-        terminate_terminal_process(&mut process);
-        drop(process);
-        Ok(governed_session)
-    }
-
-    /// The governed session a live pane currently holds, if any.
-    fn governed_session(&self, pane_id: &str) -> Option<String> {
-        self.processes
-            .lock()
-            .ok()?
-            .get(pane_id)?
-            .request
-            .governance
-            .as_ref()
-            .map(|governance| governance.session_id.clone())
-    }
-
-    fn restart(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
-        let request = {
-            let mut processes = self
-                .processes
-                .lock()
-                .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-            let mut process = processes
-                .remove(pane_id)
-                .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-            terminate_terminal_process(&mut process);
-            process.request.clone()
-        };
-        self.create(request)
-    }
-
-    fn restore(&self) -> anyhow::Result<Vec<TerminalPaneSnapshot>> {
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
-        Ok(processes
-            .values_mut()
-            .map(|process| snapshot_terminal_process(process, None))
-            .collect())
-    }
 }
 
 #[tauri::command]
@@ -4902,6 +4725,7 @@ fn run_provider_chat_blocking(
         #[cfg(test)]
         message: control_markers.message.clone(),
     };
+    let questions = control_markers.questions;
     let artifact_extraction = ChatArtifactExtraction {
         items: control_markers.artifacts,
         message: control_markers.message,
@@ -4991,6 +4815,9 @@ fn run_provider_chat_blocking(
                 "artifacts".into(),
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
+        }
+        if let Some(questions) = questions {
+            object.insert("questions".into(), questions);
         }
         object.insert(
             "turnTokens".into(),
@@ -6036,6 +5863,9 @@ fn provider_context_message_with_capabilities_for_turn(
             );
         }
     }
+    // Any mode can ask. Gyro shows these as a one-at-a-time question card and
+    // sends every answer back in a single message.
+    context.push("When you need a decision only the user can make, one that would change what you do and that reading the project cannot settle, ask before acting: write one short sentence, then one hidden line in this exact form: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Which release should this target?\",\"options\":[{\"label\":\"v0.1.0 stable\",\"detail\":\"First signed public release\",\"recommended\":true},{\"label\":\"Next Alpha\",\"detail\":\"Incremental release on the Alpha channel\"}]}]}. Ask at most 3 questions with 2 to 4 options each, mark at most one option per question as recommended, keep the JSON on one line, do not repeat the questions as prose, and end the turn to wait for the answers. When nothing needs the user, keep working without asking.".into());
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -7309,21 +7139,26 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
             let name = entry.file_name().to_string_lossy();
             name != ".git"
                 && (max_depth == 1
-                    || !matches!(
-                        name.as_ref(),
-                        ".next" | "node_modules" | "target" | "dist" | "build"
-                    ))
+                    || !(is_generated_workspace_dir(&name)
+                        || matches!(name.as_ref(), "target" | "dist" | "build")))
         })
     {
-        let entry = entry.map_err(to_string)?;
-        let path = entry.path().strip_prefix(root).map_err(to_string)?;
+        // One unreadable folder, or one removed mid-build, leaves a gap in
+        // the tree instead of failing the whole listing.
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(path) = entry.path().strip_prefix(root) else {
+            continue;
+        };
         let kind = if entry.file_type().is_dir() {
-            let metadata = entry.metadata().map_err(to_string)?;
-            directories.push(WorkspaceDirectoryStamp {
-                path: entry.path().to_path_buf(),
-                modified: metadata.modified().ok(),
-                len: metadata.len(),
-            });
+            if let Ok(metadata) = entry.metadata() {
+                directories.push(WorkspaceDirectoryStamp {
+                    path: entry.path().to_path_buf(),
+                    modified: metadata.modified().ok(),
+                    len: metadata.len(),
+                });
+            }
             "directory".into()
         } else {
             "file".into()
@@ -7384,6 +7219,13 @@ impl WorkspaceWatchManager {
         mut snapshot: WorkspaceTreeSnapshot,
     ) -> Result<WorkspaceTreeSnapshot, String> {
         snapshot.generation = self.next_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        // A quiet, watched workspace keeps its old scan time; evicting it
+        // would silently drop its watcher while the UI waits for events.
+        let watched = self
+            .watchers
+            .lock()
+            .map(|watchers| watchers.keys().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
         let mut snapshots = self
             .snapshots
             .lock()
@@ -7392,7 +7234,7 @@ impl WorkspaceWatchManager {
             if !snapshots.contains_key(&root) && snapshots.len() >= MAX_WORKSPACE_WATCH_CACHES {
                 snapshots
                     .iter()
-                    .min_by_key(|(_, cached)| cached.scanned_at)
+                    .min_by_key(|(path, cached)| (watched.contains(*path), cached.scanned_at))
                     .map(|(path, _)| path.clone())
             } else {
                 None
@@ -7498,6 +7340,7 @@ impl WorkspaceWatchManager {
             return;
         }
         let manager = self.clone();
+        let mut superseded_rounds = 0;
         std::thread::spawn(move || loop {
             std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
             let serial = manager
@@ -7515,9 +7358,13 @@ impl WorkspaceWatchManager {
                 .lock()
                 .map(|rescan_state| rescan_state.serial(&root) != Some(serial))
                 .unwrap_or(true);
-            if superseded {
+            // Constant churn (a home-folder workspace) must still publish
+            // now and then rather than rescanning forever without emitting.
+            if superseded && superseded_rounds < MAX_SUPERSEDED_WORKSPACE_RESCANS {
+                superseded_rounds += 1;
                 continue;
             }
+            superseded_rounds = 0;
             if let Ok(snapshot) =
                 scanned.and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
             {
@@ -7543,6 +7390,18 @@ impl WorkspaceWatchManager {
     }
 }
 
+const MAX_SUPERSEDED_WORKSPACE_RESCANS: u32 = 8;
+
+/// Folder names that only ever hold installed dependencies or tool caches.
+fn is_generated_workspace_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".next" | "node_modules" | "__pycache__" | ".venv" | ".turbo" | ".nuxt" | ".svelte-kit"
+            | ".parcel-cache" | ".pytest_cache" | ".mypy_cache" | ".ruff_cache" | ".gradle"
+            | "DerivedData"
+    )
+}
+
 fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
     event.paths.is_empty()
         || event.paths.iter().any(|path| {
@@ -7555,6 +7414,12 @@ fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
             };
             let first = first.as_os_str().to_string_lossy();
             if first == ".git" {
+                return false;
+            }
+            // Dependency and tool caches churn at any depth (`pnpm install`,
+            // a test run); only their appearance at the top level counts.
+            let mut parents = relative.parent().into_iter().flat_map(Path::components);
+            if parents.any(|part| is_generated_workspace_dir(&part.as_os_str().to_string_lossy())) {
                 return false;
             }
             // Build output churns on every compile; rescanning and re-running
@@ -8422,16 +8287,25 @@ async fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
 
 fn git_diff_blocking(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    // A UI click never runs repository-configured diff or textconv drivers,
+    // and the path is held to the workspace like every other Git action.
+    let path = match request.path.as_deref() {
+        Some(path) => Some(assert_workspace_entry(&root, path).map_err(to_string)?),
+        None => None,
+    };
     let mut command = git_command();
-    command.arg("-C").arg(root).arg("diff");
+    command.arg("-C").arg(&root).arg("--literal-pathspecs").arg("diff");
+    command.args(["--no-ext-diff", "--no-textconv"]);
     if request.staged.unwrap_or(false) {
         command.arg("--cached");
     }
     command.arg("--");
-    if let Some(path) = request.path {
-        command.arg(path);
+    if let Some(path) = &path {
+        command.arg(path.strip_prefix(&root).map_err(to_string)?);
     }
-    run_command_output(command).map_err(to_string)
+    let cancel = CancellationToken::default();
+    run_command_output_with_limits(command, cancel, Duration::from_secs(120), None)
+        .map_err(to_string)
 }
 
 #[tauri::command]
@@ -8443,7 +8317,7 @@ async fn git_stage(request: GitStageRequest) -> Result<SourceControlStatus, Stri
 
 fn git_stage_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let path = assert_workspace_entry(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
     let mut command = git_command();
     command
@@ -8465,7 +8339,7 @@ async fn git_unstage(request: GitStageRequest) -> Result<SourceControlStatus, St
 
 fn git_unstage_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let path = assert_workspace_entry(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
     let mut command = git_command();
     command
@@ -8488,7 +8362,7 @@ async fn git_discard(request: GitStageRequest) -> Result<SourceControlStatus, St
 
 fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let path = assert_workspace_entry(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
     let mut status_command = git_command();
     status_command
@@ -8522,11 +8396,12 @@ fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
     }
 
     if is_untracked || is_added {
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(to_string)?;
-        } else if path.exists() {
-            std::fs::remove_file(&path).map_err(to_string)?;
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(&path),
+            Ok(_) => std::fs::remove_file(&path),
+            Err(_) => Ok(()),
         }
+        .map_err(to_string)?;
     }
     git_status_impl(&request.workspace_path).map_err(to_string)
 }
@@ -9136,6 +9011,7 @@ impl DebugAdapterManager {
             next_sequence: 2,
             name: request.name.clone(),
             adapter: request.adapter.clone(),
+            launched: false,
         };
         language_server::write_lsp_message(
             &mut process.stdin,
@@ -9237,6 +9113,9 @@ impl DebugAdapterManager {
                 "events": events,
             })));
         }
+        if command == "launch" || command == "attach" {
+            process.launched = command == "launch";
+        }
         let sequence = process.next_sequence;
         process.next_sequence += 1;
         language_server::write_lsp_message(
@@ -9271,13 +9150,14 @@ impl DebugAdapterManager {
             .lock()
             .map_err(|_| anyhow::anyhow!("debug adapter process lock poisoned"))?;
         let sequence = process.next_sequence;
+        let terminate_debuggee = process.launched;
         let _ = language_server::write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
                 "seq": sequence,
                 "type": "request",
                 "command": "disconnect",
-                "arguments": { "terminateDebuggee": false }
+                "arguments": { "terminateDebuggee": terminate_debuggee }
             }),
         );
         let _ = receive_dap_response(&mut process, sequence, Duration::from_secs(2));
@@ -9339,8 +9219,13 @@ fn receive_dap_response(
             return Ok((message, events));
         }
         handle_dap_adapter_request(process, &message)?;
-        if events.len() >= MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
-            anyhow::bail!("debug adapter produced too many events before its response");
+        // A launch can print far more output than a message cap allows before
+        // it responds. Output past the byte budget is dropped; other events stay.
+        if message.get("event").and_then(|value| value.as_str()) == Some("output")
+            && event_bytes.saturating_add(serde_json::to_vec(&message)?.len())
+                > MAX_DAP_OUTPUT_EVENT_BYTES
+        {
+            continue;
         }
         add_ide_protocol_message_bytes(&mut event_bytes, &message)?;
         events.push(message);
@@ -9683,6 +9568,11 @@ fn assert_workspace_path(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
     gyro_core::security::assert_path_inside_workspace(root, Path::new(path))
 }
 
+/// Lifecycle and Git actions act on the entry itself, never a symlink's target.
+fn assert_workspace_entry(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
+    gyro_core::security::assert_entry_inside_workspace(root, Path::new(path))
+}
+
 fn create_workspace_path_impl(
     request: &WorkspacePathCreateRequest,
 ) -> anyhow::Result<WorkspaceFileStat> {
@@ -9714,12 +9604,12 @@ fn rename_workspace_path_impl(
     request: &WorkspacePathRenameRequest,
 ) -> anyhow::Result<WorkspaceFileStat> {
     let root = workspace_root(&request.workspace_path)?;
-    let from = assert_workspace_path(&root, &request.from_path)?;
-    let to = assert_workspace_path(&root, &request.to_path)?;
-    if !from.exists() {
+    let from = assert_workspace_entry(&root, &request.from_path)?;
+    let to = assert_workspace_entry(&root, &request.to_path)?;
+    if std::fs::symlink_metadata(&from).is_err() {
         anyhow::bail!("workspace path does not exist");
     }
-    if to.exists() {
+    if std::fs::symlink_metadata(&to).is_ok() {
         anyhow::bail!("target workspace path already exists");
     }
     if let Some(parent) = to.parent() {
@@ -9734,11 +9624,15 @@ fn rename_workspace_path_impl(
 
 fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::Result<bool> {
     let root = workspace_root(&request.workspace_path)?;
-    let candidate = assert_workspace_path(&root, &request.path)?;
-    if !candidate.exists() {
+    let candidate = assert_workspace_entry(&root, &request.path)?;
+    let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
         anyhow::bail!("workspace path does not exist");
+    };
+    if metadata.is_symlink() {
+        // Removing a link never loses the content it points at.
+        std::fs::remove_file(candidate)?;
+        return Ok(true);
     }
-    let metadata = std::fs::metadata(&candidate)?;
     if metadata.is_file() {
         if let Some(expected_hash) = request.expected_hash.as_deref() {
             let (bytes, _) = read_bounded_regular_file(
@@ -9797,7 +9691,10 @@ fn run_workspace_rg_search(
     use_regex: bool,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let mut command = command_with_gui_path("rg");
+    // No file needs more than the whole result budget, so one busy file can
+    // no longer fill the output cap on its own.
     command.current_dir(root).arg("--json");
+    command.arg("--max-count").arg(max_results.to_string());
     if !use_regex {
         command.arg("--fixed-strings");
     }
@@ -9816,6 +9713,11 @@ fn run_workspace_rg_search(
         64 * 1024,
     ) {
         Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
+            Ok(parse_rg_output(&output.stdout, max_results))
+        }
+        // A common query can outgrow the output cap. The matches read so far
+        // are real results; parsing skips the one cut record at the end.
+        Ok(output) if output.termination == ExecutionTermination::OutputLimit => {
             Ok(parse_rg_output(&output.stdout, max_results))
         }
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
@@ -9860,10 +9762,8 @@ fn fallback_search_workspace(
         .into_iter()
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
-            !matches!(
-                name.as_ref(),
-                ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
-            )
+            !(is_generated_workspace_dir(&name)
+                || matches!(name.as_ref(), ".git" | "target" | "dist" | "build"))
         })
     {
         if started_at.elapsed() >= WORKSPACE_SEARCH_FALLBACK_TIMEOUT
@@ -9872,11 +9772,16 @@ fn fallback_search_workspace(
         {
             break;
         }
-        let entry = entry?;
+        // Unreadable entries are skipped; the fallback is best-effort.
+        let Ok(entry) = entry else {
+            continue;
+        };
         if !entry.file_type().is_file() {
             continue;
         }
-        let metadata = entry.metadata()?;
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
         if metadata.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES as u64 {
             continue;
         }
@@ -9885,11 +9790,13 @@ fn fallback_search_workspace(
         }
         scanned_files += 1;
         scanned_bytes = scanned_bytes.saturating_add(metadata.len());
-        let (bytes, _) = read_bounded_regular_file(
+        let Ok((bytes, _)) = read_bounded_regular_file(
             entry.path(),
             MAX_WORKSPACE_FILE_PREVIEW_BYTES,
             "workspace search file",
-        )?;
+        ) else {
+            continue;
+        };
         if bytes.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES {
             continue;
         }
@@ -10772,19 +10679,7 @@ async fn terminal_pane_working_directory(
 ) -> Result<String, String> {
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (pid, fallback) = {
-            let processes = manager
-                .processes
-                .lock()
-                .map_err(|_| "terminal process manager lock poisoned".to_string())?;
-            let process = processes
-                .get(&pane_id)
-                .ok_or_else(|| "terminal pane not found".to_string())?;
-            (
-                process.child.process_id(),
-                process.working_directory.clone(),
-            )
-        };
+        let (pid, fallback) = manager.process_directory(&pane_id).map_err(to_string)?;
         terminal_current_directory(pid, fallback)
             .map(|path| path.display().to_string())
             .map_err(to_string)
@@ -11895,17 +11790,22 @@ fn claude_oauth_access_token_at(raw: &str, now_ms: i64) -> Result<String, String
 fn claude_credentials_json() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE,
-                "-w",
-            ])
-            .output()
+        let mut command = Command::new("security");
+        command.args([
+            "find-generic-password",
+            "-s",
+            CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE,
+            "-w",
+        ]);
+        // Bounded: the usage poll holds its lock across this read, and an
+        // unanswered Keychain prompt must not wedge every later poll.
+        let timeout = Duration::from_secs(30);
+        let cancel = CancellationToken::default();
+        if let Ok(output) =
+            run_bounded_command_with_cancellation(&command, timeout, None, 64 * 1024, 4096, cancel)
         {
-            if output.status.success() {
-                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if matches!(output.termination, ExecutionTermination::Exited { code: Some(0) }) {
+                let raw = output.stdout.trim().to_string();
                 if !raw.is_empty() {
                     return Some(raw);
                 }
@@ -12342,23 +12242,52 @@ fn receive_codex_app_server_response(
     request_id: u64,
     deadline: Instant,
 ) -> Result<serde_json::Value, String> {
+    receive_codex_app_server_response_until(messages, request_id, deadline, || false)
+}
+
+/// Wait for one app-server response in short slices so a Stop pressed while
+/// Codex is still starting (MCP servers, a slow resume) ends the wait at once.
+fn receive_codex_app_server_response_until(
+    messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
+    request_id: u64,
+    deadline: Instant,
+    cancelled: impl Fn() -> bool,
+) -> Result<serde_json::Value, String> {
     loop {
+        if cancelled() {
+            return Err("Codex request was stopped".into());
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err("Codex usage request timed out".into());
         }
-        let message = messages
-            .recv_timeout(remaining)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => "Codex usage request timed out".to_string(),
-                mpsc::RecvTimeoutError::Disconnected => {
-                    "Codex usage service disconnected".to_string()
-                }
-            })??;
+        let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            Ok(message) => message?,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Codex usage service disconnected".to_string())
+            }
+        };
         if message.get("id").and_then(serde_json::Value::as_u64) == Some(request_id) {
             return Ok(message);
         }
     }
+}
+
+fn receive_codex_turn_response(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
+    request_id: u64,
+    deadline: Instant,
+) -> anyhow::Result<serde_json::Value> {
+    let cancelled = || provider_chat_cancelled(app, &request.session_id);
+    receive_codex_app_server_response_until(messages, request_id, deadline, cancelled).map_err(
+        |error| match provider_chat_cancelled(app, &request.session_id) {
+            true => anyhow::anyhow!("{}", provider_stop_message(app, &request.session_id)),
+            false => anyhow::Error::msg(error),
+        },
+    )
 }
 
 fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -12586,149 +12515,6 @@ fn session_workspace_mode_label(mode: &SessionWorkspaceMode) -> &'static str {
     }
 }
 
-fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<TerminalProcess> {
-    if request.command.trim().is_empty() {
-        anyhow::bail!("terminal command cannot be empty");
-    }
-
-    let cwd = resolve_terminal_cwd(&request)?;
-    let cols = request.cols.unwrap_or(120);
-    let rows = request.rows.unwrap_or(32);
-    let pty_system = native_pty_system();
-    let pair = pty_system.openpty(PtySize {
-        rows,
-        cols,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-    let command_path = terminal_command_path(&request.command);
-    let mut command = CommandBuilder::new(command_path.as_str());
-    command.args(request.args.iter().map(String::as_str));
-    if let Some(governance) = request.governance.as_ref() {
-        command.args(governance.args.iter().map(String::as_str));
-    }
-    if let Some(cwd) = cwd.as_ref() {
-        command.cwd(cwd);
-    }
-    configure_terminal_environment(&mut command);
-    if let Some(governance) = request.governance.as_ref() {
-        for (name, value) in &governance.env {
-            command.env(name, value);
-        }
-    }
-    if !command_path.contains('/') {
-        command.env("PATH", augmented_gui_path());
-    }
-
-    let child = pair.slave.spawn_command(command)?;
-    let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
-    let reader = pair.master.try_clone_reader()?;
-    let writer = pair.master.take_writer()?;
-    spawn_terminal_reader(reader, Arc::clone(&output));
-    drop(pair.slave);
-
-    Ok(TerminalProcess {
-        request,
-        working_directory: cwd,
-        master: pair.master,
-        writer,
-        child,
-        output,
-        status: "running".into(),
-        exit_code: None,
-        cols,
-        rows,
-        terminated: false,
-    })
-}
-
-fn terminate_terminal_process(process: &mut TerminalProcess) {
-    if process.terminated {
-        return;
-    }
-    #[cfg(unix)]
-    let process_groups = {
-        let shell_group = process.child.process_id().map(|pid| pid as i32);
-        let foreground_group = process.master.process_group_leader();
-        let mut groups = [foreground_group, shell_group]
-            .into_iter()
-            .flatten()
-            .filter(|group| *group > 1)
-            .collect::<Vec<_>>();
-        groups.sort_unstable();
-        groups.dedup();
-        for group in &groups {
-            // PTY jobs can outlive their shell. Signal both the current
-            // foreground job and the shell process group before reaping.
-            unsafe {
-                libc::kill(-*group, libc::SIGHUP);
-                libc::kill(-*group, libc::SIGTERM);
-            }
-        }
-        groups
-    };
-    let _ = process.child.kill();
-    #[cfg(unix)]
-    {
-        std::thread::sleep(Duration::from_millis(25));
-        for group in process_groups {
-            unsafe {
-                if libc::kill(-group, 0) == 0 {
-                    libc::kill(-group, libc::SIGKILL);
-                }
-            }
-        }
-    }
-    if let Ok(status) = process.child.wait() {
-        process.exit_code = Some(status.exit_code() as i32);
-        process.terminated = true;
-    }
-}
-
-fn configure_terminal_environment(command: &mut CommandBuilder) {
-    command.env_remove("NO_COLOR");
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
-    command.env("TERM_PROGRAM", "Gyro");
-    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    command.env("CLICOLOR", "1");
-    command.env("CLICOLOR_FORCE", "1");
-    command.env("FORCE_COLOR", "1");
-}
-
-fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<PathBuf>> {
-    if request.working_directory.as_deref() == Some("Home") {
-        return Ok(Some(user_home_directory()?));
-    }
-    let workspace = request
-        .workspace_path
-        .as_deref()
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
-        .map(|path| path.canonicalize())
-        .transpose()?;
-    let Some(mut workspace) = workspace else {
-        return Ok(Some(user_home_directory()?));
-    };
-    // A folder picker or split explicitly selected this path, including worktrees.
-    if request.working_directory.as_deref() == Some("Exact workspace") {
-        return Ok(Some(workspace));
-    }
-    if request.workspace_mode.as_deref() != Some("worktree") {
-        workspace = terminal_local_workspace(&workspace).unwrap_or(workspace);
-    }
-
-    let Some(working_directory) = request.working_directory.as_deref() else {
-        return Ok(Some(workspace));
-    };
-    if working_directory.trim().is_empty() || working_directory == "Workspace" {
-        return Ok(Some(workspace));
-    }
-
-    let candidate = Path::new(working_directory);
-    gyro_core::security::assert_path_inside_workspace(&workspace, candidate).map(Some)
-}
-
 fn user_home_directory() -> anyhow::Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .filter(|value| !value.is_empty())
@@ -12737,50 +12523,6 @@ fn user_home_directory() -> anyhow::Result<PathBuf> {
     Ok(home.canonicalize().unwrap_or(home))
 }
 
-fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
-    let mut top_level_command = git_command();
-    top_level_command
-        .arg("-C")
-        .arg(workspace)
-        .args(["rev-parse", "--show-toplevel"]);
-    let top_level_output = run_bounded_command(
-        &top_level_command,
-        Duration::from_secs(10),
-        None,
-        64 * 1024,
-        64 * 1024,
-    )?;
-    if !top_level_output.succeeded() || top_level_output.stdout_truncated {
-        return Ok(workspace.to_path_buf());
-    }
-    let git_top_level = PathBuf::from(top_level_output.stdout.trim()).canonicalize()?;
-
-    let mut common_dir_command = git_command();
-    common_dir_command.arg("-C").arg(workspace).args([
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-    ]);
-    let common_dir_output = run_bounded_command(
-        &common_dir_command,
-        Duration::from_secs(10),
-        None,
-        64 * 1024,
-        64 * 1024,
-    )?;
-    if !common_dir_output.succeeded() || common_dir_output.stdout_truncated {
-        return Ok(workspace.to_path_buf());
-    }
-    let git_common_dir = PathBuf::from(common_dir_output.stdout.trim());
-    let Some(repo_root) = git_common_dir.parent() else {
-        return Ok(workspace.to_path_buf());
-    };
-    let repo_root = repo_root.canonicalize()?;
-    if repo_root != git_top_level {
-        return Ok(repo_root);
-    }
-    Ok(workspace.to_path_buf())
-}
 
 fn terminal_command_path(command: &str) -> String {
     let command = command.trim();
@@ -14057,8 +13799,7 @@ fn run_openai_codex_app_server_chat(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let initialize = receive_codex_app_server_response(&messages, 1, deadline)
-            .map_err(anyhow::Error::msg)?;
+        let initialize = receive_codex_turn_response(app, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
         write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
             .map_err(anyhow::Error::msg)?;
@@ -14107,8 +13848,7 @@ fn run_openai_codex_app_server_chat(
             })
         };
         write_codex_app_server_message(&mut stdin, &thread_request).map_err(anyhow::Error::msg)?;
-        let thread_response = receive_codex_app_server_response(&messages, 2, deadline)
-            .map_err(anyhow::Error::msg)?;
+        let thread_response = receive_codex_turn_response(app, request, &messages, 2, deadline)?;
         let thread_result =
             codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
         let thread_id = thread_result
@@ -14544,8 +14284,7 @@ fn run_openai_codex_context_compaction(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let initialize = receive_codex_app_server_response(&messages, 1, deadline)
-            .map_err(anyhow::Error::msg)?;
+        let initialize = receive_codex_turn_response(app, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
         write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
             .map_err(anyhow::Error::msg)?;
@@ -14578,8 +14317,7 @@ fn run_openai_codex_context_compaction(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let thread_response = receive_codex_app_server_response(&messages, 2, deadline)
-            .map_err(anyhow::Error::msg)?;
+        let thread_response = receive_codex_turn_response(app, request, &messages, 2, deadline)?;
         let thread_result =
             codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
         let thread_id = thread_result
@@ -16779,6 +16517,7 @@ struct StrippedControlMarkers {
     session_title: Option<String>,
     plan_update: Option<serde_json::Value>,
     goal_update: Option<serde_json::Value>,
+    questions: Option<serde_json::Value>,
     artifacts: Vec<serde_json::Value>,
 }
 
@@ -16786,6 +16525,7 @@ const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
 const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
 const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
 const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
+const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";
 const MAX_CHAT_ARTIFACTS: usize = 8;
 const MAX_CHAT_ARTIFACT_MARKER_BYTES: usize = 64 * 1024;
 
@@ -16797,6 +16537,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     let mut session_title = None;
     let mut plan_update = None;
     let mut goal_update = None;
+    let mut questions = None;
     let mut artifacts = Vec::new();
     let mut kept_lines = Vec::new();
 
@@ -16806,6 +16547,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
             &mut session_title,
             &mut plan_update,
             &mut goal_update,
+            &mut questions,
             &mut artifacts,
         );
         if cleaned.trim().is_empty() {
@@ -16831,6 +16573,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
         session_title,
         plan_update,
         goal_update,
+        questions,
         artifacts,
     }
 }
@@ -16857,6 +16600,7 @@ fn strip_control_markers_from_line(
     session_title: &mut Option<String>,
     plan_update: &mut Option<serde_json::Value>,
     goal_update: &mut Option<serde_json::Value>,
+    questions: &mut Option<serde_json::Value>,
     artifacts: &mut Vec<serde_json::Value>,
 ) -> String {
     let mut rest = line;
@@ -16900,6 +16644,17 @@ fn strip_control_markers_from_line(
                     rest = "";
                 }
             },
+            GYRO_QUESTIONS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
+                Some((value, remainder)) if value.is_object() => {
+                    if questions.is_none() {
+                        *questions = Some(value);
+                    }
+                    rest = remainder;
+                }
+                _ => {
+                    rest = "";
+                }
+            },
             GYRO_ARTIFACTS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) => {
                     collect_chat_artifacts_from_value(value, artifacts);
@@ -16927,6 +16682,7 @@ fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
         GYRO_SESSION_TITLE_MARKER,
         GYRO_PLAN_UPDATE_MARKER,
         GYRO_GOAL_UPDATE_MARKER,
+        GYRO_QUESTIONS_MARKER,
         GYRO_ARTIFACTS_MARKER,
     ];
     candidates
@@ -17055,6 +16811,7 @@ fn derive_session_summary(response: &str) -> Option<String> {
                 && !line.starts_with("GYRO_SESSION_TITLE:")
                 && !line.starts_with("GYRO_PLAN_UPDATE:")
                 && !line.starts_with("GYRO_GOAL_UPDATE:")
+                && !line.starts_with("GYRO_QUESTIONS:")
         })
         .map(|line| {
             line.trim_start_matches(['#', '-', '*', '>'])
@@ -17723,6 +17480,8 @@ struct StreamingCommandState {
     pending_timeline: Option<provider_timeline::TimelinePosition>,
     provider_session_id: Option<String>,
     stdout_line_buffer: String,
+    /// Set after an oversize frame was dropped: skip to the next newline.
+    skipping_oversize_stdout_line: bool,
     /// Whether any stdout line parsed as JSON.
     ///
     /// Separates "this CLI streamed structured output Gyro could not read" from
@@ -17756,6 +17515,7 @@ impl StreamingCommandState {
             pending_timeline: None,
             provider_session_id: None,
             stdout_line_buffer: String::new(),
+            skipping_oversize_stdout_line: false,
             parsed_stream_json: false,
             last_emit_at: None,
         }
@@ -17946,6 +17706,14 @@ impl StreamingCommandState {
 
     fn take_stdout_lines(&mut self, chunk: &str) -> Vec<String> {
         self.push_stdout(chunk);
+        let mut chunk = chunk;
+        if self.skipping_oversize_stdout_line {
+            let Some(newline) = chunk.find('\n') else {
+                return Vec::new();
+            };
+            chunk = &chunk[newline + 1..];
+            self.skipping_oversize_stdout_line = false;
+        }
         self.stdout_line_buffer.push_str(chunk);
         // Provider CLIs can flush thousands of JSON frames in one OS chunk.
         // Draining one line at a time repeatedly shifts the remaining string
@@ -17966,8 +17734,12 @@ impl StreamingCommandState {
                 .collect::<String>();
             complete.split_inclusive('\n').map(str::to_owned).collect()
         };
-        if self.stdout_line_buffer.chars().count() > MAX_CHAT_RESPONSE_CHARS * 4 {
-            self.stdout_line_buffer.clear();
+        // A frame can carry a whole capability result or browser capture, so
+        // the bound is the largest bridge message, checked in O(1). A frame
+        // past it is dropped whole; its tail is never parsed as a new line.
+        if self.stdout_line_buffer.len() > MAX_PROVIDER_STDOUT_FRAME_BYTES {
+            self.stdout_line_buffer = String::new();
+            self.skipping_oversize_stdout_line = true;
         }
         lines
     }
@@ -18758,14 +18530,13 @@ fn provider_rate_limit_window_label(raw_type: &str) -> (String, String) {
         "weekly" | "seven_day" => ("weekly".into(), "Weekly limit".into()),
         "weekly_opus" | "seven_day_opus" => ("weekly-opus".into(), "Weekly · Opus".into()),
         "weekly_sonnet" | "seven_day_sonnet" => ("weekly-sonnet".into(), "Weekly · Sonnet".into()),
-        other => (
-            other.replace('_', "-"),
-            format!(
-                "{}{} limit",
-                other[..1].to_uppercase(),
-                other[1..].replace('_', " ")
-            ),
-        ),
+        other => {
+            // Provider-controlled text: split on a char, never a byte index.
+            let mut chars = other.chars();
+            let first = chars.next().map(|c| c.to_uppercase().to_string());
+            let label = format!("{}{} limit", first.unwrap_or_default(), chars.as_str());
+            (other.replace('_', "-"), label.replace('_', " "))
+        }
     }
 }
 
@@ -19370,7 +19141,10 @@ struct ProviderProcessGuard {
 }
 
 impl ProviderProcessGuard {
+    /// Registered so quitting Gyro tears the group down: it runs in its own
+    /// process group and gets no SIGHUP from the app exiting.
     fn new(child: Child) -> Self {
+        gyro_core::register_process_group(child.id());
         Self { child }
     }
 }
@@ -19392,6 +19166,7 @@ impl std::ops::DerefMut for ProviderProcessGuard {
 impl Drop for ProviderProcessGuard {
     fn drop(&mut self) {
         terminate_provider_process_group(&mut self.child);
+        gyro_core::unregister_process_group(self.child.id());
     }
 }
 
@@ -19439,160 +19214,6 @@ fn terminate_provider_process_group(child: &mut Child) {
 fn terminate_provider_process_group(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
-}
-
-fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<TerminalOutputBuffer>>)
-where
-    R: Read + Send + 'static,
-{
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(reader);
-        let mut chunk = [0; 8192];
-        loop {
-            match reader.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(count) => append_terminal_output(&output, &chunk[..count]),
-                Err(_) => break,
-            }
-        }
-        if let Ok(mut output) = output.lock() {
-            output.reader_finished = true;
-        }
-    });
-}
-
-fn append_terminal_output(output: &Arc<Mutex<TerminalOutputBuffer>>, bytes: &[u8]) {
-    if bytes.is_empty() {
-        return;
-    }
-    let Ok(mut output) = output.lock() else {
-        return;
-    };
-    output.revision = output.revision.wrapping_add(1).max(1);
-    if bytes.len() >= MAX_TERMINAL_OUTPUT_BYTES {
-        output.bytes.clear();
-        output.bytes.extend(
-            bytes[bytes.len() - MAX_TERMINAL_OUTPUT_BYTES..]
-                .iter()
-                .copied(),
-        );
-        return;
-    }
-    let overflow = output
-        .bytes
-        .len()
-        .saturating_add(bytes.len())
-        .saturating_sub(MAX_TERMINAL_OUTPUT_BYTES);
-    if overflow > 0 {
-        output.bytes.drain(..overflow);
-    }
-    output.bytes.extend(bytes.iter().copied());
-}
-
-fn snapshot_terminal_process(
-    process: &mut TerminalProcess,
-    known_output_revision: Option<u64>,
-) -> TerminalPaneSnapshot {
-    match process.child.try_wait() {
-        Ok(Some(status)) => {
-            process.exit_code = Some(status.exit_code() as i32);
-            process.terminated = true;
-            process.status = if status.success() {
-                "done".into()
-            } else {
-                "failed".into()
-            };
-        }
-        Ok(None) => {
-            if process.status != "failed" {
-                process.status = "running".into();
-            }
-        }
-        Err(_) => {
-            process.status = "failed".into();
-        }
-    }
-
-    let (output, output_revision, output_complete) = process
-        .output
-        .lock()
-        .map(|value| {
-            let (output, revision) = snapshot_terminal_output(&value, known_output_revision);
-            (output, revision, value.reader_finished)
-        })
-        .unwrap_or((None, 0, false));
-    let has_foreground_job = terminal_process_has_foreground_job(process);
-    TerminalPaneSnapshot {
-        pane_id: process.request.pane_id.clone(),
-        title: process.request.title.clone(),
-        profile_id: process.request.profile_id.clone(),
-        command: std::iter::once(process.request.command.as_str())
-            .chain(process.request.args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" "),
-        output,
-        output_revision,
-        output_complete,
-        status: process.status.clone(),
-        has_foreground_job,
-        exit_code: process.exit_code,
-        workspace_path: process.request.workspace_path.clone(),
-        working_directory: process
-            .working_directory
-            .as_ref()
-            .map(|path| path.display().to_string()),
-        cols: process.cols,
-        rows: process.rows,
-        governed_session_id: process
-            .request
-            .governance
-            .as_ref()
-            .map(|governance| governance.session_id.clone()),
-        governed_provider_id: process
-            .request
-            .governance
-            .as_ref()
-            .map(|governance| governance.provider_id.clone()),
-    }
-}
-
-fn terminal_process_has_foreground_job(process: &TerminalProcess) -> Option<bool> {
-    if process.status != "running" {
-        return Some(false);
-    }
-
-    #[cfg(unix)]
-    {
-        let shell_pid = process.child.process_id().map(|pid| pid as i32);
-        let foreground_pid = process.master.process_group_leader();
-        match (shell_pid, foreground_pid) {
-            (Some(shell_pid), Some(foreground_pid)) => Some(foreground_pid != shell_pid),
-            _ => None,
-        }
-    }
-
-    #[cfg(not(unix))]
-    Some(true)
-}
-
-fn snapshot_terminal_output(
-    output: &TerminalOutputBuffer,
-    known_output_revision: Option<u64>,
-) -> (Option<String>, u64) {
-    let text = (known_output_revision != Some(output.revision))
-        .then(|| terminal_output_text(&output.bytes));
-    (text, output.revision)
-}
-
-fn terminal_output_text(output: &VecDeque<u8>) -> String {
-    let (first, second) = output.as_slices();
-    if second.is_empty() {
-        return String::from_utf8_lossy(first).into_owned();
-    }
-    let mut bytes = Vec::with_capacity(output.len());
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn capability_argument_string<'a>(
@@ -22444,22 +22065,27 @@ pub fn run() {
             menu_bar::setup(app)?;
             #[cfg(target_os = "macos")]
             restore_main_window(app.handle())?;
-            let paths = GyroPaths::for_current_user()?;
-            let store = SessionStore::open(paths.clone())?;
-            recover_provider_mutation_transactions(&paths.mutation_journals_dir, &store)?;
-            // Not fatal: a session whose turn cannot be closed is one session
-            // that still needs a new turn, which is strictly better than
-            // refusing to start the app over it.
-            match reconcile_interrupted_provider_turns(&store) {
-                Ok(0) => {}
-                Ok(closed) => eprintln!("closed {closed} turn(s) interrupted by an earlier exit"),
-                Err(error) => eprintln!("could not reconcile interrupted turns: {error}"),
-            }
-            let _ = store.maintain();
-            if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
-                if pool.len() < SESSION_STORE_POOL_CAPACITY {
-                    pool.push(store);
+            // Store recovery runs before any command can start a turn, but a
+            // locked or damaged store must not stop the app from opening: the
+            // warm-up report and later store calls surface the failure instead.
+            // Index maintenance is left to `warm_desktop_shell`, off this thread.
+            match GyroPaths::for_current_user()
+                .and_then(|paths| Ok((SessionStore::open(paths.clone())?, paths)))
+            {
+                Ok((store, paths)) => {
+                    let journals = &paths.mutation_journals_dir;
+                    if let Err(error) = recover_provider_mutation_transactions(journals, &store) {
+                        eprintln!("could not recover provider file edits: {error}");
+                    }
+                    // A session whose turn cannot be closed still takes a new turn.
+                    match reconcile_interrupted_provider_turns(&store) {
+                        Ok(0) => {}
+                        Ok(closed) => eprintln!("closed {closed} turn(s) interrupted by an earlier exit"),
+                        Err(error) => eprintln!("could not reconcile interrupted turns: {error}"),
+                    }
+                    drop(SessionStoreLease { store: Some(store) });
                 }
+                Err(error) => eprintln!("could not open the session store at launch: {error}"),
             }
             start_cli_ipc_listener(app.handle().clone());
             start_automation_scheduler(app.handle().clone());
@@ -22673,44 +22299,102 @@ pub fn run() {
     });
 }
 
+/// Whole-quit budget. Quit runs on the main thread, so no single wedged
+/// language server, debug adapter or PTY may hold it longer than this.
+const QUIT_DRAIN_DEADLINE: Duration = Duration::from_secs(2);
+static QUIT_DRAINED: AtomicBool = AtomicBool::new(false);
+
 fn drain_backend_resources_on_quit(app: &tauri::AppHandle) {
     // Best-effort drain on true quit. Window hide on macOS is intentional and
-    // must keep the automation scheduler and terminals alive.
+    // must keep the automation scheduler and terminals alive. ExitRequested and
+    // Exit both land here; drain once so quit spends one deadline, not two.
+    if QUIT_DRAINED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let deadline = Instant::now() + QUIT_DRAIN_DEADLINE;
     if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
         for control in flags.values() {
             control.cancellation.cancel();
         }
         flags.clear();
     }
+    // Cancelled task runs kill their own commands; the wait below lets them.
+    if let Ok(runs) = active_task_runs().lock() {
+        runs.values().for_each(CancellationToken::cancel);
+    }
     app.state::<AutomationSchedulerControl>().wake();
-    let terminal_ids = app
-        .state::<TerminalProcessManager>()
-        .processes
-        .lock()
-        .ok()
-        .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    for pane_id in terminal_ids {
-        let _ = app.state::<TerminalProcessManager>().stop(&pane_id);
-        let _ = app.state::<TerminalProcessManager>().close(&pane_id);
+    let mut jobs: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
+    // Provider CLIs and task commands run in their own process groups and get
+    // no SIGHUP from the app exiting; the process exits right after this drain,
+    // before a cancelled runner could reap them itself.
+    jobs.push(Box::new(|| {
+        gyro_core::terminate_live_process_groups(QUIT_DRAIN_DEADLINE / 2)
+    }));
+    for pane in app.state::<TerminalProcessManager>().take_all() {
+        jobs.push(Box::new(move || {
+            terminal_process::terminate_terminal_pane(&pane)
+        }));
     }
-    let language_server_ids = app
+    let language_servers = app
         .state::<language_server::LanguageServerManager>()
-        .server_ids();
-    for server_id in language_server_ids {
-        let _ = app
-            .state::<language_server::LanguageServerManager>()
-            .stop(&server_id);
+        .inner()
+        .clone();
+    for server_id in language_servers.server_ids() {
+        let manager = language_servers.clone();
+        jobs.push(Box::new(move || drop(manager.stop(&server_id))));
     }
-    let debug_adapter_ids = app
-        .state::<DebugAdapterManager>()
+    let debug_adapters = app.state::<DebugAdapterManager>().inner().clone();
+    let debug_session_ids = debug_adapters
         .processes
         .lock()
-        .ok()
         .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
-    for adapter_id in debug_adapter_ids {
-        let _ = app.state::<DebugAdapterManager>().stop(&adapter_id);
+    for session_id in debug_session_ids {
+        let manager = debug_adapters.clone();
+        jobs.push(Box::new(move || drop(manager.stop(&session_id))));
+    }
+    run_quit_jobs_until(jobs, deadline);
+    while Instant::now() < deadline && active_task_runs().lock().is_ok_and(|runs| !runs.is_empty())
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if let Ok(paths) = GyroPaths::for_current_user() {
+        remove_provider_host_ipc_socket(paths, std::process::id());
+    }
+}
+
+/// Runs each shutdown on its own thread and returns by `deadline` even if some
+/// never finish; the process is exiting, so stragglers die with it.
+fn run_quit_jobs_until(jobs: Vec<Box<dyn FnOnce() + Send>>, deadline: Instant) {
+    let (done, finished) = mpsc::channel::<()>();
+    let pending = jobs.len();
+    for job in jobs {
+        let done = done.clone();
+        let _ = std::thread::Builder::new()
+            .name("gyro-quit-drain".into())
+            .spawn(move || {
+                job();
+                let _ = done.send(());
+            });
+    }
+    drop(done);
+    for _ in 0..pending {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if finished.recv_timeout(remaining).is_err() {
+            break;
+        }
+    }
+}
+
+/// The per-PID provider socket belongs to this process alone; the public CLI
+/// socket may be taken over by another instance and is left alone.
+fn remove_provider_host_ipc_socket(paths: GyroPaths, host_pid: u32) {
+    #[cfg(unix)]
+    if let Ok(paths) = provider_host_ipc_paths(paths, host_pid) {
+        use std::os::unix::fs::FileTypeExt;
+        if fs::symlink_metadata(&paths.socket_path).is_ok_and(|meta| meta.file_type().is_socket()) {
+            let _ = fs::remove_file(&paths.socket_path);
+        }
     }
 }
 
@@ -22744,7 +22428,7 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
 /// Process-local SQLite connection pools. Concurrent commands borrow a handle
 /// and return it on drop. Extra connections beyond capacity are discarded so
 /// the pool stays small (one DB file, several WAL readers/writers).
-const SESSION_STORE_POOL_CAPACITY: usize = 4;
+const SESSION_STORE_POOL_CAPACITY: usize = 8;
 const AUTOMATION_STORE_POOL_CAPACITY: usize = 2;
 static SESSION_STORE_POOL: Mutex<Vec<SessionStore>> = Mutex::new(Vec::new());
 static AUTOMATION_STORE_POOL: Mutex<Vec<AutomationStore>> = Mutex::new(Vec::new());
@@ -22838,29 +22522,24 @@ fn open_automation_store() -> Result<AutomationStoreLease, String> {
 /// Prefill idle pooled connections so the first user actions after warm-up do
 /// not pay SQLite open + schema ensure latency.
 fn warm_store_pools(paths: &GyroPaths) -> Result<(usize, usize), String> {
-    let mut session_warmed = 0usize;
-    let mut automation_warmed = 0usize;
-    {
-        let mut pool = SESSION_STORE_POOL
-            .lock()
-            .map_err(|_| "session store pool lock poisoned".to_string())?;
-        while pool.len() < SESSION_STORE_POOL_CAPACITY {
-            let store = SessionStore::open(paths.clone()).map_err(to_string)?;
-            store.maintain().map_err(to_string)?;
-            pool.push(store);
-            session_warmed += 1;
-        }
+    // Connections open outside the pool locks, so store calls made during
+    // warm-up never queue behind it. Maintenance already ran on the caller's
+    // connection and is database-wide, so pooled connections skip it.
+    let idle = SESSION_STORE_POOL.lock().map_or(0, |pool| pool.len());
+    let sessions = (idle..SESSION_STORE_POOL_CAPACITY)
+        .map(|_| SessionStore::open(paths.clone()).map_err(to_string))
+        .collect::<Result<Vec<_>, _>>()?;
+    let session_warmed = sessions.len();
+    for store in sessions {
+        drop(SessionStoreLease { store: Some(store) });
     }
-    {
-        let mut pool = AUTOMATION_STORE_POOL
-            .lock()
-            .map_err(|_| "automation store pool lock poisoned".to_string())?;
-        while pool.len() < AUTOMATION_STORE_POOL_CAPACITY {
-            let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
-            store.maintain().map_err(to_string)?;
-            pool.push(store);
-            automation_warmed += 1;
-        }
+    let idle = AUTOMATION_STORE_POOL.lock().map_or(0, |pool| pool.len());
+    let automations = (idle..AUTOMATION_STORE_POOL_CAPACITY)
+        .map(|_| AutomationStore::open(paths.clone()).map_err(to_string))
+        .collect::<Result<Vec<_>, _>>()?;
+    let automation_warmed = automations.len();
+    for store in automations {
+        drop(AutomationStoreLease { store: Some(store) });
     }
     Ok((session_warmed, automation_warmed))
 }
@@ -23111,6 +22790,7 @@ fn write_bounded_json_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use terminal_process::*;
 
     #[test]
     fn compatibility_tool_requests_follow_the_advertised_schema_and_mode() {
@@ -24244,6 +23924,14 @@ mod tests {
     }
 
     #[test]
+    fn every_chat_mode_can_ask_clarifying_questions() {
+        let mut request = anthropic_provider_request();
+        assert!(provider_context_message(&request).contains("GYRO_QUESTIONS:"));
+        request.mode = ChatMode::Plan;
+        assert!(provider_context_message(&request).contains("GYRO_QUESTIONS:"));
+    }
+
+    #[test]
     fn live_plan_reaches_the_model_as_a_checklist_that_normal_turns_can_advance() {
         let mut request = anthropic_provider_request();
         request.plan = Some(serde_json::json!({
@@ -25109,6 +24797,11 @@ while True:
     if message is None:
         break
     command = message.get('command', '')
+    for index in range(40 if command == 'launch' else 0):
+        send({'seq': 1000 + index, 'type': 'event', 'event': 'output', 'body': {'output': f'line {index}\n'}})
+    if command == 'disconnect':
+        with open(__file__ + '.disconnect.json', 'w') as record:
+            json.dump(message.get('arguments'), record)
     body = {'supportsConfigurationDoneRequest': True} if command == 'initialize' else {'threads': [{'id': 1, 'name': 'main'}]}
     send({'seq': message['seq'] + 100, 'type': 'response', 'request_seq': message['seq'], 'command': command, 'success': True, 'body': body})
     if command == 'disconnect':
@@ -25138,7 +24831,21 @@ while True:
             })
             .unwrap();
         assert_eq!(response["response"]["body"]["threads"][0]["name"], "main");
+        // More program output than the 32-message cap arrives before `launch`
+        // responds; the request still succeeds with every event.
+        let launch = manager
+            .send(DebugSendRequest {
+                session_id: session.id.clone(),
+                request: serde_json::json!({ "command": "launch" }),
+            })
+            .unwrap();
+        assert_eq!(launch["status"], "ok");
+        assert_eq!(launch["events"].as_array().unwrap().len(), 40);
         assert_eq!(manager.stop(&session.id).unwrap()["status"], "stopped");
+        let disconnect =
+            std::fs::read_to_string(format!("{}.disconnect.json", adapter_path.display())).unwrap();
+        let disconnect: serde_json::Value = serde_json::from_str(&disconnect).unwrap();
+        assert_eq!(disconnect["terminateDebuggee"], true);
     }
 
     #[test]
@@ -25443,7 +25150,7 @@ while True:
     }
 
     #[test]
-    fn workspace_watcher_includes_dependency_changes_but_ignores_git_internals() {
+    fn workspace_watcher_ignores_git_internals_and_dependency_churn() {
         let root = PathBuf::from("/tmp/gyro-workspace");
         let ignored =
             NotifyEvent::new(notify::EventKind::Any).add_path(root.join(".git/objects/object"));
@@ -25453,7 +25160,15 @@ while True:
 
         assert!(!workspace_watch_event_is_relevant(&root, &ignored));
         assert!(workspace_watch_event_is_relevant(&root, &source));
-        assert!(workspace_watch_event_is_relevant(&root, &dependency));
+        // `pnpm install` or a test run churns these at any depth; only the
+        // folder itself appearing at the top level changes the tree.
+        assert!(!workspace_watch_event_is_relevant(&root, &dependency));
+        for churn in ["packages/ui/node_modules/x/index.js", "src/__pycache__/a.pyc"] {
+            let event = NotifyEvent::new(notify::EventKind::Any).add_path(root.join(churn));
+            assert!(!workspace_watch_event_is_relevant(&root, &event), "{churn}");
+        }
+        let installed = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("node_modules"));
+        assert!(workspace_watch_event_is_relevant(&root, &installed));
 
         let build_output = NotifyEvent::new(notify::EventKind::Any)
             .add_path(root.join("target/debug/deps/gyro.o"));
@@ -26994,6 +26709,18 @@ while True:
             vec!["partial frame\n".to_string()]
         );
         assert!(state.stdout_line_buffer.is_empty());
+
+        // A large frame (a capability result) survives; an oversize one is
+        // dropped whole and its tail is not mistaken for the next frame.
+        let large = format!("{{\"result\":\"{}\"}}\n", "x".repeat(1024 * 1024));
+        assert_eq!(state.take_stdout_lines(&large), vec![large.clone()]);
+        let oversize = "y".repeat(MAX_PROVIDER_STDOUT_FRAME_BYTES + 1);
+        assert!(state.take_stdout_lines(&oversize).is_empty());
+        assert!(state.take_stdout_lines("tail").is_empty());
+        assert_eq!(
+            state.take_stdout_lines("tail\n{\"next\":1}\n"),
+            vec!["{\"next\":1}\n".to_string()]
+        );
     }
 
     #[test]
@@ -28622,6 +28349,19 @@ while True:
     }
 
     #[test]
+    fn strips_question_markers_into_structured_payload() {
+        let raw = "A few decisions first.\nGYRO_QUESTIONS: {\"questions\":[{\"question\":\"Which release?\",\"options\":[{\"label\":\"Stable\",\"recommended\":true},{\"label\":\"Alpha\"}]}]}";
+        let stripped = strip_hidden_control_markers(raw);
+        assert_eq!(stripped.message, "A few decisions first.");
+        let questions = stripped.questions.expect("questions payload");
+        assert_eq!(questions["questions"][0]["question"], "Which release?");
+        assert_eq!(questions["questions"][0]["options"][0]["recommended"], true);
+        let broken = strip_hidden_control_markers("Ask.\nGYRO_QUESTIONS: {not json");
+        assert_eq!(broken.message, "Ask.");
+        assert!(broken.questions.is_none());
+    }
+
+    #[test]
     fn streaming_state_separates_text_blocks_after_tool_activity() {
         let mut state = StreamingCommandState::new();
         state.push_assistant_delta("Now the edits.");
@@ -29082,6 +28822,42 @@ while True:
             .to_string()
             .contains("not a safe Unix socket"));
         assert_eq!(fs::read(&paths.socket_path).unwrap(), b"do not remove");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quit_removes_only_this_hosts_provider_socket() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        let own = provider_host_ipc_paths(paths.clone(), 4242).unwrap();
+        let other = provider_host_ipc_paths(paths.clone(), 4343).unwrap();
+        drop(std::os::unix::net::UnixListener::bind(&own.socket_path).unwrap());
+        drop(std::os::unix::net::UnixListener::bind(&other.socket_path).unwrap());
+        remove_provider_host_ipc_socket(paths.clone(), 4242);
+        assert!(!own.socket_path.exists() && other.socket_path.exists());
+        fs::remove_file(&other.socket_path).unwrap();
+        fs::write(&other.socket_path, b"not a socket").unwrap();
+        remove_provider_host_ipc_socket(paths, 4343);
+        assert!(other.socket_path.exists());
+    }
+
+    #[test]
+    fn quit_jobs_run_in_parallel_and_stop_waiting_at_the_deadline() {
+        let finished = Arc::new(AtomicUsize::new(0));
+        let mut jobs: Vec<Box<dyn FnOnce() + Send>> =
+            vec![Box::new(|| std::thread::sleep(Duration::from_secs(30)))];
+        for _ in 0..4 {
+            let finished = Arc::clone(&finished);
+            jobs.push(Box::new(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                finished.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+        let started = Instant::now();
+        run_quit_jobs_until(jobs, started + Duration::from_millis(400));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(finished.load(Ordering::SeqCst), 4);
     }
 
     #[test]

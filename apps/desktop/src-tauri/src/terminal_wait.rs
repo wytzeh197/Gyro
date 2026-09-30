@@ -20,10 +20,11 @@ pub(super) fn timeout(arguments: &serde_json::Value) -> anyhow::Result<Duration>
 
 /// Sleep between status checks without holding the process or resource locks.
 /// A bounded wait yields a tool result; it never kills a still-running command.
+/// `read(false)` polls status only; the output is copied once, on return.
 pub(super) fn wait(
     timeout: Duration,
     cancellation: &CancellationToken,
-    mut read: impl FnMut() -> anyhow::Result<TerminalPaneSnapshot>,
+    mut read: impl FnMut(bool) -> anyhow::Result<TerminalPaneSnapshot>,
 ) -> anyhow::Result<TerminalPaneSnapshot> {
     let started = Instant::now();
     let mut exited_at = None;
@@ -31,7 +32,7 @@ pub(super) fn wait(
         if cancellation.is_cancelled() {
             anyhow::bail!("command wait cancelled");
         }
-        let snapshot = read()?;
+        let snapshot = read(false)?;
         // Process exit can race the PTY reader's final output. Give it a bounded
         // drain period; descendants may keep the PTY open after the command exits.
         let finished = if snapshot.status != "running" {
@@ -41,7 +42,7 @@ pub(super) fn wait(
             false
         };
         if finished || started.elapsed() >= timeout {
-            return Ok(snapshot);
+            return read(true);
         }
         std::thread::sleep(
             Duration::from_millis(100).min(timeout.saturating_sub(started.elapsed())),
@@ -77,7 +78,7 @@ mod tests {
             let snapshot = wait(
                 Duration::from_secs(5),
                 &CancellationToken::default(),
-                || manager.read("wait-test", None),
+                |full| manager.observe("wait-test", full),
             )
             .unwrap();
             assert_eq!(snapshot.exit_code, Some(code));
@@ -85,8 +86,9 @@ mod tests {
             assert!(snapshot.output.unwrap_or_default().contains("build-output"));
             // Waiting again observes the same finished command; it never relaunches it.
             assert_eq!(
-                wait(Duration::ZERO, &CancellationToken::default(), || manager
-                    .read("wait-test", None))
+                wait(Duration::ZERO, &CancellationToken::default(), |full| {
+                    manager.observe("wait-test", full)
+                })
                 .unwrap()
                 .exit_code,
                 Some(code)
@@ -95,12 +97,33 @@ mod tests {
     }
 
     #[test]
+    fn polls_skip_output_and_only_the_returned_snapshot_carries_it() {
+        let manager = command("printf polled; sleep 0.3");
+        let mut polls_with_output = Vec::new();
+        let snapshot = wait(
+            Duration::from_secs(5),
+            &CancellationToken::default(),
+            |full| {
+                let snapshot = manager.observe("wait-test", full)?;
+                if !full {
+                    polls_with_output.push(snapshot.output.is_some());
+                }
+                Ok(snapshot)
+            },
+        )
+        .unwrap();
+        assert!(polls_with_output.len() > 1);
+        assert!(polls_with_output.iter().all(|copied| !copied));
+        assert!(snapshot.output.unwrap_or_default().contains("polled"));
+    }
+
+    #[test]
     fn timeout_keeps_command_alive_and_a_later_wait_completes() {
         let manager = command("sleep 0.5; printf finished");
         let snapshot = wait(
             Duration::from_millis(20),
             &CancellationToken::default(),
-            || manager.read("wait-test", None),
+            |full| manager.observe("wait-test", full),
         )
         .unwrap();
         assert_eq!(snapshot.status, "running");
@@ -108,7 +131,7 @@ mod tests {
         let snapshot = wait(
             Duration::from_secs(5),
             &CancellationToken::default(),
-            || manager.read("wait-test", None),
+            |full| manager.observe("wait-test", full),
         )
         .unwrap();
         assert_eq!(snapshot.exit_code, Some(0));
@@ -125,8 +148,8 @@ mod tests {
             cancel.cancel();
         });
         let started = Instant::now();
-        let result = wait(Duration::from_secs(5), &cancellation, || {
-            manager.read("wait-test", None)
+        let result = wait(Duration::from_secs(5), &cancellation, |full| {
+            manager.observe("wait-test", full)
         });
         assert!(result.unwrap_err().to_string().contains("cancelled"));
         assert!(started.elapsed() < Duration::from_secs(1));
@@ -140,7 +163,7 @@ mod tests {
         let result = wait(
             Duration::from_secs(5),
             &CancellationToken::default(),
-            || anyhow::bail!("terminal resource ownership changed"),
+            |_| anyhow::bail!("terminal resource ownership changed"),
         );
         assert!(result
             .unwrap_err()

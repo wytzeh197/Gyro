@@ -49,6 +49,45 @@ pub fn assert_path_inside_workspace(workspace: &Path, candidate: &Path) -> Resul
     Ok(candidate)
 }
 
+/// Resolve a workspace entry for lifecycle operations (delete, rename, stage,
+/// discard) without following the entry itself. Only the parent is
+/// canonicalized, so a symlink named `CLAUDE.md -> AGENTS.md` resolves to the
+/// link and never to its target. The workspace root itself is never an entry.
+pub fn assert_entry_inside_workspace(workspace: &Path, candidate: &Path) -> Result<PathBuf> {
+    let workspace = workspace
+        .canonicalize()
+        .with_context(|| format!("resolve workspace {}", workspace.display()))?;
+    reject_parent_components(candidate)?;
+
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        workspace.join(candidate)
+    };
+    let file_name = candidate
+        .components()
+        .next_back()
+        .and_then(|component| match component {
+            Component::Normal(name) => Some(name.to_os_string()),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow::anyhow!("path {} has no entry name", candidate.display()))?;
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path {} has no parent", candidate.display()))?;
+    let entry = resolve_from_nearest_existing_ancestor(parent)?.join(file_name);
+
+    if !entry.starts_with(&workspace) || entry == workspace {
+        bail!(
+            "path {} is outside workspace {}",
+            entry.display(),
+            workspace.display()
+        );
+    }
+
+    Ok(entry)
+}
+
 fn reject_parent_components(path: &Path) -> Result<()> {
     if path
         .components()
@@ -201,5 +240,35 @@ mod tests {
         let error =
             assert_path_inside_workspace(&workspace, Path::new("dangling/new.txt")).unwrap_err();
         assert!(error.to_string().contains("resolve path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entry_resolution_keeps_symlinks_as_links() {
+        use std::os::unix::fs::symlink;
+
+        let (_temp, workspace, outside) = test_workspace();
+        fs::write(workspace.join("AGENTS.md"), "keep").unwrap();
+        symlink("AGENTS.md", workspace.join("CLAUDE.md")).unwrap();
+        symlink(&outside, workspace.join("escape")).unwrap();
+        let root = workspace.canonicalize().unwrap();
+
+        let link = assert_entry_inside_workspace(&workspace, Path::new("CLAUDE.md")).unwrap();
+        assert_eq!(link, root.join("CLAUDE.md"));
+        // A link to a directory outside the workspace is itself an entry of it.
+        let escape = assert_entry_inside_workspace(&workspace, Path::new("escape")).unwrap();
+        assert_eq!(escape, root.join("escape"));
+        // Entries beneath that link still resolve outside and are refused.
+        let error =
+            assert_entry_inside_workspace(&workspace, Path::new("escape/file.txt")).unwrap_err();
+        assert!(error.to_string().contains("outside workspace"));
+    }
+
+    #[test]
+    fn entry_resolution_refuses_the_workspace_root() {
+        let (_temp, workspace, _outside) = test_workspace();
+        assert!(assert_entry_inside_workspace(&workspace, Path::new("")).is_err());
+        assert!(assert_entry_inside_workspace(&workspace, Path::new(".")).is_err());
+        assert!(assert_entry_inside_workspace(&workspace, &workspace).is_err());
     }
 }

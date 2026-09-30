@@ -1,0 +1,855 @@
+/* The plan in the conversation: one card holding the same document the plan
+   panel renders, previewed until it is expanded or moved to the panel. */
+.gyro-plan-card {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: 0 1px 2px var(--gyro-premium-shadow-soft);
+  color: var(--gyro-text);
+  margin: 4px 0 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gyro-plan-card-head {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 6px 0 12px;
+}
+
+.gyro-plan-card-head > svg {
+  color: var(--gyro-faint);
+  flex: none;
+}
+
+.gyro-plan-card-kind {
+  color: var(--gyro-text);
+  font-weight: 560;
+}
+
+.gyro-plan-card-steps {
+  color: var(--gyro-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gyro-plan-card-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.gyro-plan-card-actions > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  width: 26px;
+}
+
+.gyro-plan-card-actions > button:hover,
+.gyro-plan-card-actions > button:focus-visible {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+  outline: none;
+}
+
+/* The preview fades out through a mask, so it reads the same on any surface
+   in either theme. */
+.gyro-plan-card-body {
+  -webkit-mask-image: linear-gradient(#000 55%, transparent);
+  mask-image: linear-gradient(#000 55%, transparent);
+  max-height: 230px;
+  overflow: hidden;
+}
+
+.gyro-plan-card.is-expanded .gyro-plan-card-body {
+  -webkit-mask-image: none;
+  mask-image: none;
+  max-height: none;
+}
+
+.gyro-plan-card-body .gyro-plan-document {
+  overflow: visible;
+  padding: 16px 18px 4px;
+}
+
+.gyro-plan-card-body .gyro-plan-document h1 {
+  font-size: calc(18px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+
+.gyro-plan-card-body .gyro-plan-document h2 {
+  font-size: calc(14.5px * var(--gyro-ui-scale, 1));
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+  margin-top: 18px;
+}
+
+.gyro-plan-card-body .gyro-plan-document p,
+.gyro-plan-card-body .gyro-plan-document li {
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.55;
+}
+
+.gyro-plan-card-body .gyro-plan-document p {
+  margin-bottom: 10px;
+}
+
+.gyro-plan-card-body .gyro-plan-document ul,
+.gyro-plan-card-body .gyro-plan-document ol {
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.gyro-plan-card-more {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  gap: 4px;
+  padding: 2px 18px 12px;
+}
+
+.gyro-plan-card-more:hover,
+.gyro-plan-card-more:focus-visible {
+  color: var(--gyro-text);
+  outline: none;
+}
+
+.gyro-plan-card-more > svg {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-plan-card.is-expanded .gyro-plan-card-more > svg {
+  transform: rotate(180deg);
+}
+
+.gyro-plan-card.is-folded {
+  box-shadow: none;
+}
+
+.gyro-plan-card-fold {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 560;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-plan-card-fold > svg {
+  color: var(--gyro-faint);
+  flex: none;
+}
+
+.gyro-plan-card-fold > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-plan-card-fold > small {
+  color: var(--gyro-faint);
+  flex: none;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.gyro-plan-card-fold:hover {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+}
+
+/* Answers fold into a run row with the same type and rhythm as a burst of
+   tool calls ("Read files, ran commands"). */
+.gyro-question-answers {
+  margin: 0 0 12px;
+  min-width: 0;
+}
+
+.gyro-question-answers-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: flex;
+  font:
+    calc(14px * var(--gyro-ui-scale, 1)) / calc(20px * var(--gyro-ui-scale, 1))
+    var(--gyro-font-sans);
+  gap: 8px;
+  letter-spacing: -0.005em;
+  max-width: 100%;
+  min-height: 25px;
+  padding: 0;
+  text-align: left;
+}
+
+.gyro-question-answers-toggle:hover,
+.gyro-question-answers-toggle:focus-visible {
+  color: var(--gyro-text);
+  outline: none;
+}
+
+.gyro-question-answers-toggle > svg:first-child {
+  color: var(--gyro-faint);
+  flex: none;
+}
+
+.gyro-question-answers-toggle small {
+  color: var(--gyro-faint);
+  font-size: inherit;
+}
+
+.gyro-question-answers-chevron {
+  color: var(--gyro-faint);
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-question-answers.is-expanded .gyro-question-answers-chevron {
+  transform: rotate(90deg);
+}
+
+.gyro-question-answers-list {
+  border-left: 1px solid var(--gyro-premium-hairline);
+  display: grid;
+  gap: 10px;
+  margin: 6px 0 4px 6px;
+  padding-left: 16px;
+}
+
+.gyro-question-answers-list dt {
+  color: var(--gyro-muted);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+}
+
+.gyro-question-answers-list dd {
+  color: var(--gyro-text);
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.gyro-question-answers-list dd.is-skipped {
+  color: var(--gyro-faint);
+}
+
+/* The plan panel's header, shared by the Document and Steps views. It sits on
+   the panel's own surface (no second band of colour), names the plan with its
+   progress underneath, and keeps the view switch and actions on the right. */
+.gyro-plan-panel-head {
+  align-items: center;
+  box-sizing: border-box;
+  display: grid;
+  flex: none;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  position: relative;
+}
+
+.gyro-plan-rail > .gyro-plan-panel-head.is-panel {
+  background: var(--gyro-app);
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  min-height: 56px;
+  padding: 0 10px 0 14px;
+}
+
+:root[data-theme="light"] .gyro-plan-rail > .gyro-plan-panel-head.is-panel {
+  background: var(--gyro-surface);
+}
+
+.gyro-plan-panel-title {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gyro-plan-panel-icon {
+  align-items: center;
+  background: var(--gyro-control-bg);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
+  display: inline-flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.gyro-plan-panel-title > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-plan-panel-title strong {
+  color: var(--gyro-text);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-plan-panel-title small {
+  color: var(--gyro-faint);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-plan-panel-title small > em {
+  color: var(--gyro-warn);
+  font-style: normal;
+}
+
+.gyro-plan-panel-tools {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.gyro-plan-panel-views {
+  background: var(--gyro-segment-bg);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 4px;
+  padding: 2px;
+}
+
+.gyro-plan-panel-views > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  transition:
+    background var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  white-space: nowrap;
+}
+
+.gyro-plan-panel-views > button:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-plan-panel-views > button[aria-pressed="true"] {
+  background: var(--gyro-segment-active);
+  box-shadow:
+    0 1px 2px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  color: var(--gyro-segment-active-text);
+}
+
+.gyro-plan-panel-views > button:focus-visible,
+.gyro-plan-panel-action:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+
+.gyro-plan-panel-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  width: 28px;
+}
+
+.gyro-plan-panel-action:hover {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+
+/* Progress rides the header's bottom edge instead of taking its own row. */
+.gyro-plan-panel-progress {
+  bottom: -1px;
+  height: 2px;
+  left: 0;
+  overflow: hidden;
+  position: absolute;
+  right: 0;
+}
+
+.gyro-plan-panel-progress > span {
+  background: var(--gyro-status-success);
+  display: block;
+  height: 100%;
+  transition: width var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+}
+
+/* A narrow panel keeps the switch as icons so the title keeps its room. */
+@container (max-width: 400px) {
+  .gyro-plan-panel-views > button > span {
+    display: none;
+  }
+}
+
+.gyro-plan-rail:has(> .gyro-plan-panel-head) {
+  container-type: inline-size;
+}
+
+/* In the plan panel the checklist is the body, not a card inside it. */
+.gyro-plan-rail .gyro-plan-harness.gyro-plan-steps {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  grid-template-rows: minmax(0, 1fr);
+  padding: 8px 8px 20px;
+}
+
+/* Steps read as a quiet vertical track: one mark per step joined by a hairline,
+   the title beside it, and nothing else unless a step is blocked. Row tools
+   appear on hover. The mark carries the state: an empty ring waits, a turning
+   arc is the step the model is on, a filled check is done. */
+.gyro-plan-harness.gyro-plan-steps > .gyro-rail-section {
+  display: grid;
+  gap: 0;
+  padding: 4px 4px 0;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  padding: 8px 8px;
+  position: relative;
+  transition: background var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item + .gyro-plan-item {
+  border-top: 0;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item:hover,
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item:focus-within {
+  background: color-mix(in srgb, var(--gyro-text) 3.5%, transparent);
+  border: 0;
+}
+
+/* The track: from under this step's mark to the next step's mark. */
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item::before {
+  background: var(--gyro-premium-hairline);
+  bottom: -10px;
+  content: "";
+  left: calc(8px + 9.5px);
+  position: absolute;
+  top: 30px;
+  width: 1px;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item:last-of-type::before {
+  display: none;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item.is-complete::before {
+  background: color-mix(in srgb, var(--gyro-status-success) 45%, transparent);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-check {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  width: 20px;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-check:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Scoped through the check button so the steps list's generic span rules
+   (faint colour, clipped overflow) never reach the mark. */
+.gyro-plan-check > .gyro-plan-step-status {
+  align-items: center;
+  overflow: visible;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px var(--gyro-border-strong);
+  box-sizing: border-box;
+  color: var(--gyro-app);
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  transition:
+    background var(--gyro-premium-motion) var(--gyro-premium-ease),
+    box-shadow var(--gyro-premium-motion) var(--gyro-premium-ease);
+  width: 16px;
+}
+
+.gyro-plan-check:hover .gyro-plan-step-status.is-todo {
+  box-shadow: inset 0 0 0 1.5px var(--gyro-text);
+}
+
+.gyro-plan-check > .gyro-plan-step-status.is-complete {
+  background: var(--gyro-status-success);
+  box-shadow: none;
+}
+
+.gyro-plan-check > .gyro-plan-step-status.is-blocked {
+  background: var(--gyro-warn);
+  box-shadow: none;
+}
+
+.gyro-plan-check > .gyro-plan-step-status.is-in-progress {
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--gyro-status-running) 22%, transparent);
+  color: var(--gyro-status-running);
+}
+
+.gyro-plan-step-status.is-in-progress svg {
+  animation: gyro-chat-activity-spin 0.9s linear infinite;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item strong {
+  color: var(--gyro-text);
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-weight: 450;
+  line-height: 20px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item.is-in-progress strong {
+  font-weight: 600;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item.is-complete strong {
+  color: var(--gyro-muted);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item > div > span {
+  color: var(--gyro-faint);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item > small {
+  align-self: center;
+  background: var(--gyro-warn-soft);
+  border-radius: 999px;
+  color: var(--gyro-warn);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  grid-column: 3;
+  grid-row: 1;
+  line-height: 20px;
+  padding: 0 8px;
+  text-transform: none;
+}
+
+/* Tools float over the row end on hover and take the Blocked tag's place. */
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item-actions {
+  align-self: center;
+  background: var(--gyro-app);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: -8px 0 8px var(--gyro-app);
+  grid-column: 3;
+  grid-row: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item:hover .gyro-plan-item-actions,
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item:focus-within .gyro-plan-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item-actions button {
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item-actions button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-item-actions {
+  background: var(--gyro-surface);
+  box-shadow: -8px 0 8px var(--gyro-surface);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-rail-row.is-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-faint);
+  column-gap: 12px;
+  display: grid;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  grid-template-columns: 20px minmax(0, 1fr);
+  justify-items: start;
+  margin-top: 4px;
+  min-height: 36px;
+  padding: 0 8px;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-rail-row.is-action > svg {
+  justify-self: center;
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-rail-row.is-action:hover {
+  background: color-mix(in srgb, var(--gyro-text) 3.5%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-harness.gyro-plan-steps .gyro-plan-inline-editor {
+  margin: 4px 0 0;
+}
+
+/* Without rotation the open arc in the running colour still tells the step
+   being worked on apart from a waiting ring. */
+@media (prefers-reduced-motion: reduce) {
+  .gyro-plan-step-status.is-in-progress svg {
+    animation: none;
+  }
+}
+
+/* The Environment popover's Plan row reuses the step mark while a step runs,
+   so the popover shows at a glance that the plan is being worked. */
+.gyro-chat-environment-plan-row > .gyro-plan-step-status {
+  align-items: center;
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--gyro-status-running) 22%, transparent);
+  color: var(--gyro-status-running);
+  display: inline-flex;
+  flex: none;
+  height: 14px;
+  justify-content: center;
+  border-radius: 999px;
+  width: 14px;
+}
+
+.gyro-chat-environment-plan-row > .gyro-plan-step-status svg {
+  animation: gyro-chat-activity-spin 0.9s linear infinite;
+  height: 14px;
+  width: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-chat-environment-plan-row > .gyro-plan-step-status svg {
+    animation: none;
+  }
+}
+
+/* The Plan row in the chat's Environment card unfolds its steps in place. */
+.gyro-chat-environment-plan-row > svg:last-child {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-chat-environment-plan-row[aria-expanded="true"] > svg:last-child {
+  transform: rotate(90deg);
+}
+
+.gyro-environment-plan {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 0 0 0 6px;
+}
+
+.gyro-environment-plan-steps {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 0;
+}
+
+.gyro-environment-plan-steps > li {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 26px;
+  position: relative;
+}
+
+/* The same hairline track as the plan panel, scaled to the compact rows. */
+.gyro-environment-plan-steps > li::before {
+  background: var(--gyro-premium-hairline);
+  bottom: -6px;
+  content: "";
+  left: 9.5px;
+  position: absolute;
+  top: 19px;
+  width: 1px;
+}
+
+.gyro-environment-plan-steps > li:last-child::before {
+  display: none;
+}
+
+.gyro-environment-plan-steps > li.is-complete::before {
+  background: color-mix(in srgb, var(--gyro-status-success) 45%, transparent);
+}
+
+.gyro-environment-plan-steps .gyro-plan-check {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 20px;
+}
+
+.gyro-environment-plan-steps .gyro-plan-check:disabled {
+  cursor: default;
+}
+
+.gyro-environment-plan-steps .gyro-plan-check:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+
+.gyro-environment-plan-steps .gyro-plan-step-status {
+  height: 14px;
+  width: 14px;
+}
+
+.gyro-environment-plan-steps .gyro-plan-step-status.is-in-progress svg {
+  height: 14px;
+  width: 14px;
+}
+
+.gyro-environment-plan-steps > li > span {
+  color: var(--gyro-text);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-environment-plan-steps > li.is-complete > span {
+  color: var(--gyro-muted);
+}
+
+.gyro-environment-plan-steps > li.is-in-progress > span {
+  font-weight: 600;
+}
+
+.gyro-environment-plan-steps > li > small {
+  background: var(--gyro-warn-soft);
+  border-radius: 999px;
+  color: var(--gyro-warn);
+  font-size: calc(10.5px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  line-height: 18px;
+  padding: 0 7px;
+}
+
+.gyro-environment-plan-open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  gap: 4px;
+  justify-self: start;
+  margin-left: 22px;
+  padding: 4px 6px;
+}
+
+.gyro-environment-plan-open:hover,
+.gyro-environment-plan-open:focus-visible {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+  outline: none;
+}

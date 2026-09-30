@@ -570,9 +570,20 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
-export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
-export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
+export {
+  formatChatAnswers,
+  latestChatQuestions,
+  parseChatAnswers,
+  parseChatQuestions,
+  questionsFromPayload,
+} from "./chat-questions";
+export type {
+  ChatQuestion,
+  ChatQuestionAnswer,
+  ChatQuestionRequest,
+} from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
+export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
 export { sendableChatImage } from "./chat-media-transfer";
 export type {
   ChatRailDiffTools,

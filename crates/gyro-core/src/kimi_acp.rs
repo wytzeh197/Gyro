@@ -1,7 +1,7 @@
 use crate::credentials::{
     apply_stored_provider_api_key, provider_id_from_program, CredentialPolicy,
 };
-use crate::execution::{configure_process_group, terminate_process_group};
+use crate::execution::{configure_process_group, register_process_group, terminate_process_group};
 use crate::security::redact_secrets;
 use crate::CancellationToken;
 use anyhow::{anyhow, Result};
@@ -264,6 +264,9 @@ impl KimiAcpConnection {
             let _ = stderr_sender.send(collected);
         });
 
+        // Tracked from here on, where `Drop` owns teardown (which also
+        // unregisters it), so app quit can reach a live ACP agent too.
+        register_process_group(child.id());
         let now = Instant::now();
         Ok(Self {
             provider_label: request.provider_label.clone(),
