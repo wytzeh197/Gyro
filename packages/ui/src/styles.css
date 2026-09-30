@@ -13314,9 +13314,6 @@ button.gyro-settings-row em::after {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.gyro-provider-table {
-  border-top: 0.5px solid var(--gyro-hairline-strong);
-}
 .gyro-provider-table-head,
 .gyro-provider-table > .gyro-provider-row {
   align-items: center;
@@ -13326,13 +13323,37 @@ button.gyro-settings-row em::after {
     minmax(130px, 1fr) minmax(150px, 0.9fr) minmax(110px, 0.55fr)
     276px;
 }
+/* The group title leads the column labels, so one line names both. */
 .gyro-provider-table-head {
+  border-bottom: 0.5px solid var(--gyro-hairline-strong);
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
-  font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.06em;
-  padding: 10px 12px;
-  text-transform: uppercase;
+  font-weight: var(--gyro-weight-medium);
+  padding: 0 12px 8px;
+}
+.gyro-provider-table-head > h2 {
+  align-items: center;
+  color: var(--gyro-text);
+  display: flex;
+  font-size: var(--gyro-type-base);
+  font-weight: var(--gyro-weight-medium);
+  gap: 8px;
+  margin: 0;
+}
+.gyro-provider-group-note {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-sm);
+  line-height: 1.5;
+  margin: 0;
+  padding: 10px 12px 2px;
+}
+.gyro-provider-row .gyro-provider-connect-method {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .gyro-provider-table > .gyro-provider-row {
   border-bottom: 0.5px solid var(--gyro-hairline-soft);
@@ -13719,6 +13740,9 @@ button.gyro-settings-row em::after {
 
 @media (max-width: 900px) {
   .gyro-provider-table-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-provider-table-head > span {
     display: none;
   }
   .gyro-provider-table > .gyro-provider-row {
@@ -13903,6 +13927,11 @@ button.gyro-settings-row em::after {
     gap: 12px;
     grid-template-columns: minmax(0, 1fr);
     padding: 14px 4px;
+  }
+
+  .gyro-provider-table-head,
+  .gyro-provider-group-note {
+    padding-inline: 4px;
   }
 
   /* Stacked rows have no column to align to, so stop the select spanning it. */
@@ -29411,57 +29440,32 @@ body,
   }
 }
 
-/* Provider setup: clear entry points without hiding searchable controls. */
+/* Provider setup: one quiet line of jump links, not cards that read as info. */
 .gyro-provider-connect-path {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.gyro-provider-connect-path > button {
+  align-items: center;
   display: flex;
-  flex-direction: column;
-  padding: 16px;
-  min-width: 0;
-  text-align: left;
-  color: var(--gyro-text);
-  background: transparent;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: -12px;
 }
-.gyro-provider-connect-path span,
-.gyro-provider-connect-help p,
+.gyro-provider-connect-path > span {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-type-sm);
+  margin-right: 4px;
+}
 .gyro-provider-identity .gyro-provider-setup-message {
   color: var(--gyro-muted);
+  display: block;
   font-size: var(--gyro-type-sm);
   line-height: 1.5;
-}
-.gyro-provider-connect-help h2 {
-  margin: 0 0 8px;
-  font-size: var(--gyro-type-base);
-}
-.gyro-provider-connect-help p {
-  margin: 0;
-  max-width: 70ch;
-}
-.gyro-provider-identity .gyro-provider-setup-message {
-  display: block;
-  white-space: normal;
-  overflow-wrap: anywhere;
   margin-top: 4px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
-.gyro-provider-connect-help,
+.gyro-provider-table,
 #gyro-provider-api-keys,
 #gyro-provider-ollama {
   scroll-margin-block: 24px;
-}
-@media (max-width: 760px) {
-  .gyro-provider-connect-path {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  .gyro-provider-connect-path > button {
-    padding: 12px;
-  }
 }
 
 /* Design polish — shared appearance, with pane geometry owned above. */
@@ -30108,26 +30112,6 @@ body,
   overflow-wrap: anywhere;
 }
 
-.gyro-provider-connect-path > button {
-  gap: 8px;
-  font: var(--gyro-type-md) var(--gyro-font-sans);
-  line-height: 1.45;
-  transition:
-    background-color calc(120ms * var(--gyro-motion-factor, 1)) ease,
-    border-color calc(120ms * var(--gyro-motion-factor, 1)) ease;
-}
-
-.gyro-provider-connect-path > button > strong {
-  font-size: var(--gyro-type-base);
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-provider-connect-path > button:hover {
-  background: var(--gyro-control-hover);
-  border-color: var(--gyro-border-strong);
-  transform: none;
-}
-
 /* Storage paths remain copyable without forcing their row wider than the page. */
 .gyro-settings-surface .gyro-copy-value {
   max-width: 100%;
@@ -30149,7 +30133,16 @@ body,
    content area after the sidebar, rather than only the window breakpoint. */
 @container gyro-settings (max-width: 760px) {
   .gyro-provider-table-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gyro-provider-table-head > span {
     display: none;
+  }
+
+  .gyro-provider-table-head,
+  .gyro-provider-group-note {
+    padding-inline: 4px;
   }
 
   .gyro-provider-table.is-native-list > .gyro-provider-row {
@@ -30167,15 +30160,6 @@ body,
   .gyro-settings-provider-actions {
     flex-wrap: wrap;
     justify-content: flex-start;
-  }
-
-  .gyro-provider-connect-path {
-    gap: 8px;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .gyro-provider-connect-path > button {
-    padding: 12px 14px;
   }
 }
 
@@ -30241,12 +30225,6 @@ body,
   font-size: var(--gyro-type-md);
   line-height: 1.6;
   overflow-wrap: anywhere;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .gyro-provider-connect-path > button {
-    transition: none;
-  }
 }
 
 /* Responsive CSS can hide the sidebar without changing the desktop preference.
