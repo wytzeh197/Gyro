@@ -28,6 +28,14 @@ export function SettingsSelect(props: ComponentProps<typeof OptionSelect>) {
   return <OptionSelect {...props} />;
 }
 
+/**
+ * One settings row: the label and its explanation, then the control.
+ *
+ * `value` is a read-only fact ("On", "Provider-dependent"). It is set after the
+ * label as quiet text, never in the control column, so a row that cannot be
+ * changed does not look like a disabled control. The control column is only
+ * rendered when there is something to operate.
+ */
 export function SettingsRow({
   label,
   value,
@@ -46,12 +54,22 @@ export function SettingsRow({
   const content = (
     <>
       <div>
-        <strong>{label}</strong>
+        <strong>
+          {label}
+          {/* A real space keeps "Label Value" apart in copied text and for
+              screen readers; the dot between them is drawn by CSS. */}
+          {value ? (
+            <>
+              {" "}
+              <small className="gyro-settings-info-value">{value}</small>
+            </>
+          ) : null}
+        </strong>
         <span>{detail}</span>
       </div>
-      <div className="gyro-settings-control-column">
-        {children ?? <span className="gyro-settings-info-value">{value}</span>}
-      </div>
+      {children != null && children !== false ? (
+        <div className="gyro-settings-control-column">{children}</div>
+      ) : null}
     </>
   );
 

@@ -585,6 +585,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/keyboard-settings.tsx"),
+  readRepoFile("packages/ui/src/usage-card.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
 ].join("\n");
@@ -4135,7 +4136,11 @@ expect(
       'invoke<NotificationPermissionState>("test_notification")',
     ) &&
     surfaceSource.includes("Test notification") &&
-    surfaceSource.includes("Gyro asks macOS when you send a test") &&
+    surfaceSource.includes(
+      "Gyro asks macOS for permission, then sends a test notification",
+    ) &&
+    // No notification switch may look on until macOS has allowed Gyro.
+    surfaceSource.includes('const allowed = permission === "granted"') &&
     !tauriSource.includes("body(automation.prompt)") &&
     !tauriSource.includes("body(automation.last_result)"),
   "Background automation outcomes should require explicit native permission and use generic notices without exposing prompts or results.",

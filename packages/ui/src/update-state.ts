@@ -126,7 +126,7 @@ export function updateStatusSummary(
 ): string | undefined {
   switch (state?.status) {
     case "development":
-      return "The updater is off in development builds. Nothing is contacted and no release is installed.";
+      return "The updater is off in development builds, so Gyro never checks for or installs a release.";
     case "checking":
       return "Asking GitHub Releases for the newest signed Alpha build.";
     case "current":

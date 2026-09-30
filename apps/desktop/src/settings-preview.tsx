@@ -9,8 +9,10 @@ import {
   type ThemeMode,
   providersForConfig,
   type DesktopNotificationPreferences,
+  type NotificationPermissionState,
   type GyroConfig,
   type ProviderId,
+  type ProviderUsageState,
   type SettingsSectionId,
   type UpdateState,
 } from "@gyro-dev/ui";
@@ -116,6 +118,19 @@ const UPDATE_SCENES: Array<{
   },
 ];
 
+/** Plan windows at every level, so Usage Limits can be reviewed whole. */
+const USAGE_PREVIEW: ProviderUsageState = {
+  providerId: "openai",
+  status: "available",
+  fetchedAt: "2026-09-22T13:28:00.000Z",
+  windows: [
+    { id: "five-hour", label: "5-hour window", usedPercent: 42 },
+    { id: "weekly", label: "Weekly window", usedPercent: 86 },
+    { id: "weekly-opus", label: "Weekly · largest model", status: "exhausted" },
+    { id: "monthly", label: "Monthly credits" },
+  ],
+};
+
 function Preview() {
   const [theme, setTheme] = useState<ThemeMode>(() =>
     new URLSearchParams(location.search).get("theme") === "dark"
@@ -130,8 +145,22 @@ function Preview() {
       ? "providers"
       : scene === "updates"
         ? "updates"
-        : "appearance",
+        : scene === "general"
+          ? "general"
+          : scene === "usage"
+            ? "usage-limits"
+            : "appearance",
   );
+  // ?permission=prompt|denied|granted|checking previews each macOS
+  // notification state; "checking" is the moment before macOS answers.
+  const [permission, setPermission] = useState<
+    NotificationPermissionState | undefined
+  >(() => {
+    const requested = new URLSearchParams(location.search).get("permission");
+    return requested === "checking"
+      ? undefined
+      : ((requested as NotificationPermissionState | null) ?? "prompt");
+  });
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
@@ -303,11 +332,24 @@ function Preview() {
         onDesktopNotificationsChange={(next) =>
           setNotifications((current) => ({ ...current, ...next }))
         }
+        notificationPermission={permission}
+        onTestNotification={() =>
+          setPermission((current) =>
+            current === "denied" ? "denied" : "granted",
+          )
+        }
         modelFollow={follow}
         onModelFollowChange={setFollow}
         mainColor={colors[0]}
         secondaryColor={colors[1]}
         updateState={updateState}
+        selectedUsageProviderId="openai"
+        providerUsage={section === "usage-limits" ? USAGE_PREVIEW : undefined}
+        usageVisualization={
+          new URLSearchParams(location.search).get("viz") === "wheels"
+            ? "wheels"
+            : "bars"
+        }
         onCheckForUpdates={() => setResult("Checked for updates (preview)")}
         onUpdateAction={(state) => setResult(`Update action: ${state.status}`)}
         onAppearanceColorsChange={(main, secondary) =>

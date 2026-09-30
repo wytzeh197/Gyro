@@ -181,6 +181,32 @@ export function useGyroUpdater({
     stateRef.current = state;
   }, [state]);
 
+  // Settings names the running build from launch. The version used to arrive
+  // only with a check, so a development build, or one with automatic checks
+  // off, showed a bare "Gyro" until someone checked by hand.
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return undefined;
+    }
+    let active = true;
+    void getVersion()
+      .then((version) => {
+        const installed = typeof version === "string" ? version.trim() : "";
+        if (!active || !installed) return;
+        currentVersionRef.current = installed;
+        setState((current) =>
+          current.currentVersion === "unknown" ||
+          current.currentVersion === "development"
+            ? { ...current, currentVersion: installed }
+            : current,
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const downloadUpdate = useCallback(async () => {
     let update = updateRef.current;
     if (!update) {

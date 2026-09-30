@@ -955,7 +955,7 @@ export function App() {
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
   const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
-    useState<NotificationPermissionState>("prompt");
+    useState<NotificationPermissionState>(); // undefined until macOS answers
   const [isTestingNotification, setIsTestingNotification] = useState(false);
   const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
   const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
@@ -2211,14 +2211,14 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
+      workbench.preferences.lastSettingsSection !== "general" ||
       !isTauriRuntime()
     ) {
       return undefined;
     }
     void invoke<NotificationPermissionState>("get_notification_permission")
       .then(setNotificationPermission)
-      .catch(() => undefined);
+      .catch(() => setNotificationPermission("prompt"));
   }, [activeDestination, workbench.preferences.lastSettingsSection]);
   const testSystemNotification = useCallback(async () => {
     if (isTestingNotification) return;
