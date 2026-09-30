@@ -25113,10 +25113,14 @@ function Composer({
     const preferredRoom = preferred === "up" ? roomAbove : roomBelow;
     const oppositeRoom = preferred === "up" ? roomBelow : roomAbove;
     // The model list keeps the slider's side while that side leaves it a
-    // usable list, scrolling into the space instead of jumping across.
+    // usable list, scrolling into the space instead of jumping across. Below
+    // the start composer a few rows will do: flipping up would cover the
+    // headline the downward card was keeping clear.
     // Anything else takes the side it fits on, else the roomier one.
+    const usableListRoom = preferred === "down" ? 160 : 280;
     const keepsSide = isModelRailPane
-      ? preferredRoom >= Math.min(height, 280) || preferredRoom >= oppositeRoom
+      ? preferredRoom >= Math.min(height, usableListRoom) ||
+        preferredRoom >= oppositeRoom
       : height <= preferredRoom ||
         (height > oppositeRoom && preferredRoom >= oppositeRoom);
     const direction = keepsSide ? preferred : preferred === "up" ? "down" : "up";
@@ -25132,6 +25136,20 @@ function Composer({
     preferredProviderPlacement,
     popoverScopeRef,
   ]);
+  // The usage card is a hover card and cannot scroll, so it takes the menus'
+  // side only when it fits there. Place it as it opens, and again when a
+  // fresh reading changes its height while it is showing.
+  const contextMeterRef = useRef<HTMLDivElement>(null);
+  const openContextMeter = () => {
+    if (contextMeterRef.current)
+      placeComposerContextCard(contextMeterRef.current, menuPlacement);
+    refreshContextMeterUsage();
+  };
+  useLayoutEffect(() => {
+    const meter = contextMeterRef.current;
+    if (meter?.matches(":hover, :focus-within"))
+      placeComposerContextCard(meter, menuPlacement);
+  }, [limitWindows, menuPlacement, providerUsage, shownContextUsage]);
 
   useEffect(() => {
     setActiveSlashCommandIndex(0);
@@ -25861,46 +25879,50 @@ function Composer({
             className="gyro-composer-context-meter"
             // Opening the meter asks for the plan's current level; the account
             // poll coalesces repeat hovers into one request.
-            onFocus={refreshContextMeterUsage}
-            onPointerEnter={refreshContextMeterUsage}
+            onFocus={openContextMeter}
+            onPointerEnter={openContextMeter}
+            ref={contextMeterRef}
           >
-            {shownContextUsage ? (
+            {/* One focusable node for both states, so focus survives the
+                first context reading turning the gauge into the ring. Before
+                a reading, the gauge keeps plan limits one hover away without
+                a ring claiming 0%. */}
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-              aria-label={shownContextUsage.label}
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={shownContextUsage.percent}
-              className="gyro-composer-context-wheel"
-              role="progressbar"
+              aria-label={shownContextUsage?.label ?? "Plan usage"}
+              aria-valuemax={shownContextUsage ? 100 : undefined}
+              aria-valuemin={shownContextUsage ? 0 : undefined}
+              aria-valuenow={shownContextUsage?.percent}
+              className={
+                shownContextUsage
+                  ? "gyro-composer-context-wheel"
+                  : "gyro-composer-plan-usage"
+              }
+              data-severity={
+                shownContextUsage
+                  ? undefined
+                  : (limitWindows.find(
+                      (window) => window.severity === "critical",
+                    )?.severity ??
+                    limitWindows.find((window) => window.severity === "warning")
+                      ?.severity)
+              }
+              role={shownContextUsage ? "progressbar" : "img"}
               style={
-                {
-                  "--context-usage": `${shownContextUsage.percent * 3.6}deg`,
-                } as CSSProperties
+                shownContextUsage
+                  ? ({
+                      "--context-usage": `${shownContextUsage.percent * 3.6}deg`,
+                    } as CSSProperties)
+                  : undefined
               }
               tabIndex={0}
             >
-              <span />
-            </div>
-            ) : (
-              /* No context reading yet, but the plan's limits are known: a
-                 gauge keeps them one hover away without a ring claiming 0%. */
-              <span
-                aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-                aria-label="Plan usage"
-                className="gyro-composer-plan-usage"
-                data-severity={
-                  limitWindows.find((window) => window.severity === "critical")
-                    ?.severity ??
-                  limitWindows.find((window) => window.severity === "warning")
-                    ?.severity
-                }
-                role="img"
-                tabIndex={0}
-              >
+              {shownContextUsage ? (
+                <span />
+              ) : (
                 <Gauge aria-hidden="true" size={14} />
-              </span>
-            )}
+              )}
+            </div>
             <div
               className="gyro-composer-context-tooltip"
               id={`${popoverBaseId}-context-usage-tooltip`}
@@ -29556,6 +29578,35 @@ function clippingBounds(element: HTMLElement) {
     };
   }
   return viewport;
+}
+
+/// Picks the side of the composer's usage card by measurement. The card
+/// cannot scroll, so it keeps the preferred side only when it fits there,
+/// else takes the side it fits on, else the roomier one. The choice rides on
+/// the meter as data-placement, which the card's CSS reads.
+function placeComposerContextCard(meter: HTMLElement, preferred: "up" | "down") {
+  const card = meter.querySelector<HTMLElement>(
+    ".gyro-composer-context-tooltip",
+  );
+  if (!card) return;
+  // Thread composers anchor the card to the bar rather than the meter.
+  const anchor = (card.offsetParent ?? meter).getBoundingClientRect();
+  const bounds = clippingBounds(card);
+  const gap = 12; // the card's calc(100% + 12px)
+  const edgePad = 12;
+  const height = card.offsetHeight;
+  const roomAbove = anchor.top - bounds.top - gap - edgePad;
+  const roomBelow = bounds.bottom - anchor.bottom - gap - edgePad;
+  const preferredRoom = preferred === "down" ? roomBelow : roomAbove;
+  const oppositeRoom = preferred === "down" ? roomAbove : roomBelow;
+  const keepsSide =
+    height <= preferredRoom ||
+    (height > oppositeRoom && preferredRoom >= oppositeRoom);
+  meter.dataset.placement = keepsSide
+    ? preferred
+    : preferred === "down"
+      ? "up"
+      : "down";
 }
 
 function workspaceParentFolder(path?: string) {
