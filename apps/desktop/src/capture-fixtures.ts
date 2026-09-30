@@ -898,6 +898,35 @@ const responses: Record<string, unknown> = {
   check_system_access: [],
 };
 
+// Opt-in (automations=1): a few automations so the Automations list, filters,
+// and detail panel can be captured. Without the flag the page stays empty.
+const captureAutomations = [
+  ["auto_capture_1", "Daily project check", "current", 2],
+  ["auto_capture_2", "Weekly code review", "paused", 0],
+  ["auto_capture_3", "Dependency audit", "completed", 0],
+].map(([id, title, status, unreadResults]) => ({
+  id,
+  title,
+  prompt: `${title}. Summarize what needs attention. Do not edit files.`,
+  schedule: "daily-at",
+  status,
+  triageState: "none",
+  project: WORKSPACE,
+  provider: "anthropic",
+  branch: "main",
+  workspaceMode: "local",
+  execution: {
+    calendar: { timezone: "UTC", time: "09:00", weekday: 0 },
+    workspacePath: WORKSPACE,
+    providerId: "anthropic",
+  },
+  lastResult: "",
+  unreadResults,
+  runHistory: [],
+  createdAt: NOW,
+  updatedAt: NOW,
+}));
+
 const emptyArray = new Set([
   "list_automations",
   "github_workflow_runs",
@@ -1466,6 +1495,8 @@ const invoke: Invoke = (command, args) => {
     };
   }
   if (command in responses) return responses[command];
+  if (command === "list_automations" && parameters.get("automations") === "1")
+    return captureAutomations;
   if (emptyArray.has(command)) return [];
   if (command === "read_terminal_output") {
     return (

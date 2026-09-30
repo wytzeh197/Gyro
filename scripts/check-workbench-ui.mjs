@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
 import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
@@ -869,23 +869,53 @@ expect(
   "Workspace Source Control files should use compact single-line rows with stable actions.",
 );
 // Commit is the shared primary button only with a message and staged files;
-// otherwise it is the secondary primitive (disabled without a message), and no
-// contextual rule repaints the commit actions over the primitives.
+// otherwise it is the secondary primitive (disabled without a message). All
+// three actions (commit, sync, check) are the small gyro-button, and no
+// contextual rule anywhere repaints or resizes a button inside the commit
+// actions: whatever the selector shape (`> button`, `button:disabled`,
+// `.gyro-button.is-primary`, inside @media), it may not set background,
+// border, height, opacity, font, or padding over the primitive.
 const compactSurfaceSource = surfaceSource.replace(/\s+/g, " ");
+const commitActionsStart = surfaceSource.indexOf(
+  'className="gyro-sidebar-commit-actions"',
+);
+const commitActionButtonClasses =
+  surfaceSource
+    .slice(commitActionsStart, surfaceSource.indexOf("</form>", commitActionsStart))
+    .match(/"gyro-button[^"]*"/g) ?? [];
+const allUiStyleSource = ["packages/ui/src", "apps/desktop/src"]
+  .flatMap((dir) =>
+    readdirSync(resolve(repoRoot, dir))
+      .filter((file) => file.endsWith(".css"))
+      .map((file) => readRepoFile(`${dir}/${file}`)),
+  )
+  .join("\n");
+const commitActionButtonOverrides = [
+  ...allUiStyleSource
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .matchAll(/([^{}]+)\{([^{}]*)\}/g),
+].filter(
+  ([, selectors, body]) =>
+    selectors
+      .split(",")
+      .some((selector) =>
+        /commit-actions\b[^,]*(\bbutton\b|\.gyro-button\b|>\s*\*)/.test(selector),
+      ) &&
+    /(?:^|[;{\s])(?:background|border|(?:min-|max-)?height|opacity|font|padding)[\w-]*\s*:/.test(
+      body,
+    ),
+);
 expect(
-  surfaceSource.includes('className="gyro-sidebar-commit-actions"') &&
+  commitActionsStart !== -1 &&
     compactSurfaceSource.includes(
       "const sourceControlCommitReady = sourceControlMessage.trim().length > 0 && stagedSourceControlFiles.length > 0;",
     ) &&
     compactSurfaceSource.includes(
-      'className={ sourceControlCommitReady ? "gyro-button is-primary" : "gyro-button is-secondary" }',
+      'className={ sourceControlCommitReady ? "gyro-button is-primary is-small" : "gyro-button is-secondary is-small" }',
     ) &&
-    !cssRules(styleSource, ".gyro-sidebar-commit-actions > button").some(
-      (rule) => /background|opacity/.test(rule),
-    ) &&
-    !/commit-actions\s*>\s*button(:not\(\.is-secondary\)|\.is-secondary)/.test(
-      styleSource,
-    ),
+    commitActionButtonClasses.length === 4 &&
+    commitActionButtonClasses.every((name) => / is-small\b/.test(name)) &&
+    commitActionButtonOverrides.length === 0,
   "Disabled Source Control commits should look unavailable instead of like a primary action.",
 );
 
@@ -912,10 +942,33 @@ expect(
 
 // History never says "No commits yet." beside "1 commit to push": a branch with
 // commits to push, or one already on the remote, says history has not loaded.
+// The detailed read that brings history is already queued, so the copy does
+// not send the user to a refresh.
 expect(
   surfaceSource.includes("sourceControlAhead > 0 || sourceControlPublished") &&
-    surfaceSource.includes("History hasn't loaded yet. Refresh to load it."),
+    surfaceSource.includes('"History hasn\'t loaded yet."') &&
+    !surfaceSource.includes("Refresh to load it."),
   "Source Control history should not claim there are no commits while commits wait to push.",
+);
+
+// Automations: the status filter collapses to a menu from the list column's
+// measured width, not whenever a panel is open, and "Show all" keeps keyboard
+// focus in the column instead of dropping it to <body>.
+const automationStatusFilterSource = readRepoFile(
+  "packages/ui/src/automation-status-filter.tsx",
+);
+expect(
+  automationStatusFilterSource.includes("new ResizeObserver(measure)") &&
+    automationStatusFilterSource.includes("wraps || needed > available") &&
+    compactSurfaceSource.includes(
+      '<AutomationStatusFilter containerRef={indexRef} onChange={setStatusFilter} size={isCreating || detailOpen ? "small" : "medium"} value={statusFilter} />',
+    ) &&
+    !/isCreating \|\| detailOpen \? \( <SelectMenu/.test(compactSurfaceSource) &&
+    compactSurfaceSource.includes(
+      'flushSync(() => { setQuery(""); setStatusFilter(""); });',
+    ) &&
+    compactSurfaceSource.includes("searchRef.current ?? indexRef.current?.querySelector"),
+  "Automation filters should fit the list column and Show all should keep focus.",
 );
 
 // The review diff's change count is unknown until Monaco's worker answers, so
