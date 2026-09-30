@@ -11158,7 +11158,7 @@ textarea,
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-shell textarea,
 :root[data-theme="light"] .gyro-composer-shell.is-hero textarea,
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-bar {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d9dde5;
   color: var(--gyro-hero-text);
   font-size: var(--gyro-type-base);
@@ -11191,7 +11191,7 @@ textarea,
 
 :root[data-theme="light"] .gyro-send-button {
   background: #1f242c;
-  color: #ffffff;
+  color: var(--gyro-primary-text);
 }
 
 :root[data-theme="light"] .gyro-send-button:hover {
@@ -11199,23 +11199,23 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-send-button:disabled {
-  background: #d1d5db;
-  color: #6b7280;
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
 }
 
 :root[data-theme="light"]
   .gyro-chat-start
   .gyro-composer-shell.is-provider-collapsed
   .gyro-send-button:disabled {
-  background: #d1d5db;
-  color: #6b7280;
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
   opacity: 0.9;
 }
 
 :root[data-theme="light"]
   .gyro-chat-surface.has-environment
   .gyro-environment-rail {
-  background: #ffffff;
+  background: var(--gyro-surface);
   box-shadow:
     var(--gyro-elev-pop), inset 0 0 0 0.5px rgba(32, 34, 38, 0.12);
 }
@@ -11271,7 +11271,7 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-pane,
 :root[data-theme="light"] .gyro-terminal-pane {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: rgba(32, 34, 38, 0.12);
 }
 
@@ -11305,7 +11305,7 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-workspace-tool-panel-head
   .gyro-icon-button {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: rgba(32, 34, 38, 0.1);
   color: #5b6470;
 }
@@ -11330,7 +11330,7 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-terminal-actions-menu {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: rgba(32, 34, 38, 0.14);
   box-shadow: var(--gyro-elev-pop);
 }
@@ -11343,13 +11343,13 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-pane-tabs
   button.is-active {
-  background: #ffffff;
+  background: var(--gyro-surface);
   color: #171a20;
 }
 
 :root[data-theme="light"] .gyro-cli-launch-preset,
 :root[data-theme="light"] .gyro-cli-launch-stepper {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: rgba(32, 34, 38, 0.12);
   color: #20242b;
 }
@@ -14241,10 +14241,10 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"]
   .gyro-chat-composer-dock
   .gyro-composer-shell.is-hero.has-provider {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d9dde5;
   box-shadow:
-    var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.14), inset 0 1px 0 var(--gyro-inset-highlight);
 }
 
 :root[data-theme="light"]
@@ -14260,7 +14260,7 @@ button.gyro-settings-row em::after {
   .gyro-chat-composer-dock
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-context-row {
-  background: rgba(255, 255, 255, 0.74);
+  background: color-mix(in srgb, var(--gyro-surface) 74%, transparent);
   box-shadow:
     var(--gyro-elev-raised), inset 0 0 0 0.5px rgba(32, 34, 38, 0.1);
 }
@@ -14273,7 +14273,7 @@ button.gyro-settings-row em::after {
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button {
   background: #1f242c;
-  color: #ffffff;
+  color: var(--gyro-primary-text);
 }
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button:hover {
@@ -14281,8 +14281,8 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button:disabled {
-  background: #d1d5db;
-  color: #6b7280;
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
 }
 
 /* Stop must win over the cream/hero send fill in every theme. */
@@ -14315,7 +14315,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-send-button.is-stop,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button.is-stop {
   background: #e8eaee;
-  box-shadow: inset 0 0 0 1px rgba(31, 36, 44, 0.16);
+  box-shadow: inset 0 0 0 1px var(--gyro-hairline-strong);
   color: #1f242c;
 }
 
@@ -15238,20 +15238,20 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-change-summary-details {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d9dde3;
   box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-chat-run-change-summary-trigger {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #e7e9ed;
   color: #667085;
 }
 
 :root[data-theme="light"] .gyro-change-summary-file > button,
 :root[data-theme="light"] .gyro-change-summary-file-static {
-  background: #ffffff;
+  background: var(--gyro-surface);
 }
 
 /* Outcome and route, stacked as siblings under one hairline. The band owns
@@ -16416,7 +16416,7 @@ button.gyro-settings-row em::after {
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-row.gyro-sidebar-explorer-row[aria-selected="true"] {
-  background: rgba(122, 167, 255, 0.12);
+  background: var(--gyro-blue-soft);
   box-shadow: inset 2px 0 0 var(--gyro-accent);
   color: var(--gyro-text);
 }
@@ -16428,7 +16428,7 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"]
   .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-row.gyro-sidebar-explorer-row[aria-selected="true"] {
-  background: rgba(53, 111, 214, 0.1);
+  background: color-mix(in srgb, var(--gyro-blue) 10%, transparent);
 }
 
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
@@ -16723,14 +16723,14 @@ button.gyro-settings-row em::after {
 
 /* Screenshot-driven chat surface corrections. */
 :root[data-theme="light"] .gyro-session-actions {
-  background: rgba(255, 255, 255, 0.96);
+  background: color-mix(in srgb, var(--gyro-surface) 96%, transparent);
   border-color: rgba(31, 41, 55, 0.12);
   box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-session-action,
 :root[data-theme="light"] .gyro-session-action.is-more {
-  color: #5f6670;
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"] .gyro-session-action:hover,
@@ -17164,7 +17164,7 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-composer-slash-hint-bubble {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d5d9e0;
   box-shadow: var(--gyro-elev-pop);
 }
@@ -17177,7 +17177,7 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-composer-slash-menu {
-  background: #ffffff;
+  background: var(--gyro-surface);
   border-color: #d5d9e0;
   box-shadow: var(--gyro-elev-pop);
 }
@@ -21011,14 +21011,13 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-scm-branch-menu {
-  background: #fff;
   border-color: rgba(0, 0, 0, 0.1);
   box-shadow: var(--gyro-elev-pop);
 }
 
 :root[data-theme="light"] .gyro-scm-branch-item:hover,
 :root[data-theme="light"] .gyro-scm-branch-item.is-current {
-  background: color-mix(in srgb, var(--gyro-accent) 14%, #fff);
+  background: color-mix(in srgb, var(--gyro-accent) 14%, var(--gyro-surface-raised));
 }
 
 /* ==========================================================================
