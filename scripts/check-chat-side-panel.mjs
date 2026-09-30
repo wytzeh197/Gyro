@@ -253,7 +253,7 @@ expect(
       surfaces,
     ) &&
     surfaces.includes(
-      "aria-label={`Open Files, ${workspaceName(workspacePath)}`}",
+      "aria-label={`Open files, ${workspaceName(workspacePath)}`}",
     ),
   "Files is a companion tab, so the Environment launcher must open it beside the chat instead of leaving the conversation for Workspace.",
 );

@@ -263,7 +263,7 @@ export function shouldShowSidebarUpdate(state: UpdateState) {
 
 /** Primary button label for the CLI update notice. */
 export function cliUpdateActionLabel(offers: CliUpdateOffer[]) {
-  return offers.length > 1 ? "Update All" : "Update";
+  return offers.length > 1 ? "Update all" : "Update";
 }
 
 /** One-line copy for the center-top CLI update notice. */

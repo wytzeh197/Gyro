@@ -1443,7 +1443,6 @@ button {
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  text-transform: uppercase;
 }
 
 .gyro-message p {
@@ -1885,7 +1884,6 @@ button {
 .gyro-mini-heading {
   font-weight: var(--gyro-weight-strong);
   margin: 0 0 4px;
-  text-transform: uppercase;
 }
 
 .gyro-mini-file-row {
@@ -2341,7 +2339,6 @@ button {
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  text-transform: uppercase;
 }
 
 .gyro-context-metric strong {
@@ -3060,9 +3057,7 @@ button {
   color: var(--gyro-accent);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.02em;
   padding: 2px 8px;
-  text-transform: uppercase;
 }
 
 .gyro-url-bar small.is-local {
@@ -3473,7 +3468,6 @@ button {
 .gyro-automation-prompt span {
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
-  text-transform: uppercase;
 }
 
 .gyro-automation-fact strong {
@@ -3868,7 +3862,6 @@ button {
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  text-transform: uppercase;
 }
 
 .gyro-provider-handoff-form input {
@@ -3970,7 +3963,6 @@ button {
   color: var(--gyro-faint);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  text-transform: uppercase;
 }
 
 .gyro-profile-table-row {
@@ -7170,10 +7162,8 @@ body {
   color: #8f949c;
   font-size: var(--gyro-type-sm);
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.08em;
   margin-top: 5px;
   padding: 10px 8px 4px;
-  text-transform: uppercase;
 }
 
 .gyro-composer-menu-item.is-effort,
@@ -8506,8 +8496,6 @@ body {
 .gyro-chat-artifact-options small {
   color: var(--gyro-accent);
   font-size: var(--gyro-type-xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .gyro-chat-artifact-options em {
@@ -8691,8 +8679,6 @@ body {
   font-size: var(--gyro-type-xs);
   font-style: normal;
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .gyro-chat-artifact-table-wrap {
@@ -9940,7 +9926,6 @@ body {
 
 .gyro-run-task-group-label {
   color: var(--gyro-faint);
-  text-transform: uppercase;
 }
 
 .gyro-run-task-row {
@@ -14606,7 +14591,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-text);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  text-transform: uppercase;
 }
 
 .gyro-model-terminal-notice {
@@ -18121,8 +18105,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-text);
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .gyro-plan-harness {
@@ -18257,10 +18239,8 @@ button.gyro-settings-row em::after {
   color: var(--gyro-faint) !important;
   font-size: var(--gyro-type-xs) !important;
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.08em;
   line-height: 1.2;
   margin: 0 !important;
-  text-transform: uppercase;
 }
 
 .gyro-surface-page-header h1 {
@@ -19152,9 +19132,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-ide-secondary-foreground, var(--gyro-muted));
   font-size: var(--gyro-type-sm);
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.025em;
   margin: 0 8px 7px;
-  text-transform: uppercase;
 }
 
 .gyro-sidebar-section:has(.gyro-sidebar-scm-group-label) .gyro-sidebar-list {
@@ -19607,7 +19585,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-xs);
   font-style: normal;
-  text-transform: uppercase;
+  text-transform: capitalize;
 }
 
 .gyro-workspace-services article em[data-status="ready"] {
@@ -20552,9 +20530,7 @@ button.gyro-settings-row em::after {
   font-weight: var(--gyro-weight-strong);
   gap: 6px;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  letter-spacing: 0.04em;
   padding: 8px 10px 3px;
-  text-transform: uppercase;
 }
 
 .gyro-sidebar-scm-group-label .gyro-scm-label-text {
@@ -21459,9 +21435,7 @@ button.gyro-settings-row em::after {
   color: var(--gyro-faint, var(--gyro-muted));
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
-  letter-spacing: 0.04em;
   padding: 6px 8px 2px;
-  text-transform: uppercase;
 }
 
 .gyro-chat-switcher-item {

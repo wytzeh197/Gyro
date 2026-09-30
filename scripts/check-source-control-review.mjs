@@ -16,7 +16,7 @@ const initial = createInitialWorkbenchState();
 const file = "/workspace/file.ts";
 const review = (staged) => ({
   path: `gyro-diff:workspace:${staged ? "index" : "worktree"}:file.ts`,
-  title: `file.ts (${staged ? "Index" : "Working Tree"})`,
+  title: `file.ts (${staged ? "Index" : "Working tree"})`,
   dirty: false,
   preview: true,
   sourceControlDiff: { workspacePath: "/workspace", path: "file.ts", staged },

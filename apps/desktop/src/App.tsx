@@ -649,7 +649,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: ["auth", "login"],
       command: "claude",
-      displayName: "Anthropic Login",
+      displayName: "Anthropic login",
       id: "anthropic-login",
       workingDirectory: null,
     };
@@ -658,7 +658,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: ["login"],
       command: "cursor-agent",
-      displayName: "Cursor Login",
+      displayName: "Cursor login",
       id: "cursor-login",
       workingDirectory: null,
     };
@@ -667,7 +667,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: ["auth", "login"],
       command: "opencode",
-      displayName: "OpenCode Login",
+      displayName: "OpenCode login",
       id: "opencode-login",
       workingDirectory: null,
     };
@@ -676,7 +676,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: ["login"],
       command: "kimi",
-      displayName: "Kimi Login",
+      displayName: "Kimi login",
       id: "kimi-login",
       workingDirectory: null,
     };
@@ -694,7 +694,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
     return {
       args: [],
       command: "gemini",
-      displayName: "Gemini Login",
+      displayName: "Gemini login",
       id: "gemini-login",
       workingDirectory: null,
     };
@@ -703,7 +703,7 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
   return {
     args: ["login", "--device-auth"],
     command: "codex",
-    displayName: "OpenAI Login",
+    displayName: "OpenAI login",
     id: "openai-login",
     workingDirectory: null,
   };
@@ -4410,7 +4410,7 @@ export function App() {
     if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
       notify(
         "command-failed",
-        "Git action blocked in Restricted Mode",
+        "Git action blocked in restricted mode",
         workspaceName(root),
       );
       return;
@@ -4651,7 +4651,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Git action blocked in Restricted Mode",
+          "Git action blocked in restricted mode",
           workspaceName(root),
         );
         return;
@@ -4678,7 +4678,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Discard blocked in Restricted Mode",
+          "Discard blocked in restricted mode",
           workspaceName(root),
         );
         return;
@@ -4796,7 +4796,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Task blocked in Restricted Mode",
+          "Task blocked in restricted mode",
           "Trust this workspace before running project commands",
         );
         return;
@@ -5070,7 +5070,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Debug blocked in Restricted Mode",
+          "Debug blocked in restricted mode",
           "Trust this workspace before starting a debug adapter",
         );
         return;
@@ -5084,7 +5084,7 @@ export function App() {
         type: "ide-upsert-output-channel",
         channel: {
           id: channelId,
-          label: "Debug Adapter",
+          label: "Debug adapter",
           kind: "debug",
           lines: [`Initializing ${command}`],
           updatedAt: new Date().toISOString(),
@@ -5497,7 +5497,7 @@ export function App() {
         type: "ide-open-tab",
         tab: {
           path: reviewPath,
-          title: `${workspaceName(path)} (${staged ? "Index" : "Working Tree"})`,
+          title: `${workspaceName(path)} (${staged ? "Index" : "Working tree"})`,
           dirty: false,
           preview: true,
           sourceControlDiff: {
@@ -5747,7 +5747,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Commit blocked in Restricted Mode",
+          "Commit blocked in restricted mode",
           workspaceName(root),
         );
         return;
@@ -5833,7 +5833,7 @@ export function App() {
     if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
       notify(
         "command-failed",
-        "Push blocked in Restricted Mode",
+        "Push blocked in restricted mode",
         workspaceName(root),
       );
       return;
@@ -5901,7 +5901,7 @@ export function App() {
     if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
       notify(
         "command-failed",
-        "Pull blocked in Restricted Mode",
+        "Pull blocked in restricted mode",
         workspaceName(root),
       );
       return;
@@ -6204,7 +6204,7 @@ export function App() {
       if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
         notify(
           "command-failed",
-          "Git actions are blocked in Restricted Mode",
+          "Git actions are blocked in restricted mode",
           workspaceName(root),
         );
         return;
@@ -7542,7 +7542,7 @@ export function App() {
       ) {
         notify(
           "command-failed",
-          "Terminal blocked in Restricted Mode",
+          "Terminal blocked in restricted mode",
           "Trust this workspace before running local commands",
         );
         return false;
@@ -9435,7 +9435,7 @@ export function App() {
             notify(
               "command-failed",
               "No test task detected",
-              "Open Run and Test to choose or add a workspace command.",
+              "Open Run and test to choose or add a workspace command.",
             );
             break;
           }
@@ -10021,7 +10021,7 @@ export function App() {
         notify(
           "command-failed",
           "Council is not available yet",
-          "Model Council is still in development. It will return in a later release.",
+          "Model council is still in development. It will return in a later release.",
         );
         return false;
       }
@@ -10031,7 +10031,7 @@ export function App() {
         notify(
           "command-failed",
           "Council disabled",
-          "Enable Model Council in settings to use this mode.",
+          "Enable model council in settings to use this mode.",
         );
         return false;
       }
@@ -10818,7 +10818,7 @@ export function App() {
         void sendDraft(message, { mode: "normal" });
         notify(
           "terminal",
-          "Continuing from Council",
+          "Continuing from council",
           "Normal mode — implementing the synthesized recommendation.",
         );
         return;
@@ -10967,7 +10967,7 @@ export function App() {
         notify(
           "terminal",
           "Plan kept",
-          "Stay in Plan mode to revise it or ask another question.",
+          "Stay in plan mode to revise it or ask another question.",
         );
         return true;
       }
@@ -12015,7 +12015,7 @@ export function App() {
       if (restrictedRoot) {
         notify(
           "command-failed",
-          "Replace blocked in Restricted Mode",
+          "Replace blocked in restricted mode",
           workspaceName(restrictedRoot),
         );
         return;
@@ -13891,7 +13891,7 @@ export function App() {
             decision === "trusted" ? "terminal" : "approval",
             decision === "trusted"
               ? "Workspace trusted"
-              : "Restricted Mode enabled",
+              : "Restricted mode enabled",
             workspaceName(workspaceActionRoot),
           );
           if (decision === "trusted") refreshIdeServices(workspaceActionRoot);
@@ -17311,7 +17311,7 @@ export function App() {
           onAddCustomProfile={() => {
             const customProfile = {
               id: `custom-${Date.now()}`,
-              displayName: "Custom Agent",
+              displayName: "Custom agent",
               command: "./agent.sh",
               args: [],
               workingDirectory: "Workspace",
@@ -18288,8 +18288,8 @@ function sessionTitleFromMessage(message: string) {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 6)
-    .map((word) => {
-      if (/^[A-Z0-9]{2,}$/.test(word)) {
+    .map((word, index) => {
+      if (index > 0 || /^[A-Z0-9]{2,}$/.test(word)) {
         return word;
       }
       return word.charAt(0).toUpperCase() + word.slice(1);

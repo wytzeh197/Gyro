@@ -48,7 +48,7 @@ export function useRemoteCheck({
         if (!quiet) {
           notify(
             "command-failed",
-            "Remote check blocked in Restricted Mode",
+            "Remote check blocked in restricted mode",
             root.split("/").filter(Boolean).at(-1) ?? "Untitled",
           );
         }

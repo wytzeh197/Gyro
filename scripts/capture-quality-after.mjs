@@ -51,12 +51,12 @@ const states = [
   {
     name: "workspace-source-control",
     scene: "workspace-source-control",
-    clicks: ["Workspace", "Source Control"],
+    clicks: ["Workspace", "Source control"],
   },
   {
     name: "selected-diff",
     scene: "selected-diff",
-    clicks: ["Workspace", "Source Control", "sync.js"],
+    clicks: ["Workspace", "Source control", "sync.js"],
   },
   {
     name: "appearance",

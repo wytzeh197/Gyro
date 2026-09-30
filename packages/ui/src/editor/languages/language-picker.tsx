@@ -128,7 +128,7 @@ export function LanguagePicker({
                 aria-selected={!override}
                 onClick={() => select()}
               >
-                Auto Detect <small>{detected.name}</small>
+                Auto detect <small>{detected.name}</small>
               </button>
               {!query && (
                 <button

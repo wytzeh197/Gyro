@@ -2317,9 +2317,9 @@ expect(
     ) &&
     surfaceSource.includes("gyro-workspace-trust-banner") &&
     surfaceSource.includes("Trust workspace") &&
-    appSource.includes("Terminal blocked in Restricted Mode") &&
-    appSource.includes("Debug blocked in Restricted Mode") &&
-    appSource.includes("Task blocked in Restricted Mode") &&
+    appSource.includes("Terminal blocked in restricted mode") &&
+    appSource.includes("Debug blocked in restricted mode") &&
+    appSource.includes("Task blocked in restricted mode") &&
     appSource.includes("!workspaceCommand.requiresTrust || workspaceTrusted"),
   "Workspace Trust should persist restricted roots, preserve legacy workspaces as trusted, and gate executable Workspace capabilities.",
 );
@@ -2446,7 +2446,7 @@ expect(
     surfaceSource.includes("Replace preview") &&
     appSource.includes("const applyWorkspaceReplace = useCallback") &&
     appSource.includes("Replace blocked by unsaved changes") &&
-    appSource.includes("Replace blocked in Restricted Mode") &&
+    appSource.includes("Replace blocked in restricted mode") &&
     !surfaceSource.includes("documentOutlineSymbols(") &&
     !surfaceSource.includes('title="Outline"'),
   "Workspace navigation should keep Explorer persistent while providing guarded search-and-replace preview.",
@@ -2456,10 +2456,10 @@ expect(
     surfaceSource.includes(
       'aria-label="Stage selected source control changes"',
     ) &&
-    appSource.includes("Git action blocked in Restricted Mode") &&
-    surfaceSource.includes('aria-label="Test Results"') &&
+    appSource.includes("Git action blocked in restricted mode") &&
+    surfaceSource.includes('aria-label="Test results"') &&
     workspacePanelContributions.some(
-      (panel) => panel.id === "test-results" && panel.label === "Test Results",
+      (panel) => panel.id === "test-results" && panel.label === "Test results",
     ) &&
     appSource.includes('"textDocument/definition"') &&
     appSource.includes('"textDocument/references"') &&
@@ -5079,7 +5079,7 @@ expect(
     reducerSource.includes('case "set-terminal-pane-attention"') &&
     surfaceSource.includes("TerminalDiffControl") &&
     surfaceSource.includes("gyro-terminal-diff-popover") &&
-    surfaceSource.includes("Review in Workspace") &&
+    surfaceSource.includes("Review in workspace") &&
     surfaceSource.includes('label: "Review changes"') &&
     surfaceSource.includes('aria-label="CLI sessions"') &&
     surfaceSource.includes("pane.attention") &&
@@ -5310,11 +5310,11 @@ expect(
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
       "crate::apply_macos_traffic_light_position(&main)",
     ) &&
-    surfaceSource.includes("New Chat") &&
+    surfaceSource.includes("New chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
     surfaceSource.includes("ideSidebarMinimumWidth * 2") &&
-    surfaceSource.includes('aria-label="Resize Workspace sidebar"') &&
+    surfaceSource.includes('aria-label="Resize workspace sidebar"') &&
     surfaceSource.includes('role="separator"') &&
     surfaceSource.includes("onDoubleClick") &&
     surfaceSource.includes("resizeIdeSidebarWithKeyboard") &&
@@ -5345,7 +5345,7 @@ expect(
     surfaceSource.includes("projectSidebarName") &&
     surfaceSource.includes("SessionSidebarRow") &&
     !surfaceSource.includes("localCliPanes") &&
-    surfaceSource.includes("Create Chat or CLI session") &&
+    surfaceSource.includes("Create chat or CLI session") &&
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
@@ -5375,7 +5375,7 @@ expect(
       'className="gyro-agent-launcher-heading">Start a terminal',
     ) &&
     surfaceSource.includes("Not connected") &&
-    surfaceSource.includes("New Terminal") &&
+    surfaceSource.includes("New terminal") &&
     surfaceSource.includes("Start Codex CLI") &&
     surfaceSource.includes("Start Claude Code") &&
     surfaceSource.includes("Set CLI launch preset") &&
@@ -5660,7 +5660,7 @@ expect(
   "Launcher rows in the Create menu must stay single-line with ellipsis: a wrapped label grows past the row height and collides with the row below it.",
 );
 expect(
-  chatSidebarSource.includes("New Chat") &&
+  chatSidebarSource.includes("New chat") &&
     chatSidebarSource.includes(
       '<span className="gyro-sidebar-session-group-label">',
     ) &&
@@ -5804,11 +5804,11 @@ expect(
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
     surfaceSource.includes("Appearance") &&
-    surfaceSource.includes("Editor & Search") &&
-    surfaceSource.includes("Tools & Contributions") &&
-    surfaceSource.includes("Usage Limits") &&
+    surfaceSource.includes("Editor & search") &&
+    surfaceSource.includes("Tools & contributions") &&
+    surfaceSource.includes("Usage limits") &&
     surfaceSource.includes("Providers") &&
-    surfaceSource.includes("CLI Profiles") &&
+    surfaceSource.includes("CLI profiles") &&
     surfaceSource.includes("Permissions") &&
     surfaceSource.includes("Updates") &&
     surfaceSource.includes("Keyboard") &&
@@ -6075,10 +6075,10 @@ expect(
     surfaceSource.includes("<span>Plan</span>") &&
     surfaceSource.includes("function chatToolBrowserStatusLabel") &&
     surfaceSource.includes('return "Idle"') &&
-    surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
-    surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
+    surfaceSource.includes("aria-label={`Open browser, ${browserLabel}`}") &&
+    surfaceSource.includes("aria-label={`Open changes, ${changesLabel}`}") &&
     surfaceSource.includes(
-      "aria-label={`Open Files, ${workspaceName(workspacePath)}`}",
+      "aria-label={`Open files, ${workspaceName(workspacePath)}`}",
     ) &&
     // Launcher rows spend their detail slot on a state worth knowing and go
     // quiet otherwise. "Open" was neither — it restated the button it sat on.
@@ -6550,7 +6550,7 @@ expect(
     ) &&
     surfaceSource.includes('action: "select-no-folder"') &&
     surfaceSource.includes('label: "No folder"') &&
-    surfaceSource.includes("Choose a folder for Council") &&
+    surfaceSource.includes("Choose a folder for council") &&
     surfaceSource.includes("Connect a provider before sending") &&
     surfaceSource.includes("resolveCleanMachinePath") &&
     surfaceSource.includes("branchLabel") &&
@@ -7569,7 +7569,7 @@ expect(
       "const isEmptyStart = turns.length === 0 && looseEvents.length === 0",
     ) &&
     surfaceSource.includes("if (isEmptyStart)") &&
-    surfaceSource.includes('aria-label="New Chat"') &&
+    surfaceSource.includes('aria-label="New chat"') &&
     /const isOpen =\s*!isEmptyStart &&/.test(environmentPopoverSource) &&
     /useChatEnvironmentPopover\(\{[^}]*\bisEmptyStart,/.test(surfaceSource),
   "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
