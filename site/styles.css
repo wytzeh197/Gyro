@@ -185,38 +185,6 @@ pre {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/*
- * :root sets Inter's own feature settings, and every element inherits them —
- * including the ones set in the monospace stack, where cv05 and cv11 mean
- * nothing and "calt" switches on SF Mono's ligatures. That fused the pair of
- * hyphens in `node --test` into a single long dash and misprinted the command.
- * Monospace here is standing in for a terminal, so it has to render literally.
- */
-code,
-pre,
-.eyebrow,
-.kicker,
-.release-kicker,
-.detail-label,
-.hero-badge,
-.surface-index,
-.agent-badge,
-.cost-figure,
-.product-stage figcaption,
-.mock-bar-meta,
-.mock-delta,
-.mock-key,
-.mock-age,
-.mock-state,
-.mock-pill,
-.mock-body-term,
-.mock-mono,
-.mock-diff-lines,
-.mock-review-note {
-  font-feature-settings: normal;
-  font-variant-ligatures: none;
-}
-
 code {
   overflow-wrap: anywhere;
 }
@@ -790,17 +758,6 @@ pre {
 .product-section,
 .help-section {
   padding: 76px 0;
-}
-
-/*
- * Every band below the hero opens on a hairline. It is the only separator the
- * page uses, so the rhythm stays flat and the sections read as one column.
- */
-.premise,
-.product-section,
-.agents-section {
-  padding: 76px 0;
-  border-top: 1px solid var(--line);
 }
 
 .product-section {
@@ -1620,110 +1577,6 @@ pre {
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 13px;
-}
-
-/*
- * Providers read as a plain roster. The point is how ordinary the list is —
- * these are the CLIs and local runtimes already on the reader's machine — so
- * nothing here is animated or staged.
- */
-.agent-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.agent-tile {
-  display: flex;
-  min-height: 64px;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: var(--surface);
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease;
-}
-
-.agent-tile:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-raised);
-}
-
-/* The mark sits in a chip of its own, which keeps five different logos, drawn
- * at different weights, reading as one row. */
-.agent-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  flex: none;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-soft);
-  color: var(--text);
-}
-
-.agent-name {
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 620;
-  letter-spacing: -0.012em;
-}
-
-/*
- * The marks carry their owners' published colours, nothing invented. Claude
- * Code has a brand hex; Gemini has a brand gradient, applied in the SVG itself
- * (see index.html). OpenAI, xAI, Moonshot, and Ollama publish black-and-white
- * marks with no brand colour at all, so Codex, Grok, Kimi, and Ollama stay on
- * --text and flip with the theme, which is how those marks are meant to be
- * shown.
- */
-.agent-claude .agent-mark {
-  color: #d97757;
-}
-
-/* The accent dot above Kimi's K, picked out from the rest of the mark. */
-.agent-kimi-dot {
-  fill: #3b82f6;
-}
-
-/* Upcoming integrations stay in the roster, but read as an annotation rather
- * than as a feature pill. */
-.agent-tile.is-soon {
-  border-style: dashed;
-}
-
-.agent-tile.is-soon .agent-mark,
-.agent-tile.is-soon .agent-name {
-  color: var(--quiet);
-}
-
-.agent-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  color: var(--quiet);
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.agent-badge::before {
-  width: 14px;
-  height: 1px;
-  background: currentColor;
-  content: "";
-  opacity: 0.65;
 }
 
 .text-link,
@@ -2553,21 +2406,6 @@ pre {
   animation-delay: 280ms;
 }
 
-/*
- * The agent roster is the only thing on the page that responds to a pointer.
- * The surfaces are rows on a spine, not cards, so they stay put.
- */
-.agent-tile {
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease;
-}
-
-.agent-tile:not(.is-soon):hover {
-  border-color: var(--line-strong);
-  background: var(--surface-raised);
-}
-
 @media (max-width: 900px) {
   .desktop-nav-link {
     display: none !important;
@@ -2667,23 +2505,6 @@ pre {
 /* The provider roster remains two columns on phones. Give upcoming providers a
  * second line for their annotation instead of cramming it beside the name. */
 @media (max-width: 520px) {
-  .agent-tile.is-soon {
-    position: relative;
-    min-height: 78px;
-    align-items: flex-start;
-    padding-top: 12px;
-  }
-
-  .agent-tile.is-soon .agent-name {
-    padding-top: 4px;
-  }
-
-  .agent-tile.is-soon .agent-badge {
-    position: absolute;
-    top: 44px;
-    left: 62px;
-    margin-left: 0;
-  }
 }
 
 @media (max-width: 720px) {
@@ -2720,23 +2541,6 @@ pre {
 
   .mock-diff-lines li {
     padding-inline: 11px;
-  }
-
-  .agent-grid {
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .agent-tile {
-    min-height: 58px;
-    padding: 0 13px;
-  }
-
-  .agent-name {
-    font-size: 14px;
-  }
-
-  .agent-badge {
-    padding: 2px 7px;
   }
 
   :root {
@@ -2824,13 +2628,6 @@ pre {
 
   .product-stage {
     margin-top: 48px;
-  }
-
-  .premise,
-  .product-section,
-  .agents-section,
-  .help-section {
-    padding: 56px 0;
   }
 
   .premise-list {
@@ -3319,60 +3116,6 @@ summary:focus-visible {
 .home-page .product-section {
   overflow-anchor: none;
 }
-.home-page .agents-section {
-  padding: 64px 0;
-  border-top: 1px solid var(--line);
-}
-.home-page .agents-section .section-heading {
-  display: block;
-  text-align: center;
-  max-width: none;
-  margin: 0 0 34px;
-}
-.home-page .agents-section h2 {
-  font-size: 21px;
-  font-weight: 500;
-  letter-spacing: -0.025em;
-}
-.home-page .agents-section .section-heading > p:last-child {
-  margin-top: 8px;
-  font-size: 14px;
-}
-.home-page .agent-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 16px 28px;
-}
-.home-page .agent-tile {
-  padding: 0;
-  min-width: 80px;
-  gap: 9px;
-  flex-direction: column;
-  border: 0;
-  background: none;
-}
-.home-page .agent-mark {
-  background: none;
-  border: 0;
-  border-radius: 0;
-  width: 34px;
-  height: 34px;
-}
-.home-page .agent-name {
-  font-size: 13px;
-  font-weight: 500;
-}
-.home-page .agent-badge {
-  font-family: var(--sans);
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 13px;
-  margin-top: -6px;
-}
-.home-page .agent-badge::before {
-  display: none;
-}
 .home-page .product-section {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -3787,9 +3530,6 @@ summary:focus-visible {
     grid-template-columns: 1fr 400px;
     gap: 40px;
   }
-  .home-page .agent-grid {
-    gap: 20px;
-  }
 }
 @media (max-width: 760px) {
   :root {
@@ -3841,28 +3581,6 @@ summary:focus-visible {
   }
   .home-page .product-stage figcaption {
     padding-block: 12px;
-    font-size: 13px;
-  }
-  .home-page .agents-section {
-    padding: 48px 0 56px;
-  }
-  .home-page .agent-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 24px 12px;
-  }
-  .home-page .agent-tile {
-    min-width: 0;
-  }
-  .home-page .agent-name {
-    font-size: 13px;
-    white-space: nowrap;
-  }
-  .home-page .agent-mark {
-    width: 36px;
-    height: 36px;
-  }
-  .home-page .agents-section .section-heading > p:last-child {
     font-size: 13px;
   }
   .home-page .product-section {
@@ -4008,9 +3726,6 @@ summary:focus-visible {
   }
   .home-page .hero-actions {
     gap: 4px;
-  }
-  .home-page .agent-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .switcher-title {
     font-size: 13px;
@@ -4580,15 +4295,6 @@ summary:focus-visible {
 .home-page .product-section > .section-heading h2 {
   margin: 0;
 }
-.home-page .agents-section {
-  padding-block: 64px;
-}
-.home-page .agents-section .section-heading {
-  margin-bottom: 30px;
-}
-.home-page .agents-section h2 {
-  font-size: 32px;
-}
 .home-page .download-heading > p {
   margin-top: 14px;
 }
@@ -4699,15 +4405,6 @@ summary:focus-visible {
 .home-page .help-section h2 {
   font-size: clamp(30px, 3.5vw, 44px);
 }
-.home-page .agents-section {
-  padding-block: 48px;
-}
-.home-page .agents-section h2 {
-  font-size: 22px;
-}
-.home-page .agents-section .section-heading {
-  margin-bottom: 24px;
-}
 .home-page .surface-copy h3 {
   font-size: 18px;
 }
@@ -4771,9 +4468,6 @@ summary:focus-visible {
   .home-page .product-section > .section-heading h2,
   .home-page .help-section h2 {
     font-size: 32px;
-  }
-  .home-page .agents-section {
-    padding-block: 40px;
   }
   .home-page .surface-copy h3 {
     font-size: 18px;
@@ -4875,19 +4569,6 @@ summary:focus-visible {
 .home-page .hero-note {
   margin-top: 14px;
 }
-
-.home-page .ownership-copy h2,
-.home-page .product-section > .section-heading h2,
-.home-page .agents-section h2,
-.home-page .download-heading h2,
-.home-page .help-section h2 {
-  font-family: var(--display);
-  font-size: clamp(32px, 3.8vw, 48px);
-  font-weight: 620;
-  line-height: 1.04;
-  letter-spacing: -0.045em;
-  text-wrap: balance;
-}
 .home-page .help-section h2 {
   max-width: 9ch;
 }
@@ -4906,49 +4587,6 @@ summary:focus-visible {
   font-size: 14px;
 }
 
-.home-page .agents-section {
-  padding-block: clamp(56px, 6vw, 88px);
-}
-.home-page .agents-section .section-heading {
-  margin-bottom: clamp(28px, 3vw, 40px);
-}
-.home-page .agent-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-}
-.home-page .agent-tile {
-  min-width: 0;
-  padding: 26px 12px 20px;
-  gap: 14px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface-raised);
-  box-shadow: 0 1px 2px var(--shadow-card);
-}
-.home-page .agent-tile:hover {
-  border-color: var(--line-strong);
-  box-shadow: 0 10px 28px -14px var(--shadow-lift);
-  transform: translateY(-2px);
-}
-.home-page .agent-tile {
-  transition:
-    border-color 160ms ease,
-    box-shadow 200ms ease,
-    transform 200ms ease;
-}
-.home-page .agent-mark {
-  width: 44px;
-  height: 44px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-soft);
-}
-.home-page .agent-name {
-  font-size: 14px;
-  font-weight: 560;
-}
-
 .home-page .download-stack > .release-meta {
   justify-content: center;
   text-align: center;
@@ -4964,9 +4602,6 @@ summary:focus-visible {
 }
 
 @media (max-width: 900px) {
-  .home-page .agent-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 720px) {
@@ -4976,32 +4611,269 @@ summary:focus-visible {
   .home-page .hero-description {
     font-size: 17px;
   }
-  .home-page .ownership-copy h2,
-  .home-page .product-section > .section-heading h2,
-  .home-page .agents-section h2,
-  .home-page .download-heading h2,
-  .home-page .help-section h2 {
-    font-size: clamp(30px, 8.5vw, 38px);
-  }
-  .home-page .agent-grid {
-    gap: 8px;
-  }
-  .home-page .agent-tile {
-    padding: 16px 6px 12px;
-    gap: 10px;
-    border-radius: 14px;
-  }
-  .home-page .agent-mark {
-    width: 38px;
-    height: 38px;
-  }
-  .home-page .agent-name {
-    font-size: 13px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-page .agent-tile:hover {
-    transform: none;
+}
+
+/*
+ * Agent rotator. The headline names one agent at a time and the pill resizes
+ * to fit it; the roster underneath is the full list and doubles as the
+ * control. Without JavaScript the first agent stays in place and the pill keeps
+ * the width of the widest name. agents.js drives it.
+ *
+ * Every mark was checked against its owner's current brand source (Sep 2026)
+ * and carries only published colours: Claude's hex, Gemini's four-colour spark
+ * (Google's own PNG), Kimi's accent dot, DeepSeek's blue, Mistral's five rows
+ * (a gradient in the sprite), and OpenCode's two-tone frame. Codex, Grok,
+ * Cursor, Ollama, and OpenRouter are monochrome marks, so they follow --text.
+ * See assets/ATTRIBUTIONS.md for sources.
+ */
+/* Resting marks flatten to one ink, so coloured and monochrome logos dim to
+   the same weight instead of the coloured ones going muddy grey. */
+.agents-section {
+  --agent-idle: brightness(0) invert(1);
+  --agent-cycle: 2600ms;
+  --agent-ease: cubic-bezier(0.65, 0, 0.35, 1);
+  padding: 88px 0 96px;
+  text-align: center;
+}
+
+.agent-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.agent-mark {
+  display: block;
+  flex: none;
+  color: var(--text);
+}
+
+.agent-mark.is-claude {
+  color: #d97757;
+}
+
+.agent-mark.is-deepseek {
+  color: #4d6bfe;
+}
+
+.agent-mark.is-opencode {
+  --agent-opencode-block: #4b4646;
+  color: #f1ecec;
+}
+
+:root[data-theme="light"] .agent-mark.is-opencode {
+  --agent-opencode-block: #cfcecd;
+  color: #211e1e;
+}
+
+/* The block reaches into the <use> copy through the inherited custom
+   properties. When the roster flattens a resting mark to one ink, the block
+   drops back so the frame still reads. */
+.agent-opencode-block {
+  fill: var(--agent-opencode-block);
+  fill-opacity: var(--agent-opencode-block-alpha, 1);
+}
+
+.agent-kimi-dot {
+  fill: #1783ff;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.agents-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: clamp(29px, 7.6vw, 58px);
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: -0.04em;
+}
+
+.agents-line {
+  display: block;
+}
+
+.agent-slot {
+  display: inline-grid;
+  height: 1.2em;
+  margin-left: 0.04em;
+  padding: 0 0.22em;
+  overflow: hidden;
+  align-items: center;
+  justify-items: start;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.3em;
+  background: var(--surface);
+  vertical-align: baseline;
+  transition: width 550ms var(--agent-ease);
+}
+
+.agent-word {
+  display: inline-flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  gap: 0.2em;
+  white-space: nowrap;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(70%);
+  transition:
+    transform 550ms var(--agent-ease),
+    opacity 450ms ease,
+    filter 450ms ease;
+}
+
+.agent-word.is-on {
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+.agent-word.is-out {
+  transform: translateY(-70%);
+}
+
+.agent-word .agent-mark {
+  width: 0.72em;
+  height: 0.72em;
+}
+
+.agent-roster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px 8px;
+  margin: 44px auto 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-pick {
+  position: relative;
+  display: grid;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: none;
+  cursor: pointer;
+  transition:
+    background-color 250ms ease,
+    border-color 250ms ease;
+}
+
+.agent-pick .agent-mark {
+  width: 24px;
+  height: 24px;
+  --agent-opencode-block-alpha: 0.4;
+  opacity: 0.42;
+  filter: var(--agent-idle);
+  transition:
+    opacity 300ms ease,
+    filter 300ms ease;
+}
+
+.agent-pick:hover .agent-mark,
+.agent-pick.is-on .agent-mark {
+  --agent-opencode-block-alpha: 1;
+  opacity: 1;
+  filter: none;
+}
+
+.agent-pick.is-on {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.agent-progress {
+  position: absolute;
+  right: 14px;
+  bottom: -9px;
+  left: 14px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.agent-pick.is-on .agent-progress {
+  opacity: 1;
+}
+
+.agent-progress::after {
+  position: absolute;
+  inset: 0;
+  background: var(--orange);
+  content: "";
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+.is-rotating .agent-pick.is-on .agent-progress::after {
+  animation: agent-progress var(--agent-cycle) linear forwards;
+}
+
+.is-paused .agent-pick.is-on .agent-progress::after {
+  animation-play-state: paused;
+}
+
+:root[data-theme="light"] .agents-section {
+  --agent-idle: brightness(0);
+}
+
+@keyframes agent-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Phones: two balanced rows of 44px targets (six over five). The marks sit
+ * well inside their targets, so a 2px gap still reads as open spacing and the
+ * rows hold together down to a 320px screen. */
+@media (max-width: 560px) {
+  .agents-section {
+    padding: 56px 0 64px;
+  }
+
+  .agent-roster {
+    max-width: 274px;
+    gap: 18px 2px;
+    margin-top: 32px;
+  }
+
+  .agent-pick {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .agent-pick .agent-mark {
+    width: 22px;
+    height: 22px;
+  }
+
+  .agent-progress {
+    right: 11px;
+    bottom: -8px;
+    left: 11px;
   }
 }

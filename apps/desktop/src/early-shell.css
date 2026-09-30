@@ -41,7 +41,7 @@ html[data-theme="light"] .gyro-root-error {
 }
 
 .gyro-early-shell {
-  background: #181818;
+  background: #141517;
   color: #f0f0f0;
   display: grid;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -51,13 +51,13 @@ html[data-theme="light"] .gyro-root-error {
 }
 
 html[data-theme="light"] .gyro-early-shell {
-  background: #f7f9fc;
+  background: #f9f9f8;
   color: #161b23;
 }
 
 .gyro-early-shell-sidebar {
-  background: #292929;
-  border-right: 1px solid #343434;
+  background: #1a1b1e;
+  border-right: 1px solid #26282c;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -65,8 +65,8 @@ html[data-theme="light"] .gyro-early-shell {
 }
 
 html[data-theme="light"] .gyro-early-shell-sidebar {
-  background: #f1f2f3;
-  border-right-color: #e8eaed;
+  background: #f2f2f0;
+  border-right-color: #e0e0dc;
 }
 
 html[data-theme="light"] .gyro-early-shell-brand {

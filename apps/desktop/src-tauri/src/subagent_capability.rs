@@ -35,6 +35,10 @@ const MAX_SUMMARY_CHARS: usize = 8_000;
 const MAX_TITLE_CHARS: usize = 60;
 /// How often a child run checks whether the chat that started it was stopped.
 const PARENT_STOP_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// The parent's tool call gives up reading after 15 minutes (the IPC approval
+/// read timeout), so research stops just before that instead of spending on
+/// with nobody left to read its report.
+const RESEARCH_MAX_RUNTIME: Duration = Duration::from_secs(14 * 60);
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -187,14 +191,25 @@ struct ParentStopWatcher {
 }
 
 impl ParentStopWatcher {
+    #[cfg(test)]
     fn start(parent: &CancellationToken, child: &CancellationToken) -> Self {
+        Self::start_until(parent, child, RESEARCH_MAX_RUNTIME)
+    }
+
+    /// Also stops the child once `runtime` has passed.
+    fn start_until(
+        parent: &CancellationToken,
+        child: &CancellationToken,
+        runtime: Duration,
+    ) -> Self {
+        let deadline = Instant::now() + runtime;
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let parent = parent.clone();
         let child = child.clone();
         let worker = std::thread::spawn(move || {
             while !worker_stopped.load(Ordering::SeqCst) {
-                if parent.is_cancelled() {
+                if parent.is_cancelled() || Instant::now() >= deadline {
                     child.cancel();
                     return;
                 }
@@ -257,7 +272,9 @@ impl ChildRunControl {
         Ok(Self {
             app: app.clone(),
             session_id: session_id.to_string(),
-            watcher: parent.map(|parent| ParentStopWatcher::start(&parent, &control.cancellation)),
+            watcher: parent.map(|parent| {
+                ParentStopWatcher::start_until(&parent, &control.cancellation, RESEARCH_MAX_RUNTIME)
+            }),
             control,
         })
     }
@@ -478,5 +495,18 @@ mod tests {
         parent.cancel();
         std::thread::sleep(PARENT_STOP_POLL_INTERVAL * 2);
         assert!(!child.is_cancelled());
+    }
+
+    #[test]
+    fn research_past_its_runtime_is_stopped() {
+        let parent = CancellationToken::default();
+        let child = CancellationToken::default();
+        let _watcher = ParentStopWatcher::start_until(&parent, &child, Duration::ZERO);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !child.is_cancelled() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(child.is_cancelled(), "research outlived its runtime");
+        assert!(!parent.is_cancelled());
     }
 }

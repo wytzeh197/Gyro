@@ -5729,15 +5729,13 @@ export function App() {
       });
       dispatchWorkbench({ type: "ide-select-view", view: "source-control" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
-      if (file && selectedTerminalSourceControl.repoRoot) {
-        void openSourceControlDiffForRoot(
-          selectedTerminalSourceControl.repoRoot,
-          file.path,
-          file.staged,
-        );
+      // Status paths are relative to the folder it was read for, not the repo.
+      const root = selectedTerminalPane?.workingDirectory ?? activeSession?.workspacePath ?? workspacePath;
+      if (file && root) {
+        void openSourceControlDiffForRoot(root, file.path, file.staged);
       }
     },
-    [openSourceControlDiffForRoot, selectedTerminalSourceControl],
+    [activeSession?.workspacePath, openSourceControlDiffForRoot, selectedTerminalPane?.workingDirectory, selectedTerminalSourceControl, workspacePath],
   );
 
   const commitSourceControl = useCallback(

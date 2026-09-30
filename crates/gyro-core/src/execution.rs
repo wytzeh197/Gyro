@@ -1,13 +1,14 @@
 use crate::credentials::CredentialPolicy;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,150 @@ const EXECUTION_CHANNEL_CAPACITY: usize = 128;
 const EXECUTION_READ_CHUNK_BYTES: usize = 8 * 1024;
 const EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const EXECUTION_TERMINATION_GRACE: Duration = Duration::from_millis(250);
+/// How often a terminating process group is checked for having exited, so a
+/// group that dies on SIGTERM is not held for the whole grace period.
+const EXECUTION_TERMINATION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// After the child is gone, how long output may stay silent before the
+/// readers are abandoned. A descendant that left the process group (setsid,
+/// setpgrp, a daemonizing tool) can hold the pipes open indefinitely.
+const EXECUTION_READER_SILENCE_GRACE: Duration = Duration::from_millis(250);
+/// Hard ceiling on the post-exit drain, for an escaped descendant that keeps
+/// writing to the inherited pipes.
+const EXECUTION_READER_DRAIN_LIMIT: Duration = Duration::from_secs(5);
+
+/// Process groups spawned for provider runs that have not been reaped yet.
+/// Provider children run in their own process group, so they receive no
+/// SIGHUP when Gyro quits; the quit path tears them down through
+/// [`terminate_live_process_groups`].
+static LIVE_PROCESS_GROUPS: Mutex<BTreeSet<i32>> = Mutex::new(BTreeSet::new());
+
+fn live_process_groups() -> MutexGuard<'static, BTreeSet<i32>> {
+    LIVE_PROCESS_GROUPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub fn register_process_group(process_group_id: u32) {
+    if let Ok(process_group_id) = i32::try_from(process_group_id) {
+        if process_group_id > 0 {
+            live_process_groups().insert(process_group_id);
+        }
+    }
+}
+
+pub fn unregister_process_group(process_group_id: u32) {
+    if let Ok(process_group_id) = i32::try_from(process_group_id) {
+        live_process_groups().remove(&process_group_id);
+    }
+}
+
+/// Terminate every provider process group that is still running: SIGTERM
+/// each one, wait up to `grace` for the groups to disappear, then SIGKILL
+/// whatever remains. Meant for app shutdown; safe to call from any thread,
+/// never panics, and never holds the registry lock while sleeping.
+pub fn terminate_live_process_groups(grace: Duration) {
+    let process_groups = live_process_groups().iter().copied().collect::<Vec<_>>();
+    terminate_process_groups(&process_groups, grace);
+}
+
+#[cfg(unix)]
+fn terminate_process_groups(process_groups: &[i32], grace: Duration) {
+    if process_groups.is_empty() {
+        return;
+    }
+    // Signals are sent under the registry lock (kill(2) does not block) so a
+    // group its owner already reaped and unregistered is never signalled.
+    let signal_registered = |process_group: i32, signal: libc::c_int| {
+        let registry = live_process_groups();
+        if registry.contains(&process_group) {
+            unsafe {
+                libc::kill(-process_group, signal);
+            }
+        }
+    };
+    for process_group in process_groups {
+        signal_registered(*process_group, libc::SIGTERM);
+    }
+    let started_at = Instant::now();
+    let mut remaining = process_groups.to_vec();
+    loop {
+        remaining.retain(|process_group| {
+            live_process_groups().contains(process_group) && process_group_exists(*process_group)
+        });
+        let elapsed = started_at.elapsed();
+        if remaining.is_empty() || elapsed >= grace {
+            break;
+        }
+        thread::sleep(EXECUTION_TERMINATION_POLL_INTERVAL.min(grace - elapsed));
+    }
+    for process_group in &remaining {
+        signal_registered(*process_group, libc::SIGKILL);
+    }
+    let mut registry = live_process_groups();
+    for process_group in process_groups {
+        registry.remove(process_group);
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_process_groups(process_groups: &[i32], _grace: Duration) {
+    let mut registry = live_process_groups();
+    for process_group in process_groups {
+        registry.remove(process_group);
+    }
+}
+
+/// Whether any process is still in the group. EPERM means it exists but we
+/// may not signal it, which still counts as alive.
+#[cfg(unix)]
+fn process_group_exists(process_group: i32) -> bool {
+    if unsafe { libc::kill(-process_group, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+/// A spawned provider child whose whole process group is torn down when the
+/// guard is dropped without the child having been reaped — including when a
+/// panic unwinds out of an output callback — so a failed turn cannot leak
+/// the provider CLI or its tool children.
+struct ProcessGroupChild {
+    child: Child,
+    settled: bool,
+}
+
+impl ProcessGroupChild {
+    fn new(child: Child) -> Self {
+        register_process_group(child.id());
+        Self {
+            child,
+            settled: false,
+        }
+    }
+
+    fn terminate(&mut self) {
+        if !self.settled {
+            self.settled = true;
+            terminate_process_group(&mut self.child);
+        }
+    }
+
+    /// The direct child exited on its own: clear out any descendants left in
+    /// its process group and stop tracking it.
+    fn finish_after_exit(&mut self) {
+        if !self.settled {
+            self.settled = true;
+            terminate_descendants_after_exit(self.child.id());
+            unregister_process_group(self.child.id());
+        }
+    }
+}
+
+impl Drop for ProcessGroupChild {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
@@ -178,16 +323,18 @@ where
     configure_process_group(&mut command);
 
     crate::timing::mark(crate::timing::Stage::ProcessStart);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("start {}", request.program.to_string_lossy()))?;
+    let mut child = ProcessGroupChild::new(
+        command
+            .spawn()
+            .with_context(|| format!("start {}", request.program.to_string_lossy()))?,
+    );
     crate::timing::mark(crate::timing::Stage::ProcessSpawned);
-    let Some(stdout) = child.stdout.take() else {
-        terminate_process_group(&mut child);
+    let Some(stdout) = child.child.stdout.take() else {
+        child.terminate();
         anyhow::bail!("execution stdout was unavailable");
     };
-    let Some(stderr) = child.stderr.take() else {
-        terminate_process_group(&mut child);
+    let Some(stderr) = child.child.stderr.take() else {
+        child.terminate();
         anyhow::bail!("execution stderr was unavailable");
     };
     let (sender, receiver) = mpsc::sync_channel(EXECUTION_CHANNEL_CAPACITY);
@@ -227,11 +374,11 @@ where
             last_activity_at = Instant::now();
         }
         if output_budget.exceeded {
-            terminate_process_group(&mut child);
+            child.terminate();
             break ExecutionTermination::OutputLimit;
         }
         if cancellation.is_cancelled() {
-            terminate_process_group(&mut child);
+            child.terminate();
             break ExecutionTermination::Cancelled;
         }
         if let Some(termination) = execution_timeout_termination(
@@ -240,23 +387,23 @@ where
             request.timeout,
             request.inactivity_timeout,
         ) {
-            terminate_process_group(&mut child);
+            child.terminate();
             break termination;
         }
-        match child.try_wait() {
+        match child.child.try_wait() {
             Ok(Some(status)) => {
                 // A background descendant can retain the inherited output pipes after
                 // the direct child exits. Tear down any remaining process-group members
                 // before waiting for the reader threads so a completed command cannot
                 // hang forever.
-                terminate_descendants_after_exit(child.id());
+                child.finish_after_exit();
                 break ExecutionTermination::Exited {
                     code: status.code(),
                 };
             }
             Ok(None) => {}
             Err(error) => {
-                terminate_process_group(&mut child);
+                child.terminate();
                 return Err(error).context("poll execution process");
             }
         }
@@ -276,31 +423,53 @@ where
                 &mut output_budget,
             );
             if output_budget.exceeded {
-                terminate_process_group(&mut child);
+                child.terminate();
                 break ExecutionTermination::OutputLimit;
             }
         }
     };
 
-    while let Ok(chunk) = receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
-        if termination != ExecutionTermination::OutputLimit {
-            handle_chunk(
-                chunk,
-                &mut on_chunk,
-                &mut stdout_text,
-                &mut stderr_text,
-                &mut stdout_chars,
-                &mut stderr_chars,
-                request.max_stdout_chars,
-                request.max_stderr_chars,
-                &mut stdout_truncated,
-                &mut stderr_truncated,
-                &mut output_budget,
-            );
+    // Drain until both readers hit EOF. A descendant that escaped the process
+    // group can keep the pipes open forever, so the drain is bounded by a
+    // silence grace and a hard limit, and unfinished readers are detached
+    // rather than joined: they exit on their own once the pipe closes or
+    // their next send finds the receiver gone.
+    let drain_started_at = Instant::now();
+    loop {
+        match receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
+            Ok(chunk) => {
+                if termination != ExecutionTermination::OutputLimit {
+                    handle_chunk(
+                        chunk,
+                        &mut on_chunk,
+                        &mut stdout_text,
+                        &mut stderr_text,
+                        &mut stdout_chars,
+                        &mut stderr_chars,
+                        request.max_stdout_chars,
+                        request.max_stderr_chars,
+                        &mut stdout_truncated,
+                        &mut stderr_truncated,
+                        &mut output_budget,
+                    );
+                }
+                if drain_started_at.elapsed() >= EXECUTION_READER_DRAIN_LIMIT {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                if drain_started_at.elapsed() >= EXECUTION_READER_SILENCE_GRACE {
+                    break;
+                }
+            }
         }
     }
-    let _ = stdout_thread.join();
-    let _ = stderr_thread.join();
+    for reader in [stdout_thread, stderr_thread] {
+        if reader.is_finished() {
+            let _ = reader.join();
+        }
+    }
 
     Ok(ExecutionOutcome {
         termination,
@@ -539,33 +708,46 @@ fn terminate_descendants_after_exit(_process_group_id: u32) {}
 
 #[cfg(unix)]
 pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
-    let process_group = -(child.id() as i32);
+    let process_group_id = child.id() as i32;
     unsafe {
-        libc::kill(process_group, libc::SIGTERM);
+        libc::kill(-process_group_id, libc::SIGTERM);
     }
     let started_at = Instant::now();
     let mut child_reaped = false;
-    while started_at.elapsed() < EXECUTION_TERMINATION_GRACE {
+    loop {
         if !child_reaped && child.try_wait().ok().flatten().is_some() {
             child_reaped = true;
         }
-        thread::sleep(EXECUTION_POLL_INTERVAL);
-    }
-    // The direct child can exit after SIGTERM while a descendant keeps the
-    // process group's output pipes open. Always follow with SIGKILL after the
-    // grace period so cancellation cannot wait on an orphaned provider child.
-    unsafe {
-        libc::kill(process_group, libc::SIGKILL);
+        // Once the direct child is reaped and no descendant is left in the
+        // group there is nothing to escalate against: return immediately
+        // instead of paying the whole grace period on every cancel or ACP
+        // connection teardown.
+        if child_reaped && !process_group_exists(process_group_id) {
+            break;
+        }
+        if started_at.elapsed() >= EXECUTION_TERMINATION_GRACE {
+            // The direct child can exit after SIGTERM while a descendant keeps
+            // the process group's output pipes open. Follow with SIGKILL after
+            // the grace period so cancellation cannot wait on an orphaned
+            // provider child.
+            unsafe {
+                libc::kill(-process_group_id, libc::SIGKILL);
+            }
+            break;
+        }
+        thread::sleep(EXECUTION_TERMINATION_POLL_INTERVAL);
     }
     if !child_reaped {
         let _ = child.wait();
     }
+    unregister_process_group(child.id());
 }
 
 #[cfg(not(unix))]
 pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
+    unregister_process_group(child.id());
 }
 
 #[cfg(test)]
@@ -795,6 +977,174 @@ mod tests {
         assert!(outcome.succeeded());
         assert_eq!(outcome.stdout, "done");
         assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_child_does_not_wait_on_pipes_held_by_an_escaped_descendant() {
+        // The forked child leaves the process group (as setsid/daemonizing
+        // tools do), so the exit-time group teardown cannot reach it, and it
+        // keeps stdout/stderr open. The parent only exits once the child has
+        // escaped, so the race cannot hide the bug.
+        if !std::path::Path::new("/usr/bin/perl").exists() {
+            return;
+        }
+        let mut request = ExecutionRequest::new("/usr/bin/perl");
+        request.args = vec![
+            "-e".into(),
+            "pipe(my $r, my $w) or die; \
+             my $pid = fork(); die unless defined $pid; \
+             if ($pid) { close $w; <$r>; $| = 1; print \"escaped:$pid\\n\"; exit 0 } \
+             close $r; setpgrp(0, 0); close $w; sleep 10;"
+                .into(),
+        ];
+        request.timeout = Duration::from_secs(20);
+
+        let started_at = Instant::now();
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+        let elapsed = started_at.elapsed();
+        if let Some(pid) = outcome
+            .stdout
+            .trim()
+            .strip_prefix("escaped:")
+            .and_then(|pid| pid.parse::<i32>().ok())
+        {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+
+        assert!(outcome.succeeded(), "{outcome:?}");
+        assert!(outcome.stdout.starts_with("escaped:"), "{outcome:?}");
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "run_command waited {elapsed:?} on pipes held by an escaped descendant"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn panicking_output_callback_tears_down_the_process_group() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "printf 'pid:%s\\n' \"$$\"; exec sleep 30".into(),
+        ];
+        request.timeout = Duration::from_secs(20);
+        let seen_pid = Arc::new(Mutex::new(None::<i32>));
+        let seen_pid_in_callback = seen_pid.clone();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_command(request, CancellationToken::default(), move |chunk| {
+                if let Some(pid) = chunk
+                    .text
+                    .trim()
+                    .strip_prefix("pid:")
+                    .and_then(|pid| pid.parse::<i32>().ok())
+                {
+                    *seen_pid_in_callback.lock().unwrap() = Some(pid);
+                    panic!("provider output callback failed");
+                }
+            })
+        }));
+
+        assert!(result.is_err(), "the callback panic should propagate");
+        let pid = seen_pid.lock().unwrap().expect("child reported its pid");
+        assert!(
+            !process_group_exists(pid),
+            "the provider process group outlived the panicking run"
+        );
+        assert!(!live_process_groups().contains(&pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_command_tracks_its_process_group_only_while_it_runs() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec!["-c".into(), "printf 'pid:%s\\n' \"$$\"; sleep 0.1".into()];
+        let mut tracked_while_running = None;
+
+        let outcome = run_command(request, CancellationToken::default(), |chunk| {
+            if let Some(pid) = chunk
+                .text
+                .trim()
+                .strip_prefix("pid:")
+                .and_then(|pid| pid.parse::<i32>().ok())
+            {
+                tracked_while_running = Some((pid, live_process_groups().contains(&pid)));
+            }
+        })
+        .unwrap();
+
+        assert!(outcome.succeeded());
+        let (pid, tracked) = tracked_while_running.expect("child reported its pid");
+        assert!(tracked, "a running provider group should be registered");
+        assert!(!live_process_groups().contains(&pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_process_group_returns_as_soon_as_the_group_is_gone() {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30");
+        configure_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        register_process_group(child.id());
+
+        let started_at = Instant::now();
+        terminate_process_group(&mut child);
+        let elapsed = started_at.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "terminating an already-dying group took {elapsed:?}"
+        );
+        assert!(!process_group_exists(child.id() as i32));
+        assert!(!live_process_groups().contains(&(child.id() as i32)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminating_live_groups_escalates_from_sigterm_to_sigkill() {
+        use std::io::{BufRead, BufReader};
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut polite = Command::new("/bin/sleep");
+        polite.arg("30");
+        configure_process_group(&mut polite);
+        let mut polite = polite.spawn().unwrap();
+
+        let mut stubborn = Command::new("/bin/sh");
+        stubborn
+            .args(["-c", "trap '' TERM; echo ready; sleep 30"])
+            .stdout(Stdio::piped());
+        configure_process_group(&mut stubborn);
+        let mut stubborn = stubborn.spawn().unwrap();
+        let mut ready = String::new();
+        BufReader::new(stubborn.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready.trim(), "ready");
+
+        register_process_group(polite.id());
+        register_process_group(stubborn.id());
+        let groups = [polite.id() as i32, stubborn.id() as i32];
+
+        let started_at = Instant::now();
+        terminate_process_groups(&groups, Duration::from_millis(300));
+        assert!(started_at.elapsed() < Duration::from_secs(2));
+
+        assert_eq!(polite.wait().unwrap().signal(), Some(libc::SIGTERM));
+        assert_eq!(stubborn.wait().unwrap().signal(), Some(libc::SIGKILL));
+        for group in groups {
+            assert!(!live_process_groups().contains(&group));
+            // The stubborn shell's grandchild is reaped by init, not by us.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while process_group_exists(group) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!process_group_exists(group));
+        }
     }
 
     #[test]

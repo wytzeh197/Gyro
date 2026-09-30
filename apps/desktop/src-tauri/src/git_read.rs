@@ -31,15 +31,26 @@ pub(super) fn run(
 }
 
 pub(super) fn repo_root(workspace: &Path, deadline: Instant) -> anyhow::Result<Option<PathBuf>> {
+    Ok(repo_root_and_prefix(workspace, deadline)?.map(|(root, _)| root))
+}
+
+/// The repository root and the workspace's place inside it (`sub/dir/`, or
+/// empty at the root), from one `rev-parse`.
+pub(super) fn repo_root_and_prefix(
+    workspace: &Path,
+    deadline: Instant,
+) -> anyhow::Result<Option<(PathBuf, String)>> {
     let mut command = git_command();
     command
         .arg("-C")
         .arg(workspace)
-        .args(["rev-parse", "--show-toplevel"]);
+        .args(["rev-parse", "--show-toplevel", "--show-prefix"]);
     let output = run(&command, deadline, 64 * 1024)?;
     if output.succeeded() && !output.stdout_truncated {
-        let path = output.stdout.trim();
-        return Ok((!path.is_empty()).then(|| PathBuf::from(path)));
+        let mut lines = output.stdout.lines();
+        let path = lines.next().unwrap_or_default().trim();
+        let prefix = lines.next().unwrap_or_default().to_string();
+        return Ok((!path.is_empty()).then(|| (PathBuf::from(path), prefix)));
     }
     if output.stderr.contains("not a git repository")
         && matches!(output.termination, ExecutionTermination::Exited { .. })

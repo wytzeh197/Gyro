@@ -88,8 +88,8 @@ pub use credentials::{
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
-    run_command, CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest,
-    ExecutionStream, ExecutionTermination,
+    register_process_group, run_command, terminate_live_process_groups, unregister_process_group, CancellationToken, ExecutionChunk,
+    ExecutionOutcome, ExecutionRequest, ExecutionStream, ExecutionTermination,
 };
 pub use file_review::{
     build_summary_prompt, cached_summaries, content_hash as file_review_content_hash,

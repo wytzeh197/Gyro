@@ -25,19 +25,19 @@
   color-scheme: dark;
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
-  --gyro-app: #181818;
-  --gyro-sidebar: #242526;
-  --gyro-sidebar-soft: #303236;
-  --gyro-pane: #1e1e1e;
-  --gyro-surface: #242628;
-  --gyro-surface-raised: #303236;
-  --gyro-surface-soft: #2c2e31;
-  --gyro-border: #3b3e43;
-  --gyro-border-soft: #303338;
-  --gyro-border-strong: #6d737d;
-  --gyro-text: #ededed;
-  --gyro-muted: #b5bbc4;
-  --gyro-faint: #9ca3ad;
+  --gyro-app: #141517;
+  --gyro-sidebar: #1a1b1e;
+  --gyro-sidebar-soft: #25272b;
+  --gyro-pane: #17181b;
+  --gyro-surface: #1e1f23;
+  --gyro-surface-raised: #27292e;
+  --gyro-surface-soft: #222328;
+  --gyro-border: #2e3036;
+  --gyro-border-soft: #25272c;
+  --gyro-border-strong: #5f646e;
+  --gyro-text: #ededf0;
+  --gyro-muted: #adb1ba;
+  --gyro-faint: #959aa5;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -60,10 +60,10 @@
   --gyro-permission-full: #ff8a3d;
   --gyro-danger: #ef7d7d;
   --gyro-success: #70d39f;
-  --gyro-sidebar-text: #d4d4d4;
-  --gyro-hover-text: #fafafa;
-  --gyro-topbar: #181818;
-  --gyro-topbar-border: #2d2d2d;
+  --gyro-sidebar-text: #d6d8dd;
+  --gyro-hover-text: #fafafb;
+  --gyro-topbar: #141517;
+  --gyro-topbar-border: #26282c;
   --gyro-brand-text: #111210;
   --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
   --gyro-primary-text: #101724;
@@ -72,22 +72,22 @@
     var(--gyro-user-main) 40%,
     white 60%
   );
-  --gyro-user-bubble: #303030;
-  --gyro-user-bubble-text: #ededed;
-  --gyro-code-bg: #0c0c0c;
-  --gyro-code-text: #e6e6e6;
-  --gyro-segment-bg: #202020;
-  --gyro-segment-active: #383838;
-  --gyro-segment-active-text: #f3f3f3;
+  --gyro-user-bubble: #26282c;
+  --gyro-user-bubble-text: #ededf0;
+  --gyro-code-bg: #0e0f11;
+  --gyro-code-text: #e6e7ea;
+  --gyro-segment-bg: #1a1b1e;
+  --gyro-segment-active: #2d2f35;
+  --gyro-segment-active-text: #f4f4f6;
   /* The System preference thumbnail must show both palettes at once. */
-  --gyro-theme-preview-dark-canvas: #242526;
-  --gyro-theme-preview-dark-content: #6d737d;
-  --gyro-theme-preview-light-canvas: #f8f9fb;
-  --gyro-theme-preview-light-content: #e9eef5;
-  --gyro-sidebar-mode-track: #202020;
+  --gyro-theme-preview-dark-canvas: #1a1b1e;
+  --gyro-theme-preview-dark-content: #5f646e;
+  --gyro-theme-preview-light-canvas: #f9f9f8;
+  --gyro-theme-preview-light-content: #ebebe8;
+  --gyro-sidebar-mode-track: #141517;
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
-  --gyro-shadow: rgba(0, 0, 0, 0.34);
-  --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
+  --gyro-shadow: rgba(0, 0, 0, 0.42);
+  --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -99,11 +99,11 @@
   --gyro-danger-soft: rgba(255, 105, 97, 0.13);
   --gyro-blue: #7aa7ff;
   --gyro-blue-soft: rgba(122, 167, 255, 0.12);
-  --gyro-canvas-subtle: #181818;
-  --gyro-window: #181818;
-  --gyro-workbench-line: rgba(255, 255, 255, 0.07);
-  --gyro-control-bg: #2c2e31;
-  --gyro-control-hover: #383c41;
+  --gyro-canvas-subtle: #141517;
+  --gyro-window: #141517;
+  --gyro-workbench-line: rgba(255, 255, 255, 0.06);
+  --gyro-control-bg: #222328;
+  --gyro-control-hover: #2d2f35;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -116,15 +116,15 @@
   --gyro-premium-muted: var(--gyro-muted);
   --gyro-premium-faint: var(--gyro-faint);
   --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(0, 0, 0, 0.44);
-  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.24);
-  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.34);
+  --gyro-premium-shadow: rgba(0, 0, 0, 0.55);
+  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.32);
+  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.42);
   --gyro-premium-hairline: rgba(255, 255, 255, 0.09);
   --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
   --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
-  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.04);
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.05);
   --gyro-premium-focus: var(--gyro-focus-ring);
-  --gyro-scrim: rgba(0, 0, 0, 0.58);
+  --gyro-scrim: rgba(6, 7, 9, 0.62);
   /* Corner ladder. Every control radius in this sheet resolves through one of
      these steps, so there is exactly one place to retune the app's corners.
      The ramp is softened one step from the old 4/6/8/10/12: badges and
@@ -183,23 +183,23 @@
      dark surfaces, so the token keeps the brand ink instead of a flipped
      monochrome. */
   --gyro-provider-openrouter: #c8ff00;
-  --gyro-hero-heading: #ededed;
+  --gyro-hero-heading: #f1f1f3;
   --gyro-hero-brand: #a0a0a0;
   --gyro-hero-composer: var(--gyro-surface);
   --gyro-hero-context: var(--gyro-surface);
   --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: #ededed;
+  --gyro-hero-text: #ededf0;
   --gyro-hero-muted: var(--gyro-muted);
   --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(255, 255, 255, 0.065);
-  --gyro-hero-hover-text: #ededed;
-  --gyro-hero-send: #ededed;
+  --gyro-hero-hover: rgba(255, 255, 255, 0.06);
+  --gyro-hero-hover-text: #f4f4f6;
+  --gyro-hero-send: #ededf0;
   --gyro-hero-send-hover: #ffffff;
-  --gyro-hero-send-text: #181818;
-  --gyro-hero-focus-border: rgba(255, 255, 255, 0.26);
-  --gyro-hero-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --gyro-hero-shadow-focus: 0 2px 8px rgba(0, 0, 0, 0.14);
-  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.015);
+  --gyro-hero-send-text: #141517;
+  --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
+  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 36px -12px rgba(0, 0, 0, 0.55);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.32), 0 18px 44px -12px rgba(0, 0, 0, 0.62);
+  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
   --gyro-page-card: var(--gyro-surface);
@@ -826,19 +826,19 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --gyro-app: #f7f9fc;
-  --gyro-sidebar: #edf1f6;
-  --gyro-sidebar-soft: #e7ebf0;
+  --gyro-app: #f9f9f8;
+  --gyro-sidebar: #f2f2f0;
+  --gyro-sidebar-soft: #e9e9e6;
   --gyro-pane: #ffffff;
   --gyro-surface: #ffffff;
   --gyro-surface-raised: #ffffff;
-  --gyro-surface-soft: #f1f4f8;
-  --gyro-border: #d6dce5;
-  --gyro-border-soft: #e3e8ef;
-  --gyro-border-strong: #788392;
-  --gyro-text: #20242a;
-  --gyro-muted: #596473;
-  --gyro-faint: #5e6978;
+  --gyro-surface-soft: #f4f4f2;
+  --gyro-border: #e0e0dc;
+  --gyro-border-soft: #eaeae7;
+  --gyro-border-strong: #7c7f87;
+  --gyro-text: #1b1c1f;
+  --gyro-muted: #5b5e66;
+  --gyro-faint: #61646c;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -873,9 +873,9 @@
     var(--gyro-muted) 60%,
     transparent
   );
-  --gyro-sidebar-text: #343a42;
-  --gyro-hover-text: #171a1f;
-  --gyro-topbar: rgba(255, 255, 255, 0.97);
+  --gyro-sidebar-text: #34363b;
+  --gyro-hover-text: #111214;
+  --gyro-topbar: rgba(255, 255, 255, 0.96);
   --gyro-topbar-border: var(--gyro-border);
   --gyro-brand-text: #ffffff;
   --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 84%, #10203b 16%);
@@ -885,15 +885,15 @@
     var(--gyro-user-main) 72%,
     #08182f 28%
   );
-  --gyro-user-bubble: #f0f1f2;
-  --gyro-user-bubble-text: #191b1f;
-  --gyro-code-bg: #f6f8fa;
-  --gyro-code-text: #24272d;
-  --gyro-segment-bg: #eceeef;
+  --gyro-user-bubble: #f1f1ef;
+  --gyro-user-bubble-text: #1b1c1f;
+  --gyro-code-bg: #f7f7f5;
+  --gyro-code-text: #24252a;
+  --gyro-segment-bg: #ededea;
   --gyro-segment-active: #ffffff;
-  --gyro-segment-active-text: #191b1f;
-  --gyro-shadow: rgba(32, 40, 52, 0.12);
-  --gyro-heavy-shadow: rgba(32, 40, 52, 0.2);
+  --gyro-segment-active-text: #1b1c1f;
+  --gyro-shadow: rgba(24, 24, 28, 0.1);
+  --gyro-heavy-shadow: rgba(24, 24, 28, 0.18);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -937,11 +937,11 @@
   --gyro-file-archive: #6d5a94;
   --gyro-file-font: #8a6a25;
   --gyro-file-data: #3f7f52;
-  --gyro-canvas-subtle: #f1f4f8;
+  --gyro-canvas-subtle: #f4f4f2;
   --gyro-window: #ffffff;
-  --gyro-workbench-line: rgba(32, 36, 42, 0.09);
-  --gyro-control-bg: #f1f4f8;
-  --gyro-control-hover: #e7ebf0;
+  --gyro-workbench-line: rgba(24, 24, 28, 0.08);
+  --gyro-control-bg: #f4f4f2;
+  --gyro-control-hover: #ebebe8;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -954,15 +954,15 @@
   --gyro-premium-muted: var(--gyro-muted);
   --gyro-premium-faint: var(--gyro-faint);
   --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(32, 36, 42, 0.14);
-  --gyro-premium-shadow-soft: rgba(32, 36, 42, 0.07);
-  --gyro-premium-shadow-lift: rgba(32, 36, 42, 0.11);
+  --gyro-premium-shadow: rgba(24, 24, 28, 0.12);
+  --gyro-premium-shadow-soft: rgba(24, 24, 28, 0.06);
+  --gyro-premium-shadow-lift: rgba(24, 24, 28, 0.09);
   --gyro-premium-hairline: rgba(32, 36, 42, 0.11);
   --gyro-premium-hairline-soft: rgba(32, 36, 42, 0.07);
   --gyro-premium-hairline-strong: rgba(32, 36, 42, 0.16);
-  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.72);
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.8);
   --gyro-premium-focus: var(--gyro-focus-ring);
-  --gyro-scrim: rgba(23, 27, 34, 0.34);
+  --gyro-scrim: rgba(20, 20, 24, 0.3);
   --gyro-provider-openai: #0f8f72;
   --gyro-provider-openai-logo: #000;
   --gyro-provider-anthropic: #c15d12;
@@ -972,31 +972,31 @@
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-provider-cursor: #1c2027;
-  --gyro-theme-preview-dark-canvas: #242526;
-  --gyro-theme-preview-dark-content: #6d737d;
-  --gyro-theme-preview-light-canvas: #f8f9fb;
-  --gyro-theme-preview-light-content: #e9eef5;
+  --gyro-theme-preview-dark-canvas: #1a1b1e;
+  --gyro-theme-preview-dark-content: #5f646e;
+  --gyro-theme-preview-light-canvas: #f9f9f8;
+  --gyro-theme-preview-light-content: #ebebe8;
   --gyro-provider-opencode: #1c2027;
   --gyro-provider-deepseek: #2c5bd0;
   --gyro-provider-mistral: #c2480c;
   --gyro-provider-openrouter: #7624f4;
-  --gyro-hero-heading: #20242a;
-  --gyro-hero-brand: #747d88;
+  --gyro-hero-heading: #1b1c1f;
+  --gyro-hero-brand: #7a7c83;
   --gyro-hero-composer: #ffffff;
   --gyro-hero-context: var(--gyro-surface-soft);
   --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: #20242a;
+  --gyro-hero-text: #1b1c1f;
   --gyro-hero-muted: var(--gyro-muted);
   --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(31, 41, 55, 0.075);
-  --gyro-hero-hover-text: #151a21;
-  --gyro-hero-send: #252b34;
-  --gyro-hero-send-hover: #111827;
+  --gyro-hero-hover: rgba(24, 24, 28, 0.06);
+  --gyro-hero-hover-text: #111214;
+  --gyro-hero-send: #1b1c1f;
+  --gyro-hero-send-hover: #000000;
   --gyro-hero-send-text: #ffffff;
   --gyro-hero-focus-border: var(--gyro-accent);
-  --gyro-hero-shadow: 0 18px 42px rgba(32, 36, 42, 0.12);
-  --gyro-hero-shadow-focus: 0 20px 46px rgba(32, 36, 42, 0.15);
-  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 28, 0.04), 0 14px 36px -14px rgba(24, 24, 28, 0.16);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 28, 0.05), 0 18px 44px -14px rgba(24, 24, 28, 0.2);
+  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 * {
@@ -2828,25 +2828,6 @@ button.gyro-account-menu-row:hover {
 
 .gyro-rail-row.is-clickable:hover {
   background: var(--gyro-surface-soft);
-}
-
-.gyro-plan-rail header > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.gyro-plan-rail header strong,
-.gyro-plan-rail header span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-plan-rail header span {
-  color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-plan-item {
@@ -9144,7 +9125,7 @@ textarea:focus-visible {
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
   border: 0.5px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-premium-radius-xl);
-  box-shadow: 0 12px 32px var(--gyro-premium-shadow-soft);
+  box-shadow: var(--gyro-hero-shadow), var(--gyro-hero-highlight);
 }
 
 .gyro-chat-start
@@ -14234,33 +14215,6 @@ body {
   padding: 0;
 }
 
-.gyro-plan-rail.is-document > header {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-surface-raised) 92%, transparent);
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
-  box-sizing: border-box;
-  display: flex;
-  justify-content: space-between;
-  min-height: 48px;
-  padding: 0 14px;
-}
-
-.gyro-plan-rail.is-document > header > div {
-  align-items: center;
-  display: flex;
-  gap: 9px;
-}
-
-.gyro-plan-rail.is-document > header > div > svg {
-  color: var(--gyro-muted);
-}
-
-.gyro-plan-rail.is-document > header strong {
-  color: var(--gyro-text);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 640;
-}
-
 .gyro-plan-document {
   color: var(--gyro-text);
   min-height: 0;
@@ -14699,10 +14653,6 @@ body {
   .gyro-chat-surface.has-environment
   .gyro-plan-rail.is-document {
   background: #ffffff;
-}
-
-:root[data-theme="light"] .gyro-plan-rail.is-document > header {
-  background: #f7f7f8;
 }
 
 @media (max-width: 1100px) {
@@ -25896,7 +25846,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
   border: 0.5px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-premium-radius-xl);
-  box-shadow: 0 12px 32px var(--gyro-premium-shadow-soft);
+  box-shadow: var(--gyro-hero-shadow), var(--gyro-hero-highlight);
 }
 
 .gyro-kanban-column,
@@ -26342,132 +26292,8 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Questions replace the composer while preserving the draft. */
-.gyro-composer-shell.has-overlay > :not(.gyro-chat-question-popup) {
+.gyro-composer-shell.has-overlay > :not(.gyro-question-dock) {
   display: none;
-}
-
-/* Plan decisions sit in the right panel beside the document or checklist. */
-.gyro-plan-decision-card {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: var(--gyro-radius-md);
-  box-sizing: border-box;
-  color: var(--gyro-text);
-  display: grid;
-  flex: none;
-  gap: 8px;
-  margin: 14px 16px 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 12px 14px;
-  position: relative;
-}
-
-.gyro-plan-decision-head {
-  align-items: center;
-  color: var(--gyro-muted);
-  display: flex;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  gap: 7px;
-}
-
-.gyro-plan-decision-head > svg {
-  color: var(--gyro-faint);
-  flex: none;
-}
-
-.gyro-plan-decision-head small {
-  color: var(--gyro-faint);
-  font-size: inherit;
-}
-
-.gyro-plan-decision-foot {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.gyro-plan-decision-hint {
-  color: var(--gyro-faint);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-plan-decision-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.gyro-plan-decision-actions > button {
-  border: 1px solid transparent;
-  border-radius: var(--gyro-radius-md);
-  cursor: pointer;
-  font: inherit;
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
-  font-weight: 560;
-  min-height: 30px;
-  padding: 0 12px;
-  white-space: nowrap;
-}
-
-.gyro-plan-decision-actions > button.is-secondary {
-  background: transparent;
-  color: var(--gyro-muted);
-}
-
-.gyro-plan-decision-actions > button.is-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-actions > button.is-primary {
-  background: var(--gyro-text);
-  color: var(--gyro-app);
-}
-
-.gyro-plan-decision-actions > button.is-primary:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
-.gyro-plan-decision-actions > button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
-.gyro-plan-decision-progress {
-  bottom: 0;
-  height: 2px;
-  left: 0;
-  overflow: hidden;
-  position: absolute;
-  right: 0;
-}
-
-.gyro-plan-decision-progress::after {
-  animation: gyro-plan-decision-progress 1.1s ease-in-out infinite;
-  background: var(--gyro-accent);
-  content: "";
-  inset: 0;
-  position: absolute;
-}
-
-@keyframes gyro-plan-decision-progress {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .gyro-plan-decision-progress::after {
-    animation: none;
-    opacity: 0.55;
-  }
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -27442,8 +27268,14 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-surface.has-environment .gyro-chat-tool-rail.has-plan {
-  align-self: stretch;
   grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/* Environment is a card sized to what it lists, unlike the tool panels that
+   fill the column. A long plan scrolls inside it instead of growing it. */
+.gyro-chat-surface.has-environment .gyro-environment-rail.gyro-chat-tool-rail {
+  align-self: start;
+  max-height: calc(100% - 16px);
 }
 
 .gyro-chat-tool-rail > header {
@@ -35416,7 +35248,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-sidebar-action.is-settings-page.is-active,
 .gyro-sidebar-thread.is-active {
-  background: color-mix(in srgb, var(--gyro-accent) 8%, var(--gyro-sidebar));
+  background: transparent;
   box-shadow: none;
 }
 
@@ -35646,7 +35478,7 @@ textarea:focus-visible,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row.is-active,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread.is-active,
 .gyro-app-shell.is-chat-shell .gyro-session-row.is-active {
-  background: color-mix(in srgb, var(--gyro-accent) 8%, var(--gyro-sidebar));
+  background: transparent;
   box-shadow: none;
   color: var(--gyro-text);
 }
@@ -41326,8 +41158,9 @@ textarea:focus-visible,
   }
 }
 
+/* Header, then the document or the step list filling the rest. */
 .gyro-chat-surface.has-environment .gyro-plan-rail.is-document {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 /* Status and hover actions occupy the same trailing slot without displacing
@@ -41594,11 +41427,6 @@ textarea:focus-visible,
     var(--gyro-text) 4%,
     var(--gyro-sidebar)
   );
-  --gyro-shell-row-selected: color-mix(
-    in srgb,
-    var(--gyro-accent) 12%,
-    var(--gyro-sidebar)
-  );
   color: var(--gyro-sidebar-text);
 }
 
@@ -41686,9 +41514,35 @@ textarea:focus-visible,
     .gyro-session-row,
     .gyro-footer-button
   ).is-active:hover {
-  background: var(--gyro-shell-row-selected);
+  background: transparent;
   color: var(--gyro-text);
   box-shadow: none;
+}
+
+/* The selected row carries no fill; brighter, heavier text marks it, and it
+   still answers the pointer like its neighbours. */
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active {
+  font-weight: 600;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active:hover {
+  background: var(--gyro-shell-row-hover);
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-row {
@@ -41805,7 +41659,7 @@ textarea:focus-visible,
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-actions {
-  background: var(--gyro-shell-row-selected);
+  background: var(--gyro-shell-row-hover);
   border-color: transparent;
   border-radius: 5px;
   box-shadow: none;
@@ -43216,11 +43070,6 @@ textarea:focus-visible,
 :root .gyro-color-control .gyro-color-swatch {
   /* 9px control, 1px border, 5px padding. */
   border-radius: calc(var(--gyro-radius-md) - 1px - 5px);
-}
-:root .gyro-chat-question-popup > header > button {
-  /* A close control in a card's corner reads as a circle, which no corner
-     radius can mismatch. */
-  border-radius: 999px;
 }
 
 /* Project choices need room for names and paths, with actions kept separate. */

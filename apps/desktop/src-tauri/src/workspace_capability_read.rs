@@ -192,13 +192,22 @@ fn continuation(content: &str, line: u64, column: u64) -> (u64, u64) {
 }
 
 fn bound_read_result(mut data: Value) -> anyhow::Result<Value> {
-    let content = data["content"].as_str().unwrap_or("").to_owned();
+    let full = data["content"].as_str().unwrap_or("");
+    let full_len = full.len();
+    // The serialized payload is never smaller than its text, so text past the
+    // result budget can never fit. Cutting it first keeps the boundary search
+    // below from indexing every character of a 64 MB minified line.
+    let mut cap = full_len.min(gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES);
+    while !full.is_char_boundary(cap) {
+        cap -= 1;
+    }
+    let content = full[..cap].to_owned();
     let already_truncated = data["truncated"].as_bool().unwrap_or(false);
     let line = data["line"].as_u64().unwrap_or(1);
     let column = data["column"].as_u64().unwrap_or(1);
     let update = |data: &mut Value, end: usize| {
         let text = &content[..end];
-        let truncated = already_truncated || end < content.len();
+        let truncated = already_truncated || end < full_len;
         data["content"] = json!(text);
         data["truncated"] = json!(truncated);
         if truncated {
@@ -274,6 +283,22 @@ mod tests {
                 rest["content"].as_str().unwrap()
             ),
             text
+        );
+    }
+
+    #[test]
+    fn workspace_read_bounds_a_huge_minified_line() {
+        let text = "é".repeat(8 * 1024 * 1024);
+        let result =
+            bound_read_result(json!({"content":text,"line":1,"column":1,"truncated":false}))
+                .unwrap();
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["nextLine"], 1);
+        let returned = result["content"].as_str().unwrap().chars().count() as u64;
+        assert_eq!(result["nextColumn"], returned + 1);
+        assert!(
+            serde_json::to_vec(&result).unwrap().len()
+                <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
         );
     }
 

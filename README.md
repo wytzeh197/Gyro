@@ -34,36 +34,51 @@ session with you.
 
 - **One session across surfaces.** The app and the `gyro` CLI share one local
   session store, so a conversation can start in either place and resume in the
-  other with its run state, approvals, and history.
+  other with its run state, approvals, workspace and worktree context, and
+  history.
 - **Bring your own agent.** Use the agent subscriptions you already have, a
   local model, or an API key, without keeping a separate workspace per provider.
 - **Approvals before mutation.** Commands, file edits, and sensitive reads stay
   visible before they change local state. Choose **Ask for approval**,
-  **Approve for me**, or **Full access**; Plan mode stays non-mutating.
+  **Approve for me**, or **Full access**; Plan mode keeps a chat read-only
+  while it works through a plan.
 - **Goals and plans on the composer.** Pin the outcome a session is pursuing,
   and approve a finished plan with **Implement** or **Keep planning** before
   any edit starts.
 - **A real workbench.** Files, Git, diffs, problems, output, test results, a
   terminal grid, a browser, and interactive Canvas previews sit in the same
-  window as the chat. A session can span several project folders, and chats
-  can run side by side in a split layout.
+  window as the chat. A session can span several project folders, chats can run
+  side by side in a split layout, and isolated sessions can work in their own
+  Git worktree. Builds and CI commands that outlast a turn keep running and
+  report back into the chat.
+- **Search across everything.** One fuzzy search over projects, sessions,
+  actions, and workspace files, plus code intelligence from managed language
+  servers: definitions, references, hover docs, and document symbols for the
+  editor and the model alike.
+- **GitHub in the workspace.** Pull requests, Actions runs with failed-step
+  logs, and pushing the current branch sit beside Git status and diffs.
 - **A browser the agent can use.** Models open, read, and inspect pages in a
-  per-session browser. It stays in the background while you work in split
-  chats, and opens beside the chat when you want to watch or take over.
+  per-chat browser. It stays out of the way while you work, and opens beside
+  the chat when you want to watch or take over.
 - **Scheduled work.** Automations run agent tasks on a schedule with pause, stop
   conditions, receipts, and recovery across restarts.
 - **Delegated research.** A read-only sub-agent investigates a question in its
   own child session and returns only its final report to the chat.
+- **Menu bar and notifications.** A native menu-bar item tracks idle, working,
+  and waiting sessions, and macOS notifications cover approvals, finished work,
+  and failures while Gyro is in the background.
 - **Usage you can see.** Turn tokens, plan-usage meters, and provider retries
-  are reported per session; estimates are not hard spend ceilings.
+  are reported per session, and usage limits can pause work that would run past
+  them; estimates are not hard spend ceilings.
 - **Local-first trust.** Sessions, config, worktrees, and usage stay on your
   Mac; provider keys live in the macOS Keychain; logs are redacted; app
   telemetry is off by default.
 
 ## Providers
 
-- **Subscription CLIs.** Claude Code, Codex, Gemini CLI, Kimi Code, and Grok run
-  through their own local CLIs. Cursor and OpenCode are experimental.
+- **Subscription CLIs.** Claude Code, Codex, Gemini CLI, Kimi Code, and
+  Grok Build run through their own local CLIs. Cursor and OpenCode are
+  experimental.
 - **Local models.** Ollama runs on your Mac, with discovered models and governed
   Gyro tools where the model supports them. See [Local models](docs/local-models.md).
 - **API keys.** DeepSeek, Mistral, and OpenRouter ship as presets, and any
@@ -104,6 +119,8 @@ Known limits in the current alpha:
 - App bundles are ad-hoc signed; first launch needs **Open Anyway**.
 - Cursor and OpenCode are experimental and not approval-safe adapters.
 - Notebook and binary file edits are refused rather than applied.
+- API-key providers run in the app; the CLI chat loop does not execute them
+  yet.
 - Keep the app and CLI on the same version when handing sessions between them.
 
 ## Build from source
@@ -131,6 +148,7 @@ Do not open `target/debug/gyro-desktop`; it expects the Vite server.
 
 - [Architecture](docs/architecture.md) · [Verification](docs/verification.md) · [Privacy](docs/privacy.md) · [Roadmap](docs/roadmap.md)
 - [Install on macOS](docs/install-macos.md) · [Homebrew](docs/homebrew.md) · [Local models](docs/local-models.md) · [API-key providers](docs/api-key-providers.md)
-- [Permissions](docs/permissions.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
+- [Permissions](docs/permissions.md) · [Usage safety](docs/usage-safety.md) · [Model tools](docs/model-tools.md) · [Command waiting](docs/command-waiting.md)
+- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
 
 Apache-2.0. Contributions use [DCO](CONTRIBUTING.md#developer-certificate-of-origin) signoff.

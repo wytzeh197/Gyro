@@ -14,136 +14,256 @@
 }
 .gyro-scheduled-titlebar button {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
   min-height: 30px;
   padding: 5px 12px;
+  border-radius: var(--gyro-radius-md);
 }
 .gyro-scheduled-body {
-  width: min(760px, calc(100% - 64px));
-  margin: 30px auto 60px;
+  width: min(720px, calc(100% - 64px));
+  margin: 28px auto 64px;
 }
 .gyro-scheduled-heading {
-  margin-bottom: 26px;
+  margin-bottom: 24px;
 }
 .gyro-scheduled-heading h1 {
   font-size: calc(26px * var(--gyro-ui-scale, 1));
-  letter-spacing: -0.6px;
-  font-weight: 600;
-  margin: 0 0 8px;
+  letter-spacing: -0.02em;
+  font-weight: 620;
+  margin: 0 0 6px;
 }
 .gyro-scheduled-heading p {
   margin: 0;
   font-size: calc(13px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
 }
+.gyro-scheduled-search-field {
+  position: relative;
+  display: block;
+}
+.gyro-scheduled-search-field > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--gyro-faint);
+  pointer-events: none;
+}
 .gyro-scheduled-search {
   box-sizing: border-box;
   width: 100%;
-  height: 34px;
-  border: 1px solid var(--gyro-border);
-  border-radius: 8px;
-  padding: 6px 12px;
-  background: transparent;
+  height: 36px;
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-md);
+  padding: 6px 12px 6px 34px;
+  background: var(--gyro-control-bg);
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
   color: inherit;
+  transition:
+    border-color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+.gyro-scheduled-search::placeholder {
+  color: var(--gyro-faint);
+}
+.gyro-scheduled-search:hover {
+  border-color: var(--gyro-premium-hairline-strong);
+}
+.gyro-scheduled-search:focus {
+  outline: none;
+  border-color: var(--gyro-premium-hairline-strong);
+  background: var(--gyro-surface);
+}
+.gyro-scheduled-search:focus-visible {
+  outline: none;
 }
 .gyro-scheduled-filters {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 20px 0;
+  gap: 2px;
+  margin: 16px 0 18px;
+  padding: 3px;
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-segment-bg);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
 }
 .gyro-scheduled-filters button {
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
   color: var(--gyro-muted);
   font: inherit;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
-  padding: 7px 10px;
+  font-weight: 500;
+  padding: 5px 12px;
   cursor: pointer;
+  transition:
+    background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 .gyro-scheduled-filters button:hover {
-  background: var(--gyro-surface-soft);
   color: var(--gyro-text);
 }
 .gyro-scheduled-filters button[aria-pressed="true"] {
-  background: var(--gyro-accent-soft);
-  color: var(--gyro-text);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-accent) 25%, transparent);
+  background: var(--gyro-segment-active);
+  color: var(--gyro-segment-active-text);
+  box-shadow:
+    0 1px 2px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+}
+/* Scheduled work and suggestions sit in grouped cards: one hairline frame,
+   rows divided by inset rules, like a native settings list. */
+.gyro-scheduled-list,
+.gyro-scheduled-suggestions > div {
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-page-card);
+  box-shadow: 0 1px 2px var(--gyro-premium-shadow-soft);
+  overflow: hidden;
 }
 .gyro-scheduled-item,
 .gyro-scheduled-suggestions button {
+  position: relative;
   width: 100%;
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: inherit;
-  padding: 13px 10px;
+  padding: 12px 14px;
   text-align: left;
   cursor: pointer;
   font: inherit;
+  transition: background-color var(--gyro-premium-motion)
+    var(--gyro-premium-ease);
+}
+.gyro-scheduled-item + .gyro-scheduled-item,
+.gyro-scheduled-suggestions button + button {
+  box-shadow: inset 0 1px 0 var(--gyro-premium-hairline-soft);
 }
 .gyro-scheduled-item:hover,
 .gyro-scheduled-item.is-selected,
 .gyro-scheduled-suggestions button:hover {
-  background: var(--gyro-surface-soft);
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
 }
-.gyro-scheduled-item > svg,
-.gyro-scheduled-suggestions button > svg {
+.gyro-scheduled-item:disabled,
+.gyro-scheduled-suggestions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.gyro-scheduled-item > svg:first-child,
+.gyro-scheduled-suggestions button > svg:first-child {
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  padding: 8px;
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-control-bg);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
   color: var(--gyro-muted);
   flex-shrink: 0;
-  margin-top: 2px;
 }
 .gyro-scheduled-item > span,
 .gyro-scheduled-suggestions button > span {
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 3px;
 }
 .gyro-scheduled-item strong,
 .gyro-scheduled-suggestions strong {
   font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
+  font-weight: 550;
   overflow-wrap: anywhere;
 }
 .gyro-scheduled-item small,
 .gyro-scheduled-suggestions small {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  line-height: 1.5;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
   color: var(--gyro-muted);
   overflow-wrap: anywhere;
 }
-.gyro-scheduled-item b {
+.gyro-scheduled-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  background: var(--gyro-control-bg);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
   font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-style: normal;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.gyro-scheduled-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gyro-status-cancelled);
+}
+.gyro-scheduled-status.is-current {
+  color: var(--gyro-text);
+}
+.gyro-scheduled-status.is-current::before {
+  background: var(--gyro-status-success);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--gyro-status-success) 18%, transparent);
+}
+.gyro-scheduled-status.is-paused::before {
+  background: var(--gyro-status-waiting);
+}
+.gyro-scheduled-item b {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--gyro-primary-bg);
+  color: var(--gyro-primary-text);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 .gyro-scheduled-empty {
-  padding: 56px 0;
+  margin: 0;
+  padding: 48px 0;
   font-size: calc(13px * var(--gyro-ui-scale, 1));
   text-align: center;
   color: var(--gyro-muted);
 }
 .gyro-scheduled-suggestions {
-  border-top: 1px solid var(--gyro-border);
-  margin-top: 20px;
-  padding-top: 20px;
+  margin-top: 28px;
 }
 .gyro-scheduled-suggestions h2 {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
-  font-weight: 500;
-  margin: 0 10px 10px;
+  font-weight: 550;
+  margin: 0 2px 10px;
+}
+.gyro-scheduled-suggestions button > svg:last-child {
+  color: var(--gyro-faint);
+  flex-shrink: 0;
+  transition: color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+.gyro-scheduled-suggestions button:hover > svg:last-child {
+  color: var(--gyro-text);
 }
 .gyro-scheduled-local-note {
-  color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-faint);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   line-height: 1.5;
-  padding: 12px 10px;
+  margin: 0;
+  padding: 16px 2px 0;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-body {
   display: grid;
@@ -338,23 +458,44 @@
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-filters {
   order: -1;
-  margin: 0 0 24px;
+  margin: 0 0 12px;
   gap: 0;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-filters button {
   padding: 6px 9px;
 }
-.gyro-scheduled-page.has-detail .gyro-scheduled-search {
-  border-radius: 18px;
+.gyro-scheduled-page.has-detail .gyro-scheduled-search-field {
   flex-shrink: 0;
+  margin-bottom: 12px;
+}
+/* The narrow list column keeps each row to title and schedule; status stays
+   as its dot, and the word remains for assistive technology. */
+.gyro-scheduled-page.has-detail .gyro-scheduled-item,
+.gyro-scheduled-page.has-detail .gyro-scheduled-suggestions button {
+  gap: 10px;
+  padding: 10px 12px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-item > svg:first-child,
+.gyro-scheduled-page.has-detail
+  .gyro-scheduled-suggestions
+  button
+  > svg:first-child {
+  width: 28px;
+  height: 28px;
+  padding: 7px;
+}
+.gyro-scheduled-page.has-detail .gyro-scheduled-status {
+  background: none;
+  box-shadow: none;
+  font-size: 0;
+  gap: 0;
+  padding: 4px;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-empty {
   padding: 70px 0;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-suggestions {
-  border-top: 0;
-  margin-top: 0;
-  padding-top: 6px;
+  margin-top: 20px;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-panel {
   padding: 0;

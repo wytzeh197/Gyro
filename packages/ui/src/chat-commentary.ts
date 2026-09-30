@@ -108,7 +108,7 @@ export function assistantMessageBlockStarts(value: string): number[] {
  * live streamed text still carries them until the turn completes.
  */
 const HIDDEN_CONTROL_MARKER =
-  /^[ \t]*GYRO_(?:SESSION_TITLE|ARTIFACTS|PLAN_UPDATE|GOAL_UPDATE):[^\n]*/gm;
+  /^[ \t]*GYRO_(?:SESSION_TITLE|ARTIFACTS|PLAN_UPDATE|GOAL_UPDATE|QUESTIONS):[^\n]*/gm;
 
 /** Remove control markers so they never draw as a narration row. */
 export function stripHiddenControlMarkers(value: string): string {

@@ -1,14 +1,16 @@
 use super::{
-    git_command, parse_git_numstat, run_bounded_command, MainComparisonStats, SourceControlFile,
+    git_command, git_read, parse_git_numstat, MainComparisonStats, SourceControlFile,
+    GIT_NUMSTAT_ARGS,
 };
 use std::path::Path;
-use std::time::Duration;
+use std::time::Instant;
 
 const MAX_COMPARISON_FILES: usize = 400;
 
 // Prefer the fetched remote main; a local main may lag behind many releases.
-// Local-only repositories retain their existing comparison behavior.
-pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
+// Local-only repositories retain their existing comparison behavior. Both
+// candidates share the caller's deadline.
+pub(crate) fn git_main_comparison_base(repo_root: &Path, deadline: Instant) -> Option<String> {
     for reference in ["refs/remotes/origin/main", "refs/heads/main"] {
         let mut command = git_command();
         command.arg("-C").arg(repo_root).args([
@@ -16,13 +18,7 @@ pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
             "--verify",
             &format!("{reference}^{{commit}}"),
         ]);
-        let Ok(output) = run_bounded_command(
-            &command,
-            Duration::from_secs(5),
-            Some(Duration::from_secs(5)),
-            1024,
-            1024,
-        ) else {
+        let Ok(output) = git_read::run(&command, deadline, 1024) else {
             continue;
         };
         if output.succeeded() && !output.stdout_truncated {
@@ -32,26 +28,23 @@ pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
     None
 }
 
+/// `workspace` is the directory paths are reported relative to, like the
+/// `untracked` files; the base is resolved once, within `deadline`.
 pub(crate) fn git_main_comparison(
-    repo_root: &Path,
+    workspace: &Path,
     untracked: &[SourceControlFile],
     untracked_additions: usize,
     partial: bool,
+    deadline: Instant,
 ) -> Option<MainComparisonStats> {
-    let base = git_main_comparison_base(repo_root)?;
+    let base = git_main_comparison_base(workspace, deadline)?;
     let mut command = git_command();
     command
         .arg("-C")
-        .arg(repo_root)
-        .args(["diff", "--numstat", "--no-renames", &base, "--"]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
-        4 * 1024 * 1024,
-        64 * 1024,
-    )
-    .ok()?;
+        .arg(workspace)
+        .args(GIT_NUMSTAT_ARGS)
+        .args([base.as_str(), "--"]);
+    let output = git_read::run(&command, deadline, 4 * 1024 * 1024).ok()?;
     if !output.succeeded() {
         return None;
     }

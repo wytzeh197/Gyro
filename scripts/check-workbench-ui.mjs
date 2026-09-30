@@ -605,6 +605,15 @@ const styleSource = [
   readRepoFile("packages/ui/src/installed-update.css"),
 ].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
+const planModeSource = [
+  readRepoFile("packages/ui/src/plan-mode.tsx"),
+  readRepoFile("packages/ui/src/chat-question-popup.tsx"),
+  readRepoFile("packages/ui/src/chat-questions.ts"),
+].join("\n");
+const planModeStyleSource = [
+  readRepoFile("packages/ui/src/plan-mode.css"),
+  readRepoFile("packages/ui/src/chat-question-popup.css"),
+].join("\n");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
 const desktopIndexSource = readRepoFile("apps/desktop/index.html");
@@ -1222,6 +1231,7 @@ const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/context_compaction.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/language_server.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/terminal_process.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
@@ -5686,7 +5696,7 @@ expect(
 );
 const chatSurfaceSource = surfaceSource.slice(
   surfaceSource.indexOf("export function ChatSurface"),
-  surfaceSource.indexOf("function PlanDecisionCard"),
+  surfaceSource.indexOf("function PlanDocument("),
 );
 expect(
   typeSource.includes('| "plan-updated"') &&
@@ -5698,7 +5708,7 @@ expect(
     surfaceSource.includes("ChatSurfaceControls") &&
     surfaceSource.includes("ChatSidePanel") &&
     surfaceSource.includes("function PlanDocument") &&
-    surfaceSource.includes("function PlanDecisionCard") &&
+    planModeSource.includes("export function ImplementPlanDock") &&
     typeSource.includes("content?: string") &&
     appSource.includes("assistantContentByTurnId") &&
     surfaceSource.includes("gyro-plan-inline-editor") &&
@@ -5768,12 +5778,16 @@ expect(
     appSource.includes('kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
     styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
-    styleSource.includes(".gyro-plan-decision-card") &&
+    planModeStyleSource.includes(".gyro-plan-card") &&
     styleSource.includes(".gyro-plan-harness") &&
     styleSource.includes(".gyro-plan-progress") &&
     surfaceSource.includes('aria-label="Plan harness"') &&
-    surfaceSource.includes('role="progressbar"') &&
-    surfaceSource.includes("model-managed checklist") &&
+    planModeSource.includes('role="progressbar"') &&
+    planModeSource.includes("export function PlanPanelHeader") &&
+    surfaceSource.includes('className="gyro-plan-harness gyro-plan-steps"') &&
+    surfaceSource.includes("<EnvironmentPlanSteps") &&
+    planModeSource.includes("export function EnvironmentPlanSteps") &&
+    planModeSource.includes("export function PlanStepStatus") &&
     surfaceSource.includes(
       'activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : ""',
     ) &&
@@ -7117,24 +7131,33 @@ expect(
   "Explicit plan requests in Normal chat should enter the real read-only Plan mode and always produce a plan document.",
 );
 expect(
-  surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes('onDecision("reject")') &&
-    surfaceSource.includes('onDecision("approve")') &&
-    surfaceSource.includes("onPlanDecision={handlePlanDecision}") &&
-    surfaceSource.includes(
-      "onDecision={(decision) => onPlanDecision?.(decision)}",
+  // The decision takes the composer's place, like a question: approve, type a
+  // change (which stays in Plan mode), or keep planning.
+  planModeSource.includes("export function ImplementPlanDock") &&
+    planModeSource.includes('aria-label="Implement this plan?"') &&
+    planModeSource.includes('onDecision("reject")') &&
+    planModeSource.includes('onDecision("approve")') &&
+    planModeSource.includes("Yes, implement this plan") &&
+    chatSurfaceSource.includes("<ImplementPlanDock") &&
+    chatSurfaceSource.includes(
+      "onDecision={(decision) => void handlePlanDecision(decision)}",
     ) &&
-    surfaceSource.includes(
-      "autoOpenedPlanDecisionKeyRef.current = planDecisionKey",
-    ) &&
+    chatSurfaceSource.includes("setDismissedPlanDecisionKey(planDecisionKey);") &&
+    // The plan lands in the transcript as a card holding the same document the
+    // panel renders, and folds to one line while the panel shows it.
+    planModeSource.includes("export function PlanCard") &&
+    planModeSource.includes("Showing in panel") &&
+    chatTurnSource.includes("{isPlanResponseTurn && plan?.content ? (") &&
+    chatTurnSource.includes("<PlanCard") &&
+    chatTurnSource.includes("isOpenInPanel={isPlanInPanel}") &&
+    surfaceSource.includes('isPlanInPanel={activeRailPanel === "plan"}') &&
+    !surfaceSource.includes("autoOpenedPlanDecisionKeyRef") &&
+    !surfaceSource.includes("function PlanDecisionCard") &&
     surfaceSource.includes("!isPlanResponseTurn ? (") &&
-    !surfaceSource.includes("function PlanArtifactCard") &&
-    !chatSurfaceSource.includes("<PlanDecisionCard") &&
-    !chatSurfaceSource.includes("<SessionGoalBand") &&
     /activePanel === "plan" &&\s*sessionPlan\?\.content/.test(surfaceSource) &&
     surfaceSource.includes('planView === "document"') &&
-    surfaceSource.includes('aria-label="Plan view"') &&
+    planModeSource.includes('aria-label="Plan view"') &&
+    surfaceSource.includes("<PlanPanelHeader") &&
     surfaceSource.includes("content={sessionPlan.content}") &&
     surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
@@ -7148,10 +7171,24 @@ expect(
     appSource.includes('mode: "normal"') &&
     appSource.includes("const plan = target?.plan ?? activeSessionPlan") &&
     appSource.includes("preserveDraft: true") &&
-    styleSource.includes(".gyro-plan-decision-card") &&
+    // Questions arrive one at a time with a recommended pick, and the answers
+    // fold into an "Asked N questions" run row.
+    tauriSource.includes('const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";') &&
+    tauriSource.includes('object.insert("questions".into(), questions);') &&
+    planModeSource.includes("export function questionsFromPayload") &&
+    planModeSource.includes("export function formatChatAnswers") &&
+    planModeSource.includes("No, and tell Gyro what to do instead") &&
+    planModeSource.includes("gyro-question-option-badge") &&
+    planModeSource.includes("export function ChatQuestionAnswers") &&
+    chatTurnSource.includes("<ChatQuestionAnswers {...questionAnswers} />") &&
+    planModeStyleSource.includes(".gyro-question-dock") &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > :not(.gyro-question-dock)",
+    ) &&
+    !styleSource.includes(".gyro-plan-decision-card") &&
     !styleSource.includes(".gyro-plan-artifact-card") &&
     styleSource.includes(".gyro-plan-rail.is-document"),
-  "Completed Plan-mode output should open the right panel with approval controls and keep the plan out of the transcript.",
+  "Plan mode should ask one question at a time, land the plan as a card in the transcript, and put the implement decision where the composer sits.",
 );
 
 expect(
@@ -7665,15 +7702,15 @@ expect(
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 9px") &&
     styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
-    styleSource.includes("--gyro-app: #181818") &&
-    styleSource.includes("--gyro-pane: #1e1e1e") &&
+    styleSource.includes("--gyro-app: #141517") &&
+    styleSource.includes("--gyro-pane: #17181b") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f7f9fc") &&
-    styleSource.includes("--gyro-sidebar: #edf1f6") &&
+    styleSource.includes("--gyro-app: #f9f9f8") &&
+    styleSource.includes("--gyro-sidebar: #f2f2f0") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
