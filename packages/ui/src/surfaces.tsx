@@ -52,6 +52,12 @@ import {
   settingsSearchKey,
 } from "./settings-controls";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
+import {
+  ProviderGroupHead,
+  ProviderJumpLinks,
+  providerConnectMethodLabel,
+  revealProviderAnchor,
+} from "./provider-groups";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -21125,9 +21131,12 @@ function CustomProviderSection({
 function ProviderDetailsMenu({
   children,
   label,
+  summaryClassName,
 }: {
   children: ReactNode;
   label: string;
+  /** Lets a caller dress the trigger as a shared primitive, e.g. an icon button. */
+  summaryClassName?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const detailsRef = useOutsidePointerDismiss<HTMLDetailsElement>(isOpen, () =>
@@ -21141,7 +21150,7 @@ function ProviderDetailsMenu({
       open={isOpen}
       ref={detailsRef}
     >
-      <summary aria-label={label}>
+      <summary aria-label={label} className={summaryClassName}>
         <MoreHorizontal size={16} />
       </summary>
       {children}
@@ -21847,288 +21856,288 @@ export function SettingsSurface({
             title="Providers"
             description="Connect an account, add an API key, or use a local model. Then choose a model and return to chat."
           >
-            <nav
-              className="gyro-provider-connect-path"
-              aria-label="Connection methods"
-            >
-              {(
-                [
-                  [
-                    "gyro-provider-accounts",
-                    "Existing account",
-                    "Use your provider’s sign-in.",
-                  ],
-                  [
-                    "gyro-provider-api-keys",
-                    "API key",
-                    "Use a key from your provider.",
-                  ],
-                  [
-                    "gyro-provider-ollama",
-                    "Local models",
-                    "Connect to Ollama on this Mac.",
-                  ],
-                ] as const
-              ).map(([target, label, detail]) => (
-                <button
-                  key={target}
-                  type="button"
-                  onClick={() => {
-                    const section = document.getElementById(target);
-                    section?.scrollIntoView({
-                      behavior: "instant",
-                      block: "start",
-                    });
-                    section?.focus({ preventScroll: true });
-                  }}
+            <ProviderJumpLinks
+              accountsTarget={
+                disabledProviders.length > 0
+                  ? "gyro-provider-accounts"
+                  : "gyro-provider-connected"
+              }
+            />
+            {(
+              [
+                {
+                  id: "gyro-provider-connected",
+                  label: "Connected",
+                  statusLabel: "Status",
+                  providers: enabledProviders,
+                },
+                {
+                  id: "gyro-provider-accounts",
+                  label: "Available",
+                  statusLabel: "Connects with",
+                  providers: disabledProviders,
+                },
+              ] as const
+            ).map((group) =>
+              group.providers.length === 0 ? null : (
+                <section
+                  aria-labelledby={`${group.id}-title`}
+                  className="gyro-provider-table is-native-list"
+                  id={group.id}
+                  key={group.id}
+                  tabIndex={-1}
                 >
-                  <strong>{label}</strong>
-                  <span>{detail}</span>
-                </button>
-              ))}
-            </nav>
-            <div
-              className="gyro-provider-connect-help"
-              id="gyro-provider-accounts"
-              tabIndex={-1}
-            >
-              <h2>Connect your provider</h2>
-              <p>
-                Choose your provider below. Sign-in opens a terminal and may
-                continue in your browser. Finish there, then return here to
-                choose “Use in chat”.
-              </p>
-            </div>
-            <div className="gyro-provider-table is-native-list">
-              <div className="gyro-provider-table-head">
-                <span>Provider</span>
-                <span>Default model</span>
-                <span>Connection</span>
-                <span>Actions</span>
-              </div>
-              {[...enabledProviders, ...disabledProviders].map((provider) => {
-                const capabilities = providerCapabilities(provider.id);
-                const defaultModelId = providerDefaultModelId(provider);
-                const hasModelChoice = provider.models.length > 1;
-                const health = providerStatuses?.find(
-                  (status) => status.id === provider.id,
-                );
-                const needsModelInstall =
-                  provider.id === "ollama" &&
-                  health?.runtimeStatus === "no-models";
-                const needsSignInRepair =
-                  !needsModelInstall &&
-                  providerNeedsSignInRepair(provider, health);
-                const isConnecting =
-                  connectingProviderIds.includes(provider.id) ||
-                  provider.authStatus === "connecting";
-                const isChecking =
-                  isConnecting || health?.connectionStatus === "checking";
-                const canUseInChat =
-                  capabilities?.executable &&
-                  isProviderRuntimeUsable(provider, health) &&
-                  !needsSignInRepair &&
-                  health?.connectionStatus !== "failed" &&
-                  !isChecking &&
-                  Boolean(defaultModelId);
-                const setupMessage = isConnecting
-                  ? "Connecting. Follow the sign-in instructions if prompted."
-                  : needsModelInstall
-                    ? "Install a model, then refresh."
-                    : health?.connectionStatus === "failed" || needsSignInRepair
-                      ? (health?.healthSummary ??
-                        "Connection needs attention. Try signing in again.")
-                      : undefined;
-                return (
-                  <div
-                    id={
-                      provider.id === "ollama"
-                        ? "gyro-provider-ollama"
-                        : undefined
-                    }
-                    tabIndex={provider.id === "ollama" ? -1 : undefined}
-                    className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
-                    key={provider.id}
-                  >
-                    <div className="gyro-provider-identity">
-                      <ProviderLogo
-                        label={provider.displayName}
-                        providerId={provider.id}
-                      />
-                      <div>
-                        <strong>{provider.displayName}</strong>
-                        {setupMessage ? (
-                          <small
-                            className="gyro-provider-setup-message"
-                            role="status"
-                          >
-                            {setupMessage}
-                          </small>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="gyro-provider-default-model">
-                      {hasModelChoice ? (
-                        <SettingsSelect
-                          aria-label={`${provider.displayName} default model`}
-                          onChange={(event) =>
-                            onSelectProviderDefaultModel?.(
-                              provider.id,
-                              event.target.value,
-                            )
-                          }
-                          value={defaultModelId ?? ""}
-                        >
-                          {provider.models.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.displayName}
-                            </option>
-                          ))}
-                        </SettingsSelect>
-                      ) : (
-                        <strong>{defaultModelLabel(provider)}</strong>
-                      )}
-                      {needsModelInstall ? (
-                        <small>
-                          Run <code>ollama pull &lt;model&gt;</code>.
-                        </small>
-                      ) : null}
-                    </div>
-                    <SettingsStatus
-                      status={
-                        needsModelInstall ||
-                        needsSignInRepair ||
-                        isChecking ||
-                        health?.connectionStatus === "failed"
-                          ? "warning"
-                          : provider.authStatus === "connected"
-                            ? "good"
-                            : "neutral"
-                      }
-                    >
-                      {isChecking
-                        ? "Connecting…"
-                        : providerConnectionLabel(provider, health)}
-                    </SettingsStatus>
-                    <div className="gyro-settings-provider-actions">
-                      {canUseInChat && onUseProvider ? (
-                        <button
-                          className="gyro-button is-primary"
-                          type="button"
-                          onClick={() =>
-                            onUseProvider(provider.id, defaultModelId!)
-                          }
-                        >
-                          Use in chat
-                        </button>
-                      ) : null}
-                      {!canUseInChat &&
-                      !isChecking &&
-                      !needsSignInRepair &&
+                  <ProviderGroupHead
+                    count={group.providers.length}
+                    id={`${group.id}-title`}
+                    label={group.label}
+                    statusLabel={group.statusLabel}
+                  />
+                  {group.id === "gyro-provider-accounts" ? (
+                    <p className="gyro-provider-group-note">
+                      Sign-in opens a terminal and may continue in your browser.
+                      Finish there, and the provider moves to Connected.
+                    </p>
+                  ) : null}
+                  {group.providers.map((provider) => {
+                    const capabilities = providerCapabilities(provider.id);
+                    const defaultModelId = providerDefaultModelId(provider);
+                    const hasModelChoice = provider.models.length > 1;
+                    const health = providerStatuses?.find(
+                      (status) => status.id === provider.id,
+                    );
+                    const needsModelInstall =
+                      provider.id === "ollama" &&
+                      health?.runtimeStatus === "no-models";
+                    const needsSignInRepair =
                       !needsModelInstall &&
-                      provider.authStatus === "connected" &&
-                      health?.connectionStatus === "failed" ? (
-                        <button
-                          className="gyro-button is-secondary"
-                          type="button"
-                          onClick={() => onTestProvider?.(provider.id)}
-                        >
-                          Check connection
-                        </button>
-                      ) : null}
-                      {provider.id === "ollama" ? (
-                        <button
-                          className="gyro-button is-secondary"
-                          disabled={isChecking}
-                          onClick={() => onTestProvider?.(provider.id)}
-                          type="button"
-                        >
-                          Refresh models
-                        </button>
-                      ) : null}
-                      {provider.authStatus !== "connected" ||
+                      providerNeedsSignInRepair(provider, health);
+                    const isConnecting =
+                      connectingProviderIds.includes(provider.id) ||
+                      provider.authStatus === "connecting";
+                    const isChecking =
+                      isConnecting || health?.connectionStatus === "checking";
+                    const canUseInChat =
+                      capabilities?.executable &&
+                      isProviderRuntimeUsable(provider, health) &&
+                      !needsSignInRepair &&
+                      health?.connectionStatus !== "failed" &&
+                      !isChecking &&
+                      Boolean(defaultModelId);
+                    const setupMessage = isConnecting
+                      ? "Connecting. Follow the sign-in instructions if prompted."
+                      : needsModelInstall
+                        ? "Install a model, then refresh."
+                        : health?.connectionStatus === "failed" ||
+                            needsSignInRepair
+                          ? (health?.healthSummary ??
+                            "Connection needs attention. Try signing in again.")
+                          : undefined;
+                    const isAvailable = provider.authStatus !== "connected";
+                    const connectionTone =
+                      needsModelInstall ||
                       needsSignInRepair ||
-                      needsModelInstall ? (
-                        <button
-                          className="gyro-button is-primary"
-                          disabled={
-                            isChecking ||
-                            needsModelInstall ||
-                            (provider.authStatus === "connected" &&
-                              !needsSignInRepair)
-                          }
-                          onClick={() => {
-                            if (
-                              provider.authMode === "env" &&
-                              providerSupportsApiKey(provider.id)
-                            ) {
-                              setApiKeyProviderId(provider.id);
-                              const section = document.getElementById(
-                                "gyro-provider-api-keys",
-                              );
-                              section?.scrollIntoView({
-                                behavior: "instant",
-                                block: "start",
-                              });
-                              section?.focus({ preventScroll: true });
-                            } else if (needsSignInRepair) {
-                              onSignInProvider?.(provider.id);
-                            } else {
-                              onToggleProvider?.(provider.id);
-                            }
-                          }}
-                          type="button"
-                        >
-                          {isChecking
-                            ? "Connecting…"
-                            : needsModelInstall
-                              ? "Model required"
-                              : needsSignInRepair
-                                ? "Sign in again"
-                                : provider.authStatus === "connected"
-                                  ? "Connected"
+                      isChecking ||
+                      health?.connectionStatus === "failed"
+                        ? "warning"
+                        : isAvailable
+                          ? "neutral"
+                          : "good";
+                    // A missing model is fixed by installing one and
+                    // refreshing, so that is the row's one next step.
+                    const showsRefreshModels =
+                      provider.id === "ollama" &&
+                      (!isAvailable || needsModelInstall);
+                    const showsConnect =
+                      !needsModelInstall && (isAvailable || needsSignInRepair);
+                    return (
+                      <div
+                        id={
+                          provider.id === "ollama"
+                            ? "gyro-provider-ollama"
+                            : undefined
+                        }
+                        tabIndex={provider.id === "ollama" ? -1 : undefined}
+                        className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
+                        key={provider.id}
+                      >
+                        <div className="gyro-provider-identity">
+                          <ProviderLogo
+                            label={provider.displayName}
+                            providerId={provider.id}
+                          />
+                          <div>
+                            <strong>{provider.displayName}</strong>
+                            {setupMessage ? (
+                              <small
+                                className="gyro-provider-setup-message"
+                                role="status"
+                              >
+                                {setupMessage}
+                              </small>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="gyro-provider-default-model">
+                          {hasModelChoice ? (
+                            <SettingsSelect
+                              aria-label={`${provider.displayName} default model`}
+                              onChange={(event) =>
+                                onSelectProviderDefaultModel?.(
+                                  provider.id,
+                                  event.target.value,
+                                )
+                              }
+                              value={defaultModelId ?? ""}
+                            >
+                              {provider.models.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.displayName}
+                                </option>
+                              ))}
+                            </SettingsSelect>
+                          ) : (
+                            <strong>{defaultModelLabel(provider)}</strong>
+                          )}
+                          {needsModelInstall ? (
+                            <small>
+                              Run <code>ollama pull &lt;model&gt;</code>.
+                            </small>
+                          ) : null}
+                        </div>
+                        {connectionTone === "neutral" ? (
+                          <span className="gyro-provider-connect-method">
+                            {providerConnectMethodLabel(provider)}
+                          </span>
+                        ) : (
+                          <SettingsStatus status={connectionTone}>
+                            {isChecking
+                              ? "Connecting…"
+                              : providerConnectionLabel(provider, health)}
+                          </SettingsStatus>
+                        )}
+                        <div className="gyro-settings-provider-actions">
+                          {canUseInChat && onUseProvider ? (
+                            <button
+                              className="gyro-button is-primary"
+                              type="button"
+                              onClick={() =>
+                                onUseProvider(provider.id, defaultModelId!)
+                              }
+                            >
+                              Use in chat
+                            </button>
+                          ) : null}
+                          {!canUseInChat &&
+                          !isChecking &&
+                          !needsSignInRepair &&
+                          !needsModelInstall &&
+                          provider.authStatus === "connected" &&
+                          health?.connectionStatus === "failed" ? (
+                            <button
+                              className="gyro-button is-secondary"
+                              type="button"
+                              onClick={() => onTestProvider?.(provider.id)}
+                            >
+                              Check connection
+                            </button>
+                          ) : null}
+                          {showsRefreshModels ? (
+                            <button
+                              className={`gyro-button ${needsModelInstall ? "is-primary" : "is-secondary"}`}
+                              disabled={isChecking}
+                              onClick={() => onTestProvider?.(provider.id)}
+                              type="button"
+                            >
+                              Refresh models
+                            </button>
+                          ) : null}
+                          {showsConnect ? (
+                            <button
+                              aria-label={
+                                needsSignInRepair || isChecking
+                                  ? undefined
+                                  : `Connect ${provider.displayName}`
+                              }
+                              className={
+                                needsSignInRepair
+                                  ? "gyro-button is-primary"
+                                  : "gyro-button is-secondary is-small"
+                              }
+                              disabled={isChecking}
+                              onClick={() => {
+                                if (
+                                  provider.authMode === "env" &&
+                                  providerSupportsApiKey(provider.id)
+                                ) {
+                                  setApiKeyProviderId(provider.id);
+                                  revealProviderAnchor(
+                                    "gyro-provider-api-keys",
+                                  );
+                                } else if (needsSignInRepair) {
+                                  onSignInProvider?.(provider.id);
+                                } else {
+                                  onToggleProvider?.(provider.id);
+                                }
+                              }}
+                              title={
+                                needsSignInRepair || isChecking
+                                  ? undefined
                                   : provider.authMode === "env"
                                     ? providerSupportsApiKey(provider.id)
                                       ? "Add API key"
                                       : "Check environment"
-                                    : providerPrimaryActionLabel(provider)}
-                        </button>
-                      ) : null}
-                      <ProviderDetailsMenu
-                        label={`${provider.displayName} details`}
-                      >
-                        <div>
-                          <button
-                            className="gyro-button is-secondary"
-                            disabled={isChecking}
-                            onClick={() => onTestProvider?.(provider.id)}
-                            type="button"
-                          >
-                            {needsModelInstall
-                              ? "Test after install"
-                              : providerTestActionLabel(provider)}
-                          </button>
-                          <strong>Technical details</strong>
-                          <code>{provider.apiKeyRef}</code>
-                          <span>
-                            {provider.authMode.toUpperCase()} authentication
-                          </span>
-                          {provider.authStatus === "connected" ? (
-                            <button
-                              className="gyro-button is-danger"
-                              onClick={() => onToggleProvider?.(provider.id)}
+                                    : providerPrimaryActionLabel(provider)
+                              }
                               type="button"
                             >
-                              Disable in Gyro
+                              {isChecking
+                                ? "Connecting…"
+                                : needsSignInRepair
+                                  ? "Sign in again"
+                                  : "Connect"}
                             </button>
                           ) : null}
+                          <ProviderDetailsMenu
+                            label={`${provider.displayName} details`}
+                            summaryClassName="gyro-icon-button"
+                          >
+                            <div>
+                              <button
+                                className="gyro-button is-secondary"
+                                disabled={isChecking}
+                                onClick={() => onTestProvider?.(provider.id)}
+                                type="button"
+                              >
+                                {needsModelInstall
+                                  ? "Test after install"
+                                  : providerTestActionLabel(provider)}
+                              </button>
+                              <strong>Technical details</strong>
+                              <code>{provider.apiKeyRef}</code>
+                              <span>
+                                {provider.authMode.toUpperCase()} authentication
+                              </span>
+                              {provider.authStatus === "connected" ? (
+                                <button
+                                  className="gyro-button is-danger"
+                                  onClick={() =>
+                                    onToggleProvider?.(provider.id)
+                                  }
+                                  type="button"
+                                >
+                                  Disable in Gyro
+                                </button>
+                              ) : null}
+                            </div>
+                          </ProviderDetailsMenu>
                         </div>
-                      </ProviderDetailsMenu>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                      </div>
+                    );
+                  })}
+                </section>
+              ),
+            )}
             {COUNCIL_COMING_SOON ? (
               <details className="gyro-settings-disclosure">
                 <summary>

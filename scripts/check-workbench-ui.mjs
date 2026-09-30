@@ -3243,10 +3243,30 @@ expect(
     runtimeStatus: "no-models",
   }) &&
     surfaceSource.includes("const needsModelInstall =") &&
-    surfaceSource.includes('? "Model required"') &&
+    // Refreshing after an install is the row's one primary step, and the
+    // Connect / sign-in button stays hidden while a model is missing.
+    surfaceSource.includes(
+      'needsModelInstall ? "is-primary" : "is-secondary"',
+    ) &&
+    surfaceSource.includes(
+      "!needsModelInstall && (isAvailable || needsSignInRepair)",
+    ) &&
     surfaceSource.includes('"Test after install"') &&
     surfaceSource.includes("ollama pull &lt;model&gt;"),
   "A missing Ollama model should point to model installation, never trigger a sign-in repair.",
+);
+const providerGroupsSource = readRepoFile(
+  "packages/ui/src/provider-groups.tsx",
+);
+expect(
+  surfaceSource.includes('label: "Connected"') &&
+    surfaceSource.includes('label: "Available"') &&
+    surfaceSource.includes('"gyro-button is-secondary is-small"') &&
+    providerGroupsSource.includes("<span>Default model</span>") &&
+    cssRules(styleSource, ".gyro-provider-table-head").every(
+      (rule) => !rule.includes("text-transform: uppercase"),
+    ),
+  "Settings > Providers should list connected providers first, then the rest under Available with a quiet Connect, all under sentence-case headers.",
 );
 state = workbenchReducer(state, {
   type: "record-provider-health",
