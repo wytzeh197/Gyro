@@ -5,26 +5,23 @@
   background: var(--gyro-surface);
   color: var(--gyro-text);
 }
+/* An empty window-drag strip; the page action lives on the title row. */
 .gyro-scheduled-titlebar {
   height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 24px 0 180px;
-}
-.gyro-scheduled-titlebar button {
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  min-height: 30px;
-  padding: 5px 12px;
-  border-radius: var(--gyro-radius-md);
 }
 .gyro-scheduled-body {
   width: min(720px, calc(100% - 64px));
-  margin: 28px auto 64px;
+  margin: 4px auto 64px;
 }
 .gyro-scheduled-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 24px;
+}
+.gyro-scheduled-heading > div {
+  min-width: 0;
 }
 .gyro-scheduled-heading h1 {
   font-size: var(--gyro-type-xl);
@@ -80,8 +77,6 @@
   outline-offset: var(--gyro-focus-offset-inset);
 }
 .gyro-scheduled-filters {
-  display: inline-flex;
-  flex-wrap: wrap;
   margin: 16px 0 18px;
 }
 /* Scheduled work and suggestions sit in grouped cards: one hairline frame,
@@ -207,11 +202,16 @@
   font-variant-numeric: tabular-nums;
 }
 .gyro-scheduled-empty {
-  margin: 0;
-  padding: 48px 0;
-  font-size: var(--gyro-type-md);
-  text-align: center;
-  color: var(--gyro-muted);
+  border: 1px solid var(--gyro-hairline);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-page-card);
+}
+/* A one-line "no matches" row keeps its reset action at the far end. */
+.gyro-scheduled-empty:has(> .gyro-empty-state-action) > * {
+  align-self: center;
+}
+.gyro-scheduled-empty .gyro-empty-state-action {
+  margin-left: auto;
 }
 .gyro-scheduled-suggestions {
   margin-top: 28px;
@@ -321,7 +321,10 @@
   align-content: start;
   gap: 20px;
 }
+/* Inside the page the detail header is a plain title row, like the editor's,
+   leaving the close button clear space instead of a raised band. */
 .gyro-scheduled-panel .gyro-automation-detail > header {
+  background: transparent;
   padding-right: 36px;
   flex-wrap: wrap;
   gap: 16px;
@@ -340,7 +343,6 @@
   }
   .gyro-scheduled-body {
     width: calc(100% - 40px);
-    margin-top: 24px;
   }
 }
 
@@ -411,15 +413,17 @@
   height: 28px;
   padding: 7px;
 }
+.gyro-scheduled-page.has-detail .gyro-scheduled-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .gyro-scheduled-page.has-detail .gyro-scheduled-status {
   background: none;
   box-shadow: none;
   font-size: 0;
   gap: 0;
   padding: 4px;
-}
-.gyro-scheduled-page.has-detail .gyro-scheduled-empty {
-  padding: 70px 0;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-suggestions {
   margin-top: 20px;
