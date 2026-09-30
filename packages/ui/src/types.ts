@@ -750,7 +750,8 @@ export type NotificationKind =
   | "diff-ready"
   | "browser-failed"
   | "update"
-  | "provider";
+  | "provider"
+  | "provider-ready";
 
 export type Notification = {
   id: string;

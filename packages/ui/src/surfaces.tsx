@@ -1032,7 +1032,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "editor-workspace",
     label: "Editor & search",
-    detail: "Editor, Explorer, and search behavior by workspace scope",
+    detail: "Editor, explorer, and search behavior by workspace scope",
     keywords: "workspace folder minimap exclude maximum results",
   },
   {
@@ -3054,14 +3054,14 @@ function SettingsSidebarContent({
           />
         </div>
         <button
-          aria-label={`Back to ${backLabel}`}
+          aria-label={`Back to ${backLabel.toLowerCase()}`}
           className="gyro-settings-back-button has-label"
           onClick={onBack}
-          title={`Back to ${backLabel}`}
+          title={`Back to ${backLabel.toLowerCase()}`}
           type="button"
         >
           <ArrowLeft size={13} />
-          <span>Back to app</span>
+          <span>Back to {backLabel.toLowerCase()}</span>
         </button>
       </div>
 
@@ -5841,7 +5841,9 @@ function WorkspaceSidebarContent({
                   ) || undefined
                 }
               >
-                <summary>Debug adapter</summary>
+                <summary>
+                  Debug adapter <ChevronDown aria-hidden="true" size={14} />
+                </summary>
                 <form
                   className="gyro-sidebar-debug-launch"
                   onSubmit={(event) => {
@@ -12898,7 +12900,7 @@ function WorkspaceSettingsEditor({
           ) : null}
           <SettingsGroup label="Editor and search">
             <SettingsRow
-              detail="Comma-separated globs hidden from Explorer."
+              detail="Comma-separated globs hidden from the explorer."
               label="Hidden files"
             >
               <SettingsDraftInput
@@ -21329,10 +21331,7 @@ function CliLaunchPresetEditor({
   return (
     <div className="gyro-cli-launch-preset">
       <header>
-        <div>
-          <strong>Launch preset</strong>
-          <span>{cliLaunchPresetLabel(preset, profiles)}</span>
-        </div>
+        <strong>{cliLaunchPresetLabel(preset, profiles)}</strong>
         <small>
           {total}/{CLI_LAUNCH_PRESET_MAX_PANES} panes
         </small>
@@ -22151,7 +22150,9 @@ export function SettingsSurface({
                               ? "Connecting…"
                               : isChecking
                                 ? "Checking…"
-                                : providerConnectionLabel(provider, health)}
+                                : upperFirst(
+                                    providerConnectionLabel(provider, health),
+                                  )}
                           </SettingsStatus>
                         )}
                         <div className="gyro-settings-provider-actions">
@@ -22282,6 +22283,7 @@ export function SettingsSurface({
               <details className="gyro-settings-disclosure">
                 <summary>
                   Model council <span>Coming soon</span>
+                  <ChevronDown aria-hidden="true" size={14} />
                 </summary>
                 <p>
                   Compare answers from multiple providers in one conversation.
@@ -22591,7 +22593,7 @@ export function SettingsSurface({
                     <strong className="gyro-update-version">
                       {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
                     </strong>
-                    <span className="gyro-badge gyro-update-channel">Public Alpha</span>
+                    <Badge className="gyro-update-channel">Public Alpha</Badge>
                     <SettingsStatus status={updateLevel}>
                       {updateStatusLabel(updateState)}
                     </SettingsStatus>
@@ -23733,6 +23735,9 @@ function providerCredentialSummary(secretStorage?: string) {
  * support it. Reading `authStatus` alone is what let Settings report a verified
  * Claude Code sign-in while every send in chat came back rejected.
  */
+/** The status column starts with the label; mid-sentence uses keep it lowercase. */
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 function providerConnectionLabel(
   provider: Pick<ModelProviderConfig, "authStatus" | "enabled"> & {
     id: ProviderId;

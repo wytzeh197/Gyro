@@ -7991,7 +7991,7 @@ export function App() {
               }
             }
             notify(
-              "provider",
+              "provider-ready",
               providerId === "openai"
                 ? "Using Codex sign-in"
                 : "Provider verified",
@@ -8126,7 +8126,7 @@ export function App() {
             }
           }
           notify(
-            "provider",
+            "provider-ready",
             source === "login-exit"
               ? "Provider signed in"
               : "Provider verified",

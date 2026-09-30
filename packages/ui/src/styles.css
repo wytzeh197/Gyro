@@ -5628,10 +5628,6 @@ body {
   margin-top: 16px;
 }
 
-.gyro-workspace-contributions {
-  margin-top: 34px;
-}
-
 .gyro-workspace-contribution-error {
   padding: 8px 10px;
   border: 1px solid
@@ -5693,7 +5689,7 @@ body {
 .gyro-workspace-contribution-actions {
   display: flex;
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   align-items: center;
   gap: 4px;
 }
@@ -12962,7 +12958,6 @@ button.gyro-settings-row em::after {
   container: gyro-usage / inline-size;
   display: grid;
   gap: 18px;
-  padding-bottom: 28px;
 }
 
 /* Compact sibling of the provider select, sized for a settings row. */
@@ -13149,7 +13144,6 @@ button.gyro-settings-row em::after {
 .gyro-usage-toolbar {
   align-items: center;
   border-bottom: 0.5px solid var(--gyro-hairline-strong);
-  border-top: 0.5px solid var(--gyro-hairline-strong);
   display: flex;
   justify-content: space-between;
   padding: 12px 0;
@@ -13471,9 +13465,6 @@ button.gyro-settings-row em::after {
 }
 .gyro-cli-profile-list .gyro-provider-row {
   grid-template-columns: minmax(0, 1fr) 240px;
-}
-.gyro-cli-profile-list code {
-  justify-self: start;
 }
 /* Updates settings: one status card answers "am I current, and what happens
    next" before the preferences and release-notes cards below it. Colour comes
@@ -24733,17 +24724,38 @@ body,
 /* Shared native desktop controls and the new compact tool entry points. */
 
 .gyro-settings-disclosure {
-  border-top: 1px solid var(--gyro-border-soft);
   color: var(--gyro-muted);
   font-size: var(--gyro-type-base);
   padding: 16px 0;
 }
 
+/* In Settings the table above already draws the rule; the run panel needs its own. */
+.gyro-run-task-group.gyro-settings-disclosure {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
 .gyro-settings-disclosure > summary {
+  align-items: center;
   color: var(--gyro-text);
   cursor: pointer;
+  display: flex;
   font-size: var(--gyro-type-base);
+  list-style: none;
   padding: 4px;
+}
+
+.gyro-settings-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.gyro-settings-disclosure > summary > svg {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.gyro-settings-disclosure[open] > summary > svg {
+  transform: rotate(180deg);
 }
 
 .gyro-settings-disclosure > summary > span {
@@ -24753,6 +24765,8 @@ body,
 }
 
 .gyro-settings-disclosure > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-sm);
   line-height: 1.5;
   margin: 12px 4px 0;
 }
@@ -31916,6 +31930,7 @@ body,
 
 .gyro-settings-section-body > .gyro-workspace-settings-reset {
   justify-self: end;
+  margin-right: 4px;
 }
 
 .gyro-visually-hidden {

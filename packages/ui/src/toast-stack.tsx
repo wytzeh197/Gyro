@@ -22,6 +22,7 @@ const TOAST_TONE: Record<NotificationKind, ToastTone | null> = {
   "diff-ready": "success",
   update: "neutral",
   provider: "neutral",
+  "provider-ready": "success",
   terminal: null,
 };
 
@@ -34,16 +35,25 @@ export function toastTone(kind: NotificationKind): ToastTone | null {
   return TOAST_TONE[kind] ?? null;
 }
 
+const isProviderToast = (notification: Notification) =>
+  notification.kind === "provider" || notification.kind === "provider-ready";
+
 export function visibleToasts(
   notifications: Notification[],
   mountedAt: number,
 ): Notification[] {
+  // A provider result replaces its "Connecting provider" toast; the list is
+  // newest first, so only the first provider toast survives.
+  const newestProvider = notifications.find(
+    (notification) => !notification.read && isProviderToast(notification),
+  );
   return notifications
     .filter(
       (notification) =>
         !notification.read &&
         toastTone(notification.kind) !== null &&
-        Date.parse(notification.createdAt) >= mountedAt,
+        Date.parse(notification.createdAt) >= mountedAt &&
+        (!isProviderToast(notification) || notification === newestProvider),
     )
     .slice(0, MAX_VISIBLE)
     .reverse();

@@ -1125,7 +1125,7 @@ function defaultIdeContributions(): IdeContribution[] {
   return [
     {
       id: "gyro-core-ide",
-      label: "Gyro Core Workspace",
+      label: "Gyro core workspace",
       version: "1",
       publisher: "Gyro",
       source: "core",

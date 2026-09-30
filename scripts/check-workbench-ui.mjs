@@ -5954,7 +5954,7 @@ expect(
       ".gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface",
     ) &&
     surfaceSource.includes("gyro-settings-sidebar-group") &&
-    surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
+    surfaceSource.includes("aria-label={`Back to ${backLabel.toLowerCase()}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
     surfaceSource.includes("<h2>{label}</h2>") &&
     surfaceSource.includes("aria-pressed={themeMode === mode}") &&
@@ -5993,10 +5993,10 @@ const settingsSidebarSource = surfaceSource.slice(
 expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
     settingsSidebarSource.includes("onToggleSidebar") &&
-    settingsSidebarSource.includes("aria-label={`Back to ${backLabel}`}") &&
-    settingsSidebarSource.includes("<span>Back to app</span>") &&
+    settingsSidebarSource.includes("aria-label={`Back to ${backLabel.toLowerCase()}`}") &&
+    settingsSidebarSource.includes("<span>Back to {backLabel.toLowerCase()}</span>") &&
     !settingsSidebarSource.includes('aria-label="Forward"'),
-  "Settings should offer Back to app with the originating surface in its accessible label.",
+  "Settings should offer a back button whose visible text and accessible label both name the originating surface.",
 );
 expect(
   surfaceSource.includes('onOpenSettingsSection("editor-workspace")') &&
