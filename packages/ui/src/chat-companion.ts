@@ -264,6 +264,11 @@ export function activeChatCompanionPanel(
  * as that panel is up and hands it back on close. A tiled pane starts without
  * it, because two chats side by side have no width to spare for a popover that
  * covers the transcript of one of them.
+ *
+ * Resting only decides what the rail holds. The card itself floats over the
+ * chat, so it stays on screen only where it clears the conversation column
+ * (`chatEnvironmentRestsBesideColumn`); anywhere narrower the surface keeps it
+ * closed until the Environment button opens it as a popover.
  */
 export function resolveChatRailPanel(options: {
   companionPanel?: ChatSidePanelId;
@@ -273,6 +278,25 @@ export function resolveChatRailPanel(options: {
   const claimed = options.legacyPanel ?? options.companionPanel;
   if (claimed) return claimed;
   return options.isEnvironmentVisible ? "environment" : undefined;
+}
+
+/**
+ * Whether the Environment card can rest open beside the centred conversation
+ * column without covering any of it: the free width on the column's right must
+ * hold the card, its inset and a gap (`space`). A column with no pixel width
+ * fills the surface. Where this is false the card would sit on the transcript's
+ * text and turn actions, so it only opens on demand, as a popover.
+ */
+export function chatEnvironmentRestsBesideColumn(options: {
+  columnWidth?: number;
+  space: number;
+  surfaceWidth: number;
+}) {
+  const column = Math.min(
+    options.columnWidth ?? options.surfaceWidth,
+    options.surfaceWidth,
+  );
+  return (options.surfaceWidth - column) / 2 >= options.space;
 }
 
 /**

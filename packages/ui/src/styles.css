@@ -23619,7 +23619,14 @@ button.gyro-settings-row em::after {
 /* C9: in a thread the card floats over the conversation instead of reserving
    a column, so opening it never moves the transcript or the composer. It stops
    above the measured composer dock, which keeps Send reachable however long
-   the card grows; the card scrolls instead. */
+   the card grows; the card scrolls instead. It rests open only where the
+   surface leaves this much room right of the centred column (the card's 300px,
+   its 14px inset and a 16px gap); narrower, ChatSurface keeps it closed until
+   the Environment button opens it as a popover. */
+.gyro-chat-surface.is-thread {
+  --gyro-environment-card-space: 330px;
+}
+
 .gyro-chat-surface.is-thread > .gyro-chat-environment-popover {
   max-height: calc(100% - 64px - var(--gyro-composer-dock-height, 160px));
 }
@@ -31035,7 +31042,12 @@ body,
 }
 
 /* In the workspace AI sidebar, Environment becomes a bounded row between the
-   title and conversation. A floating 300px card covered most of a 440px chat. */
+   title and conversation. A floating 300px card covered most of a 440px chat.
+   The row covers nothing, so it needs no room beside the column to rest open. */
+.gyro-sidebar-ai-chat .gyro-chat-surface.is-thread {
+  --gyro-environment-card-space: 0px;
+}
+
 .gyro-sidebar-ai-chat
   .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
   grid-template-rows: 48px auto minmax(0, 1fr);

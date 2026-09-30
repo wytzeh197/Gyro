@@ -2088,7 +2088,7 @@ expect(
 );
 expect(
   initialState.preferences.chatEnvironmentRailOpen === true,
-  "Chat environment is the rail's resting state, so a fresh chat shows it.",
+  "Chat environment is the rail's resting state, so a fresh chat shows it wherever the window leaves room beside the conversation.",
 );
 expect(
   initialState.preferences.mainColor === "#0874df" &&
@@ -5330,23 +5330,56 @@ expect(
   "The in-chat run header should not show a working ring or completed check.",
 );
 
+const transcriptScrollSource = readRepoFile(
+  "packages/ui/src/use-chat-transcript-scroll.ts",
+);
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
     !styleSource.includes("--gyro-environment-popover-gutter") &&
-    styleSource.includes(
-      ".gyro-chat-surface.is-thread > .gyro-chat-environment-popover {\n  max-height: calc(100% - 64px - var(--gyro-composer-dock-height, 160px));",
+    /\.gyro-chat-surface\.is-thread > \.gyro-chat-environment-popover \{\s*max-height: calc\(100% - 64px - var\(--gyro-composer-dock-height, 160px\)\);/.test(
+      styleSource,
     ) &&
-    surfaceSource.includes(
-      '.closest<HTMLElement>(".gyro-chat-surface")\n          ?.style.setProperty("--gyro-composer-dock-height", dockHeight);',
+    /closest<HTMLElement>\("\.gyro-chat-surface"\)\s*\?\.style\.setProperty\("--gyro-composer-dock-height"/.test(
+      transcriptScrollSource,
     ),
   "The temporary Environment popover should float over the conversation without moving the transcript or composer, and stop above the measured composer dock so Send stays reachable.",
+);
+
+const environmentPopoverSource = readRepoFile(
+  "packages/ui/src/use-chat-environment-popover.ts",
+);
+expect(
+  /\.gyro-chat-surface\.is-thread \{\s*--gyro-environment-card-space: 330px;/.test(
+    styleSource,
+  ) &&
+    /\.gyro-sidebar-ai-chat \.gyro-chat-surface\.is-thread \{\s*--gyro-environment-card-space: 0px;/.test(
+      styleSource,
+    ) &&
+    environmentPopoverSource.includes('"--gyro-environment-card-space"') &&
+    environmentPopoverSource.includes('"--gyro-chat-content-width"') &&
+    environmentPopoverSource.includes("chatEnvironmentRestsBesideColumn(") &&
+    /rests\s*\?\s*activeRailPanel === "environment" && !isCompanionPanel\s*:\s*isRailFree && openPaneKey === paneKey/.test(
+      environmentPopoverSource,
+    ) &&
+    /isPopover: isOpen && !rests/.test(environmentPopoverSource) &&
+    /useOutsidePointerDismiss<HTMLElement>\(\s*environment\.isPopover,\s*environment\.dismiss,\s*environment\.buttonRef,?\s*\)/.test(
+      surfaceSource,
+    ) &&
+    /popoverRef=\{environmentPopoverRef\}/.test(surfaceSource) &&
+    /environmentButtonRef=\{environment\.buttonRef\}/.test(surfaceSource) &&
+    /onToggleEnvironmentRail \? environment\.toggle : undefined/.test(
+      surfaceSource,
+    ),
+  "The Environment card should rest open only where it clears the conversation column; narrower, it opens from its button as a popover that Escape, a click outside or a chat switch closes.",
 );
 
 const chatTitleActionsSource = readRepoFile(
   "packages/ui/src/chat-title-actions.tsx",
 );
 expect(
-  surfaceSource.includes("onDeleteSession={onDeleteSession}\n          onPinSession={onPinSession}\n          onRenameSession={onRenameSession}") &&
+  /onDeleteSession=\{onDeleteSession\}\s+onPinSession=\{onPinSession\}\s+onRenameSession=\{onRenameSession\}/.test(
+    surfaceSource,
+  ) &&
     surfaceSource.includes("chatActions={titleActions}") &&
     surfaceSource.includes("<ChatTitleActionItems") &&
     chatTitleActionsSource.includes("<span>Rename chat</span>") &&
@@ -5354,8 +5387,12 @@ expect(
     chatTitleActionsSource.includes("<span>Delete chat</span>") &&
     /isDeleteConfirmOpen && chatActions\?\.onDelete[\s\S]{0,120}<SessionDeleteConfirmOverlay/.test(
       surfaceSource,
+    ) &&
+    /onCancel=\{cancelDelete\}/.test(surfaceSource) &&
+    /requestAnimationFrame\(\(\) => overflowButtonRef\.current\?\.focus\(\)\)/.test(
+      surfaceSource,
     ),
-  "The chat title menu should offer Rename, Pin and Delete through the sidebar's own callbacks, and confirm Delete first.",
+  "The chat title menu should offer Rename, Pin and Delete through the sidebar's own callbacks, confirm Delete first, and hand focus back to its button when Delete is cancelled.",
 );
 
 expect(
@@ -5748,7 +5785,7 @@ expect(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
     surfaceSource.includes("const isEnvironmentPopoverOpen =") &&
-    surfaceSource.includes("!isEmptyStart &&") &&
+    environmentPopoverSource.includes("!isEmptyStart &&") &&
     surfaceSource.includes("const environmentPopover =") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
@@ -7393,10 +7430,8 @@ expect(
     ) &&
     surfaceSource.includes("if (isEmptyStart)") &&
     surfaceSource.includes('aria-label="New Chat"') &&
-    surfaceSource.includes("!isEmptyStart &&") &&
-    surfaceSource.includes(
-      '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
-    ),
+    /const isOpen =\s*!isEmptyStart &&/.test(environmentPopoverSource) &&
+    /useChatEnvironmentPopover\(\{[^}]*\bisEmptyStart,/.test(surfaceSource),
   "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
 );
 expect(
