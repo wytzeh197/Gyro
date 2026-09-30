@@ -79,6 +79,10 @@ import {
   PROVIDER_SIGN_IN_REJECTED_SUMMARY,
 } from "../packages/ui/src/provider-catalog.ts";
 import {
+  providerAvailableNote,
+  providerConnectMethodLabel,
+} from "../packages/ui/src/provider-connect-methods.ts";
+import {
   CHAT_RESPONSE_TRUNCATION_SUFFIX,
   limitSessionEventsForUi,
   MAX_CHAT_EVENT_RENDER_COUNT,
@@ -3298,16 +3302,76 @@ expect(
 const providerGroupsSource = readRepoFile(
   "packages/ui/src/provider-groups.tsx",
 );
+// The Available row's Connect button itself, from its guard to its close.
+const providerConnectButtonSource = surfaceSource.slice(
+  surfaceSource.indexOf("{showsConnect ? ("),
+  surfaceSource.indexOf("</button>", surfaceSource.indexOf("{showsConnect ? (")),
+);
 expect(
   surfaceSource.includes('label: "Connected"') &&
     surfaceSource.includes('label: "Available"') &&
-    surfaceSource.includes('"gyro-button is-secondary is-small"') &&
+    providerConnectButtonSource.includes("`Connect ${provider.displayName}`") &&
+    providerConnectButtonSource.includes(
+      ': "gyro-button is-secondary is-small"',
+    ) &&
     providerGroupsSource.includes("<span>Default model</span>") &&
     cssRules(styleSource, ".gyro-provider-table-head").every(
       (rule) => !rule.includes("text-transform: uppercase"),
     ),
   "Settings > Providers should list connected providers first, then the rest under Available with a quiet Connect, all under sentence-case headers.",
 );
+{
+  const catalogProviders = (...ids) =>
+    providerCatalog.filter((provider) => ids.includes(provider.id));
+  const apiKeyNote = providerAvailableNote(
+    catalogProviders("deepseek", "mistral", "openrouter"),
+  );
+  const signInNote = providerAvailableNote(catalogProviders("kimi", "cursor"));
+  const ollamaNote = providerAvailableNote(catalogProviders("ollama"));
+  const mixedNote = providerAvailableNote(
+    catalogProviders("kimi", "deepseek", "ollama"),
+  );
+  expect(
+    // Only CLI sign-in opens a terminal; the note says so per method present.
+    !apiKeyNote.includes("terminal") &&
+      apiKeyNote.includes("API key") &&
+      signInNote.includes("opens a terminal") &&
+      !signInNote.includes("API key") &&
+      !ollamaNote.includes("terminal") &&
+      ollamaNote.includes("this Mac") &&
+      ["opens a terminal", "API key", "this Mac"].every((phrase) =>
+        mixedNote.includes(phrase),
+      ) &&
+      providerConnectMethodLabel(catalogProviders("deepseek")[0]) ===
+        "API key" &&
+      providerConnectMethodLabel(catalogProviders("kimi")[0]) ===
+        "Kimi Code sign-in" &&
+      surfaceSource.includes(
+        "<ProviderAvailableNote providers={group.providers} />",
+      ) &&
+      !surfaceSource.includes("Sign-in opens a terminal") &&
+      // An Available row keeps its connect method in the column, whatever
+      // its state; a failed or connecting state shows beside the name.
+      /\{isAvailable \? \(\s*<ProviderConnectMethod provider=\{provider\} \/>/.test(
+        surfaceSource,
+      ) &&
+      // Stacked rows lose the column labels, so the cell names itself.
+      providerGroupsSource.includes(
+        '<span className="gyro-provider-cell-label">Connects with </span>',
+      ) &&
+      cssRules(styleSource, ".gyro-provider-row .gyro-provider-cell-label")
+        .length === 3 &&
+      // One focus ring: the control's own, never also the row outline.
+      ((rules) =>
+        rules.length > 0 && rules.every((rule) => !rule.includes("outline")))(
+        cssRules(
+          styleSource,
+          ".gyro-provider-table > .gyro-provider-row:has(:focus-visible)",
+        ),
+      ),
+    "Settings > Providers should describe only the connect methods it lists, keep each Available row's connect method in its column with a label once stacked, and draw a single focus ring.",
+  );
+}
 state = workbenchReducer(state, {
   type: "record-provider-health",
   providerId: "openai",
@@ -8079,6 +8143,27 @@ expect(
     styleSource.includes(".gyro-settings-key,\n.gyro-keybinding-input {") &&
     !styleSource.includes(".gyro-workspace-keybindings"),
   "Settings > Keyboard should group shortcuts, filter them by name, show unset ones as a quiet dash, and print every combination in one glyph notation.",
+);
+
+// A shortcut field has one focus ring and names its own conflict. Built-in
+// shortcuts count as taken, and reset appears only when it would change
+// something.
+expect(
+  keyboardSettingsSource.includes("aria-describedby={`${detailId} ${hintId}`}") &&
+    keyboardSettingsSource.includes("detailId={detailId}") &&
+    surfaceSource.includes("<span id={detailId}>{detail}</span>") &&
+    keyboardSettingsSource.includes("const builtIn = builtInShortcutFor(binding);") &&
+    keyboardSettingsSource.includes("`${builtIn.name} (built in)`") &&
+    keyboardSettingsSource.includes('if (["k", "p", "s"].includes(binding.key)) {') &&
+    keyboardSettingsSource.includes("{bindingError?.message ?? conflictNotice}") &&
+    keyboardSettingsSource.includes("{differsFromDefault ? (") &&
+    !keyboardSettingsSource.includes("{hasOverride ? (") &&
+    ((rules) =>
+      rules.length > 0 &&
+      rules.every((rule) => !rule.includes("--gyro-focus-ring")))(
+      cssRules(styleSource, ".gyro-settings-row .gyro-keybinding-input:focus"),
+    ),
+  "Settings > Keyboard should show one focus ring on a shortcut field, link its conflict text, treat built-in shortcuts as taken, and offer reset only for a changed shortcut.",
 );
 
 expect(

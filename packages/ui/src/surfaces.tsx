@@ -4,7 +4,7 @@ import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { ToastStack } from "./toast-stack";
-import { Button, Dialog, EmptyState, OptionSelect, Segmented, SelectMenu, Skeleton, Spinner } from "./primitives";
+import { Button, Dialog, Dot, EmptyState, OptionSelect, Segmented, SelectMenu, Skeleton, Spinner } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -54,9 +54,10 @@ import {
 } from "./settings-controls";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
 import {
+  ProviderAvailableNote,
+  ProviderConnectMethod,
   ProviderGroupHead,
   ProviderJumpLinks,
-  providerConnectMethodLabel,
   revealProviderAnchor,
 } from "./provider-groups";
 import { UsageCard } from "./usage-card";
@@ -22012,10 +22013,7 @@ export function SettingsSurface({
                     statusLabel={group.statusLabel}
                   />
                   {group.id === "gyro-provider-accounts" ? (
-                    <p className="gyro-provider-group-note">
-                      Sign-in opens a terminal and may continue in your browser.
-                      Finish there, and the provider moves to Connected.
-                    </p>
+                    <ProviderAvailableNote providers={group.providers} />
                   ) : null}
                   {group.providers.map((provider) => {
                     const capabilities = providerCapabilities(provider.id);
@@ -22050,7 +22048,9 @@ export function SettingsSurface({
                             needsSignInRepair
                           ? (health?.healthSummary ??
                             "Connection needs attention. Try signing in again.")
-                          : undefined;
+                          : isChecking && provider.authStatus !== "connected"
+                            ? "Checking the connection…"
+                            : undefined;
                     const isAvailable = provider.authStatus !== "connected";
                     const connectionTone =
                       needsModelInstall ||
@@ -22091,6 +22091,14 @@ export function SettingsSurface({
                                 className="gyro-provider-setup-message"
                                 role="status"
                               >
+                                {/* Available rows keep the connect method in
+                                    their column, so the state shows here. */}
+                                {isAvailable ? (
+                                  <Dot
+                                    pulse={isChecking}
+                                    tone={isChecking ? "accent" : "warn"}
+                                  />
+                                ) : null}
                                 {setupMessage}
                               </small>
                             ) : null}
@@ -22123,10 +22131,8 @@ export function SettingsSurface({
                             </small>
                           ) : null}
                         </div>
-                        {connectionTone === "neutral" ? (
-                          <span className="gyro-provider-connect-method">
-                            {providerConnectMethodLabel(provider)}
-                          </span>
+                        {isAvailable ? (
+                          <ProviderConnectMethod provider={provider} />
                         ) : (
                           <SettingsStatus status={connectionTone}>
                             {isChecking
