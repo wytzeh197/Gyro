@@ -3547,6 +3547,18 @@ button {
   font-size: var(--gyro-type-sm);
 }
 
+/* The helper line and the empty row sit under the heading, quieter than it
+   and on its left edge. */
+.gyro-automation-history > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-type-xs);
+  margin: 0;
+}
+
+.gyro-automation-history > .gyro-empty-state.gyro-empty-state.is-compact {
+  padding-inline: 0;
+}
+
 .gyro-automation-run {
   align-items: center;
   border: 1px solid var(--gyro-border-soft);
@@ -20835,7 +20847,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-text);
 }
 
-:root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-scm-repository,
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-github-row.is-active,
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-github-row:hover,
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-scm-row:hover {
@@ -21287,45 +21298,6 @@ button.gyro-settings-row em::after {
   display: flex;
   flex: 0 0 auto;
   gap: 4px;
-}
-
-.gyro-scm-sync-actions > button {
-  align-items: center;
-  appearance: none;
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-text);
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  gap: 4px;
-  justify-content: center;
-  min-height: var(--gyro-control-height);
-  padding: 3px 9px;
-  white-space: nowrap;
-}
-
-.gyro-scm-sync-actions > button:hover:not(:disabled) {
-  background: var(--gyro-control-hover);
-  border-color: var(--gyro-border-strong);
-}
-
-.gyro-scm-sync-actions > button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.gyro-scm-sync-actions > button.is-secondary {
-  background: transparent !important;
-  border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.1)) !important;
-  color: var(--gyro-text) !important;
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-scm-sync-actions > button.is-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent) !important;
 }
 
 /* Workspace chat sits flush in its sidebar, without navigation-list gutters. */
@@ -32496,7 +32468,9 @@ body,
   background: var(--gyro-scrim);
 }
 
-.gyro-dialog[open] {
+/* The panel moves, not the <dialog>: a transformed dialog would become the
+   frame for the toast stack that joins it while it is open. */
+.gyro-dialog[open] > .gyro-dialog-panel {
   animation: gyro-dialog-in var(--gyro-motion) var(--gyro-ease) both;
 }
 

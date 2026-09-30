@@ -3390,34 +3390,33 @@ function ScmSyncRow({
       </span>
       <div className="gyro-scm-sync-actions">
         {behind > 0 ? (
-          <button
-            className="is-secondary"
+          <Button
             disabled={syncing}
+            icon={<ArrowDown size={12} />}
             onClick={onPull}
+            size="small"
             title={`Pull ${behind} from ${upstream}`}
-            type="button"
           >
-            <ArrowDown size={12} />
             Pull
             <span className="gyro-scm-sync-count">{`${behind}↓`}</span>
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           disabled={syncing || (published && ahead === 0 && behind === 0)}
+          icon={<ArrowUp size={12} />}
           onClick={onPush}
+          size="small"
           title={
             published
               ? `Push to ${upstream}`
               : "Push this branch to the remote and track it"
           }
-          type="button"
         >
-          <ArrowUp size={12} />
           {syncing ? "Working…" : pushLabel}
           {!syncing && published && ahead > 0 ? (
             <span className="gyro-scm-sync-count">{`${ahead}↑`}</span>
           ) : null}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -15168,7 +15167,7 @@ export function TerminalPanel({
                 onClick: () => onOpenCommandPalette?.(),
               },
               {
-                label: `Launch ${presetLabel}`,
+                label: presetLabel,
                 icon: Plus,
                 disabled: !canLaunchPreset,
                 onClick: () => onLaunchCliPreset?.(launchOptions),
@@ -17268,7 +17267,7 @@ function AutomationDetail({
                     ? relativeFutureTime(automation.leaseExpiresAt)
                     : "active"
                 }`
-              : "available"
+              : "Available"
           }
         />
       </div>

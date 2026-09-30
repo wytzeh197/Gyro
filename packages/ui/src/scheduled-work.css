@@ -79,6 +79,11 @@
 .gyro-scheduled-filters {
   margin: 16px 0 18px;
 }
+/* The small segments stand 24px tall, like the small status menu that takes
+   their place in a narrow column, so the list below does not jump. */
+.gyro-segmented.gyro-segmented.gyro-scheduled-filters.is-small > button {
+  min-height: calc(18px * var(--gyro-ui-scale, 1));
+}
 /* Scheduled work and suggestions sit in grouped cards: one hairline frame,
    rows divided by inset rules, like a native settings list. */
 .gyro-scheduled-list,
@@ -322,15 +327,24 @@
   gap: 20px;
 }
 /* Inside the page the detail header is a plain title row, like the editor's,
-   leaving the close button clear space instead of a raised band. */
+   leaving the close button clear space instead of a raised band. Title and
+   blocks start on the panel's edge, as the editor's do. */
 .gyro-scheduled-panel .gyro-automation-detail > header {
   background: transparent;
-  padding-right: 36px;
+  padding: 0 36px 12px 0;
   flex-wrap: wrap;
   gap: 16px;
 }
 .gyro-scheduled-panel .gyro-automation-detail-grid {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  padding-inline: 0;
+}
+.gyro-scheduled-panel
+  :is(.gyro-automation-prompt, .gyro-automation-stop, .gyro-automation-result) {
+  margin-inline: 0;
+}
+.gyro-scheduled-panel .gyro-automation-history {
+  padding-inline: 0;
 }
 .gyro-scheduled-page :is(button, input, select, textarea):focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
@@ -543,6 +557,8 @@
   overflow-wrap: anywhere;
   color: var(--gyro-muted);
   max-width: 72%;
+  /* Inset like the menu triggers' values, so every value ends on one edge. */
+  padding-right: calc(8px * var(--gyro-ui-scale, 1) + 1px);
 }
 .gyro-scheduled-setting button {
   background: transparent;
@@ -576,7 +592,7 @@
   flex-shrink: 0;
 }
 .gyro-scheduled-panel > .gyro-automation-detail {
-  padding: 24px;
+  padding: 20px 24px 24px;
 }
 @media (max-width: 850px) {
   .gyro-scheduled-page.has-detail .gyro-scheduled-index {
