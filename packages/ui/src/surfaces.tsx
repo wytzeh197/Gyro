@@ -5,6 +5,7 @@ import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { AutomationStatusFilter, type AutomationStatusFilterValue } from "./automation-status-filter.tsx";
 import { ToastStack } from "./toast-stack";
+import { TextPromptHost } from "./text-prompt";
 import { Badge, Button, Dialog, Dot, EmptyState, OptionSelect, Skeleton, Spinner, type Tone } from "./primitives";
 import {
   ComposerContextCandidates,
@@ -2657,6 +2658,7 @@ export function AppChrome({
         notifications={notifications}
         onDismiss={onDismissNotification}
       />
+      <TextPromptHost />
     </div>
   );
 }
@@ -14687,6 +14689,11 @@ function cliLaunchPresetLabel(
   return "Start preset";
 }
 
+// Menu items read as actions: a user-named preset gets a "Start" verb.
+function presetMenuLabel(label: string) {
+  return /^(new|start|open|run)\b/i.test(label) ? label : `Start ${label}`;
+}
+
 function cliProfileShortLabel(profile: CommandProfile) {
   const compactLabels: Record<string, string> = {
     claude: "Claude",
@@ -15167,7 +15174,7 @@ export function TerminalPanel({
                 onClick: () => onOpenCommandPalette?.(),
               },
               {
-                label: presetLabel,
+                label: presetMenuLabel(presetLabel),
                 icon: Plus,
                 disabled: !canLaunchPreset,
                 onClick: () => onLaunchCliPreset?.(launchOptions),

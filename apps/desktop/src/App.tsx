@@ -66,7 +66,7 @@ import {
   visibleSessionsForProjects,
 } from "./session-listing";
 import * as turnTiming from "./turn-timing";
-import { terminalLaunchProfiles } from "@gyro-dev/ui";
+import { requestText, terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
   pendingMediaAttachment,
   settlePendingMedia,
@@ -5277,10 +5277,10 @@ export function App() {
         notify("command-failed", "Create blocked", "Open a workspace first");
         return;
       }
-      const entered = window.prompt(
-        kind === "directory" ? "New folder path" : "New file path",
-        parentPath ? `${parentPath}/` : "",
-      );
+      const entered = await requestText({
+        title: kind === "directory" ? "New folder" : "New file",
+        label: kind === "directory" ? "Folder path" : "File path",
+        initial: parentPath ? `${parentPath}/` : "", confirmLabel: "Create" });
       const enteredPath = entered?.trim();
       if (!enteredPath) {
         return;
@@ -5367,7 +5367,7 @@ export function App() {
         );
         return;
       }
-      const entered = window.prompt("Rename workspace path", fromPath);
+      const entered = await requestText({ title: "Rename", label: "Path", initial: fromPath, confirmLabel: "Rename" });
       const toPath = entered?.trim()
         ? absoluteWorkspaceFilePath(root, entered.trim())
         : undefined;
@@ -7705,10 +7705,8 @@ export function App() {
                 multiple: false,
                 title: "Open terminal in folder",
               })
-            : window.prompt(
-                "Open terminal in folder",
-                workspaceActionRoot ?? "",
-              );
+            : await requestText({ title: "Open terminal in folder", label: "Folder path",
+                initial: workspaceActionRoot ?? "", confirmLabel: "Open" });
           if (typeof selected !== "string" || !selected.trim()) return;
           folderPath = selected;
         }
@@ -9759,12 +9757,12 @@ export function App() {
   );
 
   const renameTerminalPane = useCallback(
-    (paneId: string) => {
+    async (paneId: string) => {
       const pane = workbench.terminalPanes.find((item) => item.id === paneId);
       if (!pane) {
         return;
       }
-      const title = window.prompt("Rename terminal", pane.title)?.trim();
+      const title = (await requestText({ title: "Rename terminal", label: "Terminal name", initial: pane.title, confirmLabel: "Rename" }))?.trim();
       if (!title || title === pane.title) {
         return;
       }

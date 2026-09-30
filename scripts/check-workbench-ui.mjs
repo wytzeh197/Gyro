@@ -1164,6 +1164,26 @@ expect(
     ),
   "The new-branch dialog should use Gyro overlay, type, and buttons instead of native system chrome.",
 );
+const textPromptSource = readRepoFile("packages/ui/src/text-prompt.tsx");
+expect(
+  textPromptSource.includes("export function requestText(") &&
+    textPromptSource.includes("<Dialog") &&
+    textPromptSource.includes('className="gyro-input"') &&
+    textPromptSource.includes("inputRef.current?.select()") &&
+    textPromptSource.includes("onClose={() => onFinish(null)}") &&
+    indexSource.includes("requestText") &&
+    surfaceSource.includes("<TextPromptHost />") &&
+    !/window\.prompt\(/.test(appSource) &&
+    appSource.includes('title: "Rename terminal"') &&
+    appSource.includes('title: kind === "directory" ? "New folder" : "New file"') &&
+    appSource.includes('await requestText({ title: "Rename", label: "Path"'),
+  "Text input prompts should use the styled requestText dialog, never the native window.prompt.",
+);
+expect(
+  surfaceSource.includes("label: presetMenuLabel(presetLabel)") &&
+    surfaceSource.includes("/^(new|start|open|run)\\b/i.test(label) ? label : `Start ${label}`"),
+  "The terminal actions menu should phrase a user-named preset as a Start action.",
+);
 expect(
   cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
     rule.includes("background: var(--gyro-sidebar)"),
