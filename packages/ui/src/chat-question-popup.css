@@ -187,12 +187,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Options are prose: bold, code and plain runs share one line box and wrap
+   like a sentence. A flex label turned every run into its own box, so a code
+   chip or a bold lead-in ("**A** — …") broke the line around itself. */
 .gyro-question-option-label {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
+  display: block;
   font-weight: var(--gyro-weight-medium);
-  gap: 4px 8px;
+}
+
+.gyro-question-option-label > .gyro-question-option-badge {
+  margin-left: 8px;
+  vertical-align: 1px;
 }
 
 .gyro-question-option small {

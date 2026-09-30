@@ -22318,7 +22318,9 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-command-palette,
 :root[data-theme="light"] .gyro-composer-popover,
 :root[data-theme="light"] .gyro-chat-switcher-menu {
-  background: rgba(255, 255, 255, 0.98);
+  /* Opaque: a start-screen menu hangs over the chip row, which showed
+     through a translucent sheet. */
+  background: var(--gyro-surface);
   border-color: #d9e1ea;
   box-shadow:
     var(--gyro-elev-pop), inset 0 1px 0 #ffffff;

@@ -11551,6 +11551,7 @@ function ChatContextSection({
   isBranchLoading,
   isSending = false,
   onAction,
+  placement = "up",
   savedProjects = [],
   workspaceMode = "local",
   workspacePath,
@@ -11560,6 +11561,8 @@ function ChatContextSection({
   isBranchLoading?: boolean;
   isSending?: boolean;
   onAction?: (action: string) => void;
+  /** Preferred side; the menu still flips when that side lacks room. */
+  placement?: "up" | "down";
   savedProjects?: Array<{ path: string; label: string; detail?: string }>;
   workspaceMode?: WorkbenchMode;
   workspacePath?: string;
@@ -11714,9 +11717,8 @@ function ChatContextSection({
           >
             <Icon size={14} aria-hidden="true" />
             <span>{label}</span>
-            {popover === "branch" ? (
-              <ChevronDown size={13} aria-hidden="true" />
-            ) : null}
+            {/* Every chip here opens a menu, so each carries the same caret. */}
+            <ChevronDown size={13} aria-hidden="true" />
           </button>
         ))}
         {activePopover ? (
@@ -11732,7 +11734,7 @@ function ChatContextSection({
             keepInBounds
             items={items}
             onAction={runAction}
-            placement="up"
+            placement={placement}
             title={
               activePopover === "workspace-mode"
                 ? "Workspace mode"
@@ -23377,6 +23379,7 @@ function BranchLabel({ name }: { name: string }) {
 function ComposerPopover({
   align = "start",
   className,
+  clearBelow,
   keepInBounds = false,
   id,
   items,
@@ -23386,6 +23389,12 @@ function ComposerPopover({
 }: {
   align?: "start" | "end";
   className?: string;
+  /**
+   * With keepInBounds: an ancestor (selector) whose bottom edge a downward
+   * menu hangs below, so a menu opened from the composer bar clears the
+   * composer's own border instead of sitting flush on it.
+   */
+  clearBelow?: string;
   keepInBounds?: boolean;
   id: string;
   items: ComposerPopoverItem[];
@@ -23439,14 +23448,23 @@ function ComposerPopover({
           ? panel.offsetParent.getBoundingClientRect()
           : panel.parentElement!.getBoundingClientRect();
       const anchorTop = anchor.top;
-      const anchorBottom = anchor.bottom;
+      const clearEdge = clearBelow
+        ? panel.parentElement?.closest(clearBelow)?.getBoundingClientRect()
+            .bottom
+        : undefined;
+      const downOffset = Math.max(
+        0,
+        Math.round((clearEdge ?? anchor.bottom) - anchor.bottom),
+      );
+      const anchorBottom = anchor.bottom + downOffset;
       const above = Math.max(0, anchorTop - bounds.top - pad - gap);
       const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
       const preferred = placement === "up" ? above : below;
       const opposite = placement === "up" ? below : above;
       const flip = rect.height > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
-      panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
+      panel.style.top =
+        direction === "down" ? `calc(100% + ${gap + downOffset}px)` : "auto";
       panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
       panel.style.maxHeight = `${Math.min(420, direction === "up" ? above : below)}px`;
       const positioned = panel.getBoundingClientRect();
@@ -23467,7 +23485,7 @@ function ComposerPopover({
       window.removeEventListener("scroll", position, true);
       observer.disconnect();
     };
-  }, [keepInBounds, placement, items]);
+  }, [clearBelow, keepInBounds, placement, items]);
   return (
     <div
       ref={panelRef}
@@ -24424,14 +24442,12 @@ function Composer({
   const usageFetchedAt = providerUsage?.fetchedAt;
   const usageLoading = providerUsage?.status === "loading";
   // An empty thread has nothing to measure yet. Printing "0 of 1M" there
-  // claims a reading nobody took — the system prompt alone is not zero.
-  const contextSource: "reported" | "estimated" | "empty" = !contextUsage
-    ? "empty"
-    : contextUsage.source === "reported"
-      ? "reported"
-      : contextUsage.usedTokens > 0
-        ? "estimated"
-        : "empty";
+  // claims a reading nobody took — the system prompt alone is not zero — and
+  // a ring at 0% reads as a broken control, so the meter only appears once
+  // the thread fills a visible share of the window.
+  const shownContextUsage =
+    contextUsage && contextUsage.percent > 0 ? contextUsage : undefined;
+  const isContextEstimated = shownContextUsage?.source !== "reported";
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
     const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
@@ -24566,6 +24582,12 @@ function Composer({
   });
   const isHero = variant === "hero";
   const shouldShowContextRow = showContextRow ?? isHero;
+  // The centred start composer has the empty page below it, so its menus
+  // hang down instead of covering the headline; a docked composer sits at
+  // the bottom and opens up. Either way each menu flips when its side lacks
+  // room (keepInBounds measures the space).
+  const menuPlacement: "up" | "down" =
+    popoverPlacement ?? (isHero ? "down" : "up");
   // Same order as the provider list: connected A–Z, then the rest A–Z.
   const modelRailProviders = providerConfigs
     .filter((provider) => isProviderExecutable(provider.id))
@@ -25707,8 +25729,11 @@ function Composer({
                 <ComposerPopover
                   className="gyro-context-picker"
                   id={`${popoverBaseId}-context`}
+                  clearBelow=".gyro-composer-shell"
                   items={contextItems}
+                  keepInBounds
                   onAction={runPopoverAction}
+                  placement={menuPlacement}
                 />
               ) : null}
             </div>
@@ -25733,7 +25758,10 @@ function Composer({
               {activePopover === "approval" ? (
                 <ComposerPopover
                   className="gyro-approval-picker"
+                  clearBelow=".gyro-composer-shell"
                   id={`${popoverBaseId}-approval`}
+                  keepInBounds
+                  placement={menuPlacement}
                   items={[
                     {
                       action: "set-approval-gated",
@@ -25837,7 +25865,7 @@ function Composer({
           </button>
         ) : null}
         <div className="gyro-composer-spacer" />
-        {contextUsage ? (
+        {shownContextUsage ? (
           <div
             className="gyro-composer-context-meter"
             // Opening the meter asks for the plan's current level; the account
@@ -25847,15 +25875,15 @@ function Composer({
           >
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-              aria-label={contextUsage.label}
+              aria-label={shownContextUsage.label}
               aria-valuemax={100}
               aria-valuemin={0}
-              aria-valuenow={contextUsage.percent}
+              aria-valuenow={shownContextUsage.percent}
               className="gyro-composer-context-wheel"
               role="progressbar"
               style={
                 {
-                  "--context-usage": `${contextUsage.percent * 3.6}deg`,
+                  "--context-usage": `${shownContextUsage.percent * 3.6}deg`,
                 } as CSSProperties
               }
               tabIndex={0}
@@ -25873,39 +25901,32 @@ function Composer({
                     <strong>Context</strong>
                     <span
                       className="gyro-composer-context-model"
-                      title={contextUsage.modelLabel}
+                      title={shownContextUsage.modelLabel}
                     >
-                      {contextUsage.modelLabel}
+                      {shownContextUsage.modelLabel}
                     </span>
                   </div>
                 </header>
                 <div
                   className="gyro-composer-context-value"
-                  title={
-                    contextSource === "empty"
-                      ? "Measured once the model replies"
-                      : `${contextUsage.remainingLabel} left`
-                  }
+                  title={`${shownContextUsage.remainingLabel} left`}
                 >
                   <strong>
-                    {contextSource === "empty"
-                      ? "—"
-                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
+                    {isContextEstimated ? "~" : ""}
+                    {shownContextUsage.usedLabel}
                   </strong>
-                  <span>/ {contextUsage.windowLabel} tokens</span>
-                  {contextSource === "empty" ? null : (
-                    <b>{contextUsage.percentLabel}</b>
-                  )}
+                  <span>/ {shownContextUsage.windowLabel} tokens</span>
+                  <b>{shownContextUsage.percentLabel}</b>
                 </div>
                 <div
                   aria-label="Context window used"
                   aria-valuemax={100}
                   aria-valuemin={0}
-                  aria-valuenow={contextUsage.percent}
+                  aria-valuenow={shownContextUsage.percent}
                   className="gyro-composer-context-bar"
                   role="progressbar"
                 >
-                  <span style={{ width: `${contextUsage.percent}%` }} />
+                  <span style={{ width: `${shownContextUsage.percent}%` }} />
                 </div>
               </section>
               {limitWindows.length > 0 || providerUsage ? (
@@ -26150,6 +26171,7 @@ function Composer({
           isBranchLoading={isBranchLoading}
           isSending={isSending}
           onAction={onComposerAction}
+          placement={menuPlacement}
           savedProjects={savedProjects}
           workspaceMode={workspaceMode}
           workspacePath={workspacePath}
