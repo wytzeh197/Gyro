@@ -3881,14 +3881,14 @@ export function App() {
   const [branchNameRequest, setBranchNameRequest] = useState<{
     startPoint?: string;
     initialValue: string;
-    mode: "create" | "rename";
+    mode: "create" | "rename" | "chat";
     resolve: (name: string | undefined) => void;
   }>();
   const requestBranchName = useCallback(
     (
       startPoint?: string,
       initialValue = "",
-      mode: "create" | "rename" = "create",
+      mode: "create" | "rename" | "chat" = "create",
     ) =>
       new Promise<string | undefined>((resolve) => {
         setBranchNameRequest({ startPoint, initialValue, mode, resolve });
@@ -7279,14 +7279,14 @@ export function App() {
       if (!session) {
         return;
       }
-      const nextTitle = window.prompt("Rename chat", session.title)?.trim();
-      if (!nextTitle || nextTitle === session.title) {
+      const title = await requestBranchName(undefined, session.title, "chat");
+      if (!title || title === session.title) {
         return;
       }
 
-      await updateSessionTitle(sessionId, nextTitle, { notifySuccess: true });
+      await updateSessionTitle(sessionId, title, { notifySuccess: true });
     },
-    [sessions, updateSessionTitle],
+    [requestBranchName, sessions, updateSessionTitle],
   );
 
   const deleteSession = useCallback(

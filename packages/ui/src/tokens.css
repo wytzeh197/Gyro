@@ -182,6 +182,10 @@
   --gyro-hero-send: #ededf0;
   --gyro-hero-send-hover: #ffffff;
   --gyro-hero-send-text: #141517;
+  /* A disabled send button: greyed out on every composer, so an empty prompt
+     never reads as ready to send. */
+  --gyro-send-disabled: #77797f;
+  --gyro-send-disabled-text: #303135;
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
   --gyro-hero-shadow: var(--gyro-elev-raised);
   --gyro-hero-shadow-focus: var(--gyro-elev-raised);
@@ -421,6 +425,8 @@
   --gyro-hero-send: #1b1c1f;
   --gyro-hero-send-hover: #000000;
   --gyro-hero-send-text: #ffffff;
+  --gyro-send-disabled: #d1d5db;
+  --gyro-send-disabled-text: #6b7280;
   --gyro-hero-focus-border: var(--gyro-accent);
   --gyro-elev-raised: 0 1px 2px rgb(24 26 32 / 0.05), 0 6px 16px -6px rgb(24 26 32 / 0.1);
   --gyro-elev-pop: 0 1px 2px rgb(24 26 32 / 0.06), 0 14px 36px -10px rgb(24 26 32 / 0.18);

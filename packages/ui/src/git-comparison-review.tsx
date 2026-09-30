@@ -151,7 +151,7 @@ export function GitComparisonReview({
             className="gyro-diff-empty-state"
             detail={listing.limitation ?? empty.detail}
             icon={<GitPullRequest size={18} />}
-            title={empty.title}
+            title={listing.failed ? "Couldn’t compare with main" : empty.title}
           />
         )}
       </section>

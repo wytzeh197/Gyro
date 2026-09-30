@@ -44,6 +44,8 @@
   min-height: 64px;
   border: 0;
   border-bottom: 1px solid var(--gyro-border-soft);
+  /* Full-bleed: rounded corners would curve its hairline into the panel edge. */
+  border-radius: 0;
   background: transparent;
 }
 .gyro-comparison-review.gyro-git-comparison-review.is-empty

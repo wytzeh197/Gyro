@@ -30,6 +30,8 @@ export type ReviewFile = {
 export type ReviewScopeListing = {
   files: ReviewFile[];
   limitation?: string;
+  /** The list could not be read: an error, not an empty scope. */
+  failed?: boolean;
 };
 
 export function reviewScopeFromTotals(
@@ -139,6 +141,7 @@ export function filesForReviewScope(
       files: [],
       limitation:
         "Could not compare this branch with main. Refresh source control to retry.",
+      failed: true,
     };
   }
   const files = (comparison.files ?? []).map(toReviewFile);
@@ -150,6 +153,7 @@ export function filesForReviewScope(
       files: [],
       limitation:
         "Could not list files compared to main. Refresh source control to retry.",
+      failed: true,
     };
   }
   return { files };

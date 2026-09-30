@@ -228,8 +228,15 @@ export function WorkspaceKeyboardSettings({
   const builtInGroups = builtInShortcutGroups
     .map((group) => ({
       ...group,
+      // Filtered like the editable list, so a shortcut shown here is findable.
       rows: group.rows.filter((row) =>
-        matchesTerms(terms, group.label, row.name),
+        matchesTerms(
+          terms,
+          group.label,
+          row.name,
+          row.detail,
+          formatWorkspaceKeybinding(row.binding, platform),
+        ),
       ),
     }))
     .filter((group) => group.rows.length);

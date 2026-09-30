@@ -413,8 +413,11 @@
   height: 28px;
   padding: 7px;
 }
+/* The narrow list truncates both lines alike, so rows keep one height. */
+.gyro-scheduled-page.has-detail .gyro-scheduled-item strong,
 .gyro-scheduled-page.has-detail .gyro-scheduled-item small {
   overflow: hidden;
+  overflow-wrap: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

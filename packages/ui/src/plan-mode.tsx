@@ -277,7 +277,7 @@ export function PlanCard({
       <div className="gyro-plan-card-body">{children}</div>
       <button
         aria-expanded={isExpanded}
-        className="gyro-icon-button is-small gyro-plan-card-more"
+        className="gyro-button is-ghost is-small gyro-plan-card-more"
         onClick={() => setIsExpanded((current) => !current)}
         type="button"
       >

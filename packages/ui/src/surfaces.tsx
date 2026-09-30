@@ -5,7 +5,7 @@ import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import { AutomationStatusFilter, type AutomationStatusFilterValue } from "./automation-status-filter.tsx";
 import { ToastStack } from "./toast-stack";
-import { Button, Dialog, Dot, EmptyState, OptionSelect, Skeleton, Spinner } from "./primitives";
+import { Badge, Button, Dialog, Dot, EmptyState, OptionSelect, Skeleton, Spinner, type Tone } from "./primitives";
 import {
   ComposerContextCandidates,
   contextMentionCandidates,
@@ -325,6 +325,7 @@ import type {
   CustomTaskDraft,
   AppDestination,
   Automation,
+  AutomationRunStatus,
   BrowserFeedback,
   BrowserPreview,
   BrowserPreviewDevice,
@@ -6407,11 +6408,12 @@ function WorkspaceSidebarContent({
                           )
                         ) : (
                           <button
-                            className="gyro-sidebar-thread is-empty"
+                            className="gyro-empty-state is-compact gyro-sidebar-recents-empty gyro-sidebar-project-empty"
                             onClick={onCreateSession}
+                            title="Start a new chat"
                             type="button"
                           >
-                            <span>No recent sessions</span>
+                            No chats yet
                           </button>
                         )}
                         {hiddenCount > 0 || hasRevealedMore ? (
@@ -17303,7 +17305,9 @@ function AutomationDetail({
         ) : null}
         {history.map((run) => (
           <div className="gyro-automation-run" key={run.id}>
-            <span className={`is-${run.status}`}>{run.status}</span>
+            <Badge tone={automationRunBadges[run.status].tone}>
+              {automationRunBadges[run.status].label}
+            </Badge>
             <strong>{run.summary}</strong>
             {run.sessionId ? (
               <button
@@ -17328,6 +17332,17 @@ function AutomationDetail({
     </section>
   );
 }
+
+const automationRunBadges: Record<
+  AutomationRunStatus,
+  { label: string; tone: Tone }
+> = {
+  queued: { label: "Queued", tone: "warn" },
+  running: { label: "Running", tone: "warn" },
+  passed: { label: "Passed", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
+  stopped: { label: "Stopped", tone: "neutral" },
+};
 
 function AutomationFact({ label, value }: { label: string; value: string }) {
   return (
@@ -19849,11 +19864,11 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
   {
     id: "new-chat",
     label: "New chat",
-    meta: "Start a desktop session",
+    meta: "Start a new chat",
     destination: "workspace",
     layout: "thread",
     icon: MessageSquare,
-    keywords: "thread conversation",
+    keywords: "thread conversation session",
     shortcut: { mac: "⌘N", other: "Ctrl N" },
   },
   {
@@ -20368,7 +20383,7 @@ export function CommandPaletteOverlay({
                 ? "Search commands"
                 : mode === "files"
                   ? "Search files by name"
-                  : "Search files, projects, sessions, and actions"
+                  : "Search files, projects, chats, and actions"
             }
             onChange={(event) => onQueryChange?.(event.target.value)}
             onKeyDown={(event) => {
@@ -20400,7 +20415,7 @@ export function CommandPaletteOverlay({
                 ? "Type a command"
                 : mode === "files"
                   ? "Search files by name"
-                  : "Search files, projects, sessions, and actions"
+                  : "Search files, projects, chats, and actions"
             }
             ref={inputRef}
             role="combobox"
@@ -20417,7 +20432,7 @@ export function CommandPaletteOverlay({
           {visibleEntries.length === 0 ? (
             <EmptyState
               className="gyro-global-search-empty"
-              detail="Try a file, project, session title, or Gyro action."
+              detail="Try a file, project, chat title, or Gyro action."
               icon={<Search size={18} />}
               title={`No results for “${query.trim()}”`}
             />
@@ -21393,22 +21408,22 @@ function CliLaunchPresetEditor({
             className="gyro-segmented is-small"
             role="group"
           >
-          <button
-            aria-pressed={preset.focus === "first"}
-            className={preset.focus === "first" ? "is-active" : ""}
-            onClick={() => onChange?.({ ...preset, focus: "first" })}
-            type="button"
-          >
-            First
-          </button>
-          <button
-            aria-pressed={preset.focus === "last"}
-            className={preset.focus === "last" ? "is-active" : ""}
-            onClick={() => onChange?.({ ...preset, focus: "last" })}
-            type="button"
-          >
-            Last
-          </button>
+            <button
+              aria-pressed={preset.focus === "first"}
+              className={preset.focus === "first" ? "is-active" : ""}
+              onClick={() => onChange?.({ ...preset, focus: "first" })}
+              type="button"
+            >
+              First
+            </button>
+            <button
+              aria-pressed={preset.focus === "last"}
+              className={preset.focus === "last" ? "is-active" : ""}
+              onClick={() => onChange?.({ ...preset, focus: "last" })}
+              type="button"
+            >
+              Last
+            </button>
           </div>
         </div>
       </footer>
@@ -22132,9 +22147,11 @@ export function SettingsSurface({
                           <ProviderConnectMethod provider={provider} />
                         ) : (
                           <SettingsStatus status={connectionTone}>
-                            {isChecking
+                            {isConnecting
                               ? "Connecting…"
-                              : providerConnectionLabel(provider, health)}
+                              : isChecking
+                                ? "Checking…"
+                                : providerConnectionLabel(provider, health)}
                           </SettingsStatus>
                         )}
                         <div className="gyro-settings-provider-actions">
@@ -22212,11 +22229,13 @@ export function SettingsSurface({
                               }
                               type="button"
                             >
-                              {isChecking
+                              {isConnecting
                                 ? "Connecting…"
-                                : needsSignInRepair
-                                  ? "Sign in again"
-                                  : "Connect"}
+                                : isChecking
+                                  ? "Checking…"
+                                  : needsSignInRepair
+                                    ? "Sign in again"
+                                    : "Connect"}
                             </button>
                           ) : null}
                           <ProviderDetailsMenu
@@ -25709,6 +25728,7 @@ function Composer({
           cleanMachinePath.nextAction &&
           cleanMachinePath.nextActionLabel ? (
             <button
+              className="gyro-button is-primary is-small"
               onClick={() => {
                 const action = cleanMachinePath.nextAction;
                 if (action) onComposerAction?.(action);
@@ -26569,6 +26589,7 @@ function MutationApprovalCard({
       actions={
         <>
           <button
+            className="gyro-button is-secondary"
             disabled={!onAction}
             onClick={() => onAction?.(approval.proposalId, "reject")}
             type="button"
@@ -26576,7 +26597,7 @@ function MutationApprovalCard({
             Reject
           </button>
           <button
-            className="is-primary"
+            className="gyro-button is-primary"
             disabled={!onAction}
             onClick={() => onAction?.(approval.proposalId, "approve")}
             type="button"
@@ -26629,6 +26650,7 @@ function ProviderToolApprovalCard({
       actions={
         <>
           <button
+            className="gyro-button is-secondary"
             disabled={!onAction}
             onClick={() => onAction?.(approval.approvalId, "reject")}
             type="button"
@@ -26638,6 +26660,7 @@ function ProviderToolApprovalCard({
           {approval.approvalType === "capability" &&
           approval.capabilityId !== "workspace-read-editor" ? (
             <button
+              className="gyro-button is-secondary"
               disabled={!onAction}
               onClick={() => onAction?.(approval.approvalId, "allow-project")}
               type="button"
@@ -26646,7 +26669,7 @@ function ProviderToolApprovalCard({
             </button>
           ) : null}
           <button
-            className="is-primary"
+            className="gyro-button is-primary"
             disabled={!onAction}
             onClick={() => onAction?.(approval.approvalId, "approve")}
             type="button"
@@ -27805,28 +27828,32 @@ function ChatRunChangeSummary({
                   </span>
                   {stats}
                 </button>
-                <span className="gyro-change-summary-file-actions">
-                  {onAsk ? (
-                    <button onClick={() => onAsk(file.path)} type="button">
-                      <MessageSquare aria-hidden="true" size={13} /> Ask AI
-                    </button>
-                  ) : null}
-                  {onKeep ? (
-                    kept ? (
-                      <span className="gyro-change-summary-kept">
-                        <Check aria-hidden="true" size={13} /> Kept
-                      </span>
-                    ) : (
-                      <button
-                        className="is-keep"
-                        onClick={() => onKeep(file.path, summary?.contentHash)}
-                        type="button"
-                      >
-                        Keep
+                {onAsk || onKeep ? (
+                  <span className="gyro-change-summary-file-actions">
+                    {onAsk ? (
+                      <button onClick={() => onAsk(file.path)} type="button">
+                        <MessageSquare aria-hidden="true" size={13} /> Ask AI
                       </button>
-                    )
-                  ) : null}
-                </span>
+                    ) : null}
+                    {onKeep ? (
+                      kept ? (
+                        <span className="gyro-change-summary-kept">
+                          <Check aria-hidden="true" size={13} /> Kept
+                        </span>
+                      ) : (
+                        <button
+                          className="is-keep"
+                          onClick={() =>
+                            onKeep(file.path, summary?.contentHash)
+                          }
+                          type="button"
+                        >
+                          Keep
+                        </button>
+                      )
+                    ) : null}
+                  </span>
+                ) : null}
                 {isOpen && changePatches ? (
                   <ChangeSummaryDiff
                     patches={changePatches}

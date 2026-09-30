@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, RefObject } from "react";
 import type { Notification, NotificationKind } from "./types";
 
 /*
@@ -26,6 +27,8 @@ const TOAST_TONE: Record<NotificationKind, ToastTone | null> = {
 
 const MAX_VISIBLE = 3;
 const AUTO_DISMISS_MS = 5000;
+/** Space kept between a lifted stack and the composer under it. */
+const TOAST_GAP = 8;
 
 export function toastTone(kind: NotificationKind): ToastTone | null {
   return TOAST_TONE[kind] ?? null;
@@ -55,14 +58,86 @@ export function ToastStack({
 }) {
   const [mountedAt] = useState(() => Date.now() - 1000);
   const toasts = visibleToasts(notifications, mountedAt);
+  const stackRef = useRef<HTMLElement>(null);
+  const offset = useComposerClearance(
+    stackRef,
+    toasts.map((toast) => toast.id).join(" "),
+  );
   if (!onDismiss) return null;
   return (
-    <section aria-label="Notifications" className="gyro-toast-stack">
+    <section
+      aria-label="Notifications"
+      className="gyro-toast-stack"
+      ref={stackRef}
+      style={
+        offset
+          ? ({ "--gyro-toast-offset": `${offset}px` } as CSSProperties)
+          : undefined
+      }
+    >
       {toasts.map((toast) => (
         <Toast key={toast.id} notification={toast} onDismiss={onDismiss} />
       ))}
     </section>
   );
+}
+
+/*
+ * The stack's corner is where the chat composer keeps its Send button and
+ * model chip, and warn/danger toasts stay until dismissed, so they swallowed
+ * those clicks. When a composer would sit under the stack, lift the stack
+ * clear of it; the offset follows the composer as it grows.
+ */
+function useComposerClearance(
+  stackRef: RefObject<HTMLElement | null>,
+  toastKey: string,
+) {
+  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    const update = (next: number) => {
+      offsetRef.current = next;
+      setOffset(next);
+    };
+    if (!stack || !toastKey) {
+      update(0);
+      return undefined;
+    }
+    const composers = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(".gyro-composer-shell"),
+      );
+    const measure = () => {
+      // The stack's box without the current lift.
+      const rect = stack.getBoundingClientRect();
+      const top = rect.top + offsetRef.current;
+      const bottom = rect.bottom + offsetRef.current;
+      let next = 0;
+      for (const composer of composers()) {
+        const box = composer.getBoundingClientRect();
+        if (
+          box.width > 0 &&
+          box.right > rect.left &&
+          box.left < rect.right &&
+          box.bottom > top &&
+          box.top < bottom
+        ) {
+          next = Math.max(next, Math.ceil(bottom - box.top + TOAST_GAP));
+        }
+      }
+      if (next !== offsetRef.current) update(next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const composer of composers()) observer.observe(composer);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [stackRef, toastKey]);
+  return offset;
 }
 
 function Toast({

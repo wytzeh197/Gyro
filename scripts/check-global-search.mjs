@@ -15,7 +15,7 @@ const entry = (label, detail = "", keywords = "", priority = 0) => ({
 });
 
 const corpus = [
-  entry("New chat", "Start a desktop session", "thread conversation", 0),
+  entry("New chat", "Start a new chat", "thread conversation session", 0),
   entry("Open settings", "Preferences", "", 1),
   entry("Set CLI launch preset", "Choose agents and pane counts", "", 2),
   entry(

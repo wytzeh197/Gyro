@@ -319,7 +319,11 @@ export function ComposerModelRail({
             ) : preview.connected ? (
               <div className="gyro-model-rail-empty" ref={listRef}>
                 <p>No models found for {preview.label}.</p>
-                <button onClick={onManageProviders} type="button">
+                <button
+                  className="gyro-button is-secondary"
+                  onClick={onManageProviders}
+                  type="button"
+                >
                   Open provider settings
                 </button>
               </div>
@@ -330,7 +334,7 @@ export function ComposerModelRail({
                 </span>
                 <p>Connect {preview.label} to use its models here.</p>
                 <button
-                  className="is-primary"
+                  className="gyro-button is-primary"
                   onClick={() => onConnect(preview.id)}
                   type="button"
                 >
@@ -343,7 +347,11 @@ export function ComposerModelRail({
         ) : (
           <div className="gyro-model-rail-empty" ref={listRef}>
             <p>No providers available yet.</p>
-            <button onClick={onManageProviders} type="button">
+            <button
+              className="gyro-button is-secondary"
+              onClick={onManageProviders}
+              type="button"
+            >
               Open provider settings
             </button>
           </div>

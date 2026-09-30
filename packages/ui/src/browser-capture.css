@@ -1,5 +1,6 @@
 .gyro-browser-capture-view {
-  background: #0a0b0d;
+  /* The letterbox around a screenshot follows the theme. */
+  background: var(--gyro-app);
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
@@ -54,29 +55,22 @@
 .gyro-browser-feedback-form textarea {
   background: var(--gyro-surface, #151619);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-type-sm);
   min-height: 56px;
   padding: 8px;
   resize: vertical;
 }
 
+.gyro-browser-feedback-form textarea::placeholder {
+  color: var(--gyro-faint);
+}
+
 .gyro-browser-feedback-form > div {
   display: flex;
   gap: 6px;
-}
-
-.gyro-browser-feedback-form button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 999px;
-  color: var(--gyro-text);
-  font-size: var(--gyro-type-xs);
-  padding: 4px 10px;
-}
-
-.gyro-browser-feedback-form button:disabled {
-  opacity: 0.45;
 }
 
 .gyro-browser-capture-meta {
@@ -98,15 +92,9 @@
   gap: 6px;
 }
 
-.gyro-browser-capture-actions > button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 999px;
+/* "Comment on page" is a toggle: show when it is on. */
+.gyro-browser-capture-actions > .gyro-button.gyro-button[aria-pressed="true"] {
+  background: var(--gyro-accent-soft);
+  border-color: color-mix(in srgb, var(--gyro-accent) 45%, var(--gyro-border));
   color: var(--gyro-text);
-  font-size: var(--gyro-type-xs);
-  padding: 4px 10px;
-}
-
-.gyro-browser-capture-actions > button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
 }

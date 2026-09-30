@@ -154,12 +154,14 @@ export function BrowserCaptureView({
           />
           <div>
             <button
+              className="gyro-button is-primary is-small"
               disabled={!feedbackRegion || !feedbackComment.trim()}
               type="submit"
             >
               Add to chat
             </button>
             <button
+              className="gyro-button is-secondary is-small"
               onClick={() => {
                 setFeedbackMode(false);
                 setFeedbackRegion(null);
@@ -181,12 +183,17 @@ export function BrowserCaptureView({
             : ""}
         </span>
         <div className="gyro-browser-capture-actions">
-          <button onClick={onBackToLive} type="button">
+          <button
+            className="gyro-button is-secondary is-small"
+            onClick={onBackToLive}
+            type="button"
+          >
             Back to live
           </button>
           {isChat && onScreenshot ? (
             <button
               aria-pressed={feedbackMode}
+              className="gyro-button is-secondary is-small"
               onClick={() => {
                 setFeedbackMode((current) => !current);
                 setFeedbackRegion(null);
@@ -197,7 +204,11 @@ export function BrowserCaptureView({
               Comment on page
             </button>
           ) : null}
-          <button onClick={() => onScreenshot?.("reveal")} type="button">
+          <button
+            className="gyro-button is-secondary is-small"
+            onClick={() => onScreenshot?.("reveal")}
+            type="button"
+          >
             Reveal file
           </button>
         </div>

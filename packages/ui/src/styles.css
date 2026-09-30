@@ -652,8 +652,18 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.gyro-sidebar-thread.is-empty {
-  color: var(--gyro-muted);
+/* A project with no chats left reads as the same quiet empty state as
+   Recents; it stays a button so a click still starts a chat. */
+.gyro-sidebar-project-empty {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+}
+
+.gyro-sidebar-project-empty:hover {
+  opacity: 1;
 }
 
 /*
@@ -713,9 +723,6 @@ button {
   margin-left: 10px;
 }
 
-.gyro-sidebar-project-chat-list .gyro-sidebar-thread.is-empty {
-  margin-left: 10px;
-}
 
 .gyro-sidebar-thread-title {
   display: grid;
@@ -3551,21 +3558,14 @@ button {
   padding: 8px 10px;
 }
 
-.gyro-automation-run span {
-  border: 1px solid var(--gyro-border);
-  border-radius: 999px;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  padding: 3px 8px;
+/* The status is a Badge; it hugs its label rather than stretching with the
+   column, and the meta line takes the whole width under the summary. */
+.gyro-automation-run > .gyro-badge {
+  justify-self: start;
 }
 
-.gyro-automation-run span.is-failed {
-  color: var(--gyro-danger);
-}
-
-.gyro-automation-run span.is-running,
-.gyro-automation-run span.is-queued {
-  color: var(--gyro-warn);
+.gyro-automation-run > small {
+  grid-column: 1 / -1;
 }
 
 .gyro-automation-run strong,
@@ -4867,9 +4867,7 @@ body {
 
 .gyro-provider-session-row span.is-accepted,
 .gyro-provider-session-row span.is-done,
-.gyro-provider-session-row span.is-ready,
-.gyro-automation-run span.is-passed,
-.gyro-automation-run span.is-stopped {
+.gyro-provider-session-row span.is-ready {
   color: var(--gyro-muted);
 }
 
@@ -5049,7 +5047,8 @@ body {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
   border: 0.5px solid var(--gyro-hairline-soft);
   border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-faint);
+  /* 11px glyphs on the raised palette need the muted step to reach 4.5:1. */
+  color: var(--gyro-muted);
   font-family: inherit;
   font-size: var(--gyro-type-xs);
   font-weight: var(--gyro-weight-strong);
@@ -5093,7 +5092,7 @@ body {
 }
 
 .gyro-global-search-count {
-  color: color-mix(in srgb, var(--gyro-faint) 70%, transparent);
+  color: var(--gyro-muted);
   font-variant-numeric: tabular-nums;
   font-weight: var(--gyro-weight-medium);
 }
@@ -5183,10 +5182,6 @@ body {
 .gyro-command-list button.is-active .gyro-global-search-hit,
 .gyro-global-search-copy small .gyro-global-search-hit {
   color: var(--gyro-accent-strong);
-}
-
-.gyro-global-search-enter {
-  opacity: 0.75;
 }
 
 .gyro-command-palette.is-global-search .gyro-command-list button.is-disabled {
@@ -5865,7 +5860,8 @@ body {
 }
 
 .gyro-editor-buffer-state[data-state="dirty"] {
-  color: #dfbd72;
+  /* A theme token: the old dark-only amber measured 1.55:1 on light. */
+  color: var(--gyro-warn);
 }
 
 .gyro-editor-buffer-state[data-state="error"] {
@@ -7258,7 +7254,9 @@ body {
   white-space: nowrap;
 }
 
-.gyro-composer-menu-item-title {
+/* Beats the `.gyro-composer-menu-item span` grid below, so a badge stays a
+   compact pill beside the title instead of stretching as a grid item. */
+.gyro-composer-menu-item span.gyro-composer-menu-item-title {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
@@ -7366,8 +7364,8 @@ body {
 }
 
 .gyro-send-button:disabled {
-  background: #8f8c86;
-  color: #343332;
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
   cursor: default;
   opacity: 0.62;
   transform: none;
@@ -9094,8 +9092,8 @@ body {
 }
 
 .gyro-chat-composer-dock .gyro-send-button:disabled {
-  background: #77797f;
-  color: #303135;
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
   opacity: 0.76;
 }
 
@@ -9549,8 +9547,7 @@ body {
   gap: 8px;
 }
 
-.gyro-cli-launch-stepper,
-.gyro-cli-launch-focus {
+.gyro-cli-launch-stepper {
   overflow: hidden;
 }
 
@@ -9564,11 +9561,6 @@ body {
   justify-content: center;
   min-width: 28px;
   padding: 0 8px;
-}
-
-.gyro-cli-launch-focus button {
-  display: inline-flex;
-  min-width: 28px;
 }
 
 .gyro-cli-launch-stepper span {
@@ -11342,8 +11334,7 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-cli-launch-preset,
-:root[data-theme="light"] .gyro-cli-launch-stepper,
-:root[data-theme="light"] .gyro-cli-launch-focus {
+:root[data-theme="light"] .gyro-cli-launch-stepper {
   background: #ffffff;
   border-color: rgba(32, 34, 38, 0.12);
   color: #20242b;
@@ -11628,7 +11619,6 @@ textarea,
 .gyro-profile-table-row,
 .gyro-cli-launch-preset,
 .gyro-cli-launch-stepper,
-.gyro-cli-launch-focus,
 .gyro-sidebar-search-form {
   background: color-mix(
     in srgb,
@@ -13470,13 +13460,14 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   overflow-wrap: anywhere;
 }
+/* A plain label + Segmented row: the Segmented draws the only border. */
 .gyro-cli-launch-focus {
   align-items: center;
+  gap: var(--gyro-space-standard);
 }
 .gyro-cli-launch-focus > span {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-xs);
-  margin-right: 6px;
 }
 .gyro-cli-profile-list .gyro-provider-row {
   grid-template-columns: minmax(0, 1fr) 240px;
@@ -14123,6 +14114,14 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-start .gyro-send-button:not(:disabled) {
   background: var(--gyro-hero-send);
+}
+
+/* The hero fill above sits later than `.gyro-send-button:disabled` at the
+   same specificity; keep the start screen's empty prompt visibly greyed. */
+.gyro-chat-start .gyro-send-button:disabled {
+  background: var(--gyro-send-disabled);
+  color: var(--gyro-send-disabled-text);
+  opacity: 0.76;
 }
 
 .gyro-chat-start .gyro-send-button:not(:disabled):hover {
@@ -15071,6 +15070,20 @@ button.gyro-settings-row em::after {
   min-height: 44px;
   padding: 10px 4px 10px 12px;
   width: auto;
+}
+
+/* With no Ask/Keep actions the button is the whole row, so its hover and open
+   fill reach the card edge; it takes over the empty actions cell's inset. */
+.gyro-change-summary-file.is-reviewable:not(
+    :has(> .gyro-change-summary-file-actions)
+  )
+  > button {
+  padding-right: 12px;
+}
+
+.gyro-change-summary-file > button:focus-visible {
+  /* The card clips anything drawn outside a full-width row. */
+  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-change-summary-file.is-reviewable > button small {
@@ -20006,9 +20019,14 @@ button.gyro-settings-row em::after {
  */
 .gyro-sidebar-project-chat-list {
   flex: 1 1 auto;
+  /* The scroll clip sat on the rows' own edge, cutting a focused row's ring
+     and the row menu's shadow off in a hard line. Pad the clip outwards; the
+     negative margin keeps the rows where they were. */
+  margin-inline: calc(-1 * var(--gyro-space-standard));
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  padding-inline: var(--gyro-space-standard);
   /* The sidebar list is a dead end for a scroll; do not chain it to the page. */
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -21692,6 +21710,8 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: none;
   border: 0;
+  /* No fill, but the shared focus ring follows this corner. */
+  border-radius: var(--gyro-radius-sm);
   color: inherit;
   cursor: pointer;
   display: flex;
@@ -21865,6 +21885,7 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-run-row.is-actionable {
+  border-radius: var(--gyro-radius-sm);
   cursor: pointer;
 }
 
@@ -23804,27 +23825,9 @@ button.gyro-settings-row em::after {
   flex: 0 0 auto;
 }
 
+/* The action is a primary Button; the blocker only places it. */
 .gyro-composer-blocker > button {
-  background: var(--gyro-accent-soft);
-  border: 1px solid transparent;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-accent);
-  cursor: pointer;
-  flex: 0 0 auto;
-  font: inherit;
-  font-weight: var(--gyro-weight-strong);
   margin-left: auto;
-  min-height: 28px;
-  padding: 4px 10px;
-}
-
-.gyro-composer-blocker > button:hover {
-  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
-}
-
-.gyro-composer-blocker > button:focus-visible {
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset);
 }
 
 /* Failed turns are one recovery card instead of a detached label, a narrow
@@ -25465,6 +25468,13 @@ body,
   min-width: 0;
 }
 
+/* The chat variant hides the icon and badge and lets the field flex. That
+   needs a flex bar wherever the variant renders, not only inside the chat
+   companion: in the base grid the field fell into the 16px icon track. */
+.gyro-browser-preview.is-chat .gyro-url-bar {
+  display: flex;
+}
+
 .gyro-browser-preview.is-chat .gyro-url-bar > svg,
 .gyro-browser-preview.is-chat .gyro-url-bar > small {
   display: none;
@@ -25823,9 +25833,20 @@ body,
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-row.is-active {
   background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
 }
-.gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-row:focus-within {
+/* One ring: the file name is the row's main action, so its keyboard focus
+   rings the whole row (inset) instead of the button; the row's ⋯ and −
+   buttons keep their own ring and no longer add a second one around it. */
+.gyro-sidebar-section
+  .gyro-scm-panel
+  .gyro-sidebar-scm-row:has(> .gyro-sidebar-scm-identity:focus-visible) {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset-inset);
+}
+.gyro-sidebar-section
+  .gyro-scm-panel
+  .gyro-sidebar-scm-row
+  > .gyro-sidebar-scm-identity:focus-visible {
+  outline: none;
 }
 .gyro-sidebar-section
   .gyro-scm-panel
@@ -26106,11 +26127,13 @@ body,
   white-space: nowrap;
 }
 
+/* Pinned rows hide their actions at rest too, so they reserve the same
+   timestamp-only width instead of truncating 20px early. */
 :root[data-theme]
   .gyro-sidebar
   .gyro-session-row:not(:hover):not(:focus-within):not(.is-active):not(
     .is-menu-open
-  ):not(.is-pinned)
+  )
   .gyro-sidebar-thread-main {
   padding-right: 36px;
 }
@@ -26127,16 +26150,16 @@ body,
   width: var(--gyro-model-popover-width);
   min-width: 0;
   max-width: none;
-  padding: 13.3px;
-  border-radius: 19px;
+  padding: var(--gyro-space-comfortable);
+  border-radius: var(--gyro-radius-composer);
   overflow: visible;
 }
 .gyro-effort-slider-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 5.7px;
-  margin-bottom: 15.2px;
+  gap: var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-comfortable);
 }
 .gyro-effort-slider-header button {
   appearance: none;
@@ -26150,18 +26173,20 @@ body,
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.9px;
+  gap: 2px;
   min-width: 0;
 }
+/* Accent-strong reads 6:1 or better in both themes; the old #3982fa was
+   3.65:1 on the light popover. */
 .gyro-effort-slider-header .gyro-effort-value-button {
   display: flex;
   align-items: center;
-  gap: 2.85px;
-  color: #3982fa;
+  gap: var(--gyro-space-compact);
+  color: var(--gyro-accent-strong);
   font-size: var(--gyro-type-base);
   font-weight: var(--gyro-weight-medium);
   line-height: calc(20.9px * var(--gyro-ui-scale, 1));
-  border-radius: 3.8px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-effort-value-button svg {
   color: var(--gyro-muted);
@@ -26174,7 +26199,7 @@ body,
   font-size: var(--gyro-type-md);
   line-height: calc(19px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
-  border-radius: 3.8px;
+  border-radius: var(--gyro-radius-xs);
 }
 .gyro-effort-slider-header button:hover {
   color: var(--gyro-text);
@@ -26203,7 +26228,7 @@ body,
     var(--effort-thumb-size) / 2 + (100% - var(--effort-thumb-size)) *
       var(--effort-progress)
   );
-  background: #3982fa;
+  background: var(--gyro-accent);
 }
 .gyro-effort-slider-stops {
   position: absolute;
@@ -26221,10 +26246,10 @@ body,
   background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
 }
 .gyro-effort-slider-stops .is-filled {
-  background: #8fbbff;
+  background: color-mix(in srgb, var(--gyro-accent) 45%, white);
 }
 .gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value-button {
-  color: #a45cff;
+  color: var(--gyro-secondary-accent);
 }
 .gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
   width: 100%;
@@ -26437,31 +26462,7 @@ body,
   gap: 8px;
   margin-left: auto;
 }
-.gyro-inline-approval-actions button {
-  border: 1px solid var(--gyro-hairline-strong);
-  border-radius: var(--gyro-radius-sm);
-  background: var(--gyro-surface);
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-medium);
-  min-height: 32px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
-.gyro-inline-approval-actions .is-primary {
-  background: var(--gyro-text);
-  color: var(--gyro-surface);
-  border-color: var(--gyro-text);
-}
-.gyro-inline-approval-actions button:hover {
-  filter: brightness(0.94);
-}
-.gyro-inline-approval-actions button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-.gyro-inline-approval-actions button:focus-visible,
+/* The actions are the shared Button primary/secondary variants. */
 .gyro-inline-approval summary:focus-visible {
   outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-focus-offset);
@@ -26533,7 +26534,9 @@ body,
   font: inherit;
   font-size: var(--gyro-type-md);
 }
-.gyro-help-search input::-webkit-search-cancel-button {
+/* Both searches draw their own clear button; hide WebKit's native one. */
+.gyro-help-search input::-webkit-search-cancel-button,
+.gyro-settings-topbar-search input::-webkit-search-cancel-button {
   display: none;
 }
 .gyro-help button {
@@ -30125,6 +30128,17 @@ body,
   padding: 7px 10px;
 }
 
+/* Vertical padding grew single-line fields to 32px beside 26px selects and
+   buttons; they take the control height itself and keep only side padding. */
+.gyro-settings-surface
+  :is(
+    .gyro-provider-api-key-row > input,
+    .gyro-provider-custom-form input
+  ) {
+  height: var(--gyro-control-height);
+  padding-block: 0;
+}
+
 .gyro-settings-surface .gyro-provider-custom-form textarea {
   font-family: var(--gyro-mono);
   line-height: 1.55;
@@ -30800,32 +30814,6 @@ body,
 .gyro-model-rail-empty-mark .gyro-provider-logo {
   width: 22px;
   height: 22px;
-}
-.gyro-model-rail-empty button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--gyro-hairline-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-type-md);
-  font-weight: var(--gyro-weight-medium);
-  cursor: pointer;
-}
-.gyro-model-rail-empty button:hover {
-  background: var(--gyro-control-hover);
-}
-.gyro-model-rail-empty button.is-primary {
-  border-color: transparent;
-  background: var(--gyro-model-rail-accent);
-  color: #fff;
-}
-.gyro-model-rail-empty button.is-primary:hover {
-  background: color-mix(in srgb, var(--gyro-model-rail-accent) 88%, black);
 }
 
 /*
@@ -32076,6 +32064,8 @@ body,
 
 .gyro-icon-button.gyro-icon-button.is-small {
   height: calc(22px * var(--gyro-ui-scale, 1));
+  /* The quality-lock min-height (28px) would otherwise stretch it to 22x28. */
+  min-height: calc(22px * var(--gyro-ui-scale, 1));
   width: calc(22px * var(--gyro-ui-scale, 1));
 }
 
@@ -32180,6 +32170,9 @@ body,
 .gyro-select-trigger.gyro-select-trigger > span {
   color: inherit;
   font: inherit;
+  /* Settings/provider row copy rules (`.gyro-settings-row span`) push every
+     nested span down; the value must stay centred on the chevron. */
+  margin: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -32624,28 +32617,40 @@ body,
   font: inherit;
   font-size: var(--gyro-type-md);
   font-weight: var(--gyro-weight-regular);
+  /* The same height as Select and Button at every density. */
+  height: var(--gyro-control-height);
   min-height: var(--gyro-control-height);
-  padding: 6px 10px;
+  padding: 0 10px;
   width: 100%;
 }
 
 textarea.gyro-input.gyro-input {
+  height: auto;
   line-height: 1.5;
+  padding: 6px 10px;
   resize: vertical;
 }
 
+/* The app's one focus ring, like every other field and button. */
 .gyro-input.gyro-input:focus-visible {
-  border-color: var(--gyro-focus-ring);
-  outline: none;
+  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-focus-offset);
 }
 
 .gyro-input.gyro-input::placeholder {
   color: var(--gyro-faint);
 }
 
-/* Toasts. */
+/* Every field without its own placeholder rule (commit message, Help search,
+   automation stop condition, …) uses the token, not the browser default. */
+:where(input, textarea)::placeholder {
+  color: var(--gyro-faint);
+}
+
+/* Toasts. --gyro-toast-offset lifts the stack clear of a composer beneath it
+   (set by ToastStack). */
 .gyro-toast-stack {
-  bottom: 16px;
+  bottom: calc(16px + var(--gyro-toast-offset, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;

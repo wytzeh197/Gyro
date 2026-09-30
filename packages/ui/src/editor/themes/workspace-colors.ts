@@ -49,6 +49,11 @@ export const workspaceEditorColors = {
     "editorSuggestWidget.background": "#FFFFFF",
     "editorSuggestWidget.border": "#D6DCE5",
     "editorSuggestWidget.selectedBackground": "#E7EBF0",
+    // The "vs" base keeps a white selected-row foreground for its blue fill;
+    // on this light fill the focused suggestion needs the editor's text colour.
+    "editorSuggestWidget.selectedForeground": "#24272D",
+    "editorSuggestWidget.selectedIconForeground": "#24272D",
+    "editorSuggestWidget.focusHighlightForeground": "#0066BF",
     "editorHoverWidget.background": "#FFFFFF",
     "editorHoverWidget.border": "#D6DCE5",
     "minimap.background": "#F6F8FA",

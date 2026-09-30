@@ -115,6 +115,7 @@ const repo = (overrides) => ({
     /not backfilled/i,
     "a historical turn must not be filled with the live working tree",
   );
+  assert.notEqual(listing.failed, true);
 }
 
 {
@@ -128,6 +129,11 @@ const repo = (overrides) => ({
   );
   assert.equal(listing.files.length, 0);
   assert.match(listing.limitation ?? "", /list files compared to main/i);
+  assert.equal(
+    listing.failed,
+    true,
+    "a file list that failed to load is an error, not an empty branch",
+  );
 }
 
 assert.equal(reviewScopeTitle({ kind: "proposed" }), "Recorded file changes");

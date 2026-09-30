@@ -3842,6 +3842,11 @@ export function workbenchReducer(
       };
     }
     case "select-diff-file":
+      // A click handler wired straight to a path callback once passed the
+      // MouseEvent here, and the whole window crashed on `path.split`.
+      if (typeof action.path !== "string") {
+        return state;
+      }
       return {
         ...state,
         activeDestination: "workspace",

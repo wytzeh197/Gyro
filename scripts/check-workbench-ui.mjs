@@ -1152,6 +1152,10 @@ expect(
     branchDialogSource.includes("<code>{startPoint}</code>") &&
     branchDialogSource.includes("<Dialog") &&
     branchDialogSource.includes('className="gyro-input"') &&
+    // Renaming a chat uses the same dialog, never the native prompt.
+    branchDialogSource.includes('title: "Rename chat"') &&
+    appSource.includes('requestBranchName(undefined, session.title, "chat")') &&
+    !appSource.includes('window.prompt("Rename chat"') &&
     cssRules(styleSource, ".gyro-dialog::backdrop").some((rule) =>
       rule.includes("var(--gyro-scrim)"),
     ) &&
@@ -5854,7 +5858,10 @@ expect(
     chatSidebarSource.includes("<span>more</span>") &&
     chatSidebarSource.includes("<span>less</span>") &&
     chatSidebarSource.includes("gyro-sidebar-more-button") &&
-    chatSidebarSource.includes("No recent sessions") &&
+    chatSidebarSource.includes(
+      'className="gyro-empty-state is-compact gyro-sidebar-recents-empty gyro-sidebar-project-empty"',
+    ) &&
+    !chatSidebarSource.includes("No recent sessions") &&
     !chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
     chatSidebarSource.includes("onOpenWorkspace();") &&
@@ -8323,6 +8330,40 @@ expect(
   "Settings > Keyboard should show one focus ring on a shortcut field, link its conflict text, treat built-in shortcuts as taken, and offer reset only for a changed shortcut.",
 );
 
+// One focus ring, checked across every stylesheet rule rather than one
+// selector: no settings/provider row draws an outline when a child has focus,
+// and no rule gives the shortcut field a focus-ring outline or shadow of its
+// own on top of the shared one.
+{
+  const blocks = cssBlocks(styleSource);
+  const rowFocusOutlines = blocks.filter(
+    (block) =>
+      cssBlockSelectors(block).some(
+        (selector) =>
+          selector.includes(":has(:focus-visible)") &&
+          /gyro-(?:settings|provider)-row/.test(selector),
+      ) &&
+      cssBlockProperties(block).some((property) =>
+        property.startsWith("outline"),
+      ),
+  );
+  const keybindingFocusRings = blocks.filter(
+    (block) =>
+      cssBlockSelectors(block).some(
+        (selector) =>
+          selector.includes("gyro-keybinding-input") &&
+          selector.includes("focus"),
+      ) &&
+      /(?:^|;)\s*(?:outline|box-shadow)(?:-[a-z]+)?\s*:[^;]*--gyro-focus-ring/.test(
+        block.body,
+      ),
+  );
+  expect(
+    rowFocusOutlines.length === 0 && keybindingFocusRings.length === 0,
+    `Settings rows and shortcut fields should draw exactly one focus ring (row outlines: ${rowFocusOutlines.map((block) => block.chain.at(-1)).join(" | ") || "none"}; shortcut rings: ${keybindingFocusRings.map((block) => block.chain.at(-1)).join(" | ") || "none"}).`,
+  );
+}
+
 expect(
   typeSource.includes('| { kind: "file"; path: string }') &&
     surfaceSource.includes("const fileEntries = useMemo") &&
@@ -8707,7 +8748,11 @@ expect(
     inlineApprovalSource.includes('role="alert"') &&
     styleSource.includes(".gyro-inline-approval") &&
     styleSource.includes(".gyro-inline-approval.is-applied") &&
-    styleSource.includes(".gyro-inline-approval-actions button:focus-visible"),
+    styleSource.includes(".gyro-inline-approval summary:focus-visible") &&
+    // Approve/Reject are the shared Button variants, not bespoke buttons.
+    (surfaceSource.match(/className="gyro-button is-primary"\s+disabled=\{!onAction\}/g) ?? [])
+      .length === 2 &&
+    !styleSource.includes(".gyro-inline-approval-actions button {"),
   "Provider command, file, and permission requests should render as reconciled accessible transcript cards.",
 );
 

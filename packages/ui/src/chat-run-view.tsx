@@ -92,7 +92,7 @@ export type ChatRunProps = {
   suppressThinkingIndicator?: boolean;
   /** Turn-wide line delta for a provider's generic “files” activity. */
   aggregateFileStats?: { additions: number; deletions: number };
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
   onRetry?: () => void;
   onReconnect?: () => void;
   reconnectLabel?: string;
@@ -390,7 +390,7 @@ function RunWorkGroup({
 }: {
   aggregateFileStats?: { additions: number; deletions: number };
   group: WorkGroup;
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const text = runWorkGroupText(group);
@@ -473,7 +473,7 @@ function RunSegmentSummary({
 }: {
   aggregateFileStats?: FileStats;
   calls: WorkStep[];
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summary = splitSegmentSummary(summarizeSegment(calls));
@@ -532,7 +532,7 @@ function RunCalls({
 }: {
   aggregateFileStats?: FileStats;
   calls: WorkStep[];
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
   windowed: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
@@ -577,7 +577,7 @@ function RunCallRow({
 }: {
   aggregateFileStats?: FileStats;
   now: number;
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
   step: WorkStep;
 }) {
   const item = step.item;
@@ -639,7 +639,7 @@ function RunCallRow({
     return (
       <button
         className={`${className} is-actionable`}
-        onClick={onOpenChanges}
+        onClick={() => onOpenChanges(file.path)}
         title={file.path}
         type="button"
       >
@@ -729,7 +729,7 @@ function RunRow({
   step,
 }: {
   aggregateFileStats?: FileStats;
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
   renderSay?: (text: string) => ReactNode;
   step: RunStep;
 }) {
@@ -793,7 +793,7 @@ function RunRow({
     return (
       <button
         className={`${className} is-actionable`}
-        onClick={onOpenChanges}
+        onClick={() => onOpenChanges(file.path)}
         title={file.path}
         type="button"
       >

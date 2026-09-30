@@ -364,6 +364,8 @@
   .gyro-chat-surface
   .gyro-run.is-segments
   :is(.gyro-run-segment-toggle, .gyro-run-calls-more, .gyro-run-call.is-actionable) {
+  /* Rounds the shared focus ring like every sibling control in the thread. */
+  border-radius: var(--gyro-radius-sm);
   cursor: pointer;
 }
 :root[data-theme]
