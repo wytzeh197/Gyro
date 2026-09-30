@@ -8289,7 +8289,9 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("contextUsage.remainingLabel") &&
+    // The meter renders only a reading above 0%; an empty ring is hidden.
+    surfaceSource.includes("contextUsage && contextUsage.percent > 0") &&
+    surfaceSource.includes("shownContextUsage.remainingLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
     // Hovering a model in the picker must not open the context card over it.
     !surfaceSource.includes("previewComposerContextModel") &&
