@@ -40,6 +40,7 @@ export function SettingsRow({
   label,
   value,
   detail,
+  detailId,
   onClick,
   children,
   tone,
@@ -47,6 +48,8 @@ export function SettingsRow({
   label: string;
   value?: string;
   detail: string;
+  /** Lets the row's control point aria-describedby at the detail line. */
+  detailId?: string;
   onClick?: () => void;
   children?: ReactNode;
   tone?: "danger";
@@ -65,7 +68,7 @@ export function SettingsRow({
             </>
           ) : null}
         </strong>
-        <span>{detail}</span>
+        <span id={detailId}>{detail}</span>
       </div>
       {children != null && children !== false ? (
         <div className="gyro-settings-control-column">{children}</div>

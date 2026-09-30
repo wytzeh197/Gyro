@@ -1,6 +1,9 @@
 import { KeyRound, Laptop, UserCircle } from "lucide-react";
 import { Badge } from "./primitives";
-import { providerSupportsApiKey } from "./provider-catalog";
+import {
+  providerAvailableNote,
+  providerConnectMethodLabel,
+} from "./provider-connect-methods";
 import type { ProviderId } from "./types";
 
 /*
@@ -88,30 +91,30 @@ export function ProviderGroupHead({
   );
 }
 
-const CONNECT_METHOD_LABELS: Partial<Record<ProviderId, string>> = {
-  anthropic: "Claude Code sign-in",
-  gemini: "Gemini CLI sign-in",
-  kimi: "Kimi Code sign-in",
-  ollama: "Ollama on this Mac",
-  openai: "Codex sign-in",
-  xai: "Grok Build sign-in",
-};
-
 /**
- * How a provider that is not connected yet would connect. The Available list
- * shows this where a "not connected" status would otherwise repeat on every row.
+ * The Available list's "Connects with" cell. The column label is hidden once
+ * the rows stack, so the cell carries its own label: visible in the stacked
+ * layout, and read by screen readers in every layout.
  */
-export function providerConnectMethodLabel(provider: {
-  authMode: string;
-  id: ProviderId;
+export function ProviderConnectMethod({
+  provider,
+}: {
+  provider: { authMode: string; id: ProviderId };
 }) {
-  if (provider.authMode === "env") {
-    return providerSupportsApiKey(provider.id)
-      ? "API key"
-      : "Environment variable";
-  }
   return (
-    CONNECT_METHOD_LABELS[provider.id] ??
-    (provider.authMode === "cli" ? "CLI sign-in" : "Account sign-in")
+    <span className="gyro-provider-connect-method">
+      <span className="gyro-provider-cell-label">Connects with </span>
+      {providerConnectMethodLabel(provider)}
+    </span>
   );
+}
+
+/** The note above the Available group, naming only the methods it lists. */
+export function ProviderAvailableNote({
+  providers,
+}: {
+  providers: Array<{ authMode: string; id: ProviderId }>;
+}) {
+  const note = providerAvailableNote(providers);
+  return note ? <p className="gyro-provider-group-note">{note}</p> : null;
 }

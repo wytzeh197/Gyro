@@ -100,6 +100,35 @@ const builtInShortcutGroups: Array<{ label: string; rows: ShortcutRow[] }> = [
   },
 ];
 
+/**
+ * The built-in shortcut App.tsx runs for this binding, if any.
+ *
+ * App.tsx reads ⌘ or ⌃ with K, P, or S (S while a file is open in the editor)
+ * before any workspace command, whatever the other modifiers, so a workspace
+ * binding on those keys never fires. The rest (⌘N, ⌘T, ⌘1–3, ⌘,) run after
+ * workspace commands, so a matching workspace binding replaces them.
+ */
+function builtInShortcutFor(binding: WorkspaceKeybinding) {
+  const key = binding.key.toLowerCase();
+  const rows = builtInShortcutGroups.flatMap((group) => group.rows);
+  if (key === "k" || key === "p" || key === "s") {
+    return rows.find(
+      (row) =>
+        row.binding.key === key &&
+        Boolean(row.binding.shift) === (key === "p" && Boolean(binding.shift)),
+    );
+  }
+  const signature = workspaceKeybindingSignature(binding);
+  return rows.find(
+    (row) => workspaceKeybindingSignature(row.binding) === signature,
+  );
+}
+
+/** Compares bindings, reading a missing one as "no shortcut". */
+function keybindingSignatureOrNone(binding?: WorkspaceKeybinding | null) {
+  return binding ? workspaceKeybindingSignature(binding) : "";
+}
+
 function keybindingPlatform(): KeybindingPlatform {
   return typeof navigator !== "undefined" &&
     /Mac|iPhone|iPad/.test(navigator.platform)
@@ -136,7 +165,10 @@ export function WorkspaceKeyboardSettings({
   const platform = keybindingPlatform();
   const mac = platform === "mac";
   const hintId = useId();
+  const detailIdPrefix = useId();
   const [query, setQuery] = useState("");
+  // Read out by the sr-only alert when a new shortcut lands on a taken one.
+  const [conflictNotice, setConflictNotice] = useState("");
   const [recordingId, setRecordingId] = useState<string>();
   const [bindingError, setBindingError] = useState<{
     commandId: string;
@@ -149,13 +181,43 @@ export function WorkspaceKeyboardSettings({
       ? (keybindings[command.id] ?? undefined)
       : command.keybinding;
 
+  /** The workspace command or built-in shortcut that already uses a binding. */
+  const conflictFor = (
+    command: WorkspaceCommandDefinition,
+    binding: WorkspaceKeybinding,
+  ) => {
+    const signature = workspaceKeybindingSignature(binding);
+    const taken = workspaceCommandRegistry.find((candidate) => {
+      if (candidate.id === command.id) return false;
+      const candidateBinding = bindingFor(candidate);
+      return (
+        candidateBinding &&
+        workspaceKeybindingSignature(candidateBinding) === signature
+      );
+    });
+    if (taken) return commandParts(taken).name;
+    const builtIn = builtInShortcutFor(binding);
+    return builtIn ? `${builtIn.name} (built in)` : undefined;
+  };
+
   const editableGroups: Array<{
     label: string;
     commands: Array<{ command: WorkspaceCommandDefinition; name: string }>;
   }> = [];
   for (const command of workspaceCommandRegistry) {
     const { group, name } = commandParts(command);
-    if (!matchesTerms(terms, group, name)) continue;
+    const binding = bindingFor(command);
+    if (
+      !matchesTerms(
+        terms,
+        group,
+        name,
+        command.description,
+        binding ? formatWorkspaceKeybinding(binding, platform) : "",
+      )
+    ) {
+      continue;
+    }
     let bucket = editableGroups.find((entry) => entry.label === group);
     if (!bucket) {
       bucket = { label: group, commands: [] };
@@ -180,6 +242,7 @@ export function WorkspaceKeyboardSettings({
     event.preventDefault();
     event.stopPropagation();
     setBindingError(undefined);
+    setConflictNotice("");
     if (event.key === "Escape") {
       event.currentTarget.blur();
       return;
@@ -212,13 +275,18 @@ export function WorkspaceKeyboardSettings({
       shift: event.shiftKey,
       alt: event.altKey,
     };
-    if (binding.primary && ["k", "p", "s"].includes(binding.key)) {
+    const shortcut = formatWorkspaceKeybinding(binding, platform);
+    // App.tsx always takes K, P, and S first, so a binding there could never
+    // run. Refuse it rather than save a shortcut that does nothing.
+    if (["k", "p", "s"].includes(binding.key)) {
       setBindingError({
         commandId: command.id,
-        message: `${formatWorkspaceKeybinding(binding, platform)} is already used by Gyro. Choose another shortcut.`,
+        message: `${shortcut} is already used for ${builtInShortcutFor(binding)?.name ?? "a built-in shortcut"}. Choose another shortcut.`,
       });
       return;
     }
+    const conflict = conflictFor(command, binding);
+    if (conflict) setConflictNotice(`${shortcut} conflicts with ${conflict}.`);
     onKeybindingChange?.(command.id, binding);
   };
 
@@ -246,41 +314,40 @@ export function WorkspaceKeyboardSettings({
         </p>
       </div>
       <p className="gyro-sr-only" role="alert">
-        {bindingError?.message ?? ""}
+        {bindingError?.message ?? conflictNotice}
       </p>
       {editableGroups.map((group) => (
         <SettingsGroup key={group.label} label={group.label}>
           {group.commands.map(({ command, name }) => {
-            const hasOverride = command.id in keybindings;
+            // Reset only when there is something to reset: an override that
+            // matches the default changes nothing when cleared.
+            const differsFromDefault =
+              command.id in keybindings &&
+              keybindingSignatureOrNone(keybindings[command.id]) !==
+                keybindingSignatureOrNone(command.keybinding);
             const binding = bindingFor(command);
             const collision = binding
-              ? workspaceCommandRegistry.find((candidate) => {
-                  if (candidate.id === command.id) return false;
-                  const candidateBinding = bindingFor(candidate);
-                  return (
-                    candidateBinding &&
-                    workspaceKeybindingSignature(candidateBinding) ===
-                      workspaceKeybindingSignature(binding)
-                  );
-                })
+              ? conflictFor(command, binding)
               : undefined;
             const error =
               bindingError?.commandId === command.id
                 ? bindingError.message
                 : undefined;
             const recording = recordingId === command.id;
+            const detailId = `${detailIdPrefix}-${command.id}`;
             return (
               <SettingsRow
                 detail={
                   error ??
                   (collision
-                    ? `Conflicts with ${commandParts(collision).name}`
+                    ? `Conflicts with ${collision}`
                     : command.description)
                 }
+                detailId={detailId}
                 key={command.id}
                 label={name}
               >
-                {hasOverride ? (
+                {differsFromDefault ? (
                   <button
                     aria-label={`Reset shortcut for ${name}`}
                     className="gyro-icon-button is-small"
@@ -296,11 +363,12 @@ export function WorkspaceKeyboardSettings({
                 ) : null}
                 <div className="gyro-keybinding-field">
                   <input
-                    aria-describedby={hintId}
+                    aria-describedby={`${detailId} ${hintId}`}
                     aria-invalid={error || collision ? true : undefined}
                     aria-label={`Shortcut for ${name}`}
                     className="gyro-keybinding-input"
                     onBlur={() => {
+                      setConflictNotice("");
                       setRecordingId((current) =>
                         current === command.id ? undefined : current,
                       );

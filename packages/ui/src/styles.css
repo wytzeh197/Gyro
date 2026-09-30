@@ -13430,6 +13430,18 @@ button.gyro-settings-row em::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The column label names the cell in the table layout; the stacked layouts
+   below show this copy of it instead. Screen readers get it in both. */
+.gyro-provider-row .gyro-provider-cell-label {
+  clip-path: inset(50%);
+  display: inline;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
 .gyro-provider-table > .gyro-provider-row {
   border-bottom: 0.5px solid var(--gyro-hairline-soft);
   min-height: 56px;
@@ -13761,15 +13773,12 @@ button.gyro-settings-row em::after {
   position: absolute;
 }
 
-/* Focus and conflict borders match row hover's weight and come after it. */
+/* Focus and conflict borders match row hover's weight and come after it. The
+   settings-wide outline is the field's only focus ring. */
 .gyro-settings-row:hover .gyro-keybinding-input,
 .gyro-settings-row .gyro-keybinding-input:focus {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border-strong);
-}
-
-.gyro-settings-row .gyro-keybinding-input:focus {
-  border-color: var(--gyro-focus-ring);
 }
 
 .gyro-settings-row .gyro-keybinding-input[aria-invalid="true"] {
@@ -13869,12 +13878,12 @@ button.gyro-settings-row em::after {
   transform: none;
 }
 
+/* The focused control draws the one focus ring; its row only tints, so the
+   label still reads as part of the same row without a second outline. */
 .gyro-settings-row:has(:focus-visible),
 .gyro-settings-group .gyro-provider-row:has(:focus-visible),
 .gyro-provider-table > .gyro-provider-row:has(:focus-visible) {
   background: color-mix(in srgb, var(--gyro-accent) 6%, transparent);
-  outline: var(--gyro-focus-width) solid var(--gyro-focus-ring);
-  outline-offset: var(--gyro-focus-offset-inset);
 }
 
 .gyro-settings-status {
@@ -14004,6 +14013,15 @@ button.gyro-settings-row em::after {
   .gyro-provider-table-head,
   .gyro-provider-group-note {
     padding-inline: 4px;
+  }
+
+  .gyro-provider-row .gyro-provider-cell-label {
+    clip-path: none;
+    color: var(--gyro-faint);
+    height: auto;
+    overflow: visible;
+    position: static;
+    width: auto;
   }
 
   /* Stacked rows have no column to align to, so stop the select spanning it. */
@@ -29514,6 +29532,12 @@ body,
   overflow-wrap: anywhere;
   white-space: normal;
 }
+/* An Available row's state sits here, beside its explanation, while the
+   column keeps saying how the provider connects. */
+.gyro-provider-setup-message > .gyro-dot {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
 .gyro-provider-table,
 #gyro-provider-api-keys,
 #gyro-provider-ollama {
@@ -30195,6 +30219,15 @@ body,
   .gyro-provider-table-head,
   .gyro-provider-group-note {
     padding-inline: 4px;
+  }
+
+  .gyro-provider-row .gyro-provider-cell-label {
+    clip-path: none;
+    color: var(--gyro-faint);
+    height: auto;
+    overflow: visible;
+    position: static;
+    width: auto;
   }
 
   .gyro-provider-table.is-native-list > .gyro-provider-row {
