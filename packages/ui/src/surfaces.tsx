@@ -52,6 +52,7 @@ import {
   settingsSearchKey,
 } from "./settings-controls";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
+import { UsageCard } from "./usage-card";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -22387,11 +22388,7 @@ export function SettingsSurface({
                     detail={systemAccessDetail(scope)}
                   >
                     {scope.status === "granted" ||
-                    scope.status === "unavailable" ? (
-                      <span className="gyro-settings-info-value">
-                        {systemAccessValue(scope)}
-                      </span>
-                    ) : (
+                    scope.status === "unavailable" ? null : (
                       <button
                         className="gyro-button is-secondary"
                         disabled={!onOpenSystemAccessSettings}
@@ -22949,19 +22946,6 @@ function SettingsStatus({
   );
 }
 
-function formatUsageReset(value?: string) {
-  if (!value) return "Reset time unavailable";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Reset time unavailable";
-  const relativeMs = date.getTime() - Date.now();
-  if (relativeMs > 0 && relativeMs < 24 * 60 * 60 * 1000) {
-    const hours = Math.floor(relativeMs / 3_600_000);
-    const minutes = Math.max(1, Math.round((relativeMs % 3_600_000) / 60_000));
-    return `Resets in ${hours ? `${hours}h ` : ""}${minutes}m`;
-  }
-  return `Resets ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
-}
-
 /** Budget choices, in the units people actually think in. */
 function budgetOptions(current?: number) {
   const presets = [
@@ -22988,104 +22972,6 @@ function budgetOptions(current?: number) {
 function usagePauseDetail(snapshot: UsageSafetySnapshot) {
   const notice = summarizeUsageSafety(snapshot);
   return notice ? [notice.title, notice.detail].filter(Boolean).join(" ") : "";
-}
-
-function UsageCard({
-  window,
-  visualization,
-  resetCaption,
-}: {
-  window?: ProviderUsageState["windows"][number];
-  visualization: "bars" | "wheels";
-  /** Replaces the reset line — ledger windows carry their spend detail here. */
-  resetCaption?: string;
-}) {
-  if (!window) return null;
-  // Plan windows report how much of the allowance is *spent* this period.
-  // The bar fills as spend builds up.
-  const measured =
-    typeof window.usedPercent === "number" &&
-    Number.isFinite(window.usedPercent);
-  const used = measured
-    ? Math.max(0, Math.min(100, Math.round(window.usedPercent!)))
-    : window.status === "exhausted"
-      ? 100
-      : undefined;
-  const severity =
-    window.status === "exhausted" || (used !== undefined && used >= 95)
-      ? "critical"
-      : window.status === "warning" || (used !== undefined && used >= 80)
-        ? "warning"
-        : "normal";
-  const usedLabel =
-    used === undefined
-      ? "—"
-      : used === 0 && measured && (window.usedPercent ?? 0) > 0
-        ? "<1"
-        : String(used);
-  return (
-    <article className={`gyro-usage-card is-${severity}`}>
-      <header>
-        <strong>{window.label}</strong>
-        <span>
-          {severity === "critical"
-            ? "Limit reached"
-            : severity === "warning"
-              ? "High usage"
-              : used === undefined
-                ? "Unmeasured"
-                : "Within limit"}
-        </span>
-      </header>
-      {visualization === "wheels" ? (
-        <div
-          className="gyro-usage-wheel"
-          style={
-            {
-              "--usage": `${(used ?? 0) * 3.6}deg`,
-            } as CSSProperties
-          }
-        >
-          <span>
-            <strong>{used === undefined ? "—" : `${usedLabel}%`}</strong>
-            <small>used</small>
-          </span>
-        </div>
-      ) : (
-        <div
-          className={`gyro-usage-bar${used === undefined ? " is-unmeasured" : ""}`}
-          aria-label={
-            used === undefined
-              ? `${window.label}: level not reported`
-              : `${usedLabel}% used`
-          }
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          {...(used !== undefined ? { "aria-valuenow": used } : {})}
-        >
-          {used !== undefined ? (
-            <span
-              style={{
-                width: `${Math.max(used, used > 0 ? 2 : 0)}%`,
-              }}
-            />
-          ) : null}
-        </div>
-      )}
-      <div className="gyro-usage-card-meta">
-        <strong>
-          {used === undefined ? "Level not reported" : `${usedLabel}% used`}
-        </strong>
-        <span>
-          {resetCaption ??
-            (window.resetsAt
-              ? formatUsageReset(window.resetsAt)
-              : "Resets with plan window")}
-        </span>
-      </div>
-    </article>
-  );
 }
 
 /**

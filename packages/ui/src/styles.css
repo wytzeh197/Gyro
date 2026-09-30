@@ -4348,16 +4348,14 @@ body {
 .gyro-chat-icon-tool,
 .gyro-composer-chip,
 .gyro-composer-tool,
-.gyro-browser-preview-toolbar button,
-.gyro-theme-picker button {
+.gyro-browser-preview-toolbar button {
   border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-icon-button,
 .gyro-chat-tool,
 .gyro-chat-icon-tool,
-.gyro-browser-preview-toolbar button,
-.gyro-theme-picker button {
+.gyro-browser-preview-toolbar button {
   background: var(--gyro-control-bg);
   border-color: var(--gyro-border);
 }
@@ -13067,11 +13065,6 @@ button.gyro-settings-row em::after {
   padding-left: 18px;
 }
 
-.gyro-settings-info-value {
-  font-style: normal;
-  font-weight: var(--gyro-weight-medium);
-}
-
 .gyro-settings-switch {
   background: var(--gyro-surface-soft);
   border: 0.5px solid var(--gyro-hairline-strong);
@@ -13341,100 +13334,145 @@ button.gyro-settings-row em::after {
 }
 /* Local ledger budget/window chrome (reserved; plan cards use gyro-usage-*). */
 
+/* Each plan or spend window is one compact row, not a tall card. Bars: one
+   bordered list, name | bar | amount | status, whose rows share one set of
+   columns (subgrid) so every bar starts and ends on the same line. Wheels:
+   small tiles with the ring beside the name. */
 .gyro-usage-cards {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.gyro-usage-cards:has(> .gyro-usage-card[data-visualization="bars"]) {
+  border: 0.5px solid var(--gyro-hairline-strong);
+  border-radius: var(--gyro-radius-lg);
+  gap: 0;
+  grid-template-columns:
+    minmax(120px, 1fr) minmax(96px, 2fr) minmax(0, auto)
+    minmax(0, auto);
 }
 
 .gyro-usage-card {
+  --gyro-usage-tone: var(--gyro-accent);
+  align-items: center;
+  column-gap: 16px;
+  display: grid;
+  min-width: 0;
+}
+.gyro-usage-card.is-warning {
+  --gyro-usage-tone: var(--gyro-warn);
+}
+.gyro-usage-card.is-critical {
+  --gyro-usage-tone: var(--gyro-danger);
+}
+.gyro-usage-card[data-visualization="bars"] {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding: 10px 16px;
+}
+.gyro-usage-card[data-visualization="bars"] + .gyro-usage-card {
+  border-top: 0.5px solid var(--gyro-hairline-soft);
+}
+.gyro-usage-card[data-visualization="wheels"] {
   border: 0.5px solid var(--gyro-hairline-strong);
   border-radius: var(--gyro-radius-lg);
-  display: grid;
-  gap: 20px;
-  min-height: 190px;
-  padding: 17px;
+  grid-template-areas:
+    "wheel label status"
+    "wheel meta meta";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 12px 14px;
+  row-gap: 2px;
 }
 
-.gyro-usage-card > header,
-.gyro-usage-card-meta {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
+.gyro-usage-card-label {
+  color: var(--gyro-text);
+  font-size: var(--gyro-type-md);
+  font-weight: var(--gyro-weight-medium);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.gyro-usage-card > header span {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
+.gyro-usage-card-status {
+  justify-self: end;
 }
 .gyro-usage-card-meta {
   color: var(--gyro-muted);
+  display: grid;
   font-size: var(--gyro-type-xs);
+  gap: 2px;
+  min-width: 0;
 }
 .gyro-usage-card-meta strong {
   color: var(--gyro-text);
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
 }
+.gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-meta {
+  text-align: right;
+}
+.gyro-usage-card[data-visualization="wheels"] > .gyro-usage-wheel {
+  grid-area: wheel;
+}
+.gyro-usage-card[data-visualization="wheels"] > .gyro-usage-card-label {
+  align-self: end;
+  grid-area: label;
+}
+.gyro-usage-card[data-visualization="wheels"] > .gyro-usage-card-meta {
+  align-self: start;
+  grid-area: meta;
+}
+.gyro-usage-card[data-visualization="wheels"] > .gyro-usage-card-status {
+  grid-area: status;
+}
+
 .gyro-usage-bar {
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   border-radius: 999px;
-  height: 10px;
+  height: 6px;
   overflow: hidden;
 }
 .gyro-usage-bar > span {
-  background: var(--gyro-accent);
+  background: var(--gyro-usage-tone);
   display: block;
   height: 100%;
 }
-.gyro-usage-card.is-warning .gyro-usage-bar > span {
-  background: #d59b45;
-}
-.gyro-usage-card.is-critical .gyro-usage-bar > span {
-  background: #d86464;
-}
+/* The ring is the wheel's own layer, cut to a band by a mask, so the centre
+   shows whatever surface the tile sits on in either theme. */
 .gyro-usage-wheel {
   align-items: center;
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  position: relative;
+  width: 56px;
+}
+.gyro-usage-wheel::before {
   background: conic-gradient(
-    var(--gyro-accent) var(--usage, 0deg),
+    var(--gyro-usage-tone) var(--usage, 0deg),
     color-mix(in srgb, var(--gyro-text) 8%, transparent) 0
   );
   border-radius: 50%;
-  display: flex;
-  height: 108px;
-  justify-content: center;
-  margin: 8px auto 4px;
-  position: relative;
-  width: 108px;
-}
-.gyro-usage-wheel::before {
-  background: var(--gyro-window, var(--gyro-surface-raised, #151619));
-  border-radius: 50%;
   content: "";
-  height: 82px;
-  left: 50%;
+  inset: 0;
+  -webkit-mask: radial-gradient(circle at 28px 28px, transparent 22.5px, var(--gyro-text) 23px);
+  mask: radial-gradient(circle at 28px 28px, transparent 22.5px, var(--gyro-text) 23px);
   position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 82px;
 }
 .gyro-usage-wheel > span {
   display: grid;
+  line-height: 1.1;
   position: relative;
   text-align: center;
+}
+.gyro-usage-wheel strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-type-sm);
+  font-weight: var(--gyro-weight-medium);
 }
 .gyro-usage-wheel small {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-xs);
-}
-.gyro-usage-card.is-warning .gyro-usage-wheel {
-  background: conic-gradient(
-    #d59b45 var(--usage),
-    color-mix(in srgb, var(--gyro-text) 8%, transparent) 0
-  );
-}
-.gyro-usage-card.is-critical .gyro-usage-wheel {
-  background: conic-gradient(
-    #d86464 var(--usage),
-    color-mix(in srgb, var(--gyro-text) 8%, transparent) 0
-  );
 }
 
 .gyro-usage-empty {
@@ -13750,6 +13788,31 @@ button.gyro-settings-row em::after {
   }
   .gyro-usage-cards {
     grid-template-columns: 1fr;
+  }
+  /* Narrow: each bar row stacks, name and status over the bar, amount below. */
+  .gyro-usage-cards:has(> .gyro-usage-card[data-visualization="bars"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-usage-card[data-visualization="bars"] {
+    grid-template-areas:
+      "label status"
+      "bar bar"
+      "meta meta";
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-label {
+    grid-area: label;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-bar {
+    grid-area: bar;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-meta {
+    grid-area: meta;
+    text-align: left;
+  }
+  .gyro-usage-card[data-visualization="bars"] > .gyro-usage-card-status {
+    grid-area: status;
   }
   .gyro-usage-toolbar {
     align-items: flex-start;
@@ -18953,18 +19016,6 @@ button.gyro-settings-row em::after {
 }
 
 /* Balanced light and dark theme contrast for primary interactive surfaces. */
-.gyro-theme-picker button {
-  color: var(--gyro-muted);
-}
-
-.gyro-theme-picker button:hover {
-  color: var(--gyro-text);
-}
-
-.gyro-theme-picker button.is-active {
-  color: var(--gyro-text);
-}
-
 .gyro-sidebar-action.is-settings-page.is-active,
 .gyro-sidebar-thread.is-active {
   color: var(--gyro-text);
@@ -22820,76 +22871,20 @@ button.gyro-settings-row em::after {
   margin: 0;
 }
 
-.gyro-settings-info-value {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  min-width: 0;
-  padding: 0;
-  font-size: var(--gyro-type-base);
+/* A read-only value follows its label as quiet text ("Secrets redaction · On"),
+   so a row that cannot be changed never reads as a disabled control. */
+.gyro-settings-row strong > .gyro-settings-info-value {
   color: var(--gyro-muted);
-}
-
-.gyro-theme-picker button {
   font-size: var(--gyro-type-md);
-  justify-content: flex-start;
+  font-weight: var(--gyro-weight-regular);
+  margin-left: 6px;
 }
 
-.gyro-theme-picker button > svg {
-  color: var(--gyro-muted);
-  display: block;
-  margin-bottom: -3px;
-}
-
-.gyro-theme-picker button > small {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-type-xs);
-  line-height: 1.2;
-}
-
-.gyro-theme-picker button::before {
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-hairline-soft);
-  flex: 1 1 auto;
-  position: relative;
-}
-
-.gyro-theme-picker button.is-system::before {
-  background:
-    linear-gradient(var(--gyro-theme-preview-light-content) 0 0)
-      calc(50% + 12px) 16px / 30% 5px no-repeat,
-    linear-gradient(var(--gyro-theme-preview-light-content) 0 0)
-      calc(50% + 12px) 31px / 38% 3px no-repeat,
-    linear-gradient(var(--gyro-theme-preview-dark-content) 0 0) calc(50% - 14px)
-      16px / 30% 5px no-repeat,
-    linear-gradient(var(--gyro-theme-preview-dark-content) 0 0) calc(50% - 14px)
-      31px / 38% 3px no-repeat,
-    linear-gradient(
-      90deg,
-      var(--gyro-theme-preview-dark-canvas) 0 50%,
-      var(--gyro-theme-preview-light-canvas) 50% 100%
-    );
-  border-color: color-mix(in srgb, var(--gyro-text) 16%, transparent);
-}
-
-.gyro-theme-picker button.is-dark::before {
-  background:
-    linear-gradient(var(--gyro-surface-raised) 0 0) 16px 16px / 58% 5px
-      no-repeat,
-    linear-gradient(var(--gyro-surface-raised) 0 0) 16px 31px / 72% 3px
-      no-repeat,
-    linear-gradient(var(--gyro-surface-raised) 0 0) 16px 44px / 40% 3px
-      no-repeat,
-    #30302d;
-  border-color: color-mix(in srgb, #fff 16%, transparent);
-}
-
-.gyro-theme-picker button.is-light::before {
-  background:
-    linear-gradient(var(--gyro-border-strong) 0 0) 16px 16px / 58% 5px no-repeat,
-    linear-gradient(var(--gyro-border-strong) 0 0) 16px 31px / 72% 3px no-repeat,
-    linear-gradient(var(--gyro-border-strong) 0 0) 16px 44px / 40% 3px no-repeat,
-    #f8f9fb;
+.gyro-settings-row strong > .gyro-settings-info-value::before {
+  color: var(--gyro-faint);
+  content: "\00b7";
+  content: "\00b7" / "";
+  margin-right: 6px;
 }
 
 @media (max-width: 760px) {
@@ -24113,8 +24108,7 @@ button.gyro-settings-row em::after {
 
 .gyro-sidebar-action.is-settings-page,
 .gyro-sidebar-thread,
-.gyro-icon-button,
-.gyro-theme-picker button {
+.gyro-icon-button {
   transition:
     background-color var(--gyro-motion) var(--gyro-ease),
     border-color var(--gyro-motion) var(--gyro-ease),
@@ -24798,12 +24792,6 @@ body,
   font-size: var(--gyro-type-sm);
 }
 
-.gyro-theme-picker button::before {
-  border-color: var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  min-height: 88px;
-}
-
 .gyro-settings-group-rows > .gyro-theme-picker + .gyro-settings-row {
   background: transparent;
   border-left: 0;
@@ -24828,8 +24816,7 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .gyro-sidebar-action.is-settings-page,
 .gyro-sidebar-thread,
-.gyro-icon-button,
-.gyro-theme-picker button {
+.gyro-icon-button {
     transition: none;
   }
 }
@@ -28753,34 +28740,137 @@ body,
   box-shadow: none;
   text-align: center;
 }
-.gyro-theme-picker button::before {
-  display: none;
-  content: none;
-}
-.gyro-theme-picker button > img {
-  display: block;
-  width: 100%;
-  height: clamp(96px, 11vw, 150px);
-  object-fit: cover;
-  object-position: center top;
+/* Each card is a miniature Gyro window drawn from that theme's real palette
+   (the --gyro-theme-preview-* tokens), with the send button in the user's
+   main colour. The ring sits 2px outside the window, like a selected
+   wallpaper, so it reads on both the light and the dark card. */
+.gyro-theme-preview {
   border: 2px solid transparent;
   border-radius: var(--gyro-radius-lg);
   box-sizing: border-box;
+  display: block;
+  height: clamp(96px, 11vw, 150px);
+  position: relative;
+  transition: border-color var(--gyro-motion) var(--gyro-ease);
+  width: 100%;
 }
-.gyro-theme-picker button:hover > img {
+.gyro-theme-picker button:hover > .gyro-theme-preview {
   border-color: var(--gyro-muted);
 }
-.gyro-theme-picker button.is-active > img {
+.gyro-theme-picker button.is-active > .gyro-theme-preview {
   border-color: var(--gyro-text);
 }
-.gyro-theme-picker button > span {
-  margin: 0;
+.gyro-theme-preview-window {
+  background: var(--preview-app);
+  border: 1px solid var(--preview-border);
+  border-radius: var(--gyro-radius-md);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 30% minmax(0, 1fr);
+  inset: 2px;
+  overflow: hidden;
+  position: absolute;
+}
+.gyro-theme-preview-window[data-palette="dark"] {
+  --preview-app: var(--gyro-theme-preview-dark-app);
+  --preview-sidebar: var(--gyro-theme-preview-dark-sidebar);
+  --preview-surface: var(--gyro-theme-preview-dark-surface);
+  --preview-border: var(--gyro-theme-preview-dark-border);
+  --preview-text: var(--gyro-theme-preview-dark-text);
+  --preview-muted: var(--gyro-theme-preview-dark-muted);
+  --preview-bubble: var(--gyro-theme-preview-dark-bubble);
+  --preview-accent: var(--gyro-theme-preview-dark-accent);
+}
+.gyro-theme-preview-window[data-palette="light"] {
+  --preview-app: var(--gyro-theme-preview-light-app);
+  --preview-sidebar: var(--gyro-theme-preview-light-sidebar);
+  --preview-surface: var(--gyro-theme-preview-light-surface);
+  --preview-border: var(--gyro-theme-preview-light-border);
+  --preview-text: var(--gyro-theme-preview-light-text);
+  --preview-muted: var(--gyro-theme-preview-light-muted);
+  --preview-bubble: var(--gyro-theme-preview-light-bubble);
+  --preview-accent: var(--gyro-theme-preview-light-accent);
+}
+/* System: the dark window covers the right half of the light one. */
+.gyro-theme-preview-window + .gyro-theme-preview-window {
+  clip-path: inset(0 0 0 50%);
+}
+.gyro-theme-preview-sidebar,
+.gyro-theme-preview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 7%;
+  min-width: 0;
+}
+.gyro-theme-preview-sidebar {
+  background: var(--preview-sidebar);
+  border-right: 1px solid var(--preview-border);
+  padding: 14%;
+}
+.gyro-theme-preview-main {
+  padding: 7% 10%;
+}
+/* Text is drawn as bars in the palette's own text colours. */
+.gyro-theme-preview-window i {
+  background: var(--preview-muted);
+  border-radius: var(--gyro-radius-xs);
+  display: block;
+  flex: none;
+  height: 3px;
+  opacity: 0.45;
+  width: 80%;
+}
+.gyro-theme-preview-sidebar i:first-child {
+  width: 60%;
+}
+.gyro-theme-preview-sidebar i.is-active {
+  background: var(--preview-text);
+  opacity: 0.8;
+  width: 92%;
+}
+.gyro-theme-preview-main > i.is-bubble {
+  align-self: flex-end;
+  background: var(--preview-bubble);
+  border-radius: var(--gyro-radius-sm);
+  height: 13%;
+  opacity: 1;
+  width: 44%;
+}
+.gyro-theme-preview-main > i.is-title {
+  background: var(--preview-text);
+  height: 5px;
+  opacity: 0.9;
+  width: 46%;
+}
+.gyro-theme-preview-main > i.is-short {
+  width: 58%;
+}
+.gyro-theme-preview-composer {
+  align-items: center;
+  background: var(--preview-surface);
+  border: 1px solid var(--preview-border);
+  border-radius: var(--gyro-radius-sm);
+  display: flex;
+  height: 22%;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-inline: 5%;
+}
+.gyro-theme-preview-composer > i {
+  aspect-ratio: 1;
+  background: var(--preview-accent);
+  border-radius: 50%;
+  height: 52%;
+  opacity: 1;
+  width: auto;
+}
+.gyro-theme-picker-label {
   color: var(--gyro-muted);
   font-size: var(--gyro-type-base);
   font-weight: var(--gyro-weight-regular);
   line-height: 1.3;
 }
-.gyro-theme-picker button.is-active > span {
+.gyro-theme-picker button.is-active > .gyro-theme-picker-label {
   color: var(--gyro-text);
 }
 .gyro-theme-picker button:focus-visible {

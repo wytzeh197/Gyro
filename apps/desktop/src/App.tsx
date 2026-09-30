@@ -2211,7 +2211,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
+      workbench.preferences.lastSettingsSection !== "general" ||
       !isTauriRuntime()
     ) {
       return undefined;

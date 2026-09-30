@@ -11,9 +11,10 @@ import {
   SettingsRow,
   SettingsSegmented,
 } from "./settings-controls";
-import themePreviewSystem from "./assets/theme-preview-system.png";
-import themePreviewLight from "./assets/theme-preview-light.png";
-import themePreviewDark from "./assets/theme-preview-dark.png";
+
+/** Gyro's own palette. Reset only appears once either colour has moved off it. */
+const DEFAULT_MAIN_COLOR = "#0874df";
+const DEFAULT_SECONDARY_COLOR = "#8b6fcb";
 
 type AppearanceSettingsProps = {
   themeMode: ThemeMode;
@@ -56,15 +57,11 @@ export function AppearanceSettings({
         >
           {(
             [
-              {
-                mode: "system",
-                label: "System",
-                image: themePreviewSystem,
-              },
-              { mode: "light", label: "Light", image: themePreviewLight },
-              { mode: "dark", label: "Dark", image: themePreviewDark },
+              { mode: "system", label: "System" },
+              { mode: "light", label: "Light" },
+              { mode: "dark", label: "Dark" },
             ] as const
-          ).map(({ mode, label, image }) => (
+          ).map(({ mode, label }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
@@ -72,8 +69,15 @@ export function AppearanceSettings({
               onClick={() => onThemeChange(mode)}
               type="button"
             >
-              <img src={image} alt="" draggable={false} />
-              <span>{label}</span>
+              <span aria-hidden="true" className="gyro-theme-preview">
+                <ThemePreviewWindow
+                  palette={mode === "dark" ? "dark" : "light"}
+                />
+                {mode === "system" ? (
+                  <ThemePreviewWindow palette="dark" />
+                ) : null}
+              </span>
+              <span className="gyro-theme-picker-label">{label}</span>
             </button>
           ))}
         </div>
@@ -151,25 +155,55 @@ export function AppearanceSettings({
             onChange={(color) => onAppearanceColorsChange?.(mainColor, color)}
           />
         </SettingsRow>
-        <SettingsRow
-          label="Default palette"
-          detail="Restore Gyro blue and violet."
-        >
-          <button
-            className="gyro-button is-secondary is-small gyro-color-reset"
-            disabled={
-              mainColor.toLowerCase() === "#0874df" &&
-              secondaryColor.toLowerCase() === "#8b6fcb"
-            }
-            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
-            type="button"
+        {mainColor.toLowerCase() !== DEFAULT_MAIN_COLOR ||
+        secondaryColor.toLowerCase() !== DEFAULT_SECONDARY_COLOR ? (
+          <SettingsRow
+            label="Default palette"
+            detail="Restore Gyro blue and violet."
           >
-            <RotateCcw aria-hidden="true" size={13} />
-            Reset colors
-          </button>
-        </SettingsRow>
+            <button
+              className="gyro-button is-secondary is-small gyro-color-reset"
+              onClick={() =>
+                onAppearanceColorsChange?.(
+                  DEFAULT_MAIN_COLOR,
+                  DEFAULT_SECONDARY_COLOR,
+                )
+              }
+              type="button"
+            >
+              <RotateCcw aria-hidden="true" size={13} />
+              Reset colors
+            </button>
+          </SettingsRow>
+        ) : null}
       </SettingsGroup>
     </>
+  );
+}
+
+/** A miniature Gyro window in one theme's real colours: the sidebar with its
+    chats, a message and its reply, and the composer whose send button carries
+    the main colour. The System card stacks both and shows the dark half on
+    the right. */
+function ThemePreviewWindow({ palette }: { palette: "light" | "dark" }) {
+  return (
+    <span className="gyro-theme-preview-window" data-palette={palette}>
+      <span className="gyro-theme-preview-sidebar">
+        <i />
+        <i className="is-active" />
+        <i />
+        <i />
+      </span>
+      <span className="gyro-theme-preview-main">
+        <i className="is-bubble" />
+        <i className="is-title" />
+        <i />
+        <i className="is-short" />
+        <span className="gyro-theme-preview-composer">
+          <i />
+        </span>
+      </span>
+    </span>
   );
 }
 

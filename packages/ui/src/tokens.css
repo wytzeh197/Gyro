@@ -63,11 +63,34 @@
   --gyro-segment-bg: #1a1b1e;
   --gyro-segment-active: #2d2f35;
   --gyro-segment-active-text: #f4f4f6;
-  /* The System preference thumbnail must show both palettes at once. */
-  --gyro-theme-preview-dark-canvas: #1a1b1e;
-  --gyro-theme-preview-dark-content: #5f646e;
-  --gyro-theme-preview-light-canvas: #f9f9f8;
-  --gyro-theme-preview-light-content: #ebebe8;
+  /* Appearance draws each theme card in that theme's real colours whichever
+     theme is active, and System shows both at once, so these never flip.
+     They mirror --gyro-app/sidebar/surface/border/text/muted/user-bubble/
+     accent of each theme; keep them in step when a palette changes. */
+  --gyro-theme-preview-dark-app: #141517;
+  --gyro-theme-preview-dark-sidebar: #1a1b1e;
+  --gyro-theme-preview-dark-surface: #1e1f23;
+  --gyro-theme-preview-dark-border: #2e3036;
+  --gyro-theme-preview-dark-text: #ededf0;
+  --gyro-theme-preview-dark-muted: #adb1ba;
+  --gyro-theme-preview-dark-bubble: #26282c;
+  --gyro-theme-preview-dark-accent: color-mix(
+    in srgb,
+    var(--gyro-user-main) 86%,
+    white 14%
+  );
+  --gyro-theme-preview-light-app: #f9f9f8;
+  --gyro-theme-preview-light-sidebar: #f2f2f0;
+  --gyro-theme-preview-light-surface: #ffffff;
+  --gyro-theme-preview-light-border: #e0e0dc;
+  --gyro-theme-preview-light-text: #1b1c1f;
+  --gyro-theme-preview-light-muted: #5b5e66;
+  --gyro-theme-preview-light-bubble: #f1f1ef;
+  --gyro-theme-preview-light-accent: color-mix(
+    in srgb,
+    var(--gyro-user-main) 82%,
+    #10203b 18%
+  );
   --gyro-sidebar-mode-track: #141517;
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
   --gyro-shadow: rgba(0, 0, 0, 0.42);
@@ -390,10 +413,6 @@
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-provider-cursor: #1c2027;
-  --gyro-theme-preview-dark-canvas: #1a1b1e;
-  --gyro-theme-preview-dark-content: #5f646e;
-  --gyro-theme-preview-light-canvas: #f9f9f8;
-  --gyro-theme-preview-light-content: #ebebe8;
   --gyro-provider-opencode: #1c2027;
   --gyro-provider-deepseek: #2c5bd0;
   --gyro-provider-mistral: #c2480c;

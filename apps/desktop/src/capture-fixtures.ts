@@ -954,6 +954,8 @@ const invoke: Invoke = (command, args) => {
   }
   // Deterministic folder choice for exercising project editing in browser QA.
   if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
+  // A fixed demo build, so Settings > Updates can name the installed version.
+  if (command === "plugin:app|version") return "0.1.0-alpha.49.3";
   if (command === "timing_diagnostics_enabled") return false;
   if (command === "prepare_workspace") {
     const request = args?.request as
