@@ -87,6 +87,10 @@ function SourceControlDiffEditor({
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
   const [changeCount, setChangeCount] = useState(0);
+  // Monaco computes the diff in a worker after the editor mounts. Until its
+  // first result arrives the count is unknown, not zero, and the toolbar says
+  // so instead of printing "0 changes" beside a diff about to highlight.
+  const [diffComputed, setDiffComputed] = useState(false);
   const editorRef = useRef<Parameters<DiffOnMount>[0]>();
   const subscriptionRef = useRef<{ dispose(): void }>();
 
@@ -111,6 +115,7 @@ function SourceControlDiffEditor({
       setError("");
       setForcePlain(false);
       setChangeCount(0);
+      setDiffComputed(false);
     }
     void invoke<Content>("git_review_content", { request: review })
       .then((result) => {
@@ -186,7 +191,9 @@ function SourceControlDiffEditor({
         ? "No text changes"
         : usePlain
           ? "Text diff"
-          : `${changeCount} change${changeCount === 1 ? "" : "s"}`;
+          : !diffComputed
+            ? "Comparing…"
+            : `${changeCount} change${changeCount === 1 ? "" : "s"}`;
 
   return (
     <div
@@ -279,9 +286,12 @@ function SourceControlDiffEditor({
               subscriptionRef.current?.dispose();
               let firstDiff = true;
               let settled = false;
-              subscriptionRef.current = editor.onDidUpdateDiff(() => {
-                const changes = editor.getLineChanges() ?? [];
+              const onDiff = () => {
+                // Null until the worker has answered for these models.
+                const changes = editor.getLineChanges();
+                if (!changes) return;
                 setChangeCount(changes.length);
+                setDiffComputed(true);
                 settled = true;
                 if (firstDiff && changes.length) {
                   firstDiff = false;
@@ -291,7 +301,12 @@ function SourceControlDiffEditor({
                     .setPosition({ lineNumber: line, column: 1 });
                   editor.getModifiedEditor().revealLineInCenter(line);
                 }
-              });
+              };
+              setDiffComputed(false);
+              subscriptionRef.current = editor.onDidUpdateDiff(onDiff);
+              // A warm worker can answer before this subscription exists;
+              // the event would never repeat, so read any result already in.
+              onDiff();
               window.setTimeout(() => {
                 if (
                   !settled &&

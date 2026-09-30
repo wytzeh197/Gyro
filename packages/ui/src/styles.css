@@ -6668,23 +6668,6 @@ body {
   padding: 0 8px;
 }
 
-.gyro-sidebar-commit-form > button {
-  align-items: center;
-  background: var(--gyro-accent);
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-primary-text);
-  display: flex;
-  font-size: var(--gyro-type-sm);
-  gap: 5px;
-  justify-content: center;
-  min-height: 28px;
-}
-
-.gyro-sidebar-commit-form > button:disabled {
-  opacity: 0.4;
-}
-
 @media (max-width: 780px) {
   html,
   body,
@@ -19127,13 +19110,6 @@ button.gyro-settings-row em::after {
   min-height: 28px;
 }
 
-.gyro-sidebar-section:has(.gyro-sidebar-scm-group-label)
-  .gyro-sidebar-commit-form
-  > button {
-  border-radius: var(--gyro-radius-xs);
-  min-height: 28px;
-}
-
 .gyro-sidebar-section:has(.gyro-sidebar-scm-group-label) .gyro-sidebar-scm-row {
   border-radius: 0;
   gap: 2px;
@@ -20637,70 +20613,6 @@ button.gyro-settings-row em::after {
   padding: 0 8px;
 }
 
-.gyro-scm-panel .gyro-sidebar-commit-form > button,
-.gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-commit-form > button {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-accent) 88%, transparent);
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-primary-text, #fff);
-  display: flex;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  justify-content: center;
-  min-height: 26px;
-  padding: 0 8px;
-}
-
-.gyro-scm-panel .gyro-sidebar-commit-form > button:disabled,
-.gyro-sidebar-section:has(.gyro-scm-panel)
-  .gyro-sidebar-commit-form
-  > button:disabled {
-  opacity: 0.38;
-}
-
-/* The compact SCM form nests its actions in a grid. Keep its disabled commit
-   control visibly unavailable instead of leaving it in the normal accent
-   treatment, which looked actionable beside the message field. */
-.gyro-scm-panel .gyro-sidebar-commit-actions > button:not(.is-secondary),
-.gyro-sidebar-section:has(.gyro-scm-panel)
-  .gyro-sidebar-commit-actions
-  > button:not(.is-secondary) {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-accent) 88%, transparent);
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-primary-text, #fff);
-  display: flex;
-  font-size: var(--gyro-type-sm);
-  font-weight: var(--gyro-weight-strong);
-  gap: 5px;
-  justify-content: center;
-  min-height: 26px;
-  padding: 0 8px;
-}
-
-.gyro-scm-panel
-  .gyro-sidebar-commit-actions
-  > button:not(.is-secondary):disabled,
-.gyro-sidebar-section:has(.gyro-scm-panel)
-  .gyro-sidebar-commit-actions
-  > button:not(.is-secondary):disabled {
-  background: color-mix(in srgb, var(--gyro-muted) 18%, transparent);
-  color: var(--gyro-muted);
-  cursor: not-allowed;
-  opacity: 1;
-}
-
-.gyro-scm-panel .gyro-sidebar-commit-actions > button.is-secondary:disabled,
-.gyro-sidebar-section:has(.gyro-scm-panel)
-  .gyro-sidebar-commit-actions
-  > button.is-secondary:disabled {
-  color: var(--gyro-muted) !important;
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 .gyro-scm-panel .gyro-sidebar-mini-copy,
 .gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-mini-copy {
   color: var(--gyro-muted);
@@ -20970,21 +20882,12 @@ button.gyro-settings-row em::after {
   grid-template-columns: 14px minmax(0, 1fr) 22px !important;
 }
 
+/* One action at a time (commit, sync, or check), full width. The button
+   itself is a gyro-button primitive; only its size is set here. */
 .gyro-sidebar-commit-actions {
   display: grid;
   gap: 4px;
-  grid-template-columns: 1fr 1.2fr;
-}
-
-.gyro-sidebar-commit-actions > button.is-secondary {
-  background: transparent !important;
-  border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.1)) !important;
-  color: var(--gyro-text) !important;
-  font-weight: var(--gyro-weight-strong);
-}
-
-.gyro-sidebar-commit-actions > button.is-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent) !important;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .gyro-sidebar-mini-copy.is-error {
@@ -21293,19 +21196,6 @@ button.gyro-settings-row em::after {
   .gyro-scm-panel .gyro-sidebar-scm-stage {
     opacity: 1;
   }
-}
-
-.gyro-scm-panel .gyro-sidebar-commit-actions {
-  display: grid;
-  gap: 4px;
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-.gyro-scm-panel .gyro-sidebar-commit-actions > button {
-  align-items: center;
-  display: inline-flex;
-  gap: 5px;
-  justify-content: center;
 }
 
 /* Where the branch stands against its remote, and the press that closes the
@@ -24582,11 +24472,6 @@ body,
   min-height: 32px;
 }
 
-.gyro-scm-panel .gyro-sidebar-commit-actions > button {
-  border-radius: var(--gyro-radius-sm);
-  min-height: 30px;
-}
-
 .gyro-sidebar-scm-sync {
   border-bottom: 1px solid var(--gyro-border-soft);
   margin-inline: 8px;
@@ -25887,17 +25772,6 @@ body,
   min-height: 26px;
   padding-inline: 5px;
 }
-.gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-actions {
-  grid-template-columns: minmax(0, 1fr);
-}
-.gyro-sidebar-section
-  .gyro-scm-panel
-  .gyro-sidebar-commit-actions
-  > button:not(.is-secondary) {
-  background: var(--gyro-accent);
-  color: var(--gyro-accent-contrast, #fff);
-  min-height: 28px;
-}
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-group-label {
   min-height: 24px;
   padding-block: 3px;
@@ -26858,6 +26732,7 @@ body,
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-commit-actions > button {
   min-height: 28px;
   border-radius: var(--gyro-radius-xs);
+  font-size: var(--gyro-type-sm);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-sync {
   margin: 0 8px;

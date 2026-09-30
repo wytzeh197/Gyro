@@ -3402,7 +3402,7 @@ function ScmSyncRow({
 const SCM_GROUP_LIMIT = 60;
 
 /**
- * One VS Code-style change group — "Staged Changes" or "Changes" — with a
+ * One VS Code-style change group — "Staged changes" or "Changes" — with a
  * collapsible header, a count, group actions, and colour-coded rows.
  */
 function ScmSectionDivider({
@@ -3528,7 +3528,7 @@ function ScmChangeGroup({
       >
         <button
           aria-expanded={!collapsed}
-          aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${title.toLowerCase()}`}
           className="gyro-sidebar-scm-group-toggle"
           onClick={onToggleCollapsed}
           type="button"
@@ -4031,6 +4031,11 @@ function WorkspaceSidebarContent({
   const hasSourceControlChanges =
     stagedSourceControlFiles.length > 0 ||
     unstagedSourceControlFiles.length > 0;
+  // Commit is the primary press only once there is a message and something
+  // staged; "Commit all" and an empty message stay secondary.
+  const sourceControlCommitReady =
+    sourceControlMessage.trim().length > 0 &&
+    stagedSourceControlFiles.length > 0;
   const sourceControlAhead = ide?.sourceControl.ahead ?? 0;
   const sourceControlBehind = ide?.sourceControl.behind ?? 0;
   const sourceControlPublished = Boolean(ide?.sourceControl.upstream);
@@ -5115,6 +5120,7 @@ function WorkspaceSidebarContent({
                       <div className="gyro-sidebar-commit-actions">
                         {showSourceControlSyncButton ? (
                           <button
+                            className="gyro-button is-primary"
                             disabled={
                               isSourceControlSyncing || isRemoteChecking
                             }
@@ -5155,6 +5161,7 @@ function WorkspaceSidebarContent({
                           sourceControlPublished &&
                           ide?.sourceControl.available === true ? (
                           <button
+                            className="gyro-button is-secondary"
                             disabled={
                               isRemoteChecking || isSourceControlSyncing
                             }
@@ -5167,6 +5174,11 @@ function WorkspaceSidebarContent({
                           </button>
                         ) : (
                           <button
+                            className={
+                              sourceControlCommitReady
+                                ? "gyro-button is-primary"
+                                : "gyro-button is-secondary"
+                            }
                             disabled={
                               !sourceControlMessage.trim() ||
                               !hasSourceControlChanges
@@ -5271,7 +5283,7 @@ function WorkspaceSidebarContent({
                         onToggleSelected={toggleSourceControlSelection}
                         onToggleStage={onToggleSourceControlFile}
                         selectedPaths={selectedSourceControlPaths}
-                        title="Staged Changes"
+                        title="Staged changes"
                       />
                     </div>
                   ) : null}
@@ -5379,7 +5391,7 @@ function WorkspaceSidebarContent({
                     onToggleSelected={toggleSourceControlSelection}
                     onToggleStage={onToggleSourceControlFile}
                     selectedPaths={selectedSourceControlPaths}
-                    title="Uncommitted changes"
+                    title="Changes"
                   />
                 </div>
                 <div
@@ -5486,7 +5498,14 @@ function WorkspaceSidebarContent({
                         Could not load history. Refresh source control to retry.
                       </p>
                     ) : !ide?.sourceControl.history?.length ? (
-                      <p className="gyro-sidebar-mini-copy">No commits yet.</p>
+                      <p className="gyro-sidebar-mini-copy">
+                        {/* Commits waiting to push, or a branch already on
+                            the remote, prove there is history; it just has
+                            not arrived with this status yet. */}
+                        {sourceControlAhead > 0 || sourceControlPublished
+                          ? "History hasn't loaded yet. Refresh to load it."
+                          : "No commits yet."}
+                      </p>
                     ) : (
                       ide.sourceControl.history.map((commit, index) => {
                         const row = scmHistoryGraph[index];

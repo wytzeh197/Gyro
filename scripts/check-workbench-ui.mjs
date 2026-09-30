@@ -865,11 +865,23 @@ expect(
     ),
   "Workspace Source Control files should use compact single-line rows with stable actions.",
 );
-const compactStyleSource = styleSource.replace(/\s+/g, " ");
+// Commit is the shared primary button only with a message and staged files;
+// otherwise it is the secondary primitive (disabled without a message), and no
+// contextual rule repaints the commit actions over the primitives.
+const compactSurfaceSource = surfaceSource.replace(/\s+/g, " ");
 expect(
   surfaceSource.includes('className="gyro-sidebar-commit-actions"') &&
-    compactStyleSource.includes(
-      ".gyro-scm-panel .gyro-sidebar-commit-actions > button:not(.is-secondary):disabled, .gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-commit-actions > button:not(.is-secondary):disabled { background: color-mix(in srgb, var(--gyro-muted) 18%, transparent); color: var(--gyro-muted); cursor: not-allowed;",
+    compactSurfaceSource.includes(
+      "const sourceControlCommitReady = sourceControlMessage.trim().length > 0 && stagedSourceControlFiles.length > 0;",
+    ) &&
+    compactSurfaceSource.includes(
+      'className={ sourceControlCommitReady ? "gyro-button is-primary" : "gyro-button is-secondary" }',
+    ) &&
+    !cssRules(styleSource, ".gyro-sidebar-commit-actions > button").some(
+      (rule) => /background|opacity/.test(rule),
+    ) &&
+    !/commit-actions\s*>\s*button(:not\(\.is-secondary\)|\.is-secondary)/.test(
+      styleSource,
     ),
   "Disabled Source Control commits should look unavailable instead of like a primary action.",
 );
@@ -879,7 +891,8 @@ expect(
 // a git decoration letter.
 expect(
   surfaceSource.includes("function ScmChangeGroup") &&
-    surfaceSource.includes('title="Staged Changes"') &&
+    surfaceSource.includes('title="Staged changes"') &&
+    surfaceSource.includes('title="Changes"') &&
     surfaceSource.includes("gyro-sidebar-scm-file-icon is-") &&
     surfaceSource.includes("function scmFileBadge") &&
     surfaceSource.includes("function scmStateDecoration") &&
@@ -892,6 +905,29 @@ expect(
     ).some((rule) => rule.includes("var(--gyro-scm-deleted)")) &&
     styleSource.includes(".gyro-sidebar-scm-filename.is-gone"),
   "Source Control should group staged and unstaged changes with coloured file icons and git decoration letters.",
+);
+
+// History never says "No commits yet." beside "1 commit to push": a branch with
+// commits to push, or one already on the remote, says history has not loaded.
+expect(
+  surfaceSource.includes("sourceControlAhead > 0 || sourceControlPublished") &&
+    surfaceSource.includes("History hasn't loaded yet. Refresh to load it."),
+  "Source Control history should not claim there are no commits while commits wait to push.",
+);
+
+// The review diff's change count is unknown until Monaco's worker answers, so
+// the toolbar says "Comparing…" rather than "0 changes", and a result that
+// landed before the subscription is still read.
+const sourceControlDiffEditorSource = readRepoFile(
+  "apps/desktop/src/source-control-diff-editor.tsx",
+);
+expect(
+  sourceControlDiffEditorSource.includes('? "Comparing…"') &&
+    sourceControlDiffEditorSource.includes("setDiffComputed(true)") &&
+    /onDidUpdateDiff\(onDiff\);[\s\S]{0,240}onDiff\(\);/.test(
+      sourceControlDiffEditorSource,
+    ),
+  "The source control diff should not report 0 changes before Monaco has computed it.",
 );
 
 // The activity rail carries the change count, capped at 99+, and the panel
