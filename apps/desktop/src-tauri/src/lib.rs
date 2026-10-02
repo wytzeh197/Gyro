@@ -141,6 +141,7 @@ mod menu_bar;
 mod provider_timeline;
 mod reply_segments;
 mod subagent_capability;
+mod delegated_agents;
 mod web_fetch_capability;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod provider_context;
@@ -609,6 +610,8 @@ struct ProviderRunControl {
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
     timing: Mutex<timing::Handle>,
+    request: Mutex<Option<ProviderChatRequest>>,
+    usage_offset: Mutex<Option<UsageTokens>>,
 }
 
 impl Default for ProviderRunControl {
@@ -623,6 +626,8 @@ impl Default for ProviderRunControl {
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
             timing: Mutex::new(timing::Handle::default()),
+            request: Mutex::new(None),
+            usage_offset: Mutex::new(None),
         }
     }
 }
@@ -4501,6 +4506,7 @@ fn run_provider_chat_blocking(
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    delegated_agents::restrict_request(&app, &mut request);
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
     let events = store.read_context_events(session_id).map_err(to_string)?;
@@ -4530,6 +4536,7 @@ fn run_provider_chat_blocking(
     validate_chat_context(&request)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
     let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
+    request.turn_id = Some(run_id.to_string());
     // Checked before any of the work below: this send is about to be refused,
     // and scanning the workspace, binding a capability context, and persisting
     // a snapshot for it are all wasted. Running the check first also means a
@@ -4578,6 +4585,10 @@ fn run_provider_chat_blocking(
     }
     let load_persisted_context = turn_status.is_some();
     timing::mark(TimingStage::WorkspaceStart);
+    if let Some(control) = app.state::<ProviderCancellationManager>().flags.lock().map_err(to_string)?.get(&request.session_id).cloned() {
+        *control.request.lock().map_err(to_string)? = Some(request.clone());
+    }
+    let _agent_scope = delegated_agents::ParentRunScope::new(&app, &request.session_id);
     bind_provider_capability_context(&app, &store, &request, run_id, load_persisted_context)?;
     timing::mark(TimingStage::WorkspaceReady);
     let bound_context =
@@ -5396,7 +5407,7 @@ fn bind_provider_capability_context(
             .cloned()
             .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()))
     };
-    let context = BoundProviderCapabilityContext {
+    let mut context = BoundProviderCapabilityContext {
         session_id: request.session_id.clone(),
         turn_id: Some(run_id.to_string()),
         provider_id: request.provider_id.clone(),
@@ -5412,6 +5423,7 @@ fn bind_provider_capability_context(
         workspace_context,
         workspace_check,
     };
+    delegated_agents::restrict_context(app, &mut context);
     let manager = app.state::<ProviderCancellationManager>();
     let control = manager
         .flags
@@ -5820,6 +5832,7 @@ fn provider_context_message_with_capabilities_for_turn(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if supports_tools {
+        context.push("Parallel delegation: use Gyro's gyro_agent_spawn/wait/send/stop tools, not provider-native delegation. Give each child a self-contained task and clear file ownership in the shared workspace. Children inherit this model and this chat's permissions, cannot delegate, and Plan-mode children are read-only. Wait for all children and incorporate their reports before your final response.".into());
         if let Some(workspace) = request.workspace_path.as_deref() {
             context.push(format!("Selected workspace: {workspace}"));
         }
@@ -12676,6 +12689,42 @@ fn run_provider_chat_with_retry(
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    let mut output = run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
+    let mut continuation = request.clone();
+    for round in 0..=8 {
+        let Some(reports) = delegated_agents::collect_for_parent(app, request)? else { return Ok(output); };
+        if round == 8 { anyhow::bail!("the parent reached its delegation synthesis limit; remaining agents were stopped"); }
+        continuation.message = format!("Your previous response was held until delegated agents settled. Their reports follow. Incorporate these results and failures, verify any necessary changes, and then give the final response to the original request.\n\nOriginal request:\n{}\n\nPrevious response:\n{}\n\nAgent reports:\n{}", request.message, output.response, reports);
+        let binding = output.resume_cursor.as_ref().map(|cursor| ProviderSessionBinding {
+            session_id: Uuid::parse_str(&request.session_id).unwrap(), provider_id: request.provider_id.clone(),
+            model_id: request.model_id.clone(), model_label: request.model_label.clone(), reasoning_effort: request.reasoning_effort.clone(),
+            resume_cursor_json: serde_json::to_value(cursor).unwrap(), status: "ready".into(), last_error: None, updated_at: chrono::Utc::now(),
+        });
+        let a = provider_turn_tokens(request, Some(&output));
+        provider_accounting::set_usage_offset(app, &request.session_id, Some(a));
+        let mut next = run_provider_chat_with_retry_inner(store, app, &continuation, binding, usage_context)?;
+        provider_accounting::set_usage_offset(app, &request.session_id, None);
+        let b = provider_turn_tokens(&continuation, Some(&next));
+        next.accounted_usage = Some(UsageTokens {
+            input_tokens: a.input_tokens.saturating_add(b.input_tokens), cached_input_tokens: a.cached_input_tokens.saturating_add(b.cached_input_tokens),
+            output_tokens: a.output_tokens.saturating_add(b.output_tokens), reasoning_output_tokens: a.reasoning_output_tokens.saturating_add(b.reasoning_output_tokens),
+            total_tokens: a.total_tokens.saturating_add(b.total_tokens), measured: a.measured && b.measured,
+        });
+        let mut activities = output.activities;
+        activities.append(&mut next.activities); next.activities = activities;
+        output = next;
+        provider_accounting::emit_turn_tokens(app, request, output.accounted_usage.unwrap());
+    }
+    anyhow::bail!("the parent reached its delegation synthesis limit; remaining agents were stopped")
+}
+
+fn run_provider_chat_with_retry_inner(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    binding: Option<ProviderSessionBinding>,
+    usage_context: UsageContext,
+) -> anyhow::Result<ProviderRunnerOutput> {
     if let Some(reason) = usage_guard_block(store, usage_context.origin, &request.provider_id) {
         anyhow::bail!(reason);
     }
@@ -13570,6 +13619,7 @@ fn run_openai_codex_chat(
         &prompt,
     );
     audit_provider_chat_args(&request.provider_id, &args)?;
+    process.args(codex_capability_mcp_config_args(app, request)?);
     process.args(args);
 
     let mut observed_session_id = None;
@@ -13755,6 +13805,7 @@ fn run_openai_codex_app_server_chat(
     process
         .current_dir(&cwd)
         .args(capability_args)
+        .args(["-c", "features.multi_agent=false"])
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -15684,6 +15735,7 @@ fn codex_chat_args(
         }
     }
     args.push("--json".into());
+    args.extend(["-c".into(), "features.multi_agent=false".into()]);
     args.push("--output-last-message".into());
     args.push(output_path.display().to_string());
     if resume_session_id.is_some() {
@@ -15770,6 +15822,7 @@ fn claude_chat_args(
         args.push("--effort".into());
         args.push(effort);
     }
+    args.extend(["--disallowedTools".into(), "Agent,Task".into()]);
     let capability_tools = advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode));
     if let Some(permission_mcp_config) = permission_mcp_config {
         args.extend([
@@ -18261,7 +18314,13 @@ fn handle_provider_stdout_line(
         return;
     };
     let previous_usage = stream_state.context_usage.clone();
+    let previous_billed_usage = stream_state.billed_usage.clone();
     handle_provider_stdout_value(&value, app, request, stream_state);
+    if stream_state.billed_usage != previous_billed_usage {
+        if let Some(usage) = &stream_state.billed_usage {
+            provider_accounting::emit_turn_tokens(app, request, provider_accounting::usage_tokens(usage));
+        }
+    }
     // Publish after the frame's text/tools so the UI checkpoint includes them.
     if stream_state.context_usage != previous_usage {
         if let Some(usage) = &stream_state.context_usage {
@@ -19871,6 +19930,7 @@ fn wait_for_capability_approval(
         // Selecting Full access also releases an already waiting capability.
         if capability_id != CapabilityId::WorkspaceReadEditor
             && bound.policy.mode == CapabilityRunMode::Normal
+            && delegated_agents::full_access_ceiling(app, &bound.session_id)
             && load_config_blocking().is_ok_and(|config| capability_full_access_enabled(&config))
         {
             break Ok(CapabilityApprovalDecision::AllowOnce);
@@ -20211,6 +20271,7 @@ fn execute_provider_capability(
             memory_capability::execute(app, bound, request)?
         }
         CapabilityId::ResearchRun => subagent_capability::execute(app, bound, request)?,
+        CapabilityId::AgentSpawn | CapabilityId::AgentWait | CapabilityId::AgentSend | CapabilityId::AgentStop => delegated_agents::execute(app, bound, request)?,
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => {
             let task_id = capability_argument_string(arguments, "taskId")?.to_string();
             let tasks = task_discover_impl(&workspace)?;
@@ -20464,14 +20525,16 @@ fn execute_provider_capability(
             )
             .map_err(anyhow::Error::msg)?;
             remember_model_browser_resource(app, bound, request.context.call_id, &snapshot)?;
-            let _ = app.emit(
-                "session-browser-opened",
-                serde_json::json!({
-                    "sessionId": bound.session_id,
-                    "url": snapshot.url,
-                    "resourceId": snapshot.resource_id,
-                }),
-            );
+            if !snapshot.background_only {
+                let _ = app.emit(
+                    "session-browser-opened",
+                    serde_json::json!({
+                        "sessionId": bound.session_id,
+                        "url": snapshot.url,
+                        "resourceId": snapshot.resource_id,
+                    }),
+                );
+            }
             let resource = CapabilityResourceRef {
                 id: snapshot.resource_id.clone(),
                 kind: "browser".into(),
@@ -21205,10 +21268,14 @@ fn handle_desktop_provider_capability_request(
             .and_then(|contexts| contexts.get(&key).cloned())
             .unwrap_or_else(|| WorkspaceContextSnapshot::empty(key));
         selected.workspace_check = gyro_core::check_workspace(&selected.workspace);
+        delegated_agents::restrict_context(app, &mut selected);
         selected
     } else {
         bound
     };
+    if let Err(error) = delegated_agents::validate_caller(&store, &bound, request.capability_id) {
+        return fail("invalid-agent-owner", error.to_string());
+    }
     if bound.policy.mode == CapabilityRunMode::Plan
         && matches!(
             request.capability_id,
@@ -21275,8 +21342,15 @@ fn handle_desktop_provider_capability_request(
         class,
         &scope_kind,
         &scope_value,
-        capability_full_access_enabled(&config),
+        capability_full_access_enabled(&config) && delegated_agents::full_access_ceiling(app, &bound.session_id),
     );
+    // Only these delegation IDs may cross Plan's AgentRun class ceiling.
+    // Child execution is independently bound to Plan mode in the agent manager.
+    if bound.policy.mode == CapabilityRunMode::Plan
+        && matches!(request.capability_id, CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun) {
+        let snapshot = bound.policy.classes.get(&CapabilityClass::AgentRun).copied().unwrap_or(CapabilityAccess::Deny);
+        access = narrower_capability_access(snapshot, current_policy.access_for(CapabilityClass::AgentRun));
+    }
     // Live editor text is not part of ordinary Workspace reads. Even Full
     // Access requires a fresh decision before disclosing an unsaved buffer.
     if request.capability_id == CapabilityId::WorkspaceReadEditor
@@ -21423,7 +21497,12 @@ fn handle_desktop_provider_capability_request(
                 result.resource.clone(),
                 session_browser::browser_action_target(&result).as_deref(),
             );
-            if let Some(resource) = result.resource.clone() {
+            // Agent browser tools remain in the child's Working process, but
+            // must not populate the frontend browser/focus/capture surfaces.
+            if let Some(resource) = result.resource.clone().filter(|resource| {
+                resource.kind != "browser"
+                    || !session_browser::is_background_browser(app, &bound.session_id)
+            }) {
                 let live_data = match resource.kind.as_str() {
                     "terminal" => result.data.clone(),
                     "browser" => result.data.clone(),
@@ -21666,6 +21745,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         .or_else(|| web_fetch_capability::schema(id))
         .or_else(|| memory_capability::schema(id))
         .or_else(|| subagent_capability::schema(id))
+        .or_else(|| delegated_agents::schema(id))
     {
         return serde_json::json!({
             "type": "object",
@@ -21991,11 +22071,13 @@ pub fn run_provider_permission_server() -> anyhow::Result<()> {
 pub fn run_provider_capability_server() -> anyhow::Result<()> {
     let context = DesktopProviderCapabilityContext::from_env()?;
     let paths = desktop_provider_ipc_paths()?;
+    let allow_delegation = delegated_agents::can_delegate(&context.session_id);
     provider_mcp::serve(
         &mut std::io::stdin().lock(),
         std::io::stdout(),
         "gyro-provider-capabilities",
         advertised_capability_descriptors(context.mode)
+            .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
             .map(|descriptor| {
                 serde_json::json!({
                     "name": descriptor.id.provider_tool_name(),
@@ -22051,6 +22133,7 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(delegated_agents::AgentManager::default())
         .manage(ProviderApprovalManager::default())
         .manage(ProviderCapabilityApprovalManager::default())
         .manage(ProviderCapabilityBroker)
@@ -22132,6 +22215,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             turn_timing::timing_diagnostics_enabled,
             turn_timing::record_frontend_timing,
+            delegated_agents::list_subagents,
+            delegated_agents::stop_subagent,
             append_chat_context_event,
             append_editor_event,
             append_plan_event,
@@ -22856,6 +22941,7 @@ mod tests {
             CapabilityRunMode::Normal,
             Some("gyro_workspace_read_editor"),
             0,
+            true,
         );
         assert_eq!(catalog["total"], 1);
         assert_eq!(catalog["tools"][0]["name"], "gyro_workspace_read_editor");
@@ -25884,6 +25970,9 @@ while True:
                 "--json".to_string()
             ]
         );
+        for args in [&fresh_codex, &resumed_codex] {
+            assert!(args.windows(2).any(|pair| pair == ["-c", "features.multi_agent=false"]), "only Gyro-owned delegation should be available");
+        }
         assert!(resumed_codex.contains(&"--skip-git-repo-check".to_string()));
         assert!(resumed_codex
             .windows(2)

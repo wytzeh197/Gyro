@@ -34,7 +34,9 @@ pub(super) fn execute(
         gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(&path))?;
     let config = load_config_blocking().map_err(anyhow::Error::msg)?;
     let apply_immediately =
-        bound.policy.mode == CapabilityRunMode::Normal && capability_full_access_enabled(&config);
+        bound.policy.mode == CapabilityRunMode::Normal
+            && capability_full_access_enabled(&config)
+            && delegated_agents::file_edit_ceiling(app, &bound.session_id);
 
     let (content, expected_hash, shape) = match request.capability_id {
         CapabilityId::WorkspaceProposeEdit => {

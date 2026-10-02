@@ -1382,6 +1382,10 @@ function humanizeCapabilityId(capabilityId: string): string {
     "memory-read": "Read memory",
     "memory-write": "Remember",
     "research-run": "Research sub-agent",
+    "agent-spawn": "Launch sub-agent",
+    "agent-wait": "Wait for sub-agents",
+    "agent-send": "Send agent task",
+    "agent-stop": "Stop sub-agent",
     "code-definition": "Go to definition",
     "code-references": "Find references",
     "code-hover": "Hover info",
@@ -2024,6 +2028,7 @@ function isHiddenRunEvent(event: SessionEvent) {
     return false;
   }
   const payload = record(event.payload);
+  if (text(payload, "kind") === "subagent-state") return true;
   // A "Kept" is the user's reading record, not something the run did. Without
   // this it would fall through to the unrecognized-event branch and draw as an
   // approval row the agent never asked for.

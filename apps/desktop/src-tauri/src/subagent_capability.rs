@@ -1,31 +1,4 @@
-//! `gyro_research`: one bounded, read-only provider run in a fresh context.
-//!
-//! A research sub-agent is a real chat turn in its own session, run in Plan
-//! mode, so it inherits the capability policy that already exists for
-//! read-only work instead of a hand-rolled tool filter: inspection tools are
-//! advertised, and every writing class is denied by the broker. That also makes
-//! recursion impossible rather than merely discouraged — this capability's own
-//! class is denied in Plan mode, so a sub-agent cannot start another one.
-//!
-//! The child turn runs against a run control of its own, because every provider
-//! run in the app is dispatched through the cancellation manager: the
-//! capability context is bound through that control, the broker checks it
-//! before executing a tool call, an approval watches it to abandon its wait,
-//! and timeline and usage events read their sequence from it. A child without a
-//! control dies before its first token — "provider run is no longer active" —
-//! which is exactly how research appeared broken.
-//!
-//! The child's stop token is watched against the parent chat's, so stopping the
-//! chat that asked for research also stops the research instead of leaving it
-//! to spend on its own while the parent waits for a tool result nobody is
-//! waiting for any more. The watch is one-way: stopping the research chat stops
-//! only the research.
-//!
-//! The child session is kept rather than deleted, so the cached research is
-//! auditable, and only its final assistant message is returned to the parent.
-//! The call blocks the parent's tool call until the child finishes; the child's
-//! provider run carries the same timeouts and usage metering as any other turn,
-//! attributed to the sub-agent origin so its cost is visible on its own.
+//! Compatibility wrapper for bounded research and child run controls.
 use super::*;
 use serde_json::{json, Value};
 
@@ -46,93 +19,48 @@ pub(super) fn execute(
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     let question = normalize_question(capability_argument_string(&request.arguments, "question")?)?;
+    let title = truncate_chars(
+        &format!("Research: {}", title_from(&question)),
+        MAX_TITLE_CHARS,
+    )
+    .0;
+    let agent = delegated_agents::spawn(app, bound, &title, &research_prompt(&question))?;
+    let result =
+        delegated_agents::wait(app, bound, &[agent.agent_id.clone()], RESEARCH_MAX_RUNTIME)?;
+    let finished = result
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("research agent disappeared"))?;
+    if finished.status != "completed" {
+        anyhow::bail!(
+            "the research sub-agent did not finish: {}",
+            finished.error.as_deref().unwrap_or(&finished.status)
+        );
+    }
     let store = open_store().map_err(anyhow::Error::msg)?;
-    let parent_id = Uuid::parse_str(&bound.session_id)?;
-    let parent = store
-        .get_session(parent_id)?
-        .ok_or_else(|| anyhow::anyhow!("the chat that asked for research no longer exists"))?;
-    let provider_id = parent
-        .provider_id
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("this chat has no provider selected"))?;
-    let child = store.create_subagent_session(
-        &parent.workspace_path,
-        SessionOrigin::Desktop,
-        format!("Research: {}", title_from(&question)),
-        CreateSessionContext {
-            workspace_mode: parent.workspace_mode,
-            branch: parent.branch.clone(),
-            worktree_name: parent.worktree_name.clone(),
-            provider_id: Some(provider_id.clone()),
-            provider_label: parent.provider_label.clone(),
-            model_id: parent.model_id.clone(),
-            model_label: parent.model_label.clone(),
-            reasoning_effort: parent.reasoning_effort.clone(),
-        },
-        parent.id,
-    )?;
-    // The child turn is a provider run like any other, so it runs against a
-    // control registered in the cancellation manager for exactly its lifetime.
-    let run = match ChildRunControl::claim(app, &child.id.to_string(), &parent.id.to_string()) {
-        Ok(run) => run,
-        Err(error) => {
-            // The child never started, so there is no research to keep:
-            // remove the empty session instead of leaving a stray chat behind.
-            let _ = store.delete_session(child.id);
-            return Err(error);
-        }
-    };
-    let outcome = run_provider_chat_blocking(
-        app.clone(),
-        ProviderChatRequest {
-            session_id: child.id.to_string(),
-            message: research_prompt(&question),
-            turn_id: Some(Uuid::new_v4().to_string()),
-            provider_id,
-            provider_label: child.provider_label.clone(),
-            model_id: child.model_id.clone(),
-            model_label: child.model_label.clone(),
-            reasoning_effort: child.reasoning_effort.clone(),
-            // Read-only work still asks before anything unusual, and never
-            // inherits the parent's Full Access.
-            require_command_approval: true,
-            require_file_edit_approval: true,
-            full_access: false,
-            suggest_title: false,
-            workspace_path: Some(parent.workspace_path.to_string_lossy().to_string()),
-            mode: ChatMode::Plan,
-            goal: None,
-            plan: None,
-            attachments: Vec::new(),
-            workspace_context: None,
-            workspace_check: None,
-        },
-        UsageOrigin::SubAgent,
+    let response = store
+        .read_events(Uuid::parse_str(&agent.agent_id)?)?
+        .into_iter()
+        .rev()
+        .find(|event| event.kind == SessionEventKind::AssistantMessage);
+    let (summary, truncated) = truncate_chars(
+        response
+            .as_ref()
+            .map(|event| event.message.as_str())
+            .unwrap_or_else(|| finished.summary.as_deref().unwrap_or("")),
+        MAX_SUMMARY_CHARS,
     );
-    // Nothing may approve, cancel, or meter against the child run once it has
-    // returned; the run wrote its own events before releasing the control.
-    drop(run);
-    let response = outcome
-        .map_err(|error| anyhow::anyhow!("the research sub-agent did not finish: {error}"))?;
-    let (summary, truncated) = truncate_chars(&response.assistant_event.message, MAX_SUMMARY_CHARS);
-    let resource = CapabilityResourceRef {
-        id: child.id.to_string(),
-        kind: "chat".into(),
-        label: child.title.clone(),
-    };
     Ok((
-        format!("Research finished in chat {}", child.id),
+        format!("Research finished in chat {}", agent.agent_id),
         json!({
-            "schema": SUBAGENT_SCHEMA,
-            "sessionId": child.id,
-            "title": child.title,
-            "providerId": child.provider_id,
-            "modelId": child.model_id,
-            "question": question,
-            "truncated": truncated,
-            "summary": summary,
+            "schema": SUBAGENT_SCHEMA, "sessionId": agent.agent_id, "title": agent.name,
+            "providerId": agent.provider_id, "modelId": agent.model_id,
+            "question": question, "truncated": truncated, "summary": summary,
         }),
-        Some(resource),
+        Some(CapabilityResourceRef {
+            id: agent.agent_id,
+            kind: "chat".into(),
+            label: agent.name,
+        }),
     ))
 }
 
@@ -244,7 +172,7 @@ impl Drop for ParentStopWatcher {
 /// A child is a real provider run, so it claims a control of its own before the
 /// child turn starts; without one the run dies before its first token with
 /// "provider run is no longer active", which is how research appeared broken.
-struct ChildRunControl {
+pub(super) struct ChildRunControl {
     app: tauri::AppHandle,
     session_id: String,
     control: Arc<ProviderRunControl>,
@@ -254,7 +182,7 @@ struct ChildRunControl {
 }
 
 impl ChildRunControl {
-    fn claim(
+    pub(super) fn claim(
         app: &tauri::AppHandle,
         session_id: &str,
         parent_session_id: &str,
@@ -291,14 +219,11 @@ impl Drop for ChildRunControl {
     }
 }
 
-/// A sub-agent gets a question, not a conversation: it is told what it is, that
-/// it may only read, and that the parent wants findings rather than a plan.
+/// Research defines the task; the parent defines its permissions.
 fn research_prompt(question: &str) -> String {
     format!(
-        "You are a read-only research sub-agent started by another Gyro chat. \
-         Answer the question below using only read-only tools (search, read, code navigation, git history). \
-         You cannot write files, run commands, or fetch the web. \
-         Work from evidence in this workspace, and when you are done reply with a short report: \
+        "Research the question below using the tools available under the parent's inherited permissions. \
+         Focus on evidence and avoid unrelated changes. When you are done reply with a short report: \
          the findings, the file paths and line numbers that support them, and anything you could not determine. \
          Do not produce a plan or ask for approval; the chat that started you will relay your report.\n\n\
          Question: {question}"
@@ -320,7 +245,7 @@ fn title_from(question: &str) -> String {
     truncate_chars(question, MAX_TITLE_CHARS).0
 }
 
-fn truncate_chars(value: &str, limit: usize) -> (String, bool) {
+pub(super) fn truncate_chars(value: &str, limit: usize) -> (String, bool) {
     if value.chars().count() <= limit {
         return (value.to_string(), false);
     }
@@ -361,10 +286,11 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_states_the_question_and_the_read_only_contract() {
+    fn the_research_prompt_respects_inherited_permissions() {
         let prompt = research_prompt("how does the capability broker work?");
-        assert!(prompt.contains("read-only research sub-agent"));
-        assert!(prompt.contains("cannot write files"));
+        assert!(prompt.contains("parent's inherited permissions"));
+        assert!(!prompt.contains("cannot write files"));
+        assert!(!prompt.contains("cannot write"));
         assert!(
             prompt.contains("How does") || prompt.contains("how does the capability broker work?")
         );

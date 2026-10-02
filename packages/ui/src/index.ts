@@ -1,3 +1,4 @@
+export { ChatFileActionsContext } from "./chat-file-card";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
 export { interfaceScales } from "./appearance";
@@ -654,3 +655,6 @@ export {
 export type { CalendarSchedule } from "./types.ts";
 
 export { ComposerContextCandidates } from "./composer-context.ts";
+
+export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab } from "./subagents";
+export type { SubagentSnapshot, SubagentSurfaceState, SubagentTabState } from "./subagents";

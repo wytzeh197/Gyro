@@ -87,6 +87,7 @@ function workIcon(item: WorkItem): LucideIcon {
 
 export type ChatRunProps = {
   model: RunModel;
+  agentRows?: ReactNode;
   /** Optional host state when work is preparing or waiting for a person. */
   statusLabel?: string;
   suppressThinkingIndicator?: boolean;
@@ -139,6 +140,7 @@ const LIVE_CALL_WINDOW = 4;
 
 export function ChatRun({
   model,
+  agentRows,
   statusLabel,
   suppressThinkingIndicator = false,
   aggregateFileStats,
@@ -242,6 +244,7 @@ export function ChatRun({
         activeLabel={activeLabel}
         onToggle={() => setIsCollapsed((current) => !current)}
       />
+      {showSteps ? agentRows : null}
       {showRail ? (
         <ol aria-label="Work timeline" className="gyro-run-rail">
           {showSteps && isSegments

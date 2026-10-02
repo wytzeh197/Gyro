@@ -23,21 +23,23 @@
 
 :root {
   color-scheme: dark;
+  /* Neutral surface ramps keep dark mode free of blue casts and light mode
+     free of cream casts. Accent hues belong to actions and semantic states. */
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
-  --gyro-app: #141517;
-  --gyro-sidebar: #1a1b1e;
-  --gyro-sidebar-soft: #25272b;
-  --gyro-pane: #17181b;
-  --gyro-surface: #1e1f23;
-  --gyro-surface-raised: #27292e;
-  --gyro-surface-soft: #222328;
-  --gyro-border: #2e3036;
-  --gyro-border-soft: #25272c;
-  --gyro-border-strong: #5f646e;
-  --gyro-text: #ededf0;
-  --gyro-muted: #adb1ba;
-  --gyro-faint: #959aa5;
+  --gyro-app: #181818;
+  --gyro-sidebar: #222222;
+  --gyro-sidebar-soft: #2c2c2c;
+  --gyro-pane: #1c1c1c;
+  --gyro-surface: #242424;
+  --gyro-surface-raised: #303030;
+  --gyro-surface-soft: #262626;
+  --gyro-border: #383838;
+  --gyro-border-soft: #2c2c2c;
+  --gyro-border-strong: #707070;
+  --gyro-text: #ededed;
+  --gyro-muted: #b5b5b5;
+  --gyro-faint: #a0a0a0;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -56,14 +58,15 @@
   );
   --gyro-update-blue: #356fd6;
   --gyro-update-blue-hover: #2f63be;
-  --gyro-warn: #e8b45f;
+  --gyro-warn: #dbb77a;
   --gyro-permission-full: #ff8a3d;
-  --gyro-danger: #ef7d7d;
-  --gyro-success: #70d39f;
-  --gyro-sidebar-text: #d6d8dd;
-  --gyro-hover-text: #fafafb;
-  --gyro-topbar: #141517;
-  --gyro-topbar-border: #26282c;
+  --gyro-effort-max: #a45cff;
+  --gyro-danger: #e48e91;
+  --gyro-success: #85c4a2;
+  --gyro-sidebar-text: #d5d5d5;
+  --gyro-hover-text: #fafafa;
+  --gyro-topbar: var(--gyro-app);
+  --gyro-topbar-border: var(--gyro-border-soft);
   --gyro-brand-text: #111210;
   --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
   --gyro-primary-text: #101724;
@@ -72,24 +75,24 @@
     var(--gyro-user-main) 40%,
     white 60%
   );
-  --gyro-user-bubble: #26282c;
-  --gyro-user-bubble-text: #ededf0;
-  --gyro-code-bg: #0e0f11;
-  --gyro-code-text: #e6e7ea;
-  --gyro-segment-bg: #1a1b1e;
-  --gyro-segment-active: #2d2f35;
-  --gyro-segment-active-text: #f4f4f6;
+  --gyro-user-bubble: var(--gyro-surface-soft);
+  --gyro-user-bubble-text: var(--gyro-text);
+  --gyro-code-bg: #141414;
+  --gyro-code-text: #dedede;
+  --gyro-segment-bg: var(--gyro-sidebar);
+  --gyro-segment-active: #323232;
+  --gyro-segment-active-text: var(--gyro-text);
   /* The System preference thumbnail must show both palettes at once. */
-  --gyro-theme-preview-dark-canvas: #1a1b1e;
-  --gyro-theme-preview-dark-content: #5f646e;
-  --gyro-theme-preview-light-canvas: #f9f9f8;
-  --gyro-theme-preview-light-content: #ebebe8;
-  --gyro-sidebar-mode-track: #141517;
+  --gyro-theme-preview-dark-canvas: #141414;
+  --gyro-theme-preview-dark-content: #383838;
+  --gyro-theme-preview-light-canvas: #f7f7f7;
+  --gyro-theme-preview-light-content: #e5e5e5;
+  --gyro-sidebar-mode-track: var(--gyro-sidebar);
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
   --gyro-shadow: rgba(0, 0, 0, 0.42);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
   --gyro-focus-ring: var(--gyro-accent);
-  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
     var(--gyro-secondary-accent) 12%,
@@ -97,13 +100,13 @@
   );
   --gyro-warn-soft: rgba(255, 173, 92, 0.14);
   --gyro-danger-soft: rgba(255, 105, 97, 0.13);
-  --gyro-blue: #7aa7ff;
-  --gyro-blue-soft: rgba(122, 167, 255, 0.12);
-  --gyro-canvas-subtle: #141517;
-  --gyro-window: #141517;
+  --gyro-blue: #8faee0;
+  --gyro-blue-soft: rgba(143, 174, 224, 0.1);
+  --gyro-canvas-subtle: var(--gyro-app);
+  --gyro-window: var(--gyro-app);
   --gyro-workbench-line: rgba(255, 255, 255, 0.06);
-  --gyro-control-bg: #222328;
-  --gyro-control-hover: #2d2f35;
+  --gyro-control-bg: var(--gyro-surface-soft);
+  --gyro-control-hover: #323232;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -181,22 +184,22 @@
      dark surfaces, so the token keeps the brand ink instead of a flipped
      monochrome. */
   --gyro-provider-openrouter: #c8ff00;
-  --gyro-hero-heading: #f1f1f3;
-  --gyro-hero-brand: #a0a0a0;
+  --gyro-hero-heading: var(--gyro-text);
+  --gyro-hero-brand: var(--gyro-faint);
   --gyro-hero-composer: var(--gyro-surface);
   --gyro-hero-context: var(--gyro-surface);
   --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: #ededf0;
+  --gyro-hero-text: var(--gyro-text);
   --gyro-hero-muted: var(--gyro-muted);
   --gyro-hero-placeholder: var(--gyro-faint);
   --gyro-hero-hover: rgba(255, 255, 255, 0.06);
-  --gyro-hero-hover-text: #f4f4f6;
-  --gyro-hero-send: #ededf0;
-  --gyro-hero-send-hover: #ffffff;
-  --gyro-hero-send-text: #141517;
+  --gyro-hero-hover-text: var(--gyro-hover-text);
+  --gyro-hero-send: #ededed;
+  --gyro-hero-send-hover: #fafafa;
+  --gyro-hero-send-text: var(--gyro-app);
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
-  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 36px -12px rgba(0, 0, 0, 0.55);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.32), 0 18px 44px -12px rgba(0, 0, 0, 0.62);
+  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
@@ -220,11 +223,11 @@
   --gyro-icon-compact: 13px;
   --gyro-icon-standard: 15px;
   --gyro-status-active: var(--gyro-accent);
-  --gyro-status-running: #74a8ff;
-  --gyro-status-waiting: #d9a852;
-  --gyro-status-success: #68c892;
-  --gyro-status-warning: #dc9c48;
-  --gyro-status-failed: #de7474;
+  --gyro-status-running: var(--gyro-blue);
+  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-success: var(--gyro-success);
+  --gyro-status-warning: var(--gyro-warn);
+  --gyro-status-failed: var(--gyro-danger);
   --gyro-status-cancelled: #8b95a3;
   --gyro-status-disabled: #646d79;
   --gyro-status-experimental: var(--gyro-secondary-accent);
@@ -824,19 +827,19 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --gyro-app: #f9f9f8;
-  --gyro-sidebar: #f2f2f0;
-  --gyro-sidebar-soft: #e9e9e6;
-  --gyro-pane: #ffffff;
+  --gyro-app: #f7f7f7;
+  --gyro-sidebar: #ffffff;
+  --gyro-sidebar-soft: #f0f0f0;
+  --gyro-pane: #fcfcfc;
   --gyro-surface: #ffffff;
   --gyro-surface-raised: #ffffff;
-  --gyro-surface-soft: #f4f4f2;
-  --gyro-border: #e0e0dc;
-  --gyro-border-soft: #eaeae7;
-  --gyro-border-strong: #7c7f87;
-  --gyro-text: #1b1c1f;
-  --gyro-muted: #5b5e66;
-  --gyro-faint: #61646c;
+  --gyro-surface-soft: #f3f3f3;
+  --gyro-border: #dedede;
+  --gyro-border-soft: #e8e8e8;
+  --gyro-border-strong: #898989;
+  --gyro-text: #252525;
+  --gyro-muted: #626262;
+  --gyro-faint: #686868;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -853,11 +856,12 @@
     var(--gyro-user-secondary) 68%,
     #201033 32%
   );
-  --gyro-warn: #9a5b0e;
+  --gyro-warn: #8a601d;
   --gyro-permission-full: #c2510a;
-  --gyro-danger: #b4232e;
-  --gyro-success: #197a4c;
-  /* Agent state reads on white too. The dark ramp above is tuned for #181818
+  --gyro-effort-max: #7c3bc7;
+  --gyro-danger: #af4149;
+  --gyro-success: #2e7553;
+  /* Agent state reads on white too. The dark ramp above is tuned for graphite
      and drops to roughly 2:1 on a light surface, so every state that carries
      meaning is restated here from the light semantic colors already set. */
   --gyro-status-running: var(--gyro-blue);
@@ -871,9 +875,9 @@
     var(--gyro-muted) 60%,
     transparent
   );
-  --gyro-sidebar-text: #34363b;
-  --gyro-hover-text: #111214;
-  --gyro-topbar: rgba(255, 255, 255, 0.96);
+  --gyro-sidebar-text: #434343;
+  --gyro-hover-text: #191919;
+  --gyro-topbar: var(--gyro-pane);
   --gyro-topbar-border: var(--gyro-border);
   --gyro-brand-text: #ffffff;
   --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 84%, #10203b 16%);
@@ -883,15 +887,15 @@
     var(--gyro-user-main) 72%,
     #08182f 28%
   );
-  --gyro-user-bubble: #f1f1ef;
-  --gyro-user-bubble-text: #1b1c1f;
-  --gyro-code-bg: #f7f7f5;
-  --gyro-code-text: #24252a;
-  --gyro-segment-bg: #ededea;
-  --gyro-segment-active: #ffffff;
-  --gyro-segment-active-text: #1b1c1f;
-  --gyro-shadow: rgba(24, 24, 28, 0.1);
-  --gyro-heavy-shadow: rgba(24, 24, 28, 0.18);
+  --gyro-user-bubble: var(--gyro-surface-soft);
+  --gyro-user-bubble-text: var(--gyro-text);
+  --gyro-code-bg: #f5f5f5;
+  --gyro-code-text: #2c2c2c;
+  --gyro-segment-bg: #e5e5e5;
+  --gyro-segment-active: var(--gyro-surface);
+  --gyro-segment-active-text: var(--gyro-text);
+  --gyro-shadow: rgba(24, 24, 24, 0.08);
+  --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -901,8 +905,8 @@
   );
   --gyro-warn-soft: rgba(169, 91, 18, 0.1);
   --gyro-danger-soft: rgba(187, 45, 36, 0.1);
-  --gyro-blue: #356fd6;
-  --gyro-blue-soft: rgba(53, 111, 214, 0.09);
+  --gyro-blue: #42679f;
+  --gyro-blue-soft: rgba(66, 103, 159, 0.08);
   /* The dark tones are too light to read on a light sidebar; these are the
      same hues carried down to a legible lightness. */
   --gyro-file-javascript: #8a7413;
@@ -935,11 +939,11 @@
   --gyro-file-archive: #6d5a94;
   --gyro-file-font: #8a6a25;
   --gyro-file-data: #3f7f52;
-  --gyro-canvas-subtle: #f4f4f2;
-  --gyro-window: #ffffff;
-  --gyro-workbench-line: rgba(24, 24, 28, 0.08);
-  --gyro-control-bg: #f4f4f2;
-  --gyro-control-hover: #ebebe8;
+  --gyro-canvas-subtle: var(--gyro-surface-soft);
+  --gyro-window: var(--gyro-app);
+  --gyro-workbench-line: rgba(32, 32, 32, 0.08);
+  --gyro-control-bg: var(--gyro-surface-soft);
+  --gyro-control-hover: #e7e7e7;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -952,12 +956,12 @@
   --gyro-premium-muted: var(--gyro-muted);
   --gyro-premium-faint: var(--gyro-faint);
   --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(24, 24, 28, 0.12);
-  --gyro-premium-shadow-soft: rgba(24, 24, 28, 0.06);
-  --gyro-premium-shadow-lift: rgba(24, 24, 28, 0.09);
-  --gyro-premium-hairline: rgba(32, 36, 42, 0.11);
-  --gyro-premium-hairline-soft: rgba(32, 36, 42, 0.07);
-  --gyro-premium-hairline-strong: rgba(32, 36, 42, 0.16);
+  --gyro-premium-shadow: rgba(24, 24, 24, 0.12);
+  --gyro-premium-shadow-soft: rgba(24, 24, 24, 0.05);
+  --gyro-premium-shadow-lift: rgba(24, 24, 24, 0.08);
+  --gyro-premium-hairline: rgba(32, 32, 32, 0.1);
+  --gyro-premium-hairline-soft: rgba(32, 32, 32, 0.06);
+  --gyro-premium-hairline-strong: rgba(32, 32, 32, 0.15);
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.8);
   --gyro-premium-focus: var(--gyro-focus-ring);
   --gyro-scrim: rgba(20, 20, 24, 0.3);
@@ -970,30 +974,30 @@
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-provider-cursor: #1c2027;
-  --gyro-theme-preview-dark-canvas: #1a1b1e;
-  --gyro-theme-preview-dark-content: #5f646e;
-  --gyro-theme-preview-light-canvas: #f9f9f8;
-  --gyro-theme-preview-light-content: #ebebe8;
+  --gyro-theme-preview-dark-canvas: #141414;
+  --gyro-theme-preview-dark-content: #383838;
+  --gyro-theme-preview-light-canvas: #f7f7f7;
+  --gyro-theme-preview-light-content: #e5e5e5;
   --gyro-provider-opencode: #1c2027;
   --gyro-provider-deepseek: #2c5bd0;
   --gyro-provider-mistral: #c2480c;
   --gyro-provider-openrouter: #7624f4;
-  --gyro-hero-heading: #1b1c1f;
-  --gyro-hero-brand: #7a7c83;
-  --gyro-hero-composer: #ffffff;
+  --gyro-hero-heading: var(--gyro-text);
+  --gyro-hero-brand: var(--gyro-faint);
+  --gyro-hero-composer: var(--gyro-surface);
   --gyro-hero-context: var(--gyro-surface-soft);
   --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: #1b1c1f;
+  --gyro-hero-text: var(--gyro-text);
   --gyro-hero-muted: var(--gyro-muted);
   --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(24, 24, 28, 0.06);
-  --gyro-hero-hover-text: #111214;
-  --gyro-hero-send: #1b1c1f;
-  --gyro-hero-send-hover: #000000;
-  --gyro-hero-send-text: #ffffff;
+  --gyro-hero-hover: rgba(32, 32, 32, 0.05);
+  --gyro-hero-hover-text: var(--gyro-hover-text);
+  --gyro-hero-send: var(--gyro-text);
+  --gyro-hero-send-hover: #191919;
+  --gyro-hero-send-text: var(--gyro-surface);
   --gyro-hero-focus-border: var(--gyro-accent);
-  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 28, 0.04), 0 14px 36px -14px rgba(24, 24, 28, 0.16);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 28, 0.05), 0 18px 44px -14px rgba(24, 24, 28, 0.2);
+  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
@@ -6860,11 +6864,7 @@ textarea:focus-visible {
 .gyro-file-row.is-active,
 .gyro-command-list button:hover,
 .gyro-command-list button.is-active {
-  background: color-mix(
-    in srgb,
-    var(--gyro-sidebar-soft) 82%,
-    var(--gyro-accent) 18%
-  );
+  background: var(--gyro-control-hover);
 }
 
 .gyro-sidebar-row.is-active::before,
@@ -9242,15 +9242,15 @@ textarea:focus-visible {
 
 /* IDE workbench hierarchy: distinct VS Code-style regions and compact density. */
 .gyro-workspace-route.is-code {
-  --gyro-ide-editor-bg: #1e1f22;
-  --gyro-ide-header-bg: #18191c;
-  --gyro-ide-panel-bg: #17181b;
-  --gyro-ide-sidebar-bg: #191a1d;
-  --gyro-ide-status-bg: #151619;
+  --gyro-ide-editor-bg: var(--gyro-code-bg);
+  --gyro-ide-header-bg: var(--gyro-surface-soft);
+  --gyro-ide-panel-bg: var(--gyro-pane);
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
+  --gyro-ide-status-bg: var(--gyro-sidebar);
   --gyro-ide-region-border: rgba(255, 255, 255, 0.075);
   --gyro-ide-region-border-soft: rgba(255, 255, 255, 0.05);
-  --gyro-ide-foreground: #d7d9de;
-  --gyro-ide-secondary-foreground: #9298a1;
+  --gyro-ide-foreground: var(--gyro-text);
+  --gyro-ide-secondary-foreground: var(--gyro-muted);
   --gyro-ide-tab-height: calc(35px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(27px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(24px * var(--gyro-ui-scale, 1));
@@ -9287,10 +9287,10 @@ textarea:focus-visible {
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) {
   --gyro-ide-sidebar-bg: var(--gyro-sidebar);
-  --gyro-ide-region-border: rgba(232, 238, 247, 0.09);
-  --gyro-ide-region-border-soft: rgba(232, 238, 247, 0.055);
-  --gyro-ide-foreground: #e2e6eb;
-  --gyro-ide-secondary-foreground: #969da8;
+  --gyro-ide-region-border: rgba(255, 255, 255, 0.09);
+  --gyro-ide-region-border-soft: rgba(255, 255, 255, 0.055);
+  --gyro-ide-foreground: var(--gyro-text);
+  --gyro-ide-secondary-foreground: var(--gyro-muted);
 }
 
 .gyro-workspace-route.is-code .gyro-ide-editor-stack.is-editor-only {
@@ -9993,15 +9993,15 @@ textarea:focus-visible {
 }
 
 :root[data-theme="light"] .gyro-workspace-route.is-code {
-  --gyro-ide-editor-bg: #ffffff;
-  --gyro-ide-header-bg: #f3f3f3;
-  --gyro-ide-panel-bg: #f7f7f7;
-  --gyro-ide-sidebar-bg: #f3f3f3;
-  --gyro-ide-status-bg: #eeeeee;
-  --gyro-ide-region-border: rgba(31, 35, 40, 0.14);
-  --gyro-ide-region-border-soft: rgba(31, 35, 40, 0.09);
-  --gyro-ide-foreground: #24272d;
-  --gyro-ide-secondary-foreground: #616975;
+  --gyro-ide-editor-bg: var(--gyro-code-bg);
+  --gyro-ide-header-bg: var(--gyro-surface-soft);
+  --gyro-ide-panel-bg: var(--gyro-pane);
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
+  --gyro-ide-status-bg: var(--gyro-sidebar);
+  --gyro-ide-region-border: rgba(32, 32, 32, 0.14);
+  --gyro-ide-region-border-soft: rgba(32, 32, 32, 0.09);
+  --gyro-ide-foreground: var(--gyro-text);
+  --gyro-ide-secondary-foreground: var(--gyro-muted);
 }
 
 :root[data-theme="light"]
@@ -10884,101 +10884,131 @@ textarea:focus-visible {
   transform: rotate(90deg);
 }
 
-/* One rule per language tone, keyed by the same tone names Source Control
-   uses, so both views colour a file type identically. */
-.gyro-explorer-file-icon {
+/* Shared file tones keep Explorer rows and editor tabs consistent. */
+.gyro-explorer-file-icon,
+.gyro-editor-tabs .gyro-editor-file-icon {
   color: var(--gyro-file-tone, var(--gyro-file-default));
   flex: 0 0 auto;
 }
 
-.gyro-sidebar-explorer-row[data-file-tone="javascript"] {
+.gyro-sidebar-explorer-row[data-file-tone="javascript"],
+.gyro-editor-file-icon[data-file-tone="javascript"] {
   --gyro-file-tone: var(--gyro-file-javascript);
 }
-.gyro-sidebar-explorer-row[data-file-tone="typescript"] {
+.gyro-sidebar-explorer-row[data-file-tone="typescript"],
+.gyro-editor-file-icon[data-file-tone="typescript"] {
   --gyro-file-tone: var(--gyro-file-typescript);
 }
-.gyro-sidebar-explorer-row[data-file-tone="react"] {
+.gyro-sidebar-explorer-row[data-file-tone="react"],
+.gyro-editor-file-icon[data-file-tone="react"] {
   --gyro-file-tone: var(--gyro-file-react);
 }
-.gyro-sidebar-explorer-row[data-file-tone="json"] {
+.gyro-sidebar-explorer-row[data-file-tone="json"],
+.gyro-editor-file-icon[data-file-tone="json"] {
   --gyro-file-tone: var(--gyro-file-json);
 }
-.gyro-sidebar-explorer-row[data-file-tone="css"] {
+.gyro-sidebar-explorer-row[data-file-tone="css"],
+.gyro-editor-file-icon[data-file-tone="css"] {
   --gyro-file-tone: var(--gyro-file-css);
 }
-.gyro-sidebar-explorer-row[data-file-tone="html"] {
+.gyro-sidebar-explorer-row[data-file-tone="html"],
+.gyro-editor-file-icon[data-file-tone="html"] {
   --gyro-file-tone: var(--gyro-file-html);
 }
-.gyro-sidebar-explorer-row[data-file-tone="vue"] {
+.gyro-sidebar-explorer-row[data-file-tone="vue"],
+.gyro-editor-file-icon[data-file-tone="vue"] {
   --gyro-file-tone: var(--gyro-file-vue);
 }
-.gyro-sidebar-explorer-row[data-file-tone="markdown"] {
+.gyro-sidebar-explorer-row[data-file-tone="markdown"],
+.gyro-editor-file-icon[data-file-tone="markdown"] {
   --gyro-file-tone: var(--gyro-file-markdown);
 }
-.gyro-sidebar-explorer-row[data-file-tone="rust"] {
+.gyro-sidebar-explorer-row[data-file-tone="rust"],
+.gyro-editor-file-icon[data-file-tone="rust"] {
   --gyro-file-tone: var(--gyro-file-rust);
 }
-.gyro-sidebar-explorer-row[data-file-tone="go"] {
+.gyro-sidebar-explorer-row[data-file-tone="go"],
+.gyro-editor-file-icon[data-file-tone="go"] {
   --gyro-file-tone: var(--gyro-file-go);
 }
-.gyro-sidebar-explorer-row[data-file-tone="python"] {
+.gyro-sidebar-explorer-row[data-file-tone="python"],
+.gyro-editor-file-icon[data-file-tone="python"] {
   --gyro-file-tone: var(--gyro-file-python);
 }
-.gyro-sidebar-explorer-row[data-file-tone="ruby"] {
+.gyro-sidebar-explorer-row[data-file-tone="ruby"],
+.gyro-editor-file-icon[data-file-tone="ruby"] {
   --gyro-file-tone: var(--gyro-file-ruby);
 }
-.gyro-sidebar-explorer-row[data-file-tone="java"] {
+.gyro-sidebar-explorer-row[data-file-tone="java"],
+.gyro-editor-file-icon[data-file-tone="java"] {
   --gyro-file-tone: var(--gyro-file-java);
 }
-.gyro-sidebar-explorer-row[data-file-tone="swift"] {
+.gyro-sidebar-explorer-row[data-file-tone="swift"],
+.gyro-editor-file-icon[data-file-tone="swift"] {
   --gyro-file-tone: var(--gyro-file-swift);
 }
-.gyro-sidebar-explorer-row[data-file-tone="cpp"] {
+.gyro-sidebar-explorer-row[data-file-tone="cpp"],
+.gyro-editor-file-icon[data-file-tone="cpp"] {
   --gyro-file-tone: var(--gyro-file-cpp);
 }
-.gyro-sidebar-explorer-row[data-file-tone="php"] {
+.gyro-sidebar-explorer-row[data-file-tone="php"],
+.gyro-editor-file-icon[data-file-tone="php"] {
   --gyro-file-tone: var(--gyro-file-php);
 }
-.gyro-sidebar-explorer-row[data-file-tone="lua"] {
+.gyro-sidebar-explorer-row[data-file-tone="lua"],
+.gyro-editor-file-icon[data-file-tone="lua"] {
   --gyro-file-tone: var(--gyro-file-lua);
 }
-.gyro-sidebar-explorer-row[data-file-tone="dart"] {
+.gyro-sidebar-explorer-row[data-file-tone="dart"],
+.gyro-editor-file-icon[data-file-tone="dart"] {
   --gyro-file-tone: var(--gyro-file-dart);
 }
-.gyro-sidebar-explorer-row[data-file-tone="elixir"] {
+.gyro-sidebar-explorer-row[data-file-tone="elixir"],
+.gyro-editor-file-icon[data-file-tone="elixir"] {
   --gyro-file-tone: var(--gyro-file-elixir);
 }
-.gyro-sidebar-explorer-row[data-file-tone="graphql"] {
+.gyro-sidebar-explorer-row[data-file-tone="graphql"],
+.gyro-editor-file-icon[data-file-tone="graphql"] {
   --gyro-file-tone: var(--gyro-file-graphql);
 }
-.gyro-sidebar-explorer-row[data-file-tone="diff"] {
+.gyro-sidebar-explorer-row[data-file-tone="diff"],
+.gyro-editor-file-icon[data-file-tone="diff"] {
   --gyro-file-tone: var(--gyro-file-diff);
 }
-.gyro-sidebar-explorer-row[data-file-tone="shell"] {
+.gyro-sidebar-explorer-row[data-file-tone="shell"],
+.gyro-editor-file-icon[data-file-tone="shell"] {
   --gyro-file-tone: var(--gyro-file-shell);
 }
-.gyro-sidebar-explorer-row[data-file-tone="config"] {
+.gyro-sidebar-explorer-row[data-file-tone="config"],
+.gyro-editor-file-icon[data-file-tone="config"] {
   --gyro-file-tone: var(--gyro-file-config);
 }
-.gyro-sidebar-explorer-row[data-file-tone="lock"] {
+.gyro-sidebar-explorer-row[data-file-tone="lock"],
+.gyro-editor-file-icon[data-file-tone="lock"] {
   --gyro-file-tone: var(--gyro-file-lock);
 }
-.gyro-sidebar-explorer-row[data-file-tone="binary"] {
+.gyro-sidebar-explorer-row[data-file-tone="binary"],
+.gyro-editor-file-icon[data-file-tone="binary"] {
   --gyro-file-tone: var(--gyro-file-binary);
 }
-.gyro-sidebar-explorer-row[data-file-tone="image"] {
+.gyro-sidebar-explorer-row[data-file-tone="image"],
+.gyro-editor-file-icon[data-file-tone="image"] {
   --gyro-file-tone: var(--gyro-file-image);
 }
-.gyro-sidebar-explorer-row[data-file-tone="media"] {
+.gyro-sidebar-explorer-row[data-file-tone="media"],
+.gyro-editor-file-icon[data-file-tone="media"] {
   --gyro-file-tone: var(--gyro-file-media);
 }
-.gyro-sidebar-explorer-row[data-file-tone="archive"] {
+.gyro-sidebar-explorer-row[data-file-tone="archive"],
+.gyro-editor-file-icon[data-file-tone="archive"] {
   --gyro-file-tone: var(--gyro-file-archive);
 }
-.gyro-sidebar-explorer-row[data-file-tone="font"] {
+.gyro-sidebar-explorer-row[data-file-tone="font"],
+.gyro-editor-file-icon[data-file-tone="font"] {
   --gyro-file-tone: var(--gyro-file-font);
 }
-.gyro-sidebar-explorer-row[data-file-tone="data"] {
+.gyro-sidebar-explorer-row[data-file-tone="data"],
+.gyro-editor-file-icon[data-file-tone="data"] {
   --gyro-file-tone: var(--gyro-file-data);
 }
 
@@ -28219,19 +28249,19 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-workspace-route.is-code {
-  --gyro-ide-editor-bg: #ffffff;
-  --gyro-ide-header-bg: #f4f5f7;
-  --gyro-ide-panel-bg: #f5f6f8;
-  --gyro-ide-sidebar-bg: #f2f3f5;
-  --gyro-ide-status-bg: #ebeef2;
+  --gyro-ide-editor-bg: var(--gyro-code-bg);
+  --gyro-ide-header-bg: var(--gyro-surface-soft);
+  --gyro-ide-panel-bg: var(--gyro-pane);
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
+  --gyro-ide-status-bg: var(--gyro-sidebar);
 }
 
 :root[data-theme="light"] .gyro-app-shell:has(.gyro-workspace-route.is-code) {
-  --gyro-ide-sidebar-bg: #f2f3f5;
-  --gyro-ide-region-border: rgba(31, 35, 40, 0.14);
-  --gyro-ide-region-border-soft: rgba(31, 35, 40, 0.09);
-  --gyro-ide-foreground: #24272d;
-  --gyro-ide-secondary-foreground: #616975;
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
+  --gyro-ide-region-border: rgba(32, 32, 32, 0.14);
+  --gyro-ide-region-border-soft: rgba(32, 32, 32, 0.09);
+  --gyro-ide-foreground: var(--gyro-text);
+  --gyro-ide-secondary-foreground: var(--gyro-muted);
 }
 
 @media (max-width: 980px) {
@@ -33626,7 +33656,7 @@ button.gyro-account-menu-row:hover,
       no-repeat,
     linear-gradient(var(--gyro-surface-raised) 0 0) 16px 44px / 40% 3px
       no-repeat,
-    #30302d;
+    var(--gyro-theme-preview-dark-canvas);
   border-color: color-mix(in srgb, #fff 16%, transparent);
 }
 
@@ -33635,7 +33665,7 @@ button.gyro-account-menu-row:hover,
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 16px / 58% 5px no-repeat,
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 31px / 72% 3px no-repeat,
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 44px / 40% 3px no-repeat,
-    #f8f9fb;
+    var(--gyro-theme-preview-light-canvas);
 }
 
 .gyro-theme-picker button.is-active {
@@ -34313,9 +34343,12 @@ button.gyro-account-menu-row:hover,
 /* Effort qualifies the model rather than continuing its name, so a hairline
    separates them the way the second chip used to. */
 .gyro-model-chip-effort {
-  border-left: 1px solid color-mix(in srgb, currentcolor 22%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--gyro-muted) 22%, transparent);
   color: var(--gyro-muted);
   padding-left: 8px;
+}
+.gyro-model-chip-effort[data-max-effort="true"] {
+  color: var(--gyro-effort-max);
 }
 
 /* Room for name plus qualifier before either has to truncate. */
@@ -35036,7 +35069,7 @@ button.gyro-account-menu-row:hover,
 /* Sessions/Workspace is navigation, but it is also a two-way switch. Keep the
    shared track visible in both themes so the selected pill has a stable home. */
 :root[data-theme="light"] {
-  --gyro-sidebar-mode-track: #e9eaec;
+  --gyro-sidebar-mode-track: var(--gyro-sidebar-soft);
   --gyro-sidebar-mode-active: #ffffff;
 }
 
@@ -39131,12 +39164,12 @@ textarea:focus-visible,
 
 /* Shared terminal chrome: quiet tabs and a neutral terminal canvas. */
 :root[data-theme="light"] {
-  --gyro-terminal-canvas: #fff;
-  --gyro-terminal-tab: #f3f3f3;
+  --gyro-terminal-canvas: var(--gyro-code-bg);
+  --gyro-terminal-tab: var(--gyro-surface-soft);
 }
 :root[data-theme="dark"] {
-  --gyro-terminal-canvas: #0c0c0c;
-  --gyro-terminal-tab: #222;
+  --gyro-terminal-canvas: var(--gyro-code-bg);
+  --gyro-terminal-tab: var(--gyro-surface-soft);
 }
 :root[data-theme] .gyro-terminal-pane,
 :root[data-theme] .gyro-terminal-live-body,
@@ -41781,11 +41814,11 @@ textarea:focus-visible,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   :is(.gyro-chat-start, .gyro-chat-composer-dock)
   > .gyro-composer-shell.is-hero.has-provider {
-  background: #ffffff;
+  background: var(--gyro-surface);
 }
 
 :root[data-theme="light"] .gyro-chat-message-queue {
-  background: #fcfcfd;
+  background: var(--gyro-surface);
 }
 
 :root[data-theme]

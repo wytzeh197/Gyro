@@ -94,7 +94,8 @@ pub(super) fn execute(
                 .transpose()?;
             let config = load_config_blocking().map_err(anyhow::Error::msg)?;
             let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
-                && capability_full_access_enabled(&config);
+                && capability_full_access_enabled(&config)
+                && delegated_agents::file_edit_ceiling(app, &bound.session_id);
             let store = open_store().map_err(anyhow::Error::msg)?;
             let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
             let proposal = workspace_mutations::create_file_mutation_proposal_at_root(

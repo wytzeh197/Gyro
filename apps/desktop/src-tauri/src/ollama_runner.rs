@@ -51,9 +51,11 @@ pub(super) fn ollama_compatibility_catalog(
     mode: CapabilityRunMode,
     prefix: Option<&str>,
     offset: usize,
+    allow_delegation: bool,
 ) -> serde_json::Value {
     let prefix = prefix.unwrap_or("gyro_");
     let entries = advertised_capability_descriptors(mode)
+        .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
         .filter(|descriptor| descriptor.id.provider_tool_name().starts_with(prefix))
         .collect::<Vec<_>>();
     let items = entries
@@ -277,8 +279,10 @@ pub(super) fn run_ollama_chat(
     if !browser_images.is_empty() {
         messages[1]["images"] = serde_json::json!(browser_images);
     }
+    let allow_delegation = delegated_agents::can_delegate(&request.session_id);
     let tools = if discovered.supports_tools {
         advertised_capability_descriptors(run_mode)
+            .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
             .map(|descriptor| {
                 serde_json::json!({
                     "type": "function",
@@ -410,6 +414,9 @@ pub(super) fn run_ollama_chat(
                 }
             })?;
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
+            if let Some(usage) = turn_usage.measured() {
+                provider_accounting::emit_turn_tokens(app, request, provider_accounting::usage_tokens(&usage));
+            }
             // What the live context note reports before the next request.
             last_measured = Some((turn.input_tokens, turn.output_tokens));
             if compatibility {
@@ -456,7 +463,7 @@ pub(super) fn run_ollama_chat(
                             anyhow::bail!("This model requested another catalog after its tool budget was exhausted");
                         }
                         let catalog =
-                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset);
+                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset, allow_delegation);
                         malformed_responses = 0;
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));

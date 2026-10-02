@@ -179,11 +179,34 @@ fn subtract(total: UsageTokens, baseline: UsageTokens) -> UsageTokens {
     )
 }
 
+pub(super) fn set_usage_offset(app: &tauri::AppHandle, session: &str, tokens: Option<UsageTokens>) {
+    if let Some(control) = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session).cloned())
+    {
+        if let Ok(mut offset) = control.usage_offset.lock() {
+            *offset = tokens;
+        }
+    }
+}
+
 pub(super) fn emit_turn_tokens(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     tokens: UsageTokens,
 ) {
+    let offset = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+        .and_then(|control| control.usage_offset.lock().ok().and_then(|offset| *offset));
+    let tokens = delegated_agents::add_tokens(offset, Some(tokens)).unwrap();
+    delegated_agents::observe_tokens(app, request, tokens);
     let _ = app.emit(
         PROVIDER_CHAT_EVENT,
         serde_json::json!({

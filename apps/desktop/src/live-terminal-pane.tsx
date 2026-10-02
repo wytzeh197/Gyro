@@ -321,7 +321,7 @@ export function LiveTerminalPaneBody({
 function terminalThemeFor(theme: ResolvedTheme) {
   if (theme === "light") {
     return {
-      background: "#ffffff",
+      background: "#f5f5f5",
       black: "#1f242c",
       blue: "#1f66d1",
       brightBlack: "#8e8e93",
@@ -333,20 +333,20 @@ function terminalThemeFor(theme: ResolvedTheme) {
       brightWhite: "#171a20",
       brightYellow: "#ffbf00",
       cursor: "#1f242c",
-      cursorAccent: "#ffffff",
+      cursorAccent: "#f5f5f5",
       cyan: "#007c89",
-      foreground: "#25272d",
+      foreground: "#2c2c2c",
       green: "#087443",
       magenta: "#9b26b6",
       red: "#b42318",
-      selectionBackground: "#dfe2e6",
+      selectionBackground: "#c9dbf7",
       white: "#ededed",
       yellow: "#875200",
     };
   }
 
   return {
-    background: "#0c0c0c",
+    background: "#141414",
     black: "#080808",
     blue: "#6ea8ff",
     brightBlack: "#858585",
@@ -358,13 +358,13 @@ function terminalThemeFor(theme: ResolvedTheme) {
     brightWhite: "#f7f7f7",
     brightYellow: "#ffd166",
     cursor: "#ededed",
-    cursorAccent: "#0b0b0b",
+    cursorAccent: "#141414",
     cyan: "#51d7d0",
-    foreground: "#e6e6e6",
+    foreground: "#dedede",
     green: "#52d985",
     magenta: "#d86cff",
     red: "#ff6f6f",
-    selectionBackground: "#343434",
+    selectionBackground: "#294a73",
     white: "#dddddd",
     yellow: "#f2c94c",
   };

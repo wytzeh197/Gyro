@@ -48,7 +48,8 @@ export type ChatSidePanelId =
   | "changes"
   | "terminal"
   | "files"
-  | "side-chat";
+  | "side-chat"
+  | "agents";
 
 export type ChatMode = "normal" | "plan" | "council";
 
@@ -115,6 +116,10 @@ export type CapabilityId =
   | "memory-read"
   | "memory-write"
   | "research-run"
+  | "agent-spawn"
+  | "agent-wait"
+  | "agent-send"
+  | "agent-stop"
   | "code-definition"
   | "code-references"
   | "code-hover"

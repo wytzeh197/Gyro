@@ -1,3 +1,14 @@
+import { ChatFileCard, chatFileKind } from "./chat-file-card";
+import {
+  chatInlineTokenPattern,
+  linkedChatFile,
+  parseChatMarkdownLink,
+} from "./chat-file-links";
+import { SubagentList, SubagentPanel, SubagentMark } from "./subagents-view";
+import {
+  pendingSubagentApprovals,
+  type SubagentSurfaceState,
+} from "./subagents";
 import { AppearanceSettings } from "./appearance-settings";
 import { SettingsSegmented } from "./settings-controls";
 import "./scheduled-work.css";
@@ -1944,7 +1955,13 @@ export function AppChrome({
                 `[data-setting-key="${settingsSearchKey(sectionLabel)}"]`,
               )
             : null);
-        target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+        target?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+            .matches
+            ? "auto"
+            : "smooth",
+          block: "center",
+        });
         target?.focus({ preventScroll: true });
         target?.classList.add("is-search-target");
         window.setTimeout(
@@ -3093,7 +3110,7 @@ type ScmFileBadge = { icon: IconComponent; tone: string };
 
 /**
  * Language badge for a file row: the icon and the colour tone shared by the
- * Explorer and Source Control, so a file reads by colour first and by name
+ * Explorer, Source Control, and editor tabs, so a file reads by colour first and by name
  * second — the way VS Code's views do — and looks the same in both.
  */
 const SCM_ICONS: Record<string, ScmFileBadge["icon"]> = {
@@ -8266,6 +8283,7 @@ type ChatSurfaceProps = {
    * session is destroyed when the tab closes.
    */
   sideChat?: SideChatState;
+  subagents?: SubagentSurfaceState;
   planEditorRequest?: {
     kind: "goal" | "item";
     token: number;
@@ -8363,14 +8381,17 @@ const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
   browser: Globe,
   files: Folders,
   "side-chat": MessageCirclePlus,
+  agents: Users,
 };
 
-/** Strip order for the "+" launcher; open tabs keep the order they were added. */
-const chatCompanionTabs = chatCompanionTabIds.map((id) => ({
-  id,
-  label: chatCompanionTabLabels[id],
-  icon: chatCompanionTabIcons[id],
-}));
+/** Agents open from their rows; the launcher offers only general tools. */
+const chatCompanionTabs = chatCompanionTabIds
+  .filter((id) => id !== "agents")
+  .map((id) => ({
+    id,
+    label: chatCompanionTabLabels[id],
+    icon: chatCompanionTabIcons[id],
+  }));
 
 function isChatCompanionTab(
   panel?: ChatSidePanelId,
@@ -8498,6 +8519,7 @@ export function ChatSurface({
   browserCompanionWidth,
   onCompanionWidthChange,
   sideChat,
+  subagents,
   planEditorRequest,
   isEnvironmentRailOpen,
   isToolPanelOpen,
@@ -8998,6 +9020,7 @@ export function ChatSurface({
           const { turn, turnIndex } = item;
           return (
             <ChatTurn
+              subagents={subagents}
               artifactActions={{
                 onOpenCanvas: openCanvas,
                 onOpenPreview: (url) => {
@@ -9105,6 +9128,7 @@ export function ChatSurface({
       </>
     ),
     [
+      subagents,
       onMutationApprovalAction,
       openCanvas,
       onBrowserNavigate,
@@ -9235,6 +9259,7 @@ export function ChatSurface({
     !activeRailPanel || isEnvironmentPopoverOpen ? null : isCompanionPanel ? (
       <ChatCompanionDock
         activeTab={activeCompanionTab}
+        subagents={subagents}
         onClose={closeCompanion}
         onCloseTab={onCloseCompanionTab}
         onOpenTab={(tab) => {
@@ -9285,6 +9310,31 @@ export function ChatSurface({
             files={files}
             onOpenFile={onOpenCompanionFile}
             workspacePath={workspacePath}
+          />
+        ) : railPanel === "agents" ? (
+          <SubagentPanel
+            key={subagents?.selectedAgentId}
+            state={subagents}
+            renderAsk={(event) => (
+              <ChatEvent
+                event={event}
+                onMutationApprovalAction={onMutationApprovalAction}
+                onProviderApprovalAction={onProviderApprovalAction}
+                onProviderStatusAction={onProviderStatusAction}
+              />
+            )}
+            renderSay={(text) =>
+              renderAssistantInlineContent(text, onBrowserNavigate)
+            }
+            renderResponse={(text) =>
+              assistantResponseBlocks(text).map((block, index) => (
+                <AssistantResponseBlockView
+                  block={block}
+                  key={`${block.kind}-${index}`}
+                  onOpenBrowserUrl={onBrowserNavigate}
+                />
+              ))
+            }
           />
         ) : railPanel === "side-chat" ? (
           <SideChatPanel
@@ -9350,6 +9400,7 @@ export function ChatSurface({
       plan={sessionPlan}
       sourceControl={sourceControl}
       terminalPanes={terminalPanes}
+      subagents={subagents}
       workspacePath={workspacePath}
     />
   ) : null;
@@ -10595,7 +10646,9 @@ function ChatSidePanel({
                         <strong>{item.title}</strong>
                         {item.detail ? <span>{item.detail}</span> : null}
                       </div>
-                      {item.status === "blocked" ? <small>Blocked</small> : null}
+                      {item.status === "blocked" ? (
+                        <small>Blocked</small>
+                      ) : null}
                       <div className="gyro-plan-item-actions">
                         <button
                           aria-label={`Move ${item.title} up`}
@@ -10882,6 +10935,7 @@ function useBrowserAgentPresence(
 
 function ChatCompanionDock({
   activeTab,
+  subagents,
   browserTabLabel,
   children,
   isToolPanelOpen,
@@ -10897,6 +10951,7 @@ function ChatCompanionDock({
   width,
 }: {
   activeTab?: ChatCompanionTabId;
+  subagents?: SubagentSurfaceState;
   /** The open page title becomes the selected browser tab label. */
   browserTabLabel?: string;
   children: ReactNode;
@@ -10928,6 +10983,8 @@ function ChatCompanionDock({
   const setIsExpanded = (update: (current: boolean) => boolean) =>
     setExpandedChoice({ tab: activeTab, expanded: update(isExpanded) });
   const dockRef = useRef<HTMLElement | null>(null);
+  const focusTabAfterCloseRef = useRef(false);
+  const panelId = useId();
   const widthMode: ChatCompanionWidthMode =
     activeTab === "browser" ? "browser" : "tool";
   const {
@@ -10942,9 +10999,66 @@ function ChatCompanionDock({
   const overlay = shouldOverlayChatCompanion(availableWidth);
   const fillSurface = isExpanded || overlay;
   const cannotExpand = overlay && !isTiled && !isExpanded;
-  const activeLabel = activeTab
-    ? chatCompanionTabLabels[activeTab]
-    : "Open a tool";
+  const activeAgent = subagents?.agents.find(
+    (agent) => agent.agentId === subagents.selectedAgentId,
+  );
+  const activeLabel =
+    activeTab === "agents"
+      ? (activeAgent?.name ?? "Working process")
+      : activeTab
+        ? chatCompanionTabLabels[activeTab]
+        : "Open a tool";
+  const tabs = openTabs.flatMap((id) => {
+    if (id === "agents") {
+      const agentIds =
+        subagents?.openAgentIds ?? (activeAgent ? [activeAgent.agentId] : []);
+      return agentIds.flatMap((agentId) => {
+        const agent = subagents?.agents.find(
+          (item) => item.agentId === agentId,
+        );
+        return agent
+          ? [
+              {
+                key: `agent:${agentId}`,
+                label: agent.name,
+                isAgent: true,
+                isActive:
+                  activeTab === "agents" &&
+                  agentId === subagents?.selectedAgentId,
+                icon: <SubagentMark agentId={agentId} />,
+                onSelect: () => subagents?.onSelect(agentId),
+                onClose: subagents?.onClose
+                  ? () => subagents.onClose?.(agentId)
+                  : undefined,
+              },
+            ]
+          : [];
+      });
+    }
+    const Icon = chatCompanionTabIcons[id];
+    return [
+      {
+        key: id,
+        label: chatCompanionTabLabels[id],
+        isAgent: false,
+        isActive: id === activeTab,
+        icon: <Icon aria-hidden="true" size={14} />,
+        onSelect: () => onSelectTab?.(id),
+        onClose: onCloseTab ? () => onCloseTab(id) : undefined,
+      },
+    ];
+  });
+  const selectedTab = tabs.find((tab) => tab.isActive);
+  useEffect(() => {
+    const selected = dockRef.current?.querySelector<HTMLElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (focusTabAfterCloseRef.current) {
+      selected?.focus();
+      focusTabAfterCloseRef.current = false;
+    }
+  }, [selectedTab?.key, tabs.length]);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       const surface = dockRef.current?.parentElement;
@@ -11002,45 +11116,82 @@ function ChatCompanionDock({
         type="button"
       />
       <header className="gyro-chat-companion-tabs">
-        <div className="gyro-chat-companion-tab-list" role="tablist">
-          {openTabs.map((id) => {
-            const Icon = chatCompanionTabIcons[id];
-            const isActive = id === activeTab;
-            const label = chatCompanionTabLabels[id];
-            return (
-              <span
-                className={[
-                  "gyro-chat-companion-tab",
-                  isActive ? "is-active" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                key={id}
-              >
-                <button
-                  aria-selected={isActive}
-                  title={id === "browser" ? browserTabLabel : label}
-                  onClick={() => onSelectTab?.(id)}
-                  role="tab"
-                  type="button"
+        <div
+          className="gyro-chat-companion-tab-list"
+          role="tablist"
+          aria-label="Open companion tabs"
+          onKeyDown={(event) => {
+            if (
+              !(event.target instanceof HTMLElement) ||
+              event.target.getAttribute("role") !== "tab"
+            )
+              return;
+            const buttons = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="tab"]',
+              ),
+            );
+            const index = buttons.indexOf(event.target as HTMLButtonElement);
+            const next =
+              event.key === "ArrowRight"
+                ? (index + 1) % buttons.length
+                : event.key === "ArrowLeft"
+                  ? (index + buttons.length - 1) % buttons.length
+                  : event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? buttons.length - 1
+                      : undefined;
+            if (next === undefined) return;
+            event.preventDefault();
+            buttons[next]?.focus();
+            buttons[next]?.click();
+          }}
+        >
+          {tabs.map(
+            ({ key, label, isActive, isAgent, icon, onSelect, onClose }) => {
+              return (
+                <span
+                  className={[
+                    "gyro-chat-companion-tab",
+                    isAgent ? "gyro-subagent-tab" : "",
+                    isActive ? "is-active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={key}
                 >
-                  <Icon aria-hidden="true" size={14} />
-                  <span>{label}</span>
-                </button>
-                {onCloseTab ? (
                   <button
-                    aria-label={`Close ${chatCompanionTabLabels[id]}`}
-                    className="gyro-chat-companion-tab-close"
-                    onClick={() => onCloseTab(id)}
-                    title={`Close ${chatCompanionTabLabels[id]}`}
+                    id={`${panelId}-${key}`}
+                    aria-controls={panelId}
+                    aria-selected={isActive}
+                    tabIndex={isActive || !selectedTab ? 0 : -1}
+                    title={key === "browser" ? browserTabLabel : label}
+                    onClick={onSelect}
+                    role="tab"
                     type="button"
                   >
-                    <X aria-hidden="true" size={11} />
+                    {icon}
+                    <span>{label}</span>
                   </button>
-                ) : null}
-              </span>
-            );
-          })}
+                  {onClose ? (
+                    <button
+                      aria-label={`Close ${label}`}
+                      className="gyro-chat-companion-tab-close"
+                      onClick={() => {
+                        focusTabAfterCloseRef.current = true;
+                        onClose();
+                      }}
+                      title={`Close ${label}`}
+                      type="button"
+                    >
+                      <X aria-hidden="true" size={11} />
+                    </button>
+                  ) : null}
+                </span>
+              );
+            },
+          )}
           {activeTab || openTabs.length ? (
             <div className="gyro-chat-companion-add">
               <button
@@ -11108,7 +11259,11 @@ function ChatCompanionDock({
         </div>
       </header>
       <section
+        id={panelId}
         aria-label={activeLabel}
+        aria-labelledby={
+          selectedTab ? `${panelId}-${selectedTab.key}` : undefined
+        }
         className="gyro-chat-companion-content"
         role="tabpanel"
       >
@@ -11129,6 +11284,7 @@ function ChatCompanionDock({
                       browser: "⌘T",
                       files: "⌘P",
                       "side-chat": "⌥⌘S",
+                      agents: "",
                     }[id]
                   }
                 </kbd>
@@ -11691,6 +11847,7 @@ function ChatEnvironmentPopover({
   plan,
   sourceControl,
   terminalPanes,
+  subagents,
   workspacePath,
 }: {
   attachments: ChatAttachment[];
@@ -11711,6 +11868,7 @@ function ChatEnvironmentPopover({
   plan?: SessionPlan;
   sourceControl?: SourceControlState;
   terminalPanes?: TerminalPane[];
+  subagents?: SubagentSurfaceState;
   workspacePath?: string;
 }) {
   const [showBranches, setShowBranches] = useState(false);
@@ -11971,6 +12129,7 @@ function ChatEnvironmentPopover({
           );
         })}
       </div>
+      {subagents ? <SubagentList state={subagents} /> : null}
       {sourceItems.length ? (
         <section className="gyro-chat-environment-popover-sources">
           <header>
@@ -13592,26 +13751,34 @@ export function IdeStatusBar({
             : bufferState === "loading"
               ? "Loading…"
               : undefined;
-  const sync = !scm?.available || !scm.branch
-    ? undefined
-    : scm.operation
-      ? { label: `${scm.operation[0]!.toUpperCase()}${scm.operation.slice(1)} in progress`, tone: "warning" }
-      : scm.upstreamGone
-        ? { label: "Upstream gone", tone: "warning" }
-        : !scm.upstream
-          ? { label: "Not published", tone: "muted" }
-          : scm.ahead || scm.behind
-            ? {
-                label: [
-                  scm.ahead ? `↑${scm.ahead}` : "",
-                  scm.behind ? `↓${scm.behind}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" "),
-                tone: "pending",
-                title: `${scm.ahead} to push, ${scm.behind} to pull from ${scm.upstream}`,
-              }
-            : { label: "Synced", tone: "ok", title: `Up to date with ${scm.upstream}` };
+  const sync =
+    !scm?.available || !scm.branch
+      ? undefined
+      : scm.operation
+        ? {
+            label: `${scm.operation[0]!.toUpperCase()}${scm.operation.slice(1)} in progress`,
+            tone: "warning",
+          }
+        : scm.upstreamGone
+          ? { label: "Upstream gone", tone: "warning" }
+          : !scm.upstream
+            ? { label: "Not published", tone: "muted" }
+            : scm.ahead || scm.behind
+              ? {
+                  label: [
+                    scm.ahead ? `↑${scm.ahead}` : "",
+                    scm.behind ? `↓${scm.behind}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  tone: "pending",
+                  title: `${scm.ahead} to push, ${scm.behind} to pull from ${scm.upstream}`,
+                }
+              : {
+                  label: "Synced",
+                  tone: "ok",
+                  title: `Up to date with ${scm.upstream}`,
+                };
   const details = [
     fileSize,
     editorSelection?.text ? `${editorSelection.text.length} selected` : "",
@@ -13655,7 +13822,10 @@ export function IdeStatusBar({
   };
 
   return (
-    <footer className="gyro-editor-statusbar is-quiet" aria-label="Workspace status">
+    <footer
+      className="gyro-editor-statusbar is-quiet"
+      aria-label="Workspace status"
+    >
       {onDragPanel && !isPanelOpen ? (
         <div
           aria-hidden="true"
@@ -13724,7 +13894,9 @@ export function IdeStatusBar({
         {onTogglePanel ? (
           <button
             aria-label={
-              isPanelOpen ? "Hide the workspace panel" : "Open the workspace panel"
+              isPanelOpen
+                ? "Hide the workspace panel"
+                : "Open the workspace panel"
             }
             aria-pressed={isPanelOpen}
             className="gyro-editor-statusbar-panel-toggle"
@@ -13873,83 +14045,92 @@ function EditorGroupPane({
         }}
       >
         {group.tabs.length > 0 ? (
-          group.tabs.map((tab) => (
-            <button
-              className={[
-                activePath === tab.path ? "is-active" : "",
-                tab.dirty ? "is-dirty" : "",
-                tab.sourceControlDiff ? "is-diff" : "",
-                tab.preview && !tab.pinned ? "is-preview" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              draggable
-              key={tab.path}
-              onClick={() => onSelectFile(tab.path)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                openFileMenu(
-                  event.currentTarget,
-                  tab.path,
-                  event.clientX,
-                  event.clientY,
-                );
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key !== "ContextMenu" &&
-                  !(event.shiftKey && event.key === "F10")
-                )
-                  return;
-                event.preventDefault();
-                const rect = event.currentTarget.getBoundingClientRect();
-                openFileMenu(
-                  event.currentTarget,
-                  tab.path,
-                  rect.left,
-                  rect.bottom,
-                );
-              }}
-              title={`${tab.path} · Right-click for file actions`}
-              onDoubleClick={() => onPinTab?.(tab.path)}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData(
-                  "application/x-gyro-editor-tab",
-                  tab.path,
-                );
-                event.dataTransfer.setData(
-                  "application/x-gyro-editor-group",
-                  group.id,
-                );
-              }}
-              type="button"
-            >
-              <FileCode2 size={14} />
-              <span>{tab.title || workspaceName(tab.path)}</span>
-              <span
-                aria-label={`Close ${tab.title || workspaceName(tab.path)}`}
-                className="gyro-editor-tab-close"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseTab?.(tab.path);
+          group.tabs.map((tab) => {
+            const badge = scmFileBadge(tab.path);
+            const FileIcon = badge.icon;
+            return (
+              <button
+                className={[
+                  activePath === tab.path ? "is-active" : "",
+                  tab.dirty ? "is-dirty" : "",
+                  tab.sourceControlDiff ? "is-diff" : "",
+                  tab.preview && !tab.pinned ? "is-preview" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                draggable
+                key={tab.path}
+                onClick={() => onSelectFile(tab.path)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openFileMenu(
+                    event.currentTarget,
+                    tab.path,
+                    event.clientX,
+                    event.clientY,
+                  );
                 }}
                 onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") {
+                  if (
+                    event.key !== "ContextMenu" &&
+                    !(event.shiftKey && event.key === "F10")
+                  )
                     return;
-                  }
                   event.preventDefault();
-                  event.stopPropagation();
-                  onCloseTab?.(tab.path);
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openFileMenu(
+                    event.currentTarget,
+                    tab.path,
+                    rect.left,
+                    rect.bottom,
+                  );
                 }}
-                role="button"
-                tabIndex={0}
+                title={`${tab.path} · Right-click for file actions`}
+                onDoubleClick={() => onPinTab?.(tab.path)}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData(
+                    "application/x-gyro-editor-tab",
+                    tab.path,
+                  );
+                  event.dataTransfer.setData(
+                    "application/x-gyro-editor-group",
+                    group.id,
+                  );
+                }}
+                type="button"
               >
-                <X size={12} />
-                {tab.dirty ? <i aria-hidden="true" /> : null}
-              </span>
-            </button>
-          ))
+                <FileIcon
+                  aria-hidden="true"
+                  className="gyro-editor-file-icon"
+                  data-file-tone={badge.tone}
+                  size={14}
+                />
+                <span>{tab.title || workspaceName(tab.path)}</span>
+                <span
+                  aria-label={`Close ${tab.title || workspaceName(tab.path)}`}
+                  className="gyro-editor-tab-close"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTab?.(tab.path);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") {
+                      return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onCloseTab?.(tab.path);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <X size={12} />
+                  {tab.dirty ? <i aria-hidden="true" /> : null}
+                </span>
+              </button>
+            );
+          })
         ) : (
           <button className="is-active" disabled type="button">
             <FileCode2 size={14} />
@@ -15638,7 +15819,9 @@ function TestResultsPane({
                   <CircleDashed size={13} />
                 )}
                 <strong>{test.label}</strong>
-                <span>{test.status === "unknown" ? "not run" : test.status}</span>
+                <span>
+                  {test.status === "unknown" ? "not run" : test.status}
+                </span>
               </button>
             );
           })
@@ -16621,7 +16804,9 @@ export function AutomationsSurface({
                   <GitPullRequest size={15} />
                   <span>
                     <strong>Weekly code review</strong>
-                    <small>Summarize progress, risks, and next priorities.</small>
+                    <small>
+                      Summarize progress, risks, and next priorities.
+                    </small>
                   </span>
                   <Plus size={14} />
                 </button>
@@ -21587,12 +21772,17 @@ export function SettingsSurface({
             description="Make Gyro comfortable to read and use."
           >
             <AppearanceSettings
-              themeMode={themeMode} onThemeChange={onThemeChange}
-              density={density} onDensityChange={onDensityChange}
-              interfaceSize={interfaceSize} onInterfaceSizeChange={onInterfaceSizeChange}
-              motionSpeed={motionSpeed} onMotionSpeedChange={onMotionSpeedChange}
+              themeMode={themeMode}
+              onThemeChange={onThemeChange}
+              density={density}
+              onDensityChange={onDensityChange}
+              interfaceSize={interfaceSize}
+              onInterfaceSizeChange={onInterfaceSizeChange}
+              motionSpeed={motionSpeed}
+              onMotionSpeedChange={onMotionSpeedChange}
               reduceMotion={reduceMotion}
-              mainColor={mainColor} secondaryColor={secondaryColor}
+              mainColor={mainColor}
+              secondaryColor={secondaryColor}
               onAppearanceColorsChange={onAppearanceColorsChange}
             />
           </SettingsSection>
@@ -23019,7 +23209,6 @@ function SettingsSection({
     </section>
   );
 }
-
 
 function SettingsStatus({
   status,
@@ -26185,7 +26374,13 @@ function Composer({
             {/* Effort rides on the model's own chip: it only ever qualifies a
                 model, and a second chip for it spent bar width saying so. */}
             {hasEffortChoice && providerReasoningEffort ? (
-              <span className="gyro-model-chip-effort">
+              <span
+                className="gyro-model-chip-effort"
+                data-max-effort={
+                  effortItems.length > 1 &&
+                  effortItems[effortItems.length - 1]?.active
+                }
+              >
                 {reasoningEffortLabel(providerReasoningEffort)}
               </span>
             ) : null}
@@ -26930,47 +27125,22 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
         return (
           typeof record?.id === "string" &&
           typeof record.name === "string" &&
-          typeof record.kind === "string"
+          typeof record.kind === "string" &&
+          typeof record.path === "string"
         );
       })
     : [];
-  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment>();
   const terminalAttachmentActions = useTerminalAttachmentActions();
-  useEffect(() => {
-    if (!previewAttachment) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreviewAttachment(undefined);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewAttachment]);
   if (!attachments.length) return null;
   return (
-    <>
-      <div className="gyro-transcript-attachments">
-        {attachments.map((attachment) => (
+    <div className="gyro-transcript-attachments" aria-label="Attachments">
+      {attachments.map((attachment) =>
+        attachment.kind === "terminal-output" ? (
           <div
-            className={`gyro-transcript-attachment is-${attachment.kind}`}
+            className="gyro-transcript-attachment is-terminal-output"
             key={attachment.id}
           >
-            {attachment.kind === "image" && attachment.previewUrl ? (
-              <button
-                aria-label={`Open ${attachment.name}`}
-                className="gyro-transcript-image-preview"
-                onClick={() => setPreviewAttachment(attachment)}
-                type="button"
-              >
-                <img alt="" src={attachment.previewUrl} />
-              </button>
-            ) : attachment.kind === "image" ? (
-              <ImagePlus size={14} />
-            ) : attachment.kind === "video" ? (
-              <Video size={14} />
-            ) : attachment.kind === "terminal-output" ? (
-              <SquareTerminal size={14} />
-            ) : (
-              <FileText size={14} />
-            )}
+            <SquareTerminal size={14} />
             <span
               title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}
             >
@@ -26979,8 +27149,7 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
                 {formatAttachmentSize(attachment.size)}
               </small>
             </span>
-            {attachment.kind === "terminal-output" &&
-            terminalAttachmentActions?.canRerun(attachment.id) ? (
+            {terminalAttachmentActions?.canRerun(attachment.id) ? (
               <button
                 aria-label={`Re-run the command from ${attachment.name}`}
                 className="gyro-transcript-attachment-rerun"
@@ -26993,39 +27162,21 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
               </button>
             ) : null}
           </div>
-        ))}
-      </div>
-      {previewAttachment?.previewUrl && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              aria-label={`Preview ${previewAttachment.name}`}
-              className="gyro-image-preview-overlay"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) {
-                  setPreviewAttachment(undefined);
-                }
-              }}
-              role="dialog"
-            >
-              <figure>
-                <img
-                  alt={previewAttachment.name}
-                  src={previewAttachment.previewUrl}
-                />
-                <figcaption>{previewAttachment.name}</figcaption>
-                <button
-                  aria-label="Close image preview"
-                  onClick={() => setPreviewAttachment(undefined)}
-                  type="button"
-                >
-                  <X size={18} />
-                </button>
-              </figure>
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
+        ) : (
+          <ChatFileCard
+            key={attachment.id}
+            file={{
+              target: attachment.path,
+              name: attachment.name,
+              kind: chatFileKind(attachment.name, attachment.mimeType),
+              local: true,
+            }}
+            previewUrl={attachment.previewUrl}
+            detail={formatAttachmentSize(attachment.size)}
+          />
+        ),
+      )}
+    </div>
   );
 }
 
@@ -27204,6 +27355,8 @@ function deriveTranscriptState(events: SessionEvent[]) {
        * are work the turn did; they belong in its timeline, in order.
        */
       turn.timelineEvents.push(event);
+    } else if (payloadKind === "subagent-state") {
+      turn.timelineEvents.push(event);
     } else if (payloadKind === "file-review") {
       /*
        * A Keep belongs to the turn it was made about: the review card replays
@@ -27341,6 +27494,7 @@ function useNetworkOnline(): boolean {
 
 function ChatTurn({
   artifactActions,
+  subagents,
   fileReview,
   isActive,
   keepAlives = [],
@@ -27367,6 +27521,7 @@ function ChatTurn({
   turn,
 }: {
   artifactActions?: ChatArtifactActions;
+  subagents?: SubagentSurfaceState;
   /** Present only in "Ask first"; absent means the plain summary card. */
   fileReview?: {
     summaries?: FileReviewSummary[];
@@ -27557,6 +27712,26 @@ function ChatTurn({
       ) : null}
       <div className="gyro-chat-run">
         <ChatRun
+          agentRows={
+            subagents ? (
+              <SubagentList
+                state={subagents}
+                turnId={turn.id}
+                renderApproval={(agentId) =>
+                  pendingSubagentApprovals(
+                    subagents.eventsByAgentId[agentId] ?? [],
+                  ).map((event) => (
+                    <ChatEvent
+                      key={event.id}
+                      event={event}
+                      onMutationApprovalAction={onMutationApprovalAction}
+                      onProviderApprovalAction={onProviderApprovalAction}
+                    />
+                  ))
+                }
+              />
+            ) : undefined
+          }
           aggregateFileStats={aggregateFileStats}
           headerActions={
             isRunning && turn.turnTokens ? (
@@ -28795,7 +28970,7 @@ function renderAssistantInlineContent(
   onOpenBrowserUrl?: (url: string) => void,
 ): ReactNode[] {
   return value
-    .split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g)
+    .split(chatInlineTokenPattern)
     .filter(Boolean)
     .map((part, index) => {
       if (part.startsWith("`") && part.endsWith("`")) {
@@ -28808,11 +28983,20 @@ function renderAssistantInlineContent(
       if (part.startsWith("**") && part.endsWith("**")) {
         return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
       }
-      const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const link = parseChatMarkdownLink(part);
       if (link) {
-        const href = safeAssistantLinkUrl(link[2] ?? "");
+        const file = linkedChatFile(link.label, link.target, link.image);
+        if (file)
+          return (
+            <ChatFileCard
+              file={file}
+              key={`${part}-${index}`}
+              onOpen={onOpenBrowserUrl}
+            />
+          );
+        const href = safeAssistantLinkUrl(link.target);
         if (!href) {
-          return <span key={`${part}-${index}`}>{link[1]}</span>;
+          return <span key={`${part}-${index}`}>{link.label}</span>;
         }
         return (
           <a
@@ -28827,7 +29011,7 @@ function renderAssistantInlineContent(
             rel="noreferrer"
             target={onOpenBrowserUrl ? undefined : "_blank"}
           >
-            {link[1]}
+            {link.label}
           </a>
         );
       }
@@ -28856,9 +29040,7 @@ function stripHiddenSessionTitleMarker(message: string) {
   return lines
     .filter((line) => {
       const trimmed = line.trim();
-      return (
-        !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS):/.test(trimmed)
-      );
+      return !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS):/.test(trimmed);
     })
     .join("\n")
     .trim();
@@ -29084,6 +29266,7 @@ function providerApprovalFromEvent(
     const editorPreview = recordFromUnknown(payload?.editorPreview);
     const previewPath = stringFromRecord(editorPreview, "path");
     const previewContent = stringFromRecord(editorPreview, "content");
+    const status = stringFromEventPayload(payload, "status");
     return {
       approvalId,
       approvalType: "capability",
@@ -29098,7 +29281,19 @@ function providerApprovalFromEvent(
           : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
       risk: "This capability is restricted to the owning Chat and project.",
       changes: previewPath ? [{ path: previewPath }] : [],
-      status: "pending",
+      status:
+        status === "approved" ||
+        status === "applied" ||
+        status === "rejected" ||
+        status === "cancelled" ||
+        status === "failed"
+          ? status
+          : status === "allowed"
+            ? "approved"
+            : status === "denied"
+              ? "rejected"
+              : "pending",
+      error: stringFromEventPayload(payload, "error"),
     };
   }
   if (payloadKind !== "provider-tool-approval") {

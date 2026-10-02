@@ -45,6 +45,13 @@ pub const BACKGROUND_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds
     height: 800.0,
 };
 
+// Create agent webviews outside the window before hiding them, so creation
+// cannot briefly cover the frontend. They retain a full desktop viewport.
+const AGENT_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds {
+    x: -1281.0,
+    ..BACKGROUND_BROWSER_BOUNDS
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionBrowserOpenRequest {
@@ -66,6 +73,7 @@ pub struct SessionBrowserSnapshot {
     pub url: String,
     pub title: String,
     pub visible: bool,
+    pub background_only: bool,
     pub label: String,
 }
 
@@ -119,6 +127,7 @@ struct SessionBrowserSlot {
     url: String,
     title: String,
     visible: bool,
+    background_only: bool,
     approved_origins: HashSet<String>,
     pointer_reference: Option<BrowserPointerReference>,
     console: VecDeque<BrowserConsoleEntry>,
@@ -154,6 +163,7 @@ impl SessionBrowserManager {
             url: slot.url.clone(),
             title: slot.title.clone(),
             visible: slot.visible,
+            background_only: slot.background_only,
             label: slot.webview_label.clone(),
         }
     }
@@ -280,6 +290,10 @@ impl SessionBrowserManager {
         self.with_slot_mut(session_id, |slot| slot.webview_label.clone())
     }
 
+    fn background_only(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.background_only)
+    }
+
     fn set_url(&self, session_id: &str, url: &str) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
             if slot.url != url {
@@ -297,7 +311,7 @@ impl SessionBrowserManager {
 
     fn set_visible_flag(&self, session_id: &str, visible: bool) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
-            slot.visible = visible;
+            slot.visible = browser_visibility(slot.background_only, visible);
         })
     }
 
@@ -308,6 +322,29 @@ impl SessionBrowserManager {
             .map_err(|_| "session browser state is unavailable".to_string())?;
         Ok(guard.remove(session_id))
     }
+}
+
+fn browser_visibility(background_only: bool, requested_visible: bool) -> bool {
+    !background_only && requested_visible
+}
+
+fn session_browser_is_background_only(
+    store: &gyro_core::SessionStore,
+    session_id: &str,
+) -> Result<bool, String> {
+    let session = store
+        .get_session(super::parse_uuid(session_id)?)
+        .map_err(super::to_string)?
+        .ok_or_else(|| "browser chat no longer exists".to_string())?;
+    Ok(session.parent_session_id.is_some())
+}
+
+pub fn is_background_browser<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> bool {
+    app.state::<SessionBrowserManager>()
+        .get_snapshot(session_id)
+        .ok()
+        .flatten()
+        .is_some_and(|snapshot| snapshot.background_only)
 }
 
 pub fn browser_url_is_navigable(url: &url::Url) -> bool {
@@ -364,6 +401,9 @@ fn sanitize_text(value: &str) -> String {
 
 fn agent_initialization_script(bridge_nonce: &str) -> String {
     let nonce = serde_json::to_string(bridge_nonce).unwrap_or_else(|_| "\"\"".into());
+    let background_pointer = include_str!("browser_background_pointer.js")
+        .trim()
+        .trim_end_matches(';');
     format!(
         r#"(function() {{
   if (window.__gyroBrowserAgentInstalled) return;
@@ -911,6 +951,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return Object.assign({{ ok: true }}, pageState());
     }},
   }};
+  window.__gyroBrowserAgent.backgroundPointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
 }})();"#
     )
 }
@@ -1045,7 +1086,7 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
     }
     // Console and network entries are read on demand from the buffers above;
     // broadcasting each one only wakes every window for nothing.
-    if !matches!(kind, "console" | "network") {
+    if !matches!(kind, "console" | "network") && !is_background_browser(app, &session_id) {
         let _ = app.emit(
             "session-browser-event",
             serde_json::json!({ "sessionId": session_id, "kind": kind }),
@@ -1078,11 +1119,20 @@ fn apply_bounds<R: Runtime>(
 
 pub fn open_session_browser<R: Runtime>(
     app: &AppHandle<R>,
-    request: SessionBrowserOpenRequest,
+    mut request: SessionBrowserOpenRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
     let url = parse_navigable_url(&request.url)?;
     let origin = url.origin().ascii_serialization();
     let manager = app.state::<SessionBrowserManager>();
+    // Ownership comes from the durable chat relationship, never a tool/UI
+    // argument. A restored agent gets the same private browser on follow-up.
+    let store = super::open_store()?;
+    let background_only = session_browser_is_background_only(&store, &request.session_id)?;
+    drop(store);
+    if background_only {
+        request.bounds = None;
+        request.visible = Some(false);
+    }
 
     if let Ok(Some(existing)) = manager.get_snapshot(&request.session_id) {
         if existing.workspace_key != request.workspace_key {
@@ -1096,7 +1146,8 @@ pub fn open_session_browser<R: Runtime>(
             if let Some(bounds) = request.bounds.as_ref() {
                 apply_bounds(&webview, bounds)?;
             }
-            let visible = request.visible.unwrap_or(existing.visible);
+            let visible =
+                browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
             if visible {
                 let _ = webview.show();
             } else {
@@ -1137,11 +1188,16 @@ pub fn open_session_browser<R: Runtime>(
     let bounds = requested_bounds
         .clone()
         .unwrap_or(BACKGROUND_BROWSER_BOUNDS);
+    let bounds = if background_only {
+        AGENT_BROWSER_BOUNDS
+    } else {
+        bounds
+    };
     let visible = request.visible.unwrap_or(
         requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
     );
 
-    let builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
+    let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)
         .incognito(true)
         .devtools(false)
@@ -1151,33 +1207,49 @@ pub fn open_session_browser<R: Runtime>(
                 let url = payload.url().as_str();
                 let manager = app_for_load.state::<SessionBrowserManager>();
                 let _ = manager.set_url(&session_for_load, url);
-                let _ = app_for_load.emit(
-                    "session-browser-event",
-                    serde_json::json!({
-                        "sessionId": session_for_load,
-                        "kind": "loaded",
-                        "url": url,
-                    }),
-                );
+                if !background_only {
+                    let _ = app_for_load.emit(
+                        "session-browser-event",
+                        serde_json::json!({
+                            "sessionId": session_for_load,
+                            "kind": "loaded",
+                            "url": url,
+                        }),
+                    );
+                }
             }
         })
         .on_document_title_changed(move |_webview, title| {
             let manager = app_for_title.state::<SessionBrowserManager>();
             let _ = manager.set_title(&session_for_title, &sanitize_text(&title));
-            let _ = app_for_title.emit(
-                "session-browser-event",
-                serde_json::json!({
-                    "sessionId": session_for_title,
-                    "kind": "title",
-                    "title": sanitize_text(&title),
-                }),
-            );
+            if !background_only {
+                let _ = app_for_title.emit(
+                    "session-browser-event",
+                    serde_json::json!({
+                        "sessionId": session_for_title,
+                        "kind": "title",
+                        "title": sanitize_text(&title),
+                    }),
+                );
+            }
         });
+    if background_only {
+        // A hidden agent page must keep running during a long task.
+        builder = builder
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+    }
 
     let webview = window
         .add_child(
             builder,
-            LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)),
+            LogicalPosition::new(
+                if background_only {
+                    bounds.x
+                } else {
+                    bounds.x.max(0.0)
+                },
+                bounds.y.max(0.0),
+            ),
             LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| format!("could not create session browser webview: {error}"))?;
@@ -1190,7 +1262,9 @@ pub fn open_session_browser<R: Runtime>(
     }
 
     if !visible {
-        let _ = webview.hide();
+        webview
+            .hide()
+            .map_err(|error| format!("could not hide browser: {error}"))?;
     }
 
     let mut approved = HashSet::new();
@@ -1211,6 +1285,7 @@ pub fn open_session_browser<R: Runtime>(
             url: url.to_string(),
             title: String::new(),
             visible,
+            background_only,
             approved_origins: approved,
             pointer_reference: None,
             console: VecDeque::new(),
@@ -1230,6 +1305,10 @@ pub fn set_session_browser_bounds<R: Runtime>(
     bounds: SessionBrowserBounds,
 ) -> Result<(), String> {
     let manager = app.state::<SessionBrowserManager>();
+    if manager.background_only(session_id)? {
+        // No frontend host can resize or move an agent's independent viewport.
+        return Ok(());
+    }
     let label = manager.webview_label_for(session_id)?;
     let webview = app
         .get_webview(&label)
@@ -1246,6 +1325,7 @@ pub fn set_session_browser_visible<R: Runtime>(
     visible: bool,
 ) -> Result<(), String> {
     let manager = app.state::<SessionBrowserManager>();
+    let visible = browser_visibility(manager.background_only(session_id)?, visible);
     let label = manager.webview_label_for(session_id)?;
     let webview = app
         .get_webview(&label)
@@ -1422,6 +1502,17 @@ pub fn mouse_session_browser<R: Runtime>(
     let snapshot = manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "this chat has no open browser".to_string())?;
+    if snapshot.background_only {
+        return call_agent(
+            app,
+            session_id,
+            "backgroundPointer",
+            serde_json::json!({
+                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+            }),
+        )
+        .map(|_| ());
+    }
     if !snapshot.visible {
         return Err("show this chat's Browser before using the mouse".into());
     }
@@ -1747,6 +1838,130 @@ pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
+        SessionBrowserSlot {
+            session_id: session_id.into(),
+            workspace_key: "shared-workspace".into(),
+            resource_id: Uuid::new_v4().to_string(),
+            webview_label: format!("session-browser-{session_id}"),
+            bridge_nonce: Uuid::new_v4().to_string(),
+            url: "https://example.com/".into(),
+            title: String::new(),
+            visible: false,
+            background_only,
+            approved_origins: HashSet::new(),
+            pointer_reference: None,
+            console: VecDeque::new(),
+            network: VecDeque::new(),
+        }
+    }
+
+    #[test]
+    fn restored_subagents_get_private_browsers_from_durable_ownership() {
+        use gyro_core::{CreateSessionContext, GyroPaths, SessionOrigin, SessionStore};
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("store"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Parent")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        assert!(!session_browser_is_background_only(&store, &parent.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &child.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &Uuid::new_v4().to_string()).is_err());
+    }
+
+    #[test]
+    fn agent_browser_cannot_be_revealed_but_parent_browser_can() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+            manager.set_visible_flag(id, true).unwrap();
+            let snapshot = manager.get_snapshot(id).unwrap().unwrap();
+            assert_eq!(snapshot.visible, !private);
+            assert_eq!(snapshot.background_only, private);
+            manager.set_visible_flag(id, false).unwrap();
+            manager.set_visible_flag(id, true).unwrap();
+            assert_eq!(manager.get_snapshot(id).unwrap().unwrap().visible, !private);
+        }
+        assert_eq!(AGENT_BROWSER_BOUNDS.width, 1280.0);
+        assert_eq!(AGENT_BROWSER_BOUNDS.height, 800.0);
+        assert!(AGENT_BROWSER_BOUNDS.x + AGENT_BROWSER_BOUNDS.width < 0.0);
+    }
+
+    #[test]
+    fn agent_browsers_keep_resources_page_state_and_grants_independent() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent-a", true), ("agent-b", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+        }
+        manager
+            .set_url("agent-a", "https://example.com/research")
+            .unwrap();
+        manager.set_title("agent-a", "Research").unwrap();
+        manager
+            .approve_origin("agent-a", "https://example.com")
+            .unwrap();
+        manager.push_console(
+            "agent-a",
+            BrowserConsoleEntry {
+                kind: "log".into(),
+                message: "ready".into(),
+                source: None,
+                line: None,
+                column: None,
+            },
+        );
+        manager
+            .remember_pointer_capture(
+                "agent-a",
+                "capture-a".into(),
+                "https://example.com/research".into(),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        let a = manager
+            .require_owned("agent-a", "shared-workspace")
+            .unwrap();
+        for id in ["parent", "agent-b"] {
+            let other = manager.require_owned(id, "shared-workspace").unwrap();
+            assert_ne!(a.resource_id, other.resource_id);
+            assert_ne!(a.label, other.label);
+            assert_eq!(other.url, "https://example.com/");
+            assert!(other.title.is_empty());
+            assert!(!manager
+                .is_origin_approved(id, "https://example.com")
+                .unwrap());
+            assert!(manager.console_entries(id, 10).unwrap().is_empty());
+            assert!(manager.pointer_reference(id, "capture-a").is_err());
+        }
+        assert_eq!(manager.console_entries("agent-a", 10).unwrap().len(), 1);
+        assert!(manager.pointer_reference("agent-a", "capture-a").is_ok());
+        assert!(manager.require_owned("agent-a", "other-workspace").is_err());
+        manager.remove_slot("agent-a").unwrap();
+        assert!(manager.get_snapshot("agent-a").unwrap().is_none());
+        assert!(manager.get_snapshot("agent-b").unwrap().is_some());
+        assert!(manager.get_snapshot("parent").unwrap().is_some());
+    }
 
     #[test]
     fn navigable_urls_accept_public_https_and_reject_credentials() {

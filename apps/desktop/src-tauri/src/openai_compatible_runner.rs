@@ -216,7 +216,9 @@ pub(super) fn run_openai_compatible_chat(
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),
     ];
+    let allow_delegation = delegated_agents::can_delegate(&request.session_id);
     let tools = advertised_capability_descriptors(run_mode)
+        .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
         .map(|descriptor| {
             serde_json::json!({
                 "type": "function",
@@ -417,7 +419,7 @@ pub(super) fn run_openai_compatible_chat(
                             "{label} requested another catalog after its tool budget was exhausted"
                         );
                         let catalog =
-                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset);
+                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset, allow_delegation);
                         malformed_responses = 0;
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));

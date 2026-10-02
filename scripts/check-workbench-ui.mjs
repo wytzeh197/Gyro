@@ -1019,21 +1019,13 @@ expect(
   "Linked screenshots should use a contained preview tray inside the composer.",
 );
 expect(
-  surfaceSource.includes('className="gyro-transcript-image-preview"') &&
-    cssRules(styleSource, ".gyro-transcript-image-preview").some(
-      (rule) =>
-        rule.includes("height: 32px") &&
-        rule.includes("overflow: hidden") &&
-        rule.includes("width: 32px"),
-    ) &&
-    cssRules(styleSource, ".gyro-transcript-image-preview > img").some(
-      (rule) =>
-        rule.includes("height: 100%") &&
-        rule.includes("object-fit: cover") &&
-        rule.includes("width: 100%"),
-    ),
-  "Linked screenshots in restored transcripts should stay inside their thumbnail boundary.",
+  surfaceSource.includes("<ChatFileCard") &&
+    readRepoFile("packages/ui/src/chat-file-card.tsx").includes("{file.name}") &&
+    readRepoFile("packages/ui/src/chat-file-card.css").includes("object-fit: contain") &&
+    readRepoFile("packages/ui/src/chat-file-card.css").includes("text-overflow: ellipsis"),
+  "Linked files and restored media should show contained previews with visible, truncated titles.",
 );
+
 expect(
   surfaceSource.includes("buildRunModel(turn.timelineEvents, {") &&
     runSource.includes("export function buildRunModel") &&
@@ -1248,6 +1240,7 @@ const languageServerRustSource = readRepoFile(
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
 );
+const delegatedAgentRustSource = readRepoFile("apps/desktop/src-tauri/src/delegated_agents.rs");
 const subagentRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/subagent_capability.rs",
 );
@@ -6458,13 +6451,13 @@ expect(
   tauriSource.includes(
     "CapabilityId::ResearchRun => subagent_capability::execute",
   ) &&
-    subagentRustSource.includes("ChildRunControl::claim(") &&
+    delegatedAgentRustSource.includes("ChildRunControl::claim(") &&
     subagentRustSource.includes("claim_child_run_control(") &&
     subagentRustSource.includes("release_child_run_control(") &&
-    subagentRustSource.includes("ParentStopWatcher::start(") &&
+    subagentRustSource.includes("ParentStopWatcher::start_until(") &&
     subagentRustSource.includes("ProviderCancellationManager") &&
     subagentRustSource.includes("MAX_CONCURRENT_PROVIDER_RUNS") &&
-    subagentRustSource.includes("drop(run);"),
+    delegatedAgentRustSource.includes("drop(control.take());"),
   "A research sub-agent should claim its own provider run control, watch its parent chat's stop, and release the control when the child turn ends.",
 );
 // A sub-agent run belongs to the chat that started it. The child session
@@ -6474,7 +6467,7 @@ expect(
 // its completion as a chat of its own; and the call card that reports the
 // research is the way the transcript is opened.
 expect(
-  subagentRustSource.includes("create_subagent_session(") &&
+  delegatedAgentRustSource.includes("create_subagent_session(") &&
     coreSessionsSource.includes("create_subagent_session(") &&
     coreSessionsSource.includes("parent_session_id") &&
     coreSessionsSource.includes("where parent_session_id = ?1") &&
@@ -7704,16 +7697,16 @@ expect(
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 6px") &&
     styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
-    styleSource.includes("--gyro-app: #141517") &&
-    styleSource.includes("--gyro-pane: #17181b") &&
+    styleSource.includes("--gyro-app: #181818") &&
+    styleSource.includes("--gyro-pane: #1c1c1c") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f9f9f8") &&
-    styleSource.includes("--gyro-sidebar: #f2f2f0") &&
-    styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
+    styleSource.includes("--gyro-app: #f7f7f7") &&
+    styleSource.includes("--gyro-sidebar: #ffffff") &&
+    styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
     surfaceSource.includes('label="Main color"') &&
@@ -7971,8 +7964,8 @@ expect(
     liveTerminalPaneSource.includes(
       "terminal.options.theme = terminalThemeFor(theme)",
     ) &&
-    liveTerminalPaneSource.includes('background: "#ffffff"') &&
-    liveTerminalPaneSource.includes('background: "#0c0c0c"') &&
+    liveTerminalPaneSource.includes('background: "#f5f5f5"') &&
+    liveTerminalPaneSource.includes('background: "#141414"') &&
     liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "System, dark, and light preferences should resolve before live terminals update their palette in place.",
@@ -8037,10 +8030,10 @@ expect(
 expect(
   monacoEditorSource.includes("createMonacoTheme(mode)") &&
     readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes(
-      '"editor.background": "#0C0C0C"',
+      '"editor.background": "#141414"',
     ) &&
     readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes(
-      '"editor.lineHighlightBackground": "#161616"',
+      '"editor.lineHighlightBackground": "#1C1C1C"',
     ) &&
     appSource.includes(
       "stickyScroll: { enabled: !limited, maxLineCount: 3 }",

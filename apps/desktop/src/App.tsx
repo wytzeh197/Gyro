@@ -1,3 +1,4 @@
+import { useSubagents } from "./use-subagents";
 import { workspaceEditorOptions } from "./editor-presentation";
 import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
 import {
@@ -20,7 +21,7 @@ import {
   useDerivedSessionContext,
   useSessionContextEvents,
 } from "./use-session-context-events";
-import { ComposerContextCandidates } from "@gyro-dev/ui";
+import { ChatFileActionsContext, ComposerContextCandidates } from "@gyro-dev/ui";
 import {
   isSplitChatLayout,
   restoreCompanionPanes,
@@ -100,7 +101,7 @@ import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -1698,10 +1699,18 @@ export function App() {
     },
     [openCompanionTab, soloEnvironment],
   );
+  const sessionForPane = (paneId: string) => {
+    const pane = displayedChatLayout.slots.find((slot) => slot?.paneId === paneId);
+    return pane?.kind === "session" ? pane.sessionId : undefined;
+  };
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
     sideChat: sideChatFor(paneId),
+    subagents: subagentController.forPane(
+      paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId),
+      paneId,
+    ),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
     companionWidth: companion.dockWidth,
     browserCompanionWidth: companion.browserDockWidth,
@@ -2759,6 +2768,14 @@ export function App() {
     [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
   );
   const refreshEvents = useCoalescedByKey(readSessionEvents);
+  const openAgentPanel = useCallback(
+    (paneId: string) => {
+      closeLegacyRail();
+      setPaneLegacyPanelByPaneId((current) => ({ ...current, [paneId]: undefined }));
+      openCompanionTab("agents", paneId);
+    },
+    [closeLegacyRail, openCompanionTab],
+  );
 
   const loadEarlierEvents = useCallback(
     async (sessionId: string) => {
@@ -2831,6 +2848,20 @@ export function App() {
       setEventsForSession,
     ],
   );
+
+  const subagentController = useSubagents({
+    parentIds: [
+      activeSessionId,
+      ...displayedChatLayout.slots.flatMap((pane) => pane?.kind === "session" ? [pane.sessionId] : []),
+    ].filter((id): id is string => Boolean(id)),
+    eventsBySessionId: sessionEventsById,
+    readEvents: readSessionEvents,
+    openPanel: openAgentPanel,
+    closePanel: (paneId) => dispatchCompanion({ type: "close-tab", tab: "agents", paneId }),
+    hasMoreBeforeBySession,
+    loadingEarlierSessionIds,
+    loadEarlier: loadEarlierEvents,
+  });
 
   useEffect(() => {
     const layout = chatGrid.activeProjectKey
@@ -3248,6 +3279,7 @@ export function App() {
       }
       if (
         streamEvent.phase === "context-usage" ||
+        streamEvent.phase === "turn-tokens" ||
         streamEvent.phase === "activity"
       ) {
         flushProviderStreamBatches();
@@ -11195,12 +11227,8 @@ export function App() {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
         if (activity.resource.kind === "chat") {
-          // A research sub-agent keeps its transcript in a chat of its own.
-          // That chat is not listed among the user's chats, so the call that
-          // ran it is what opens it — and the session list may not know about
-          // it yet.
-          const chatSessionId = activity.resource.id;
-          void refreshSessions().then(() => selectSession(chatSessionId));
+          const paneId = displayedChatLayout.slots.find((pane) => pane?.kind === "session" && pane.sessionId === event.sessionId)?.paneId ?? SOLO_CHAT_PANE_ID;
+          subagentController.select(paneId, activity.resource.id);
           return;
         }
         selectSession(event.sessionId);
@@ -11426,6 +11454,8 @@ export function App() {
       }
     },
     [
+      subagentController,
+      displayedChatLayout,
       browserResourcesBySessionId,
       capabilityResourceDataByCallId,
       connectProvider,
@@ -11442,13 +11472,15 @@ export function App() {
       if (!activeSessionId || !isTauriRuntime()) {
         return;
       }
+      const approvalEvent = Object.values(sessionEventsById).flat().find((event) => stringFromRecord(recordFromUnknown(event.payload), "proposalId") === proposalId);
+      const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
       try {
         const result = await invoke<{
           proposal: { path: string; status: string };
         }>("resolve_file_mutation_proposal", {
           request: { proposalId, decision },
         });
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
         if (result.proposal.status === "applied") {
           await refreshWorkspaceTree();
           refreshIdeSourceControl(
@@ -11470,7 +11502,7 @@ export function App() {
           "Could not resolve change",
           error instanceof Error ? error.message : String(error),
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
       }
     },
     [
@@ -11481,6 +11513,7 @@ export function App() {
       refreshIdeSourceControl,
       refreshWorkspaceTree,
       workspacePath,
+      sessionEventsById,
     ],
   );
 
@@ -16281,6 +16314,39 @@ export function App() {
     />
   );
 
+  const chatFileActions = useMemo(
+    () => ({
+      preview: async (path: string, kind: "image" | "video" | "audio") => {
+        if (kind === "audio") return undefined;
+        const key = `${activeSessionId ?? "new"}:${kind}:${path}`;
+        let pending = chatFilePreviewCache.get(key);
+        if (!pending) {
+          pending = invoke<ChatAttachment>("prepare_chat_attachment", {
+            request: {
+              sessionId: activeSessionId ?? "new",
+              path,
+              workspacePath,
+              kind,
+            },
+          }).then((attachment) => convertFileSrc(attachment.path));
+          if (chatFilePreviewCache.size >= 64)
+            chatFilePreviewCache.delete(
+              chatFilePreviewCache.keys().next().value!,
+            );
+          chatFilePreviewCache.set(key, pending);
+          void pending.catch(() => chatFilePreviewCache.delete(key));
+        }
+        return pending;
+      },
+      open: (path: string) => {
+        void revealItemInDir(path).catch((error) =>
+          notify("command-failed", "Could not show the file", String(error)),
+        );
+      },
+    }),
+    [activeSessionId, workspacePath, notify],
+  );
+
   const appChrome = (
     <AppChrome
       renderAiChat={renderWorkspaceChat}
@@ -17524,6 +17590,7 @@ export function App() {
     </AppChrome>
   );
   return (
+    <ChatFileActionsContext.Provider value={chatFileActions}>
     <TerminalAttachmentActionsContext.Provider
       value={terminalAttachmentActions}
     >
@@ -17548,8 +17615,11 @@ export function App() {
         <AppearanceContext.Provider value={appearance}>{appChrome}</AppearanceContext.Provider>
       </ComposerContextCandidates.Provider>
     </TerminalAttachmentActionsContext.Provider>
+    </ChatFileActionsContext.Provider>
   );
 }
+
+const chatFilePreviewCache = new Map<string, Promise<string>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState({

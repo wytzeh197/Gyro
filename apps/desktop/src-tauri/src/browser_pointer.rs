@@ -98,15 +98,18 @@ pub(super) fn execute<R: Runtime>(
     session_browser::mouse_session_browser(app, session_id, action, x, y, to_x, to_y)?;
     // Pointer feedback is best effort: navigation can replace the document
     // immediately after a successful click. It must not turn success into retry.
-    let _ = session_browser::call_agent(
-        app,
-        session_id,
-        "showPointer",
-        json!({
-            "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
-            "actor": actor, "url": reference.url,
-        }),
-    );
+    let background_only = session_browser::is_background_browser(app, session_id);
+    if !background_only {
+        let _ = session_browser::call_agent(
+            app,
+            session_id,
+            "showPointer",
+            json!({
+                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+                "actor": actor, "url": reference.url,
+            }),
+        );
+    }
     Ok(BrowserMouseOutcome {
         action: action.to_string(),
         url: reference.url,
@@ -117,7 +120,10 @@ pub(super) fn execute<R: Runtime>(
             "toX": to_x,
             "toY": to_y,
             "target": target,
-            "verification": "Re-observe the page before claiming the outcome."
+            "inputMode": if background_only { "page-events" } else { "native-mouse" },
+            "verification": if background_only {
+                "Re-observe the result. Background input cannot provide trusted OS events, native menus, HTML drag-and-drop, or CSS hover state."
+            } else { "Re-observe the page before claiming the outcome." }
         }),
     })
 }

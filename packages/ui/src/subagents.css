@@ -1,0 +1,127 @@
+.gyro-subagents {
+  margin-block: 4px;
+  min-width: 0;
+}
+.gyro-subagents ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gyro-subagents li > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 4px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-subagents li > button:hover,
+.gyro-subagents li > button.is-selected {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.gyro-subagents li > button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.gyro-subagent-mark {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  object-fit: contain;
+}
+.gyro-subagent-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.gyro-subagent-runtime,
+.gyro-subagent-tokens {
+  opacity: 0.65;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.gyro-subagent-runtime,
+.gyro-subagent-tokens {
+  flex: none;
+}
+.gyro-subagent-panel {
+  height: 100%;
+  overflow: auto;
+  padding: 20px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.gyro-subagent-task {
+  margin: 0 0 14px;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.6;
+}
+.gyro-subagent-task summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--gyro-faint);
+}
+.gyro-subagent-task summary:hover {
+  color: var(--gyro-text);
+}
+.gyro-subagent-task p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gyro-subagent-run + .gyro-subagent-run {
+  margin-top: 24px;
+}
+.gyro-subagent-result {
+  margin-top: 14px;
+  overflow-wrap: anywhere;
+}
+.gyro-subagent-panel .gyro-run-header-actions {
+  align-items: center;
+}
+.gyro-subagent-panel .gyro-run-header-actions .gyro-subagent-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.gyro-subagent-panel .gyro-subagent-stop:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-subagent-stop:focus-visible,
+.gyro-subagent-task summary:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+.gyro-chat-companion .gyro-subagent-tab,
+.gyro-chat-companion .gyro-subagent-tab.is-active {
+  min-width: 0;
+  max-width: 160px;
+}
+.gyro-chat-companion .gyro-subagent-tab > button[role="tab"] {
+  min-width: 0;
+  gap: 7px;
+}
+.gyro-subagent-empty {
+  padding: 20px;
+  font-size: 12px;
+  opacity: 0.65;
+}

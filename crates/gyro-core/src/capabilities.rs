@@ -68,6 +68,10 @@ pub enum CapabilityId {
     MemoryRead,
     MemoryWrite,
     ResearchRun,
+    AgentSpawn,
+    AgentWait,
+    AgentSend,
+    AgentStop,
     GithubPullRequests,
     GithubWorkflowRuns,
     GithubWorkflowLogs,
@@ -131,6 +135,10 @@ impl CapabilityId {
             Self::MemoryRead => "memory.read",
             Self::MemoryWrite => "memory.write",
             Self::ResearchRun => "research.run",
+            Self::AgentSpawn => "agent.spawn",
+            Self::AgentWait => "agent.wait",
+            Self::AgentSend => "agent.send",
+            Self::AgentStop => "agent.stop",
             Self::GithubPullRequests => "github.pull_requests",
             Self::GithubWorkflowRuns => "github.workflow_runs",
             Self::GithubWorkflowLogs => "github.workflow_logs",
@@ -194,6 +202,10 @@ impl CapabilityId {
             Self::MemoryRead => "gyro_memory_read",
             Self::MemoryWrite => "gyro_memory_write",
             Self::ResearchRun => "gyro_research",
+            Self::AgentSpawn => "gyro_agent_spawn",
+            Self::AgentWait => "gyro_agent_wait",
+            Self::AgentSend => "gyro_agent_send",
+            Self::AgentStop => "gyro_agent_stop",
             Self::GithubPullRequests => "gyro_github_pull_requests",
             Self::GithubWorkflowRuns => "gyro_github_workflow_runs",
             Self::GithubWorkflowLogs => "gyro_github_workflow_logs",
@@ -892,9 +904,29 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Read recent redacted network request summaries captured from this chat's open browser.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::AgentSpawn,
+        class: CapabilityClass::AgentRun,
+        description: "Launch a named parallel sub-agent for a self-contained task. It inherits this chat's model, workspace, and permissions. Assign clear file ownership when implementing in the shared workspace. Returns an agentId immediately. Plan-mode children are read-only. Only the parent may delegate; use gyro_agent_wait to collect results before finishing.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentWait,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read status or wait up to 60 seconds for this chat's agents. Returns bounded reports for settled agents. timeoutMs: 0 reads status immediately. Wait again if agents are still running.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentSend,
+        class: CapabilityClass::AgentRun,
+        description: "Send a follow-up task to an agent owned by this chat. Running agents receive it after their current task finishes; settled agents start a new turn. Settings and permission ceilings remain inherited.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentStop,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Stop one of this chat's sub-agents and discard its queued tasks. The parent and siblings keep running; already-applied edits remain in the workspace.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::ResearchRun,
         class: CapabilityClass::AgentRun,
-        description: "Start one read-only research sub-agent in a fresh context and return only its final report. Use it to investigate a self-contained question whose answer needs many reads, so the searching stays out of this chat. The sub-agent can search, read, navigate code, and read git history; it cannot write, run commands, browse, or fetch the web, and it cannot start another sub-agent. It costs provider tokens, so ask a question you actually need answered, and it does not know anything this chat has not written into the question.",
+        description: "Start one research sub-agent in a fresh context and return only its final report. It inherits this chat's permissions and approval setting, including Full Access; Plan-mode children remain read-only. Use it to investigate a self-contained question whose answer needs many reads, so the searching stays out of this chat. It cannot start another sub-agent. It costs provider tokens and knows only what this chat writes into the question.",
     },
     CapabilityDescriptor {
         id: CapabilityId::MemoryRead,
@@ -1032,6 +1064,9 @@ pub fn capability_advertised_for_mode(id: CapabilityId, mode: CapabilityRunMode)
     match mode {
         CapabilityRunMode::Council => false,
         CapabilityRunMode::Plan => {
+            if matches!(id, CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun) {
+                return true;
+            }
             // Both edit tools are classified as workspace inspection, so the
             // class alone would advertise them in Plan mode.
             !matches!(
@@ -1320,8 +1355,9 @@ mod tests {
         // Reading memory is inspection; writing it is writing.
         assert!(plan.contains(&CapabilityId::MemoryRead));
         assert!(!plan.contains(&CapabilityId::MemoryWrite));
-        // A sub-agent spends tokens and needs tools, so Plan never offers it.
-        assert!(!plan.contains(&CapabilityId::ResearchRun));
+        // Plan advertises delegation; the broker enforces read-only child runs.
+        assert!(plan.contains(&CapabilityId::ResearchRun));
+        assert!(plan.contains(&CapabilityId::AgentSpawn));
         assert!(!plan.contains(&CapabilityId::GithubPush));
         assert_eq!(
             advertised_capability_descriptors(CapabilityRunMode::Normal).count(),

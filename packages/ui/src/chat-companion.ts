@@ -13,7 +13,7 @@ import type { ChatSidePanelId } from "./types.ts";
  */
 export type ChatCompanionTabId = Extract<
   ChatSidePanelId,
-  "review" | "terminal" | "browser" | "files" | "side-chat" | "canvas"
+  "review" | "terminal" | "browser" | "files" | "side-chat" | "canvas" | "agents"
 >;
 
 export const chatCompanionTabIds: ChatCompanionTabId[] = [
@@ -23,6 +23,7 @@ export const chatCompanionTabIds: ChatCompanionTabId[] = [
   "browser",
   "files",
   "side-chat",
+  "agents",
 ];
 
 export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
@@ -32,6 +33,7 @@ export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
   browser: "Browser",
   files: "Files",
   "side-chat": "Side chat",
+  agents: "Agents",
 };
 
 export function isChatCompanionTabId(

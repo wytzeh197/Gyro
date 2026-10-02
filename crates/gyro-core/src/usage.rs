@@ -78,7 +78,7 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
-            Self::SubAgent => "Research sub-agents",
+            Self::SubAgent => "Sub-agents",
         }
     }
 }

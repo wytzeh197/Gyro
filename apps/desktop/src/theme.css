@@ -24,7 +24,7 @@ textarea:focus-visible {
 .gyro-root-error {
   align-items: flex-start;
   background: #181818;
-  color: #f0f0f0;
+  color: #ededed;
   display: flex;
   flex-direction: column;
   font-family:
@@ -49,15 +49,15 @@ textarea:focus-visible {
 }
 
 .gyro-root-error span {
-  color: #a3a3a3;
+  color: #b5b5b5;
   max-width: 720px;
 }
 
 :root[data-theme="light"] .gyro-root-error {
-  background: #f7f9fc;
-  color: #161b23;
+  background: #f7f7f7;
+  color: #252525;
 }
 
 :root[data-theme="light"] .gyro-root-error span {
-  color: #5c6670;
+  color: #626262;
 }

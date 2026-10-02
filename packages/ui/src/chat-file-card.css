@@ -1,0 +1,122 @@
+.gyro-chat-file-card {
+  appearance: none;
+  background: var(--gyro-code-bg);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-xl);
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  font: inherit;
+  margin-block: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-decoration: none;
+  vertical-align: top;
+  width: min(280px, 100%);
+}
+.gyro-chat-file-card:hover {
+  border-color: var(--gyro-border-strong);
+}
+.gyro-chat-file-card:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 3px;
+}
+.gyro-chat-file-thumbnail {
+  align-items: center;
+  aspect-ratio: 16 / 10;
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-faint);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  width: 100%;
+}
+.gyro-chat-file-thumbnail > :is(img, video) {
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+.gyro-chat-file-caption {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-height: 52px;
+  padding: 12px;
+  width: 100%;
+}
+.gyro-chat-file-caption > svg {
+  color: var(--gyro-secondary-accent);
+  flex: none;
+}
+.gyro-chat-file-caption > span {
+  display: grid;
+  min-width: 0;
+}
+.gyro-chat-file-caption strong {
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-chat-file-caption small {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+  margin-top: 3px;
+}
+.gyro-transcript-attachments > .gyro-chat-file-card {
+  margin-block: 0;
+}
+.gyro-chat-file-overlay {
+  align-items: center;
+  background: var(--gyro-scrim);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 32px;
+  position: fixed;
+  z-index: 10000;
+}
+.gyro-chat-file-overlay figure {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xl);
+  margin: 0;
+  max-width: 100%;
+  padding: 16px;
+  position: relative;
+}
+.gyro-chat-file-overlay :is(img, video) {
+  display: block;
+  max-height: 75vh;
+  max-width: min(1100px, 85vw);
+  object-fit: contain;
+}
+.gyro-chat-file-overlay figcaption {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-body);
+  overflow-wrap: anywhere;
+  padding: 12px 32px 0 0;
+}
+.gyro-chat-file-overlay figure > button {
+  align-items: center;
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: 50%;
+  color: var(--gyro-text);
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 30px;
+  z-index: 1;
+}
+
+.gyro-chat-file-overlay video {
+  width: min(960px, 85vw);
+}
