@@ -1,0 +1,266 @@
+{
+  "assets/screenshots/editorial-hero-light.webp": {
+    "width": 2040,
+    "height": 1320,
+    "master": "current-review-light.webp",
+    "crop": [
+      0,
+      0,
+      2040,
+      1320
+    ]
+  },
+  "assets/screenshots/editorial-hero-dark.webp": {
+    "width": 2040,
+    "height": 1320,
+    "master": "current-review-dark.webp",
+    "crop": [
+      0,
+      0,
+      2040,
+      1320
+    ]
+  },
+  "assets/screenshots/editorial-hero-mobile-light.webp": {
+    "width": 1560,
+    "height": 1350,
+    "master": "current-review-light.webp",
+    "crop": [
+      480,
+      0,
+      2040,
+      1350
+    ]
+  },
+  "assets/screenshots/editorial-hero-mobile-dark.webp": {
+    "width": 1560,
+    "height": 1350,
+    "master": "current-review-dark.webp",
+    "crop": [
+      480,
+      0,
+      2040,
+      1350
+    ]
+  },
+  "assets/screenshots/editorial-chat-light.webp": {
+    "width": 2040,
+    "height": 1800,
+    "master": "current-chat-light.webp",
+    "crop": [
+      0,
+      0,
+      2040,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-chat-dark.webp": {
+    "width": 2040,
+    "height": 1800,
+    "master": "current-chat-dark.webp",
+    "crop": [
+      0,
+      0,
+      2040,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-chat-mobile-light.webp": {
+    "width": 1080,
+    "height": 1450,
+    "master": "current-chat-light.webp",
+    "crop": [
+      480,
+      0,
+      1560,
+      1450
+    ]
+  },
+  "assets/screenshots/editorial-chat-mobile-dark.webp": {
+    "width": 1080,
+    "height": 1450,
+    "master": "current-chat-dark.webp",
+    "crop": [
+      480,
+      0,
+      1560,
+      1450
+    ]
+  },
+  "assets/screenshots/editorial-terminal-light.webp": {
+    "width": 2320,
+    "height": 1800,
+    "master": "current-workspace-light.webp",
+    "crop": [
+      560,
+      0,
+      2880,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-terminal-dark.webp": {
+    "width": 2320,
+    "height": 1800,
+    "master": "current-workspace-dark.webp",
+    "crop": [
+      560,
+      0,
+      2880,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-terminal-mobile-light.webp": {
+    "width": 1140,
+    "height": 1540,
+    "master": "current-workspace-light.webp",
+    "crop": [
+      560,
+      200,
+      1700,
+      1740
+    ]
+  },
+  "assets/screenshots/editorial-terminal-mobile-dark.webp": {
+    "width": 1140,
+    "height": 1540,
+    "master": "current-workspace-dark.webp",
+    "crop": [
+      560,
+      200,
+      1700,
+      1740
+    ]
+  },
+  "assets/screenshots/editorial-ide-light.webp": {
+    "width": 2880,
+    "height": 1800,
+    "master": "current-workspace-light.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-ide-dark.webp": {
+    "width": 2880,
+    "height": 1800,
+    "master": "current-workspace-dark.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1800
+    ]
+  },
+  "assets/screenshots/editorial-ide-mobile-light.webp": {
+    "width": 1080,
+    "height": 1460,
+    "master": "current-workspace-light.webp",
+    "crop": [
+      560,
+      0,
+      1640,
+      1460
+    ]
+  },
+  "assets/screenshots/editorial-ide-mobile-dark.webp": {
+    "width": 1080,
+    "height": 1460,
+    "master": "current-workspace-dark.webp",
+    "crop": [
+      560,
+      0,
+      1640,
+      1460
+    ]
+  },
+  "assets/screenshots/editorial-review-light.webp": {
+    "width": 934,
+    "height": 449,
+    "master": "current-review-wide-light.webp",
+    "crop": [
+      14,
+      58,
+      948,
+      507
+    ]
+  },
+  "assets/screenshots/editorial-review-dark.webp": {
+    "width": 934,
+    "height": 449,
+    "master": "current-review-wide-dark.webp",
+    "crop": [
+      14,
+      58,
+      948,
+      507
+    ]
+  },
+  "assets/screenshots/editorial-review-mobile-light.webp": {
+    "width": 840,
+    "height": 940,
+    "master": "current-review-light.webp",
+    "crop": [
+      2040,
+      0,
+      2880,
+      940
+    ]
+  },
+  "assets/screenshots/editorial-review-mobile-dark.webp": {
+    "width": 840,
+    "height": 940,
+    "master": "current-review-dark.webp",
+    "crop": [
+      2040,
+      0,
+      2880,
+      940
+    ]
+  },
+  "assets/screenshots/editorial-ownership-light.webp": {
+    "width": 2880,
+    "height": 1730,
+    "master": "current-review-light.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1730
+    ]
+  },
+  "assets/screenshots/editorial-ownership-dark.webp": {
+    "width": 2880,
+    "height": 1730,
+    "master": "current-review-dark.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1730
+    ]
+  },
+  "assets/screenshots/editorial-ownership-mobile-light.webp": {
+    "width": 2880,
+    "height": 1730,
+    "master": "current-review-light.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1730
+    ]
+  },
+  "assets/screenshots/editorial-ownership-mobile-dark.webp": {
+    "width": 2880,
+    "height": 1730,
+    "master": "current-review-dark.webp",
+    "crop": [
+      0,
+      0,
+      2880,
+      1730
+    ]
+  }
+}

@@ -68,3 +68,22 @@ their own colours.
 
 Each mark is a trademark of its owner. They appear here only to identify the
 providers Gyro supports, and imply no affiliation or endorsement.
+
+## Editorial homepage assets
+
+- `folder.svg` and `terminal.svg` are unmodified Primer Octicons 19.24.1
+  (`file-directory-24`, `terminal-24`), distributed under MIT, from
+  https://github.com/primer/octicons/tree/v19.24.1.
+- The getting-started OpenAI knot reuses the previously vendored Simple Icons
+  mark from the Gyro site (`ecaa974d`). Simple Icons is CC0-1.0. The mark
+  identifies the familiar OpenAI/GPT tool family; Codex keeps its separate
+  authentic desktop glyph in the supported-provider roster.
+- `ownership-device.webp` is an AI-generated hardware photograph with a
+  transparent screen aperture. The screen is a separate authentic Gyro capture,
+  not generated interface text. Original pixels: 1586×992. Aperture: x 212, y 85,
+  width 1157, height 695. CSS uses these measured percentages.
+- `screenshots/editorial-crops.json` records the source master, crop rectangle,
+  and exact dimensions for each derivative. Crops preserve real UI and scale
+  proportionally. The sample task is illustrative fixture evidence.
+
+The `current-review-wide-{light,dark}.webp` masters are authentic 960×600 browser captures of Gyro’s expanded Review UI, produced with the isolated development capture fixture. Their example task and recorded patch match the original retry-limit captures. The development-only completion control was removed before capture. The desktop Review crops retain the recorded file, comparison control, and all changed lines; mobile retains the original narrow capture. No product UI was generated.

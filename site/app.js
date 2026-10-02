@@ -71,7 +71,7 @@ function configureSelectedDownload(surface, release, assets) {
   }
 
   if (link) link.href = asset.browser_download_url;
-  if (linkLabel) linkLabel.textContent = "Download DMG";
+  if (linkLabel) linkLabel.textContent = surface.dataset?.readyLabel ?? "Download DMG";
   if (metadata) {
     metadata.textContent = `${label} · ${formatBytes(asset.size)}`;
   }
@@ -168,6 +168,7 @@ async function startDownloadSurfaces() {
   const surfaces = [...document.querySelectorAll("[data-download-surface]")];
   if (!surfaces.length) return;
 
+  document.documentElement?.setAttribute("data-download-runtime", "true");
   for (const surface of surfaces) bindSurface(surface);
   // Optional browser hints must never delay release loading or replace a choice.
   void reliableArchitectureHint().then((recommendation) => {
@@ -216,16 +217,6 @@ if (workspaceSwitcher) {
     button.addEventListener("click", () => showSurface(index));
   });
   workspaceSwitcher.hidden = false;
+  document.querySelector(".editorial-product").classList.add("is-enhanced");
   showSurface(0);
-}
-
-// Keep the hero quiet; restore the navigation surface over scrolling content.
-const homeHeader = document.querySelector(".home-page .site-header");
-if (homeHeader) {
-  const updateHeaderSurface = () => {
-    homeHeader.classList.toggle("is-at-top", window.scrollY <= 8);
-  };
-  updateHeaderSurface();
-  window.addEventListener("scroll", updateHeaderSurface, { passive: true });
-  window.addEventListener("pageshow", updateHeaderSurface);
 }

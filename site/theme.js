@@ -47,6 +47,7 @@
     );
     var toggles = document.querySelectorAll("[data-theme-toggle]");
     for (var index = 0; index < toggles.length; index += 1) {
+      toggles[index].hidden = false;
       toggles[index].addEventListener("click", function () {
         var next =
           document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -67,74 +68,30 @@
   }
 })();
 
-// A quiet, mouse-only dot field shared by every page.
+// Native disclosure navigation works without this enhancement.
 (function () {
-  function wireDots() {
-    var media = matchMedia("(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)");
-    var canvas = document.createElement("canvas");
-    canvas.className = "pointer-dots";
-    canvas.setAttribute("aria-hidden", "true");
-    document.body.prepend(canvas);
-    var context = canvas.getContext("2d");
-    if (!context) { canvas.remove(); return; }
-    var pointer = null;
-    var frame = 0;
-    var width = 0;
-    var height = 0;
-    function draw() {
-      frame = 0;
-      context.clearRect(0, 0, width, height);
-      if (!media.matches || !pointer) return;
-      var light = document.documentElement.dataset.theme === "light";
-      var radius = 190;
-      var spacing = 24;
-      for (var y = Math.max(12, Math.floor((pointer.y - radius) / spacing) * spacing + 12); y < Math.min(height, pointer.y + radius); y += spacing) {
-        for (var x = Math.max(12, Math.floor((pointer.x - radius) / spacing) * spacing + 12); x < Math.min(width, pointer.x + radius); x += spacing) {
-          var distance = Math.hypot(x - pointer.x, y - pointer.y) / radius;
-          if (distance >= 1) continue;
-          var opacity = Math.pow(1 - distance, 1.6) * (light ? 0.19 : 0.24);
-          context.fillStyle = "rgba(" + (light ? "50,52,62," : "220,222,232,") + opacity + ")";
-          context.beginPath();
-          context.arc(x, y, 1, 0, Math.PI * 2);
-          context.fill();
+  function wireNavigation() {
+    var menus = document.querySelectorAll(".mobile-nav");
+    for (var i = 0; i < menus.length; i++) {
+      var menu = menus[i];
+      menu.addEventListener("click", function (event) {
+        if (event.target.closest("a")) this.open = false;
+      });
+      menu.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          this.open = false;
+          this.querySelector("summary").focus();
         }
-      }
+      });
     }
-    function schedule() {
-      if (!frame && media.matches && !document.hidden) {
-        frame = requestAnimationFrame(draw);
-      }
+    var header = document.querySelector(".site-header");
+    if (header) {
+      var update = function () { header.classList.toggle("is-at-top", window.scrollY <= 8); };
+      update();
+      window.addEventListener("scroll", update, { passive: true });
+      window.addEventListener("pageshow", update);
     }
-    function resize() {
-      var enabled = media.matches && !document.hidden;
-      width = enabled ? innerWidth : 0;
-      height = enabled ? innerHeight : 0;
-      canvas.hidden = !enabled;
-      if (!enabled) {
-        pointer = null;
-        if (frame) cancelAnimationFrame(frame);
-        frame = 0;
-      }
-      var ratio = Math.min(devicePixelRatio || 1, 2);
-      canvas.width = Math.round(width * ratio);
-      canvas.height = Math.round(height * ratio);
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      schedule();
-    }
-    function clear() { pointer = null; schedule(); }
-    window.addEventListener("pointermove", function (event) {
-      if (!media.matches || event.pointerType !== "mouse") { clear(); return; }
-      pointer = { x: event.clientX, y: event.clientY };
-      schedule();
-    }, { passive: true });
-    document.documentElement.addEventListener("pointerleave", clear);
-    window.addEventListener("blur", clear);
-    window.addEventListener("resize", resize, { passive: true });
-    media.addEventListener("change", resize);
-    document.addEventListener("visibilitychange", resize);
-    new MutationObserver(schedule).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    resize();
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireDots);
-  else wireDots();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireNavigation);
+  else wireNavigation();
 })();

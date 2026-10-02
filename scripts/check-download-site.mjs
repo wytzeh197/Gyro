@@ -115,7 +115,13 @@ const screenshotAssets = [
   "current-workspace-dark.webp",
   "current-review-light.webp",
   "current-review-dark.webp",
+  "current-review-wide-light.webp",
+  "current-review-wide-dark.webp",
 ].map((file) => `assets/screenshots/${file}`);
+
+const cropSpecs = JSON.parse(read("site/assets/screenshots/editorial-crops.json"));
+const derivedAssets = Object.keys(cropSpecs);
+const approvedAssets = [...screenshotAssets, ...derivedAssets];
 
 const pages = {
   home: read("site/index.html"),
@@ -136,7 +142,7 @@ const fixture = JSON.parse(read("site/fixtures/latest-release.json"));
 
 for (const [name, html] of Object.entries(pages)) {
   containsAll(html, `${name} page`, [
-    '<html lang="en">',
+    '<html lang="en" data-theme="light">',
     'class="skip-link"',
     '<main id="main">',
     "Content-Security-Policy",
@@ -228,70 +234,58 @@ for (const [name, html] of Object.entries(pages)) {
 }
 
 containsAll(pages.home, "Homepage", [
-  "A place to think.",
-  "A space to build.",
-  "workspace-switcher",
-  "ownership-title",
-  "Public alpha",
-  "Public alpha",
-  "One task.<br />Three views.",
-  "Direct the work.",
-  "Run it locally.",
-  "Work with AI in your IDE Workspace.",
-  "assets/gyro-mark.png",
-  'class="spine"',
-  'class="surface-card"',
-  'class="surface-visual ',
-  'class="surface-shot-dark"',
-  'class="surface-shot-light"',
-  "Your tools. Your machine. Your choice.",
-  "Your setup, your call.",
-  "data-agent-rotator",
-  'class="agent-slot"',
-  'class="agent-roster"',
-  ...[
-    "Claude Code",
-    "Codex",
-    "Gemini CLI",
-    "Grok Build",
-    "Kimi Code",
-    "Cursor",
-    "OpenCode",
-    "Ollama",
-    "OpenRouter",
-    "DeepSeek",
-    "Mistral",
-  ].map((name) => `<span class="visually-hidden">${name}</span>`),
-  'src="agents.js"',
-  ...screenshotAssets,
-  "assets/social-preview.png",
+  "A place to think. A space to build.", "workspace-switcher", "ownership-title",
+  "Public alpha", "One task.<br />Three views.", "Direct the work", "Run it locally",
+  "IDE Workspace", "assets/gyro-mark.png", 'class="spine"', 'class="surface-card"',
+  "Your setup, your call.", "data-agent-rotator", 'class="agent-slot"',
+  'class="agent-roster"', "data-agent-toggle", "data-agent-selected",
+  ...["Claude Code", "Codex", "Gemini CLI", "Grok Build", "Kimi Code", "Cursor",
+    "OpenCode", "Ollama", "OpenRouter", "DeepSeek", "Mistral"]
+    .map((name) => `<span class="visually-hidden">${name}</span>`),
+  'src="agents.js"', ...derivedAssets, "assets/social-preview.png",
   "Built for macOS 14+. Fully open source.",
-  "Coding with AI, done better.",
   "Your agents, terminal, and IDE Workspace in one place — and fully open source.",
-  "Tell your agent what to build.",
-  "Run, test, and debug without leaving Gyro.",
-  "Edit, inspect, and manage your code in one place.",
-  "Use the agents you already use.",
-  "Start building with Gyro.",
-  "Gyro brings your coding agents, terminal, and IDE Workspace into one workspace.",
-  "Download DMG",
-  "Apple Silicon + Intel",
-  "Install guide",
-  "What do I need to get started?",
-  "data-download-surface",
+  "See how it works", "See what changed.", "Bring your setup.",
+  'data-start-provider="claude"', 'data-start-provider="openai"', 'data-start-provider="grok"',
+  "Start building with Gyro.", "Download for macOS", "Apple Silicon", "Intel",
+  "Install guide", "What do I need to get started?", "data-download-surface",
 ]);
+check(pages.home.includes('Coding with AI,<br class="hero-break" /> done better.'),
+  "The approved hero headline and desktop line break must remain intact");
+const sectionOrder = ["editorial-hero", "proof-strip", "agents-section", "editorial-product",
+  "editorial-review", "editorial-ownership", "editorial-start", "editorial-download", "editorial-faq"];
+const homepageSections = [...pages.home.matchAll(/<section\b[^>]*class="([^"]+)"/g)]
+  .map((match) => match[1].split(" ")[0]);
+check(JSON.stringify(homepageSections) === JSON.stringify(sectionOrder),
+  "Homepage must use all nine main sections in the approved order, followed by the footer");
+for (const anchor of ["product", "agents", "review", "ownership", "getting-started", "download"])
+  check(pages.home.includes(`id="${anchor}"`), `Missing approved anchor #${anchor}`);
+check((pages.home.match(/data-agent-pick/g) ?? []).length === 11,
+  "The supported roster must retain exactly eleven providers");
+check((pages.home.match(/<details>/g) ?? []).length === 5,
+  "The FAQ must retain five collapsed native disclosures");
+check(!pages.home.includes('<details open'), "FAQ answers must start collapsed");
+for (const [name, html] of Object.entries(pages)) {
+  check(html.includes('class="mobile-nav"'), `${name} must contain native mobile navigation`);
+  check(html.includes('class="footer-wordmark" aria-hidden="true"'), `${name} wordmark must be decorative`);
+}
+check(!read("site/theme.js").includes("createElement(\"canvas\")"), "Theme must not create the decorative pointer canvas");
 
 // Product captures use the real interface and describe the demonstrated state.
 const productImages = [...pages.home.matchAll(/<img\b[^>]*>/gs)]
   .map(([tag]) => tag)
   .filter((tag) => tag.includes("assets/screenshots/"));
 for (const tag of productImages) {
-  check(
-    /\balt="[^"]+"/.test(tag) &&
-      /\bwidth="2880"/.test(tag) &&
-      /\bheight="1800"/.test(tag),
-    "Product screenshots must carry descriptive alt text and their 2880x1800 dimensions",
-  );
+  const path = tag.match(/\bsrc="([^"]+)"/)?.[1];
+  const spec = cropSpecs[path];
+  check(spec && /\balt="[^"]+"/.test(tag) &&
+      tag.includes(`width="${spec.width}"`) && tag.includes(`height="${spec.height}"`),
+    `${path} must carry descriptive alt text and its exact derivative dimensions`);
+}
+for (const [,tag,path,width,height] of pages.home.matchAll(/(<source\b[^>]*srcset="([^"]+)"[^>]*width="(\d+)"[^>]*height="(\d+)"[^>]*>)/g)) {
+  const spec = cropSpecs[path];
+  check(spec?.width === Number(width) && spec?.height === Number(height),
+    `${path} must reserve its exact mobile crop dimensions`);
 }
 
 check(
@@ -312,8 +306,8 @@ check(
   "Product captures must not be labeled as previews",
 );
 check(
-  pages.home.indexOf('id="product"') < pages.home.indexOf('id="agents"'),
-  "Product demonstration must appear before the agent roster",
+  pages.home.indexOf('id="agents"') < pages.home.indexOf('id="product"'),
+  "Provider roster must precede the product demonstration",
 );
 check(
   !pages.home.includes("Move Gyro to Applications."),
@@ -337,7 +331,7 @@ check(
 );
 check(
   [...allHtml.matchAll(/assets\/screenshots\/[^\s"'<>]+/g)].every(([path]) =>
-    screenshotAssets.includes(path),
+    approvedAssets.includes(path),
   ),
   "Pages must reference only the current product screenshots",
 );
@@ -348,7 +342,7 @@ const spine = pages.home.slice(spineStart, spineEnd);
 check(
   spineStart !== -1 &&
     spineEnd !== -1 &&
-    screenshotAssets.every((path) => spine.includes(path)) &&
+    ["chat", "terminal", "ide"].every((name) => ["light", "dark"].every((theme) => spine.includes(`editorial-${name}-${theme}.webp`))) &&
     !/class="mock(?:\s|")/.test(spine),
   "Product surfaces must show current chat, workspace, and review captures in both themes",
 );
@@ -405,45 +399,14 @@ containsAll(pages.privacy, "Privacy page", [
 ]);
 
 containsAll(css, "Shared CSS", [
-  "--shell: min(1152px, calc(100% - 48px))",
-  "--header-height: 64px",
-  "font-size: 56px",
-  "font-size: 40px",
-  "font-size: 21px",
-  "font-size: 16px",
-  "font-size: 13px",
-  "min-height: 44px",
-  ".surface-card",
-  ".surface-visual",
-  "--grid-columns: 12",
-  "grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr))",
-  "grid-template-columns: minmax(260px, 32%) minmax(0, 68%)",
-  ".surface-index",
-  ".premise-list",
-  ".cost-figure",
-  ".cost-gap",
-  ".surface-shot-dark",
-  ".surface-shot-light",
-  ".agent-roster",
-  ".agent-slot",
-  ':root[data-theme="light"]',
-  ".theme-toggle",
-  "--mono:",
-  "--sans:",
-  "--display:",
-  ".spine",
-  ".changelog-layout",
-  ".version-rail nav",
-  ".legal-layout",
-  "scroll-margin-top:",
-  ".site-header {\n  position: sticky;\n  z-index: 50;\n  top: 0;",
-  "width: 100%",
-  ":focus-visible",
-  "@media (max-width: 900px)",
-  "@media (max-width: 720px)",
-  "@media (max-width: 390px)",
-  "@media (prefers-reduced-motion: reduce)",
-  "@media (prefers-contrast: more)",
+  "--shell: min(1248px, calc(100% - 96px))", "--header-height: 72px",
+  "min-height: 44px", ".surface-card", ".capture-frame", ".agent-roster", ".agent-slot",
+  ':root[data-theme="light"]', ".theme-toggle", "--mono:", "--sans:", "--display:",
+  ".spine", ".changelog-layout", ".version-rail nav", ".legal-layout", "scroll-margin-top:",
+  ".site-header {\n  position: sticky;\n  z-index: 50;\n  top: 0;", "width: 100%",
+  ":focus-visible", "@media (max-width: 900px)", "@media (max-width: 720px)",
+  "@media (max-width: 390px)", "@media (prefers-reduced-motion: reduce)",
+  "@media (prefers-contrast: more)", "--agent-cycle: 4500ms", ".ownership-screen",
 ]);
 
 // Both webfonts are served from this origin. There is no font-src in the CSP,
@@ -520,7 +483,7 @@ containsAll(buildScript, "Site builder", [
   "site/assets/fonts/inter-tight-latin.woff2",
   "site/assets/gyro-mark.png",
   "site/assets/social-preview.png",
-  ...screenshotAssets.map((path) => `site/${path}`),
+  ...approvedAssets.map((path) => `site/${path}`),
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
 
@@ -600,12 +563,25 @@ check(
   `Site text must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
 );
 
-// Current app captures render at 1440x900 with a 2x device scale factor.
-const screenshotSpecs = screenshotAssets.map((path) => [
-  `site/${path}`,
-  2880,
-  1800,
-]);
+// Original masters are 1440x900 at 2x; the expanded Review masters are 960x600 at 1x.
+const masterDimensions = Object.fromEntries(screenshotAssets.map((path) =>
+  [path, path.includes("-wide-") ? [960, 600] : [2880, 1800]]));
+const screenshotSpecs = [
+  ...screenshotAssets.map((path) => [`site/${path}`, ...masterDimensions[path]]),
+  ...Object.entries(cropSpecs).map(([path, spec]) => [`site/${path}`, spec.width, spec.height]),
+  ["site/assets/ownership-device.webp", 1586, 992],
+];
+check(derivedAssets.length === 24, "The approved crop manifest must contain twelve light/dark pairs");
+for (const [path, spec] of Object.entries(cropSpecs)) {
+  const [left, top, right, bottom] = spec.crop;
+  const masterSize = masterDimensions[`assets/screenshots/${spec.master}`];
+  check(masterSize &&
+    left >= 0 && top >= 0 && right <= masterSize[0] && bottom <= masterSize[1] &&
+    right - left === spec.width && bottom - top === spec.height,
+    `${path} must be an aspect-preserving crop of an approved master`);
+}
+check(statSync(resolve(repoRoot, "site/assets/ownership-device.webp")).size <= 400_000,
+  "The ownership device must stay within its 400KB budget");
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));
   check(
@@ -746,8 +722,8 @@ if (!failures.length) {
   check(
     JSON.stringify(
       filesA.filter((file) => file.startsWith("assets/screenshots/")).sort(),
-    ) === JSON.stringify([...screenshotAssets].sort()),
-    "Built site must contain exactly the six current product screenshots",
+    ) === JSON.stringify([...approvedAssets, "assets/screenshots/editorial-crops.json"].sort()),
+    "Built site must contain only the eight authentic masters, approved derivatives, and their crop manifest",
   );
 }
 

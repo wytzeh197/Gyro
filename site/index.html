@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -66,15 +66,14 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="theme.js?v=light-1"></script>
-    <link rel="stylesheet" href="styles.css?v=homepage-14" />
+    <script src="theme.js?v=editorial-premium-1"></script>
+    <link rel="stylesheet" href="styles.css?v=editorial-premium-1" />
     <script type="module" src="app.js"></script>
     <script type="module" src="agents.js"></script>
   </head>
   <body class="home-page">
-    <a class="skip-link" href="#main">Skip to content</a>
-
-    <header class="site-header">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
       <a class="brand" href="./" aria-label="Gyro home">
         <img src="assets/gyro-mark.png" alt="" width="26" height="26" />
         <span>Gyro</span>
@@ -86,7 +85,7 @@
         <button
           class="theme-toggle"
           type="button"
-          data-theme-toggle
+          data-theme-toggle hidden
           aria-label="Switch to dark theme"
         >
           <svg
@@ -124,63 +123,21 @@
           <img src="assets/github.svg" alt="" width="18" height="18" />
           <span>GitHub</span>
         </a>
+        <details class="mobile-nav"><summary>Menu</summary><nav aria-label="Mobile navigation"><a href="#product">Product</a><a href="install/">Install</a><a href="changelog/">Changelog</a><a href="https://github.com/wytzeh197/Gyro">GitHub</a></nav></details>
         <a class="nav-download" href="#download">Download</a>
       </nav>
     </header>
-
-    <main id="main">
-      <section class="hero section-shell" aria-labelledby="hero-title">
-        <div class="hero-head">
-          <div class="hero-copy">
-            <a class="hero-badge" href="changelog/"
-              ><span class="release-dot" aria-hidden="true"></span
-              ><span>Public alpha</span></a
-            >
-            <h1 id="hero-title">Coding with AI, done better.</h1>
-          </div>
-          <div class="hero-intro">
-            <p class="hero-description">
-              Your agents, terminal, and IDE Workspace in one place — and fully open source.
-            </p>
-            <div class="hero-actions">
-              <a class="button button-primary" href="#download">
-                <img class="mark-apple" src="assets/apple.svg" alt="" width="17" height="17" />
-                Download for macOS
-              </a>
-              <a class="hero-tour-link" href="privacy/">Privacy <span aria-hidden="true">→</span></a>
-            </div>
-            <p class="hero-note">macOS 14+ <span aria-hidden="true">·</span> Public alpha</p>
-          </div>
+<main id="main">
+<section class="editorial-hero section-shell" aria-labelledby="hero-title">
+        <div class="editorial-hero-copy"><a class="alpha-badge" href="changelog/">Public alpha</a>
+          <h1 id="hero-title">Coding with AI,<br class="hero-break" /> done better.</h1>
+          <p>Your agents, terminal, and IDE Workspace in one place — and fully open source.</p>
+          <div class="editorial-actions"><a class="button editorial-primary" href="#download"><img src="assets/apple.svg" alt="" width="18" height="18" />Download for macOS</a><a class="editorial-tour" href="#product">See how it works <span aria-hidden="true">→</span></a></div>
+          <p class="editorial-meta">macOS 14+ · Public alpha</p>
         </div>
-
-        <figure class="product-stage">
-          <div class="product-stage-frame">
-            <div class="hero-shot-frame">
-              <picture>
-                <img
-                  class="hero-shot hero-shot-dark"
-                  src="assets/screenshots/current-review-dark.webp"
-                  width="2880"
-                  height="1800"
-                  fetchpriority="high"
-                  alt="Gyro in dark mode, with an agent conversation beside the recorded code changes in IDE Workspace."
-                />
-              </picture>
-              <picture>
-                <img
-                  class="hero-shot hero-shot-light"
-                  src="assets/screenshots/current-review-light.webp"
-                  width="2880"
-                  height="1800"
-                  alt="Gyro in light mode, with an agent conversation beside the recorded code changes in IDE Workspace."
-                />
-              </picture>
-            </div>
-          </div>
-        </figure>
+        <figure class="capture-frame hero-capture"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-hero-mobile-light.webp" width="1560" height="1350" /><img class="" src="assets/screenshots/editorial-hero-light.webp" width="2040" height="1320" alt="Gyro agent conversation with a completed retry-limit task, edited file, and Review action." loading="eager" fetchpriority="high" /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-hero-mobile-dark.webp" width="1560" height="1350" /><img class="" src="assets/screenshots/editorial-hero-dark.webp" width="2040" height="1320" alt="Gyro agent conversation with a completed retry-limit task, edited file, and Review action." loading="eager" fetchpriority="high" /></picture></figure>
       </section>
-
-      <section class="proof-strip section-shell" aria-label="About Gyro">
+<section class="proof-strip section-shell" aria-label="About Gyro">
         <div>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
           <strong>Open source</strong>
@@ -197,132 +154,7 @@
           <span>CLI or local model</span>
         </div>
       </section>
-
-      <section class="ownership-section section-shell" id="ownership" aria-labelledby="ownership-title">
-        <div class="ownership-copy">
-          <p class="eyebrow">Your tools. Your machine. Your choice.</p>
-          <h2 id="ownership-title">Your setup, your call.</h2>
-          <p class="ownership-links">
-            <a class="text-link" href="privacy/">How local data works <span aria-hidden="true">→</span></a>
-          </p>
-        </div>
-        <div class="ownership-visual" role="img" aria-label="A Mac brings your agents, files, and review into one local workspace.">
-          <svg viewBox="0 0 560 390" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path class="diagram-line" d="M104 54h342a14 14 0 0 1 14 14v213H90V68a14 14 0 0 1 14-14Z"/>
-            <path class="diagram-line" d="M72 296h406l-24 24H96l-24-24Z"/>
-            <path class="diagram-line-soft" d="M228 302h92"/>
-            <rect class="diagram-panel" x="108" y="72" width="334" height="188" rx="7"/>
-            <path class="diagram-line-soft" d="M108 100h334M157 100v160"/>
-            <circle class="diagram-dot" cx="124" cy="86" r="3"/><circle class="diagram-dot" cx="136" cy="86" r="3"/><circle class="diagram-dot" cx="148" cy="86" r="3"/>
-            <rect class="diagram-line-soft" x="120" y="114" width="25" height="7" rx="3.5"/>
-            <rect class="diagram-line-soft" x="120" y="132" width="25" height="7" rx="3.5"/>
-            <rect class="diagram-line-soft" x="120" y="150" width="25" height="7" rx="3.5"/>
-            <rect class="diagram-chat" x="176" y="116" width="148" height="27" rx="8"/>
-            <rect class="diagram-line-soft" x="188" y="126" width="103" height="6" rx="3"/>
-            <rect class="diagram-agent" x="232" y="153" width="190" height="42" rx="9"/>
-            <rect class="diagram-line-soft" x="245" y="165" width="150" height="6" rx="3"/>
-            <rect class="diagram-line-soft" x="245" y="178" width="112" height="5" rx="2.5"/>
-            <rect class="diagram-diff" x="176" y="207" width="246" height="39" rx="8"/>
-            <path class="diagram-line-soft" d="M192 219h69m-69 11h118m-118 10h91"/>
-            <rect class="diagram-diff-added" x="333" y="217" width="73" height="8" rx="4"/>
-            <rect class="diagram-diff-added" x="303" y="230" width="103" height="8" rx="4"/>
-            <path class="diagram-line-soft" d="M72 25h112l30 29M488 25H376l-30 29M280 367v-44"/>
-            <circle class="diagram-ring" cx="214" cy="54" r="4"/><circle class="diagram-ring" cx="346" cy="54" r="4"/><circle class="diagram-ring" cx="280" cy="324" r="4"/>
-            <text class="diagram-label" x="24" y="22">YOUR AGENTS</text>
-            <text class="diagram-label" x="398" y="22">YOUR FILES</text>
-            <text class="diagram-label" x="237" y="385">ON YOUR MAC</text>
-          </svg>
-        </div>
-      </section>
-
-      <section
-        class="product-section section-shell"
-        id="product"
-        aria-labelledby="product-title"
-      >
-        <header class="section-heading">
-          <h2 id="product-title">One task.<br />Three views.</h2>
-        </header>
-
-        <div
-          class="workspace-switcher"
-          role="group"
-          aria-label="Explore the workspace"
-          hidden
-        >
-          <button type="button" data-surface="0" aria-pressed="true">
-            <span class="switcher-title"
-              >Direct the work <span aria-hidden="true">↗</span></span
-            >
-            <span class="switcher-description">Start with a conversation.</span>
-          </button>
-          <button type="button" data-surface="1" aria-pressed="false">
-            <span class="switcher-title"
-              >Run it locally <span aria-hidden="true">↗</span></span
-            >
-            <span class="switcher-description"
-              >Work in your own environment.</span
-            >
-          </button>
-          <button type="button" data-surface="2" aria-pressed="false">
-            <span class="switcher-title"
-              >Work with AI in your IDE Workspace <span aria-hidden="true">↗</span></span
-            >
-            <span class="switcher-description">See exactly what changed.</span>
-          </button>
-        </div>
-        <ol class="spine">
-          <li class="surface-card">
-            <span class="surface-index" aria-hidden="true">01</span>
-            <div class="surface-copy">
-              <h3>Direct the work.</h3>
-              <p>Tell your agent what to build.</p>
-            </div>
-            <div class="surface-visual surface-visual-chat">
-              <picture class="surface-shot-dark">
-                <img src="assets/screenshots/current-chat-dark.webp" width="2880" height="1800" alt="An agent conversation in Gyro, with the completed task, edited file, and message composer visible." loading="lazy" />
-              </picture>
-              <picture class="surface-shot-light">
-                <img src="assets/screenshots/current-chat-light.webp" width="2880" height="1800" alt="An agent conversation in Gyro, with the completed task, edited file, and message composer visible." loading="lazy" />
-              </picture>
-            </div>
-          </li>
-
-          <li class="surface-card">
-            <span class="surface-index" aria-hidden="true">02</span>
-            <div class="surface-copy">
-              <h3>Run it locally.</h3>
-              <p>Run, test, and debug without leaving Gyro.</p>
-            </div>
-            <div class="surface-visual surface-visual-workspace">
-              <picture class="surface-shot-dark">
-                <img src="assets/screenshots/current-workspace-dark.webp" width="2880" height="1800" alt="Gyro Workspace with a source file open in the editor and a local shell below it." loading="lazy" />
-              </picture>
-              <picture class="surface-shot-light">
-                <img src="assets/screenshots/current-workspace-light.webp" width="2880" height="1800" alt="Gyro Workspace with a source file open in the editor and a local shell below it." loading="lazy" />
-              </picture>
-            </div>
-          </li>
-
-          <li class="surface-card">
-            <span class="surface-index" aria-hidden="true">03</span>
-            <div class="surface-copy">
-              <h3>Work with AI in your IDE Workspace.</h3>
-              <p>Edit, inspect, and manage your code in one place.</p>
-            </div>
-            <div class="surface-visual surface-visual-review">
-              <picture class="surface-shot-dark">
-                <img src="assets/screenshots/current-review-dark.webp" width="2880" height="1800" alt="Gyro IDE Workspace showing the recorded changes from an agent's turn beside the conversation." loading="lazy" />
-              </picture>
-              <picture class="surface-shot-light">
-                <img src="assets/screenshots/current-review-light.webp" width="2880" height="1800" alt="Gyro IDE Workspace showing the recorded changes from an agent's turn beside the conversation." loading="lazy" />
-              </picture>
-            </div>
-          </li>
-        </ol>
-      </section>
-
-      <section
+<section
         class="agents-section section-shell"
         id="agents"
         aria-labelledby="agents-title"
@@ -342,16 +174,23 @@
             <symbol id="agent-openrouter" viewBox="17.8 15.2 369.6 262.3"><path fill="currentColor" d="M303.9475,17.19926c42.79734,0,77.48933,34.69327,77.48933,77.48933s-34.69199,77.48933-77.48933,77.48933l76.86166,76.86244c9.76367,9.76313,2.84903,26.45667-10.95697,26.45667h-220.88335c-71.32686,0-129.14889-57.82202-129.14889-129.14889S77.64197,17.19926,148.96884,17.19926h154.97866ZM148.96884,68.85881c-42.79607,0-77.48933,34.69327-77.48933,77.48933s34.69327,77.48933,77.48933,77.48933,77.48933-34.69327,77.48933-77.48933-34.69327-77.48933-77.48933-77.48933Z"/></symbol>
             <symbol id="agent-deepseek" viewBox="0 0 24 24"><path fill="currentColor" d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45"/></symbol>
             <symbol id="agent-mistral" viewBox="0 0 24 24"><path fill="url(#agent-mistral-rows)" d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z"/></symbol>
-          </svg>
+          <symbol id="agent-openai"
+                viewBox="0 0 256 260"
+                fill="currentColor"
+              >
+                <path
+                  d="M239.184 106.203a64.72 64.72 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.72 64.72 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.67 64.67 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.77 64.77 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483m-97.56 136.338a48.4 48.4 0 0 1-31.105-11.255l1.535-.87l51.67-29.825a8.6 8.6 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601M37.158 197.93a48.35 48.35 0 0 1-5.781-32.589l1.534.921l51.722 29.826a8.34 8.34 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803M23.549 85.38a48.5 48.5 0 0 1 25.58-21.333v61.39a8.29 8.29 0 0 0 4.195 7.316l62.874 36.272l-21.845 12.636a.82.82 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405zm179.466 41.695l-63.08-36.63L161.73 77.86a.82.82 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.54 8.54 0 0 0-4.4-7.213m21.742-32.69l-1.535-.922l-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.72.72 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391zM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87l-51.67 29.825a8.6 8.6 0 0 0-4.246 7.367zm11.868-25.58L128.067 97.3l28.188 16.218v32.434l-28.086 16.218l-28.188-16.218z"
+                ></path>
+              </symbol></svg>
         <h2 class="agents-title" id="agents-title">
           <span class="visually-hidden">Use the agents you already use.</span>
           <span class="agents-line" aria-hidden="true"
             >Use
-            <span class="agent-slot" data-agent-slot>
-                <span class="agent-word is-on" data-agent-word><svg class="agent-mark is-claude" aria-hidden="true"><use href="#agent-claude" /></svg>Claude Code</span>
+            <span class="agent-footprint"><span class="agent-slot" data-agent-slot>
+                <span class="agent-word" data-agent-word><svg class="agent-mark is-claude" aria-hidden="true"><use href="#agent-claude" /></svg>Claude Code</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-codex" aria-hidden="true"><use href="#agent-codex" /></svg>Codex</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-gemini" aria-hidden="true"><use href="#agent-gemini" /></svg>Gemini CLI</span>
-                <span class="agent-word" data-agent-word><svg class="agent-mark is-grok" aria-hidden="true"><use href="#agent-grok" /></svg>Grok Build</span>
+                <span class="agent-word is-on" data-agent-word><svg class="agent-mark is-grok" aria-hidden="true"><use href="#agent-grok" /></svg>Grok Build</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-kimi" aria-hidden="true"><use href="#agent-kimi" /></svg>Kimi Code</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-cursor" aria-hidden="true"><use href="#agent-cursor" /></svg>Cursor</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-opencode" aria-hidden="true"><use href="#agent-opencode" /></svg>OpenCode</span>
@@ -359,99 +198,93 @@
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-openrouter" aria-hidden="true"><use href="#agent-openrouter" /></svg>OpenRouter</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-deepseek" aria-hidden="true"><use href="#agent-deepseek" /></svg>DeepSeek</span>
                 <span class="agent-word" data-agent-word><svg class="agent-mark is-mistral" aria-hidden="true"><use href="#agent-mistral" /></svg>Mistral</span>
-            </span></span
-          >
+            </span></span></span>
           <span class="agents-line" aria-hidden="true">the way you already do.</span>
         </h2>
         <ul class="agent-roster" aria-label="Supported agents">
             <li>
-              <button type="button" class="agent-pick is-on" aria-pressed="true" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-claude" aria-hidden="true"><use href="#agent-claude" /></svg><span class="visually-hidden">Claude Code</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-codex" aria-hidden="true"><use href="#agent-codex" /></svg><span class="visually-hidden">Codex</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-gemini" aria-hidden="true"><use href="#agent-gemini" /></svg><span class="visually-hidden">Gemini CLI</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick is-on" aria-pressed="true" data-agent-pick disabled>
                 <svg class="agent-mark is-grok" aria-hidden="true"><use href="#agent-grok" /></svg><span class="visually-hidden">Grok Build</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-kimi" aria-hidden="true"><use href="#agent-kimi" /></svg><span class="visually-hidden">Kimi Code</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-cursor" aria-hidden="true"><use href="#agent-cursor" /></svg><span class="visually-hidden">Cursor</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-opencode" aria-hidden="true"><use href="#agent-opencode" /></svg><span class="visually-hidden">OpenCode</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-ollama" aria-hidden="true"><use href="#agent-ollama" /></svg><span class="visually-hidden">Ollama</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-openrouter" aria-hidden="true"><use href="#agent-openrouter" /></svg><span class="visually-hidden">OpenRouter</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-deepseek" aria-hidden="true"><use href="#agent-deepseek" /></svg><span class="visually-hidden">DeepSeek</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
             <li>
-              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick>
+              <button type="button" class="agent-pick" aria-pressed="false" data-agent-pick disabled>
                 <svg class="agent-mark is-mistral" aria-hidden="true"><use href="#agent-mistral" /></svg><span class="visually-hidden">Mistral</span><span class="agent-progress" aria-hidden="true"></span>
               </button>
             </li>
-        </ul>
+        </ul><p class="selected-agent" data-agent-selected>Grok Build</p><button class="rotation-toggle" type="button" data-agent-toggle hidden>Pause rotation</button><noscript><p class="editorial-meta">Supported: Claude Code, Codex, Gemini CLI, Grok Build, Kimi Code, Cursor, OpenCode, Ollama, OpenRouter, DeepSeek, Mistral.</p></noscript>
       </section>
-
-      <section
-        class="download-section"
+<section class="editorial-product section-shell" id="product" aria-labelledby="product-title"><div class="view-intro"><h2 id="product-title">One task.<br />Three views.</h2><div class="workspace-switcher" role="group" aria-label="Explore the workspace" hidden><button type="button" data-surface="0" aria-pressed="true"><span class="view-marker" aria-hidden="true"></span><span><span class="switcher-title">Direct the work</span><span class="switcher-description">Start with a conversation.</span></span></button><button type="button" data-surface="1" aria-pressed="false"><span class="view-marker" aria-hidden="true"></span><span><span class="switcher-title">Run it locally</span><span class="switcher-description">Work in your own environment.</span></span></button><button type="button" data-surface="2" aria-pressed="false"><span class="view-marker" aria-hidden="true"></span><span><span class="switcher-title">IDE Workspace</span><span class="switcher-description">See exactly what changed.</span></span></button></div></div><ol class="spine"><li class="surface-card"><h3 class="fallback-view-label">Direct the work</h3><figure class="capture-frame view-capture"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-chat-mobile-light.webp" width="1080" height="1450" /><img class="" src="assets/screenshots/editorial-chat-light.webp" width="2040" height="1800" alt="Gyro chat with the completed retry-limit task and edited-file review action." loading="lazy"  /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-chat-mobile-dark.webp" width="1080" height="1450" /><img class="" src="assets/screenshots/editorial-chat-dark.webp" width="2040" height="1800" alt="Gyro chat with the completed retry-limit task and edited-file review action." loading="lazy"  /></picture></figure><p class="capture-caption">Direct the work. Start with a conversation.</p></li><li class="surface-card"><h3 class="fallback-view-label">Run it locally</h3><figure class="capture-frame view-capture"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-terminal-mobile-light.webp" width="1140" height="1540" /><img class="" src="assets/screenshots/editorial-terminal-light.webp" width="2320" height="1800" alt="Gyro source editor above a local shell with the example test results." loading="lazy"  /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-terminal-mobile-dark.webp" width="1140" height="1540" /><img class="" src="assets/screenshots/editorial-terminal-dark.webp" width="2320" height="1800" alt="Gyro source editor above a local shell with the example test results." loading="lazy"  /></picture></figure><p class="capture-caption">Run it locally. Work in your own environment.</p></li><li class="surface-card"><h3 class="fallback-view-label">IDE Workspace</h3><figure class="capture-frame view-capture"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-ide-mobile-light.webp" width="1080" height="1460" /><img class="" src="assets/screenshots/editorial-ide-light.webp" width="2880" height="1800" alt="Gyro IDE Workspace with the example source file open beside its project explorer." loading="lazy"  /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-ide-mobile-dark.webp" width="1080" height="1460" /><img class="" src="assets/screenshots/editorial-ide-dark.webp" width="2880" height="1800" alt="Gyro IDE Workspace with the example source file open beside its project explorer." loading="lazy"  /></picture></figure><p class="capture-caption">IDE Workspace. See exactly what changed.</p></li></ol></section>
+<section class="editorial-review section-shell" id="review" aria-labelledby="review-title"><header class="centered-heading"><p class="editorial-eyebrow">From result to review</p><h2 id="review-title">See what changed.</h2><p>Open the diff. Inspect the change. Keep working.</p></header><figure class="review-figure"><div class="capture-frame review-capture"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-review-mobile-light.webp" width="840" height="940" /><img class="" src="assets/screenshots/editorial-review-light.webp" width="934" height="449" alt="Review panel: sync.js selected, recorded changes, Compare current file, and the removed infinite retry limit replaced by five attempts." loading="lazy"  /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-review-mobile-dark.webp" width="840" height="940" /><img class="" src="assets/screenshots/editorial-review-dark.webp" width="934" height="449" alt="Review panel: sync.js selected, recorded changes, Compare current file, and the removed infinite retry limit replaced by five attempts." loading="lazy"  /></picture></div><figcaption class="capture-caption">An example change in Gyro.</figcaption></figure></section>
+<section class="editorial-ownership section-shell" id="ownership" aria-labelledby="ownership-title"><header><h2 id="ownership-title">Your setup, your call.</h2><p>Sessions and settings stay on your Mac.<br />Cloud agents receive the context you send.</p><a class="editorial-link" href="privacy/">How local data works <span aria-hidden="true">→</span></a></header><figure><div class="ownership-device"><div class="ownership-screen"><picture class="capture-light"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-ownership-mobile-light.webp" width="2880" height="1730" /><img class="" src="assets/screenshots/editorial-ownership-light.webp" width="2880" height="1730" alt="Gyro on your Mac with an agent conversation beside the actual recorded file changes." loading="lazy"  /></picture><picture class="capture-dark"><source media="(max-width: 720px)" srcset="assets/screenshots/editorial-ownership-mobile-dark.webp" width="2880" height="1730" /><img class="" src="assets/screenshots/editorial-ownership-dark.webp" width="2880" height="1730" alt="Gyro on your Mac with an agent conversation beside the actual recorded file changes." loading="lazy"  /></picture></div><img class="device-frame" src="assets/ownership-device.webp" width="1586" height="992" alt="" loading="lazy" /></div><figcaption class="capture-caption">Your workspace, on your machine.</figcaption></figure></section>
+<section class="editorial-start section-shell" id="getting-started" aria-labelledby="start-title"><h2 id="start-title">Bring your setup.</h2><ol class="start-sequence"><li><span class="step-number">01</span><div class="step-visual"><img src="assets/folder.svg" width="44" height="44" alt="" /></div><h3>Open a project</h3><p>Start with your existing codebase.</p></li><li><span class="step-number">02</span><div class="step-visual start-agent-logos" aria-hidden="true"><svg data-start-provider="claude" viewBox="0 0 24 24"><use href="#agent-claude" /></svg><svg data-start-provider="openai" viewBox="0 0 256 260"><use href="#agent-openai" /></svg><svg data-start-provider="grok" viewBox="0 0 24 24"><use href="#agent-grok" /></svg></div><h3>Choose your agent</h3><p>Use the tools you already know.</p></li><li><span class="step-number">03</span><div class="step-visual"><img src="assets/terminal.svg" width="44" height="44" alt="" /></div><h3>Start a task</h3><p>Describe the work. Review the result.</p></li></ol><a class="editorial-link install-guide-link" href="install/">Read the install guide <span aria-hidden="true">→</span></a></section>
+<section
+        class="editorial-download section-shell"
         id="download"
         aria-labelledby="download-title"
       >
-        <div class="section-shell download-shell">
+        <div class="editorial-download-shell">
           <header class="download-heading">
             <img
               class="download-brand-mark"
-              src="assets/gyro-mark.png"
-              width="48"
-              height="48"
+              src="assets/gyro-logo.png"
+              width="512"
+              height="512"
               alt=""
             />
             <h2 id="download-title">Start building with Gyro.</h2>
             <p>Built for macOS 14+. Fully open source.</p>
-            <a class="text-link" href="install/">Install guide →</a>
+
           </header>
 
-          <div class="download-stack" data-download-surface>
+          <div class="download-stack" data-download-surface data-ready-label="Download for macOS">
             <article class="macos-card">
-              <div class="platform-identity">
-                <span class="platform-mark">
-                  <img src="assets/apple.svg" alt="" width="28" height="28" />
-                </span>
-                <div>
-                  <h3>macOS</h3>
-                  <p>Apple Silicon + Intel</p>
-                </div>
-              </div>
+
 
               <fieldset class="architecture-selector">
                 <legend>Mac processor</legend>
@@ -485,10 +318,10 @@
                 data-role="download-link"
                 href="https://github.com/wytzeh197/Gyro/releases/latest"
               >
-                <span data-role="download-label">Download DMG</span>
+                <img src="assets/apple.svg" alt="" width="18" height="18" /><span data-role="download-label">Open GitHub Releases</span>
               </a>
 
-              <p class="asset-meta" data-role="asset-meta">
+              <p class="editorial-meta">Public alpha · macOS 14+</p><p class="asset-meta" data-role="asset-meta">
                 Loading the latest release…
               </p>
 
@@ -516,18 +349,17 @@
               <a
                 data-role="release-notes-link"
                 href="https://github.com/wytzeh197/Gyro/releases/latest"
-                >Release notes</a
+                >Release notes →</a
               >
               <span aria-hidden="true">·</span>
-              <a href="install/">Install guide</a>
+              <a href="install/">Install guide →</a>
             </p>
           </div>
         </div>
       </section>
-
-      <section class="help-section section-shell" aria-labelledby="faq-title">
+<section class="editorial-faq section-shell" aria-labelledby="faq-title">
         <header class="section-heading compact-heading">
-          <h2 id="faq-title">Questions about Gyro.</h2>
+          <h2 id="faq-title">Questions about Gyro.</h2><p>A few things to know before you start.</p>
         </header>
         <div class="detail-list">
           <details>
@@ -580,34 +412,17 @@
           </details>
         </div>
       </section>
-    </main>
-
-    <footer class="site-footer">
-      <div class="section-shell footer-grid">
-        <a class="brand" href="./"
-          ><img src="assets/gyro-logo.png" alt="" width="28" height="28" /><span
-            >Gyro</span
-          ></a
-        >
-        <nav aria-label="Footer navigation">
-          <a href="privacy/">Privacy &amp; Legal</a>
-          <a href="install/">Install</a>
-          <a href="changelog/">Changelog</a>
-          <a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
-            >Support</a
-          >
-          <a href="https://github.com/wytzeh197/Gyro/security">Security</a>
-          <a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE"
-            >License</a
-          >
-          <a href="assets/ATTRIBUTIONS.md">Attributions</a>
-          <a href="https://github.com/wytzeh197/Gyro">Source</a>
-        </nav>
-        <p>Open source. Built for macOS.</p>
-      </div>
-      <div class="footer-signature section-shell" aria-hidden="true">
-        Gyro<span>A place to think. A space to build.</span>
+</main>
+<footer class="site-footer">
+      <div class="section-shell">
+        <div class="footer-resources">
+          <a class="brand" href="./" aria-label="Gyro home"><img src="assets/gyro-mark.png" alt="" width="28" height="28" /><span>Gyro</span></a>
+          <nav aria-label="Product resources"><strong>Product</strong><a href="install/">Install</a><a href="changelog/">Changelog</a><a href="https://github.com/wytzeh197/Gyro">Source</a></nav>
+          <nav aria-label="Help resources"><strong>Help</strong><a href="privacy/">Privacy &amp; Legal</a><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md">Support</a><a href="https://github.com/wytzeh197/Gyro/security">Security</a><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE">License</a><a href="assets/ATTRIBUTIONS.md">Attributions</a></nav>
+        </div>
+        <div class="footer-colophon"><p>A place to think. A space to build.</p><p>Open source. Built for macOS.</p></div>
+        <div class="footer-wordmark" aria-hidden="true">Gyro</div>
       </div>
     </footer>
-  </body>
+</body>
 </html>

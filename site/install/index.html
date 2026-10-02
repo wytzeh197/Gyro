@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -48,29 +48,25 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="../theme.js?v=light-1"></script>
-    <link rel="stylesheet" href="../styles.css?v=editorial-2" />
+    <script src="../theme.js?v=editorial-premium-1"></script>
+    <link rel="stylesheet" href="../styles.css?v=editorial-premium-1" />
     <script type="module" src="../app.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="brand" href="../" aria-label="Gyro home"
-        ><img
-          src="../assets/gyro-mark.png"
-          alt=""
-          width="26"
-          height="26"
-        /><span>Gyro</span></a
-      >
+      <a class="brand" href="../" aria-label="Gyro home">
+        <img src="../assets/gyro-mark.png" alt="" width="26" height="26" />
+        <span>Gyro</span>
+      </a>
       <nav aria-label="Main navigation">
         <a class="desktop-nav-link" href="../#product">Product</a>
-        <a class="desktop-nav-link" href="./" aria-current="page">Install</a>
+        <a class="desktop-nav-link" href="../install/" aria-current="page">Install</a>
         <a class="desktop-nav-link" href="../changelog/">Changelog</a>
         <button
           class="theme-toggle"
           type="button"
-          data-theme-toggle
+          data-theme-toggle hidden
           aria-label="Switch to dark theme"
         >
           <svg
@@ -104,12 +100,12 @@
             <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
           </svg>
         </button>
-        <a class="github-link" href="https://github.com/wytzeh197/Gyro"
-          ><img src="../assets/github.svg" alt="" width="18" height="18" /><span
-            >GitHub</span
-          ></a
-        >
-        <a class="nav-download" href="#download">Download</a>
+        <a class="github-link" href="https://github.com/wytzeh197/Gyro">
+          <img src="../assets/github.svg" alt="" width="18" height="18" />
+          <span>GitHub</span>
+        </a>
+        <details class="mobile-nav"><summary>Menu</summary><nav aria-label="Mobile navigation"><a href="../#product">Product</a><a href="../install/" aria-current="page">Install</a><a href="../changelog/">Changelog</a><a href="https://github.com/wytzeh197/Gyro">GitHub</a></nav></details>
+        <a class="nav-download" href="../#download">Download</a>
       </nav>
     </header>
 
@@ -333,27 +329,14 @@ pnpm desktop:build</code></pre>
     </main>
 
     <footer class="site-footer">
-      <div class="section-shell footer-grid">
-        <a class="brand" href="../"
-          ><img
-            src="../assets/gyro-logo.png"
-            alt=""
-            width="28"
-            height="28"
-          /><span>Gyro</span></a
-        >
-        <nav aria-label="Footer navigation">
-          <a href="../privacy/">Privacy &amp; Legal</a><a href="./">Install</a
-          ><a href="../changelog/">Changelog</a
-          ><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
-            >Support</a
-          ><a href="https://github.com/wytzeh197/Gyro/security">Security</a
-          ><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE"
-            >License</a
-          ><a href="../assets/ATTRIBUTIONS.md">Attributions</a
-          ><a href="https://github.com/wytzeh197/Gyro">Source</a>
-        </nav>
-        <p>Open source. Built for macOS.</p>
+      <div class="section-shell">
+        <div class="footer-resources">
+          <a class="brand" href="../" aria-label="Gyro home"><img src="../assets/gyro-mark.png" alt="" width="28" height="28" /><span>Gyro</span></a>
+          <nav aria-label="Product resources"><strong>Product</strong><a href="../install/">Install</a><a href="../changelog/">Changelog</a><a href="https://github.com/wytzeh197/Gyro">Source</a></nav>
+          <nav aria-label="Help resources"><strong>Help</strong><a href="../privacy/">Privacy &amp; Legal</a><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md">Support</a><a href="https://github.com/wytzeh197/Gyro/security">Security</a><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE">License</a><a href="../assets/ATTRIBUTIONS.md">Attributions</a></nav>
+        </div>
+        <div class="footer-colophon"><p>A place to think. A space to build.</p><p>Open source. Built for macOS.</p></div>
+        <div class="footer-wordmark" aria-hidden="true">Gyro</div>
       </div>
     </footer>
   </body>
