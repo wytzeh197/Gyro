@@ -2256,8 +2256,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .site-header .brand img, .footer-resources .brand img { filter: var(--mark-filter); }
 .site-header .brand { padding: 0; gap: 10px; font-size: 24px; font-weight: 600; }
 .site-header > nav { display: flex; align-items: center; gap: 24px; }
-.site-header nav > a { min-height: 44px; display: inline-flex; align-items: center; padding: 0; font-size: 16px; text-decoration: none; }
-.site-header nav > a:hover { color: var(--blue); }
+.site-header .nav-pages { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 24px; }
+.site-header nav > a, .site-header .nav-pages > a { min-height: 44px; display: inline-flex; align-items: center; padding: 0; font-size: 16px; text-decoration: none; }
+.site-header nav > a:hover, .site-header .nav-pages > a:hover { color: var(--blue); }
 .site-header .github-link { gap: 8px; }
 .site-header .nav-download { min-height: 48px; padding: 0 22px; background: var(--blue); border: 1px solid var(--blue); border-radius: 10px; color: #fff; }
 .site-header .nav-download:hover { background: #2458c7; color: #fff; }
@@ -2454,7 +2455,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
   :root { --header-height: 64px; --footer-shell: calc(100% - 64px); }
   .home-page { --shell: calc(100% - 64px); }
   .site-header { padding-inline: 32px; }
-  .site-header > nav { gap: 16px; }
+  .site-header > nav, .site-header .nav-pages { gap: 16px; }
   .footer-resources { flex-wrap: wrap; }
   .footer-resources nav { align-items: flex-start; }
   .home-page main > section { padding-block: 80px; }
@@ -2466,6 +2467,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
   .home-page .start-sequence { gap: 32px; }
 }
 @media (max-width: 900px) {
+  .site-header .nav-pages { display: none; }
   .site-header .desktop-nav-link, .site-header .github-link { display: none; }
   .mobile-nav { display: block; }
   .site-header > nav { gap: 8px; }

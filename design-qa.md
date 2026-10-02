@@ -88,3 +88,11 @@ Product captures use the actual Gyro development fixture with synthetic example 
 - [x] Fix actionable visual findings and inspect combined post-fix comparisons.
 - [x] Verify focused runtime behavior and responsive layouts.
 - [x] Save desktop/mobile screenshots and this QA record.
+
+## Approved follow-up: centered top navigation
+
+The user's October 2 instruction moves Product, Install, and Changelog to the center of the shared top bar. This intentionally supersedes their position in the original hero reference. All four page headers now group those links in `.nav-pages`, centered on the viewport; the existing right-side actions and mobile disclosure behavior remain.
+
+Post-change evidence: `desktop-nav-centered.png` (1440 × 1000) and `nav-centering-checks.json` in the evidence directory. Measured group centers equal the viewport centers at 1440, 1024, and 901px; the minimum observed gap to the right-side controls is 33.75px at 901px. The disclosure replaces the group at 900px and below. No overflow at 1440, 1024, 901, 900, 390, or 320px. Install, Changelog, and Privacy each center at 720px in a 1440px viewport; a dark-theme 901px check also has no overflow. Browser logs contain no warnings or errors. The site checker, build, and whitespace checks pass.
+
+No actionable P0/P1/P2 finding remains after this follow-up.
