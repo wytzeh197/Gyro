@@ -18,7 +18,9 @@ in about a minute.
 
 ## Publishing a model addition
 
-Edit `site/model-catalog.json`. The site build includes it as a static asset.
+Edit `catalog/model-catalog.json` in Gyro. This is the app-owned catalog source.
+The private [gyro-website repository](https://github.com/wytzeh197/gyro-website)
+imports the committed document and the app parser before serving it as a static asset.
 A model entry looks like this (illustrative ID, not a real model):
 
 ```json
@@ -52,12 +54,19 @@ publishing, for example with `claude -p ok --model <id> --output-format json`,
 whose `modelUsage` reports the context window the CLI really gives that ID. Deploying the site is a separate release action; editing this file
 does not publish it.
 
-Commit the change, deploy it with `pnpm site:deploy`, then confirm what is
-actually live. The deploy first runs `verify-model-catalog.mjs --local`, which
-refuses a catalog the app's parser rejects, a catalog that differs from `HEAD`,
-and any uncommitted change under `site/`, since the deploy uploads the working
-tree. Both modes warn when `origin/main` records a different catalog: merge
-promptly, or the next deploy from a clean main checkout withdraws it.
+Commit and merge the catalog change in Gyro. In the website checkout, run
+`npm run catalog:sync -- /path/to/Gyro`. It imports the committed catalog, parser,
+provider baseline, and catalog checks, recording the exact Gyro commit and hashes.
+Run `npm run site:check`, commit the imported files, then deploy with
+`npm run site:deploy`. The website deploy gate refuses an invalid catalog, altered
+imported files, a catalog differing from `HEAD`, or uncommitted site changes.
+Website verification warns if its own `origin/main` has a different catalog;
+merge promptly so a later main deploy cannot withdraw the update.
+
+Gyro retains `pnpm catalog:verify` to compare the live endpoint with its committed
+`catalog/model-catalog.json`. `pnpm catalog:verify -- --local` validates the app
+source without deploying. The endpoint, client transport, and cache contract
+remain unchanged.
 
 ```bash
 pnpm catalog:verify
@@ -120,7 +129,7 @@ new model for an existing provider needs only a catalog entry at
 parser validates exactly what the picker's does. `scripts/fixtures/
 model-catalog-parity.json` lists documents both must accept or both reject, and
 the TypeScript and Rust tests each run it. A Rust test keeps the two revision
-constants equal, and another checks that `site/model-catalog.json` parses
+constants equal, and another checks that `catalog/model-catalog.json` parses
 natively. `cargo test --lib the_live_catalog -- --ignored` fetches the live
 document through the runner's own transport and checks it matches the commit.
 

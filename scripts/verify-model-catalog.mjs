@@ -1,23 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Confirms that the catalog the public site serves is the catalog this commit
- * records.
- *
- * Deployment is manual, so nothing else catches a document published from a
- * working tree nobody committed. That gap is not cosmetic: the next
- * `pnpm site:deploy` from a clean checkout republishes the committed document
- * and silently withdraws whatever is live, with no self-healing path back.
- *
- * This needs the network, so it stays out of `pnpm release:check` and is run
- * deliberately after a catalog deploy.
- *
- * `--local` is the pre-deploy gate `pnpm site:deploy` runs: no network, and it
- * also refuses uncommitted changes anywhere under site/, because the deploy
- * uploads the working tree. Both modes parse the document with the app's own
- * parser, so a catalog every client would reject is never published, and warn
- * when origin/main records a different catalog, since the next deploy from a
- * clean main checkout would publish that one instead.
+ * Validates the app-owned catalog and compares the live website document with
+ * the committed source. Publishing happens in the private gyro-website repo:
+ * import this committed source there with `npm run catalog:sync -- /path/to/Gyro`,
+ * commit it, deploy, then run `pnpm catalog:verify` here.
+ * `--local` checks the committed catalog without live HTTP requests.
  */
 
 import { execFileSync } from "node:child_process";
@@ -27,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseModelCatalog } from "../packages/ui/src/remote-model-catalog.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const catalogPath = "site/model-catalog.json";
+const catalogPath = "catalog/model-catalog.json";
 const liveUrl = "https://usegyro.io/model-catalog.json";
 const requestTimeoutMs = 10_000;
 const maxBytes = 256 * 1024;
@@ -92,13 +80,13 @@ parses(catalogPath, disk);
 if (localOnly) {
   let dirty = "";
   try {
-    dirty = git("status", "--porcelain", "--untracked-files=all", "--", "site").trim();
+    dirty = git("status", "--porcelain", "--untracked-files=all", "--", "catalog").trim();
   } catch (error) {
-    failures.push(`Could not read git status for site/: ${String(error.message).trim()}`);
+    failures.push(`Could not read git status for catalog/: ${String(error.message).trim()}`);
   }
   if (dirty) {
     failures.push(
-      "site/ has uncommitted changes, and the deploy uploads the working tree:\n" +
+      "catalog/ has uncommitted changes; commit them before importing into the website:\n" +
         dirty
           .split("\n")
           .map((line) => `    ${line}`)
@@ -117,8 +105,8 @@ try {
   if (onMain !== disk) {
     warnings.push(
       `origin/main records revision ${revisionOf(onMain)}, not ${revisionOf(disk)}. ` +
-        "Merge this catalog promptly: a deploy from a clean main checkout would " +
-        "publish main's catalog and withdraw this one.",
+        "Merge this catalog before importing it into gyro-website so main remains " +
+        "the canonical app source.",
     );
   }
 } catch {
@@ -160,7 +148,7 @@ if (live !== undefined && parses(liveUrl, live)) {
   } else {
     failures.push(
       `${liveUrl} is revision ${revisionOf(live)}, but this tree is revision ` +
-        `${revisionOf(disk)}. Commit the catalog, run \`pnpm site:deploy\`, ` +
+        `${revisionOf(disk)}. Commit and import the catalog into gyro-website, run its site:deploy, ` +
         "then verify again.",
     );
   }
@@ -176,6 +164,6 @@ if (failures.length > 0) {
 
 console.log(
   localOnly
-    ? `The catalog is committed and valid (revision ${revisionOf(disk)}); site/ is clean to deploy.`
+    ? `The catalog is committed and valid (revision ${revisionOf(disk)}); catalog/ is clean to import.`
     : `The live model catalog is the committed catalog, revision ${revisionOf(disk)}.`,
 );
