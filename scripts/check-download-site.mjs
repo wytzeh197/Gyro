@@ -399,7 +399,7 @@ containsAll(pages.privacy, "Privacy page", [
 ]);
 
 containsAll(css, "Shared CSS", [
-  "--shell: min(1248px, calc(100% - 96px))", "--header-height: 72px",
+  "--shell: min(1120px, calc(100% - 96px))", "--header-height: 72px",
   "min-height: 44px", ".surface-card", ".capture-frame", ".agent-roster", ".agent-slot",
   ':root[data-theme="light"]', ".theme-toggle", "--mono:", "--sans:", "--display:",
   ".spine", ".changelog-layout", ".version-rail nav", ".legal-layout", "scroll-margin-top:",

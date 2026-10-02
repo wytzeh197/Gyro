@@ -96,3 +96,25 @@ The user's October 2 instruction moves Product, Install, and Changelog to the ce
 Post-change evidence: `desktop-nav-centered.png` (1440 × 1000) and `nav-centering-checks.json` in the evidence directory. Measured group centers equal the viewport centers at 1440, 1024, and 901px; the minimum observed gap to the right-side controls is 33.75px at 901px. The disclosure replaces the group at 900px and below. No overflow at 1440, 1024, 901, 900, 390, or 320px. Install, Changelog, and Privacy each center at 720px in a 1440px viewport; a dark-theme 901px check also has no overflow. Browser logs contain no warnings or errors. The site checker, build, and whitespace checks pass.
 
 No actionable P0/P1/P2 finding remains after this follow-up.
+
+## Approved follow-up: restrained sizing pass
+
+The user's subsequent instruction prefers a slightly smaller site over oversized elements. This supersedes the original plan's display sizes, content maximum, and section spacing. The existing section compositions, copy, authentic assets, and interactions remain the reference for structure and behavior.
+
+At a 1440px CSS viewport, the hero changes from 70.56px to 63.36px, section headings from 60px to 52px, body copy from 20px to 18px, and the content grid from 1248px to 1120px. Major desktop section padding is 80px; tablet/mobile padding is 72px/56px. The Mac visual caps at 1040px and the footer wordmark at 420px, down from 500px. Primary actions are 52px tall; controls retain at least 44px targets, 16px control labels, and 14px metadata. Mobile body text stays 18px, with modestly smaller display headings. The desktop page is 6732px tall versus 7575px before, an 11.1% reduction.
+
+Evidence in the existing directory:
+
+- `sizing-before-desktop.png` and `sizing-before-metrics.json`: baseline at 1440px; the loaded Ownership baseline uses the earlier `desktop-light.png` because the new baseline photo had not loaded during capture.
+- `sizing-after-desktop.png` and `sizing-after-desktop-dark.png`: final 1440 × 6732 browser captures after bringing lazy visuals into view.
+- `sizing-after-mobile.png` and `sizing-after-mobile-dark.png`: final 390 × 6716 browser captures.
+- `sizing-comparison-01.png` through `sizing-comparison-10.png`: all ten before/after compositions compared in combined proportional 720px-wide tiles. No new actionable P0/P1/P2 difference remains.
+- `sizing-final-hero.png`: native 1440 × 1000 proof, with manual Grok selection to avoid capturing a provider-name crossfade.
+- `sizing-faq-mobile-open.png`: focused native-resolution open FAQ, confirming readable 18px answer text and clear keyboard outline separation.
+- `sizing-responsive-checks.json`: both themes at 1440, 1024, 901, 768, 390, and 320px; zero horizontal overflow and no wordmark overflow in every case. Desktop navigation remains exactly centered.
+
+Typography, layout rhythm, and scale were rechecked against the prior rendered compositions and the revised user instruction. Colors/tokens and app-specific copy are unchanged. The real screenshot crops retain their proportions and meaningful product detail; provider logos retain their authentic shapes. Native-resolution hero/FAQ inspection supplements the full section comparisons. The three mobile views each remain 469.90625px tall; Enter changes selection while preserving keyboard focus. The privacy FAQ opens and closes normally. The smaller header/footer were checked on Install, Changelog, and Privacy at 1440/390px with zero overflow; all secondary main bodies remain byte-identical to the previous commit. Browser warning/error logs were empty.
+
+The existing content-width assertion was updated to the approved 1120px value. Site/runtime/build-safety checks, static build, and whitespace checks pass; security and release assertions remain intact. Prior native-device and network-throttling test limits still apply.
+
+final result: passed
