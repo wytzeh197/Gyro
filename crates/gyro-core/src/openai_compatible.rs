@@ -474,14 +474,22 @@ fn refuse_redirect(response: &ureq::Response, url: &Url) -> Result<()> {
     Ok(())
 }
 
+/// One pooled agent per process: an `Agent` owns its connection pool, so
+/// building one per probe paid a fresh TCP and TLS handshake every time — and a
+/// handshake is one more way a reachable gateway reads as unreachable.
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(REQUEST_TIMEOUT)
-        .timeout_write(REQUEST_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .redirects(0)
-        .build()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::AgentBuilder::new()
+                .timeout_connect(CONNECT_TIMEOUT)
+                .timeout_read(REQUEST_TIMEOUT)
+                .timeout_write(REQUEST_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
+                .redirects(0)
+                .build()
+        })
+        .clone()
 }
 
 /// Keep the provider's status and bounded explanation in actionable errors.

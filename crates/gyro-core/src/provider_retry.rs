@@ -31,6 +31,69 @@ const DELAYS: [Duration; 3] = [
     Duration::from_secs(3),
 ];
 
+/// The retry ladder every provider connection shares — CLI launches and HTTPS
+/// exchanges alike — so one provider's budget is not a different product
+/// behaviour from another's.
+pub fn transient_retry_delays() -> &'static [Duration] {
+    &DELAYS
+}
+
+/// The delay before retry `index`, jittered so parallel sessions that failed at
+/// the same instant do not respawn in lockstep against one shared quota.
+pub fn transient_retry_delay(index: usize) -> Option<Duration> {
+    DELAYS.get(index).copied().map(jitter)
+}
+
+/// A cooldown the provider stated in its own words.
+///
+/// The HTTPS runner reads a `Retry-After` header; a provider CLI reports the
+/// same instruction as error text ("rate limit reached … retry after 12
+/// seconds"). Only a bounded wait is honored — a longer one stays an actionable
+/// rate-limit error rather than a hidden hang, exactly as [`retry_delay`]
+/// treats a long header.
+pub fn retry_after_hint(error: &str) -> Option<Duration> {
+    const MAX_HINT: Duration = Duration::from_secs(30);
+    let normalized = error.to_ascii_lowercase();
+    for marker in ["retry-after:", "retry after ", "retry in ", "try again in "] {
+        let Some((_, rest)) = normalized.split_once(marker) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let digits: String = rest
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect();
+        let Ok(whole) = digits.parse::<u64>() else {
+            continue;
+        };
+        // A stated fraction rounds up: waiting slightly long is always safe.
+        let after = &rest[digits.len()..];
+        let fraction = after
+            .strip_prefix('.')
+            .map(|rest| {
+                rest.chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .count()
+            })
+            .unwrap_or(0);
+        let seconds = whole + u64::from(fraction > 0);
+        let unit = after
+            .trim_start_matches(|character: char| character == '.' || character.is_ascii_digit())
+            .trim_start();
+        // "retry after 3 attempts" counts attempts, not seconds.
+        if unit.starts_with("attempt") || unit.starts_with("try") || unit.starts_with("time") {
+            continue;
+        }
+        let delay = Duration::from_secs(if unit.starts_with("min") {
+            seconds * 60
+        } else {
+            seconds
+        });
+        return (delay <= MAX_HINT).then_some(delay);
+    }
+    None
+}
+
 // The transport and stream layers share three retries. Nested retry loops
 // previously allowed up to twelve HTTP sends for one generation.
 thread_local! { static REMAINING: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
@@ -163,6 +226,34 @@ mod tests {
                 .unwrap(),
         )
     }
+    #[test]
+    fn shared_ladder_is_jittered_within_its_step_and_bounded() {
+        let delays = transient_retry_delays();
+        for (index, base) in delays.iter().enumerate() {
+            let delay = transient_retry_delay(index).unwrap();
+            assert!(delay >= *base && delay <= *base + *base / 4, "{delay:?}");
+        }
+        assert_eq!(transient_retry_delay(delays.len()), None);
+    }
+
+    #[test]
+    fn reads_a_stated_cooldown_and_ignores_a_hint_that_is_not_one() {
+        for (error, expected) in [
+            (
+                "429 rate limited; retry after 12 seconds",
+                Some(Duration::from_secs(12)),
+            ),
+            ("Retry-After: 5", Some(Duration::from_secs(5))),
+            ("usage limit reached, try again in 2s", Some(Duration::from_secs(2))),
+            ("rate limited; retry in 90s", None),
+            ("retry after 1 min", None),
+            ("retry after 3 attempts", None),
+            ("connection reset by peer", None),
+        ] {
+            assert_eq!(retry_after_hint(error), expected, "{error}");
+        }
+    }
+
     #[test]
     fn recovers_transient_exchange_without_replaying_caller() {
         let mut requests = 0;

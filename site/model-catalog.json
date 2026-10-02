@@ -1,9 +1,20 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-09-29.2",
+  "revision": "2026-10-02.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
+    {
+      "providerId": "openai",
+      "id": "gpt-6.1-sol",
+      "displayName": "GPT-6.1 Sol",
+      "description": "Near-Astra performance for coding and professional work.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-6-astra",
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "defaultReasoningEffort": "medium"
+    },
     {
       "providerId": "anthropic",
       "id": "claude-opus-5-5",

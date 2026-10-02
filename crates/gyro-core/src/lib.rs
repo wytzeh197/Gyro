@@ -26,7 +26,7 @@ pub mod provider_contract;
 pub mod provider_health;
 pub mod provider_observation;
 pub mod provider_registry;
-mod provider_retry;
+pub mod provider_retry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;

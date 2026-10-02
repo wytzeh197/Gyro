@@ -332,7 +332,11 @@ where
 }
 
 fn agent() -> ureq::Agent {
-    agent_with_read_timeout(REQUEST_TIMEOUT)
+    // Discovery and health share one pooled agent; generation uses chat_http.
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| agent_with_read_timeout(REQUEST_TIMEOUT))
+        .clone()
 }
 
 /// Short discovery probes have a total deadline; generation uses chat_http.

@@ -46,11 +46,12 @@ session with you.
   and approve a finished plan with **Implement** or **Keep planning** before
   any edit starts.
 - **A real workbench.** Files, Git, diffs, problems, output, test results, a
-  terminal grid, a browser, and interactive Canvas previews sit in the same
-  window as the chat. A session can span several project folders, chats can run
-  side by side in a split layout, and isolated sessions can work in their own
-  Git worktree. Builds and CI commands that outlast a turn keep running and
-  report back into the chat.
+  terminal grid, a browser, and Canvas sit in the same window as the chat.
+  Canvas items can be documents, diagrams, tables, and interactive UI pieces
+  you can try in place. A session can span several project folders, chats can
+  run side by side in a split layout, and isolated sessions can work in their
+  own Git worktree. Builds and CI commands that outlast a turn keep running
+  and report back into the chat.
 - **Search across everything.** One fuzzy search over projects, sessions,
   actions, and workspace files, plus code intelligence from managed language
   servers: definitions, references, hover docs, and document symbols for the
@@ -64,9 +65,10 @@ session with you.
   conditions, receipts, and recovery across restarts.
 - **Delegated research.** A read-only sub-agent investigates a question in its
   own child session and returns only its final report to the chat.
-- **Menu bar and notifications.** A native menu-bar item tracks idle, working,
-  and waiting sessions, and macOS notifications cover approvals, finished work,
-  and failures while Gyro is in the background.
+- **Menu bar and notifications.** A native menu-bar popover tracks idle,
+  working, and waiting sessions. macOS notifications cover approvals, finished
+  work, and failures while Gyro is in the background; Settings can turn each
+  kind on or off and send a test notification.
 - **Usage you can see.** Turn tokens, plan-usage meters, and provider retries
   are reported per session, and usage limits can pause work that would run past
   them; estimates are not hard spend ceilings.
@@ -84,7 +86,8 @@ session with you.
 - **API keys.** DeepSeek, Mistral, and OpenRouter ship as presets, and any
   OpenAI-compatible endpoint can be added as a custom provider, including local
   servers on loopback. Keys are stored in the Keychain and sent only to the
-  endpoint you configured. See [API-key providers](docs/api-key-providers.md).
+  endpoint you configured. Models that support images can read chat attachments
+  (PNG, JPEG, GIF, WebP). See [API-key providers](docs/api-key-providers.md).
 
 New models arrive through a validated remote catalog, so most model launches
 need no app update. See [Model catalog](docs/model-catalog.md).
@@ -100,6 +103,8 @@ Homebrew installs the `gyro` CLI only, not Gyro.app:
 ```bash
 brew tap wytzeh197/tap
 brew install wytzeh197/tap/gyro
+# Existing CLI installs:
+brew upgrade wytzeh197/tap/gyro
 ```
 
 Keep the app and CLI on the same version for session handoff.

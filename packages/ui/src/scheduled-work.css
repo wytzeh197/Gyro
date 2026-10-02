@@ -290,7 +290,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
   color: var(--gyro-muted);
   cursor: pointer;
@@ -331,7 +331,7 @@
   background: transparent;
   color: inherit;
   font: inherit;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   padding: 8px 10px;
 }
 .gyro-scheduled-editor :is(input, select) {
@@ -345,7 +345,7 @@
   margin: 0;
   padding: 12px;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-sm);
   background: transparent;
   display: grid;
   gap: 8px;
@@ -533,7 +533,7 @@
   gap: 18px;
   padding: 18px;
   border: 1px solid var(--gyro-border);
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   background: color-mix(in srgb, var(--gyro-surface-soft) 40%, transparent);
 }
 .gyro-scheduled-editor .gyro-scheduled-intent > label {
@@ -546,7 +546,7 @@
 }
 .gyro-scheduled-editor .gyro-scheduled-intent :is(input, textarea) {
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface);
   color: var(--gyro-text);
   transition:
@@ -601,7 +601,7 @@
 }
 .gyro-scheduled-settings-group {
   border: 1px solid var(--gyro-border);
-  border-radius: 14px;
+  border-radius: var(--gyro-radius-lg);
   padding: 0 14px;
 }
 .gyro-scheduled-setting,
@@ -647,7 +647,7 @@
   height: 32px;
   padding: 4px 0 4px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--gyro-radius-xs);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
   background: transparent;
@@ -680,7 +680,7 @@
   background: var(--gyro-text);
   border-color: var(--gyro-text);
   color: var(--gyro-surface);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
 }
 .gyro-scheduled-editor footer .gyro-primary-button:disabled {
@@ -761,7 +761,7 @@
 .gyro-scheduled-project-button {
   min-width: 0;
   justify-content: flex-end;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-sm);
   padding: 7px 9px !important;
 }
 
@@ -792,7 +792,7 @@
   max-width: 100%;
   min-height: 34px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-sm);
   padding: 6px 9px;
   justify-content: flex-end;
   color: var(--gyro-text);
@@ -834,7 +834,7 @@
   padding: 6px;
   overflow: hidden;
   border: 1px solid var(--gyro-border-strong);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   background: var(--gyro-surface-raised);
   color: var(--gyro-text);
   box-shadow: 0 16px 40px var(--gyro-shadow);
@@ -857,7 +857,7 @@
   width: 100%;
   min-height: 34px;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-sm);
   padding: 6px 10px;
   background: var(--gyro-pane);
   color: var(--gyro-text);
@@ -884,7 +884,7 @@
   width: 100%;
   min-height: 36px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   padding: 7px 9px;
   background: transparent;
   color: var(--gyro-text);
@@ -955,7 +955,7 @@
   max-width: 180px;
   height: 34px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-sm);
   padding: 5px 9px;
   background: transparent;
   color: var(--gyro-text);
@@ -973,7 +973,7 @@
 
 .gyro-scheduled-advanced {
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
 }
 
 .gyro-scheduled-advanced summary {
@@ -982,7 +982,7 @@
   justify-content: space-between;
   min-height: 38px;
   padding: 6px 10px;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   list-style: none;
   transition: background-color var(--gyro-premium-motion-fast)
     var(--gyro-premium-ease);

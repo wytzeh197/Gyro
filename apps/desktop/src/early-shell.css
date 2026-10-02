@@ -28,7 +28,7 @@
   color: inherit;
   background: transparent;
   border: 1px solid currentColor;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px 14px;
   cursor: pointer;
 }
@@ -87,7 +87,7 @@ html[data-theme="light"] .gyro-early-shell-brand {
 }
 
 .gyro-early-shell-nav span {
-  border-radius: 8px;
+  border-radius: 4px;
   color: #a8a8a8;
   font-size: 14px;
   font-weight: 450;

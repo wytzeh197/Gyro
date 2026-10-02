@@ -125,16 +125,14 @@
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.05);
   --gyro-premium-focus: var(--gyro-focus-ring);
   --gyro-scrim: rgba(6, 7, 9, 0.62);
-  /* Corner ladder. Every control radius in this sheet resolves through one of
-     these steps, so there is exactly one place to retune the app's corners.
-     The ramp is softened one step from the old 4/6/8/10/12: badges and
-     hairline chips stay crisp at the bottom, while cards and panels round
-     enough to read as modern without turning short controls into lozenges. */
-  --gyro-premium-radius-xs: 5px;
-  --gyro-premium-radius-sm: 7px;
-  --gyro-premium-radius-md: 9px;
-  --gyro-premium-radius-lg: 12px;
-  --gyro-premium-radius-xl: 14px;
+  /* Supporting UI uses restrained corners: crisp controls, lightly rounded
+     cards and menus. The composer and workspace seams keep their softer
+     geometry so the main surfaces remain distinct from utility chrome. */
+  --gyro-premium-radius-xs: 3px;
+  --gyro-premium-radius-sm: 4px;
+  --gyro-premium-radius-md: 6px;
+  --gyro-premium-radius-lg: 8px;
+  --gyro-premium-radius-xl: 10px;
   --gyro-premium-radius-composer: 18px;
   --gyro-seam-radius: 12px;
   --gyro-radius-xs: var(--gyro-premium-radius-xs);
@@ -1982,7 +1980,7 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-cli-update-banner[data-phase="failed"] {
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   padding-block: 6px;
 }
 
@@ -2746,7 +2744,7 @@ button.gyro-account-menu-row:hover {
   align-self: start;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 20px;
+  border-radius: var(--gyro-radius-xl);
   color: var(--gyro-text);
   display: grid;
   gap: 13px;
@@ -3306,7 +3304,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-md);
   display: flex;
   gap: 8px;
   margin-bottom: 18px;
@@ -4965,7 +4963,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: var(--gyro-app, #111214);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   flex: 1 1 220px;
@@ -5114,7 +5112,7 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
-  border-radius: 14px;
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-muted);
   display: grid;
   height: 44px;
@@ -5146,7 +5144,7 @@ button.gyro-account-menu-row:hover {
 .gyro-browser-placeholder-actions > button {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: calc(11px * var(--gyro-ui-scale, 1));
   padding: 5px 10px;
@@ -7633,7 +7631,7 @@ textarea:focus-visible {
   align-self: stretch;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 20px;
+  border-radius: var(--gyro-radius-xl);
   box-sizing: border-box;
   color: var(--gyro-text);
   display: grid;
@@ -8600,7 +8598,7 @@ textarea:focus-visible {
   animation: gyro-global-search-in calc(160ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1);
   background: color-mix(in srgb, var(--gyro-pane) 97%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 12%),
     0 32px 96px rgb(0 0 0 / 44%),
@@ -14109,7 +14107,7 @@ body {
 
 .gyro-chat-surface.has-environment .gyro-environment-rail {
   background: #2b2c2f;
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   margin: 58px 0 0;
   max-height: calc(100vh - 78px);
   padding: 14px 16px;
@@ -23517,7 +23515,7 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   color: var(--gyro-muted);
   cursor: pointer;
   display: inline-flex;
@@ -30177,7 +30175,7 @@ button.gyro-account-menu-row:hover,
 .gyro-model-focus-peek {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
   box-sizing: border-box;
   color: var(--gyro-text);
@@ -32868,7 +32866,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-popover {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-composer);
+  border-radius: var(--gyro-radius-xl);
   box-shadow:
     0 18px 44px var(--gyro-premium-shadow),
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -33219,7 +33217,7 @@ button.gyro-account-menu-row:hover,
 .gyro-update-release-card {
   background: #1b1b19;
   border: 1px solid #393936;
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   bottom: calc(100% + 14px);
   box-shadow:
     0 22px 52px rgba(0, 0, 0, 0.48),
@@ -33475,7 +33473,7 @@ button.gyro-account-menu-row:hover,
 .gyro-settings-group-rows {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 14px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 10px 28px color-mix(in srgb, #000 8%, transparent);
   overflow: hidden;
 }
@@ -35865,7 +35863,7 @@ textarea:focus-visible,
 .gyro-settings-sidebar-search .gyro-settings-topbar-search {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 1px solid transparent;
-  border-radius: 24px;
+  border-radius: var(--gyro-radius-md);
   height: 38px;
   min-height: 38px;
   max-width: none;
@@ -36247,6 +36245,17 @@ textarea:focus-visible,
 
 .gyro-context-summary-item svg {
   flex-shrink: 0;
+}
+
+/* Project, workspace mode and branch are one control at three addresses, so
+   they share one geometry: the 28px chip height the row already declares, one
+   radius, one gutter. Nothing can single one out as a differently sized pill
+   beside the other two. */
+.gyro-composer-context-row .gyro-composer-chip.gyro-context-summary-item {
+  border-radius: var(--gyro-radius-sm);
+  gap: calc(6px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-diff-empty-footer {
@@ -37681,7 +37690,7 @@ textarea:focus-visible,
   min-width: 0;
   max-width: none;
   padding: 13.3px;
-  border-radius: 19px;
+  border-radius: var(--gyro-radius-xl);
   overflow: visible;
 }
 .gyro-effort-slider-header {
@@ -37874,7 +37883,7 @@ textarea:focus-visible,
   width: var(--gyro-model-popover-width);
   min-width: 0;
   max-width: none;
-  border-radius: 19px;
+  border-radius: var(--gyro-radius-xl);
   grid-auto-rows: max-content;
   align-content: start;
   overflow-y: auto;
@@ -38773,40 +38782,40 @@ textarea:focus-visible,
   padding: 0 5px;
 }
 
+/* The sticky actions are the menu's last section, not a strip pasted over the
+   panel's bottom padding: the band carries the panel's own surface (inherited,
+   so the color and context pickers stay in step with their own panels), sits
+   inside the same 5px gutter as the rows, and is separated from them only by
+   its hairline. */
 .gyro-composer-menu-footer {
-  background: var(--gyro-surface-raised);
+  background-color: inherit;
   border-top: 1px solid var(--gyro-border-soft);
   bottom: -5px;
-  padding-bottom: 5px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 5px;
+  padding: 5px 0;
   position: sticky;
   z-index: 1;
-  display: grid;
-  gap: 4px;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 3px;
-  padding-top: 5px;
 }
 
+/* Branch actions are menu rows like the branches above them: same 16px icon
+   column and label origin, and the shared row hover. Two outlined boxes of
+   equal weight made a create action and a rename read as interchangeable, and
+   the boxes competed with the active-branch highlight sitting right above. */
 .gyro-composer-popover .gyro-composer-menu-item.is-branch-action {
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-sm);
+  border: 0;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  min-height: 30px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 28px;
   padding: 4px 8px;
 }
 
 .gyro-composer-menu-footer
   > .gyro-composer-menu-item.is-branch-action:only-child {
   grid-column: 1 / -1;
-}
-
-.gyro-composer-popover
-  .gyro-composer-menu-item.is-branch-action:hover:not(:disabled) {
-  background: var(--gyro-surface-soft);
-  color: var(--gyro-text);
 }
 
 .gyro-composer-popover .gyro-composer-menu-item.is-branch-action strong {
@@ -40034,7 +40043,7 @@ textarea:focus-visible,
   overflow: auto;
   padding: 16px;
   border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   background: var(--gyro-sidebar);
   color: var(--gyro-text);
   box-shadow: 0 12px 36px rgb(0 0 0 / 24%), 0 2px 6px rgb(0 0 0 / 12%);
@@ -40090,7 +40099,7 @@ textarea:focus-visible,
 
 .gyro-scm-commit-card-refs > span {
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   background: color-mix(in srgb, var(--gyro-commit-color) 12%, transparent);
   color: var(--gyro-text);
   font-size: calc(11px * var(--gyro-ui-scale, 1));
@@ -41472,7 +41481,7 @@ textarea:focus-visible,
     .gyro-sidebar-thread-main,
     .gyro-footer-button
   ) {
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-sidebar-text);
   font-size: calc(13px * var(--gyro-ui-scale, 1));
@@ -41546,7 +41555,7 @@ textarea:focus-visible,
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-row {
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
 }
 
 :root[data-theme]
@@ -41613,12 +41622,12 @@ textarea:focus-visible,
 
 :root[data-theme] .gyro-titlebar-switch {
   background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-sidebar));
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
 }
 
 :root[data-theme] .gyro-titlebar-switch-option {
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
 }
 
@@ -41643,7 +41652,7 @@ textarea:focus-visible,
 
 :root[data-theme] .gyro-sidebar-window-actions .gyro-sidebar-toggle-button,
 :root[data-theme] .gyro-sidebar-restore-cluster .gyro-sidebar-restore-button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
 }
 
@@ -41661,7 +41670,7 @@ textarea:focus-visible,
 :root[data-theme] .gyro-sidebar .gyro-session-actions {
   background: var(--gyro-shell-row-hover);
   border-color: transparent;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   box-shadow: none;
 }
 
@@ -41821,7 +41830,7 @@ textarea:focus-visible,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   :is(.gyro-composer-chip, .gyro-composer-tool) {
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 
@@ -41841,7 +41850,7 @@ textarea:focus-visible,
   :is(.gyro-chat-artifact, .gyro-chat-run-change-summary.is-complete) {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: none;
 }
 
@@ -41891,8 +41900,8 @@ textarea:focus-visible,
   > .gyro-chat-environment-popover {
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  /* Concentric with its 7px buttons: 7px + 1px border + 6px padding. */
-  border-radius: 14px;
+  /* Leave a softer outer corner around the compact utility rows. */
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 10px 30px
     color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
   padding: 6px;
@@ -41916,7 +41925,7 @@ textarea:focus-visible,
     .gyro-chat-environment-popover-actions
   )
   > button {
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   min-height: 28px;
   padding: 5px 7px;
 }
@@ -42274,7 +42283,7 @@ textarea:focus-visible,
     align-items: center;
     background: var(--gyro-app);
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--gyro-radius-sm);
     color: var(--gyro-muted);
     display: inline-flex;
     font: calc(13px * var(--gyro-ui-scale, 1)) var(--gyro-font-sans);
@@ -42478,7 +42487,7 @@ textarea:focus-visible,
   height: min(432px, calc(100vh - 96px));
   padding: 0;
   gap: 0;
-  border-radius: 19px;
+  border-radius: var(--gyro-radius-xl);
   background: var(--gyro-surface);
   overflow: hidden;
 }
@@ -42515,7 +42524,7 @@ textarea:focus-visible,
   height: var(--gyro-model-rail-tile);
   padding: 0;
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--gyro-radius-md);
   background: transparent;
   color: var(--gyro-muted);
   cursor: pointer;
@@ -42585,7 +42594,7 @@ textarea:focus-visible,
   background: var(--gyro-model-rail-floor);
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-faint);
 }
 .gyro-model-rail-tile.is-utility:hover {
@@ -42632,7 +42641,7 @@ textarea:focus-visible,
   gap: 6px;
   margin: 0 8px 6px;
   padding: 7px 9px;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, #e5a100 12%, transparent);
   color: color-mix(in srgb, #b97d00 80%, var(--gyro-text));
   font-size: calc(11.5px * var(--gyro-ui-scale, 1));
@@ -42687,7 +42696,7 @@ textarea:focus-visible,
   min-height: 34px;
   padding: 0 8px 0 9px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   background: transparent;
   color: var(--gyro-text);
   font: inherit;
@@ -42755,7 +42764,7 @@ textarea:focus-visible,
   place-items: center;
   width: 44px;
   height: 44px;
-  border-radius: 13px;
+  border-radius: var(--gyro-radius-lg);
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
 }
 .gyro-model-rail-empty-mark .gyro-provider-logo {
@@ -43043,23 +43052,23 @@ textarea:focus-visible,
    Each value is written as that sum so the relationship survives a token
    change: inner = outer - border - padding. */
 :root .gyro-composer-popover > .gyro-composer-menu-item:not(.is-disclosure) {
-  /* 22px popover, 1px border, 5px padding. */
-  border-radius: calc(var(--gyro-radius-composer) - 1px - 5px);
+  /* Menu corners follow their own panel, independently of the composer. */
+  border-radius: max(var(--gyro-radius-xs), calc(var(--gyro-radius-xl) - 1px - 5px));
 }
 :root
   .gyro-composer-popover.gyro-context-picker
   > .gyro-composer-menu-item:not(.is-disclosure) {
   /* The context picker pads by 4px. */
-  border-radius: calc(var(--gyro-radius-composer) - 1px - 4px);
+  border-radius: max(var(--gyro-radius-xs), calc(var(--gyro-radius-xl) - 1px - 4px));
 }
 :root .gyro-composer-blocker,
 :root .gyro-sidebar-new-session-menu {
-  /* Sized from the 7px buttons inside: 7px + 1px border + 8px padding. */
-  border-radius: calc(var(--gyro-radius-sm) + 1px + 8px);
+  /* Utility menus share the outer menu radius. */
+  border-radius: var(--gyro-radius-xl);
 }
 :root .gyro-chat-environment-popover > header > button {
-  /* In the 17px card's corner, 1px border + 8px inset: 17 - 9. */
-  border-radius: 8px;
+  /* Header actions use the compact control radius. */
+  border-radius: var(--gyro-radius-sm);
 }
 :root .gyro-browser-preview.is-chat > .gyro-browser-frame {
   /* The frame sits flush in the preview's bottom corners, so it takes the
@@ -43068,13 +43077,13 @@ textarea:focus-visible,
   border-bottom-right-radius: inherit;
 }
 :root .gyro-color-control .gyro-color-swatch {
-  /* 9px control, 1px border, 5px padding. */
-  border-radius: calc(var(--gyro-radius-md) - 1px - 5px);
+  /* Clamp the inset swatch radius when the control corners tighten. */
+  border-radius: max(0px, calc(var(--gyro-radius-md) - 1px - 5px));
 }
 
 /* Project choices need room for names and paths, with actions kept separate. */
 :root .gyro-composer-popover.gyro-project-picker {
-  border-radius: 16px;
+  border-radius: var(--gyro-radius-xl);
   box-sizing: border-box;
   gap: 2px;
   max-width: min(292px, calc(100vw - 32px));
@@ -43101,8 +43110,8 @@ textarea:focus-visible,
 }
 
 :root .gyro-project-picker > .gyro-composer-menu-item:not(.is-disclosure) {
-  /* 16px panel, 1px border, 6px inset. */
-  border-radius: 9px;
+  /* Keep inset choices crisper than the surrounding menu. */
+  border-radius: var(--gyro-radius-md);
   gap: 9px;
   grid-template-columns: 16px minmax(0, 1fr) 14px;
   min-height: 38px;
@@ -43152,7 +43161,7 @@ textarea:focus-visible,
 }
 
 :root .gyro-app-shell :is(.gyro-chat-surface-button, .gyro-sidebar-toggle-button) {
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   height: calc(26px * var(--gyro-ui-scale, 1));
   min-height: calc(26px * var(--gyro-ui-scale, 1));
   min-width: calc(26px * var(--gyro-ui-scale, 1));
@@ -43224,7 +43233,7 @@ textarea:focus-visible,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: inherit;
   display: inline-flex;
   font: inherit;

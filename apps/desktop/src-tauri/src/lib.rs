@@ -265,8 +265,6 @@ const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 /// quiet (long tools, thinking). The chat idle watchdog is five minutes; this
 /// stays well under that so a silent but healthy process never looks finished.
 const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
-const TRANSIENT_PROVIDER_RETRY_DELAYS: &[Duration] =
-    &[Duration::from_millis(400), Duration::from_millis(1_200)];
 const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
@@ -9695,6 +9693,9 @@ fn run_workspace_rg_search(
     // no longer fill the output cap on its own.
     command.current_dir(root).arg("--json");
     command.arg("--max-count").arg(max_results.to_string());
+    // A workspace can hold release media (multi-megabyte mp4/zip, e.g. under
+    // docs/media) whose scan costs minutes; skip files too big to be source.
+    command.arg("--max-filesize").arg("4M");
     if !use_regex {
         command.arg("--fixed-strings");
     }
@@ -9707,17 +9708,18 @@ fn run_workspace_rg_search(
 
     match run_bounded_command(
         &command,
-        Duration::from_secs(30),
-        Some(Duration::from_secs(10)),
+        Duration::from_secs(120),
+        Some(Duration::from_secs(60)),
         8 * 1024 * 1024,
         64 * 1024,
     ) {
         Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
             Ok(parse_rg_output(&output.stdout, max_results))
         }
-        // A common query can outgrow the output cap. The matches read so far
-        // are real results; parsing skips the one cut record at the end.
-        Ok(output) if output.termination == ExecutionTermination::OutputLimit => {
+        // A common query can outgrow the output cap, and a workspace holding
+        // large assets can outlive the scan window. Whatever ripgrep already
+        // streamed is real results; parsing skips the one cut record at the end.
+        Ok(output) if !output.stdout.trim().is_empty() => {
             Ok(parse_rg_output(&output.stdout, max_results))
         }
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
@@ -12838,8 +12840,17 @@ where
         {
             let mut last_error = error;
             let mut last_attempt = attempt;
-            for (retry_index, delay) in TRANSIENT_PROVIDER_RETRY_DELAYS.iter().enumerate() {
-                if let Err(stop) = wait_before_provider_retry(*delay, &stopped) {
+            // The same ladder the HTTPS runners use, so a rate-limited CLI and a
+            // rate-limited endpoint wait alike.
+            let retry_ladder = gyro_core::provider_retry::transient_retry_delays();
+            for retry_index in 0..retry_ladder.len() {
+                // A provider that states its own cooldown outranks our backoff:
+                // the HTTPS runners read `Retry-After`, and a CLI reports the
+                // same instruction as text.
+                let delay = gyro_core::provider_retry::retry_after_hint(&format!("{last_error:#}"))
+                    .or_else(|| gyro_core::provider_retry::transient_retry_delay(retry_index))
+                    .unwrap_or(retry_ladder[retry_index]);
+                if let Err(stop) = wait_before_provider_retry(delay, &stopped) {
                     let stop = last_error.context(stop);
                     persist_failed_provider_attempt(
                         store,
@@ -12867,7 +12878,7 @@ where
                     Err(retry_error)
                         if is_transient_provider_error(&format!("{retry_error:#}"))
                             && !last_attempt.published_output
-                            && retry_index + 1 < TRANSIENT_PROVIDER_RETRY_DELAYS.len() =>
+                            && retry_index + 1 < retry_ladder.len() =>
                     {
                         last_error = retry_error;
                     }
@@ -16861,7 +16872,8 @@ fn codex_reasoning_effort_arg(
         return efforts.contains(&effort).then_some(effort);
     }
     let supported = match model.as_str() {
-        "gpt-6-astra" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+        "gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra"
+        | "gpt-5.6-luna" => {
             matches!(
                 effort.as_str(),
                 "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
@@ -25619,6 +25631,28 @@ while True:
         assert_eq!(
             provider_model_context_window("anthropic", Some("claude-fable-5-1")),
             Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn gpt_6_1_sol_model_and_effort_are_forwarded_to_codex() {
+        assert_eq!(
+            codex_model_arg(Some("gpt-6.1-sol")),
+            Some("gpt-6.1-sol".into())
+        );
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert_eq!(
+                codex_reasoning_effort_arg(Some("gpt-6.1-sol"), Some(effort)),
+                Some(effort.into())
+            );
+        }
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-6.1-sol"), Some("invalid")),
+            None
+        );
+        assert_eq!(
+            provider_model_context_window("openai", Some("gpt-6.1-sol")),
+            Some(272_000)
         );
     }
 

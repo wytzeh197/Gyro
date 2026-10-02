@@ -1571,19 +1571,20 @@ const openAiCatalog = providerCatalog.find(
 );
 expect(
   openAiCatalog?.models
-    .slice(0, 4)
+    .slice(0, 5)
     .map((model) => model.id)
-    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
+    .join(",") ===
+    "gpt-6.1-sol,gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
     openAiCatalog.selectedModelId === "gpt-5.6-sol" &&
     openAiCatalog.models
-      .slice(1, 4)
+      .slice(0, 5)
       .every(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
             "low,medium,high,xhigh,max,ultra" &&
           model.contextWindowTokens === 272_000,
       ),
-  "OpenAI should expose GPT-6 Astra and all GPT-5.6 variants with their supported effort levels.",
+  "OpenAI should expose GPT-6.1 Sol, GPT-6 Astra, and all GPT-5.6 variants with their supported effort levels.",
 );
 const restoredEnabledConfig = normalizedConfig({
   telemetryEnabled: false,
@@ -1603,9 +1604,10 @@ const restoredEnabledConfig = normalizedConfig({
 expect(
   restoredEnabledConfig.modelProviders
     .find((provider) => provider.id === "openai")
-    ?.models.slice(0, 4)
+    ?.models.slice(0, 5)
     .map((model) => model.id)
-    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
+    .join(",") ===
+    "gpt-6.1-sol,gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
   "Saved legacy provider configs should merge in the current OpenAI catalog.",
 );
 expect(
@@ -7700,7 +7702,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 9px") &&
+    styleSource.includes("--gyro-premium-radius-md: 6px") &&
     styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
     styleSource.includes("--gyro-app: #141517") &&
     styleSource.includes("--gyro-pane: #17181b") &&

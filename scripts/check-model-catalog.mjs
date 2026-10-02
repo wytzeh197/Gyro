@@ -445,6 +445,26 @@ assert.throws(() =>
       assert.ok(model[field] !== undefined, `${label}: ${field} is missing`);
     }
   }
+  // New builds bundle Sol; existing revision-2 installs receive the same
+  // runtime facts from the overlay, without a duplicate picker entry.
+  applyModelCatalog(published, 0);
+  const sol = provider.models.filter((model) => model.id === "gpt-6.1-sol");
+  assert.equal(sol.length, 1);
+  assert.equal(sol[0].contextWindowTokens, 272_000);
+  assert.deepEqual(sol[0].supportedReasoningEfforts, [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+  ]);
+  assert.equal(provider.models[0].id, "gpt-6.1-sol");
+  const solEntry = published.models.find((model) => model.id === "gpt-6.1-sol");
+  assert.equal(solEntry?.minClientRevision, 2);
+  assert.equal(solEntry?.insertBefore, "gpt-6-astra");
+  assert.equal(sol[0].defaultReasoningEffort, "medium");
+  reset();
 }
 
 console.log(

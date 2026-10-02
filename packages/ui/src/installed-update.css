@@ -11,7 +11,7 @@
   background: var(--gyro-surface-raised);
   border: 1px solid
     color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border));
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
   color: var(--gyro-text);
   display: grid;
@@ -116,7 +116,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 26px;
@@ -136,7 +136,7 @@
 .gyro-installed-update-card {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
-  border-radius: 15px;
+  border-radius: var(--gyro-radius-xl);
   bottom: 0;
   box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
   color: var(--gyro-text);
@@ -182,7 +182,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
   height: 28px;
@@ -226,7 +226,7 @@
 .gyro-installed-update-done {
   background: var(--gyro-accent);
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--gyro-radius-sm);
   color: #ffffff;
   font: inherit;
   font-size: calc(12px * var(--gyro-ui-scale, 1));

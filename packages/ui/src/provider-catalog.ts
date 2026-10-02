@@ -172,6 +172,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "gpt-6.1-sol",
+        displayName: "GPT-6.1 Sol",
+        description: "Near-Astra performance for coding and professional work.",
+        // Codex's model catalog reports 272K and low through ultra.
+        contextWindowTokens: 272_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
+      {
         id: "gpt-6-astra",
         displayName: "GPT-6 Astra",
         description: "Complex reasoning, coding, and long-running work.",

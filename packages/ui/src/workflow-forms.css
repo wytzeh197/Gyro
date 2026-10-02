@@ -4,7 +4,7 @@
   padding: 20px;
   margin: 12px;
   border: 1px solid var(--gyro-border, #8884);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   max-width: 760px;
   background: var(--gyro-surface, transparent);
 }
@@ -27,7 +27,7 @@
   color: inherit;
   background: transparent;
   border: 1px solid var(--gyro-border, #8886);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font: inherit;
 }
 .gyro-workflow-form-row {
@@ -49,7 +49,7 @@
 .gyro-task-card button {
   padding: 7px 11px;
   border: 1px solid var(--gyro-border, #8884);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 .gyro-workflow-overlay {
   position: fixed;
