@@ -28,7 +28,6 @@ jobs:
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser
       - run: pnpm release:check
-      - run: pnpm site:check
 
   rust:
     name: Rust

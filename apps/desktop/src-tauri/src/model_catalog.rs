@@ -484,7 +484,7 @@ mod tests {
         let raw = fetch_catalog().expect("the live catalog is reachable");
         let profiles = parse_profiles(&raw, 0).expect("the live catalog parses");
         let published =
-            parse_profiles(include_str!("../../../../site/model-catalog.json"), 0).unwrap();
+            parse_profiles(include_str!("../../../../catalog/model-catalog.json"), 0).unwrap();
         assert_eq!(profiles, published, "the live catalog is the committed one");
     }
 
@@ -492,7 +492,7 @@ mod tests {
     /// silently falls back to the runner's bundled tables.
     #[test]
     fn the_published_catalog_parses() {
-        let raw = include_str!("../../../../site/model-catalog.json");
+        let raw = include_str!("../../../../catalog/model-catalog.json");
         assert!(parse_profiles(raw, 0).is_ok());
     }
 }

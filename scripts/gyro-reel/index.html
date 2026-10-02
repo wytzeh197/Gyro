@@ -1,5 +1,5 @@
 <!doctype html><meta charset="utf-8"><title>Gyro — In orbit</title>
-<style>@font-face{font-family:Tight;src:url('../../site/assets/fonts/inter-tight-latin.woff2');font-weight:100 900}@font-face{font-family:Inter;src:url('../../site/assets/fonts/inter-latin.woff2');font-weight:100 900}*{margin:0}body{background:#090b0d;overflow:hidden}canvas{width:100vw;height:100vh;object-fit:contain}</style><canvas id="c" width="1920" height="1080"></canvas>
+<style>@font-face{font-family:Tight;src:url('../../apps/desktop/public/fonts/inter-tight-latin.woff2');font-weight:100 900}@font-face{font-family:Inter;src:url('../../apps/desktop/public/fonts/inter-latin.woff2');font-weight:100 900}*{margin:0}body{background:#090b0d;overflow:hidden}canvas{width:100vw;height:100vh;object-fit:contain}</style><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 const c=document.querySelector('canvas'),g=c.getContext('2d');
 const W=1920,H=1080,ink='#090b0d',white='#f5f2ec',orange='#ff754f';
@@ -22,5 +22,5 @@ else if(t<11.75){let u=t-8.5,p=ease(u/.75),out=smooth((u-2.9)/.35);label('BUILT 
 else {let u=t-11.75,p=ease(u/.8);bg(t);rings(t*.55,960,510,390,.32,1.1);g.save();g.translate(960,505);g.scale(.7+.3*p,.7+.3*p);g.globalAlpha=p;g.drawImage(assets.logo,-364,-98,170,170);text('Gyro',-156,0,224);g.restore();g.globalAlpha=ease((u-.35)/.7);text('Chat, CLI & IDE. In one orbit.',960,690,48,white,'center');g.globalAlpha=ease((u-.9)/.6);text('Soon.',960,824,55,orange,'center');g.globalAlpha=1;label('usegyro.io',960,924,'#9ca3a2','center');}
 meta(t,t>=3&&t<6.25);
 };
-Promise.all([document.fonts.load('600 100px Tight'),document.fonts.load('500 22px Inter'),...Object.entries({logo:'../../site/assets/gyro-logo.png',ui:'../../docs/screenshots/readme/workspace-review.webp'}).map(([k,url])=>new Promise(resolve=>{let i=new Image;i.onload=()=>{assets[k]=i;resolve()};i.src=url}))]).then(()=>{window.draw(0);document.body.dataset.ready='1';if(!location.search.includes('render')){let start=performance.now();function tick(now){draw(((now-start)/1000)%15);requestAnimationFrame(tick)}requestAnimationFrame(tick)}});
+Promise.all([document.fonts.load('600 100px Tight'),document.fonts.load('500 22px Inter'),...Object.entries({logo:'../../docs/media/shared/gyro-logo.png',ui:'../../docs/screenshots/readme/workspace-review.webp'}).map(([k,url])=>new Promise(resolve=>{let i=new Image;i.onload=()=>{assets[k]=i;resolve()};i.src=url}))]).then(()=>{window.draw(0);document.body.dataset.ready='1';if(!location.search.includes('render')){let start=performance.now();function tick(now){draw(((now-start)/1000)%15);requestAnimationFrame(tick)}requestAnimationFrame(tick)}});
 </script>
