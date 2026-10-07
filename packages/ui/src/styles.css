@@ -1,1101 +1,8 @@
-@import "./chat-design.css";
-@import "./browser-capture.css";
-@import "./appearance.css";
+@import "./styles-foundation.css";
+@import "./composer-effort-selector.css";
+@import "./interaction-motion.css";
+@import "./press-feedback.css";
 
-/*
- System typography keeps every desktop surface consistent. Code and terminals retain their monospace fonts.
- */
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("./assets/fonts/inter-tight-latin.woff2") format("woff2");
-}
-
-:root {
-  color-scheme: dark;
-  /* Neutral surface ramps keep dark mode free of blue casts and light mode
-     free of cream casts. Accent hues belong to actions and semantic states. */
-  --gyro-user-main: #0874df;
-  --gyro-user-secondary: #8b6fcb;
-  --gyro-app: #181818;
-  --gyro-sidebar: #222222;
-  --gyro-sidebar-soft: #2c2c2c;
-  --gyro-pane: #1c1c1c;
-  --gyro-surface: #242424;
-  --gyro-surface-raised: #303030;
-  --gyro-surface-soft: #262626;
-  --gyro-border: #383838;
-  --gyro-border-soft: #2c2c2c;
-  --gyro-border-strong: #707070;
-  --gyro-text: #ededed;
-  --gyro-muted: #b5b5b5;
-  --gyro-faint: #a0a0a0;
-  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
-  --gyro-accent-strong: color-mix(
-    in srgb,
-    var(--gyro-user-main) 68%,
-    white 32%
-  );
-  --gyro-secondary-accent: color-mix(
-    in srgb,
-    var(--gyro-user-secondary) 84%,
-    white 16%
-  );
-  --gyro-secondary-accent-strong: color-mix(
-    in srgb,
-    var(--gyro-user-secondary) 66%,
-    white 34%
-  );
-  --gyro-update-blue: #356fd6;
-  --gyro-update-blue-hover: #2f63be;
-  --gyro-warn: #dbb77a;
-  --gyro-permission-full: #ff8a3d;
-  --gyro-effort-max: #a45cff;
-  --gyro-danger: #e48e91;
-  --gyro-success: #85c4a2;
-  --gyro-sidebar-text: #d5d5d5;
-  --gyro-hover-text: #fafafa;
-  --gyro-topbar: var(--gyro-app);
-  --gyro-topbar-border: var(--gyro-border-soft);
-  --gyro-brand-text: #111210;
-  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
-  --gyro-primary-text: #101724;
-  --gyro-primary-hover: color-mix(
-    in srgb,
-    var(--gyro-user-main) 40%,
-    white 60%
-  );
-  --gyro-user-bubble: var(--gyro-surface-soft);
-  --gyro-user-bubble-text: var(--gyro-text);
-  --gyro-code-bg: #141414;
-  --gyro-code-text: #dedede;
-  --gyro-segment-bg: var(--gyro-sidebar);
-  --gyro-segment-active: #323232;
-  --gyro-segment-active-text: var(--gyro-text);
-  /* The System preference thumbnail must show both palettes at once. */
-  --gyro-theme-preview-dark-canvas: #141414;
-  --gyro-theme-preview-dark-content: #383838;
-  --gyro-theme-preview-light-canvas: #f7f7f7;
-  --gyro-theme-preview-light-content: #e5e5e5;
-  --gyro-sidebar-mode-track: var(--gyro-sidebar);
-  --gyro-sidebar-mode-active: var(--gyro-control-hover);
-  --gyro-shadow: rgba(0, 0, 0, 0.42);
-  --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
-  --gyro-focus-ring: var(--gyro-accent);
-  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
-  --gyro-secondary-soft: color-mix(
-    in srgb,
-    var(--gyro-secondary-accent) 12%,
-    transparent
-  );
-  --gyro-warn-soft: rgba(255, 173, 92, 0.14);
-  --gyro-danger-soft: rgba(255, 105, 97, 0.13);
-  --gyro-blue: #8faee0;
-  --gyro-blue-soft: rgba(143, 174, 224, 0.1);
-  --gyro-canvas-subtle: var(--gyro-app);
-  --gyro-window: var(--gyro-app);
-  --gyro-workbench-line: rgba(255, 255, 255, 0.06);
-  --gyro-control-bg: var(--gyro-surface-soft);
-  --gyro-control-hover: #323232;
-  --gyro-premium-app: var(--gyro-app);
-  --gyro-premium-sidebar: var(--gyro-sidebar);
-  --gyro-premium-panel: var(--gyro-surface);
-  --gyro-premium-panel-strong: var(--gyro-surface-raised);
-  --gyro-premium-control: var(--gyro-surface-soft);
-  --gyro-premium-control-hover: var(--gyro-control-hover);
-  --gyro-premium-line: var(--gyro-border);
-  --gyro-premium-line-soft: var(--gyro-border-soft);
-  --gyro-premium-text: var(--gyro-text);
-  --gyro-premium-muted: var(--gyro-muted);
-  --gyro-premium-faint: var(--gyro-faint);
-  --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(0, 0, 0, 0.55);
-  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.32);
-  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.42);
-  --gyro-premium-hairline: rgba(255, 255, 255, 0.09);
-  --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
-  --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
-  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.05);
-  --gyro-premium-focus: var(--gyro-focus-ring);
-  --gyro-scrim: rgba(6, 7, 9, 0.62);
-  /* Supporting UI uses restrained corners: crisp controls, lightly rounded
-     cards and menus. The composer and workspace seams keep their softer
-     geometry so the main surfaces remain distinct from utility chrome. */
-  --gyro-premium-radius-xs: 3px;
-  --gyro-premium-radius-sm: 4px;
-  --gyro-premium-radius-md: 6px;
-  --gyro-premium-radius-lg: 8px;
-  --gyro-premium-radius-xl: 10px;
-  --gyro-premium-radius-composer: 18px;
-  --gyro-seam-radius: 12px;
-  --gyro-radius-xs: var(--gyro-premium-radius-xs);
-  --gyro-radius-sm: var(--gyro-premium-radius-sm);
-  --gyro-radius-md: var(--gyro-premium-radius-md);
-  --gyro-radius-lg: var(--gyro-premium-radius-lg);
-  --gyro-radius-xl: var(--gyro-premium-radius-xl);
-  --gyro-radius-composer: var(--gyro-premium-radius-composer);
-  /* Motion ladder. Fast is a state flip, motion is a control settling, slow is
-     a surface arriving. Everything shares one ease. */
-  --gyro-premium-motion-fast: calc(80ms * var(--gyro-motion-factor, 1));
-  --gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1));
-  --gyro-premium-motion-slow: calc(180ms * var(--gyro-motion-factor, 1));
-  --gyro-premium-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --gyro-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --gyro-font-display:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --gyro-font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --gyro-mono: var(--gyro-font-mono);
-  --gyro-font-micro: calc(12px * var(--gyro-ui-scale, 1));
-  --gyro-font-chrome: calc(14px * var(--gyro-ui-scale, 1));
-  --gyro-font-support: calc(13px * var(--gyro-ui-scale, 1));
-  --gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));
-  --gyro-font-lead: calc(16px * var(--gyro-ui-scale, 1));
-  --gyro-font-heading: calc(24px * var(--gyro-ui-scale, 1));
-  --gyro-font-display-size: calc(24px * var(--gyro-ui-scale, 1));
-  --gyro-chat-content-width: 760px;
-  /* The composer and everything docked above it share one width. On the start
-     screen that is the hero measure; inside a thread the dock narrows it to the
-     transcript column so the composer sits on the same edges as the turns
-     above it. */
-  --gyro-composer-width: 800px;
-  --gyro-provider-openai: #7fd2b6;
-  --gyro-provider-openai-logo: #fff;
-  --gyro-provider-anthropic: #ff8a3d;
-  --gyro-provider-kimi: #1783ff;
-  --gyro-provider-kimi-logo: #fff;
-  --gyro-provider-ollama: #f6f2ea;
-  --gyro-provider-xai: #f6f2ea;
-  --gyro-provider-gemini: #8bb8ff;
-  --gyro-provider-cursor: #f2efe9;
-  --gyro-provider-opencode: #f2efe9;
-  --gyro-provider-deepseek: #7ea6ff;
-  --gyro-provider-mistral: #ff7a35;
-  /* OpenRouter's own assets carry a hue: the lime glyph is the one drawn for
-     dark surfaces, so the token keeps the brand ink instead of a flipped
-     monochrome. */
-  --gyro-provider-openrouter: #c8ff00;
-  --gyro-hero-heading: var(--gyro-text);
-  --gyro-hero-brand: var(--gyro-faint);
-  --gyro-hero-composer: var(--gyro-surface);
-  --gyro-hero-context: var(--gyro-surface);
-  --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: var(--gyro-text);
-  --gyro-hero-muted: var(--gyro-muted);
-  --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(255, 255, 255, 0.06);
-  --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: #ededed;
-  --gyro-hero-send-hover: #fafafa;
-  --gyro-hero-send-text: var(--gyro-app);
-  --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
-  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
-  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --gyro-page-header-bg: var(--gyro-surface);
-  --gyro-page-canvas: var(--gyro-app);
-  --gyro-page-card: var(--gyro-surface);
-  --gyro-page-card-hover: var(--gyro-surface-raised);
-  --gyro-ide-sidebar-width: 224px;
-  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
-  --gyro-ide-context-height: calc(32px * var(--gyro-ui-scale, 1));
-  --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
-  --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
-  --gyro-ide-gap-xs: 4px;
-  --gyro-ide-gap-sm: 8px;
-  --gyro-ide-gap-md: 12px;
-  --gyro-space-compact: 4px;
-  --gyro-space-standard: 8px;
-  --gyro-space-comfortable: 12px;
-  --gyro-space-section: 24px;
-  --gyro-control-compact: 24px;
-  --gyro-control-standard: 28px;
-  --gyro-control-comfortable: 32px;
-  --gyro-icon-compact: 13px;
-  --gyro-icon-standard: 15px;
-  --gyro-status-active: var(--gyro-accent);
-  --gyro-status-running: var(--gyro-blue);
-  --gyro-status-waiting: var(--gyro-warn);
-  --gyro-status-success: var(--gyro-success);
-  --gyro-status-warning: var(--gyro-warn);
-  --gyro-status-failed: var(--gyro-danger);
-  --gyro-status-cancelled: #8b95a3;
-  --gyro-status-disabled: #646d79;
-  --gyro-status-experimental: var(--gyro-secondary-accent);
-  /* Language tones, shared by the Explorer and Source Control so one file
-     type reads the same colour everywhere it appears. */
-  --gyro-file-default: var(--gyro-muted);
-  --gyro-file-javascript: #d9c34a;
-  --gyro-file-typescript: #5b9fd4;
-  --gyro-file-react: #62c9e6;
-  --gyro-file-json: #cdbf58;
-  --gyro-file-css: #a982cf;
-  --gyro-file-html: #d98a5b;
-  --gyro-file-vue: #6fbf8b;
-  --gyro-file-markdown: #6ca5cc;
-  --gyro-file-rust: #cd8d64;
-  --gyro-file-go: #63b8c8;
-  --gyro-file-python: #63a6d8;
-  --gyro-file-ruby: #cf6f74;
-  --gyro-file-java: #c9776b;
-  --gyro-file-swift: #e2986a;
-  --gyro-file-cpp: #7f9fd4;
-  --gyro-file-php: #8b8ec9;
-  --gyro-file-lua: #6f8ed4;
-  --gyro-file-dart: #4fb0c0;
-  --gyro-file-elixir: #a98cc8;
-  --gyro-file-graphql: #d16fb0;
-  --gyro-file-diff: #93a4b3;
-  --gyro-file-shell: #73ad70;
-  --gyro-file-config: #9aa6b2;
-  --gyro-file-lock: #8b95a3;
-  --gyro-file-binary: #8b95a3;
-  --gyro-file-image: #b783ca;
-  --gyro-file-media: #c07fb0;
-  --gyro-file-archive: #a58bc4;
-  --gyro-file-font: #c9a86a;
-  --gyro-file-data: #7fbf8f;
-  color: var(--gyro-text);
-  font-family: var(--gyro-font-sans);
-  font-feature-settings:
-    "cv05" 1,
-    "cv11" 1,
-    "calt" 1;
-  font-synthesis: none;
-  --gyro-control-height: calc(32px * var(--gyro-ui-scale, 1));
-  --gyro-icon-target: calc(28px * var(--gyro-ui-scale, 1));
-}
-
-/* Durable Chat context: attachments, goals, plans, and run controls. */
-.gyro-composer-attachments,
-.gyro-transcript-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 10px 0;
-}
-
-.gyro-composer-attachments {
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px 2px;
-}
-
-.gyro-composer-attachment,
-.gyro-transcript-attachment {
-  align-items: center;
-  background: var(--gyro-surface-raised, #202328);
-  border: 1px solid var(--gyro-border, #30343a);
-  border-radius: var(--gyro-radius-md);
-  display: flex;
-  gap: 7px;
-  max-width: 240px;
-  padding: 6px 8px;
-}
-
-.gyro-composer-attachment.is-image {
-  background: #15171a;
-  border-color: rgba(255, 255, 255, 0.13);
-  border-radius: var(--gyro-radius-md);
-  display: block;
-  height: 72px;
-  max-width: none;
-  overflow: hidden;
-  padding: 0;
-  position: relative;
-  width: 88px;
-}
-
-.gyro-composer-attachment.is-image::after {
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
-  bottom: 0;
-  content: "";
-  height: 32px;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-}
-
-.gyro-composer-attachment > span,
-.gyro-transcript-attachment > span {
-  display: grid;
-  min-width: 0;
-}
-
-.gyro-composer-attachment > img,
-.gyro-transcript-attachment > img {
-  border-radius: var(--gyro-radius-xs);
-  height: 72px;
-  object-fit: cover;
-  width: 96px;
-}
-
-.gyro-composer-attachment.is-image > img {
-  border-radius: 0;
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-
-.gyro-composer-attachment.is-video > video {
-  border-radius: 0;
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-
-.gyro-composer-attachment.is-image > span {
-  bottom: 5px;
-  left: 7px;
-  max-width: 64px;
-  position: absolute;
-  right: 7px;
-  z-index: 1;
-}
-
-.gyro-composer-attachment.is-image strong {
-  color: rgba(255, 255, 255, 0.92);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
-}
-
-.gyro-composer-attachment.is-image small {
-  display: none;
-}
-
-.gyro-composer-attachment.is-image button {
-  align-items: center;
-  background: rgba(248, 248, 246, 0.96);
-  border-radius: 999px;
-  color: #18191c;
-  display: inline-flex;
-  height: 18px;
-  justify-content: center;
-  padding: 0;
-  position: absolute;
-  right: 5px;
-  top: 5px;
-  width: 18px;
-  z-index: 2;
-}
-
-.gyro-composer-attachment.is-image button:hover {
-  background: #ffffff;
-  transform: scale(1.04);
-}
-
-.gyro-composer-attachment strong,
-.gyro-transcript-attachment strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-composer-attachment small,
-.gyro-transcript-attachment small {
-  color: var(--gyro-text-muted, #9299a3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-composer-attachment button,
-.gyro-plan-item-actions button,
-.gyro-use-again,
-.gyro-chat-run-controls button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-text-muted, #9299a3);
-  cursor: pointer;
-  display: inline-flex;
-  gap: 5px;
-}
-
-/* Plan mode is a constraint, not an alert. Amber in this app means "needs
-   attention", so the chip reads neutral like every other composer chip and
-   lets the mode's own words carry the read-only fact. */
-.gyro-composer-chip.is-plan {
-  color: var(--gyro-muted);
-}
-
-.gyro-composer-chip.is-council {
-  color: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 88%, #c4b5fd);
-}
-
-.gyro-composer-chip.is-council:hover .gyro-composer-chip-remove {
-  opacity: 1;
-}
-
-.gyro-council-preflight {
-  align-items: center;
-  border-bottom: 1px solid var(--gyro-border-soft, #262626);
-  color: var(--gyro-muted, #b3b3b3);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  gap: 8px;
-  padding: 8px 12px 6px;
-}
-
-.gyro-council-preflight.is-blocked {
-  color: var(--gyro-warn, #e8b45f);
-}
-
-.gyro-council-preflight-seats {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-left: auto;
-}
-
-/* What one Council send costs, disclosed before Enter commits it. */
-.gyro-council-preflight-cost {
-  color: var(--gyro-faint, #8b8b8b);
-  flex-basis: 100%;
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-}
-
-/* Why runs are stopped, or which budget is about to stop them. */
-.gyro-composer-safety-notice {
-  align-items: center;
-  border-radius: var(--gyro-radius-lg);
-  color: var(--gyro-text, #f0f0f0);
-  display: flex;
-  gap: 9px;
-  margin: 8px 8px 0;
-  padding: 8px 10px;
-}
-
-.gyro-composer-safety-notice.is-paused {
-  background: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 12%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-danger, #ef7d7d) 36%, transparent);
-}
-
-.gyro-composer-safety-notice.is-warning {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-warn, #e8b45f) 30%, transparent);
-}
-
-.gyro-composer-safety-notice > span {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.gyro-composer-safety-notice strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
-}
-
-.gyro-composer-safety-notice small {
-  color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  line-height: 1.35;
-}
-
-.gyro-composer-safety-notice button {
-  background: color-mix(in srgb, var(--gyro-text, #f0f0f0) 10%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
-  flex: none;
-  font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  margin-left: auto;
-  padding: 4px 10px;
-}
-
-/* Second-press confirmation for a send large enough to be worth agreeing to. */
-.gyro-composer-cost-confirm {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-warn, #e8b45f) 34%, transparent);
-  border-radius: var(--gyro-radius-lg);
-  color: var(--gyro-text, #f0f0f0);
-  display: flex;
-  gap: 9px;
-  margin: 8px 8px 0;
-  padding: 8px 10px;
-}
-
-.gyro-composer-cost-confirm > span {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.gyro-composer-cost-confirm strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
-}
-
-.gyro-composer-cost-confirm small {
-  color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  line-height: 1.35;
-}
-
-.gyro-composer-cost-confirm button {
-  background: transparent;
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted, #b3b3b3);
-  flex: none;
-  font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  margin-left: auto;
-  padding: 4px 10px;
-}
-
-.gyro-composer-cost-confirm button + button {
-  margin-left: 0;
-}
-
-.gyro-composer-cost-confirm-send {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 22%, transparent);
-  color: var(--gyro-text, #f0f0f0);
-}
-
-.gyro-council-preflight-chip {
-  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 12%, transparent);
-  border-radius: 999px;
-  color: var(--gyro-text, #f0f0f0);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  padding: 2px 8px;
-}
-
-:root[data-theme="light"] .gyro-council-preflight-chip {
-  color: #1d2329;
-}
-
-.gyro-council-response {
-  display: grid;
-  gap: 12px;
-}
-
-.gyro-council-header {
-  display: grid;
-  gap: 6px;
-}
-
-.gyro-council-title-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.gyro-council-title-row strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
-}
-
-.gyro-council-status {
-  border: 1px solid var(--gyro-border, #303030);
-  border-radius: 999px;
-  color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  padding: 2px 8px;
-  text-transform: lowercase;
-}
-
-.gyro-council-status.is-done {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-success, #70d39f) 45%,
-    transparent
-  );
-  color: var(--gyro-success, #70d39f);
-}
-
-.gyro-council-status.is-partial {
-  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 45%, transparent);
-  color: var(--gyro-warn, #e8b45f);
-}
-
-.gyro-council-status.is-failed,
-.gyro-council-status.is-cancelled {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-danger, #ef7d7d) 45%,
-    transparent
-  );
-  color: var(--gyro-danger, #ef7d7d);
-}
-
-.gyro-council-badge {
-  border-radius: 999px;
-  background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
-  color: var(--gyro-accent, #7aa7ff);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  padding: 2px 8px;
-}
-
-.gyro-council-meta {
-  color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  margin: 0;
-}
-
-.gyro-council-banner {
-  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  margin: 0;
-  padding: 8px 10px;
-}
-
-.gyro-council-banner.is-warn {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 12%, transparent);
-  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 32%, transparent);
-}
-
-.gyro-council-seats {
-  display: grid;
-  gap: 6px;
-}
-
-.gyro-council-seat {
-  border: 1px solid var(--gyro-border, #303030);
-  border-radius: var(--gyro-radius-lg);
-  overflow: hidden;
-}
-
-.gyro-council-seat.is-failed,
-.gyro-council-seat.is-cancelled {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-danger, #ef7d7d) 35%,
-    transparent
-  );
-}
-
-.gyro-council-seat-header {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  display: flex;
-  gap: 8px;
-  padding: 8px 10px;
-  text-align: left;
-  width: 100%;
-}
-
-.gyro-council-seat-header:hover {
-  background: color-mix(in srgb, var(--gyro-text, #fff) 4%, transparent);
-}
-
-.gyro-council-seat-label {
-  flex: 1;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 560;
-}
-
-.gyro-council-seat-status,
-.gyro-council-seat-latency {
-  color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-council-seat-header svg.is-open {
-  transform: rotate(180deg);
-}
-
-.gyro-council-seat-body {
-  border-top: 1px solid var(--gyro-border, #303030);
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-}
-
-.gyro-council-seat-output {
-  background: var(--gyro-code-bg, #0c0c0c);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-code-text, #e6e6e6);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  line-height: 1.45;
-  margin: 0;
-  max-height: 280px;
-  overflow: auto;
-  padding: 10px;
-  white-space: pre-wrap;
-}
-
-.gyro-council-seat-actions,
-.gyro-council-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.gyro-council-seat-actions button,
-.gyro-council-actions button:not([aria-label]) {
-  background: var(--gyro-control-bg, #1b1b1b);
-  border: 1px solid var(--gyro-border, #303030);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
-  cursor: pointer;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  padding: 6px 10px;
-}
-
-.gyro-council-seat-actions button:hover,
-.gyro-council-actions button:not([aria-label]):hover {
-  background: var(--gyro-control-hover, #272727);
-}
-
-.gyro-council-seat-actions button:disabled,
-.gyro-council-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-:root[data-theme="light"] .gyro-council-seat-output {
-  background: #f3f4f6;
-  color: #1d2329;
-}
-
-:root[data-theme="light"] .gyro-council-seat-actions button,
-:root[data-theme="light"] .gyro-council-actions button:not([aria-label]) {
-  background: #f0f1f3;
-  border-color: #d5d8dd;
-  color: #1d2329;
-}
-
-.gyro-composer-chip-remove {
-  border-left: 1px solid currentColor;
-  margin-left: 1px;
-  opacity: 0.72;
-  padding-left: 4px;
-  width: 16px;
-}
-
-.gyro-composer-chip.is-plan:hover .gyro-composer-chip-remove {
-  opacity: 1;
-}
-
-.gyro-composer-chip.is-goal {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-composer-chip.is-goal[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-accent) 78%, var(--gyro-text));
-}
-
-.gyro-composer-chip.is-goal[aria-pressed="true"]:hover {
-  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
-}
-
-.gyro-plan-item-actions,
-.gyro-chat-run-controls {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-}
-
-.gyro-transcript-attachments {
-  padding-left: 0;
-}
-
-.gyro-use-again {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  margin-top: 5px;
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
-  --gyro-app: #f7f7f7;
-  --gyro-sidebar: #ffffff;
-  --gyro-sidebar-soft: #f0f0f0;
-  --gyro-pane: #fcfcfc;
-  --gyro-surface: #ffffff;
-  --gyro-surface-raised: #ffffff;
-  --gyro-surface-soft: #f3f3f3;
-  --gyro-border: #dedede;
-  --gyro-border-soft: #e8e8e8;
-  --gyro-border-strong: #898989;
-  --gyro-text: #252525;
-  --gyro-muted: #626262;
-  --gyro-faint: #686868;
-  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
-  --gyro-accent-strong: color-mix(
-    in srgb,
-    var(--gyro-user-main) 70%,
-    #08182f 30%
-  );
-  --gyro-secondary-accent: color-mix(
-    in srgb,
-    var(--gyro-user-secondary) 80%,
-    #26163d 20%
-  );
-  --gyro-secondary-accent-strong: color-mix(
-    in srgb,
-    var(--gyro-user-secondary) 68%,
-    #201033 32%
-  );
-  --gyro-warn: #8a601d;
-  --gyro-permission-full: #c2510a;
-  --gyro-effort-max: #7c3bc7;
-  --gyro-danger: #af4149;
-  --gyro-success: #2e7553;
-  /* Agent state reads on white too. The dark ramp above is tuned for graphite
-     and drops to roughly 2:1 on a light surface, so every state that carries
-     meaning is restated here from the light semantic colors already set. */
-  --gyro-status-running: var(--gyro-blue);
-  --gyro-status-waiting: var(--gyro-warn);
-  --gyro-status-success: var(--gyro-success);
-  --gyro-status-warning: var(--gyro-warn);
-  --gyro-status-failed: var(--gyro-danger);
-  --gyro-status-cancelled: var(--gyro-muted);
-  --gyro-status-disabled: color-mix(
-    in srgb,
-    var(--gyro-muted) 60%,
-    transparent
-  );
-  --gyro-sidebar-text: #434343;
-  --gyro-hover-text: #191919;
-  --gyro-topbar: var(--gyro-pane);
-  --gyro-topbar-border: var(--gyro-border);
-  --gyro-brand-text: #ffffff;
-  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 84%, #10203b 16%);
-  --gyro-primary-text: #ffffff;
-  --gyro-primary-hover: color-mix(
-    in srgb,
-    var(--gyro-user-main) 72%,
-    #08182f 28%
-  );
-  --gyro-user-bubble: var(--gyro-surface-soft);
-  --gyro-user-bubble-text: var(--gyro-text);
-  --gyro-code-bg: #f5f5f5;
-  --gyro-code-text: #2c2c2c;
-  --gyro-segment-bg: #e5e5e5;
-  --gyro-segment-active: var(--gyro-surface);
-  --gyro-segment-active-text: var(--gyro-text);
-  --gyro-shadow: rgba(24, 24, 24, 0.08);
-  --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
-  --gyro-focus-ring: var(--gyro-accent);
-  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
-  --gyro-secondary-soft: color-mix(
-    in srgb,
-    var(--gyro-secondary-accent) 9%,
-    transparent
-  );
-  --gyro-warn-soft: rgba(169, 91, 18, 0.1);
-  --gyro-danger-soft: rgba(187, 45, 36, 0.1);
-  --gyro-blue: #42679f;
-  --gyro-blue-soft: rgba(66, 103, 159, 0.08);
-  /* The dark tones are too light to read on a light sidebar; these are the
-     same hues carried down to a legible lightness. */
-  --gyro-file-javascript: #8a7413;
-  --gyro-file-typescript: #2f6f9f;
-  --gyro-file-react: #1f7f96;
-  --gyro-file-json: #857a10;
-  --gyro-file-css: #6d4a9c;
-  --gyro-file-html: #a0522d;
-  --gyro-file-vue: #2f7d4f;
-  --gyro-file-markdown: #3a6d8f;
-  --gyro-file-rust: #9a5a2b;
-  --gyro-file-go: #1f7a8c;
-  --gyro-file-python: #2c6b9c;
-  --gyro-file-ruby: #a53a3a;
-  --gyro-file-java: #98452f;
-  --gyro-file-swift: #a85a30;
-  --gyro-file-cpp: #3f5f9c;
-  --gyro-file-php: #4f52a3;
-  --gyro-file-lua: #34519c;
-  --gyro-file-dart: #1c7a89;
-  --gyro-file-elixir: #6a4a94;
-  --gyro-file-graphql: #a32f7c;
-  --gyro-file-diff: #55616e;
-  --gyro-file-shell: #3c7a3c;
-  --gyro-file-config: #5a6572;
-  --gyro-file-lock: #5a6572;
-  --gyro-file-binary: #5a6572;
-  --gyro-file-image: #7a4a94;
-  --gyro-file-media: #8a3f76;
-  --gyro-file-archive: #6d5a94;
-  --gyro-file-font: #8a6a25;
-  --gyro-file-data: #3f7f52;
-  --gyro-canvas-subtle: var(--gyro-surface-soft);
-  --gyro-window: var(--gyro-app);
-  --gyro-workbench-line: rgba(32, 32, 32, 0.08);
-  --gyro-control-bg: var(--gyro-surface-soft);
-  --gyro-control-hover: #e7e7e7;
-  --gyro-premium-app: var(--gyro-app);
-  --gyro-premium-sidebar: var(--gyro-sidebar);
-  --gyro-premium-panel: var(--gyro-surface);
-  --gyro-premium-panel-strong: var(--gyro-surface-raised);
-  --gyro-premium-control: var(--gyro-surface-soft);
-  --gyro-premium-control-hover: var(--gyro-control-hover);
-  --gyro-premium-line: var(--gyro-border);
-  --gyro-premium-line-soft: var(--gyro-border-soft);
-  --gyro-premium-text: var(--gyro-text);
-  --gyro-premium-muted: var(--gyro-muted);
-  --gyro-premium-faint: var(--gyro-faint);
-  --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(24, 24, 24, 0.12);
-  --gyro-premium-shadow-soft: rgba(24, 24, 24, 0.05);
-  --gyro-premium-shadow-lift: rgba(24, 24, 24, 0.08);
-  --gyro-premium-hairline: rgba(32, 32, 32, 0.1);
-  --gyro-premium-hairline-soft: rgba(32, 32, 32, 0.06);
-  --gyro-premium-hairline-strong: rgba(32, 32, 32, 0.15);
-  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.8);
-  --gyro-premium-focus: var(--gyro-focus-ring);
-  --gyro-scrim: rgba(20, 20, 24, 0.3);
-  --gyro-provider-openai: #0f8f72;
-  --gyro-provider-openai-logo: #000;
-  --gyro-provider-anthropic: #c15d12;
-  --gyro-provider-kimi: #1783ff;
-  --gyro-provider-kimi-logo: #000;
-  --gyro-provider-ollama: #1c2027;
-  --gyro-provider-xai: #1c2027;
-  --gyro-provider-gemini: #2457c5;
-  --gyro-provider-cursor: #1c2027;
-  --gyro-theme-preview-dark-canvas: #141414;
-  --gyro-theme-preview-dark-content: #383838;
-  --gyro-theme-preview-light-canvas: #f7f7f7;
-  --gyro-theme-preview-light-content: #e5e5e5;
-  --gyro-provider-opencode: #1c2027;
-  --gyro-provider-deepseek: #2c5bd0;
-  --gyro-provider-mistral: #c2480c;
-  --gyro-provider-openrouter: #7624f4;
-  --gyro-hero-heading: var(--gyro-text);
-  --gyro-hero-brand: var(--gyro-faint);
-  --gyro-hero-composer: var(--gyro-surface);
-  --gyro-hero-context: var(--gyro-surface-soft);
-  --gyro-hero-border: var(--gyro-border);
-  --gyro-hero-text: var(--gyro-text);
-  --gyro-hero-muted: var(--gyro-muted);
-  --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(32, 32, 32, 0.05);
-  --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: var(--gyro-text);
-  --gyro-hero-send-hover: #191919;
-  --gyro-hero-send-text: var(--gyro-surface);
-  --gyro-hero-focus-border: var(--gyro-accent);
-  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
-  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  background: var(--gyro-app);
-  margin: 0;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
-
-button {
-  color: inherit;
-}
-
-.gyro-app-shell {
-  background: var(--gyro-app);
-  display: grid;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  grid-template-columns: 240px minmax(0, 1fr);
-  min-height: 100vh;
-}
-
-.gyro-sidebar {
-  background: var(--gyro-sidebar);
-  border-right: 1px solid var(--gyro-border);
-  color: var(--gyro-text);
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  min-width: 0;
-  overflow: visible;
-  padding: 12px 10px 10px;
-}
-
-.gyro-sidebar-head {
-  display: grid;
-  gap: 8px;
-  padding-bottom: 8px;
-}
-
-.gyro-brand {
-  align-items: center;
-  display: flex;
-  gap: 9px;
-  min-height: 34px;
-  min-width: 0;
-  padding: 0 3px;
-}
-
-.gyro-brand strong,
-.gyro-brand span {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-brand strong {
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  letter-spacing: 0;
-  line-height: 1.2;
-}
-
-.gyro-brand span {
-  color: var(--gyro-faint);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  margin-top: 1px;
-}
-
-.gyro-brand-mark {
-  align-items: center;
-  background: var(--gyro-accent-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-brand-text);
-  display: grid;
-  flex: 0 0 auto;
-  height: 30px;
-  justify-content: center;
-  width: 30px;
-}
-
-.gyro-brand-mark img {
-  display: block;
-  filter: brightness(0) invert(1);
-  height: 20px;
-  object-fit: contain;
-  width: 20px;
-}
 
 .gyro-surface-row {
   align-items: center;
@@ -1233,7 +140,7 @@ button {
   gap: 8px;
   min-height: 128px;
   min-width: 0;
-  padding: 16px;
+  padding: var(--gyro-space-card);
   text-align: left;
 }
 
@@ -13155,7 +12062,7 @@ textarea:focus-visible {
   font-size: var(--gyro-font-body);
   font-weight: 400;
   gap: calc(8px * var(--gyro-ui-scale, 1));
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  min-height: var(--gyro-navigation-row-height);
   padding: 0 calc(8px * var(--gyro-ui-scale, 1));
 }
 
@@ -16851,46 +15758,13 @@ textarea,
     transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 
-.gyro-sidebar-action:hover,
-.gyro-sidebar-row:hover,
-.gyro-sidebar-project-row:hover,
-.gyro-sidebar-thread:hover,
-.gyro-sidebar-thread-main:hover,
-.gyro-session-row:hover {
-  transform: translateX(1px);
-}
 
-.gyro-tools-card:hover,
-.gyro-provider-card:hover,
-.gyro-task-card:hover,
-.gyro-kanban-column:hover {
-  transform: translateY(-1px);
-}
 
-.gyro-primary-button:hover:not(:disabled),
-.gyro-secondary-button:hover:not(:disabled),
-.gyro-icon-button:hover:not(:disabled),
-.gyro-composer-chip:hover:not(:disabled),
-.gyro-composer-tool:hover:not(:disabled),
-.gyro-send-button:hover:not(:disabled),
-.gyro-provider-model-picker button:hover:not(:disabled),
-.gyro-settings-row:hover,
-.gyro-provider-row:hover,
-.gyro-terminal-toolbar button:hover:not(:disabled),
-.gyro-cli-launch-stepper button:hover:not(:disabled),
-.gyro-cli-launch-focus button:hover:not(:disabled) {
-  transform: translateY(-0.5px);
-}
 
-.gyro-primary-button:active:not(:disabled),
-.gyro-secondary-button:active:not(:disabled),
-.gyro-icon-button:active:not(:disabled),
-.gyro-composer-chip:active:not(:disabled),
-.gyro-composer-tool:active:not(:disabled),
-.gyro-send-button:active:not(:disabled),
-.gyro-provider-model-picker button:active:not(:disabled) {
-  transform: translateY(0);
-}
+
+
+
+
 
 .gyro-provider-logo.is-openai {
   color: var(--gyro-provider-openai-logo);
@@ -17111,12 +15985,12 @@ textarea,
 @keyframes gyro-premium-pop-in {
   from {
     opacity: 0;
-    transform: translateY(3px) scale(0.985);
+    transform: translateY(var(--gyro-popover-offset, var(--gyro-motion-distance)));
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -18769,7 +17643,6 @@ body,
 .gyro-settings-back-button:hover {
   background: transparent;
   color: var(--gyro-premium-text);
-  transform: translateY(-0.5px);
 }
 
 .gyro-workspace-route.is-thread > .gyro-workspace-primary,
@@ -18888,18 +17761,7 @@ body,
     transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 
-.gyro-primary-button:active:not(:disabled),
-.gyro-secondary-button:active:not(:disabled),
-.gyro-icon-button:active:not(:disabled),
-.gyro-composer-chip:active:not(:disabled),
-.gyro-composer-tool:active:not(:disabled),
-.gyro-send-button:active:not(:disabled),
-.gyro-provider-model-picker button:active:not(:disabled),
-.gyro-terminal-toolbar button:active:not(:disabled),
-.gyro-settings-nav button:active:not(:disabled),
-.gyro-pane-tabs button:active:not(:disabled) {
-  transform: scale(0.985);
-}
+
 
 .gyro-composer-popover,
 .gyro-provider-picker .gyro-composer-popover,
@@ -20934,7 +19796,7 @@ button.gyro-settings-row em::after {
   height: calc(24px * var(--gyro-ui-scale, 1));
   padding: calc(2px * var(--gyro-ui-scale, 1));
   transition: background var(--gyro-premium-motion) var(--gyro-premium-ease);
-  width: 42px;
+  width: calc(42px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-switch span {
@@ -20945,7 +19807,7 @@ button.gyro-settings-row em::after {
   margin: 0;
   transform: translateX(0);
   transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-  width: 18px;
+  width: calc(18px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-switch.is-on {
@@ -20954,7 +19816,7 @@ button.gyro-settings-row em::after {
 
 .gyro-settings-switch.is-on span {
   background: white;
-  transform: translateX(17px);
+  transform: translateX(calc(17px * var(--gyro-ui-scale, 1)));
 }
 
 .gyro-settings-segmented {
@@ -21572,7 +20434,7 @@ button.gyro-settings-row em::after {
   column-gap: 14px;
   display: grid;
   grid-template-columns:
-    minmax(130px, 1fr) minmax(150px, 0.9fr) minmax(110px, 0.55fr)
+    minmax(130px, 0.9fr) minmax(150px, 0.8fr) minmax(110px, 0.75fr)
     276px;
 }
 .gyro-provider-table-head {
@@ -21582,6 +20444,16 @@ button.gyro-settings-row em::after {
   letter-spacing: 0.06em;
   padding: 10px 12px;
   text-transform: uppercase;
+}
+.gyro-provider-table-head > :last-child {
+  text-align: right;
+}
+.gyro-provider-table > .gyro-provider-row > .gyro-settings-status {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .gyro-provider-table > .gyro-provider-row {
   border-bottom: 0.5px solid var(--gyro-premium-hairline-soft);
@@ -24681,7 +23553,7 @@ button.gyro-response-changed-files:hover {
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -27217,7 +26089,7 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   color: var(--gyro-text);
   display: flex;
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 600;
   gap: 9px;
   letter-spacing: -0.02em;
@@ -27227,7 +26099,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-settings-section > header h1 svg {
   color: var(--gyro-muted);
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -27838,7 +26710,7 @@ button.gyro-account-menu-row:hover,
   border-radius: var(--gyro-radius-xl);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
   display: grid;
-  gap: 12px;
+  gap: var(--gyro-space-group);
   grid-template-columns: 38px minmax(0, 1fr) 16px;
   grid-template-rows: auto auto;
   min-height: 148px;
@@ -33455,7 +32327,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-settings-section > header h1 {
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.12;
@@ -33463,7 +32335,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-settings-section > header h1 svg {
   display: none;
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -33480,7 +32352,7 @@ button.gyro-account-menu-row:hover,
   background: transparent;
   border: 0;
   display: grid;
-  gap: 24px;
+  gap: var(--gyro-space-section);
   overflow: visible;
 }
 
@@ -35555,7 +34427,7 @@ textarea:focus-visible,
 .gyro-chat-start:not(.is-mission) > h1 {
   color: var(--gyro-text);
   font-family: var(--gyro-font-display);
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 500;
   letter-spacing: -0.025em;
   line-height: 1.15;
@@ -35930,8 +34802,8 @@ textarea:focus-visible,
 .gyro-sidebar-actions.is-settings-pages {
   overflow-y: auto;
   min-height: 0;
-  padding: 4px 8px 24px;
-  gap: 24px;
+  padding: 4px 8px var(--gyro-space-section);
+  gap: var(--gyro-space-section);
 }
 
 .gyro-sidebar-action.is-settings-page {
@@ -35966,11 +34838,11 @@ textarea:focus-visible,
 }
 
 .gyro-settings-section > header {
-  padding: 0 0 28px;
+  padding: 0 0 var(--gyro-space-section);
 }
 
 .gyro-settings-section > header h1 {
-  font-size: calc(24px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -35982,7 +34854,7 @@ textarea:focus-visible,
 }
 
 .gyro-settings-section-body {
-  gap: 28px;
+  gap: var(--gyro-space-section);
 }
 
 .gyro-settings-group {
@@ -36025,7 +34897,7 @@ textarea:focus-visible,
   background: transparent;
   border-bottom: 1px solid var(--gyro-border-soft);
   min-height: 72px;
-  padding: 14px 4px;
+  padding: 14px 0;
 }
 
 .gyro-workspace-settings-list > label:first-child {
@@ -36048,6 +34920,11 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--gyro-border-soft);
   min-height: calc(72px * var(--gyro-ui-scale, 1));
   padding: calc(14px * var(--gyro-ui-scale, 1)) calc(4px * var(--gyro-ui-scale, 1));
+}
+
+/* Align ordinary settings copy and controls with their section edges. */
+.gyro-settings-row {
+  padding-inline: 0;
 }
 
 .gyro-settings-group-rows > :first-child {
@@ -36324,6 +35201,8 @@ textarea:focus-visible,
    most: session rails, starter actions, composer controls, tool launchers,
    workspace chrome, and editable Settings rows. */
 :root[data-density="compact"] {
+  --gyro-navigation-row-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-tool-header-height: calc(36px * var(--gyro-ui-scale, 1));
   --gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
@@ -36333,7 +35212,9 @@ textarea:focus-visible,
 }
 
 :root[data-density="comfortable"] {
-  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-navigation-row-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-tool-header-height: calc(38px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
@@ -36352,7 +35233,7 @@ textarea:focus-visible,
 }
 
 :root[data-density="comfortable"] .gyro-workspace-route.is-code {
-  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
@@ -36362,6 +35243,7 @@ textarea:focus-visible,
 :root[data-density="compact"] .gyro-sidebar-row,
 :root[data-density="compact"] .gyro-sidebar-project-row,
 :root[data-density="compact"] .gyro-sidebar-thread,
+:root[data-density="compact"] .gyro-sidebar-thread-main,
 :root[data-density="compact"] .gyro-session-row,
 :root[data-density="compact"] .gyro-footer-button {
   min-height: calc(26px * var(--gyro-ui-scale, 1));
@@ -36372,35 +35254,36 @@ textarea:focus-visible,
 :root[data-density="comfortable"] .gyro-sidebar-row,
 :root[data-density="comfortable"] .gyro-sidebar-project-row,
 :root[data-density="comfortable"] .gyro-sidebar-thread,
+:root[data-density="comfortable"] .gyro-sidebar-thread-main,
 :root[data-density="comfortable"] .gyro-session-row,
 :root[data-density="comfortable"] .gyro-footer-button {
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
   padding-block: calc(3px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-session-row,
 :root[data-density="comfortable"] .gyro-session-row {
-  padding-block: calc(1px * var(--gyro-ui-scale, 1));
+  padding-block: 0;
 }
 
 :root[data-density="comfortable"] .gyro-session-row {
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-settings-row,
 :root[data-density="compact"] .gyro-settings-group .gyro-provider-row,
 :root[data-density="compact"] .gyro-provider-table > .gyro-provider-row,
 :root[data-density="compact"] .gyro-workspace-settings-list > label {
-  min-height: calc(48px * var(--gyro-ui-scale, 1));
-  padding-block: calc(9px * var(--gyro-ui-scale, 1));
+  min-height: calc(44px * var(--gyro-ui-scale, 1));
+  padding-block: calc(7px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] .gyro-settings-row,
 :root[data-density="comfortable"] .gyro-settings-group .gyro-provider-row,
 :root[data-density="comfortable"] .gyro-provider-table > .gyro-provider-row,
 :root[data-density="comfortable"] .gyro-workspace-settings-list > label {
-  min-height: calc(56px * var(--gyro-ui-scale, 1));
-  padding-block: calc(12px * var(--gyro-ui-scale, 1));
+  min-height: calc(52px * var(--gyro-ui-scale, 1));
+  padding-block: calc(10px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="compact"] .gyro-composer-bar {
@@ -37711,204 +36594,7 @@ textarea:focus-visible,
 }
 
 .gyro-composer-control-model {
-  --gyro-model-popover-width: min(290.7px, calc(100vw - 24px));
-}
-
-/* Codex-style effort control: the whole track is a pill, with native range
-   keyboard/pointer behavior. Insets align the stops with the thumb's travel. */
-:root .gyro-composer-popover.gyro-effort-slider-popover {
-  display: block;
-  background: var(--gyro-surface);
-  width: var(--gyro-model-popover-width);
-  min-width: 0;
-  max-width: none;
-  padding: 13.3px;
-  border-radius: var(--gyro-radius-xl);
-  overflow: visible;
-}
-.gyro-effort-slider-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 5.7px;
-  margin-bottom: 15.2px;
-}
-.gyro-effort-slider-header button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-.gyro-effort-slider-heading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.9px;
-  min-width: 0;
-}
-.gyro-effort-slider-header .gyro-effort-value-button {
-  display: flex;
-  align-items: center;
-  gap: 2.85px;
-  color: #3982fa;
-  font-size: calc(15.2px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
-  line-height: calc(20.9px * var(--gyro-ui-scale, 1));
-  border-radius: 3.8px;
-}
-.gyro-effort-value-button svg {
-  color: var(--gyro-muted);
-}
-.gyro-effort-slider-header .gyro-effort-model-button {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: calc(13.3px * var(--gyro-ui-scale, 1));
-  line-height: calc(19px * var(--gyro-ui-scale, 1));
-  color: var(--gyro-muted);
-  border-radius: 3.8px;
-}
-.gyro-effort-slider-header button:hover {
-  color: var(--gyro-text);
-}
-.gyro-effort-slider-header button:focus-visible {
-  outline: 1.9px solid #3982fa;
-  outline-offset: 2.85px;
-}
-.gyro-effort-slider {
-  position: relative;
-  height: 31.35px;
-  --effort-thumb-size: 31.35px;
-}
-.gyro-effort-slider-track {
-  position: absolute;
-  inset: 1.9px 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--gyro-text) 12%, var(--gyro-surface));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  overflow: hidden;
-}
-.gyro-effort-slider-fill {
-  height: 100%;
-  width: calc(
-    var(--effort-thumb-size) / 2 + (100% - var(--effort-thumb-size)) *
-      var(--effort-progress)
-  );
-  background: #3982fa;
-}
-.gyro-effort-slider-stops {
-  position: absolute;
-  inset: 0 calc(var(--effort-thumb-size) / 2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-}
-.gyro-effort-slider-stops span {
-  width: 4.75px;
-  height: 4.75px;
-  margin: 0 -2.375px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
-}
-.gyro-effort-slider-stops .is-filled {
-  background: #8fbbff;
-}
-.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value-button {
-  color: #a45cff;
-}
-.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
-  width: 100%;
-  background:
-    radial-gradient(ellipse at 48% 105%, #e2b4ff 0%, transparent 57%),
-    linear-gradient(100deg, #443ee8 0%, #9451ff 47%, #783cf3 100%);
-  box-shadow: inset 0 0 9px rgb(218 166 255 / 45%);
-}
-.gyro-effort-slider-popover[data-max-effort="true"]
-  .gyro-effort-slider-track::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 6% 62%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 11% 39%, #ead7ff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 17% 77%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 27% 32%, #fff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 43% 67%, #fff 0 0.8px, transparent 1.4px),
-    radial-gradient(circle at 47% 27%, #fff 0 0.8px, transparent 1.4px),
-    radial-gradient(circle at 51% 49%, #f7eaff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 57% 70%, #fff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 68% 25%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 78% 43%, #ead7ff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 86% 75%, #fff 0 0.7px, transparent 1.3px);
-  opacity: 0.8;
-}
-.gyro-effort-slider-popover[data-max-effort="true"]
-  .gyro-effort-slider-stops
-  .is-filled {
-  background: #ddbcff;
-}
-.gyro-effort-slider input {
-  position: absolute;
-  inset: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  width: 100%;
-  height: 31.35px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 999px;
-  touch-action: none;
-}
-.gyro-effort-slider input::-webkit-slider-runnable-track {
-  height: 31.35px;
-  background: transparent;
-}
-.gyro-effort-slider input::-moz-range-track {
-  height: 31.35px;
-  background: transparent;
-}
-.gyro-effort-slider input::-webkit-slider-thumb {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 31.35px;
-  height: 31.35px;
-  border: 1px solid #e3e4e6;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
-}
-.gyro-effort-slider input::-moz-range-thumb {
-  width: 29.45px;
-  height: 29.45px;
-  border: 1px solid #e3e4e6;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
-}
-.gyro-effort-slider input:focus-visible {
-  outline: 1.9px solid #3982fa;
-  outline-offset: 3.8px;
-}
-.gyro-effort-slider input:disabled {
-  cursor: default;
-}
-
-.gyro-effort-icon-button svg {
-  width: 16.15px;
-  height: 16.15px;
-}
-.gyro-effort-value-button svg {
-  width: 15.2px;
-  height: 15.2px;
+  --gyro-model-popover-width: min(calc(280px * var(--gyro-ui-scale, 1)), calc(100vw - 24px));
 }
 
 /* The model list grows out of the effort panel without changing its width. */
@@ -37936,8 +36622,8 @@ textarea:focus-visible,
 }
 .gyro-inline-approval-body {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: var(--gyro-space-card);
+  padding: var(--gyro-space-panel);
 }
 .gyro-inline-approval-heading {
   display: grid;
@@ -39182,13 +37868,13 @@ textarea:focus-visible,
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: var(--gyro-tool-header-height) minmax(0, 1fr);
 }
 :root[data-theme] .gyro-terminal-pane > header,
 :root[data-theme] .gyro-terminal-pane.is-active > header {
-  height: 42px;
-  min-height: 42px;
-  padding: 5px 10px;
+  height: var(--gyro-tool-header-height);
+  min-height: var(--gyro-tool-header-height);
+  padding: calc(3px * var(--gyro-ui-scale, 1)) 10px;
   gap: 4px;
   border-bottom: 0;
   background: var(--gyro-terminal-canvas);
@@ -39201,7 +37887,7 @@ textarea:focus-visible,
   gap: 8px;
   min-width: 0;
   max-width: 100%;
-  height: 30px;
+  height: var(--gyro-control-height);
   padding: 0 8px;
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
@@ -40289,19 +38975,19 @@ textarea:focus-visible,
   box-shadow: none;
 }
 :root[data-theme] .gyro-terminal-workspace:not(.is-empty) {
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: var(--gyro-tool-header-height) minmax(0, 1fr);
   background: var(--gyro-terminal-canvas);
 }
 :root[data-theme] .gyro-terminal-toolbar:not(.is-empty) {
-  height: 42px;
-  min-height: 42px;
-  padding: 5px 8px;
+  height: var(--gyro-tool-header-height);
+  min-height: var(--gyro-tool-header-height);
+  padding: calc(3px * var(--gyro-ui-scale, 1)) 8px;
   gap: 4px;
   border: 0;
   background: var(--gyro-terminal-canvas);
 }
 :root[data-theme] .gyro-terminal-tab {
-  height: 30px;
+  height: var(--gyro-control-height);
   min-width: 160px;
   padding: 0;
   gap: 0;
@@ -40309,7 +38995,7 @@ textarea:focus-visible,
 }
 :root[data-theme] .gyro-terminal-tab > button[role="tab"] {
   flex: 1 1 auto;
-  height: 30px;
+  height: var(--gyro-control-height);
   gap: 8px;
 }
 :root[data-theme] .gyro-terminal-tab-grip {
@@ -40522,7 +39208,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100vh - 40px);
-  padding: 20px;
+  padding: var(--gyro-space-panel);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-xl);
   background: var(--gyro-surface);
@@ -43795,7 +42481,7 @@ textarea:focus-visible,
 /* ---- Responsiveness contract (keep last) ------------------------------------
    A click should land on the next frame. Surfaces that a click or a view
    switch brings in appear at once instead of fading or sliding in; motion is
-   kept for popovers. Transitions
+   kept for popovers, measured selections, and tiny action-icon presses. General transitions
    only tint (background, border, color, opacity) so hover never reflows,
    re-rasterizes text, or re-lays out the shell. */
 :root .gyro-chat-thread-canvas,

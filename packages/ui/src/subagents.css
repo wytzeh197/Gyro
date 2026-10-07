@@ -60,7 +60,7 @@
 .gyro-subagent-panel {
   height: 100%;
   overflow: auto;
-  padding: 20px;
+  padding: var(--gyro-space-panel);
   min-width: 0;
   box-sizing: border-box;
 }
@@ -84,7 +84,7 @@
   overflow-wrap: anywhere;
 }
 .gyro-subagent-run + .gyro-subagent-run {
-  margin-top: 24px;
+  margin-top: var(--gyro-space-section);
 }
 .gyro-subagent-result {
   margin-top: 14px;
@@ -121,7 +121,7 @@
   gap: 7px;
 }
 .gyro-subagent-empty {
-  padding: 20px;
+  padding: var(--gyro-space-panel);
   font-size: 12px;
   opacity: 0.65;
 }

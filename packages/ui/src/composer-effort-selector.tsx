@@ -25,13 +25,19 @@ export function ComposerEffortSelector({
   onSelect: (index: number) => void;
   onModels: () => void;
 }) {
-  const [index, setIndex] = useState(selectedIndex);
-  const committedIndex = useRef(selectedIndex);
+  const normalizedIndex = Math.max(
+    0,
+    Math.min(selectedIndex, labels.length - 1),
+  );
+  const [index, setIndex] = useState(normalizedIndex);
+  const [dragging, setDragging] = useState(false);
+  const committedIndex = useRef(normalizedIndex);
+  const pointerStart = useRef<number>();
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    setIndex(selectedIndex);
-    committedIndex.current = selectedIndex;
-  }, [selectedIndex]);
+    setIndex(normalizedIndex);
+    committedIndex.current = normalizedIndex;
+  }, [normalizedIndex, labels.length]);
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
@@ -64,6 +70,7 @@ export function ComposerEffortSelector({
       aria-label="Model and effort"
       className="gyro-composer-popover gyro-effort-slider-popover"
       data-max-effort={labels.length > 1 && index === labels.length - 1}
+      data-dragging={dragging}
       data-align="end"
       data-placement={placement}
       id={id}
@@ -111,20 +118,45 @@ export function ComposerEffortSelector({
             />
           ))}
         </div>
+        <span aria-hidden="true" className="gyro-effort-slider-thumb" />
         <input
           aria-label="Reasoning effort"
           aria-valuetext={labels[index]}
           disabled={labels.length < 2}
           min={0}
-          max={labels.length - 1}
+          max={Math.max(0, labels.length - 1)}
           step={1}
           type="range"
           value={index}
           onChange={(event) => setIndex(Number(event.currentTarget.value))}
-          onPointerUp={(event) => commit(Number(event.currentTarget.value))}
-          onPointerCancel={() => setIndex(committedIndex.current)}
+          onPointerDown={(event) => {
+            pointerStart.current = event.clientX;
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (
+              pointerStart.current !== undefined &&
+              Math.abs(event.clientX - pointerStart.current) > 2
+            ) {
+              setDragging(true);
+            }
+          }}
+          onPointerUp={(event) => {
+            pointerStart.current = undefined;
+            setDragging(false);
+            commit(Number(event.currentTarget.value));
+          }}
+          onPointerCancel={() => {
+            pointerStart.current = undefined;
+            setDragging(false);
+            setIndex(committedIndex.current);
+          }}
           onKeyUp={(event) => commit(Number(event.currentTarget.value))}
-          onBlur={(event) => commit(Number(event.currentTarget.value))}
+          onBlur={(event) => {
+            pointerStart.current = undefined;
+            setDragging(false);
+            commit(Number(event.currentTarget.value));
+          }}
         />
       </div>
     </div>

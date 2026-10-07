@@ -1,0 +1,227 @@
+/* Codex-style effort control: the whole track is a pill, with native range
+   keyboard/pointer behavior. Insets align the stops with the thumb's travel. */
+:root .gyro-composer-popover.gyro-effort-slider-popover {
+  display: block;
+  background: var(--gyro-surface);
+  width: var(--gyro-model-popover-width);
+  min-width: 0;
+  max-width: none;
+  padding: var(--gyro-space-card);
+  border-radius: var(--gyro-radius-xl);
+  overflow: visible;
+}
+.gyro-effort-slider-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 5.7px;
+  margin-bottom: var(--gyro-space-card);
+}
+.gyro-effort-slider-header button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.gyro-effort-slider-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.9px;
+  min-width: 0;
+}
+.gyro-effort-slider-header .gyro-effort-value-button {
+  display: flex;
+  align-items: center;
+  gap: 2.85px;
+  color: var(--gyro-accent);
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+  line-height: calc(20.9px * var(--gyro-ui-scale, 1));
+  border-radius: 3.8px;
+}
+.gyro-effort-value-button svg {
+  color: var(--gyro-muted);
+}
+.gyro-effort-slider-header .gyro-effort-model-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--gyro-font-support);
+  line-height: calc(19px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-muted);
+  border-radius: 3.8px;
+}
+.gyro-effort-slider-header button:hover {
+  color: var(--gyro-text);
+}
+.gyro-effort-slider-header button:focus-visible {
+  outline: 1.9px solid var(--gyro-accent);
+  outline-offset: 2.85px;
+}
+.gyro-effort-slider {
+  position: relative;
+  height: var(--gyro-effort-thumb-size);
+  --effort-thumb-size: var(--gyro-effort-thumb-size);
+}
+.gyro-effort-slider-track {
+  position: absolute;
+  inset: 1.9px 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gyro-text) 12%, var(--gyro-surface));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  overflow: hidden;
+}
+.gyro-effort-slider-fill {
+  height: 100%;
+  width: calc(
+    var(--effort-thumb-size) + (100% - var(--effort-thumb-size)) *
+      var(--effort-progress)
+  );
+  background: var(--gyro-accent);
+}
+.gyro-effort-slider-stops {
+  position: absolute;
+  inset: 0 calc(var(--effort-thumb-size) / 2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.gyro-effort-slider-stops span {
+  width: 4.75px;
+  height: 4.75px;
+  margin: 0 -2.375px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
+}
+.gyro-effort-slider-stops .is-filled {
+  background: #8fbbff;
+}
+.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value-button {
+  color: var(--gyro-effort-max);
+}
+.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
+  background:
+    radial-gradient(ellipse at 48% 105%, #e2b4ff 0%, transparent 57%),
+    linear-gradient(100deg, #443ee8 0%, #9451ff 47%, #783cf3 100%);
+  box-shadow: inset 0 0 9px rgb(218 166 255 / 45%);
+}
+.gyro-effort-slider-popover[data-max-effort="true"]
+  .gyro-effort-slider-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 6% 62%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 11% 39%, #ead7ff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 17% 77%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 27% 32%, #fff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 43% 67%, #fff 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 47% 27%, #fff 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 51% 49%, #f7eaff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 57% 70%, #fff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 68% 25%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 78% 43%, #ead7ff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 86% 75%, #fff 0 0.7px, transparent 1.3px);
+  opacity: 0.8;
+}
+.gyro-effort-slider-popover[data-max-effort="true"]
+  .gyro-effort-slider-stops
+  .is-filled {
+  background: #ddbcff;
+}
+.gyro-effort-slider input {
+  position: absolute;
+  inset: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: var(--gyro-effort-thumb-size);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 999px;
+  touch-action: none;
+}
+.gyro-effort-slider input::-webkit-slider-runnable-track {
+  height: var(--gyro-effort-thumb-size);
+  background: transparent;
+}
+.gyro-effort-slider input::-moz-range-track {
+  height: var(--gyro-effort-thumb-size);
+  background: transparent;
+}
+.gyro-effort-slider input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: var(--gyro-effort-thumb-size);
+  height: var(--gyro-effort-thumb-size);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.gyro-effort-slider input::-moz-range-thumb {
+  width: var(--gyro-effort-thumb-size);
+  height: var(--gyro-effort-thumb-size);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.gyro-effort-slider input:focus-visible {
+  outline: 1.9px solid var(--gyro-accent);
+  outline-offset: 3.8px;
+}
+.gyro-effort-slider input:disabled {
+  cursor: default;
+}
+
+.gyro-effort-icon-button svg {
+  width: 16.15px;
+  height: 16.15px;
+}
+.gyro-effort-value-button svg {
+  width: 15.2px;
+  height: 15.2px;
+}
+
+/* Position and fill share one progress value and timing. Pointer motion is immediate. */
+.gyro-effort-slider-thumb {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: calc(
+    (100% - var(--effort-thumb-size)) * var(--effort-progress)
+  );
+  width: var(--effort-thumb-size);
+  height: var(--effort-thumb-size);
+  box-sizing: border-box;
+  border: 1px solid var(--gyro-border-strong);
+  border-radius: 50%;
+  background: var(--gyro-effort-thumb-ink);
+  box-shadow: var(--gyro-premium-shadow-soft);
+  pointer-events: none;
+  transition: inset-inline-start var(--gyro-premium-motion)
+    var(--gyro-premium-ease);
+}
+.gyro-effort-slider-fill {
+  transition:
+    width var(--gyro-premium-motion) var(--gyro-premium-ease),
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+.gyro-effort-slider-stops span,
+.gyro-effort-value-button {
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+.gyro-effort-slider-popover[data-dragging="true"]
+  :is(.gyro-effort-slider-thumb, .gyro-effort-slider-fill) {
+  transition: none;
+}

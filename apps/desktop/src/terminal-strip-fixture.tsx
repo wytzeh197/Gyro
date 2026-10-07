@@ -13,6 +13,21 @@ import {
   type TerminalPane,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import "../../../packages/ui/src/appearance.css";
+
+// Optional appearance variants make toolbar alignment reproducible without
+// changing the real app's saved preferences.
+const appearance = new URLSearchParams(location.search);
+for (const [parameter, attribute, supported] of [
+  ["size", "interfaceSize", ["small", "default", "large"]],
+  ["density", "density", ["compact", "comfortable"]],
+  ["theme", "theme", ["dark", "light"]],
+] as const) {
+  const value = appearance.get(parameter);
+  if (value && (supported as readonly string[]).includes(value)) {
+    document.documentElement.dataset[attribute] = value;
+  }
+}
 
 const basePane = {
   branch: "main",

@@ -85,7 +85,7 @@
 
 .gyro-plan-card-body .gyro-plan-document {
   overflow: visible;
-  padding: 16px 18px 4px;
+  padding: var(--gyro-space-card) var(--gyro-space-panel) 4px;
 }
 
 .gyro-plan-card-body .gyro-plan-document h1 {

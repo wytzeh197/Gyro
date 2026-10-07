@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { SelectionTrack } from "./selection-track";
 
 /**
  * The settings controls every section is built from.
@@ -122,7 +123,11 @@ export function SettingsSegmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div aria-label={label} className="gyro-settings-segmented" role="group">
+    <SelectionTrack
+      label={label}
+      className="gyro-settings-segmented"
+      value={value}
+    >
       {options.map((option) => (
         <button
           aria-pressed={value === option.value}
@@ -134,7 +139,7 @@ export function SettingsSegmented<T extends string>({
           {option.label}
         </button>
       ))}
-    </div>
+    </SelectionTrack>
   );
 }
 

@@ -1,0 +1,78 @@
+/* Feedback paints inside controls; their text, bounds, and hit targets stay put. */
+:root
+  :is(button, summary, a[href], [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [draggable="true"],
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ) {
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+:root
+  :is(button, summary, a[href], [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [draggable="true"],
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ):active {
+  opacity: var(--gyro-press-opacity);
+  /* A short click must register immediately; release settles over the fast token. */
+  transition-duration: 0s;
+}
+
+:root
+  :is(button, summary, [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [role="tab"],
+    [draggable="true"],
+    [draggable="true"] *,
+    [inert],
+    [inert] *,
+    .is-dragging *
+  )
+  > svg {
+  transition:
+    translate var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+:root
+  :is(button, summary, [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [role="tab"],
+    [draggable="true"],
+    [draggable="true"] *,
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ):active
+  > svg {
+  translate: 0 var(--gyro-press-distance);
+  transition-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root :is(button, summary, [role="button"]):active > svg {
+    translate: none !important;
+  }
+  :root :is(button, summary, a[href], [role="button"]),
+  :root :is(button, summary, [role="button"]) > svg {
+    transition-duration: 0s !important;
+  }
+}

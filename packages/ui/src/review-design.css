@@ -68,7 +68,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 42px;
+  min-height: calc(38px * var(--gyro-ui-scale, 1));
   padding: 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--gyro-radius-sm);
@@ -134,7 +134,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 8px var(--gyro-space-card);
   border-bottom: 1px solid var(--gyro-border-soft);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div {

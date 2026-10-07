@@ -1,0 +1,107 @@
+/* Specific interactions opt into movement; the shell responsiveness guard stays. */
+:root .gyro-selection-track {
+  position: relative;
+  isolation: isolate;
+}
+:root .gyro-selection-track > button {
+  position: relative;
+  z-index: 1;
+}
+:root .gyro-selection-track > .gyro-selection-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: color-mix(in srgb, var(--gyro-text) 13%, transparent);
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
+    width var(--gyro-premium-motion) var(--gyro-premium-ease),
+    height var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root .gyro-selection-track[data-selection-ready] > .gyro-selection-indicator {
+  visibility: visible;
+}
+:root[data-theme]
+  .gyro-selection-track[data-selection-ready]
+  > button.is-active {
+  background: transparent;
+}
+:root .gyro-titlebar-switch > .gyro-selection-indicator {
+  background: color-mix(in srgb, var(--gyro-text) 9%, var(--gyro-sidebar));
+  border-radius: var(--gyro-radius-md);
+}
+
+:root .gyro-composer-popover[data-placement="up"] {
+  --gyro-popover-offset: calc(-1 * var(--gyro-motion-distance));
+}
+:root .gyro-composer-popover[data-placement="down"] {
+  --gyro-popover-offset: var(--gyro-motion-distance);
+}
+
+/* Dialog frames arrive without animating any underlying workbench geometry. */
+:root
+  :is(
+    .gyro-project-remove-overlay,
+    .gyro-terminal-terminate-overlay,
+    .gyro-settings-confirm-overlay,
+    .gyro-workflow-overlay,
+    .gyro-project-edit-overlay
+  ) {
+  z-index: var(--gyro-layer-dialog);
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion)
+    var(--gyro-premium-ease) both;
+}
+:root
+  :is(
+    .gyro-project-remove-card,
+    .gyro-terminal-terminate-card,
+    .gyro-settings-confirm-overlay > section,
+    .gyro-workflow-overlay > .gyro-workflow-form,
+    .gyro-project-edit-dialog
+  ) {
+  animation: gyro-dialog-in var(--gyro-premium-motion-slow)
+    var(--gyro-premium-ease) both;
+}
+@keyframes gyro-dialog-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes gyro-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--gyro-motion-distance));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:root .gyro-run-group-disclosure svg {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root
+  .gyro-run-group-toggle[aria-expanded="true"]
+  .gyro-run-group-disclosure
+  svg {
+  transform: rotate(90deg);
+}
+:root .gyro-run-group-toggle[aria-expanded="true"] + .gyro-run-group-details {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion)
+    var(--gyro-premium-ease) both;
+}
+
+:root .gyro-run-header-toggle > svg {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root .gyro-run-header-toggle[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}

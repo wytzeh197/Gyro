@@ -598,8 +598,12 @@ const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = [
+  readRepoFile("packages/ui/src/styles-foundation.css"),
   readRepoFile("packages/ui/src/styles.css"),
   readRepoFile("packages/ui/src/appearance.css"),
+  readRepoFile("packages/ui/src/composer-effort-selector.css"),
+  readRepoFile("packages/ui/src/interaction-motion.css"),
+  readRepoFile("packages/ui/src/press-feedback.css"),
   readRepoFile("packages/ui/src/chat-design.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
@@ -5154,7 +5158,7 @@ expect(
       "crate::apply_macos_traffic_light_position(&main)",
     ) &&
     surfaceSource.includes("New Chat") &&
-    surfaceSource.includes('aria-label="Primary surfaces"') &&
+    surfaceSource.includes('label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
     surfaceSource.includes("ideSidebarMinimumWidth * 2") &&
     surfaceSource.includes('aria-label="Resize Workspace sidebar"') &&
@@ -5174,7 +5178,7 @@ expect(
     surfaceSource.includes('label="Sessions"') &&
     surfaceSource.includes('label="Workspace"') &&
     !surfaceSource.includes('label="IDE"') &&
-    surfaceSource.indexOf('aria-label="Primary surfaces"') <
+    surfaceSource.indexOf('label="Primary surfaces"') <
       surfaceSource.indexOf('className="gyro-sidebar-actions"') &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
@@ -7678,7 +7682,7 @@ for (const secretPattern of [
 
 expect(
   surfaceSource.includes(
-    'data-active-mode={isIdeSidebar ? "workspace" : "sessions"}',
+    'value={isIdeSidebar ? "workspace" : "sessions"}',
   ) &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes("justify-content: center") &&

@@ -1,7 +1,7 @@
 .gyro-workflow-form {
   display: grid;
-  gap: 14px;
-  padding: 20px;
+  gap: var(--gyro-space-card);
+  padding: var(--gyro-space-panel);
   margin: 12px;
   border: 1px solid var(--gyro-border, #8884);
   border-radius: var(--gyro-radius-lg);

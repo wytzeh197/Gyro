@@ -11,6 +11,8 @@ import {
 } from "./subagents";
 import { AppearanceSettings } from "./appearance-settings";
 import { SettingsSegmented } from "./settings-controls";
+import { SelectionTrack } from "./selection-track";
+import { useDialogDismiss } from "./use-dialog-dismiss";
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
@@ -4481,11 +4483,10 @@ function WorkspaceSidebarContent({
               </button>
             </div>
           ) : null}
-          <div
-            aria-label="Primary surfaces"
+          <SelectionTrack
+            label="Primary surfaces"
             className="gyro-titlebar-switch"
-            data-active-mode={isIdeSidebar ? "workspace" : "sessions"}
-            role="group"
+            value={isIdeSidebar ? "workspace" : "sessions"}
           >
             <SidebarModeRow
               icon={<MessageSquare size={15} strokeWidth={1.5} />}
@@ -4502,7 +4503,7 @@ function WorkspaceSidebarContent({
               }
               onClick={() => onSelectWorkspaceLayout("code")}
             />
-          </div>
+          </SelectionTrack>
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
@@ -20610,17 +20611,19 @@ export function ProjectRemoveConfirmOverlay({
   onKeep,
   onRemove,
 }: ProjectRemoveConfirmOverlayProps) {
+  const { ref: dialogRef, dismiss } = useDialogDismiss(onKeep);
   const sessionCopy =
     sessionCount > 0
       ? `${sessionCount} chat${sessionCount === 1 ? "" : "s"} will be hidden in the app.`
       : "This project will be hidden from the app.";
   return (
     <div
+      ref={dialogRef}
       aria-modal="true"
       className="gyro-project-remove-overlay"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
-          onKeep();
+          dismiss();
         }
       }}
       role="dialog"
@@ -20642,7 +20645,7 @@ export function ProjectRemoveConfirmOverlay({
           <button
             autoFocus
             className="gyro-project-remove-keep"
-            onClick={onKeep}
+            onClick={dismiss}
             type="button"
           >
             Keep
@@ -20671,24 +20674,26 @@ export function TerminalTerminateConfirmOverlay({
   onCancel,
   onTerminate,
 }: TerminalTerminateConfirmOverlayProps) {
+  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        dismiss();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [dismiss]);
 
   return (
     <div
+      ref={dialogRef}
       aria-modal="true"
       className="gyro-terminal-terminate-overlay"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
-          onCancel();
+          dismiss();
         }
       }}
       role="alertdialog"
@@ -20706,7 +20711,7 @@ export function TerminalTerminateConfirmOverlay({
           stop and the pane will close.
         </p>
         <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={onCancel} type="button">
+          <button autoFocus onClick={dismiss} type="button">
             Cancel
           </button>
           <button className="is-danger" onClick={onTerminate} type="button">
@@ -20739,24 +20744,26 @@ export function ChatCloseConfirmOverlay({
   onKeepRunning,
   onStopAndClose,
 }: ChatCloseConfirmOverlayProps) {
+  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        dismiss();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [dismiss]);
 
   return (
     <div
+      ref={dialogRef}
       aria-modal="true"
       className="gyro-terminal-terminate-overlay"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
-          onCancel();
+          dismiss();
         }
       }}
       role="alertdialog"
@@ -20775,7 +20782,7 @@ export function ChatCloseConfirmOverlay({
           pane without stopping leaves it using power in the background.
         </p>
         <div className="gyro-terminal-terminate-actions gyro-chat-close-actions">
-          <button onClick={onCancel} type="button">
+          <button onClick={dismiss} type="button">
             Cancel
           </button>
           <button onClick={onKeepRunning} type="button">
@@ -20817,24 +20824,26 @@ export function SessionDeleteConfirmOverlay({
   onCancel,
   onDelete,
 }: SessionDeleteConfirmOverlayProps) {
+  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        dismiss();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [dismiss]);
 
   return (
     <div
+      ref={dialogRef}
       aria-modal="true"
       className="gyro-terminal-terminate-overlay"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
-          onCancel();
+          dismiss();
         }
       }}
       role="alertdialog"
@@ -20858,7 +20867,7 @@ export function SessionDeleteConfirmOverlay({
           </p>
         ) : null}
         <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={onCancel} type="button">
+          <button autoFocus onClick={dismiss} type="button">
             Cancel
           </button>
           <button

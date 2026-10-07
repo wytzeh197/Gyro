@@ -622,7 +622,19 @@
   :is(.gyro-composer-chip, .gyro-composer-tool) {
   min-height: calc(28px * var(--gyro-ui-scale, 1));
   font-size: calc(11px * var(--gyro-ui-scale, 1));
-  transition: background-color calc(80ms * var(--gyro-motion-factor, 1)) ease;
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-bar
+  :is(.gyro-composer-chip, .gyro-composer-tool):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"]
+  ):active {
+  transition-duration: 0s;
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)

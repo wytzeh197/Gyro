@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import {
   Book,
-  ChevronDown,
   ChevronRight,
   Eye,
   FileCode2,
@@ -445,7 +444,7 @@ function RunWorkGroup({
           ) : null}
         </span>
         <span aria-hidden="true" className="gyro-run-group-disclosure">
-          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <ChevronRight size={13} />
         </span>
       </button>
       {isExpanded ? (
@@ -713,7 +712,7 @@ function RunHeader({
           type="button"
         >
           <span>{headerLabel}</span>
-          {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          <ChevronRight size={13} />
         </button>
       ) : (
         <span>{headerLabel}</span>

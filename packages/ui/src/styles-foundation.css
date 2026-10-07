@@ -1,0 +1,1110 @@
+@import "./chat-design.css";
+@import "./browser-capture.css";
+@import "./appearance.css";
+
+/*
+ System typography keeps every desktop surface consistent. Code and terminals retain their monospace fonts.
+ */
+@font-face {
+  font-family: var(--gyro-font-sans);
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: var(--gyro-font-sans);
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./assets/fonts/inter-tight-latin.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: dark;
+  /* Neutral surface ramps keep dark mode free of blue casts and light mode
+     free of cream casts. Accent hues belong to actions and semantic states. */
+  --gyro-user-main: #0874df;
+  --gyro-user-secondary: #8b6fcb;
+  --gyro-app: #181818;
+  --gyro-sidebar: #222222;
+  --gyro-sidebar-soft: #2c2c2c;
+  --gyro-pane: #1c1c1c;
+  --gyro-surface: #242424;
+  --gyro-surface-raised: #303030;
+  --gyro-surface-soft: #262626;
+  --gyro-border: #383838;
+  --gyro-border-soft: #2c2c2c;
+  --gyro-border-strong: #707070;
+  --gyro-text: #ededed;
+  --gyro-muted: #b5b5b5;
+  --gyro-faint: #a0a0a0;
+  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
+  --gyro-accent-strong: color-mix(
+    in srgb,
+    var(--gyro-user-main) 68%,
+    white 32%
+  );
+  --gyro-secondary-accent: color-mix(
+    in srgb,
+    var(--gyro-user-secondary) 84%,
+    white 16%
+  );
+  --gyro-secondary-accent-strong: color-mix(
+    in srgb,
+    var(--gyro-user-secondary) 66%,
+    white 34%
+  );
+  --gyro-update-blue: #356fd6;
+  --gyro-update-blue-hover: #2f63be;
+  --gyro-warn: #dbb77a;
+  --gyro-permission-full: #ff8a3d;
+  --gyro-effort-max: #a45cff;
+  --gyro-danger: #e48e91;
+  --gyro-success: #85c4a2;
+  --gyro-sidebar-text: #d5d5d5;
+  --gyro-hover-text: #fafafa;
+  --gyro-topbar: var(--gyro-app);
+  --gyro-topbar-border: var(--gyro-border-soft);
+  --gyro-brand-text: #111210;
+  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
+  --gyro-primary-text: #101724;
+  --gyro-primary-hover: color-mix(
+    in srgb,
+    var(--gyro-user-main) 40%,
+    white 60%
+  );
+  --gyro-user-bubble: var(--gyro-surface-soft);
+  --gyro-user-bubble-text: var(--gyro-text);
+  --gyro-code-bg: #141414;
+  --gyro-code-text: #dedede;
+  --gyro-segment-bg: var(--gyro-sidebar);
+  --gyro-segment-active: #323232;
+  --gyro-segment-active-text: var(--gyro-text);
+  /* The System preference thumbnail must show both palettes at once. */
+  --gyro-theme-preview-dark-canvas: #141414;
+  --gyro-theme-preview-dark-content: #383838;
+  --gyro-theme-preview-light-canvas: #f7f7f7;
+  --gyro-theme-preview-light-content: #e5e5e5;
+  --gyro-sidebar-mode-track: var(--gyro-sidebar);
+  --gyro-sidebar-mode-active: var(--gyro-control-hover);
+  --gyro-shadow: rgba(0, 0, 0, 0.42);
+  --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
+  --gyro-focus-ring: var(--gyro-accent);
+  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  --gyro-secondary-soft: color-mix(
+    in srgb,
+    var(--gyro-secondary-accent) 12%,
+    transparent
+  );
+  --gyro-warn-soft: rgba(255, 173, 92, 0.14);
+  --gyro-danger-soft: rgba(255, 105, 97, 0.13);
+  --gyro-blue: #8faee0;
+  --gyro-blue-soft: rgba(143, 174, 224, 0.1);
+  --gyro-canvas-subtle: var(--gyro-app);
+  --gyro-window: var(--gyro-app);
+  --gyro-workbench-line: rgba(255, 255, 255, 0.06);
+  --gyro-control-bg: var(--gyro-surface-soft);
+  --gyro-control-hover: #323232;
+  --gyro-premium-app: var(--gyro-app);
+  --gyro-premium-sidebar: var(--gyro-sidebar);
+  --gyro-premium-panel: var(--gyro-surface);
+  --gyro-premium-panel-strong: var(--gyro-surface-raised);
+  --gyro-premium-control: var(--gyro-surface-soft);
+  --gyro-premium-control-hover: var(--gyro-control-hover);
+  --gyro-premium-line: var(--gyro-border);
+  --gyro-premium-line-soft: var(--gyro-border-soft);
+  --gyro-premium-text: var(--gyro-text);
+  --gyro-premium-muted: var(--gyro-muted);
+  --gyro-premium-faint: var(--gyro-faint);
+  --gyro-premium-accent: var(--gyro-accent);
+  --gyro-premium-shadow: rgba(0, 0, 0, 0.55);
+  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.32);
+  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.42);
+  --gyro-premium-hairline: rgba(255, 255, 255, 0.09);
+  --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
+  --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.05);
+  --gyro-premium-focus: var(--gyro-focus-ring);
+  --gyro-scrim: rgba(6, 7, 9, 0.62);
+  /* Supporting UI uses restrained corners: crisp controls, lightly rounded
+     cards and menus. The composer and workspace seams keep their softer
+     geometry so the main surfaces remain distinct from utility chrome. */
+  --gyro-premium-radius-xs: 3px;
+  --gyro-premium-radius-sm: 4px;
+  --gyro-premium-radius-md: 6px;
+  --gyro-premium-radius-lg: 8px;
+  --gyro-premium-radius-xl: 10px;
+  --gyro-premium-radius-composer: 18px;
+  --gyro-seam-radius: 12px;
+  --gyro-radius-xs: var(--gyro-premium-radius-xs);
+  --gyro-radius-sm: var(--gyro-premium-radius-sm);
+  --gyro-radius-md: var(--gyro-premium-radius-md);
+  --gyro-radius-lg: var(--gyro-premium-radius-lg);
+  --gyro-radius-xl: var(--gyro-premium-radius-xl);
+  --gyro-radius-composer: var(--gyro-premium-radius-composer);
+  /* Motion ladder. Fast is a state flip, motion is a control settling, slow is
+     a surface arriving. Everything shares one ease. */
+  --gyro-premium-motion-fast: calc(80ms * var(--gyro-motion-factor, 1));
+  --gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1));
+  --gyro-premium-motion-slow: calc(180ms * var(--gyro-motion-factor, 1));
+  --gyro-premium-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --gyro-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gyro-font-display:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gyro-font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --gyro-mono: var(--gyro-font-mono);
+  --gyro-font-micro: calc(12px * var(--gyro-ui-scale, 1));
+  --gyro-font-chrome: calc(14px * var(--gyro-ui-scale, 1));
+  --gyro-font-support: calc(13px * var(--gyro-ui-scale, 1));
+  --gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));
+  --gyro-font-lead: calc(16px * var(--gyro-ui-scale, 1));
+  --gyro-font-heading: calc(22px * var(--gyro-ui-scale, 1));
+  --gyro-font-display-size: calc(22px * var(--gyro-ui-scale, 1));
+  --gyro-chat-content-width: 760px;
+  /* The composer and everything docked above it share one width. On the start
+     screen that is the hero measure; inside a thread the dock narrows it to the
+     transcript column so the composer sits on the same edges as the turns
+     above it. */
+  --gyro-composer-width: 800px;
+  --gyro-provider-openai: #7fd2b6;
+  --gyro-provider-openai-logo: #fff;
+  --gyro-provider-anthropic: #ff8a3d;
+  --gyro-provider-kimi: #1783ff;
+  --gyro-provider-kimi-logo: #fff;
+  --gyro-provider-ollama: #f6f2ea;
+  --gyro-provider-xai: #f6f2ea;
+  --gyro-provider-gemini: #8bb8ff;
+  --gyro-provider-cursor: #f2efe9;
+  --gyro-provider-opencode: #f2efe9;
+  --gyro-provider-deepseek: #7ea6ff;
+  --gyro-provider-mistral: #ff7a35;
+  /* OpenRouter's own assets carry a hue: the lime glyph is the one drawn for
+     dark surfaces, so the token keeps the brand ink instead of a flipped
+     monochrome. */
+  --gyro-provider-openrouter: #c8ff00;
+  --gyro-hero-heading: var(--gyro-text);
+  --gyro-hero-brand: var(--gyro-faint);
+  --gyro-hero-composer: var(--gyro-surface);
+  --gyro-hero-context: var(--gyro-surface);
+  --gyro-hero-border: var(--gyro-border);
+  --gyro-hero-text: var(--gyro-text);
+  --gyro-hero-muted: var(--gyro-muted);
+  --gyro-hero-placeholder: var(--gyro-faint);
+  --gyro-hero-hover: rgba(255, 255, 255, 0.06);
+  --gyro-hero-hover-text: var(--gyro-hover-text);
+  --gyro-hero-send: #ededed;
+  --gyro-hero-send-hover: #fafafa;
+  --gyro-hero-send-text: var(--gyro-app);
+  --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
+  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
+  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --gyro-page-header-bg: var(--gyro-surface);
+  --gyro-page-canvas: var(--gyro-app);
+  --gyro-page-card: var(--gyro-surface);
+  --gyro-page-card-hover: var(--gyro-surface-raised);
+  --gyro-ide-sidebar-width: 224px;
+  --gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-ide-context-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));
+  --gyro-ide-gap-xs: 4px;
+  --gyro-ide-gap-sm: 8px;
+  --gyro-ide-gap-md: 12px;
+  --gyro-space-compact: 4px;
+  --gyro-space-standard: 8px;
+  --gyro-space-comfortable: 12px;
+  --gyro-space-section: calc(20px * var(--gyro-ui-scale, 1));
+  --gyro-navigation-row-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-tool-header-height: calc(38px * var(--gyro-ui-scale, 1));
+  --gyro-space-card: calc(12px * var(--gyro-ui-scale, 1));
+  --gyro-space-panel: calc(16px * var(--gyro-ui-scale, 1));
+  --gyro-space-group: calc(10px * var(--gyro-ui-scale, 1));
+  --gyro-motion-distance: 4px;
+  --gyro-press-distance: 1px;
+  --gyro-press-opacity: 0.94;
+  /* Blocking decisions sit above menus and content-viewer overlays. */
+  --gyro-layer-dialog: 11000;
+  --gyro-effort-thumb-ink: #fff;
+  --gyro-effort-thumb-size: max(24px, calc(28px * var(--gyro-ui-scale, 1)));
+  --gyro-control-compact: 24px;
+  --gyro-control-standard: 28px;
+  --gyro-control-comfortable: 32px;
+  --gyro-icon-compact: 13px;
+  --gyro-icon-standard: 15px;
+  --gyro-status-active: var(--gyro-accent);
+  --gyro-status-running: var(--gyro-blue);
+  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-success: var(--gyro-success);
+  --gyro-status-warning: var(--gyro-warn);
+  --gyro-status-failed: var(--gyro-danger);
+  --gyro-status-cancelled: #8b95a3;
+  --gyro-status-disabled: #646d79;
+  --gyro-status-experimental: var(--gyro-secondary-accent);
+  /* Language tones, shared by the Explorer and Source Control so one file
+     type reads the same colour everywhere it appears. */
+  --gyro-file-default: var(--gyro-muted);
+  --gyro-file-javascript: #e5cc62;
+  --gyro-file-typescript: #79b8f3;
+  --gyro-file-react: #64cce8;
+  --gyro-file-json: #d8ca6b;
+  --gyro-file-css: #c6a1ed;
+  --gyro-file-html: #e9a278;
+  --gyro-file-vue: #82cba0;
+  --gyro-file-markdown: #87b8db;
+  --gyro-file-rust: #dfab86;
+  --gyro-file-go: #75c7d7;
+  --gyro-file-python: #7db9e8;
+  --gyro-file-ruby: #ed98a0;
+  --gyro-file-java: #dfa091;
+  --gyro-file-swift: #eeab80;
+  --gyro-file-cpp: #9ebbea;
+  --gyro-file-php: #adb0e8;
+  --gyro-file-lua: #97afe8;
+  --gyro-file-dart: #69c4d5;
+  --gyro-file-elixir: #bda2de;
+  --gyro-file-graphql: #ed94ce;
+  --gyro-file-diff: #afbdca;
+  --gyro-file-shell: #98cb73;
+  --gyro-file-config: #afb9c5;
+  --gyro-file-lock: #a7b3c0;
+  --gyro-file-binary: #a7b3c0;
+  --gyro-file-image: #c69ae3;
+  --gyro-file-media: #ee8cbd;
+  --gyro-file-archive: #bca3de;
+  --gyro-file-font: #d7b77c;
+  --gyro-file-data: #98cba2;
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-feature-settings:
+    "cv05" 1,
+    "cv11" 1,
+    "calt" 1;
+  font-synthesis: none;
+  --gyro-control-height: calc(32px * var(--gyro-ui-scale, 1));
+  --gyro-icon-target: calc(28px * var(--gyro-ui-scale, 1));
+}
+
+/* Durable Chat context: attachments, goals, plans, and run controls. */
+.gyro-composer-attachments,
+.gyro-transcript-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+.gyro-composer-attachments {
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 2px;
+}
+
+.gyro-composer-attachment,
+.gyro-transcript-attachment {
+  align-items: center;
+  background: var(--gyro-surface-raised, #202328);
+  border: 1px solid var(--gyro-border, #30343a);
+  border-radius: var(--gyro-radius-md);
+  display: flex;
+  gap: 7px;
+  max-width: 240px;
+  padding: 6px 8px;
+}
+
+.gyro-composer-attachment.is-image {
+  background: #15171a;
+  border-color: rgba(255, 255, 255, 0.13);
+  border-radius: var(--gyro-radius-md);
+  display: block;
+  height: 72px;
+  max-width: none;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 88px;
+}
+
+.gyro-composer-attachment.is-image::after {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  bottom: 0;
+  content: "";
+  height: 32px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.gyro-composer-attachment > span,
+.gyro-transcript-attachment > span {
+  display: grid;
+  min-width: 0;
+}
+
+.gyro-composer-attachment > img,
+.gyro-transcript-attachment > img {
+  border-radius: var(--gyro-radius-xs);
+  height: 72px;
+  object-fit: cover;
+  width: 96px;
+}
+
+.gyro-composer-attachment.is-image > img {
+  border-radius: 0;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.gyro-composer-attachment.is-video > video {
+  border-radius: 0;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.gyro-composer-attachment.is-image > span {
+  bottom: 5px;
+  left: 7px;
+  max-width: 64px;
+  position: absolute;
+  right: 7px;
+  z-index: 1;
+}
+
+.gyro-composer-attachment.is-image strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+}
+
+.gyro-composer-attachment.is-image small {
+  display: none;
+}
+
+.gyro-composer-attachment.is-image button {
+  align-items: center;
+  background: rgba(248, 248, 246, 0.96);
+  border-radius: 999px;
+  color: #18191c;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 18px;
+  z-index: 2;
+}
+
+.gyro-composer-attachment.is-image button:hover {
+  background: #ffffff;
+  transform: scale(1.04);
+}
+
+.gyro-composer-attachment strong,
+.gyro-transcript-attachment strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-attachment small,
+.gyro-transcript-attachment small {
+  color: var(--gyro-text-muted, #9299a3);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-composer-attachment button,
+.gyro-plan-item-actions button,
+.gyro-use-again,
+.gyro-chat-run-controls button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-text-muted, #9299a3);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 5px;
+}
+
+/* Plan mode is a constraint, not an alert. Amber in this app means "needs
+   attention", so the chip reads neutral like every other composer chip and
+   lets the mode's own words carry the read-only fact. */
+.gyro-composer-chip.is-plan {
+  color: var(--gyro-muted);
+}
+
+.gyro-composer-chip.is-council {
+  color: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 88%, #c4b5fd);
+}
+
+.gyro-composer-chip.is-council:hover .gyro-composer-chip-remove {
+  opacity: 1;
+}
+
+.gyro-council-preflight {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft, #262626);
+  color: var(--gyro-muted, #b3b3b3);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  gap: 8px;
+  padding: 8px 12px 6px;
+}
+
+.gyro-council-preflight.is-blocked {
+  color: var(--gyro-warn, #e8b45f);
+}
+
+.gyro-council-preflight-seats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* What one Council send costs, disclosed before Enter commits it. */
+.gyro-council-preflight-cost {
+  color: var(--gyro-faint, #8b8b8b);
+  flex-basis: 100%;
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+}
+
+/* Why runs are stopped, or which budget is about to stop them. */
+.gyro-composer-safety-notice {
+  align-items: center;
+  border-radius: var(--gyro-radius-lg);
+  color: var(--gyro-text, #f0f0f0);
+  display: flex;
+  gap: 9px;
+  margin: 8px 8px 0;
+  padding: 8px 10px;
+}
+
+.gyro-composer-safety-notice.is-paused {
+  background: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 12%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-danger, #ef7d7d) 36%, transparent);
+}
+
+.gyro-composer-safety-notice.is-warning {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-warn, #e8b45f) 30%, transparent);
+}
+
+.gyro-composer-safety-notice > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-composer-safety-notice strong {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+}
+
+.gyro-composer-safety-notice small {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.35;
+}
+
+.gyro-composer-safety-notice button {
+  background: color-mix(in srgb, var(--gyro-text, #f0f0f0) 10%, transparent);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text, #f0f0f0);
+  flex: none;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin-left: auto;
+  padding: 4px 10px;
+}
+
+/* Second-press confirmation for a send large enough to be worth agreeing to. */
+.gyro-composer-cost-confirm {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-warn, #e8b45f) 34%, transparent);
+  border-radius: var(--gyro-radius-lg);
+  color: var(--gyro-text, #f0f0f0);
+  display: flex;
+  gap: 9px;
+  margin: 8px 8px 0;
+  padding: 8px 10px;
+}
+
+.gyro-composer-cost-confirm > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-composer-cost-confirm strong {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+}
+
+.gyro-composer-cost-confirm small {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.35;
+}
+
+.gyro-composer-cost-confirm button {
+  background: transparent;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted, #b3b3b3);
+  flex: none;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin-left: auto;
+  padding: 4px 10px;
+}
+
+.gyro-composer-cost-confirm button + button {
+  margin-left: 0;
+}
+
+.gyro-composer-cost-confirm-send {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 22%, transparent);
+  color: var(--gyro-text, #f0f0f0);
+}
+
+.gyro-council-preflight-chip {
+  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 12%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-text, #f0f0f0);
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  padding: 2px 8px;
+}
+
+:root[data-theme="light"] .gyro-council-preflight-chip {
+  color: #1d2329;
+}
+
+.gyro-council-response {
+  display: grid;
+  gap: 12px;
+}
+
+.gyro-council-header {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-council-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gyro-council-title-row strong {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+.gyro-council-status {
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: 999px;
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  padding: 2px 8px;
+  text-transform: lowercase;
+}
+
+.gyro-council-status.is-done {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-success, #70d39f) 45%,
+    transparent
+  );
+  color: var(--gyro-success, #70d39f);
+}
+
+.gyro-council-status.is-partial {
+  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 45%, transparent);
+  color: var(--gyro-warn, #e8b45f);
+}
+
+.gyro-council-status.is-failed,
+.gyro-council-status.is-cancelled {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-danger, #ef7d7d) 45%,
+    transparent
+  );
+  color: var(--gyro-danger, #ef7d7d);
+}
+
+.gyro-council-badge {
+  border-radius: 999px;
+  background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
+  color: var(--gyro-accent, #7aa7ff);
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  padding: 2px 8px;
+}
+
+.gyro-council-meta {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin: 0;
+}
+
+.gyro-council-banner {
+  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text, #f0f0f0);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.gyro-council-banner.is-warn {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 32%, transparent);
+}
+
+.gyro-council-seats {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-council-seat {
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: var(--gyro-radius-lg);
+  overflow: hidden;
+}
+
+.gyro-council-seat.is-failed,
+.gyro-council-seat.is-cancelled {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-danger, #ef7d7d) 35%,
+    transparent
+  );
+}
+
+.gyro-council-seat-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-council-seat-header:hover {
+  background: color-mix(in srgb, var(--gyro-text, #fff) 4%, transparent);
+}
+
+.gyro-council-seat-label {
+  flex: 1;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 560;
+}
+
+.gyro-council-seat-status,
+.gyro-council-seat-latency {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-council-seat-header svg.is-open {
+  transform: rotate(180deg);
+}
+
+.gyro-council-seat-body {
+  border-top: 1px solid var(--gyro-border, #303030);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.gyro-council-seat-output {
+  background: var(--gyro-code-bg, #0c0c0c);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-code-text, #e6e6e6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+.gyro-council-seat-actions,
+.gyro-council-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gyro-council-seat-actions button,
+.gyro-council-actions button:not([aria-label]) {
+  background: var(--gyro-control-bg, #1b1b1b);
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text, #f0f0f0);
+  cursor: pointer;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  padding: 6px 10px;
+}
+
+.gyro-council-seat-actions button:hover,
+.gyro-council-actions button:not([aria-label]):hover {
+  background: var(--gyro-control-hover, #272727);
+}
+
+.gyro-council-seat-actions button:disabled,
+.gyro-council-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:root[data-theme="light"] .gyro-council-seat-output {
+  background: #f3f4f6;
+  color: #1d2329;
+}
+
+:root[data-theme="light"] .gyro-council-seat-actions button,
+:root[data-theme="light"] .gyro-council-actions button:not([aria-label]) {
+  background: #f0f1f3;
+  border-color: #d5d8dd;
+  color: #1d2329;
+}
+
+.gyro-composer-chip-remove {
+  border-left: 1px solid currentColor;
+  margin-left: 1px;
+  opacity: 0.72;
+  padding-left: 4px;
+  width: 16px;
+}
+
+.gyro-composer-chip.is-plan:hover .gyro-composer-chip-remove {
+  opacity: 1;
+}
+
+.gyro-composer-chip.is-goal {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-chip.is-goal[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  color: color-mix(in srgb, var(--gyro-accent) 78%, var(--gyro-text));
+}
+
+.gyro-composer-chip.is-goal[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
+}
+
+.gyro-plan-item-actions,
+.gyro-chat-run-controls {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.gyro-transcript-attachments {
+  padding-left: 0;
+}
+
+.gyro-use-again {
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  margin-top: 5px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --gyro-app: #f7f7f7;
+  --gyro-sidebar: #ffffff;
+  --gyro-sidebar-soft: #f0f0f0;
+  --gyro-pane: #fcfcfc;
+  --gyro-surface: #ffffff;
+  --gyro-surface-raised: #ffffff;
+  --gyro-surface-soft: #f3f3f3;
+  --gyro-border: #dedede;
+  --gyro-border-soft: #e8e8e8;
+  --gyro-border-strong: #898989;
+  --gyro-text: #252525;
+  --gyro-muted: #626262;
+  --gyro-faint: #686868;
+  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
+  --gyro-accent-strong: color-mix(
+    in srgb,
+    var(--gyro-user-main) 70%,
+    #08182f 30%
+  );
+  --gyro-secondary-accent: color-mix(
+    in srgb,
+    var(--gyro-user-secondary) 80%,
+    #26163d 20%
+  );
+  --gyro-secondary-accent-strong: color-mix(
+    in srgb,
+    var(--gyro-user-secondary) 68%,
+    #201033 32%
+  );
+  --gyro-warn: #8a601d;
+  --gyro-permission-full: #c2510a;
+  --gyro-effort-max: #7c3bc7;
+  --gyro-danger: #af4149;
+  --gyro-success: #2e7553;
+  /* Agent state reads on white too. The dark ramp above is tuned for graphite
+     and drops to roughly 2:1 on a light surface, so every state that carries
+     meaning is restated here from the light semantic colors already set. */
+  --gyro-status-running: var(--gyro-blue);
+  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-success: var(--gyro-success);
+  --gyro-status-warning: var(--gyro-warn);
+  --gyro-status-failed: var(--gyro-danger);
+  --gyro-status-cancelled: var(--gyro-muted);
+  --gyro-status-disabled: color-mix(
+    in srgb,
+    var(--gyro-muted) 60%,
+    transparent
+  );
+  --gyro-sidebar-text: #434343;
+  --gyro-hover-text: #191919;
+  --gyro-topbar: var(--gyro-pane);
+  --gyro-topbar-border: var(--gyro-border);
+  --gyro-brand-text: #ffffff;
+  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 84%, #10203b 16%);
+  --gyro-primary-text: #ffffff;
+  --gyro-primary-hover: color-mix(
+    in srgb,
+    var(--gyro-user-main) 72%,
+    #08182f 28%
+  );
+  --gyro-user-bubble: var(--gyro-surface-soft);
+  --gyro-user-bubble-text: var(--gyro-text);
+  --gyro-code-bg: #f5f5f5;
+  --gyro-code-text: #2c2c2c;
+  --gyro-segment-bg: #e5e5e5;
+  --gyro-segment-active: var(--gyro-surface);
+  --gyro-segment-active-text: var(--gyro-text);
+  --gyro-shadow: rgba(24, 24, 24, 0.08);
+  --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
+  --gyro-focus-ring: var(--gyro-accent);
+  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  --gyro-secondary-soft: color-mix(
+    in srgb,
+    var(--gyro-secondary-accent) 9%,
+    transparent
+  );
+  --gyro-warn-soft: rgba(169, 91, 18, 0.1);
+  --gyro-danger-soft: rgba(187, 45, 36, 0.1);
+  --gyro-blue: #42679f;
+  --gyro-blue-soft: rgba(66, 103, 159, 0.08);
+  /* The dark tones are too light to read on a light sidebar; these are the
+     same hues carried down to a legible lightness. */
+  --gyro-file-javascript: #795d00;
+  --gyro-file-typescript: #1264a0;
+  --gyro-file-react: #046a81;
+  --gyro-file-json: #6d6100;
+  --gyro-file-css: #7545a8;
+  --gyro-file-html: #9d471c;
+  --gyro-file-vue: #236e46;
+  --gyro-file-markdown: #2c658c;
+  --gyro-file-rust: #91501f;
+  --gyro-file-go: #056a7c;
+  --gyro-file-python: #22649b;
+  --gyro-file-ruby: #a93243;
+  --gyro-file-java: #97422d;
+  --gyro-file-swift: #9f461d;
+  --gyro-file-cpp: #395ca2;
+  --gyro-file-php: #5551a5;
+  --gyro-file-lua: #34519c;
+  --gyro-file-dart: #036a7b;
+  --gyro-file-elixir: #70449d;
+  --gyro-file-graphql: #a62b78;
+  --gyro-file-diff: #526272;
+  --gyro-file-shell: #3a6d18;
+  --gyro-file-config: #536273;
+  --gyro-file-lock: #536273;
+  --gyro-file-binary: #536273;
+  --gyro-file-image: #8542ad;
+  --gyro-file-media: #b0276e;
+  --gyro-file-archive: #705399;
+  --gyro-file-font: #7a5c16;
+  --gyro-file-data: #2a6d41;
+  --gyro-canvas-subtle: var(--gyro-surface-soft);
+  --gyro-window: var(--gyro-app);
+  --gyro-workbench-line: rgba(32, 32, 32, 0.08);
+  --gyro-control-bg: var(--gyro-surface-soft);
+  --gyro-control-hover: #e7e7e7;
+  --gyro-premium-app: var(--gyro-app);
+  --gyro-premium-sidebar: var(--gyro-sidebar);
+  --gyro-premium-panel: var(--gyro-surface);
+  --gyro-premium-panel-strong: var(--gyro-surface-raised);
+  --gyro-premium-control: var(--gyro-surface-soft);
+  --gyro-premium-control-hover: var(--gyro-control-hover);
+  --gyro-premium-line: var(--gyro-border);
+  --gyro-premium-line-soft: var(--gyro-border-soft);
+  --gyro-premium-text: var(--gyro-text);
+  --gyro-premium-muted: var(--gyro-muted);
+  --gyro-premium-faint: var(--gyro-faint);
+  --gyro-premium-accent: var(--gyro-accent);
+  --gyro-premium-shadow: rgba(24, 24, 24, 0.12);
+  --gyro-premium-shadow-soft: rgba(24, 24, 24, 0.05);
+  --gyro-premium-shadow-lift: rgba(24, 24, 24, 0.08);
+  --gyro-premium-hairline: rgba(32, 32, 32, 0.1);
+  --gyro-premium-hairline-soft: rgba(32, 32, 32, 0.06);
+  --gyro-premium-hairline-strong: rgba(32, 32, 32, 0.15);
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.8);
+  --gyro-premium-focus: var(--gyro-focus-ring);
+  --gyro-scrim: rgba(20, 20, 24, 0.3);
+  --gyro-provider-openai: #0f8f72;
+  --gyro-provider-openai-logo: #000;
+  --gyro-provider-anthropic: #c15d12;
+  --gyro-provider-kimi: #1783ff;
+  --gyro-provider-kimi-logo: #000;
+  --gyro-provider-ollama: #1c2027;
+  --gyro-provider-xai: #1c2027;
+  --gyro-provider-gemini: #2457c5;
+  --gyro-provider-cursor: #1c2027;
+  --gyro-theme-preview-dark-canvas: #141414;
+  --gyro-theme-preview-dark-content: #383838;
+  --gyro-theme-preview-light-canvas: #f7f7f7;
+  --gyro-theme-preview-light-content: #e5e5e5;
+  --gyro-provider-opencode: #1c2027;
+  --gyro-provider-deepseek: #2c5bd0;
+  --gyro-provider-mistral: #c2480c;
+  --gyro-provider-openrouter: #7624f4;
+  --gyro-hero-heading: var(--gyro-text);
+  --gyro-hero-brand: var(--gyro-faint);
+  --gyro-hero-composer: var(--gyro-surface);
+  --gyro-hero-context: var(--gyro-surface-soft);
+  --gyro-hero-border: var(--gyro-border);
+  --gyro-hero-text: var(--gyro-text);
+  --gyro-hero-muted: var(--gyro-muted);
+  --gyro-hero-placeholder: var(--gyro-faint);
+  --gyro-hero-hover: rgba(32, 32, 32, 0.05);
+  --gyro-hero-hover-text: var(--gyro-hover-text);
+  --gyro-hero-send: var(--gyro-text);
+  --gyro-hero-send-hover: #191919;
+  --gyro-hero-send-text: var(--gyro-surface);
+  --gyro-hero-focus-border: var(--gyro-accent);
+  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
+  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
+  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--gyro-app);
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+.gyro-app-shell {
+  background: var(--gyro-app);
+  display: grid;
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.gyro-sidebar {
+  background: var(--gyro-sidebar);
+  border-right: 1px solid var(--gyro-border);
+  color: var(--gyro-text);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-width: 0;
+  overflow: visible;
+  padding: 12px 10px 10px;
+}
+
+.gyro-sidebar-head {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.gyro-brand {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 3px;
+}
+
+.gyro-brand strong,
+.gyro-brand span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-brand strong {
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.gyro-brand span {
+  color: var(--gyro-faint);
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  margin-top: 1px;
+}
+
+.gyro-brand-mark {
+  align-items: center;
+  background: var(--gyro-accent-strong);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-brand-text);
+  display: grid;
+  flex: 0 0 auto;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.gyro-brand-mark img {
+  display: block;
+  filter: brightness(0) invert(1);
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
+}

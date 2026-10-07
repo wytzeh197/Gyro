@@ -1,3 +1,4 @@
+export { SizingMotionFixture } from "./sizing-motion-fixture";
 export { ChatFileActionsContext } from "./chat-file-card";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
