@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { sessionApprovalCounts } from "../packages/ui/src/session-approvals.ts";
 import {
   subagentElapsedMs,
   subagentTokensLabel,
   sortedSubagents,
+  subagentStatusLabel,
+  subagentActivitySummary,
   mergeSubagentSnapshot,
   pendingSubagentApprovals,
   subagentProcessEvents,
@@ -65,6 +68,19 @@ const settled = {
   updatedAt: "2026-10-02T10:00:10Z",
   startedAt: null,
 };
+assert.equal(subagentStatusLabel("waiting"), "Needs approval");
+assert.equal(subagentStatusLabel("failed"), "Failed");
+assert.deepEqual(
+  sortedSubagents(
+    ["completed", "running", "failed", "waiting"].map((status) => ({
+      ...agent,
+      agentId: status,
+      status,
+    })),
+  ).map((item) => item.status),
+  ["waiting", "failed", "running", "completed"],
+  "approval and failures must remain visible ahead of ordinary progress",
+);
 assert.equal(mergeSubagentSnapshot(settled, agent), settled);
 assert.equal(
   mergeSubagentSnapshot(settled, { ...agent, updatedAt: settled.updatedAt }),
@@ -200,3 +216,166 @@ assert.deepEqual(lastClosed.openAgentIds, []);
 assert.equal(lastClosed.selectedAgentId, undefined);
 assert.deepEqual(openSubagentTab(lastClosed, "parser"), firstTab);
 assert.equal(closeSubagentTab(firstTab, "missing"), firstTab);
+
+assert.deepEqual(
+  subagentActivitySummary([
+    { status: "waiting" },
+    { status: "failed" },
+    { status: "running" },
+  ]),
+  {
+    label: "1 needs approval · 1 needs attention · 1 running",
+    needsAttention: true,
+  },
+);
+assert.equal(
+  subagentActivitySummary([{ status: "stopping" }]).label,
+  "1 stopping",
+);
+assert.equal(
+  subagentActivitySummary([{ status: "cancelled" }]).label,
+  "1 cancelled",
+);
+assert.equal(
+  subagentActivitySummary([{ status: "completed" }]).needsAttention,
+  false,
+);
+
+// Sidebar approval state uses the same reconciliation as worker transcripts.
+const attentionUser = {
+  id: "attention-user",
+  kind: "user-message",
+  turnId: "attention-turn",
+  payload: {},
+};
+const attentionRequest = (id, payload) => ({
+  id,
+  kind: "approval-requested",
+  turnId: "attention-turn",
+  payload,
+});
+const attentionProvider = attentionRequest("provider", {
+  kind: "provider-tool-approval",
+  approvalId: "shared-id",
+  status: "pending",
+});
+const attentionMutation = attentionRequest("mutation", {
+  kind: "mutation-approval",
+  proposalId: "shared-id",
+  status: "pending",
+});
+const attentionCapability = attentionRequest("capability", {
+  kind: "capability-approval",
+  approvalId: "capability-id",
+  status: "waiting",
+});
+const attentionSessions = [
+  { id: "first" },
+  { id: "second" },
+  { id: "imported", importSource: { sourceKind: "codex" } },
+];
+const attentionEvents = [
+  attentionUser,
+  attentionProvider,
+  attentionMutation,
+  attentionCapability,
+];
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: attentionEvents,
+    second: [attentionUser],
+    imported: attentionEvents.map((event) => ({
+      ...event,
+      payload: { ...event.payload, historical: true },
+    })),
+  }),
+  { first: 3 },
+  "imported history cannot become a live approval and other chats keep independent state",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, { imported: attentionEvents }),
+  { imported: 3 },
+  "a new native turn in an imported chat still exposes its live approvals",
+);
+assert.equal(
+  pendingSubagentApprovals([
+    {
+      ...attentionProvider,
+      payload: { ...attentionProvider.payload, historical: true },
+    },
+  ]).length,
+  0,
+  "historical approval requests never force a live decision surface",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: [...attentionEvents, { ...attentionProvider, id: "persisted-copy" }],
+  }),
+  { first: 3 },
+  "optimistic and persisted copies count one approval",
+);
+const attentionDecisions = [
+  {
+    kind: "system-event",
+    turnId: "attention-turn",
+    payload: {
+      kind: "provider-tool-approval",
+      approvalId: "shared-id",
+      status: "approved",
+    },
+  },
+  {
+    kind: "system-event",
+    turnId: "attention-turn",
+    payload: {
+      kind: "mutation-approval",
+      proposalId: "shared-id",
+      status: "rejected",
+    },
+  },
+  {
+    kind: "system-event",
+    turnId: "attention-turn",
+    payload: {
+      kind: "capability-approval",
+      approvalId: "capability-id",
+      status: "allowed",
+    },
+  },
+];
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: [...attentionEvents, ...attentionDecisions],
+  }),
+  {},
+  "decisions remove the approval marker without changing send or completion state",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: [
+      ...attentionEvents,
+      { ...attentionUser, id: "next-user", turnId: "next-turn" },
+      attentionProvider,
+    ],
+  }),
+  {},
+  "a late request from an older turn cannot mark the new turn",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, { first: [attentionProvider] }),
+  {},
+  "missing current-turn history cannot invent live approval state",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: [
+      { ...attentionUser, turnId: undefined },
+      { ...attentionProvider, turnId: undefined },
+    ],
+  }),
+  { first: 1 },
+  "legacy untagged requests remain visible in their chronological turn",
+);
+console.log(
+  "Sidebar approval checks passed: reconciliation, independent chats, imports, deduplication, and turn boundaries.",
+);

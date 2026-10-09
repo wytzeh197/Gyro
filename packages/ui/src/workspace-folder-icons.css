@@ -1,0 +1,21 @@
+/* Keep tree labels aligned while retaining a separate disclosure target. */
+:root .gyro-sidebar-row.gyro-sidebar-explorer-row {
+  grid-template-columns: 12px 14px minmax(0, 1fr) auto;
+}
+
+.gyro-sidebar-explorer-row > .gyro-explorer-file-icon {
+  grid-column: 2;
+}
+
+.gyro-sidebar-explorer-row > span {
+  grid-column: 3;
+}
+
+.gyro-sidebar-explorer-row > .gyro-explorer-decoration {
+  grid-column: 4;
+}
+
+.gyro-explorer-folder-icon {
+  color: var(--gyro-muted);
+  flex: none;
+}

@@ -58,11 +58,11 @@
   );
   --gyro-update-blue: #356fd6;
   --gyro-update-blue-hover: #2f63be;
-  --gyro-warn: #dbb77a;
-  --gyro-permission-full: #ff8a3d;
-  --gyro-effort-max: #a45cff;
-  --gyro-danger: #e48e91;
-  --gyro-success: #85c4a2;
+  --gyro-warn: #f4bf5a;
+  --gyro-permission-full: #ffa05a;
+  --gyro-effort-max: #bc83ff;
+  --gyro-danger: #ff8995;
+  --gyro-success: #5ed8a4;
   --gyro-sidebar-text: #d5d5d5;
   --gyro-hover-text: #fafafa;
   --gyro-topbar: var(--gyro-app);
@@ -92,16 +92,16 @@
   --gyro-shadow: rgba(0, 0, 0, 0.42);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
   --gyro-focus-ring: var(--gyro-accent);
-  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
     var(--gyro-secondary-accent) 12%,
     transparent
   );
-  --gyro-warn-soft: rgba(255, 173, 92, 0.14);
-  --gyro-danger-soft: rgba(255, 105, 97, 0.13);
-  --gyro-blue: #8faee0;
-  --gyro-blue-soft: rgba(143, 174, 224, 0.1);
+  --gyro-warn-soft: color-mix(in srgb, var(--gyro-warn) 12%, transparent);
+  --gyro-danger-soft: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+  --gyro-blue: #60b0ff;
+  --gyro-blue-soft: color-mix(in srgb, var(--gyro-blue) 12%, transparent);
   --gyro-canvas-subtle: var(--gyro-app);
   --gyro-window: var(--gyro-app);
   --gyro-workbench-line: rgba(255, 255, 255, 0.06);
@@ -168,18 +168,18 @@
      transcript column so the composer sits on the same edges as the turns
      above it. */
   --gyro-composer-width: 800px;
-  --gyro-provider-openai: #7fd2b6;
+  --gyro-provider-openai: #4ed7ad;
   --gyro-provider-openai-logo: #fff;
-  --gyro-provider-anthropic: #ff8a3d;
+  --gyro-provider-anthropic: #f79973;
   --gyro-provider-kimi: #1783ff;
   --gyro-provider-kimi-logo: #fff;
   --gyro-provider-ollama: #f6f2ea;
   --gyro-provider-xai: #f6f2ea;
-  --gyro-provider-gemini: #8bb8ff;
+  --gyro-provider-gemini: #76aaff;
   --gyro-provider-cursor: #f2efe9;
   --gyro-provider-opencode: #f2efe9;
-  --gyro-provider-deepseek: #7ea6ff;
-  --gyro-provider-mistral: #ff7a35;
+  --gyro-provider-deepseek: #5b95ff;
+  --gyro-provider-mistral: #ff924c;
   /* OpenRouter's own assets carry a hue: the lime glyph is the one drawn for
      dark surfaces, so the token keeps the brand ink instead of a flipped
      monochrome. */
@@ -198,8 +198,10 @@
   --gyro-hero-send-hover: #fafafa;
   --gyro-hero-send-text: var(--gyro-app);
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
-  --gyro-hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
+  --gyro-hero-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
+  --gyro-hero-shadow-focus:
+    0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
@@ -246,36 +248,36 @@
   /* Language tones, shared by the Explorer and Source Control so one file
      type reads the same colour everywhere it appears. */
   --gyro-file-default: var(--gyro-muted);
-  --gyro-file-javascript: #e5cc62;
-  --gyro-file-typescript: #79b8f3;
-  --gyro-file-react: #64cce8;
-  --gyro-file-json: #d8ca6b;
-  --gyro-file-css: #c6a1ed;
-  --gyro-file-html: #e9a278;
-  --gyro-file-vue: #82cba0;
-  --gyro-file-markdown: #87b8db;
-  --gyro-file-rust: #dfab86;
-  --gyro-file-go: #75c7d7;
-  --gyro-file-python: #7db9e8;
-  --gyro-file-ruby: #ed98a0;
-  --gyro-file-java: #dfa091;
-  --gyro-file-swift: #eeab80;
-  --gyro-file-cpp: #9ebbea;
-  --gyro-file-php: #adb0e8;
-  --gyro-file-lua: #97afe8;
-  --gyro-file-dart: #69c4d5;
-  --gyro-file-elixir: #bda2de;
-  --gyro-file-graphql: #ed94ce;
+  --gyro-file-javascript: #f2d45c;
+  --gyro-file-typescript: #55aaff;
+  --gyro-file-react: #42d9f3;
+  --gyro-file-json: #e9d563;
+  --gyro-file-css: #b786fa;
+  --gyro-file-html: #f59461;
+  --gyro-file-vue: #5bd59d;
+  --gyro-file-markdown: #64baff;
+  --gyro-file-rust: #f0a46a;
+  --gyro-file-go: #46cfdf;
+  --gyro-file-python: #66b1ff;
+  --gyro-file-ruby: #fa718b;
+  --gyro-file-java: #ec8d70;
+  --gyro-file-swift: #ff925f;
+  --gyro-file-cpp: #88afff;
+  --gyro-file-php: #a3a0fa;
+  --gyro-file-lua: #849dfb;
+  --gyro-file-dart: #36cce6;
+  --gyro-file-elixir: #bc82f4;
+  --gyro-file-graphql: #f472c7;
   --gyro-file-diff: #afbdca;
-  --gyro-file-shell: #98cb73;
+  --gyro-file-shell: #9bd965;
   --gyro-file-config: #afb9c5;
   --gyro-file-lock: #a7b3c0;
   --gyro-file-binary: #a7b3c0;
-  --gyro-file-image: #c69ae3;
-  --gyro-file-media: #ee8cbd;
-  --gyro-file-archive: #bca3de;
-  --gyro-file-font: #d7b77c;
-  --gyro-file-data: #98cba2;
+  --gyro-file-image: #c484f5;
+  --gyro-file-media: #fc79bc;
+  --gyro-file-archive: #a990ef;
+  --gyro-file-font: #e5ba64;
+  --gyro-file-data: #6bd2a3;
   color: var(--gyro-text);
   font-family: var(--gyro-font-sans);
   font-feature-settings:
@@ -868,11 +870,11 @@
     var(--gyro-user-secondary) 68%,
     #201033 32%
   );
-  --gyro-warn: #8a601d;
-  --gyro-permission-full: #c2510a;
-  --gyro-effort-max: #7c3bc7;
-  --gyro-danger: #af4149;
-  --gyro-success: #2e7553;
+  --gyro-warn: #8d5200;
+  --gyro-permission-full: #a64303;
+  --gyro-effort-max: #7937cb;
+  --gyro-danger: #b42340;
+  --gyro-success: #0b6f47;
   /* Agent state reads on white too. The dark ramp above is tuned for graphite
      and drops to roughly 2:1 on a light surface, so every state that carries
      meaning is restated here from the light semantic colors already set. */
@@ -909,48 +911,48 @@
   --gyro-shadow: rgba(24, 24, 24, 0.08);
   --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
   --gyro-focus-ring: var(--gyro-accent);
-  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
-    var(--gyro-secondary-accent) 9%,
+    var(--gyro-secondary-accent) 12%,
     transparent
   );
-  --gyro-warn-soft: rgba(169, 91, 18, 0.1);
-  --gyro-danger-soft: rgba(187, 45, 36, 0.1);
-  --gyro-blue: #42679f;
-  --gyro-blue-soft: rgba(66, 103, 159, 0.08);
+  --gyro-warn-soft: color-mix(in srgb, var(--gyro-warn) 12%, transparent);
+  --gyro-danger-soft: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+  --gyro-blue: #0d5fc9;
+  --gyro-blue-soft: color-mix(in srgb, var(--gyro-blue) 12%, transparent);
   /* The dark tones are too light to read on a light sidebar; these are the
      same hues carried down to a legible lightness. */
-  --gyro-file-javascript: #795d00;
-  --gyro-file-typescript: #1264a0;
-  --gyro-file-react: #046a81;
-  --gyro-file-json: #6d6100;
-  --gyro-file-css: #7545a8;
-  --gyro-file-html: #9d471c;
-  --gyro-file-vue: #236e46;
-  --gyro-file-markdown: #2c658c;
-  --gyro-file-rust: #91501f;
-  --gyro-file-go: #056a7c;
-  --gyro-file-python: #22649b;
-  --gyro-file-ruby: #a93243;
-  --gyro-file-java: #97422d;
-  --gyro-file-swift: #9f461d;
-  --gyro-file-cpp: #395ca2;
-  --gyro-file-php: #5551a5;
-  --gyro-file-lua: #34519c;
-  --gyro-file-dart: #036a7b;
-  --gyro-file-elixir: #70449d;
-  --gyro-file-graphql: #a62b78;
+  --gyro-file-javascript: #805d00;
+  --gyro-file-typescript: #0966bb;
+  --gyro-file-react: #006b84;
+  --gyro-file-json: #796000;
+  --gyro-file-css: #7534bb;
+  --gyro-file-html: #b44815;
+  --gyro-file-vue: #117544;
+  --gyro-file-markdown: #1769ae;
+  --gyro-file-rust: #a45217;
+  --gyro-file-go: #006e80;
+  --gyro-file-python: #1265b7;
+  --gyro-file-ruby: #b72a49;
+  --gyro-file-java: #ad4128;
+  --gyro-file-swift: #b94412;
+  --gyro-file-cpp: #2c5fc0;
+  --gyro-file-php: #5348bb;
+  --gyro-file-lua: #374fb5;
+  --gyro-file-dart: #006c84;
+  --gyro-file-elixir: #7834b7;
+  --gyro-file-graphql: #b2237d;
   --gyro-file-diff: #526272;
-  --gyro-file-shell: #3a6d18;
+  --gyro-file-shell: #3e7410;
   --gyro-file-config: #536273;
   --gyro-file-lock: #536273;
   --gyro-file-binary: #536273;
-  --gyro-file-image: #8542ad;
-  --gyro-file-media: #b0276e;
-  --gyro-file-archive: #705399;
-  --gyro-file-font: #7a5c16;
-  --gyro-file-data: #2a6d41;
+  --gyro-file-image: #8930b8;
+  --gyro-file-media: #bd1b72;
+  --gyro-file-archive: #7241aa;
+  --gyro-file-font: #835d0a;
+  --gyro-file-data: #157449;
   --gyro-canvas-subtle: var(--gyro-surface-soft);
   --gyro-window: var(--gyro-app);
   --gyro-workbench-line: rgba(32, 32, 32, 0.08);
@@ -977,22 +979,22 @@
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.8);
   --gyro-premium-focus: var(--gyro-focus-ring);
   --gyro-scrim: rgba(20, 20, 24, 0.3);
-  --gyro-provider-openai: #0f8f72;
+  --gyro-provider-openai: #087e60;
   --gyro-provider-openai-logo: #000;
-  --gyro-provider-anthropic: #c15d12;
+  --gyro-provider-anthropic: #b84a27;
   --gyro-provider-kimi: #1783ff;
   --gyro-provider-kimi-logo: #000;
   --gyro-provider-ollama: #1c2027;
   --gyro-provider-xai: #1c2027;
-  --gyro-provider-gemini: #2457c5;
+  --gyro-provider-gemini: #1e5ed8;
   --gyro-provider-cursor: #1c2027;
   --gyro-theme-preview-dark-canvas: #141414;
   --gyro-theme-preview-dark-content: #383838;
   --gyro-theme-preview-light-canvas: #f7f7f7;
   --gyro-theme-preview-light-content: #e5e5e5;
   --gyro-provider-opencode: #1c2027;
-  --gyro-provider-deepseek: #2c5bd0;
-  --gyro-provider-mistral: #c2480c;
+  --gyro-provider-deepseek: #205fda;
+  --gyro-provider-mistral: #c74a0a;
   --gyro-provider-openrouter: #7624f4;
   --gyro-hero-heading: var(--gyro-text);
   --gyro-hero-brand: var(--gyro-faint);
@@ -1008,8 +1010,10 @@
   --gyro-hero-send-hover: #191919;
   --gyro-hero-send-text: var(--gyro-surface);
   --gyro-hero-focus-border: var(--gyro-accent);
-  --gyro-hero-shadow: 0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
-  --gyro-hero-shadow-focus: 0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
+  --gyro-hero-shadow:
+    0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
+  --gyro-hero-shadow-focus:
+    0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 

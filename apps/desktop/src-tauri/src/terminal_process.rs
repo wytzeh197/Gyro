@@ -137,6 +137,11 @@ impl TerminalProcessManager {
         })
     }
 
+    /// Resource listings need only the pane label, not a PTY poll or scrollback.
+    pub(crate) fn title(&self, pane_id: &str) -> anyhow::Result<String> {
+        self.with_pane(pane_id, |process| Ok(process.request.title.clone()))
+    }
+
     /// Status for a poll loop. Output is copied only when `include_output`, so
     /// a long wait does not copy the whole scrollback on every tick.
     pub(crate) fn observe(
@@ -280,6 +285,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         command.cwd(cwd);
     }
     configure_terminal_environment(&mut command);
+    apply_terminal_provider_data_home(&mut command, request.provider_data_home.as_ref());
     if let Some(governance) = request.governance.as_ref() {
         for (name, value) in &governance.env {
             command.env(name, value);
@@ -363,6 +369,15 @@ pub(crate) fn configure_terminal_environment(command: &mut CommandBuilder) {
     command.env("CLICOLOR", "1");
     command.env("CLICOLOR_FORCE", "1");
     command.env("FORCE_COLOR", "1");
+}
+
+fn apply_terminal_provider_data_home(
+    command: &mut CommandBuilder,
+    data_home: Option<&(String, String)>,
+) {
+    if let Some((variable, home)) = data_home {
+        command.env(variable, home);
+    }
 }
 
 pub(crate) fn resolve_terminal_cwd(
@@ -602,6 +617,24 @@ fn terminal_output_text(output: &VecDeque<u8>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imported_provider_login_receives_its_resolved_home_without_shell_interpolation() {
+        let mut command = CommandBuilder::new("claude");
+        let unrelated_home = command.get_env("CODEX_HOME").map(|value| value.to_owned());
+        let scope = (
+            "CLAUDE_CONFIG_DIR".to_string(),
+            "/tmp/provider home with $literal".to_string(),
+        );
+        apply_terminal_provider_data_home(&mut command, Some(&scope));
+        assert_eq!(
+            command
+                .get_env("CLAUDE_CONFIG_DIR")
+                .and_then(|value| value.to_str()),
+            Some(scope.1.as_str())
+        );
+        assert_eq!(command.get_env("CODEX_HOME"), unrelated_home.as_deref());
+    }
 
     fn start(manager: &TerminalProcessManager, pane_id: &str, script: &str) {
         manager

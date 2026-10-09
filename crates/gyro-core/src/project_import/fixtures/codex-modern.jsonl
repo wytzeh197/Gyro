@@ -1,0 +1,11 @@
+{"type":"session_meta","timestamp":"2026-01-02T12:00:00Z","payload":{"id":"22222222-2222-4222-8222-222222222222","cwd":"/fixture/project","timestamp":"2026-01-02T12:00:00Z","source":"cli","cli_version":"0.100.0","base_instructions":"SYSTEM INSTRUCTIONS"}}
+{"type":"turn_context","timestamp":"2026-01-02T12:00:01Z","payload":{"turn_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","model":"gpt-5.3-codex","cwd":"/fixture/project"}}
+{"type":"event_msg","timestamp":"2026-01-02T12:00:02Z","payload":{"type":"user_message","message":"Check the retry loop"}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:02Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Check the retry loop"}]}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:03Z","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"DEVELOPER INSTRUCTIONS"}]}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:04Z","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"PRIVATE REASONING"}],"encrypted_content":"PRIVATE"}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:05Z","payload":{"type":"function_call","call_id":"call-1","name":"exec_command","arguments":"{\"cmd\":\"cat retry.ts\"}"}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:06Z","payload":{"type":"function_call_output","call_id":"call-1","output":"const retries = 3;"}}
+{"type":"event_msg","timestamp":"2026-01-02T12:00:07Z","payload":{"type":"agent_message","message":"Three retries are configured."}}
+{"type":"response_item","timestamp":"2026-01-02T12:00:07Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Three retries are configured."}]}}
+{"type":"event_msg","timestamp":"2026-01-02T12:00:08Z","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":999999}}}}

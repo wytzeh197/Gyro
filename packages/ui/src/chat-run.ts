@@ -97,6 +97,10 @@ export type WorkItem =
        * tool name (Bash, Skill, mcp__…). Shown muted next to the bright label.
        */
       note?: string;
+      /** Imported arguments and result, preserved for read-only inspection. */
+      historicalDetail?: string;
+      /** Native call identity prevents distinct imported calls folding together. */
+      historicalCallId?: string;
     };
 
 /** One Gyro Browser verb, so each row says what the agent did to the page. */
@@ -746,6 +750,9 @@ function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
 }
 
 function toolIdentity(item: Extract<WorkItem, { kind: "tool" }>): string {
+  if (item.historicalDetail !== undefined) {
+    return `historical:${item.historicalCallId ?? item.id}`;
+  }
   // Include the note so consecutive Skill/Bash-shaped rows with different
   // targets stay as separate beats instead of collapsing into one.
   return `${item.server ?? ""}::${item.tool}::${item.note ?? ""}`.toLowerCase();
@@ -1079,6 +1086,20 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
   const status = workStatus(text(payload, "status"));
   const label = text(payload, "label") ?? event.message;
   const detail = text(payload, "detail");
+
+  // Imported calls are a record of past work. Keep their output inspectable,
+  // without classifying a past edit, command, or browser action as current work.
+  if (payload?.historical === true) {
+    return {
+      kind: "tool",
+      id,
+      status: status === "failed" ? "failed" : "done",
+      ...splitToolName(text(payload, "tool") ?? label),
+      note: text(payload, "note"),
+      historicalDetail: detail ?? "",
+      historicalCallId: text(payload, "sourceCallId") ?? id,
+    };
+  }
 
   switch (text(payload, "activityKind")) {
     case "command":
@@ -1968,6 +1989,9 @@ function workIdentity(item: WorkItem): string | undefined {
     case "browser":
       return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":
+      if (item.historicalDetail !== undefined) {
+        return `tool:historical:${item.historicalCallId ?? item.id}`;
+      }
       return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
     case "memory":
     case "context":

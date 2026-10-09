@@ -1,5 +1,5 @@
 use crate::credentials::{
-    apply_stored_provider_api_key, provider_id_from_program, CredentialPolicy,
+    try_apply_stored_provider_api_key, provider_id_from_program, CredentialPolicy,
 };
 use crate::execution::{configure_process_group, register_process_group, terminate_process_group};
 use crate::security::redact_secrets;
@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -132,7 +132,7 @@ struct IncomingFrame {
 
 struct KimiAcpConnection {
     provider_label: String,
-    child: Child,
+    child: crate::process_guard::GuardedChild,
     stdin: ChildStdin,
     incoming: Receiver<Result<IncomingFrame, String>>,
     stderr: Receiver<String>,
@@ -169,7 +169,7 @@ impl KimiAcpConnection {
             command.env_remove(key);
         }
         if let Some(provider_id) = provider_id_from_program(&request.program.to_string_lossy()) {
-            apply_stored_provider_api_key(&mut command, provider_id);
+            try_apply_stored_provider_api_key(&mut command, provider_id)?;
         }
         if std::path::Path::new(&request.program)
             .file_name()
@@ -183,7 +183,7 @@ impl KimiAcpConnection {
             command.env("OPENCODE_PERMISSION", r#"{"*":"ask","read":{"*":"ask","*.env":"deny","*.env.*":"deny"},"edit":"ask","bash":"ask","task":"ask","external_directory":"ask"}"#);
         }
         configure_process_group(&mut command);
-        let mut child = command.spawn().map_err(|error| {
+        let mut child = crate::process_guard::spawn_guarded(&mut command).map_err(|error| {
             anyhow!(
                 "start {} through ACP: {error}",
                 request.program.to_string_lossy()

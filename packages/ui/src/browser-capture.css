@@ -110,3 +110,10 @@
 .gyro-browser-capture-actions > button:hover {
   background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
 }
+.gyro-browser-preview.is-chat .gyro-url-bar {
+  /* The address field uses flex sizing even when this surface is rendered
+     outside the companion dock, such as a preview or a new host. */
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}

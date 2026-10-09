@@ -310,6 +310,14 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
+        id: "claude-haiku-5-5",
+        displayName: "Claude Haiku 5.5",
+        description: "Fast model for lighter coding and high-volume tasks.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
+      },
+      {
         id: "claude-haiku-4-5",
         displayName: "Claude Haiku 4.5",
         description: "Fastest option for lighter work.",
@@ -898,6 +906,13 @@ export function selectedReasoningEffort(provider: ModelProviderConfig) {
     return provider.selectedReasoningEffort;
   }
   return model?.defaultReasoningEffort ?? supported[0];
+}
+
+export function reasoningEffortLabel(effort: ReasoningEffort) {
+  if (effort === "xhigh") {
+    return "XHigh";
+  }
+  return `${effort.charAt(0).toUpperCase()}${effort.slice(1)}`;
 }
 
 /** Health probes observe provider state; they do not represent logout actions. */

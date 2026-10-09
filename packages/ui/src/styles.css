@@ -2,6 +2,8 @@
 @import "./composer-effort-selector.css";
 @import "./interaction-motion.css";
 @import "./press-feedback.css";
+@import "./navigation-design.css";
+@import "./detail-design.css";
 
 
 .gyro-surface-row {
@@ -258,6 +260,9 @@
 }
 
 .gyro-sidebar-more-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
   background: transparent;
   border: 0;
   border-radius: var(--gyro-radius-sm);
@@ -268,6 +273,15 @@
   min-height: 22px;
   padding: 0 6px;
   text-align: left;
+}
+
+.gyro-sidebar-more-button > svg {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.gyro-sidebar-more-button > span {
+  line-height: 1;
 }
 
 .gyro-sidebar-more-button:hover {
@@ -7495,7 +7509,6 @@ textarea:focus-visible {
 }
 
 .gyro-command-overlay {
-  animation: gyro-global-search-overlay-in calc(140ms * var(--gyro-motion-factor, 1)) ease-out;
   background: rgb(0 0 0 / 52%);
   padding: clamp(54px, 8vh, 92px) 20px 24px;
   z-index: 140;
@@ -7515,15 +7528,8 @@ textarea:focus-visible {
   width: min(680px, calc(100vw - 40px));
 }
 
-@keyframes gyro-global-search-overlay-in {
-  from {
-    opacity: 0;
-  }
-}
-
 @keyframes gyro-global-search-in {
   from {
-    opacity: 0;
     transform: translateY(-8px) scale(0.985);
   }
 }
@@ -9791,131 +9797,192 @@ textarea:focus-visible {
   transform: rotate(90deg);
 }
 
-/* Shared file tones keep Explorer rows and editor tabs consistent. */
+/* Shared file tones keep Explorer, search, and editor tabs consistent. */
 .gyro-explorer-file-icon,
-.gyro-editor-tabs .gyro-editor-file-icon {
+.gyro-editor-tabs .gyro-editor-file-icon,
+.gyro-workspace-search-file-heading .gyro-workspace-search-file-icon {
   color: var(--gyro-file-tone, var(--gyro-file-default));
   flex: 0 0 auto;
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="javascript"],
-.gyro-editor-file-icon[data-file-tone="javascript"] {
+.gyro-editor-file-icon[data-file-tone="javascript"],
+.gyro-workspace-search-file-icon[data-file-tone="javascript"],
+.gyro-file-identity[data-file-tone="javascript"] {
   --gyro-file-tone: var(--gyro-file-javascript);
 }
 .gyro-sidebar-explorer-row[data-file-tone="typescript"],
-.gyro-editor-file-icon[data-file-tone="typescript"] {
+.gyro-editor-file-icon[data-file-tone="typescript"],
+.gyro-workspace-search-file-icon[data-file-tone="typescript"],
+.gyro-file-identity[data-file-tone="typescript"] {
   --gyro-file-tone: var(--gyro-file-typescript);
 }
 .gyro-sidebar-explorer-row[data-file-tone="react"],
-.gyro-editor-file-icon[data-file-tone="react"] {
+.gyro-editor-file-icon[data-file-tone="react"],
+.gyro-workspace-search-file-icon[data-file-tone="react"],
+.gyro-file-identity[data-file-tone="react"] {
   --gyro-file-tone: var(--gyro-file-react);
 }
 .gyro-sidebar-explorer-row[data-file-tone="json"],
-.gyro-editor-file-icon[data-file-tone="json"] {
+.gyro-editor-file-icon[data-file-tone="json"],
+.gyro-workspace-search-file-icon[data-file-tone="json"],
+.gyro-file-identity[data-file-tone="json"] {
   --gyro-file-tone: var(--gyro-file-json);
 }
 .gyro-sidebar-explorer-row[data-file-tone="css"],
-.gyro-editor-file-icon[data-file-tone="css"] {
+.gyro-editor-file-icon[data-file-tone="css"],
+.gyro-workspace-search-file-icon[data-file-tone="css"],
+.gyro-file-identity[data-file-tone="css"] {
   --gyro-file-tone: var(--gyro-file-css);
 }
 .gyro-sidebar-explorer-row[data-file-tone="html"],
-.gyro-editor-file-icon[data-file-tone="html"] {
+.gyro-editor-file-icon[data-file-tone="html"],
+.gyro-workspace-search-file-icon[data-file-tone="html"],
+.gyro-file-identity[data-file-tone="html"] {
   --gyro-file-tone: var(--gyro-file-html);
 }
 .gyro-sidebar-explorer-row[data-file-tone="vue"],
-.gyro-editor-file-icon[data-file-tone="vue"] {
+.gyro-editor-file-icon[data-file-tone="vue"],
+.gyro-workspace-search-file-icon[data-file-tone="vue"],
+.gyro-file-identity[data-file-tone="vue"] {
   --gyro-file-tone: var(--gyro-file-vue);
 }
 .gyro-sidebar-explorer-row[data-file-tone="markdown"],
-.gyro-editor-file-icon[data-file-tone="markdown"] {
+.gyro-editor-file-icon[data-file-tone="markdown"],
+.gyro-workspace-search-file-icon[data-file-tone="markdown"],
+.gyro-file-identity[data-file-tone="markdown"] {
   --gyro-file-tone: var(--gyro-file-markdown);
 }
 .gyro-sidebar-explorer-row[data-file-tone="rust"],
-.gyro-editor-file-icon[data-file-tone="rust"] {
+.gyro-editor-file-icon[data-file-tone="rust"],
+.gyro-workspace-search-file-icon[data-file-tone="rust"],
+.gyro-file-identity[data-file-tone="rust"] {
   --gyro-file-tone: var(--gyro-file-rust);
 }
 .gyro-sidebar-explorer-row[data-file-tone="go"],
-.gyro-editor-file-icon[data-file-tone="go"] {
+.gyro-editor-file-icon[data-file-tone="go"],
+.gyro-workspace-search-file-icon[data-file-tone="go"],
+.gyro-file-identity[data-file-tone="go"] {
   --gyro-file-tone: var(--gyro-file-go);
 }
 .gyro-sidebar-explorer-row[data-file-tone="python"],
-.gyro-editor-file-icon[data-file-tone="python"] {
+.gyro-editor-file-icon[data-file-tone="python"],
+.gyro-workspace-search-file-icon[data-file-tone="python"],
+.gyro-file-identity[data-file-tone="python"] {
   --gyro-file-tone: var(--gyro-file-python);
 }
 .gyro-sidebar-explorer-row[data-file-tone="ruby"],
-.gyro-editor-file-icon[data-file-tone="ruby"] {
+.gyro-editor-file-icon[data-file-tone="ruby"],
+.gyro-workspace-search-file-icon[data-file-tone="ruby"],
+.gyro-file-identity[data-file-tone="ruby"] {
   --gyro-file-tone: var(--gyro-file-ruby);
 }
 .gyro-sidebar-explorer-row[data-file-tone="java"],
-.gyro-editor-file-icon[data-file-tone="java"] {
+.gyro-editor-file-icon[data-file-tone="java"],
+.gyro-workspace-search-file-icon[data-file-tone="java"],
+.gyro-file-identity[data-file-tone="java"] {
   --gyro-file-tone: var(--gyro-file-java);
 }
 .gyro-sidebar-explorer-row[data-file-tone="swift"],
-.gyro-editor-file-icon[data-file-tone="swift"] {
+.gyro-editor-file-icon[data-file-tone="swift"],
+.gyro-workspace-search-file-icon[data-file-tone="swift"],
+.gyro-file-identity[data-file-tone="swift"] {
   --gyro-file-tone: var(--gyro-file-swift);
 }
 .gyro-sidebar-explorer-row[data-file-tone="cpp"],
-.gyro-editor-file-icon[data-file-tone="cpp"] {
+.gyro-editor-file-icon[data-file-tone="cpp"],
+.gyro-workspace-search-file-icon[data-file-tone="cpp"],
+.gyro-file-identity[data-file-tone="cpp"] {
   --gyro-file-tone: var(--gyro-file-cpp);
 }
 .gyro-sidebar-explorer-row[data-file-tone="php"],
-.gyro-editor-file-icon[data-file-tone="php"] {
+.gyro-editor-file-icon[data-file-tone="php"],
+.gyro-workspace-search-file-icon[data-file-tone="php"],
+.gyro-file-identity[data-file-tone="php"] {
   --gyro-file-tone: var(--gyro-file-php);
 }
 .gyro-sidebar-explorer-row[data-file-tone="lua"],
-.gyro-editor-file-icon[data-file-tone="lua"] {
+.gyro-editor-file-icon[data-file-tone="lua"],
+.gyro-workspace-search-file-icon[data-file-tone="lua"],
+.gyro-file-identity[data-file-tone="lua"] {
   --gyro-file-tone: var(--gyro-file-lua);
 }
 .gyro-sidebar-explorer-row[data-file-tone="dart"],
-.gyro-editor-file-icon[data-file-tone="dart"] {
+.gyro-editor-file-icon[data-file-tone="dart"],
+.gyro-workspace-search-file-icon[data-file-tone="dart"],
+.gyro-file-identity[data-file-tone="dart"] {
   --gyro-file-tone: var(--gyro-file-dart);
 }
 .gyro-sidebar-explorer-row[data-file-tone="elixir"],
-.gyro-editor-file-icon[data-file-tone="elixir"] {
+.gyro-editor-file-icon[data-file-tone="elixir"],
+.gyro-workspace-search-file-icon[data-file-tone="elixir"],
+.gyro-file-identity[data-file-tone="elixir"] {
   --gyro-file-tone: var(--gyro-file-elixir);
 }
 .gyro-sidebar-explorer-row[data-file-tone="graphql"],
-.gyro-editor-file-icon[data-file-tone="graphql"] {
+.gyro-editor-file-icon[data-file-tone="graphql"],
+.gyro-workspace-search-file-icon[data-file-tone="graphql"],
+.gyro-file-identity[data-file-tone="graphql"] {
   --gyro-file-tone: var(--gyro-file-graphql);
 }
 .gyro-sidebar-explorer-row[data-file-tone="diff"],
-.gyro-editor-file-icon[data-file-tone="diff"] {
+.gyro-editor-file-icon[data-file-tone="diff"],
+.gyro-workspace-search-file-icon[data-file-tone="diff"],
+.gyro-file-identity[data-file-tone="diff"] {
   --gyro-file-tone: var(--gyro-file-diff);
 }
 .gyro-sidebar-explorer-row[data-file-tone="shell"],
-.gyro-editor-file-icon[data-file-tone="shell"] {
+.gyro-editor-file-icon[data-file-tone="shell"],
+.gyro-workspace-search-file-icon[data-file-tone="shell"],
+.gyro-file-identity[data-file-tone="shell"] {
   --gyro-file-tone: var(--gyro-file-shell);
 }
 .gyro-sidebar-explorer-row[data-file-tone="config"],
-.gyro-editor-file-icon[data-file-tone="config"] {
+.gyro-editor-file-icon[data-file-tone="config"],
+.gyro-workspace-search-file-icon[data-file-tone="config"],
+.gyro-file-identity[data-file-tone="config"] {
   --gyro-file-tone: var(--gyro-file-config);
 }
 .gyro-sidebar-explorer-row[data-file-tone="lock"],
-.gyro-editor-file-icon[data-file-tone="lock"] {
+.gyro-editor-file-icon[data-file-tone="lock"],
+.gyro-workspace-search-file-icon[data-file-tone="lock"],
+.gyro-file-identity[data-file-tone="lock"] {
   --gyro-file-tone: var(--gyro-file-lock);
 }
 .gyro-sidebar-explorer-row[data-file-tone="binary"],
-.gyro-editor-file-icon[data-file-tone="binary"] {
+.gyro-editor-file-icon[data-file-tone="binary"],
+.gyro-workspace-search-file-icon[data-file-tone="binary"],
+.gyro-file-identity[data-file-tone="binary"] {
   --gyro-file-tone: var(--gyro-file-binary);
 }
 .gyro-sidebar-explorer-row[data-file-tone="image"],
-.gyro-editor-file-icon[data-file-tone="image"] {
+.gyro-editor-file-icon[data-file-tone="image"],
+.gyro-workspace-search-file-icon[data-file-tone="image"],
+.gyro-file-identity[data-file-tone="image"] {
   --gyro-file-tone: var(--gyro-file-image);
 }
 .gyro-sidebar-explorer-row[data-file-tone="media"],
-.gyro-editor-file-icon[data-file-tone="media"] {
+.gyro-editor-file-icon[data-file-tone="media"],
+.gyro-workspace-search-file-icon[data-file-tone="media"],
+.gyro-file-identity[data-file-tone="media"] {
   --gyro-file-tone: var(--gyro-file-media);
 }
 .gyro-sidebar-explorer-row[data-file-tone="archive"],
-.gyro-editor-file-icon[data-file-tone="archive"] {
+.gyro-editor-file-icon[data-file-tone="archive"],
+.gyro-workspace-search-file-icon[data-file-tone="archive"],
+.gyro-file-identity[data-file-tone="archive"] {
   --gyro-file-tone: var(--gyro-file-archive);
 }
 .gyro-sidebar-explorer-row[data-file-tone="font"],
-.gyro-editor-file-icon[data-file-tone="font"] {
+.gyro-editor-file-icon[data-file-tone="font"],
+.gyro-workspace-search-file-icon[data-file-tone="font"],
+.gyro-file-identity[data-file-tone="font"] {
   --gyro-file-tone: var(--gyro-file-font);
 }
 .gyro-sidebar-explorer-row[data-file-tone="data"],
-.gyro-editor-file-icon[data-file-tone="data"] {
+.gyro-editor-file-icon[data-file-tone="data"],
+.gyro-workspace-search-file-icon[data-file-tone="data"],
+.gyro-file-identity[data-file-tone="data"] {
   --gyro-file-tone: var(--gyro-file-data);
 }
 
@@ -13427,7 +13494,7 @@ body {
   border: 1px solid var(--gyro-premium-hairline-soft);
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   padding: 6px 10px;
 }
 
@@ -13536,7 +13603,8 @@ body {
 
 .gyro-chat-artifact-table-wrap table {
   border-collapse: collapse;
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
   width: 100%;
 }
 
@@ -25456,7 +25524,7 @@ button.gyro-account-menu-row:hover,
   > .gyro-chat-thread-topbar {
   box-sizing: border-box;
   min-height: 48px;
-  padding-left: 212px;
+  padding-left: var(--gyro-chat-header-navigation-inset, 212px);
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
@@ -25464,14 +25532,14 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-grid-slot.is-window-origin
   .gyro-chat-surface.is-thread
   > .gyro-chat-thread-topbar {
-  padding-left: max(212px, calc((100% - var(--gyro-chat-content-width)) / 2));
+  padding-left: var(--gyro-chat-header-navigation-inset, 212px);
 }
 
 @media (max-width: 720px) {
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
     .gyro-chat-surface.is-thread:not(.is-tiled)
     > .gyro-chat-thread-topbar {
-    padding-left: 200px;
+    padding-left: var(--gyro-chat-header-navigation-inset, 200px);
   }
 
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
@@ -25479,7 +25547,7 @@ button.gyro-account-menu-row:hover,
     .gyro-chat-grid-slot.is-window-origin
     .gyro-chat-surface.is-thread
     > .gyro-chat-thread-topbar {
-    padding-left: 200px;
+    padding-left: var(--gyro-chat-header-navigation-inset, 200px);
   }
 }
 
@@ -39652,20 +39720,20 @@ textarea:focus-visible,
   font-weight: 600;
 }
 .gyro-diff-line.is-added {
-  background: rgba(46, 160, 67, 0.16);
-  color: #aff5b4;
+  background: color-mix(in srgb, var(--gyro-success) 12%, transparent);
+  color: var(--gyro-success);
 }
 .gyro-diff-line.is-removed {
-  background: rgba(248, 81, 73, 0.16);
-  color: #ffdcd7;
+  background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+  color: var(--gyro-danger);
 }
 :root[data-theme="light"] .gyro-diff-line.is-added {
-  background: #dafbe1;
-  color: #116329;
+  background: color-mix(in srgb, var(--gyro-success) 10%, transparent);
+  color: var(--gyro-success);
 }
 :root[data-theme="light"] .gyro-diff-line.is-removed {
-  background: #ffebe9;
-  color: #a40e26;
+  background: color-mix(in srgb, var(--gyro-danger) 10%, transparent);
+  color: var(--gyro-danger);
 }
 .gyro-diff-review-toolbar .gyro-diff-added-count {
   display: inline;
@@ -40561,6 +40629,21 @@ textarea:focus-visible,
   min-height: calc(28px * var(--gyro-ui-scale, 1));
   min-width: 28px;
   width: 28px;
+}
+
+/* A ready send shares the primary action palette across both chat layouts. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button:not(:disabled):not(.is-stop) {
+  background: var(--gyro-primary-bg);
+  color: var(--gyro-primary-text);
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button:not(:disabled):not(.is-stop):hover {
+  background: var(--gyro-primary-hover);
 }
 
 /* Artifacts and completed changes share one restrained card treatment. */
@@ -42563,4 +42646,238 @@ textarea:focus-visible,
    rows host their own menu and must not clip it. */
 :root .gyro-sidebar-explorer-row {
   contain: layout paint;
+}
+
+/* Chat window chrome: reserve the controls that are actually present, then
+   separate navigation from the conversation with one quiet hairline. Keep the
+   same measure when responsive navigation replaces the hidden-sidebar row. */
+:root .gyro-app-shell.is-thread-layout {
+  --gyro-chat-header-control-size: max(
+    24px,
+    calc(26px * var(--gyro-ui-scale, 1))
+  );
+  --gyro-chat-header-status-inset: 0px;
+  --gyro-chat-header-navigation-inset: calc(
+    90px + 2 * var(--gyro-chat-header-control-size) + 4px + 24px +
+      var(--gyro-chat-header-status-inset)
+  );
+}
+
+:root
+  .gyro-app-shell.is-thread-layout:has(
+    > .gyro-sidebar-restore-cluster .gyro-workspace-preparation
+  ) {
+  --gyro-chat-header-status-inset: calc(
+    var(--gyro-chat-header-control-size) + 4px
+  );
+}
+
+:root
+  .gyro-app-shell.is-thread-layout:has(.gyro-chat-grid.has-multiple-panes):has(
+    > .gyro-sidebar-restore-cluster
+      .gyro-workspace-preparation-button[data-status="ready"]
+  ) {
+  --gyro-chat-header-status-inset: 0px;
+}
+
+:root
+  .gyro-app-shell.is-thread-layout:has(.gyro-chat-grid.has-multiple-panes)
+  > .gyro-sidebar-restore-cluster
+  .gyro-workspace-preparation:has(
+    > .gyro-workspace-preparation-button[data-status="ready"]
+  ) {
+  display: none;
+}
+
+:root .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster {
+  align-items: center;
+  height: 48px;
+  min-height: 48px;
+  padding-block: 0;
+}
+
+:root .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster::after {
+  background: var(--gyro-border-soft);
+  content: "";
+  flex: 0 0 1px;
+  height: 16px;
+  margin-left: 7px;
+}
+
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-sidebar-restore-cluster
+  .gyro-sidebar-window-actions
+  > button,
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-sidebar-restore-cluster
+  .gyro-workspace-preparation-button,
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-chat-surface-button {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  height: var(--gyro-chat-header-control-size);
+  min-height: var(--gyro-chat-header-control-size);
+  min-width: var(--gyro-chat-header-control-size);
+  width: var(--gyro-chat-header-control-size);
+}
+
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-sidebar-restore-cluster
+  .gyro-workspace-preparation {
+  left: auto;
+  position: relative;
+  top: auto;
+}
+
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-sidebar-restore-cluster
+  .gyro-workspace-preparation-button {
+  padding: 0;
+}
+
+:root
+  .gyro-app-shell.is-thread-layout
+  .gyro-sidebar-restore-cluster
+  .gyro-workspace-preparation-button
+  > span:last-child {
+  display: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout.is-sidebar-hidden
+  .gyro-chat-grid-slot.is-window-origin
+  > .gyro-chat-surface
+  > .gyro-chat-thread-topbar {
+  padding-left: var(--gyro-chat-header-navigation-inset);
+}
+
+:root
+  .gyro-app-shell
+  .gyro-chat-surface.is-tiled
+  .gyro-chat-thread-identity
+  > strong {
+  min-width: 0;
+}
+
+:root
+  .gyro-app-shell
+  .gyro-chat-companion-menu
+  > .gyro-chat-header-compact-action {
+  display: none;
+}
+
+:root
+  .gyro-app-shell
+  .gyro-chat-thread-topbar
+  .gyro-chat-companion-menu
+  > button
+  > span {
+  display: block;
+  max-width: none;
+}
+
+:root
+  .gyro-app-shell
+  .gyro-chat-surface.is-tiled
+  .gyro-chat-thread-identity
+  .gyro-chat-companion-menu.is-header {
+  left: auto;
+  max-width: calc(100cqi - 28px);
+  min-width: min(208px, calc(100cqi - 28px));
+  right: 0;
+}
+
+.gyro-chat-grid-slot {
+  container: gyro-chat-pane / inline-size;
+}
+
+/* The first split pane shares its header with window navigation. At this
+   width, optional actions stay available in More so the title can still read. */
+@container gyro-chat-pane (max-width: 440px) {
+  :root
+    .gyro-chat-grid-slot.is-window-origin
+    > .gyro-chat-surface.is-tiled
+    > .gyro-chat-thread-topbar:has(
+      .gyro-chat-thread-identity .gyro-chat-surface-menu-anchor
+    )
+    .gyro-thread-topbar-actions
+    .gyro-chat-surface-button:not([data-chat-pane-action="close"]) {
+    display: none;
+  }
+
+  :root
+    .gyro-chat-grid-slot.is-window-origin
+    > .gyro-chat-surface.is-tiled
+    .gyro-chat-companion-menu
+    > .gyro-chat-header-compact-action {
+    display: flex;
+  }
+}
+
+@container gyro-chat-pane (max-width: 360px) {
+  :root
+    .gyro-chat-grid-slot.is-window-origin
+    > .gyro-chat-surface.is-tiled
+    .gyro-thread-project-icon {
+    display: none;
+  }
+}
+
+@media (max-width: 780px) {
+  :root .gyro-app-shell.is-thread-layout,
+  :root
+    .gyro-app-shell.is-thread-layout:has(
+      > .gyro-sidebar-restore-cluster .gyro-workspace-preparation
+    ) {
+    --gyro-chat-header-status-inset: 0px;
+  }
+
+  :root .gyro-app-shell.is-thread-layout > .gyro-compact-navigation-toolbar {
+    gap: 4px;
+  }
+
+  :root
+    .gyro-app-shell.is-thread-layout
+    > .gyro-compact-navigation-toolbar::after {
+    background: var(--gyro-border-soft);
+    content: "";
+    flex: 0 0 1px;
+    height: 16px;
+    margin-left: 7px;
+  }
+
+  :root
+    .gyro-app-shell.is-thread-layout
+    > .gyro-compact-navigation-toolbar
+    > button {
+    background: transparent;
+    box-sizing: border-box;
+    height: var(--gyro-chat-header-control-size);
+    min-height: var(--gyro-chat-header-control-size);
+    min-width: var(--gyro-chat-header-control-size);
+    padding: 0;
+    width: var(--gyro-chat-header-control-size);
+  }
+
+  :root
+    .gyro-app-shell.is-thread-layout
+    > .gyro-compact-navigation-toolbar
+    > button:hover {
+    background: var(--gyro-control-hover);
+    color: var(--gyro-text);
+  }
+
+  :root[data-theme]
+    .gyro-app-shell.is-thread-layout
+    .gyro-chat-grid-slot.is-window-origin
+    > .gyro-chat-surface
+    > .gyro-chat-thread-topbar {
+    padding-left: var(--gyro-chat-header-navigation-inset);
+  }
 }

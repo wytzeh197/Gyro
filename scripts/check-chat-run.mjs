@@ -149,6 +149,117 @@ assert.equal(
   "tools that share a name but not a target should not coalesce",
 );
 
+// Imported calls preserve output and ordering while remaining past activity.
+const importedDetail =
+  '{"path":"src/a.ts"}\nUpdated the heading.\n<script>untrusted transcript text</script>';
+const historicalEdit = activity("file", "Edit", {
+  historical: true,
+  tool: "Edit",
+  sourceCallId: "native-edit-one",
+  path: "src/a.ts",
+  additions: 40,
+  deletions: 12,
+  detail: importedDetail,
+});
+const historicalBrowser = activity("tool", "gyro_browser_click", {
+  historical: true,
+  tool: "mcp__gyro_capabilities__gyro_browser_click",
+  sourceCallId: "native-browser-one",
+  status: "running",
+  detail: '{"target":"Save"}\nClicked Save.',
+});
+const importedTool = workItemFromEvent(historicalEdit);
+assert.equal(
+  importedTool.kind,
+  "tool",
+  "an imported edit must be display-only tool history",
+);
+assert.equal(
+  importedTool.historicalDetail,
+  importedDetail,
+  "imported arguments and results must survive verbatim",
+);
+assert.equal(importedTool.historicalCallId, "native-edit-one");
+assert.equal(
+  workItemFromEvent(historicalBrowser).kind,
+  "tool",
+  "imported browser activity must never become current browser work",
+);
+assert.equal(
+  workItemFromEvent(historicalBrowser).status,
+  "done",
+  "historical activity must not start a live timer",
+);
+const importedRail = buildRunModel([
+  historicalEdit,
+  activity(
+    "file",
+    "Edit",
+    {
+      ...historicalEdit.payload,
+      sourceCallId: "native-edit-two",
+    },
+    1,
+  ),
+  historicalBrowser,
+  activity(
+    "file",
+    "Updated src/current.ts",
+    { path: "src/current.ts", additions: 3, deletions: 1 },
+    2,
+  ),
+]);
+assert.deepEqual(
+  importedRail.steps
+    .filter((step) => step.kind === "work")
+    .map((step) =>
+      step.item.kind === "tool" ? step.item.historicalCallId : step.item.path,
+    ),
+  [
+    "native-edit-one",
+    "native-edit-two",
+    "native-browser-one",
+    "src/current.ts",
+  ],
+  "historical calls with equal names and contents must remain distinct in their source order",
+);
+assert.deepEqual(
+  importedRail.files,
+  [{ path: "src/current.ts", additions: 3, deletions: 1, status: "done" }],
+  "imported edits must not add current file changes or line counts",
+);
+const importedWithoutNativeIds = buildRunModel([
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+]);
+assert.equal(
+  importedWithoutNativeIds.steps.length,
+  2,
+  "distinct historical calls without native IDs must keep their event identities",
+);
+const historicalCallUpdate = buildRunModel([
+  historicalEdit,
+  activity(
+    "tool",
+    "Edit",
+    {
+      historical: true,
+      sourceCallId: "native-edit-one",
+      detail: "Updated result",
+    },
+    1,
+  ),
+]);
+assert.equal(
+  historicalCallUpdate.steps.length,
+  1,
+  "updates for one historical call should share its native identity",
+);
+assert.equal(
+  historicalCallUpdate.steps[0].item.historicalDetail,
+  "Updated result",
+);
+
 // --- exact work is preserved; the view groups it --------------------------------
 
 // Parallel calls arrive milliseconds apart. The run model preserves each exact

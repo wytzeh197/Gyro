@@ -1,8 +1,6 @@
-import { useCallback, useEffect, type MutableRefObject } from "react";
-import {
-  orderProviderChatStreamEvent,
-  type ProviderStreamOrderState,
-} from "./provider-stream-events";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { type ProviderStreamOrderState } from "./provider-stream-events";
+import { createProviderStreamDispatcher } from "./provider-stream-dispatcher";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
@@ -22,27 +20,29 @@ export function useProviderStreamTiming(
   order: MutableRefObject<ProviderStreamOrderState>,
   dispatch: (event: ProviderChatStreamEvent) => void,
 ) {
-  return useCallback(
-    (event: ProviderChatStreamEvent) => {
-      for (const accepted of orderProviderChatStreamEvent(
-        order.current,
-        event,
-      )) {
-        receiveTurnTiming(accepted);
-        dispatch(accepted);
-      }
-    },
-    [dispatch, order],
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+  const dispatcher = useMemo(
+    () =>
+      createProviderStreamDispatcher(order.current, (event) => {
+        receiveTurnTiming(event);
+        dispatchRef.current(event);
+      }),
+    [order],
   );
+  useEffect(() => () => dispatcher.dispose(), [dispatcher]);
+  return dispatcher.push;
 }
 
-export function useTurnTiming(events: SessionEvent[]) {
+export function useTurnTiming(events: SessionEvent[], isSurfaceVisible = true) {
+  const visibleRef = useRef(isSurfaceVisible);
+  visibleRef.current = isSurfaceVisible;
   useEffect(() => {
     void initializeTurnTiming();
   }, []);
   useEffect(() => {
-    committedTurnTiming(events);
-  }, [events]);
+    committedTurnTiming(events, () => visibleRef.current);
+  }, [events, isSurfaceVisible]);
 }
 
 export async function initializeTurnTiming() {
@@ -70,8 +70,12 @@ export function receiveTurnTiming(event: ProviderChatStreamEvent) {
 // Called from a React effect after the real event has committed. Two animation
 // frames give a paint opportunity between callbacks, not a hardware paint timestamp.
 // A hidden document is deliberately unmeasured rather than labelled fast.
-export function committedTurnTiming(events: SessionEvent[]) {
-  if (!enabled || document.visibilityState !== "visible") return;
+export function committedTurnTiming(
+  events: SessionEvent[],
+  isSurfaceVisible: () => boolean = () => true,
+) {
+  if (!enabled || !isSurfaceVisible() || document.visibilityState !== "visible")
+    return;
   for (const event of events) {
     const turnId = event.turnId;
     const sample = turnId ? samples.get(turnId) : undefined;
@@ -87,7 +91,7 @@ export function committedTurnTiming(events: SessionEvent[]) {
     sample.scheduled = true;
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (document.visibilityState !== "visible") {
+        if (!isSurfaceVisible() || document.visibilityState !== "visible") {
           sample.scheduled = false;
           return;
         }

@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
+import { providerLoginProfile, providerLoginCommandText } from "../apps/desktop/src/provider-login-profile.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
 import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
 import { dirname, resolve } from "node:path";
@@ -528,6 +529,7 @@ expect(
 );
 
 const appSource = [
+  readRepoFile("apps/desktop/src/provider-login-profile.ts"),
   readRepoFile("apps/desktop/src/App.tsx"),
   readRepoFile("apps/desktop/src/use-workbench-appearance.ts"),
   readRepoFile("apps/desktop/src/editor-presentation.ts"),
@@ -578,9 +580,12 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = [
+  readRepoFile("packages/ui/src/diff-file-tree.ts"),
   readRepoFile("packages/ui/src/surfaces.tsx"),
+  readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/settings-presentation.tsx"),
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
@@ -721,7 +726,7 @@ expect(
   "Chat headers should keep the title clean and move workspace context into the Environment control.",
 );
 expect(
-  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong>\{sessionTitle \?\? "Gyro session"\}<\/strong>/.test(
+  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong title=\{sessionTitle \?\? "Gyro session"\}>\s*\{sessionTitle \?\? "Gyro session"\}\s*<\/strong>/.test(
     surfaceSource,
   ) &&
     !surfaceSource.includes("items={threadWorkspaceItems}") &&
@@ -4158,7 +4163,7 @@ expect(
     appSource.includes("optimisticEventsRef") &&
     appSource.includes("mergePersistedAndOptimisticEvents") &&
     appAndStreamSource.includes(
-      "const merged = limitSessionEventsForUi(persistedEvents)",
+      "const merged = limitSessionEventsForUi(persistedEvents, maxEvents)",
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
     appSource.includes(
@@ -4303,7 +4308,9 @@ expect(
     appSource.includes("areWorkbenchTurnsEqual") &&
     appSource.includes("const eventsRef = useRef<SessionEvent[]>([])") &&
     appSource.includes("eventsRef.current = events") &&
-    appSource.includes("eventsRef.current.find(") &&
+    appSource.includes("eventSessionEvents.find(") &&
+    appSource.includes("sessionEventsById[event.sessionId] ?? eventsRef.current") &&
+    appSource.includes("item.sessionId === event.sessionId &&") &&
     !appSource.includes("[connectProvider, events, sendDraft]") &&
     providerStreamSource.includes('kind: "provider-stream"') &&
     providerStreamSource.includes('kind: "provider-activity"') &&
@@ -4466,7 +4473,8 @@ expect(
     surfaceSource.includes("files.slice(0, 6)") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
-    appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
+    appSource.includes("sourceControlLineStats(scopedIde.sourceControl)") &&
+    appSource.includes("useScopedIdeState(workbench.ide, workspaceActionRoot)") &&
     appSource.includes('payload.activityKind !== "file"') &&
     appSource.includes("refreshIdeSourceControl(root)") &&
     appSource.includes("refreshedFileActivityKeysRef.current.clear()") &&
@@ -4506,15 +4514,15 @@ expect(
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
     // Completed chats lead with the final answer; the work stays expandable.
-    // Live work and failures remain visible.
+    // Live work, failures, and unresolved approvals remain visible.
     runViewSource.includes("showThinkingPulse") &&
     runViewSource.includes(
-      "const [isCollapsed, setIsCollapsed] = useState(isDone)",
+      "const [isCollapsed, setIsCollapsed] = useState(isDone && !needsApproval)",
     ) &&
     !runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes('const isDone = model.phase.name === "done"') &&
-    runViewSource.includes("setIsCollapsed(isDone)") &&
-    runViewSource.includes("const showSteps = isLive || !isCollapsed") &&
+    runViewSource.includes("setIsCollapsed(isDone && !needsApproval)") &&
+    runViewSource.includes("const showSteps = isLive || needsApproval || !isCollapsed") &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
     styleSource.includes(".gyro-run-row") &&
@@ -5473,7 +5481,7 @@ expect(
     chatSidebarSource.includes("Projects") &&
     chatSidebarSource.includes("Recents") &&
     chatSidebarSource.includes("gyro-sidebar-recents") &&
-    chatSidebarSource.includes("No chats") &&
+    chatSidebarSource.includes("No standalone chats yet") &&
     chatSidebarSource.includes(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
@@ -6533,9 +6541,10 @@ expect(
     surfaceSource.includes(
       "providerSignInLabel(providerStatus.recoveryKind)",
     ) &&
-    appSource.includes(
-      "connectProvider(providerId, { forceLogin: needsSignIn })",
-    ) &&
+    /connectProvider\(providerId,\s*\{\s*forceLogin:\s*needsSignIn,\s*importedSessionId:\s*event\.sessionId,\s*\}\)/.test(appSource) &&
+    /sendDraft\(userMessage,\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(appSource) &&
+    appSource.includes("sessionEventsById[event.sessionId] ?? eventsRef.current") &&
+    appSource.includes("item.sessionId === event.sessionId &&") &&
     appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
     appSource.includes("if (!forceLogin && result.connectionStatus"),
   "A send rejected over an expired sign-in should offer sign-in, skip the health shortcut that still passes on a stale token, and resend the message once the login succeeds.",
@@ -6624,13 +6633,21 @@ expect(
   "Start composer context row should wrap without rendering a horizontal scrollbar.",
 );
 expect(
-  appSource.includes("function providerLoginProfile") &&
-    appSource.includes('args: ["login", "--device-auth"]') &&
-    appSource.includes('args: ["auth", "login"]') &&
-    appSource.includes('command: "kimi"') &&
-    appSource.includes('args: ["login"]') &&
-    appSource.includes('command: "cursor-agent"') &&
-    appSource.includes('command: "opencode"') &&
+  [
+    ["openai", "codex", ["login", "--device-auth"]],
+    ["anthropic", "claude", ["auth", "login"]],
+    ["kimi", "kimi", ["login"]],
+    ["cursor", "cursor-agent", ["login"]],
+    ["opencode", "opencode", ["auth", "login"]],
+  ].every(([id, command, args]) => {
+    const profile = providerLoginProfile(id);
+    return profile.command === command &&
+      JSON.stringify(profile.args) === JSON.stringify(args) &&
+      providerLoginCommandText(profile) === [command, ...args].join(" ");
+  }) &&
+    appSource.includes('from "./provider-login-profile"') &&
+    appSource.includes("const profile = providerLoginProfile(providerId)") &&
+    appSource.includes("const commandText = providerLoginCommandText(profile)") &&
     appSource.includes('"check_provider_health"') &&
     appSource.includes("providerHealthRequest(provider, providerId)") &&
     appSource.includes("configSaveQueueRef.current") &&
@@ -6642,12 +6659,8 @@ expect(
     appSource.includes('layout: "terminal-grid"') &&
     appSource.includes('tab: "terminal"') &&
     coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
-    coreProviderHealthSource.includes(
-      'command: "codex",\n            args: &["login", "status"]',
-    ) &&
-    coreProviderHealthSource.includes(
-      'command: "claude",\n                    args: &["auth", "status"]',
-    ) &&
+    /command:\s*"codex",\s*args:\s*&\["login", "status"\]/.test(coreProviderHealthSource) &&
+    /command:\s*"claude",\s*args:\s*&\["auth", "status"\]/.test(coreProviderHealthSource) &&
     coreProviderHealthSource.includes('"xai"') &&
     coreProviderHealthSource.includes('"XAI_API_KEY"') &&
     coreProviderHealthSource.includes(
@@ -6724,7 +6737,8 @@ expect(
     ) &&
     surfaceSource.includes('if (event.key === "Escape")') &&
     surfaceSource.includes("openMenus.at(-1) !== menu") &&
-    surfaceSource.includes("returnFocus.focus()"),
+    surfaceSource.includes("const focusTarget = triggerRef?.current ?? returnFocus") &&
+    surfaceSource.includes("if (focusTarget?.isConnected) focusTarget.focus()"),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 // Model rail: provider marks down the left, the previewed provider's models
@@ -6844,9 +6858,8 @@ expect(
   "Every model/provider pane should open the model rail.",
 );
 // One chip carries model and effort together, still under the provider's own
-// brand mark. It opens a drill-down menu that names each setting's current
-// value, with the provider switch folded under Advanced — and no second effort
-// chip beside it.
+// brand mark. Model and effort have separate direct targets within that chip,
+// rather than introducing a separate toolbar chip or an extra model step.
 expect(
   /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
     surfaceSource,
@@ -6855,6 +6868,10 @@ expect(
     surfaceSource.includes("{modelChipLabel}") &&
     surfaceSource.includes('className="gyro-model-chip-effort"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
+    surfaceSource.includes('className="gyro-composer-model-trigger"') &&
+    surfaceSource.includes('className="gyro-composer-effort-trigger"') &&
+    surfaceSource.includes('toggleProviderPopover("model", event.currentTarget)') &&
+    surfaceSource.includes('toggleProviderPopover("root", event.currentTarget)') &&
     !surfaceSource.includes(
       'className="gyro-composer-chip gyro-effort-chip"',
     ) &&
@@ -6877,7 +6894,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer should expose one model chip whose menu opens effort first and the model rail from there.",
+  "Composer should keep one visual model control with direct model and effort access.",
 );
 
 // Drilling should feel like one card changing its mind, not a stack of
@@ -7578,8 +7595,8 @@ for (const className of [
 expect(
   liveTerminalPaneSource.includes("drawBoldTextInBrightColors: true") &&
     liveTerminalPaneSource.includes("minimumContrastRatio: 4.5") &&
-    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
-    liveTerminalPaneSource.includes('magenta: "#d86cff"') &&
+    liveTerminalPaneSource.includes('brightMagenta: "#d19aff"') &&
+    liveTerminalPaneSource.includes('magenta: "#be83ff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "Embedded CLI terminals should preserve visible ANSI accent colors.",
 );
@@ -7970,7 +7987,7 @@ expect(
     ) &&
     liveTerminalPaneSource.includes('background: "#f5f5f5"') &&
     liveTerminalPaneSource.includes('background: "#141414"') &&
-    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
+    liveTerminalPaneSource.includes('brightMagenta: "#d19aff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "System, dark, and light preferences should resolve before live terminals update their palette in place.",
 );

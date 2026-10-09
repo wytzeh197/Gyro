@@ -174,7 +174,7 @@ pub(super) fn run_openai_compatible_chat(
     // Validated before the heartbeat starts so an unusable endpoint costs no
     // background work and no tool round.
     let endpoint = openai_compat_endpoint(base_url)?;
-    let api_key = provider_api_key_value(&provider.id);
+    let api_key = gyro_core::try_provider_api_key_value(&provider.id)?;
     if api_key.is_none() && !openai_compat_host_is_loopback(&endpoint) {
         let env_hint = provider_api_key_env_name(&provider.id)
             .map(|name| format!(", or set {name}"))

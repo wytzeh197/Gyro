@@ -2,6 +2,59 @@
   margin-block: 4px;
   min-width: 0;
 }
+.gyro-subagent-strip {
+  width: 100%;
+  max-width: var(--gyro-chat-content-width);
+  margin-inline: auto;
+  box-sizing: border-box;
+  min-width: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-subagent-strip > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-subagent-strip > summary::-webkit-details-marker {
+  display: none;
+}
+.gyro-subagent-strip > summary:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-subagent-strip > summary > svg {
+  flex: none;
+}
+.gyro-subagent-strip-chevron {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+.gyro-subagent-strip[open] .gyro-subagent-strip-chevron {
+  transform: rotate(90deg);
+}
+.gyro-subagent-strip-status {
+  margin-left: auto;
+  text-align: right;
+}
+.gyro-subagent-strip-status.is-attention {
+  color: var(--gyro-warn);
+}
+.gyro-subagent-strip > .gyro-subagents {
+  max-height: 180px;
+  overflow: auto;
+}
+.gyro-subagent-strip .gyro-subagents li > button {
+  width: 100%;
+}
+.gyro-subagent-strip summary:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
 .gyro-subagents ul {
   list-style: none;
   margin: 0;
@@ -10,12 +63,13 @@
 .gyro-subagents li > button {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   width: fit-content;
   max-width: 100%;
-  padding: 3px 4px;
-  line-height: 16px;
-  white-space: nowrap;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 4px 6px;
+  line-height: 1.4;
+  flex-wrap: wrap;
   color: inherit;
   background: transparent;
   border: 0;
@@ -43,19 +97,68 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   font-weight: 500;
 }
 .gyro-subagent-runtime,
 .gyro-subagent-tokens {
-  opacity: 0.65;
-  font-size: 11px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+.gyro-subagent-status-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-subagent-status {
+  font-size: var(--gyro-font-micro);
+  color: var(--gyro-muted);
+}
+.gyro-subagent-status-icon.is-running,
+.gyro-subagent-status.is-running {
+  color: var(--gyro-accent);
+}
+.gyro-subagent-status-icon.is-waiting,
+.gyro-subagent-status.is-waiting,
+.gyro-subagent-status-icon.is-interrupted,
+.gyro-subagent-status.is-interrupted {
+  color: var(--gyro-warn);
+}
+.gyro-subagent-status-icon.is-failed,
+.gyro-subagent-status.is-failed {
+  color: var(--gyro-danger);
+}
+.gyro-subagent-status-icon.is-completed {
+  color: var(--gyro-success);
 }
 .gyro-subagent-runtime,
 .gyro-subagent-tokens {
   flex: none;
+}
+.gyro-chat-environment-popover .gyro-subagents li > button {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  width: 100%;
+  gap: 3px 8px;
+}
+.gyro-chat-environment-popover .gyro-subagent-name {
+  grid-column: 2;
+  grid-row: 1;
+}
+.gyro-chat-environment-popover .gyro-subagent-status {
+  grid-column: 3;
+  grid-row: 1;
+}
+.gyro-chat-environment-popover .gyro-subagent-runtime {
+  grid-column: 2;
+  grid-row: 2;
+}
+.gyro-chat-environment-popover .gyro-subagent-tokens {
+  grid-column: 3;
+  grid-row: 2;
+  text-align: right;
 }
 .gyro-subagent-panel {
   height: 100%;
@@ -67,7 +170,7 @@
 .gyro-subagent-task {
   margin: 0 0 14px;
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.6;
 }
 .gyro-subagent-task summary {
@@ -122,6 +225,6 @@
 }
 .gyro-subagent-empty {
   padding: var(--gyro-space-panel);
-  font-size: 12px;
-  opacity: 0.65;
+  font-size: var(--gyro-font-micro);
+  color: var(--gyro-muted);
 }

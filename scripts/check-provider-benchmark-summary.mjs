@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = await mkdtemp(join(tmpdir(), "gyro-summary-check-"));
@@ -94,8 +101,15 @@ try {
       sessionId,
       outcome: "completed",
       providerRequests: {
-        requests: 3, retries: 1, unmeasuredContent: true,
-        tokens: { inputTokens: 100, outputTokens: 20, totalTokens: 120, measured: false },
+        requests: 3,
+        retries: 1,
+        unmeasuredContent: true,
+        tokens: {
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+          measured: false,
+        },
       },
       points: marks.map(([stage, elapsedMs, toolIndex]) => ({
         stage,
@@ -175,7 +189,10 @@ try {
       records: [{ provider, task: "readme", trial: 1, outcome: "unavailable" }],
     });
   }
-  await save(join(root, "spec.json"), { providers: [{ id: "ollama" }, { id: "openrouter" }], trials: 5 });
+  await save(join(root, "spec.json"), {
+    providers: [{ id: "ollama" }, { id: "openrouter" }],
+    trials: 5,
+  });
   execFileSync(process.execPath, [
     fileURLToPath(
       new URL("./summarize-provider-benchmark.mjs", import.meta.url),
@@ -202,6 +219,23 @@ try {
   assert.equal(group.retries, 3);
   assert.equal(result.excludedRateGuardRecords, 1);
   assert.equal(result.expectedSlots, 60);
+  await save(join(root, "spec.json"), {
+    providers: [{ id: "ollama" }, { id: "openrouter" }],
+    trials: 5,
+    tasks: ["no-tool"],
+  });
+  execFileSync(process.execPath, [
+    fileURLToPath(
+      new URL("./summarize-provider-benchmark.mjs", import.meta.url),
+    ),
+    root,
+    output,
+  ]);
+  const subset = JSON.parse(await readFile(join(output, "measurements.json"), "utf8"));
+  assert.equal(subset.expectedSlots, 20);
+  assert.ok(subset.groups.length > 0);
+  assert.ok(subset.groups.every((group) => group.task === "no-tool"));
+  assert.ok((await readFile(join(output, "results-table.md"), "utf8")).includes("no-tool"));
   assert.ok(result.records.some((r) => r.provider === "ollama"));
   assert.ok(result.records.some((r) => r.provider === "openrouter"));
   const observed = result.records.find((r) => r.provider === "openai").timing;
@@ -209,7 +243,11 @@ try {
   assert.equal(observed.requestCount, 3);
   assert.equal(observed.observedUsage.totalTokens, 120);
   assert.equal(observed.unmeasuredContent, true);
-  assert.equal(observed.toolCount, 2, "broker hooks do not double-count protocol tools");
+  assert.equal(
+    observed.toolCount,
+    2,
+    "broker hooks do not double-count protocol tools",
+  );
   assert.equal(observed.brokerToolCount, 1);
   assert.deepEqual(observed.toolDurationsMs, [6, 6]);
   assert.deepEqual(observed.brokerToolDurationsMs, [1]);
@@ -236,6 +274,42 @@ try {
     false,
     "changes to original content are rejected",
   );
+  const originalSpec = {
+    providers: [{ id: "ollama", model: "fixture", effort: "" }],
+    trials: 1,
+    timeoutSeconds: 30,
+  };
+  const resumeRoot = join(root, "resume");
+  await mkdir(resumeRoot);
+  const previousPath = join(resumeRoot, "spec.json");
+  await save(previousPath, originalSpec);
+  const originalBytes = await readFile(previousPath, "utf8");
+  const changedSpec = join(root, "changed-spec.json");
+  await save(changedSpec, { ...originalSpec, tasks: ["no-tool"] });
+  const runner = fileURLToPath(
+    new URL("./benchmark-providers.mjs", import.meta.url),
+  );
+  const mismatched = spawnSync(
+    process.execPath,
+    [runner, "--spec", changedSpec, "--resume", resumeRoot, "--skip-build"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(mismatched.status, 0);
+  assert.ok(mismatched.stderr.includes("original benchmark spec"));
+  assert.equal(
+    await readFile(previousPath, "utf8"),
+    originalBytes,
+    "resume must not overwrite the original cohort evidence",
+  );
+  await rm(previousPath);
+  await symlink(changedSpec, previousPath);
+  const linked = spawnSync(
+    process.execPath,
+    [runner, "--spec", changedSpec, "--resume", resumeRoot, "--skip-build"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(linked.status, 0);
+  assert.ok(linked.stderr.includes("regular file"));
   console.log(
     "Benchmark summary: medians, overlap, resume metadata, pending proposals, exclusions, and content boundaries passed.",
   );

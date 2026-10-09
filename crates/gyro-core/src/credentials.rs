@@ -92,15 +92,21 @@ pub fn stored_provider_api_key(provider_id: &str) -> Result<Option<String>> {
 /// [`stored_provider_api_key_env`] does for CLI injection, so a run uses the
 /// same key the user would expect Gyro to be using.
 pub fn provider_api_key_value(provider_id: &str) -> Option<String> {
+    try_provider_api_key_value(provider_id).ok().flatten()
+}
+
+/// Sending a request must preserve a Keychain access failure rather than
+/// reporting a saved but inaccessible credential as absent.
+pub fn try_provider_api_key_value(provider_id: &str) -> Result<Option<String>> {
     if let Some(env_name) = provider_api_key_env_name(provider_id) {
         if let Ok(value) = std::env::var(env_name) {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
+                return Ok(Some(trimmed.to_string()));
             }
         }
     }
-    stored_provider_api_key(provider_id).ok().flatten()
+    stored_provider_api_key(provider_id)
 }
 
 pub fn set_stored_provider_api_key(provider_id: &str, value: &str) -> Result<()> {
@@ -137,12 +143,34 @@ pub fn provider_has_api_key(provider_id: &str) -> bool {
 /// Copy a Keychain-stored provider key into a child command when the process
 /// environment does not already provide one. Process env always wins.
 pub fn apply_stored_provider_api_key(command: &mut Command, provider_id: &str) {
-    if let Some((name, value)) = stored_provider_api_key_env(provider_id) {
+    let _ = try_apply_stored_provider_api_key(command, provider_id);
+}
+
+/// Actual provider launches must retain credential-access failures rather than
+/// silently falling through to a different CLI account or authentication method.
+pub fn try_apply_stored_provider_api_key(command: &mut Command, provider_id: &str) -> Result<()> {
+    apply_selected_provider_api_key(
+        command,
+        provider_id,
+        try_stored_provider_api_key_env(provider_id),
+        provider_api_key_env_name(provider_id).is_some_and(|name| std::env::var_os(name).is_some()),
+    )
+}
+
+fn apply_selected_provider_api_key(
+    command: &mut Command,
+    provider_id: &str,
+    stored: Result<Option<(OsString, OsString)>>,
+    has_environment_key: bool,
+) -> Result<()> {
+    let stored = stored?;
+    let has_key = stored.is_some() || has_environment_key;
+    if let Some((name, value)) = stored {
         command.env(name, value);
     }
     // Explicitly select environment authentication for this process, without
     // replacing the user's existing Codex login or persisting the key there.
-    if provider_id == "openai" && provider_has_api_key(provider_id) {
+    if provider_id == "openai" && has_key {
         command.args([
             "-c",
             "model_providers.openai.env_key=\"OPENAI_API_KEY\"",
@@ -150,15 +178,22 @@ pub fn apply_stored_provider_api_key(command: &mut Command, provider_id: &str) {
             "model_providers.openai.requires_openai_auth=false",
         ]);
     }
+    Ok(())
 }
 
 pub fn stored_provider_api_key_env(provider_id: &str) -> Option<(OsString, OsString)> {
-    let env_name = provider_api_key_env_name(provider_id)?;
+    try_stored_provider_api_key_env(provider_id).ok().flatten()
+}
+
+pub fn try_stored_provider_api_key_env(provider_id: &str) -> Result<Option<(OsString, OsString)>> {
+    let Some(env_name) = provider_api_key_env_name(provider_id) else {
+        return Ok(None);
+    };
     if std::env::var_os(env_name).is_some() {
-        return None;
+        return Ok(None);
     }
-    let value = stored_provider_api_key(provider_id).ok().flatten()?;
-    Some((OsString::from(env_name), OsString::from(value)))
+    Ok(stored_provider_api_key(provider_id)?
+        .map(|value| (OsString::from(env_name), OsString::from(value))))
 }
 
 /// Environment variable names that carry a secret regardless of who set them.
@@ -392,6 +427,54 @@ fn normalize_for_compare(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn codex_authentication_uses_the_same_credential_selection_as_injection() {
+        let mut command = Command::new("codex");
+        apply_selected_provider_api_key(&mut command, "openai", Ok(None), false).unwrap();
+        assert_eq!(
+            command.get_args().count(),
+            0,
+            "subscription login stays selected without a key"
+        );
+        apply_selected_provider_api_key(
+            &mut command,
+            "openai",
+            Ok(Some(("OPENAI_API_KEY".into(), "fixture-key".into()))),
+            true,
+        )
+        .unwrap();
+        assert!(command
+            .get_args()
+            .any(|arg| arg == "model_providers.openai.requires_openai_auth=false"));
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "OPENAI_API_KEY"
+                && value == Some(std::ffi::OsStr::new("fixture-key"))));
+        let mut command = Command::new("codex");
+        apply_selected_provider_api_key(&mut command, "openai", Ok(None), true).unwrap();
+        assert!(command
+            .get_args()
+            .any(|arg| arg == "model_providers.openai.requires_openai_auth=false"));
+        assert_eq!(
+            command.get_envs().count(),
+            0,
+            "inherited key is not replaced"
+        );
+        let mut command = Command::new("codex");
+        let result = apply_selected_provider_api_key(
+            &mut command,
+            "openai",
+            Err(anyhow::anyhow!("fixture Keychain access denied")),
+            false,
+        );
+        assert!(result.is_err());
+        assert_eq!(command.get_envs().count(), 0);
+        assert_eq!(
+            command.get_args().count(),
+            0,
+            "a credential failure cannot change authentication arguments"
+        );
+    }
     #[test]
     fn api_key_support_covers_new_presets_and_custom_providers() {
         for provider_id in [

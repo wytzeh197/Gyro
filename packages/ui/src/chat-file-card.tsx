@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { File, FileText, Image, Music2, Video, X } from "lucide-react";
+import { FileText, Image, Music2, Video, X } from "lucide-react";
+import { workspaceFileBadge } from "./workspace-file-icons";
 import { chatFileKind, type ChatFileLink } from "./chat-file-links";
 import "./chat-file-card.css";
 
@@ -94,12 +95,13 @@ export function ChatFileCard({
       trigger.current?.focus();
     };
   }, [expanded]);
+  const badge = workspaceFileBadge(file.name);
   const Icon = {
     image: Image,
     video: Video,
     audio: Music2,
     pdf: FileText,
-    file: File,
+    file: badge.icon,
   }[file.kind];
   const hasPreview = Boolean(src && !failed);
   const open = () => {
@@ -139,7 +141,12 @@ export function ChatFileCard({
         </span>
       ) : null}
       <span className="gyro-chat-file-caption">
-        <Icon aria-hidden="true" size={18} />
+        <Icon
+          aria-hidden="true"
+          className={file.kind === "file" ? "gyro-file-identity" : undefined}
+          data-file-tone={file.kind === "file" ? badge.tone : undefined}
+          size={18}
+        />
         <span>
           <strong>{file.name}</strong>
           {detail ? <small>{detail}</small> : null}

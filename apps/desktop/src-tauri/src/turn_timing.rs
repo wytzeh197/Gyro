@@ -34,11 +34,31 @@ pub(super) fn timing_diagnostics_enabled() -> bool {
 }
 
 #[tauri::command]
-pub(super) fn record_frontend_timing(value: timing::FrontendTiming) -> Result<(), String> {
+pub(super) async fn record_frontend_timing(value: timing::FrontendTiming) -> Result<(), String> {
     if !value.valid() {
         return Err("invalid timing measurement".into());
     }
-    timing::record_frontend(&value).map_err(|_| "could not save local timing measurement".into())
+    if !timing::enabled() {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || timing::record_frontend(&value))
+        .await
+        .map_err(|_| "timing worker failed".to_string())?
+        .map_err(|_| "could not save local timing measurement".into())
+}
+
+#[tauri::command]
+pub(super) async fn record_surface_timing(value: timing::UiTiming) -> Result<(), String> {
+    if !value.valid() {
+        return Err("invalid surface timing measurement".into());
+    }
+    if !timing::enabled() {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || timing::record_surface(&value))
+        .await
+        .map_err(|_| "surface timing worker failed".to_string())?
+        .map_err(|_| "could not save local surface timing measurement".into())
 }
 
 pub(super) fn protocol_item(item: &serde_json::Value, status: &str) {

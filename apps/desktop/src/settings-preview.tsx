@@ -15,6 +15,7 @@ import {
   type UpdateState,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import { projectImportPreview } from "./project-import-preview";
 
 /** Representative updater states, so the Updates section can be reviewed whole.
     "unavailable" carries no state at all, which is the shape the surface gets
@@ -130,7 +131,9 @@ function Preview() {
       ? "providers"
       : scene === "updates"
         ? "updates"
-        : "appearance",
+        : scene === "import"
+          ? "import-projects"
+          : "appearance",
   );
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
@@ -156,12 +159,13 @@ function Preview() {
     };
   }, []);
   const [menu, setMenu] = useState(true);
-  const [notifications, setNotifications] = useState<DesktopNotificationPreferences>({
-    enabled: true,
-    approvals: true,
-    finished: true,
-    failed: false,
-  });
+  const [notifications, setNotifications] =
+    useState<DesktopNotificationPreferences>({
+      enabled: true,
+      approvals: true,
+      finished: true,
+      failed: false,
+    });
   const [follow, setFollow] = useState<"off" | "peek" | "follow">("peek");
   const [config, setConfig] = useState<GyroConfig>(() => {
     const empty = {
@@ -228,7 +232,14 @@ function Preview() {
         style={{ display: "flex", gap: 16, padding: 16 }}
       >
         {(
-          ["general", "appearance", "advanced", "providers", "updates"] as const
+          [
+            "general",
+            "appearance",
+            "advanced",
+            "providers",
+            "updates",
+            "import-projects",
+          ] as const
         ).map((id) => (
           <button key={id} onClick={() => setSection(id)}>
             {id}
@@ -252,7 +263,12 @@ function Preview() {
           ))}
         </nav>
       ) : null}
-      <p role="status">{result}</p>
+      <p role="status">
+        {scene === "import"
+          ? "Development fixture. All import data and actions are simulated. "
+          : ""}
+        {result}
+      </p>
       {connecting.length > 0 ? (
         <button
           onClick={() => {
@@ -271,6 +287,7 @@ function Preview() {
         </button>
       ) : null}
       <SettingsSurface
+        projectImport={projectImportPreview(updateScene, setResult)}
         config={config}
         connectingProviderIds={connecting}
         onToggleProvider={(id) => setConnecting([id as ProviderId])}

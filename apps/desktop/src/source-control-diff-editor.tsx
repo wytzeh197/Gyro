@@ -66,7 +66,7 @@ function SourceControlDiffEditor({
       originalEditable: false,
       renderSideBySide: true,
       useInlineViewWhenSpaceIsLimited: true,
-      renderSideBySideInlineBreakpoint: 560,
+      renderSideBySideInlineBreakpoint: Math.round(560 * scale),
       ignoreTrimWhitespace: false,
       fontFamily:
         "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",

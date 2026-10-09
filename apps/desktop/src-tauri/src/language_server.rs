@@ -18,7 +18,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::process::{ChildStdin, ChildStdout, Stdio};
 use std::sync::{mpsc, Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -239,7 +239,7 @@ struct LspDocumentState {
 }
 
 struct LanguageServerProcess {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
     stdin: ChildStdin,
     messages: mpsc::Receiver<Result<serde_json::Value, String>>,
     next_request_id: u64,
@@ -264,7 +264,7 @@ struct LanguageServerProcess {
 
 impl LanguageServerProcess {
     fn new(
-        child: Child,
+        child: gyro_core::process_guard::GuardedChild,
         stdin: ChildStdin,
         messages: mpsc::Receiver<Result<serde_json::Value, String>>,
         root: &Path,
@@ -730,7 +730,7 @@ fn start_language_server_process(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = gyro_core::process_guard::spawn_service(&mut command).map_err(|error| {
         anyhow::anyhow!("failed to start language server {command_name}: {error}")
     })?;
     let stdin = child
@@ -1478,12 +1478,9 @@ mod tests {
         Option<ChildStdout>,
         mpsc::SyncSender<Result<serde_json::Value, String>>,
     ) {
-        let mut child = std::process::Command::new("/bin/cat")
-            .stdin(Stdio::piped())
-            .stdout(stdout)
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+        let mut command = std::process::Command::new("/bin/cat");
+        command.stdin(Stdio::piped()).stdout(stdout).stderr(Stdio::null());
+        let mut child = gyro_core::process_guard::spawn_service(&mut command).unwrap();
         let stdin = child.stdin.take().unwrap();
         let echoed = child.stdout.take();
         let (sender, receiver) = mpsc::sync_channel(1024);

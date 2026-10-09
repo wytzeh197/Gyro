@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
 use url::{Host, Url};
+mod context;
+use context::{context_overflow_message, request_context_window, OllamaContextOverflow};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
 pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
@@ -46,6 +48,7 @@ pub struct OllamaChatRequest<'a> {
     pub model: &'a str,
     pub system: &'a str,
     pub user: &'a str,
+    pub context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,6 +57,7 @@ pub struct OllamaChatResponse {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub tool_calls: Vec<OllamaToolCall>,
+    pub context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +66,12 @@ pub struct OllamaToolChatRequest<'a> {
     pub model: &'a str,
     pub messages: Vec<serde_json::Value>,
     pub tools: Vec<serde_json::Value>,
+    /// The selected model's maximum window. Allocation is sized to the request;
+    /// an explicit context rejection may grow it within this limit.
+    pub context_window_tokens: Option<u64>,
+    /// Keep the allocation stable through one tool loop instead of reloading
+    /// the runtime whenever compaction or an exchange makes the prompt smaller.
+    pub minimum_context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,33 +156,96 @@ pub fn discover_ollama_models(base_url: Option<&str>) -> Result<OllamaDiscovery>
 /// Resolve only the selected model before a turn. Full catalog enrichment is
 /// reserved for Settings; unrelated installed models must not delay a send.
 pub fn discover_ollama_model(base_url: Option<&str>, model: &str) -> Result<Option<OllamaModel>> {
+    discover_ollama_model_with_cancellation(base_url, model, &CancellationToken::default())
+}
+
+pub fn discover_ollama_model_with_cancellation(
+    base_url: Option<&str>,
+    model: &str,
+    cancellation: &CancellationToken,
+) -> Result<Option<OllamaModel>> {
+    let result = discover_selected_model(base_url, model, cancellation);
+    if cancellation.is_cancelled() {
+        Err(anyhow!(OLLAMA_CANCELLED_MESSAGE))
+    } else {
+        result
+    }
+}
+
+fn discover_selected_model(
+    base_url: Option<&str>,
+    model: &str,
+    cancellation: &CancellationToken,
+) -> Result<Option<OllamaModel>> {
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
     let endpoint = ollama_endpoint(base_url)?;
-    let response = agent()
-        .get(endpoint.join("tags")?.as_str())
-        .call()
+    let response = crate::chat_http::get(&endpoint.join("tags")?, cancellation, REQUEST_TIMEOUT)
         .map_err(ollama_http_error)?;
-    ensure_loopback_response(&response, &endpoint)?;
-    let tags: OllamaTagsResponse = response.into_json().context("invalid Ollama model list")?;
-    Ok(tags
-        .models
-        .into_iter()
-        .find(|tag| tag.name == model)
-        .map(|tag| enrich_model(&endpoint, tag)))
+    ensure_loopback_response_url(response.get_url(), &endpoint)?;
+    let tags: OllamaTagsResponse = read_metadata(response.into_reader())?;
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
+    let Some(tag) = tags.models.into_iter().find(|tag| tag.name == model) else {
+        return Ok(None);
+    };
+    let show = crate::chat_http::post_with_deadline(
+        &endpoint.join("show")?,
+        &ureq::json!({ "model": tag.name }),
+        cancellation,
+        REQUEST_TIMEOUT,
+    )
+    .ok()
+    .and_then(|response| {
+        ensure_loopback_response_url(response.get_url(), &endpoint).ok()?;
+        read_metadata::<OllamaShowResponse>(response.into_reader()).ok()
+    });
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
+    Ok(Some(model_from_show(tag, show)))
+}
+
+fn read_metadata<T: serde::de::DeserializeOwned>(reader: impl std::io::Read) -> Result<T> {
+    use std::io::Read;
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    reader.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= LIMIT,
+        "Ollama metadata exceeded its size limit"
+    );
+    serde_json::from_slice(&bytes).context("invalid Ollama metadata")
 }
 
 /// Submit one text-only Ollama chat turn. The caller owns session history and
 /// capability execution; keeping that state in Gyro is what makes runs
 /// resumable even though Ollama itself has no durable conversation cursor.
 pub fn ollama_chat(request: OllamaChatRequest<'_>) -> Result<OllamaChatResponse> {
-    ollama_tool_chat(OllamaToolChatRequest {
-        base_url: request.base_url,
-        model: request.model,
-        messages: vec![
-            serde_json::json!({ "role": "system", "content": request.system }),
-            serde_json::json!({ "role": "user", "content": request.user }),
-        ],
-        tools: Vec::new(),
-    })
+    ollama_chat_with_cancellation(request, &CancellationToken::default())
+}
+
+pub fn ollama_chat_with_cancellation(
+    request: OllamaChatRequest<'_>,
+    cancellation: &CancellationToken,
+) -> Result<OllamaChatResponse> {
+    ollama_tool_chat_with_progress(
+        OllamaToolChatRequest {
+            base_url: request.base_url,
+            model: request.model,
+            messages: vec![
+                serde_json::json!({ "role": "system", "content": request.system }),
+                serde_json::json!({ "role": "user", "content": request.user }),
+            ],
+            tools: Vec::new(),
+            context_window_tokens: request.context_window_tokens,
+            minimum_context_window_tokens: None,
+        },
+        cancellation,
+        |_| {},
+    )
 }
 
 /// Run a single model turn with optional native function tools. Callers retain
@@ -195,9 +268,26 @@ pub fn ollama_tool_chat_with_progress<F>(
 where
     F: FnMut(&str),
 {
+    let mut window = request_context_window(&request)?;
     crate::provider_retry::stream_response(
         cancellation,
-        |emit| ollama_tool_chat_once(&request, cancellation, emit),
+        |mut emit| loop {
+            match ollama_tool_chat_once(&request, window, cancellation, &mut emit) {
+                Err(error) if error.is::<OllamaContextOverflow>() => {
+                    let can_grow = window
+                        .zip(request.context_window_tokens)
+                        .is_some_and(|(allocated, maximum)| allocated < maximum);
+                    if !can_grow || !crate::provider_retry::compatibility_retry() {
+                        return Err(error);
+                    }
+                    // A tokenizer-confirmed rejection happened before any
+                    // published output or tool calls. One bounded retry uses
+                    // the model's capacity, with identical messages and tools.
+                    window = request.context_window_tokens;
+                }
+                result => return result,
+            }
+        },
         on_delta,
     )
     .map_err(|error| {
@@ -211,6 +301,7 @@ where
 
 fn ollama_tool_chat_once<F>(
     request: &OllamaToolChatRequest<'_>,
+    window: Option<u64>,
     cancellation: &CancellationToken,
     mut on_delta: F,
 ) -> Result<OllamaChatResponse>
@@ -226,8 +317,16 @@ where
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
-    let payload = ureq::json!({"model": model, "stream": true,
-        "messages": request.messages, "tools": request.tools});
+    let mut payload = ureq::json!({"model": model, "stream": true,
+        "messages": request.messages, "tools": request.tools,
+        "truncate": false, "shift": false});
+    if let Some(window) = window {
+        anyhow::ensure!(
+            window > 0 && window <= i32::MAX as u64,
+            "Ollama model returned an invalid context window"
+        );
+        payload["options"] = ureq::json!({ "num_ctx": window });
+    }
     let mut observation = None;
     let response = crate::provider_retry::http_response(cancellation, || {
         observation = Some(crate::provider_observation::Request::start(&payload));
@@ -238,7 +337,7 @@ where
         }
         response
     })
-    .map_err(ollama_http_error)?;
+    .map_err(ollama_generation_error)?;
     if (300..400).contains(&response.status()) {
         anyhow::bail!("Ollama redirected the chat request");
     }
@@ -269,10 +368,12 @@ where
         let frame: OllamaChatStreamFrame =
             serde_json::from_str(trimmed).context("invalid Ollama chat response")?;
         observation.reported(frame.prompt_eval_count, frame.eval_count);
-        anyhow::ensure!(
-            frame.error.is_none(),
-            "Ollama reported a generation error; no tool calls were executed"
-        );
+        if let Some(error) = frame.error {
+            if content.is_empty() && tool_calls.is_empty() && context_overflow_message(&error) {
+                return Err(OllamaContextOverflow.into());
+            }
+            anyhow::bail!("Ollama reported a generation error; no tool calls were executed");
+        }
         anyhow::ensure!(
             frame.done_reason.as_deref() != Some("length"),
             "Ollama reached its output token limit; the response is incomplete and no tool calls from this response were executed"
@@ -328,6 +429,7 @@ where
         input_tokens,
         output_tokens,
         tool_calls,
+        context_window_tokens: window,
     })
 }
 
@@ -371,6 +473,27 @@ fn ollama_http_error(error: ureq::Error) -> anyhow::Error {
         ureq::Error::Transport(error) => {
             anyhow!("could not reach the local Ollama service: {error}")
         }
+    }
+}
+
+fn ollama_generation_error(error: ureq::Error) -> anyhow::Error {
+    match error {
+        ureq::Error::Status(400, response) => {
+            use std::io::Read;
+            let value =
+                serde_json::from_reader::<_, serde_json::Value>(response.into_reader().take(8192))
+                    .ok();
+            if value
+                .as_ref()
+                .and_then(|value| value.get("error"))
+                .is_some_and(context_overflow_message)
+            {
+                OllamaContextOverflow.into()
+            } else {
+                anyhow!("Ollama returned HTTP 400")
+            }
+        }
+        error => ollama_http_error(error),
     }
 }
 
@@ -440,12 +563,6 @@ struct OllamaToolFunctionWire {
 }
 
 fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
-    let fallback_description = tag
-        .details
-        .family
-        .as_deref()
-        .map(|family| format!("Local {family} model through Ollama."))
-        .unwrap_or_else(|| "Local model through Ollama.".into());
     let show = endpoint.join("show").ok().and_then(|url| {
         let response = agent()
             .post(url.as_str())
@@ -454,6 +571,16 @@ fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
         ensure_loopback_response(&response, endpoint).ok()?;
         response.into_json::<OllamaShowResponse>().ok()
     });
+    model_from_show(tag, show)
+}
+
+fn model_from_show(tag: OllamaTag, show: Option<OllamaShowResponse>) -> OllamaModel {
+    let fallback_description = tag
+        .details
+        .family
+        .as_deref()
+        .map(|family| format!("Local {family} model through Ollama."))
+        .unwrap_or_else(|| "Local model through Ollama.".into());
     let supports_tools = show.as_ref().is_some_and(|value| {
         value
             .capabilities
@@ -499,6 +626,115 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener};
 
+    fn read_payload(stream: &mut std::net::TcpStream) -> serde_json::Value {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut header = String::new();
+        reader.read_line(&mut header).unwrap();
+        let mut length = 0;
+        loop {
+            header.clear();
+            reader.read_line(&mut header).unwrap();
+            if header == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = header.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        if body.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&body).unwrap()
+        }
+    }
+
+    #[test]
+    fn a_context_rejection_grows_once_without_discarding_the_prompt_or_tools() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (status, body) in [
+                (
+                    400,
+                    r#"{"error":"the input length exceeds the context length"}"#,
+                ),
+                (
+                    200,
+                    r#"{"message":{"content":"ready"},"done":true,"prompt_eval_count":5,"eval_count":2}"#,
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(read_payload(&mut stream));
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            assert_eq!(requests[0]["options"]["num_ctx"], 4096);
+            assert_eq!(requests[1]["options"]["num_ctx"], 32768);
+            for key in ["messages", "tools", "model", "truncate", "shift"] {
+                assert_eq!(requests[0][key], requests[1][key], "{key}");
+            }
+            assert_eq!(requests[0]["truncate"], false);
+            assert_eq!(requests[0]["shift"], false);
+        });
+        let _scope = crate::provider_observation::Scope::start();
+        let response = ollama_tool_chat_with_progress(OllamaToolChatRequest {
+            base_url: Some(&format!("http://{address}/api")), model: "fixture",
+            messages: vec![serde_json::json!({"role":"user", "content":"Keep this original request."})],
+            tools: vec![serde_json::json!({"function":{"name":"read_file", "parameters":{"type":"object"}}})],
+            context_window_tokens: Some(32768), minimum_context_window_tokens: None,
+        }, &CancellationToken::default(), |_| {}).unwrap();
+        server.join().unwrap();
+        assert_eq!(response.context_window_tokens, Some(32768));
+        let summary = crate::provider_observation::snapshot().unwrap();
+        assert_eq!(
+            (summary.requests, summary.rejected, summary.retries),
+            (2, 1, 1)
+        );
+        assert_eq!(summary.tokens.unwrap().total_tokens, 7);
+    }
+
+    #[test]
+    fn context_errors_never_replay_published_text_or_partial_tool_calls() {
+        for first in [
+            r#"{"message":{"content":"visible"},"done":false}"#,
+            r#"{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":{}}}]},"done":false}"#,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let body =
+                format!("{first}\n{{\"error\":\"the input length exceeds the context length\"}}\n");
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                read_payload(&mut stream);
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let _scope = crate::provider_observation::Scope::start();
+            let result = ollama_tool_chat_with_progress(
+                OllamaToolChatRequest {
+                    base_url: Some(&format!("http://{address}/api")),
+                    model: "fixture",
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                    context_window_tokens: Some(32768),
+                    minimum_context_window_tokens: None,
+                },
+                &CancellationToken::default(),
+                |_| {},
+            );
+            server.join().unwrap();
+            assert!(result.is_err());
+            let summary = crate::provider_observation::snapshot().unwrap();
+            assert_eq!((summary.requests, summary.retries), (1, 0));
+        }
+    }
+
     fn chat_once_from_body(body: String, content_type: &'static str) -> Result<OllamaChatResponse> {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -535,7 +771,10 @@ mod tests {
                 model: "test",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                context_window_tokens: None,
+                minimum_context_window_tokens: None,
             },
+            None,
             &CancellationToken::default(),
             |_| {},
         );
@@ -666,6 +905,7 @@ mod tests {
             model: "test-local-model",
             system: "Be concise",
             user: "Hello",
+            context_window_tokens: None,
         })
         .unwrap();
         server.join().unwrap();
@@ -703,6 +943,11 @@ mod tests {
                 r#"{"message":{"content":"lo"},"done":true,"prompt_eval_count":3,"eval_count":2}"#,
                 "\n"
             );
+            let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(request["options"]["num_ctx"], 4096);
+            assert_eq!(request["truncate"], false);
+            assert_eq!(request["shift"], false);
+            assert_eq!(request["model"], "test-local-model");
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -718,6 +963,8 @@ mod tests {
                 model: "test-local-model",
                 messages: vec![serde_json::json!({ "role": "user", "content": "Hi" })],
                 tools: Vec::new(),
+                context_window_tokens: Some(32768),
+                minimum_context_window_tokens: None,
             },
             &CancellationToken::default(),
             |delta| deltas.push(delta.to_string()),
@@ -737,6 +984,8 @@ mod tests {
                 model: "test-local-model",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                context_window_tokens: None,
+                minimum_context_window_tokens: None,
             },
             &cancellation,
             |_| {},
@@ -744,6 +993,139 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert_eq!(error, OLLAMA_CANCELLED_MESSAGE);
+    }
+
+    #[test]
+    fn rejects_invalid_context_windows_before_sending() {
+        for window in [0, i32::MAX as u64 + 1, u64::MAX] {
+            let error = ollama_tool_chat_once(
+                &OllamaToolChatRequest {
+                    base_url: Some("http://127.0.0.1:9/api"),
+                    model: "test",
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                    context_window_tokens: Some(window),
+                    minimum_context_window_tokens: None,
+                },
+                Some(window),
+                &CancellationToken::default(),
+                |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Ollama model returned an invalid context window"
+            );
+        }
+    }
+
+    #[test]
+    fn text_chat_cancellation_closes_an_in_flight_silent_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sent, received) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            let mut length = 0;
+            loop {
+                header.clear();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(request["options"]["num_ctx"], 4096);
+            sent.send(()).unwrap();
+            // No headers or body arrive: cancellation must interrupt the IO,
+            // rather than merely rejecting a response minutes later.
+            let mut byte = [0];
+            assert_eq!(reader.read(&mut byte).unwrap(), 0);
+        });
+        let cancellation = CancellationToken::default();
+        let worker_token = cancellation.clone();
+        let (finished, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            finished
+                .send(ollama_chat_with_cancellation(
+                    OllamaChatRequest {
+                        base_url: Some(&format!("http://{address}/api")),
+                        model: "test-local-model",
+                        system: "Be concise",
+                        user: "Hello",
+                        context_window_tokens: Some(40960),
+                    },
+                    &worker_token,
+                ))
+                .unwrap();
+        });
+        received.recv_timeout(Duration::from_secs(2)).unwrap();
+        cancellation.cancel();
+        let error = result
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.to_string(), OLLAMA_CANCELLED_MESSAGE);
+        worker.join().unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn selected_model_discovery_cancels_during_tags_or_show() {
+        for hang_on_show in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (started, ready) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                if hang_on_show {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    read_payload(&mut stream);
+                    let body = r#"{"models":[{"name":"fixture"}]}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+                let (mut stream, _) = listener.accept().unwrap();
+                read_payload(&mut stream);
+                started.send(()).unwrap();
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).unwrap(), 0);
+            });
+            let token = CancellationToken::default();
+            let worker_token = token.clone();
+            let (done, result) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                done.send(discover_ollama_model_with_cancellation(
+                    Some(&format!("http://{address}/api")),
+                    "fixture",
+                    &worker_token,
+                ))
+                .unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(2)).unwrap();
+            token.cancel();
+            assert_eq!(
+                result
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap()
+                    .unwrap_err()
+                    .to_string(),
+                OLLAMA_CANCELLED_MESSAGE
+            );
+            worker.join().unwrap();
+            server.join().unwrap();
+        }
     }
 
     #[test]

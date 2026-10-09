@@ -1,4 +1,15 @@
+import { providerLoginProfile, providerLoginCommandText } from "./provider-login-profile";
 import { useSubagents } from "./use-subagents";
+import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
+import { sourceControlForWorkspace, useScopedIdeState } from "./source-control-scope";
+import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
+import { fastModeConfigFromAction } from "@gyro-dev/ui";
+import { useProjectImport } from "./use-project-import";
+import {
+  compareSessionEventsForHistory,
+  mergeSessionHistoryPages,
+} from "./session-event-order";
+import { createPreviewSession, createPreviewWorkspaceFileContent, createTauriThreadSession, newSessionModelFromConfig, normalizeSessionTitleInput, previewFiles, selectedSessionModelFromConfig, sessionModelSelectionFromSession, workspaceRunMetadata } from "./session-creation";
 import { workspaceEditorOptions } from "./editor-presentation";
 import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
 import {
@@ -67,6 +78,7 @@ import {
   visibleSessionsForProjects,
 } from "./session-listing";
 import * as turnTiming from "./turn-timing";
+import { useMeasuredWorkbenchReducer } from "./use-measured-workbench";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
   pendingMediaAttachment,
@@ -191,7 +203,6 @@ import {
   sanitizeStoredChatGridState,
   selectedReasoningEffort,
   serializeGyroWorkspaceFile,
-  workbenchReducer,
   type AppDestination,
   type Automation,
   type BrowserPreviewCapture,
@@ -645,74 +656,6 @@ function modelUsageKey(providerId: ProviderId, modelId: string) {
   return `${providerId}:${modelId}`;
 }
 
-function providerLoginProfile(providerId: ProviderId): CommandProfile {
-  if (providerId === "anthropic") {
-    return {
-      args: ["auth", "login"],
-      command: "claude",
-      displayName: "Anthropic Login",
-      id: "anthropic-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "cursor") {
-    return {
-      args: ["login"],
-      command: "cursor-agent",
-      displayName: "Cursor Login",
-      id: "cursor-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "opencode") {
-    return {
-      args: ["auth", "login"],
-      command: "opencode",
-      displayName: "OpenCode Login",
-      id: "opencode-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "kimi") {
-    return {
-      args: ["login"],
-      command: "kimi",
-      displayName: "Kimi Login",
-      id: "kimi-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "xai") {
-    return {
-      args: ["login"],
-      command: "grok",
-      displayName: "xAI Login",
-      id: "xai-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "gemini") {
-    return {
-      args: [],
-      command: "gemini",
-      displayName: "Gemini Login",
-      id: "gemini-login",
-      workingDirectory: null,
-    };
-  }
-
-  return {
-    args: ["login", "--device-auth"],
-    command: "codex",
-    displayName: "OpenAI Login",
-    id: "openai-login",
-    workingDirectory: null,
-  };
-}
-
-function providerLoginCommandText(profile: CommandProfile) {
-  return [profile.command, ...profile.args].join(" ");
-}
 
 /**
  * Propose a branch name from the pending commit message, so the common case is
@@ -815,15 +758,12 @@ type BrowserOwner = {
 };
 
 export function App() {
-  const [workbench, dispatchWorkbench] = useReducer(
-    workbenchReducer,
-    undefined,
-    loadInitialWorkbenchState,
-  );
+  const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(loadInitialWorkbenchState);
   const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
   const [sessions, setSessions] = useState<Session[]>([]);
   // Session persistence and title updates must not interrupt live tool events.
   const sessionsRef = useRef(sessions);
+  const sessionsLoadedRef = useRef(false);
   sessionsRef.current = sessions;
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
@@ -893,7 +833,9 @@ export function App() {
   );
   const eventsRef = useRef<SessionEvent[]>([]);
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
-  const [workspacePath, setWorkspacePath] = useState<string>();
+  const [workspacePath, setWorkspacePath] = useState<string | undefined>(
+    loadInitialWorkspacePath,
+  );
   const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   /** A push or pull is in flight, so the sync control stays a single press. */
@@ -1013,6 +955,14 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const approvalCountsBySessionId = useMemo(
+    () => sessionApprovalCounts(sessions, sessionEventsById),
+    [sessions, sessionEventsById],
+  );
+  const questionCountsBySessionId = useMemo(
+    () => sessionQuestionCounts(sessions, sessionEventsById, sendingSessionIds),
+    [sessions, sessionEventsById, sendingSessionIds],
+  );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const {
     unreadCompletedSessionIds,
@@ -1321,6 +1271,7 @@ export function App() {
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  const scopedIde = useScopedIdeState(workbench.ide, workspaceActionRoot);
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
     const active = identity?.roots.find(
@@ -1916,6 +1867,7 @@ export function App() {
     );
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
   useEffect(() => {
+    if (!sessionsLoadedRef.current) return;
     const sessionById = new Map(
       sessions.map((session) => [session.id, session]),
     );
@@ -2666,6 +2618,7 @@ export function App() {
 
   const refreshSessions = useCallback(async () => {
     if (!isTauriRuntime()) {
+      sessionsLoadedRef.current = true;
       setSessions([]);
       return;
     }
@@ -2678,6 +2631,7 @@ export function App() {
         nextSessions,
         removedProjectPaths,
       );
+      sessionsLoadedRef.current = true;
       setSessions(nextSessions);
       setActiveSessionId((current) => {
         if (current || suppressSessionAutoSelectRef.current) {
@@ -2693,7 +2647,7 @@ export function App() {
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
       );
     } catch {
-      setSessions([]);
+      // A failed read cannot invalidate durable sessions or their open panes.
     }
   }, [removedProjectPaths]);
 
@@ -2725,9 +2679,6 @@ export function App() {
           // by the older transcript snapshot.
           const latestOptimisticEvents =
             optimisticEventsRef.current.get(sessionId);
-          // Fresh open always starts from the recent window; expanded history
-          // only grows via load-earlier.
-          expandedHistorySessionsRef.current.delete(sessionId);
           replaceSessionContextEvents(sessionId, page.contextEvents);
           setHasMoreBeforeBySession((current) =>
             current[sessionId] === page.hasMoreBefore
@@ -2735,13 +2686,19 @@ export function App() {
               : { ...current, [sessionId]: page.hasMoreBefore },
           );
           setEventsForSession(sessionId, (current) => {
+            const expanded = expandedHistorySessionsRef.current.has(sessionId);
             const next = limitEventsForSession(
               sessionId,
               preserveDeliveredResponses(
                 markInactiveCapabilityResources(
                   mergePersistedAndOptimisticEvents(
-                    page.events,
+                    expanded
+                      ? mergeSessionHistoryPages(current, page.events)
+                      : page.events,
                     latestOptimisticEvents,
+                    expanded
+                      ? MAX_CHAT_EVENT_HOLD_COUNT
+                      : MAX_CHAT_EVENT_RENDER_COUNT,
                   ),
                   liveCapabilityResourceIdsRef.current,
                 ),
@@ -2759,7 +2716,14 @@ export function App() {
           if (optimisticEvents && optimisticEvents.length > 0) {
             setEventsForSession(
               sessionId,
-              limitEventsForSession(sessionId, optimisticEvents),
+              (current) =>
+                mergePersistedAndOptimisticEvents(
+                  current,
+                  optimisticEvents,
+                  expandedHistorySessionsRef.current.has(sessionId)
+                    ? MAX_CHAT_EVENT_HOLD_COUNT
+                    : MAX_CHAT_EVENT_RENDER_COUNT,
+                ),
             );
           }
         }
@@ -2820,12 +2784,7 @@ export function App() {
               byId.set(event.id, event);
             }
           }
-          const merged = Array.from(byId.values()).sort(
-            (first, second) =>
-              new Date(first.createdAt).getTime() -
-                new Date(second.createdAt).getTime() ||
-              first.id.localeCompare(second.id),
-          );
+          const merged = Array.from(byId.values()).sort(compareSessionEventsForHistory);
           return limitEventsForSession(sessionId, merged);
         });
       } catch (error) {
@@ -3328,7 +3287,10 @@ export function App() {
     ],
   );
 
-  turnTiming.useTurnTiming(events);
+  turnTiming.useTurnTiming(
+    events,
+    activeDestination === "workspace" && activeWorkspaceLayout === "thread",
+  );
 
   const queueProviderChatStreamEvent = turnTiming.useProviderStreamTiming(
     providerStreamOrderRef,
@@ -3451,13 +3413,11 @@ export function App() {
           responseEvents,
         ),
       );
-      startTransition(() => {
-        setEventsForSession(sessionId, (current) => {
-          return limitSessionEventsForUi(
-            mergeProviderResponseEvents(current, responseEvents),
-          );
-        });
-      });
+      // Commit the terminal response before the sending flag clears. Deferring
+      // it can briefly expose an old running status as an interrupted turn.
+      setEventsForSession(sessionId, (current) =>
+        mergeProviderResponseEvents(current, responseEvents),
+      );
     },
     [setEventsForSession],
   );
@@ -3726,10 +3686,10 @@ export function App() {
   );
 
   const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+    ideSourceControlRootRef.current = root;
     if (!root) {
       return;
     }
-    ideSourceControlRootRef.current = root;
     if (ideSourceControlInFlightRef.current.has(root)) {
       ideSourceControlQueuedRef.current.add(root);
       return;
@@ -3739,6 +3699,7 @@ export function App() {
         type: "ide-set-source-control",
         sourceControl: {
           provider: "git",
+          workspacePath: root,
           available: true,
           branch: "preview",
           ahead: 0,
@@ -3771,6 +3732,7 @@ export function App() {
           type: "ide-set-source-control",
           sourceControl: {
             provider: "git",
+            workspacePath: root,
             available: false,
             ahead: 0,
             behind: 0,
@@ -4447,7 +4409,7 @@ export function App() {
       );
       return;
     }
-    const unstaged = workbench.ide.sourceControl.files.filter(
+    const unstaged = scopedIde.sourceControl.files.filter(
       (file) => !file.staged,
     );
     if (unstaged.length === 0) {
@@ -4472,7 +4434,7 @@ export function App() {
   }, [
     notify,
     refreshIdeSourceControl,
-    workbench.ide.sourceControl.files,
+    scopedIde.sourceControl.files,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -5521,7 +5483,7 @@ export function App() {
 
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
-      const file = workbench.ide.sourceControl.files.find(
+      const file = scopedIde.sourceControl.files.find(
         (file) => file.path === path && file.staged === staged,
       );
       const reviewPath = `gyro-diff:${encodeURIComponent(root)}:${staged ? "index" : "worktree"}:${encodeURIComponent(path)}`;
@@ -5543,7 +5505,7 @@ export function App() {
       setSelectedFile(reviewPath);
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [workbench.ide.sourceControl.files],
+    [scopedIde.sourceControl.files],
   );
 
   const openSourceControlDiff = useCallback(
@@ -5571,7 +5533,7 @@ export function App() {
       const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
         ? normalizedPath.slice(normalizedRoot.length + 1)
         : normalizedPath;
-      const file = workbench.ide.sourceControl.files.find((item) => {
+      const file = scopedIde.sourceControl.files.find((item) => {
         const candidate = item.path.replaceAll("\\", "/");
         return candidate === normalizedPath || candidate === relativePath;
       });
@@ -5607,7 +5569,7 @@ export function App() {
     [
       activeSession?.workspacePath,
       workspacePath,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
     ],
   );
 
@@ -5789,15 +5751,15 @@ export function App() {
         return;
       }
       try {
-        const hasStaged = workbench.ide.sourceControl.files.some(
+        const hasStaged = scopedIde.sourceControl.files.some(
           (file) => file.staged,
         );
-        const hasUnstaged = workbench.ide.sourceControl.files.some(
+        const hasUnstaged = scopedIde.sourceControl.files.some(
           (file) => !file.staged,
         );
         // VS Code-style "Commit All": stage remaining changes when nothing is staged.
         if (!hasStaged && hasUnstaged) {
-          for (const file of workbench.ide.sourceControl.files.filter(
+          for (const file of scopedIde.sourceControl.files.filter(
             (item) => !item.staged,
           )) {
             await invoke<SourceControlState>("git_stage", {
@@ -5843,7 +5805,7 @@ export function App() {
       refreshIdeServices,
       refreshIdeSourceControl,
       refreshWorkspaceBranches,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -5870,7 +5832,7 @@ export function App() {
       );
       return;
     }
-    const publishing = !workbench.ide.sourceControl.upstream;
+    const publishing = !scopedIde.sourceControl.upstream;
     setSourceControlSyncing(true);
     try {
       const result = await invoke<GitSyncResult>("git_push", {
@@ -5914,7 +5876,7 @@ export function App() {
     notify,
     refreshIdeSourceControl,
     refreshWorkspaceBranches,
-    workbench.ide.sourceControl.upstream,
+    scopedIde.sourceControl.upstream,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -6019,9 +5981,6 @@ export function App() {
   // reports a status, but Workspace can be opened with no active chat, and
   // without this the panel keeps the empty default and claims Git is not ready.
   useEffect(() => {
-    if (!workspaceActionRoot) {
-      return;
-    }
     refreshIdeSourceControl(workspaceActionRoot);
   }, [refreshIdeSourceControl, workspaceActionRoot]);
 
@@ -6040,7 +5999,7 @@ export function App() {
     remoteCheckMessage,
   } = useRemoteCheck({
     root: workspaceActionRoot,
-    sourceControl: workbench.ide.sourceControl,
+    sourceControl: scopedIde.sourceControl,
     visible: isSourceControlVisible,
     trusted: workspaceActionRoot
       ? isWorkspaceTrusted(
@@ -6245,7 +6204,7 @@ export function App() {
         return;
       }
 
-      const sourceControl = workbench.ide.sourceControl;
+      const sourceControl = scopedIde.sourceControl;
       const branch = sourceControl.branch;
       dispatchWorkbench({ type: "start-git-review-action", actionId });
 
@@ -6361,7 +6320,7 @@ export function App() {
       requestBranchName,
       requestPullRequest,
       workbench.diffReview.commitMessage,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -6381,7 +6340,11 @@ export function App() {
           .filter(Boolean)
           .slice(0, MAX_RECENT_PROJECTS),
       );
+      // An explicit folder choice must survive an unrelated turn's session refresh.
+      suppressSessionAutoSelectRef.current = true;
+      activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
+      dispatchChatGrid({ type: "activate-project", projectKey: chatProjectKey(selected) });
       setSelectedWorkspaceRoot(selected);
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
@@ -6402,7 +6365,8 @@ export function App() {
         step: "workspace",
       });
       notify("terminal", notificationTitle, workspaceName(selected));
-      await prepareWorkspace(selected);
+      // Selection completes now; slow preparation must not defer caller navigation.
+      void prepareWorkspace(selected);
     },
     [notify, prepareWorkspace, refreshIdeServices],
   );
@@ -7918,12 +7882,13 @@ export function App() {
   const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean },
+      options?: { forceLogin?: boolean; importedSessionId?: string },
     ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
       const providerLabel = provider?.displayName ?? providerId;
+      const importedSessionId = options?.importedSessionId;
       // A provider that rejected the last send needs the login flow whoever
       // asked for the connection: its status command still reports a stored
       // sign-in, so believing that answer would return someone to the failure
@@ -7950,6 +7915,7 @@ export function App() {
             "check_provider_health",
             {
               // Connect is a user action, so it probes for real.
+              importedSessionId,
               request: providerHealthRequest(provider, providerId, {
                 force: true,
               }),
@@ -8106,6 +8072,7 @@ export function App() {
               workspacePath: undefined,
               workspaceMode: "local",
               workingDirectory: "Home",
+              providerAuthSessionId: importedSessionId,
             },
           },
         );
@@ -8148,6 +8115,7 @@ export function App() {
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
               {
+                importedSessionId,
                 request: providerHealthRequest(provider, providerId, {
                   force: true,
                 }),
@@ -8223,6 +8191,7 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
+              importedSessionId,
               request: providerHealthRequest(provider, providerId),
             },
           ).catch((error) => ({
@@ -9030,6 +8999,7 @@ export function App() {
           action.startsWith("select-provider:") ||
           action.startsWith("select-provider-model:") ||
           action.startsWith("select-provider-effort:") ||
+          action.startsWith("set-provider-fast-mode:") ||
           action.startsWith("set-workspace-mode:") ||
           action.startsWith("refresh-provider-usage:");
         if (!allowedWhileOptimizing) {
@@ -9113,7 +9083,11 @@ export function App() {
       if (action.startsWith("connect-provider:")) {
         const providerId = action.replace("connect-provider:", "");
         if (isProviderId(providerId)) {
-          connectProvider(providerId);
+          const session = sessionsRef.current.find((session) => session.id === draftKey);
+          connectProvider(
+            providerId,
+            session?.importSource ? { importedSessionId: session.id } : undefined,
+          );
         }
         return;
       }
@@ -9140,6 +9114,14 @@ export function App() {
           ["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)
         ) {
           selectProviderReasoningEffort(providerId, effort as ReasoningEffort);
+        }
+        return;
+      }
+
+      if (action.startsWith("set-provider-fast-mode:")) {
+        const nextConfig = fastModeConfigFromAction(configRef.current, action);
+        if (nextConfig) {
+          void persistConfig(nextConfig, { notifySuccess: false });
         }
         return;
       }
@@ -10043,11 +10025,25 @@ export function App() {
         void openWorkspace();
         return false;
       }
-      if (
-        !isCouncilTurn &&
-        !checkProviderReadiness("chat", sessionModel.providerId)
-      ) {
-        return false;
+      if (!isCouncilTurn) {
+        if (targetSession?.importSource && isTauriRuntime()) {
+          const check = await invoke<ProviderHealthCheck>("check_provider_health", {
+            importedSessionId: targetSession.id,
+            request: providerHealthRequest(selectedProvider, sessionModel.providerId),
+          }).catch(() => undefined);
+          if (
+            !check ||
+            recordProviderHealthOutput(sessionModel.providerId!, check.output, check)
+              .connectionStatus !== "connected"
+          ) {
+            notify(
+              "provider",
+              "Connect this chat's provider",
+              "Use Connect to sign in with this imported chat's provider data folder.",
+            );
+            return false;
+          }
+        } else if (!checkProviderReadiness("chat", sessionModel.providerId)) return false;
       }
       if (isCouncilTurn && COUNCIL_COMING_SOON) {
         notify(
@@ -10081,12 +10077,16 @@ export function App() {
       const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
       if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
       setTurnSourceControlBaselines((current) => {
+        if (
+          scopedIde.sourceControl.detailsLoaded === false ||
+          scopedIde.sourceControl.statsPartial
+        ) return current;
         if (current[turnId]) {
           return current;
         }
         return Object.fromEntries([
           ...Object.entries(current).slice(-49),
-          [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
+          [turnId, sourceControlLineStats(scopedIde.sourceControl)],
         ]);
       });
       const isRetry = Boolean(targetSessionId && retryTurnId);
@@ -10409,6 +10409,7 @@ export function App() {
               },
             });
           }
+          await configSaveQueueRef.current;
           persistedChatTurnIdsRef.current.add(turnId);
           if (isCouncilTurn && councilResolution) {
             const councilResponse = await invoke<CouncilChatInvokeResponse>(
@@ -10556,6 +10557,7 @@ export function App() {
       } else {
         await pendingModelSave(targetSessionId);
       }
+      await configSaveQueueRef.current;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
@@ -10789,6 +10791,7 @@ export function App() {
       chatMessageQueues,
       refreshProviderUsage,
       checkProviderReadiness,
+      recordProviderHealthOutput,
       config,
       isShellOptimizing,
       isStartingFirstTurn,
@@ -10803,7 +10806,7 @@ export function App() {
       setSessionSending,
       setEventsForSession,
       updateSessionTitle,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       liveEditorEvidence,
       workbench.providerStatuses,
       workbench.workspaceMode,
@@ -11211,9 +11214,11 @@ export function App() {
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
+      const eventSessionEvents = sessionEventsById[event.sessionId] ?? eventsRef.current;
       const userEvent = turnId
-        ? eventsRef.current.find(
+        ? eventSessionEvents.find(
             (item) =>
+              item.sessionId === event.sessionId &&
               item.kind === "user-message" &&
               (turnIdFromSessionEvent(item) ?? item.id) === turnId,
           )
@@ -11409,6 +11414,8 @@ export function App() {
         const goalRecord = recordFromUnknown(payload?.goal);
         const planRecord = recordFromUnknown(payload?.plan);
         void sendDraft(userMessage, {
+          sessionId: event.sessionId,
+          preserveDraft: true,
           retryTurnId: turnId,
           mode:
             stringFromRecord(payload, "chatMode") === "plan"
@@ -11441,7 +11448,10 @@ export function App() {
         const needsSignIn = providerNeedsSignIn(
           stringFromRecord(payload, "recoveryKind"),
         );
-        void connectProvider(providerId, { forceLogin: needsSignIn }).then(
+        void connectProvider(providerId, {
+          forceLogin: needsSignIn,
+          importedSessionId: event.sessionId,
+        }).then(
           (connected) => {
             if (connected && needsSignIn) replayFailedTurn();
           },
@@ -11463,9 +11473,37 @@ export function App() {
       refreshSessions,
       selectSession,
       sendDraft,
+      sessionEventsById,
       sessions,
     ],
   );
+
+  const projectImport = useProjectImport({
+    enabled: activeDestination === "settings" && workbench.preferences.lastSettingsSection === "import-projects",
+    visibleSessions: sessions.filter((session) => session.id === activeSessionId || displayedChatLayout.slots.some((pane) => pane?.kind === "session" && pane.sessionId === session.id)), events, refreshEvents,
+    onOpenSettings: () => openSettingsSection("import-projects"),
+    onImported: (paths) => {
+      setRemovedProjectPaths((current) => current.filter((path) => !paths.some((imported) => normalizeProjectPath(imported) === normalizeProjectPath(path))));
+      setRecentProjectPaths((current) => [...new Set([...paths, ...current])]);
+      void refreshSessions();
+    },
+    onOpenSession: (id, path) => {
+      path = sessions.find((session) => session.id === id)?.workspacePath ?? path;
+      setRemovedProjectPaths((current) => current.filter((removed) => normalizeProjectPath(removed) !== normalizeProjectPath(path)));
+      setRecentProjectPaths((current) => [...new Set([path, ...current])]);
+      selectSession(id); setWorkspacePath(path);
+      dispatchWorkbench({ type: "select-destination", destination: "workspace" });
+    },
+    onSessionUpdated: (updated) => {
+      setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
+      if (updated.id === activeSessionId) setWorkspacePath(updated.workspacePath);
+    },
+    onRetrySession: (id) => {
+      const failure = [...(sessionEventsById[id] ?? [])].reverse().find((event) => stringFromRecord(recordFromUnknown(event.payload), "status") === "failed" && turnIdFromSessionEvent(event));
+      if (failure) handleProviderStatusAction("retry-send", failure);
+      else notify("terminal", "Ready to retry", "Send your message again to retry the original session.");
+    },
+  });
 
   const handleMutationApprovalAction = useCallback(
     async (proposalId: string, decision: "approve" | "reject") => {
@@ -14389,6 +14427,12 @@ export function App() {
   useEffect(() => {
     if (!activeSession) {
       workspaceTreeRequestRef.current += 1;
+      if (
+        workspacePath &&
+        workspacePreparationPathRef.current !== normalizeProjectPath(workspacePath)
+      ) {
+        void prepareWorkspace(workspacePath);
+      }
       return;
     }
     setWorkspacePath(activeSession.workspacePath);
@@ -14447,7 +14491,7 @@ export function App() {
     }
     setFiles([]);
     void prepareWorkspace(activeSession.workspacePath);
-  }, [activeSession, prepareWorkspace, refreshIdeServices]);
+  }, [activeSession, prepareWorkspace, refreshIdeServices, workspacePath]);
 
   useEffect(() => {
     if (!selectedFile || selectedFile.startsWith("gyro-diff:")) {
@@ -15305,7 +15349,7 @@ export function App() {
         terminalSourceControlLoadingPaneId === selectedTerminalPane?.id
       }
       height={isPrimary ? undefined : toolPanelHeight}
-      ide={workbench.ide}
+      ide={scopedIde}
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
@@ -15894,6 +15938,7 @@ export function App() {
     };
     return (
       <ChatSurface
+        {...projectImport.chatProps(paneSession)}
         activeChatPanel={panePanel}
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
@@ -16138,7 +16183,7 @@ export function App() {
         sessionGoal={paneGoal}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
-        sourceControl={workbench.ide.sourceControl}
+        sourceControl={sourceControlForWorkspace(workbench.ide.sourceControl, pane.workspacePath)}
         terminalPanes={workbench.terminalPanes}
         turnSourceControlBaselines={turnSourceControlBaselines}
         worktreeName={paneSession?.worktreeName}
@@ -16174,6 +16219,7 @@ export function App() {
 
   const renderWorkspaceChat = () => (
     <ChatSurface
+      {...projectImport.chatProps(activeSession)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -16305,7 +16351,7 @@ export function App() {
       sessionGoal={activeSessionGoal}
       sessionSummary={activeSession?.summary}
       sessionTitle={activeSession?.title}
-      sourceControl={workbench.ide.sourceControl}
+      sourceControl={scopedIde.sourceControl}
       terminalPanes={workbench.terminalPanes}
       turnSourceControlBaselines={turnSourceControlBaselines}
       worktreeName={activeSession?.worktreeName}
@@ -16355,6 +16401,8 @@ export function App() {
       activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
       completedSessionIds={unreadCompletedSessionIds}
+      approvalCountsBySessionId={approvalCountsBySessionId}
+      questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
@@ -16379,7 +16427,7 @@ export function App() {
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
       files={visibleWorkspaceFiles}
-      ide={workbench.ide}
+      ide={scopedIde}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       isShellOptimizing={isShellOptimizing}
       notifications={workbench.notifications}
@@ -16601,6 +16649,7 @@ export function App() {
               >
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
+                    {...projectImport.chatProps(activeSession)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -16730,7 +16779,7 @@ export function App() {
                     sessionGoal={activeSessionGoal}
                     sessionSummary={activeSession?.summary}
                     sessionTitle={activeSession?.title}
-                    sourceControl={workbench.ide.sourceControl}
+                    sourceControl={scopedIde.sourceControl}
                     terminalPanes={workbench.terminalPanes}
                     turnSourceControlBaselines={turnSourceControlBaselines}
                     worktreeName={activeSession?.worktreeName}
@@ -16763,7 +16812,7 @@ export function App() {
                 fileError={selectedFileError}
                 fileLoadState={selectedFileLoadState}
                 files={visibleWorkspaceFiles}
-                ide={workbench.ide}
+                ide={scopedIde}
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
@@ -16930,7 +16979,7 @@ export function App() {
                                 : { ...previous, [key]: id },
                             );
                         }}
-                        refreshKey={workbench.ide.sourceControl.lastCheckedAt}
+                        refreshKey={scopedIde.sourceControl.lastCheckedAt}
                         languageOverride={
                           languageOverrides[
                             absoluteWorkspaceFilePath(
@@ -17019,7 +17068,7 @@ export function App() {
               fileContent={selectedFileContent}
               fileLoadState={selectedFileLoadState}
               groupCount={Math.max(workbench.ide.layout.groups.length, 1)}
-              ide={workbench.ide}
+              ide={scopedIde}
               isBranchLoading={isBranchLoading}
               isPanelOpen={workbench.isToolPanelOpen}
               onShowProblems={() =>
@@ -17038,7 +17087,7 @@ export function App() {
               }}
               onCreateBranch={() =>
                 void createWorkspaceBranch(
-                  workbench.ide.sourceControl.branch ?? branchCatalog?.current,
+                  scopedIde.sourceControl.branch ?? branchCatalog?.current,
                 )
               }
               onSelectBranch={(branch) => void switchWorkspaceBranch(branch)}
@@ -17049,6 +17098,7 @@ export function App() {
       ) : null}
       {activeDestination === "settings" ? (
         <SettingsSurface
+          projectImport={projectImport.settingsProps}
           activeSection={workbench.preferences.lastSettingsSection}
           activeWorkspaceRoot={workspaceActionRoot}
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
@@ -17398,6 +17448,7 @@ export function App() {
       ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface
+          {...projectImport.chatProps(activeSession)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}
@@ -17489,7 +17540,7 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
-          sourceControl={workbench.ide.sourceControl}
+          sourceControl={scopedIde.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
         />
@@ -18149,6 +18200,11 @@ function loadRemovedProjectPaths(): string[] {
   }
 }
 
+function loadInitialWorkspacePath(): string | undefined {
+  const removed = new Set(loadRemovedProjectPaths());
+  return loadRecentProjectPaths().find((path) => !removed.has(path));
+}
+
 function loadRecentProjectPaths(): string[] {
   const stored = readBoundedLocalStorage(
     RECENT_PROJECTS_STORAGE_KEY,
@@ -18181,26 +18237,6 @@ function chatPaneForSession(session: Session): ChatPaneRef {
     sessionId: session.id,
     workspacePath: session.workspacePath,
   };
-}
-
-function readBoundedLocalStorage(key: string, maxChars: number) {
-  try {
-    const stored = window.localStorage.getItem(key);
-    if (!stored || stored.length > maxChars) {
-      return undefined;
-    }
-    return stored;
-  } catch {
-    return undefined;
-  }
-}
-
-function safeSetLocalStorage(key: string, value: string) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Local storage can be unavailable or quota-limited in preview contexts.
-  }
 }
 
 function persistChatDrafts(drafts: Record<string, string>) {
@@ -18327,20 +18363,6 @@ function truncatePersistedText(value: string, maxChars: number) {
 
 function normalizeChatMessage(value: string) {
   return value.replace(/\u0000/g, "").trim();
-}
-
-function normalizeSessionTitleInput(value: string) {
-  const normalized = value
-    .replace(/\u0000/g, "")
-    .replace(/[`*_#[\](){}<>|\\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^[\s:;,.!?'"-]+|[\s:;,.!?'"-]+$/g, "");
-  if (!normalized) {
-    return undefined;
-  }
-  const chars = Array.from(normalized);
-  return chars.length > 80 ? `${chars.slice(0, 77).join("")}...` : normalized;
 }
 
 function sessionTitleFromMessage(message: string) {
@@ -19907,73 +19929,6 @@ function providerLabelForId(
   );
 }
 
-function selectedSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  const model = provider ? getProviderModel(provider) : undefined;
-  return {
-    providerId: provider?.id,
-    providerLabel: provider?.displayName,
-    modelId: model?.id ?? provider?.selectedModelId,
-    modelLabel: model?.displayName ?? provider?.selectedModelId,
-    reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
-  };
-}
-
-/** Model fields stored on a session, for per-pane composer binding. */
-function sessionModelSelectionFromSession(
-  session?: Pick<
-    Session,
-    | "providerId"
-    | "providerLabel"
-    | "modelId"
-    | "modelLabel"
-    | "reasoningEffort"
-  > | null,
-): SessionModelSelection | undefined {
-  if (!session?.providerId && !session?.modelId && !session?.modelLabel) {
-    return undefined;
-  }
-  return {
-    providerId:
-      session.providerId && isProviderId(session.providerId)
-        ? session.providerId
-        : undefined,
-    providerLabel: session.providerLabel,
-    modelId: session.modelId,
-    modelLabel: session.modelLabel,
-    reasoningEffort: session.reasoningEffort,
-  };
-}
-
-/**
- * Model a brand-new session opens on.
- *
- * Deliberately reads the provider's configured default rather than
- * `selectedModelId`: the latter tracks whichever session was last active, so
- * without this a new chat would silently inherit the previous thread's model
- * and the Settings default would never take effect.
- */
-function newSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  if (!provider) {
-    return selectedSessionModelFromConfig(config);
-  }
-  const modelId = providerDefaultModelId(provider);
-  const model = getProviderModel(provider, modelId);
-  return {
-    providerId: provider.id,
-    providerLabel: provider.displayName,
-    modelId: model?.id ?? modelId,
-    modelLabel: model?.displayName ?? modelId,
-    reasoningEffort:
-      model?.defaultReasoningEffort ?? model?.supportedReasoningEfforts?.[0],
-  };
-}
-
 function approvalNotificationCopy(
   config: GyroConfig,
   mode: "auto" | "direct" | "gated",
@@ -20036,123 +19991,6 @@ function createProviderHealthOutput(
     default:
       return `${provider.displayName}: health output inconclusive`;
   }
-}
-
-const previewFiles: WorkspaceFile[] = [
-  { path: "apps", kind: "directory", depth: 1 },
-  { path: "apps/desktop", kind: "directory", depth: 2 },
-  { path: "apps/desktop/src", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src/App.tsx", kind: "file", depth: 4 },
-  { path: "apps/desktop/src-tauri", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src-tauri/src", kind: "directory", depth: 4 },
-  {
-    path: "apps/desktop/src-tauri/src/lib.rs",
-    kind: "file",
-    depth: 5,
-  },
-  { path: "crates", kind: "directory", depth: 1 },
-  { path: "crates/gyro-core", kind: "directory", depth: 2 },
-  { path: "crates/gyro-core/src", kind: "directory", depth: 3 },
-  { path: "crates/gyro-core/src/sessions.rs", kind: "file", depth: 4 },
-  { path: "docs", kind: "directory", depth: 1 },
-  { path: "docs/architecture.md", kind: "file", depth: 2 },
-  { path: "packages", kind: "directory", depth: 1 },
-  { path: "packages/ui", kind: "directory", depth: 2 },
-  { path: "packages/ui/src", kind: "directory", depth: 3 },
-  { path: "packages/ui/src/styles.css", kind: "file", depth: 4 },
-  { path: "packages/ui/src/surfaces.tsx", kind: "file", depth: 4 },
-];
-
-function createPreviewWorkspaceFileContent(path: string): WorkspaceFileContent {
-  const content = `// ${path}
-// File preview is connected through the desktop workspace bridge.
-// Open the Tauri app with a local workspace to read real file contents.`;
-  return {
-    path,
-    content,
-    contentHash: `preview-${content.length}`,
-    truncated: false,
-    sizeBytes: new TextEncoder().encode(content).length,
-  };
-}
-
-function createPreviewSession(
-  layout: WorkspaceLayoutId,
-  mode: WorkbenchState["workspaceMode"] = "local",
-  model: Partial<
-    Pick<
-      Session,
-      | "modelId"
-      | "modelLabel"
-      | "providerId"
-      | "providerLabel"
-      | "reasoningEffort"
-    >
-  > = {},
-  workspacePath = "",
-  titleOverride?: string,
-  sessionId = `preview-${Date.now()}`,
-): Session {
-  const now = new Date().toISOString();
-  const metadata = workspaceRunMetadata(mode, layout);
-  const defaultTitle =
-    layout === "terminal-grid"
-      ? mode === "worktree"
-        ? "Agent workspace CLI"
-        : "CLI workspace"
-      : mode === "worktree"
-        ? "Agent workspace"
-        : "Desktop session";
-  return {
-    id: sessionId,
-    title: normalizeSessionTitleInput(titleOverride ?? "") ?? defaultTitle,
-    workspacePath,
-    origin: layout === "terminal-grid" ? "cli" : "desktop",
-    workspaceMode: metadata.workspaceMode,
-    branch: metadata.branch,
-    worktreeName: metadata.worktreeName,
-    providerId: model.providerId,
-    providerLabel: model.providerLabel,
-    modelId: model.modelId,
-    modelLabel: model.modelLabel,
-    reasoningEffort: model.reasoningEffort,
-    createdAt: now,
-    updatedAt: now,
-    eventsPath: "preview://events",
-  };
-}
-
-async function createTauriThreadSession(
-  workspacePath: string | undefined,
-  mode: WorkbenchState["workspaceMode"],
-  model: ReturnType<typeof selectedSessionModelFromConfig>,
-  titleOverride?: string,
-): Promise<Session> {
-  const workspace = workspacePath ?? "";
-  const shouldCreateWorktree = mode === "worktree" && workspace.length > 0;
-  const title =
-    normalizeSessionTitleInput(titleOverride ?? "") ??
-    (shouldCreateWorktree ? "Agent workspace" : "Desktop session");
-  const metadata = workspaceRunMetadata(
-    shouldCreateWorktree ? "worktree" : "local",
-    `${title}-${Date.now()}`,
-  );
-
-  if (shouldCreateWorktree) {
-    return invoke<Session>("create_worktree_session", {
-      branch: metadata.branch,
-      ...model,
-      title,
-      worktreeName: metadata.worktreeName,
-      workspacePath: workspace,
-    });
-  }
-
-  return invoke<Session>("create_desktop_session", {
-    ...model,
-    title,
-    workspacePath: workspace,
-  });
 }
 
 function createAutomationDraft(
@@ -20219,23 +20057,6 @@ function createPreviewAutomation(draft: AutomationDraft): Automation {
     runHistory: [],
     createdAt: now,
     updatedAt: now,
-  };
-}
-
-function workspaceRunMetadata(
-  mode: WorkbenchState["workspaceMode"],
-  label: string,
-  workingDirectory?: string,
-) {
-  if (mode === "local") {
-    return { workspaceMode: mode, branch: "main", workingDirectory };
-  }
-  const slug = slugify(label || "task");
-  return {
-    workspaceMode: mode,
-    branch: `gyro/${slug}`,
-    worktreeName: `gyro-${slug}`,
-    workingDirectory,
   };
 }
 

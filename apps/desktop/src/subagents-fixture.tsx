@@ -3,6 +3,7 @@ import React, { useEffect, useReducer, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ChatSurface,
+  applyAppearancePreferences,
   openSubagentTab,
   closeSubagentTab,
   chatCompanionReducer,
@@ -128,9 +129,30 @@ const childEvents = [
   }),
 ];
 function Fixture() {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [environmentOpen, setEnvironmentOpen] = useState(true);
+  const params = new URLSearchParams(location.search);
+  const [theme, setTheme] = useState<"dark" | "light">(
+    params.get("theme") === "light" ? "light" : "dark",
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.density =
+      params.get("density") === "compact" ? "compact" : "comfortable";
+    applyAppearancePreferences(
+      document.documentElement,
+      {
+        interfaceSize:
+          params.get("size") === "large"
+            ? "large"
+            : params.get("size") === "small"
+              ? "small"
+              : "default",
+        mainColor: "#0874df",
+        secondaryColor: "#8b6fcb",
+        motionSpeed: "default",
+      },
+      theme,
+    );
   }, [theme]);
   const [agents, setAgents] = useState(initial);
   const [tabs, setTabs] = useState<SubagentTabState>({ openAgentIds: [] });
@@ -216,7 +238,14 @@ function Fixture() {
         >
           {theme === "dark" ? "Light theme" : "Dark theme"}
         </button>
-        <button onClick={() => setPanel(undefined)}>Environment</button>
+        <button
+          onClick={() => {
+            setPanel(undefined);
+            setEnvironmentOpen(true);
+          }}
+        >
+          Environment
+        </button>
         <button
           onClick={() => {
             setAgents((current) =>
@@ -283,8 +312,10 @@ function Fixture() {
           }}
           isComposerSending
           subagents={state}
-          activeChatPanel={panel ?? "environment"}
-          isEnvironmentRailOpen
+          activeChatPanel={
+            panel ?? (environmentOpen ? "environment" : undefined)
+          }
+          isEnvironmentRailOpen={environmentOpen}
           companionTabs={chatCompanionPane(companion, "fixture").openTabs}
           onOpenCompanionTab={setPanel}
           onSelectChatPanel={setPanel}
@@ -293,7 +324,9 @@ function Fixture() {
           }
           onShowCompanionLauncher={() => setPanel("tools")}
           onCloseCompanionDock={() => setPanel(undefined)}
-          onToggleEnvironmentRail={() => setPanel(undefined)}
+          onToggleEnvironmentRail={() =>
+            setEnvironmentOpen((current) => !current)
+          }
           onProviderApprovalAction={() => {
             setEvents((current) =>
               current.map((item) =>
@@ -321,6 +354,7 @@ function Fixture() {
     </div>
   );
 }
-const root = import.meta.hot?.data.root ?? createRoot(document.getElementById("root")!);
+const root =
+  import.meta.hot?.data.root ?? createRoot(document.getElementById("root")!);
 if (import.meta.hot) import.meta.hot.data.root = root;
 root.render(<Fixture />);

@@ -266,6 +266,18 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "The provider CLI's own configuration asks for an environment variable that is not set. Fix that CLI config or pick a different profile; retrying will not help.",
         );
     }
+    if normalized.contains("organization has disabled claude subscription access") {
+        return (
+            "provider-config",
+            "Ask your organization administrator to enable Claude Code subscription access, or explicitly configure API-key access in Settings > Providers.",
+        );
+    }
+    if normalized.contains("macos keychain") {
+        return (
+            "provider-config",
+            "Unlock your Mac and allow Gyro to read the saved credential, then send again.",
+        );
+    }
     if normalized.contains("offline")
         || normalized.contains("network is unreachable")
         || normalized.contains("connection refused")
@@ -419,6 +431,16 @@ mod recovery_tests {
         let error = "Missing environment variable: `DEEPSEEK_API_KEY`.";
         assert_eq!(provider_failure_recovery(error).0, "provider-config");
         assert!(!is_transient_provider_error(error));
+    }
+
+    #[test]
+    fn access_restrictions_get_actionable_recovery_without_automatic_retry() {
+        let refusal = gyro_core::provider_stream::CLAUDE_SUBSCRIPTION_ACCESS_DETAIL;
+        assert_eq!(provider_failure_recovery(refusal).0, "provider-config");
+        assert!(!is_transient_provider_error(refusal));
+        let keychain = "Gyro could not read the saved credential from macOS Keychain without user interaction.";
+        assert!(provider_failure_recovery(keychain).1.contains("Unlock"));
+        assert!(!is_transient_provider_error(keychain));
     }
 
     #[test]

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { buildDiffFileTree } from "../packages/ui/src/diff-file-tree.ts";
 
 import {
+  defaultChatReview,
   filesForReviewScope,
   reviewComparisonForScope,
   reviewScopeEmptyCopy,
@@ -159,6 +161,78 @@ assert.equal(
 }
 
 assert.equal(shouldUsePlainDiff("short\n", "also short\n"), false);
+
+{
+  const events = [
+    {
+      id: "old",
+      turnId: "old-turn",
+      kind: "system-event",
+      payload: {
+        kind: "provider-activity",
+        activityKind: "file",
+        status: "done",
+        path: "old.ts",
+        additions: 1,
+        deletions: 0,
+      },
+    },
+    {
+      id: "new",
+      turnId: "new-turn",
+      kind: "system-event",
+      payload: {
+        kind: "provider-activity",
+        activityKind: "file",
+        status: "done",
+        path: "new.ts",
+        additions: 2,
+        deletions: 1,
+      },
+    },
+  ];
+  events.splice(1, 0, {
+    id: "old-patch",
+    turnId: "old-turn",
+    kind: "system-event",
+    payload: {
+      schema: "gyro.mutation.v1",
+      status: "applied",
+      fileChanges: [{ path: "new.ts", patch: "old turn patch" }],
+    },
+  });
+  events.push({
+    id: "new-patch",
+    turnId: "new-turn",
+    kind: "system-event",
+    payload: {
+      schema: "gyro.mutation.v1",
+      status: "applied",
+      fileChanges: [{ path: "new.ts", patch: "new turn patch" }],
+    },
+  });
+  const review = defaultChatReview(events, false);
+  assert.deepEqual(review.scope, { kind: "turn", turnId: "new-turn" });
+  assert.deepEqual(
+    review.turnFiles.map((file) => file.path),
+    ["new.ts"],
+  );
+  assert.deepEqual(
+    review.turnFiles[0].patches,
+    ["new turn patch"],
+    "reopening Review must not mix another turn's patches into the selected turn",
+  );
+  assert.deepEqual(
+    defaultChatReview(events, true),
+    { scope: { kind: "proposed" } },
+    "an explicit proposed review must retain its approval controls",
+  );
+  assert.deepEqual(
+    defaultChatReview([], false),
+    { scope: { kind: "proposed" } },
+    "an empty chat must not borrow changes from another chat or the repository",
+  );
+}
 assert.equal(
   shouldUsePlainDiff("x".repeat(513 * 1024), "y"),
   true,
@@ -166,3 +240,27 @@ assert.equal(
 );
 
 console.log("Review scope and plain-diff checks passed.");
+
+// Shared path navigation must retain same-named file/directory replacements and
+// unknown counts; compacting folders must not lose their full identity.
+{
+  const files = [
+    { path: "/repo/src/a.ts", additions: 2, deletions: 1, state: "pending" },
+    { path: "/repo/src/nested/b.ts" },
+    { path: "/repo/src/nested/deep/c.ts", additions: 1, deletions: 0 },
+    { path: "/repo/foo" },
+    { path: "/repo/foo/child.ts" },
+  ];
+  const tree = buildDiffFileTree(files, "/repo");
+  assert.equal(tree.filter((node) => node.name === "foo").length, 2);
+  const src = tree.find((node) => node.kind === "directory" && node.name === "src");
+  assert.equal(src.changedFiles, 3);
+  assert.equal(src.pendingFiles, 1);
+  assert.equal(src.additions, 3);
+  const gather = (nodes) => nodes.flatMap((node) => node.kind === "file" ? [node.file] : gather(node.children));
+  assert.deepEqual(new Set(gather(tree)), new Set(files));
+  assert.equal(gather(tree).find((file) => file.path.endsWith("b.ts")).additions, undefined);
+  const compact = buildDiffFileTree([{ path: "packages/ui/src/one.ts" }]);
+  assert.equal(compact[0].name, "packages/ui/src");
+  assert.equal(compact[0].path, "packages/ui/src");
+}

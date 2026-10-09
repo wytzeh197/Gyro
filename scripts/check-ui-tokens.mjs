@@ -15,7 +15,19 @@ function read(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
-const styles = ["styles-foundation.css", "styles.css", "composer-effort-selector.css", "interaction-motion.css", "press-feedback.css"].map((file) => read(`packages/ui/src/${file}`)).join("\n");
+const styles = [
+  "styles-foundation.css",
+  "styles.css",
+  "settings-design.css",
+  "composer-effort-selector.css",
+  "interaction-motion.css",
+  "press-feedback.css",
+  "navigation-design.css",
+  "detail-design.css",
+  "scheduled-work.css",
+]
+  .map((file) => read(`packages/ui/src/${file}`))
+  .join("\n");
 const monaco = read("apps/desktop/src/monaco-editor.ts");
 const earlyShell = read("apps/desktop/src/early-shell.css");
 
@@ -99,19 +111,27 @@ const gradientLines = styleLines
 
 for (const { line, n } of gradientLines) {
   const window = styleLines.slice(n - 1, n + 4).join("\n");
-  // The maximum-effort slider uses a distinct fill as a state indicator.
-  // Keep this exception confined to its fill and track, not general surfaces.
+  // Effort fills use a blue ramp, with a distinct maximum-effort treatment.
+  // Keep this exception confined to the control, not general surfaces.
   const rulePrefix = styles.slice(0, styleLines.slice(0, n).join("\n").length);
   const selector = rulePrefix
     .slice(rulePrefix.lastIndexOf("}") + 1)
     .split("{")[0]
     .trim();
-  const isMaxEffortIndicator =
+  const isEffortIndicator =
+    selector === ".gyro-effort-slider-fill" ||
     /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
       selector,
     );
+  // Waiting-state title fades mask text beneath their pills; this does
+  // not paint a gradient onto a UI surface.
+  const isAwaitingTitleMask =
+    line.trim().startsWith("mask-image:") &&
+    selector.replace(/\s+/g, " ") ===
+      ":root[data-theme] .gyro-sidebar .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question) .gyro-sidebar-thread-title";
   const allowed =
-    isMaxEffortIndicator ||
+    isEffortIndicator ||
+    isAwaitingTitleMask ||
     allowedGradient.some((pattern) => pattern.test(window));
   expect(
     allowed,

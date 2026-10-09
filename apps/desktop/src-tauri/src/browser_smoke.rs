@@ -41,7 +41,16 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
 }
 
 fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<String>, String> {
-    let session = "native-browser-smoke";
+    let store = super::open_store()?;
+    let parent = store
+        .create_session(
+            output,
+            gyro_core::SessionOrigin::Desktop,
+            "Native browser smoke",
+        )
+        .map_err(super::to_string)?;
+    let session_id = parent.id.to_string();
+    let session = session_id.as_str();
     let mut steps = Vec::new();
     open_session_browser(
         app,
@@ -314,7 +323,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("browser did not close".into());
     }
     steps.push("close".into());
-    steps.push(run_background(app, url, output)?);
+    steps.push(run_background(app, url, output, parent.id)?);
     Ok(steps)
 }
 
@@ -322,8 +331,24 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
 /// through the agent bridge. This is how a model browses while the chat is in
 /// split view, so the whole observe/act/capture loop has to work with nothing
 /// on screen — a 1x1 child webview used to make every one of these steps lie.
-fn run_background(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<String, String> {
-    let session = "native-browser-smoke-background";
+fn run_background(
+    app: &AppHandle,
+    url: &str,
+    output: &std::path::Path,
+    parent_id: uuid::Uuid,
+) -> Result<String, String> {
+    let store = super::open_store()?;
+    let child = store
+        .create_subagent_session(
+            output,
+            gyro_core::SessionOrigin::Desktop,
+            "Native background browser smoke",
+            gyro_core::CreateSessionContext::default(),
+            parent_id,
+        )
+        .map_err(super::to_string)?;
+    let session_id = child.id.to_string();
+    let session = session_id.as_str();
     let snapshot = open_session_browser(
         app,
         SessionBrowserOpenRequest {

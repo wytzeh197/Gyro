@@ -107,18 +107,61 @@ export function subagentTokensLabel(agent: SubagentSnapshot) {
 }
 
 export function sortedSubagents(agents: SubagentSnapshot[]) {
+  const priority: Record<SubagentSnapshot["status"], number> = {
+    waiting: 0,
+    failed: 1,
+    interrupted: 2,
+    running: 3,
+    stopping: 4,
+    cancelled: 5,
+    completed: 6,
+  };
   return [...agents].sort(
     (a, b) =>
-      Number(isSubagentLive(b)) - Number(isSubagentLive(a)) ||
+      priority[a.status] - priority[b.status] ||
       a.createdAt.localeCompare(b.createdAt) ||
       a.agentId.localeCompare(b.agentId),
   );
+}
+
+export function subagentStatusLabel(status: SubagentSnapshot["status"]) {
+  return {
+    running: "Running",
+    waiting: "Needs approval",
+    stopping: "Stopping",
+    completed: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    interrupted: "Interrupted",
+  }[status];
+}
+
+export function subagentActivitySummary(agents: SubagentSnapshot[]) {
+  const count = (statuses: SubagentSnapshot["status"][]) =>
+    agents.filter((agent) => statuses.includes(agent.status)).length;
+  const waiting = count(["waiting"]);
+  const failed = count(["failed", "interrupted"]);
+  const parts = [
+    waiting ? `${waiting} ${waiting === 1 ? "needs" : "need"} approval` : "",
+    failed ? `${failed} ${failed === 1 ? "needs" : "need"} attention` : "",
+    count(["running"]) ? `${count(["running"])} running` : "",
+    count(["stopping"]) ? `${count(["stopping"])} stopping` : "",
+  ].filter(Boolean);
+  if (!parts.length) {
+    if (count(["completed"])) parts.push(`${count(["completed"])} completed`);
+    if (count(["cancelled"])) parts.push(`${count(["cancelled"])} cancelled`);
+  }
+  return {
+    label: parts.join(" · "),
+    needsAttention: waiting > 0 || failed > 0,
+  };
 }
 
 export function pendingSubagentApprovals(events: SessionEvent[]) {
   return subagentProcessEvents(events).filter((event) => {
     if (event.kind !== "approval-requested") return false;
     const payload = event.payload as Record<string, unknown> | undefined;
+    if (payload?.historical === true) return false;
     return ["pending", "waiting", "requested"].includes(
       String(payload?.status ?? "pending"),
     );

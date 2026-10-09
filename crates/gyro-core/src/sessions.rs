@@ -1,3 +1,6 @@
+mod project_import_storage;
+pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
+
 use crate::capabilities::ProjectCapabilityPolicy;
 use crate::paths::{reject_unsafe_private_file, secure_private_file, GyroPaths};
 use crate::worktrees::validate_branch_name;
@@ -29,7 +32,7 @@ const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 6;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 7;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -209,6 +212,8 @@ pub struct Session {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_source: Option<SessionImportSource>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -441,6 +446,7 @@ impl SessionStore {
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
         store.initialize()?;
+        store.recover_project_imports()?;
         Ok(store)
     }
 
@@ -547,6 +553,7 @@ impl SessionStore {
             created_at: now,
             updated_at: now,
             events_path,
+            import_source: None,
         };
 
         self.conn.execute(
@@ -626,7 +633,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 row_to_session,
@@ -677,7 +684,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
                  from sessions where parent_session_id is null order by updated_at desc limit 1",
                 [],
                 row_to_session,
@@ -695,11 +702,11 @@ impl SessionStore {
     pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
         let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
              from sessions order by updated_at desc limit ?1"
         } else {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
              from sessions order by updated_at desc"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -851,6 +858,14 @@ impl SessionStore {
             .with_context(|| format!("lock {} for deletion", events_path.display()))?;
 
         let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute(
+            "delete from project_import_metadata_commits where session_id = ?1",
+            params![session.id.to_string()],
+        )?;
+        transaction.execute(
+            "delete from project_imports where session_id = ?1",
+            params![session.id.to_string()],
+        )?;
         transaction.execute(
             "delete from provider_session_bindings where session_id = ?1",
             params![session_id.to_string()],
@@ -1203,7 +1218,18 @@ impl SessionStore {
             return Ok(None);
         }
         if provider_changed || model_changed {
-            let _ = self.clear_all_provider_session_bindings(session_id)?;
+            if let Some(source) = previous
+                .import_source
+                .as_ref()
+                .filter(|source| !source.fresh_session_requested)
+            {
+                // Keep the imported native cursor so selecting its original
+                // model again can resume it. The runner rejects incompatible
+                // models until the user explicitly requests a fresh session.
+                self.conn.execute("delete from provider_session_bindings where session_id = ?1 and provider_id != ?2", params![session_id.to_string(), source.source_kind.provider_id()])?;
+            } else {
+                let _ = self.clear_all_provider_session_bindings(session_id)?;
+            }
         }
         self.get_session(session_id)
     }
@@ -1514,13 +1540,22 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    /// Whether this conversation has a durable provider turn still in flight.
+    pub fn has_running_provider_turn(&self, session_id: Uuid) -> Result<bool> {
+        self.conn
+            .query_row(
+                "select exists(select 1 from session_turn_status where session_id = ?1 and status = 'running')",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     /// Turns whose durable status is still `running`.
     ///
-    /// Called at startup, where nothing can legitimately be in flight yet, so
-    /// every row this returns belongs to a run that died with its process. The
-    /// status is what [`latest_provider_status_for_turn`] reads to refuse a
-    /// second attempt on the same turn, so a row left behind by a crash or a
-    /// force-quit blocks that turn's retry for the rest of the session's life.
+    /// A running row may belong to another live process. Recovery callers must
+    /// hold the session's provider lease and recheck its current status before
+    /// closing it. A crash or force-quit can leave a row after ownership ends.
     ///
     /// [`latest_provider_status_for_turn`]: Self::latest_provider_status_for_turn
     pub fn list_running_turns(&self) -> Result<Vec<(Uuid, Uuid)>> {
@@ -1925,7 +1960,15 @@ impl SessionStore {
     }
 
     fn session_events_path(&self, session_id: Uuid) -> Result<PathBuf> {
-        let path = self.paths.sessions_dir.join(format!("{session_id}.jsonl"));
+        let imported = self
+            .paths
+            .sessions_dir
+            .join(format!("import-{session_id}.jsonl"));
+        let path = if imported.exists() {
+            imported
+        } else {
+            self.paths.sessions_dir.join(format!("{session_id}.jsonl"))
+        };
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() {
                 return Err(anyhow!("session event file cannot be a symlink"));
@@ -1961,8 +2004,11 @@ impl SessionStore {
     /// Idempotent checks for a database already at the current version.
     fn ensure_current_schema(&self) -> Result<()> {
         self.ensure_core_tables()?;
+        self.ensure_provider_session_index()?;
         self.ensure_column("parent_session_id", "parent_session_id text")?;
         self.ensure_parent_session_index()?;
+        self.ensure_column("import_source_json", "import_source_json text")?;
+        self.ensure_project_import_schema()?;
         crate::usage::ensure_usage_schema(&self.conn)?;
         crate::file_review::ensure_file_review_schema(&self.conn)?;
         Ok(())
@@ -1977,6 +2023,7 @@ impl SessionStore {
         self.ensure_column("branch", "branch text not null default 'main'")?;
         self.ensure_column("worktree_name", "worktree_name text")?;
         self.ensure_column("provider_id", "provider_id text")?;
+        self.ensure_provider_session_index()?;
         self.ensure_column("provider_label", "provider_label text")?;
         self.ensure_column("model_id", "model_id text")?;
         self.ensure_column("model_label", "model_label text")?;
@@ -1988,6 +2035,8 @@ impl SessionStore {
         // that predate the column are the user's own chats, so null is right.
         self.ensure_column("parent_session_id", "parent_session_id text")?;
         self.ensure_parent_session_index()?;
+        self.ensure_column("import_source_json", "import_source_json text")?;
+        self.ensure_project_import_schema()?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -2026,9 +2075,6 @@ impl SessionStore {
 
              create index if not exists idx_sessions_workspace_path
              on sessions(workspace_path);
-
-             create index if not exists idx_sessions_provider_id
-             on sessions(provider_id);
 
              create table if not exists provider_session_bindings (
                session_id text not null,
@@ -2114,6 +2160,15 @@ impl SessionStore {
              create index if not exists idx_session_context_events_order
              on session_context_events(session_id, log_offset
              );",
+        )?;
+        Ok(())
+    }
+
+    fn ensure_provider_session_index(&self) -> Result<()> {
+        // Legacy databases do not have provider_id until migrate_schema adds
+        // it. Creating this index with the base tables aborts that migration.
+        self.conn.execute_batch(
+            "create index if not exists idx_sessions_provider_id on sessions(provider_id);",
         )?;
         Ok(())
     }
@@ -2705,6 +2760,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let summary_updated_at: Option<String> = row.get(16)?;
     let workspace_identity_json: Option<String> = row.get(17)?;
     let parent_session_id: Option<String> = row.get(18)?;
+    let import_source_json: Option<String> = row.get(19)?;
     let workspace_path = PathBuf::from(workspace_path);
     let workspace_mode = SessionWorkspaceMode::from_str(&workspace_mode);
     let workspace_identity = workspace_identity_json
@@ -2744,6 +2800,9 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
             .map_err(parse_error)?
             .with_timezone(&Utc),
         events_path: PathBuf::from(events_path),
+        import_source: import_source_json
+            .map(|json| serde_json::from_str(&json).map_err(parse_error))
+            .transpose()?,
     })
 }
 
@@ -3321,6 +3380,7 @@ mod tests {
             .create_session(temp.path(), SessionOrigin::Desktop, "turn status")
             .unwrap();
         let turn_id = Uuid::new_v4();
+        assert!(!store.has_running_provider_turn(session.id).unwrap());
         store
             .append_event_with_turn_id(
                 session.id,
@@ -3347,6 +3407,8 @@ mod tests {
                 .as_deref(),
             Some("running")
         );
+        assert!(store.has_running_provider_turn(session.id).unwrap());
+        assert!(!store.has_running_provider_turn(Uuid::new_v4()).unwrap());
         store
             .append_event_with_turn_id(
                 session.id,
@@ -3363,6 +3425,7 @@ mod tests {
                 .as_deref(),
             Some("done")
         );
+        assert!(!store.has_running_provider_turn(session.id).unwrap());
     }
 
     #[test]
@@ -3897,7 +3960,6 @@ mod tests {
                    title text not null,
                    workspace_path text not null,
                    origin text not null,
-                   provider_id text,
                    created_at text not null,
                    updated_at text not null,
                    events_path text not null

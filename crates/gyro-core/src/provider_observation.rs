@@ -240,7 +240,7 @@ pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
 
 // Count text and schema structure without serializing or cloning large images.
 // Image bytes are not text tokens and must not become fictitious token spend.
-fn text_size(value: &Value) -> (usize, bool) {
+pub(crate) fn text_size(value: &Value) -> (usize, bool) {
     match value {
         Value::String(text) if text.starts_with("data:image/") => (0, true),
         Value::String(text) => (text.chars().count().saturating_add(2), false),

@@ -121,12 +121,35 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.gyro-comparison-main > .gyro-comparison-diff-pane {
+.gyro-comparison-review .gyro-comparison-diff-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+.gyro-comparison-diff-pane > .gyro-diff-empty-state {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.gyro-recorded-diff-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.gyro-recorded-diff-controls > select {
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  padding: 4px 6px;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar {
   flex: 0 0 auto;
@@ -134,8 +157,23 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
   padding: 8px var(--gyro-space-card);
   border-bottom: 1px solid var(--gyro-border-soft);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+.gyro-comparison-review .gyro-diff-review-toolbar button {
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 4px 8px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-comparison-review .gyro-diff-review-toolbar button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div {
   min-width: 0;
@@ -166,6 +204,9 @@
   min-height: 30px;
   padding: 4px 12px;
   border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-plain-diff > .gyro-plain-diff-notice {
+  flex: 0 0 auto;
 }
 .gyro-plain-diff > .gyro-plain-diff-hunks {
   flex: 1 1 0;

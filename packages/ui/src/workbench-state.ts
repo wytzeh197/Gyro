@@ -4560,6 +4560,7 @@ function normalizedSettingsSection(
 ): SettingsSectionId {
   switch (value) {
     case "general":
+    case "import-projects":
     case "editor-workspace":
     case "tools-contributions":
     case "providers":

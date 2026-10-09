@@ -4,7 +4,13 @@
  */
 export function EarlyShell() {
   return (
-    <div className="gyro-early-shell" data-early-shell="true">
+    <div
+      className="gyro-early-shell"
+      data-early-shell="true"
+      role="status"
+      aria-label="Starting Gyro"
+      aria-busy="true"
+    >
       <aside className="gyro-early-shell-sidebar" aria-hidden="true">
         <div className="gyro-early-shell-brand">Gyro</div>
         <div className="gyro-early-shell-nav">

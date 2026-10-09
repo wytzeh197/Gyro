@@ -3,6 +3,7 @@ use crate::paths::GyroPaths;
 use crate::usage::UsageGuardConfig;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,49 +13,85 @@ use uuid::Uuid;
 
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
-/// Process-local config cache keyed by absolute path + mtime. Desktop and CLI
-/// both re-read config on many UI actions; skipping identical disk parses is a
-/// large win on cold interaction paths without risking stale writes (save clears).
+/// Cache the version of the file actually read. A late reader must never stamp
+/// old approval settings with the metadata of a newer replacement.
 #[derive(Clone)]
 struct ConfigCacheEntry {
     path: PathBuf,
-    mtime: Option<SystemTime>,
+    version: ConfigFileVersion,
     config: GyroConfig,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ConfigFileVersion {
+    Missing,
+    File {
+        modified: Option<SystemTime>,
+        len: u64,
+        #[cfg(unix)]
+        identity: (u64, u64, i64, i64),
+    },
+}
+
+impl ConfigFileVersion {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self::File {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            #[cfg(unix)]
+            identity: (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            ),
+        }
+    }
 }
 
 static CONFIG_CACHE: Mutex<Option<ConfigCacheEntry>> = Mutex::new(None);
 
-fn config_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
+fn config_file_version(path: &Path) -> Result<ConfigFileVersion> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_CONFIG_BYTES as u64 => {
+            Ok(ConfigFileVersion::from_metadata(&metadata))
+        }
+        Ok(_) => Err(anyhow!("config cache target is not a bounded regular file")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(ConfigFileVersion::Missing)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn read_config_cache(path: &Path) -> Option<GyroConfig> {
+    // Inspect without following links and outside the cache lock. Cache hits
+    // must enforce the same file/size restrictions as uncached reads.
+    let version = config_file_version(path).ok()?;
     let guard = CONFIG_CACHE.lock().ok()?;
     let entry = guard.as_ref()?;
     if entry.path != path {
         return None;
     }
-    let mtime = config_mtime(path);
-    if entry.mtime != mtime {
+    if entry.version != version {
         return None;
     }
     Some(entry.config.clone())
 }
 
-fn write_config_cache(path: &Path, config: &GyroConfig) {
+fn write_config_cache(path: &Path, config: &GyroConfig, version: ConfigFileVersion) {
     let Ok(mut guard) = CONFIG_CACHE.lock() else {
         return;
     };
     *guard = Some(ConfigCacheEntry {
         path: path.to_path_buf(),
-        mtime: config_mtime(path),
+        version,
         config: config.clone(),
     });
 }
 
-#[allow(dead_code)]
 fn clear_config_cache() {
     if let Ok(mut guard) = CONFIG_CACHE.lock() {
         *guard = None;
@@ -180,6 +217,9 @@ pub struct GyroConfig {
     /// settings save or relaunch.
     #[serde(default)]
     pub selected_provider_id: Option<String>,
+    /// Explicit per-model Fast mode opt-ins; absent choices use standard speed.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub fast_mode_models: HashMap<String, bool>,
     pub model_providers: Vec<ModelProviderConfig>,
     pub command_profiles: Vec<CommandProfile>,
     #[serde(default)]
@@ -200,6 +240,7 @@ impl Default for GyroConfig {
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
             selected_provider_id: None,
+            fast_mode_models: HashMap::new(),
             council: CouncilConfig::default(),
             usage_guard: UsageGuardConfig::default(),
             model_providers: vec![
@@ -430,19 +471,25 @@ impl GyroConfig {
         if let Some(cached) = read_config_cache(&paths.config_path) {
             return Ok(cached);
         }
-        let config = Self::load_unlocked(paths)?;
-        write_config_cache(&paths.config_path, &config);
+        let (config, version) = Self::load_unlocked_with_version(paths)?;
+        if let Some(version) = version {
+            write_config_cache(&paths.config_path, &config, version);
+        }
         Ok(config)
     }
 
     fn load_unlocked(paths: &GyroPaths) -> Result<Self> {
+        Self::load_unlocked_with_version(paths).map(|(config, _)| config)
+    }
+
+    fn load_unlocked_with_version(paths: &GyroPaths) -> Result<(Self, Option<ConfigFileVersion>)> {
         let Some(file) = open_config_for_read(&paths.config_path)? else {
-            let config = Self::default();
-            write_config_cache(&paths.config_path, &config);
-            return Ok(config);
+            return Ok((Self::default(), Some(ConfigFileVersion::Missing)));
         };
+        let version = ConfigFileVersion::from_metadata(&file.metadata()?);
         let mut bytes = Vec::new();
-        file.take((MAX_CONFIG_BYTES + 1) as u64)
+        (&file)
+            .take((MAX_CONFIG_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .with_context(|| format!("read {}", paths.config_path.display()))?;
         if bytes.len() > MAX_CONFIG_BYTES {
@@ -458,7 +505,11 @@ impl GyroConfig {
             .with_context(|| format!("parse {}", paths.config_path.display()))?;
         config.normalize_legacy_state();
         config.council = std::mem::take(&mut config.council).normalized();
-        Ok(config)
+        // Atomic saves keep an open reader on its old inode; that version is
+        // safe to cache and will miss against the replacement. In-place edits
+        // during the read are returned uncached.
+        let after = ConfigFileVersion::from_metadata(&file.metadata()?);
+        Ok((config, (version == after).then_some(version)))
     }
 
     pub fn save(&self, paths: &GyroPaths) -> Result<()> {
@@ -486,7 +537,9 @@ impl GyroConfig {
             ));
         }
         atomic_write_private_config(&paths.config_path, &bytes)?;
-        write_config_cache(&paths.config_path, self);
+        // Do not label this value with a later writer's path metadata. The next
+        // read populates the cache from the opened file itself.
+        clear_config_cache();
         Ok(())
     }
 
@@ -1137,12 +1190,18 @@ mod tests {
     fn saves_private_config_atomically_and_round_trips() {
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
-        let config = GyroConfig {
+        let mut config = GyroConfig {
             telemetry_enabled: true,
             selected_provider_id: Some("anthropic".into()),
             change_summaries_enabled: true,
             ..GyroConfig::default()
         };
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "anthropic")
+            .unwrap()
+            .enabled = true;
 
         config.save(&paths).unwrap();
 
@@ -1163,6 +1222,65 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn config_cache_does_not_publish_a_late_reader_as_the_new_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let original = GyroConfig::default();
+        original.save(&paths).unwrap();
+        let (old, old_version) = GyroConfig::load_unlocked_with_version(&paths).unwrap();
+        let updated = GyroConfig {
+            require_command_approval: false,
+            ..original
+        };
+        updated.save(&paths).unwrap();
+        // An earlier reader finishes after the writer and publishes its cache.
+        write_config_cache(&paths.config_path, &old, old_version.unwrap());
+        assert_eq!(GyroConfig::load(&paths).unwrap(), updated);
+    }
+
+    #[test]
+    fn config_cache_detects_replacement_with_preserved_modification_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        let original = GyroConfig::load(&paths).unwrap();
+        let modified = std::fs::metadata(&paths.config_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        let replacement = paths.config_path.with_extension("replacement");
+        let updated = GyroConfig {
+            require_file_edit_approval: false,
+            ..original
+        };
+        std::fs::write(&replacement, serde_json::to_vec(&updated).unwrap()).unwrap();
+        File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        std::fs::rename(&replacement, &paths.config_path).unwrap();
+        assert_eq!(GyroConfig::load(&paths).unwrap(), updated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_cache_rejects_a_symlink_to_the_previously_cached_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        GyroConfig::load(&paths).unwrap();
+        let original = paths.config_path.with_extension("original");
+        std::fs::rename(&paths.config_path, &original).unwrap();
+        std::os::unix::fs::symlink(&original, &paths.config_path).unwrap();
+        assert!(GyroConfig::load(&paths)
+            .unwrap_err()
+            .to_string()
+            .contains("symlink"));
     }
 
     #[test]

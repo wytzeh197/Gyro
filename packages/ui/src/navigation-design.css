@@ -1,0 +1,261 @@
+/* Final navigation treatment, shared across the existing Sessions and Workspace
+   layouts. The theme and density tokens keep utility chrome consistent. */
+:root[data-theme] .gyro-session-actions {
+  gap: 2px;
+}
+
+/* Approvals stay green; unanswered questions use the blue theme ramp. */
+:root[data-theme] .gyro-sidebar .gyro-session-row.is-awaiting-approval {
+  --gyro-session-waiting-color: var(--gyro-success);
+  --gyro-session-waiting-row: color-mix(
+    in srgb,
+    var(--gyro-success) 7%,
+    var(--gyro-sidebar)
+  );
+  --gyro-session-pill-width: 102px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-row.is-awaiting-question {
+  --gyro-session-waiting-color: var(--gyro-blue);
+  --gyro-session-waiting-row: color-mix(
+    in srgb,
+    var(--gyro-text) 4%,
+    var(--gyro-sidebar)
+  );
+  --gyro-session-pill-width: 84px;
+}
+
+/* Both waiting states share placement, title fading, and keyboard behavior. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question),
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
+  > .gyro-sidebar-thread-main {
+  background: var(--gyro-session-waiting-row);
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
+  > .gyro-sidebar-thread-main {
+  overflow: hidden;
+  padding-right: 8px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
+  .gyro-sidebar-thread-title {
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - var(--gyro-session-pill-width) - 10px),
+    transparent calc(100% - var(--gyro-session-pill-width) + 10px)
+  );
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-time:is(.is-approval, .is-question) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  right: 8px;
+  min-width: min(var(--gyro-session-pill-width), calc(100% - 40px));
+  max-width: calc(100% - 40px);
+  min-height: max(20px, calc(20px * var(--gyro-ui-scale, 1)));
+  padding: 2px 3px;
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-session-waiting-color) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--gyro-session-waiting-color) 16%,
+    var(--gyro-sidebar)
+  );
+  color: var(--gyro-session-waiting-color);
+  opacity: 1;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  animation: gyro-sidebar-awaiting-in var(--gyro-premium-motion-slow)
+    var(--gyro-premium-ease) both;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-time.is-question {
+  padding-inline: 8px;
+  border-color: transparent;
+  font-size: 12px;
+}
+
+:root[data-theme] .gyro-session-time:is(.is-approval, .is-question) > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover and keyboard focus reveal the existing row actions without covering
+   the label; the chat title stays available while the pill yields its space. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
+  .gyro-session-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question):is(
+    :hover,
+    :focus-within,
+    .is-menu-open
+  )
+  .gyro-session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question):is(
+    :hover,
+    :focus-within,
+    .is-menu-open
+  )
+  .gyro-session-time:is(.is-approval, .is-question) {
+  opacity: 0;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question):is(
+    :hover,
+    :focus-within,
+    .is-menu-open
+  )
+  .gyro-sidebar-thread-title {
+  mask-image: none;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question):is(
+    :hover,
+    :focus-within,
+    .is-menu-open
+  )
+  > .gyro-sidebar-thread-main {
+  padding-right: calc(2 * max(24px, 24px * var(--gyro-ui-scale, 1)) + 12px);
+}
+
+@keyframes gyro-sidebar-awaiting-in {
+  from {
+    transform: translateX(calc(100% + 8px));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+:root[data-theme] .gyro-session-action {
+  width: max(24px, calc(24px * var(--gyro-ui-scale, 1)));
+  height: max(24px, calc(24px * var(--gyro-ui-scale, 1)));
+}
+
+/* Reserve the measured action width even at Large interface size. Keyboard
+   focus reveals the same controls as pointer hover. */
+:root[data-theme]
+  .gyro-session-row:is(
+    :hover,
+    :focus-within,
+    .is-active,
+    .is-menu-open,
+    .is-pinned
+  )
+  .gyro-sidebar-thread-main {
+  padding-right: calc(2 * max(24px, 24px * var(--gyro-ui-scale, 1)) + 12px);
+}
+
+/* Search stays opaque throughout its entrance; the backdrop settles immediately so
+   underlying page must never read as another set of search results. */
+:root[data-theme] .gyro-command-palette.is-global-search {
+  background: var(--gyro-surface-raised);
+  backdrop-filter: none;
+  border-color: var(--gyro-border);
+}
+
+:root[data-theme] .gyro-command-palette.is-global-search > header {
+  min-height: calc(52px * var(--gyro-ui-scale, 1));
+  gap: var(--gyro-space-standard);
+  border-bottom-color: var(--gyro-border-soft);
+}
+
+:root[data-theme] .gyro-global-search-heading {
+  background: var(--gyro-surface-raised);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  letter-spacing: 0;
+  padding-top: var(--gyro-space-comfortable);
+}
+
+:root[data-theme]
+  .gyro-command-palette.is-global-search
+  .gyro-command-list
+  button {
+  min-height: max(36px, calc(var(--gyro-control-height) + 14px));
+  gap: var(--gyro-space-standard);
+}
+
+:root[data-theme] .gyro-global-search-copy strong {
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-command-palette.is-global-search kbd {
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  border-radius: var(--gyro-radius-xs);
+}
+
+:root[data-theme] .gyro-global-search-footer {
+  border-top-color: var(--gyro-border-soft);
+}
+
+/* Navigation rows retain their rhythm in a narrow sidebar at Large size.
+   The button's title keeps the complete destination name available. */
+:root[data-theme]
+  .gyro-sidebar-action.is-settings-page
+  > .gyro-settings-page-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A placeholder is not a selected document. Keep its existing tab slot quiet. */
+:root[data-theme] .gyro-editor-tabs > button.is-empty {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-weight: 400;
+}
+
+:root[data-theme] .gyro-editor-tabs > button.is-empty::after {
+  display: none;
+}
+
+/* Preserve header geometry while the empty editor has no actions to perform. */
+:root[data-theme]
+  .gyro-editor-tabs:has(> button.is-empty)
+  > .gyro-editor-tab-actions
+  > button:disabled {
+  visibility: hidden;
+}

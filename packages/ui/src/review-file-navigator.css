@@ -1,0 +1,173 @@
+.gyro-review-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.gyro-review-files-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.gyro-review-files-slot.is-hidden {
+  display: none;
+}
+.gyro-review-files {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 180px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-review-file-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  flex: none;
+  margin: var(--gyro-space-standard);
+  padding-inline: var(--gyro-space-standard);
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  background: var(--gyro-surface);
+}
+.gyro-review-file-filter:focus-within {
+  border-color: var(--gyro-focus-ring);
+}
+.gyro-review-file-filter input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  color: var(--gyro-text);
+  background: transparent;
+  font: var(--gyro-font-micro) var(--gyro-font-sans);
+}
+.gyro-review-file-filter input::-webkit-search-cancel-button {
+  display: none;
+}
+.gyro-review-file-filter button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+}
+.gyro-review-file-tree {
+  overflow: auto;
+  min-height: 0;
+  padding: 0 var(--gyro-space-standard) var(--gyro-space-standard);
+}
+.gyro-review-tree-file,
+.gyro-review-tree-directory {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  width: 100%;
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding-block: var(--gyro-space-compact);
+  padding-right: var(--gyro-space-standard);
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  background: transparent;
+  font: var(--gyro-font-micro) var(--gyro-font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-review-tree-file > svg {
+  flex: none;
+  color: var(--gyro-file-tone, var(--gyro-muted));
+}
+
+.gyro-review-tree-directory > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-review-tree-file > span,
+.gyro-review-tree-directory > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.gyro-review-tree-directory {
+  color: var(--gyro-muted);
+}
+.gyro-review-tree-directory > svg:first-child {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+.gyro-review-tree-directory > svg.is-open {
+  transform: rotate(90deg);
+}
+.gyro-review-tree-file small,
+.gyro-review-tree-directory small {
+  flex: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.gyro-review-tree-file:hover,
+.gyro-review-tree-directory:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-review-tree-file.is-active {
+  background: var(--gyro-accent-soft);
+}
+.gyro-review-file-tree > p,
+.gyro-review-filter-count {
+  margin: 0;
+  padding: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-review-filter-count {
+  flex: none;
+}
+.gyro-review-scope .gyro-review-files-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  margin-left: auto;
+  min-height: 24px;
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font: var(--gyro-font-micro) var(--gyro-font-sans);
+  cursor: pointer;
+}
+.gyro-review-files-toggle:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-git-comparison-review {
+  container-type: inline-size;
+  container-name: gyro-review;
+}
+@container gyro-review (min-width: 640px) {
+  .gyro-review-workspace:has(.gyro-review-files-slot:not(.is-hidden)) {
+    display: grid;
+    grid-template-columns: minmax(180px, 26%) minmax(0, 1fr);
+  }
+  .gyro-review-files {
+    flex: 1;
+    height: 100%;
+    max-height: none;
+    border-bottom: 0;
+    border-right: 1px solid var(--gyro-border-soft);
+  }
+}

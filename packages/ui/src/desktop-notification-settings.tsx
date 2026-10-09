@@ -2,7 +2,12 @@ import type {
   DesktopNotificationPreferences,
   NotificationPermissionState,
 } from "./types";
-import { SettingsGroup, SettingsRow, SettingsSwitch } from "./settings-controls";
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsSwitch,
+} from "./settings-controls";
+import { Bell } from "lucide-react";
 
 type DesktopNotificationSettingsProps = {
   preferences: DesktopNotificationPreferences;
@@ -85,6 +90,7 @@ export function DesktopNotificationSettings({
           onClick={onTest}
           type="button"
         >
+          <Bell aria-hidden="true" size={13} />
           {isTesting ? "Sending..." : "Send test"}
         </button>
       </SettingsRow>

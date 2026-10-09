@@ -369,6 +369,7 @@ export type ChatAttachment = {
 
 export type SettingsSectionId =
   | "general"
+  | "import-projects"
   | "editor-workspace"
   | "tools-contributions"
   | "providers"
@@ -1537,6 +1538,8 @@ export type SourceControlFile = {
 };
 
 export type SourceControlState = {
+  /** Requested workspace: file paths in this snapshot are relative to it. */
+  workspacePath?: string | null;
   history?: Array<{
     hash: string;
     shortHash: string;
@@ -1565,6 +1568,8 @@ export type SourceControlState = {
   additions: number;
   deletions: number;
   statsPartial: boolean;
+  /** False until line counts and history have been attempted. */
+  detailsLoaded?: boolean;
   comparedToMain?: {
     additions: number;
     deletions: number;
@@ -1880,6 +1885,7 @@ export type Session = {
     worktreeRootId?: string;
   };
   origin: SessionOrigin;
+  importSource?: import("./project-import-types").SessionImportSource;
   /**
    * The chat whose turn started this session, when the user did not start it:
    * a research sub-agent keeps its transcript in a session of its own, but
@@ -2312,6 +2318,8 @@ export type GyroConfig = {
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;
+  /** Explicit per-model opt-in; absent choices use standard speed. */
+  fastModeModels?: Record<string, boolean>;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];
   council?: CouncilConfig;

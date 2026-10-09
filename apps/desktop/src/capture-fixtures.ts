@@ -12,6 +12,7 @@
  * Every value below is invented demo content. Nothing here reads a real
  * session, repository, or provider account.
  */
+import appearanceCss from "../../../packages/ui/src/appearance.css?inline";
 
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 
@@ -19,6 +20,36 @@ const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
 const isReelCapture = parameters.get("reel") === "1";
+if (parameters.get("motion") === "reduced") {
+  // Emulate only this page's Reduce Motion input, including the production
+  // CSS rules. A stored preference cannot activate the OS media query.
+  const nativeMatchMedia = window.matchMedia.bind(window);
+  window.matchMedia = (query) => {
+    const media = nativeMatchMedia(query);
+    if (query === "(prefers-reduced-motion: reduce)") {
+      Object.defineProperty(media, "matches", { value: true });
+    }
+    return media;
+  };
+  const reducedRules = appearanceCss.match(
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*)\}\s*$/,
+  )?.[1];
+  if (!reducedRules) throw new Error("Reduce Motion preview rules are missing");
+  const style = document.createElement("style");
+  style.dataset.captureReducedMotion = "true";
+  style.textContent = reducedRules;
+  document.head.append(style);
+}
+// Reproducible appearance combinations for frontend QA. These parameters only
+// affect this development harness and never a native preference store.
+const capturePreferences = {
+  theme,
+  density: parameters.get("density") ?? "compact",
+  interfaceSize: parameters.get("size") ?? "default",
+  ...(parameters.get("accent")
+    ? { mainColor: `#${parameters.get("accent")}` }
+    : {}),
+};
 // Opt-in reset for reproducible visual QA. This entry is development-only;
 // normal preview navigation and the shipped app retain their saved state.
 if (parameters.get("reset") === "1" || isReelCapture) {
@@ -28,7 +59,7 @@ if (parameters.get("reset") === "1" || isReelCapture) {
   localStorage.setItem(
     "gyro.workbench-state",
     JSON.stringify({
-      preferences: { theme, density: parameters.get("density") ?? "compact" },
+      preferences: capturePreferences,
       lastSessionsLayout: "thread",
       isToolPanelOpen: false,
     }),
@@ -67,7 +98,7 @@ function at(minutes: number, seconds = 0) {
 
 const session = {
   id: SESSION_ID,
-  title: "Bound the sync queue retries",
+  title: parameters.get("title")?.trim() || "Bound the sync queue retries",
   workspacePath: WORKSPACE,
   workspaceIdentity: {
     schema: "gyro.workspace.v2",
@@ -226,6 +257,21 @@ const chatEvents = [
   activity("file", "Edited src/sync.test.js", "src/sync.test.js", -12),
   activity("file", "Edited src/queue/backoff.js", "src/queue/backoff.js", -12),
 ];
+
+// Development-only question preview for the real sidebar and composer popup.
+if (parameters.get("edge") === "question") {
+  chatEvents.splice(
+    0,
+    chatEvents.length,
+    sessionEvent("user-message", "Help me choose a release scope.", {}, -2),
+    sessionEvent(
+      "assistant-message",
+      "Which release scope should I use?\n- Fixes only (Recommended)\n- Fixes and the new feature",
+      {},
+      -1,
+    ),
+  );
+}
 
 // Development-only approval preview; no command is executed by these controls.
 if (parameters.get("edge") === "inline-approval") {
@@ -426,6 +472,27 @@ const config = {
  * deletion, so the Source Control groups and their colours all show up in a
  * capture.
  */
+// Opt-in palette fixture uses the production file rows in every workspace view.
+const fileColorSamples =
+  parameters.get("edge") === "file-colors"
+    ? [
+        "engine.ts",
+        "Launch.tsx",
+        "App.vue",
+        "Server.java",
+        "build.rb",
+        "sync.js",
+        "package.json",
+        "theme.css",
+        "index.html",
+        "README.md",
+        "render.sh",
+        "ide-shell.png",
+        "launch.mp4",
+        "Cargo.toml",
+        "Cargo.lock",
+      ]
+    : [];
 const changedFiles = [
   {
     path: "src/sync.js",
@@ -492,6 +559,20 @@ const changedFiles = [
   },
 ];
 
+if (fileColorSamples.length > 0) {
+  changedFiles.splice(
+    0,
+    changedFiles.length,
+    ...fileColorSamples.map((path) => ({
+      path,
+      state: "modified",
+      staged: false,
+      additions: 1,
+      deletions: 1,
+    })),
+  );
+}
+
 if (isReelCapture) {
   changedFiles.splice(0, changedFiles.length, {
     path: "src/sync.js",
@@ -510,6 +591,7 @@ const sourceControl = {
   ahead: 1,
   behind: 0,
   repoRoot: WORKSPACE,
+  workspacePath: WORKSPACE,
   additions: isReelCapture ? 1 : 73,
   deletions: isReelCapture ? 1 : 6,
   statsPartial: false,
@@ -629,6 +711,14 @@ const workspaceTree = [
   file("README.md", "file", 1),
 ];
 
+if (fileColorSamples.length > 0) {
+  workspaceTree.splice(
+    1,
+    workspaceTree.length - 1,
+    ...fileColorSamples.map((path) => file(path, "file", 1)),
+  );
+}
+
 if (parameters.get("edge") === "lazy-explorer") {
   workspaceTree.push(
     file("node_modules", "directory", 1),
@@ -678,48 +768,52 @@ if (parameters.get("edge") === "multiple-roots") {
   );
 }
 
-const terminalOutput = (isReelCapture ? [
-  "$ npm test -- sync.test.js",
-  "",
-  "\u001b[32mPASS\u001b[0m  src/sync.test.js",
-  "  \u001b[32m✓\u001b[0m stops after 5 attempts (128 ms)",
-  "  \u001b[32m✓\u001b[0m backs off exponentially (12 ms)",
-  "",
-  "Tests:       \u001b[32m2 passed\u001b[0m, 2 total",
-  "Time:        1.42 s",
-  "",
-  "$ ",
-] : [
-  "$ gyro doctor",
-  "workspace store ready",
-  "CLI attach socket ready",
-  "approvals required",
-  "",
-  "$ npm test -- sync.test.js",
-  "",
-  "PASS  src/sync.test.js",
-  "  ✓ stops after 5 attempts (128 ms)",
-  "  ✓ backs off exponentially (12 ms)",
-  "",
-  "Tests:       2 passed, 2 total",
-  "Time:        1.42 s",
-  "",
-  "$ git status --short",
-  " M src/sync.js",
-  "?? src/queue/backoff.js",
-  "?? src/sync.test.js",
-  "",
-  "$ gyro approvals --pending",
-  "1 pending approval",
-  "  npm test -- sync.test.js   claude · main",
-  "",
-  "$ gyro sessions",
-  "ses_1  Bound the sync queue retries      claude   31h",
-  "ses_2  Fix flaky editor file tree        codex    35h",
-  "ses_3  Audit provider argument contracts gemini   43h",
-  "",
-  "$ ",
-]).join("\r\n");
+const terminalOutput = (
+  isReelCapture
+    ? [
+        "$ npm test -- sync.test.js",
+        "",
+        "\u001b[32mPASS\u001b[0m  src/sync.test.js",
+        "  \u001b[32m✓\u001b[0m stops after 5 attempts (128 ms)",
+        "  \u001b[32m✓\u001b[0m backs off exponentially (12 ms)",
+        "",
+        "Tests:       \u001b[32m2 passed\u001b[0m, 2 total",
+        "Time:        1.42 s",
+        "",
+        "$ ",
+      ]
+    : [
+        "$ gyro doctor",
+        "workspace store ready",
+        "CLI attach socket ready",
+        "approvals required",
+        "",
+        "$ npm test -- sync.test.js",
+        "",
+        "PASS  src/sync.test.js",
+        "  ✓ stops after 5 attempts (128 ms)",
+        "  ✓ backs off exponentially (12 ms)",
+        "",
+        "Tests:       2 passed, 2 total",
+        "Time:        1.42 s",
+        "",
+        "$ git status --short",
+        " M src/sync.js",
+        "?? src/queue/backoff.js",
+        "?? src/sync.test.js",
+        "",
+        "$ gyro approvals --pending",
+        "1 pending approval",
+        "  npm test -- sync.test.js   claude · main",
+        "",
+        "$ gyro sessions",
+        "ses_1  Bound the sync queue retries      claude   31h",
+        "ses_2  Fix flaky editor file tree        codex    35h",
+        "ses_3  Audit provider argument contracts gemini   43h",
+        "",
+        "$ ",
+      ]
+).join("\r\n");
 
 const governedOutput = [
   "Claude Code v2.1.159",
@@ -816,7 +910,11 @@ const responses: Record<string, unknown> = {
   git_stage: sourceControl,
   git_unstage: sourceControl,
   git_discard: sourceControl,
-  git_diff: { stdout: isReelCapture ? reelDiff : diff, stderr: "", exitCode: 0 },
+  git_diff: {
+    stdout: isReelCapture ? reelDiff : diff,
+    stderr: "",
+    exitCode: 0,
+  },
   git_review_content: {
     original: syncSource.replace(
       "const MAX_ATTEMPTS = 5;",
@@ -861,7 +959,23 @@ const responses: Record<string, unknown> = {
   task_discover: [],
   test_discover: [],
   github_status: { available: false },
-  get_provider_usage: { providerId: "anthropic", windows: [], fetchedAt: NOW },
+  get_provider_usage: {
+    providerId: "anthropic",
+    windows:
+      parameters.get("edge") === "daily-pace"
+        ? [
+            {
+              id: "weekly",
+              label: "Weekly window",
+              usedPercent: 45,
+              resetsAt: new Date(
+                Date.now() + 6 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
+            },
+          ]
+        : [],
+    fetchedAt: NOW,
+  },
   get_notification_permission: "granted",
   get_project_capability_policy: {
     schema: "gyro.capability.v1",
@@ -883,7 +997,6 @@ const responses: Record<string, unknown> = {
   set_menu_bar_snapshot: null,
   set_menu_bar_visible: null,
   append_editor_event: null,
-  append_chat_context_event: null,
   lsp_start: {
     serverId: "none",
     languageId: "javascript",
@@ -1092,10 +1205,11 @@ const invoke: Invoke = (command, args) => {
     captureEventsBySessionId.set(created.id, []);
     return created;
   }
-  if (command === "append_chat_context_event" && isReelCapture) {
+  if (command === "append_chat_context_event") {
     const request = args ?? {};
     const sessionId = String(request.sessionId ?? SESSION_ID);
-    const payload = (request.payload as Record<string, unknown> | undefined) ?? {};
+    const payload =
+      (request.payload as Record<string, unknown> | undefined) ?? {};
     const event = captureSessionEvent(
       sessionId,
       String(payload.turnId ?? "turn_capture"),
@@ -1146,12 +1260,14 @@ const invoke: Invoke = (command, args) => {
   }
   if (command === "summarize_file_changes") {
     if (isReelCapture) {
-      return [{
-        path: "src/sync.js",
-        contentHash: "capture-reel-sync-limit-5",
-        summary: "Stops retrying after five attempts.",
-        source: "intent",
-      }];
+      return [
+        {
+          path: "src/sync.js",
+          contentHash: "capture-reel-sync-limit-5",
+          summary: "Stops retrying after five attempts.",
+          source: "intent",
+        },
+      ];
     }
     return [];
   }
@@ -1200,12 +1316,14 @@ const invoke: Invoke = (command, args) => {
               schema: "gyro.mutation.v1",
               proposalId: "reel-sync-limit",
               status: "applied",
-              fileChanges: [{
-                path: "src/sync.js",
-                additions: 1,
-                deletions: 1,
-                patch: reelDiff,
-              }],
+              fileChanges: [
+                {
+                  path: "src/sync.js",
+                  additions: 1,
+                  deletions: 1,
+                  patch: reelDiff,
+                },
+              ],
             },
           );
           const statusEvent = captureSessionEvent(
@@ -1545,8 +1663,7 @@ if (scene === "companion-layout") {
     "gyro.workbench-state",
     JSON.stringify({
       preferences: {
-        theme,
-        density: parameters.get("density") ?? "compact",
+        ...capturePreferences,
         ...(parameters.get("edge") === "multiple-roots"
           ? { workspaceFolders: { [WORKSPACE]: ["/Users/dev/Clients/aurora"] } }
           : {}),

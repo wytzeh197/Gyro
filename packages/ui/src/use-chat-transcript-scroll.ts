@@ -10,6 +10,7 @@ import {
   type WheelEvent,
 } from "react";
 import type { SessionEvent } from "./types";
+import { chatScrollMemory } from "./chat-scroll-memory";
 
 const BOTTOM_SLACK = 72;
 const LOAD_EARLIER_SLACK = 96;
@@ -60,6 +61,14 @@ export function useChatTranscriptScroll({
     scrollTop: number;
   }>();
   const sessionId = events[0]?.sessionId;
+  const contextRef = useRef({
+    sessionId,
+    firstId: events.find((event) => event.kind !== "session-created")?.id,
+  });
+  contextRef.current = {
+    sessionId,
+    firstId: events.find((event) => event.kind !== "session-created")?.id,
+  };
 
   const updateScrollPosition = useCallback(() => {
     const transcript = transcriptRef.current;
@@ -82,6 +91,12 @@ export function useChatTranscriptScroll({
     lastScrollTopRef.current = transcript.scrollTop;
     setIsTranscriptAwayFromBottom(!isAtBottom);
     setIsLoadedChatClipped(isLoadedTranscriptClipped(transcript));
+    chatScrollMemory.save(contextRef.current.sessionId, {
+      top: transcript.scrollTop,
+      height: transcript.scrollHeight,
+      following: isFollowingBottomRef.current,
+      firstId: contextRef.current.firstId,
+    });
   }, []);
 
   const requestEarlierMessages = useCallback(
@@ -138,12 +153,23 @@ export function useChatTranscriptScroll({
   }, [pinToBottom, updateScrollPosition]);
 
   useLayoutEffect(() => {
-    isFollowingBottomRef.current = true;
+    const transcript = transcriptRef.current;
+    const restored = transcript
+      ? chatScrollMemory.restore(
+          sessionId,
+          events
+            .filter((event) => event.kind !== "session-created")
+            .map((event) => event.id),
+          transcript.scrollHeight,
+        )
+      : undefined;
+    isFollowingBottomRef.current = restored === undefined;
     upwardIntentRef.current = false;
     requestedEarlierCursorRef.current = undefined;
     pendingEarlierScrollRef.current = undefined;
     lastScrollTopRef.current = 0;
-    pinToBottom();
+    if (transcript && restored !== undefined) transcript.scrollTop = restored;
+    else pinToBottom();
     updateScrollPosition();
   }, [sessionId, pinToBottom, updateScrollPosition]);
   useLayoutEffect(() => {

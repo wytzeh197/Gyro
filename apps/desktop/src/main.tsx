@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
+import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
 import "./early-shell.css";
 import "./theme.css";
@@ -33,18 +34,6 @@ document.documentElement.dataset.theme = initialTheme;
 document
   .querySelector('meta[name="theme-color"]')
   ?.setAttribute("content", initialTheme === "light" ? "#f7f7f7" : "#181818");
-
-function AppFailure({ startup = false }: { startup?: boolean }) {
-  return (
-    <main className="gyro-root-error" role="alert">
-      <h1>{startup ? "Gyro couldn’t load." : "Gyro hit a rendering error."}</h1>
-      <p>Reload the window to try again.</p>
-      <button type="button" onClick={() => window.location.reload()}>
-        Reload Gyro
-      </button>
-    </main>
-  );
-}
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },

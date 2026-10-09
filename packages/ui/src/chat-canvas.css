@@ -120,7 +120,7 @@
 .gyro-canvas-preview-tools > span {
   flex: 1;
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 .gyro-canvas-preview-stage {
   flex: 1;
@@ -141,4 +141,24 @@
 .gyro-canvas :is(button, select, input, textarea):focus-visible {
   outline: 2px solid currentColor;
   outline-offset: -2px;
+}
+.gyro-canvas > .gyro-thread-empty {
+  display: grid;
+  align-content: start;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-panel);
+  color: var(--gyro-muted);
+}
+
+.gyro-canvas > .gyro-thread-empty strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+}
+
+.gyro-canvas > .gyro-thread-empty p {
+  max-width: 58ch;
+  margin: 0;
+  font-size: var(--gyro-font-support);
+  line-height: 1.55;
 }

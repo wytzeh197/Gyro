@@ -3,6 +3,21 @@ export { ChatFileActionsContext } from "./chat-file-card";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
 export { interfaceScales } from "./appearance";
+export {
+  ProjectImportSettings,
+  ProjectImportCallout,
+  ImportedChatRecoveryNotice,
+} from "./project-import-settings";
+export type { ProjectImportSettingsProps } from "./project-import-settings";
+export type {
+  ProjectImportSourceKind,
+  ProjectImportSource,
+  SessionImportSource,
+  ProjectImportCandidate,
+  ProjectImportScan,
+  ProjectImportResult,
+  ProjectImportJob,
+} from "./project-import-types";
 export type { InterfaceSize, MotionSpeed } from "./types";
 export type {
   Automation,
@@ -424,6 +439,11 @@ export {
   selectedReasoningEffort,
 } from "./provider-catalog";
 export {
+  supportsFastMode,
+  fastModeModelKey,
+  fastModeConfigFromAction,
+} from "./provider-fast-mode";
+export {
   councilPreflightLabel,
   COUNCIL_COMING_SOON,
   COUNCIL_COMING_SOON_LABEL,
@@ -659,3 +679,4 @@ export { ComposerContextCandidates } from "./composer-context.ts";
 
 export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab } from "./subagents";
 export type { SubagentSnapshot, SubagentSurfaceState, SubagentTabState } from "./subagents";
+export { sessionApprovalCounts, sessionQuestionCounts } from "./session-approvals";

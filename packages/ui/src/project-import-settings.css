@@ -1,0 +1,706 @@
+.gyro-project-import-settings {
+  display: grid;
+  gap: var(--gyro-space-section);
+  min-width: 0;
+}
+
+.gyro-project-import-settings .gyro-settings-group {
+  margin: 0;
+}
+
+.gyro-import-button {
+  align-items: center;
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  gap: 6px;
+  justify-content: center;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
+  white-space: nowrap;
+}
+
+.gyro-import-button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-import-button.is-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--gyro-accent-strong);
+}
+
+.gyro-import-button.is-primary {
+  background: var(--gyro-primary-bg);
+  border-color: transparent;
+  color: var(--gyro-primary-text);
+}
+
+.gyro-import-button.is-primary:hover:not(:disabled) {
+  background: var(--gyro-primary-hover);
+}
+
+.gyro-import-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.gyro-import-button:focus-visible,
+.gyro-import-checkbox:focus-visible,
+.gyro-import-project-expand:focus-visible,
+.gyro-import-callout-open:focus-visible,
+.gyro-import-callout-dismiss:focus-visible,
+.gyro-project-import-settings summary:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-import-source,
+.gyro-import-project-header,
+.gyro-import-chat,
+.gyro-import-result {
+  align-items: center;
+  display: flex;
+  gap: calc(12px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+  padding: var(--gyro-space-card)
+    calc(16px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-source + .gyro-import-source,
+.gyro-import-project + .gyro-import-project,
+.gyro-import-result + .gyro-import-result {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+.gyro-import-provider-mark {
+  align-items: center;
+  color: var(--gyro-text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: calc(18px * var(--gyro-ui-scale, 1));
+  justify-content: center;
+  width: calc(18px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-provider-mark.is-claude-code {
+  color: var(--gyro-provider-anthropic);
+}
+.gyro-import-provider-mark svg {
+  height: 100%;
+  width: 100%;
+}
+
+.gyro-import-source-copy,
+.gyro-import-chat-copy,
+.gyro-import-result-copy {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gyro-project-import-settings strong,
+.gyro-import-recovery strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.gyro-import-source-copy > span,
+.gyro-import-chat-copy > span,
+.gyro-import-result-copy > span,
+.gyro-import-project-expand > span > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.45;
+}
+
+.gyro-import-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-import-source-status,
+.gyro-import-existing,
+.gyro-import-result-status {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  white-space: nowrap;
+}
+
+.gyro-import-result-status {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: calc(92px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-scan-controls,
+.gyro-import-job-header,
+.gyro-import-selection-footer,
+.gyro-import-projects-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.gyro-import-archived {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+}
+
+.gyro-import-archived > div,
+.gyro-import-job-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.gyro-import-archived span,
+.gyro-import-helper,
+.gyro-import-job-header span,
+.gyro-import-selection-footer > span,
+.gyro-import-projects-toolbar > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+}
+
+.gyro-import-helper {
+  margin: -12px 0 0;
+}
+.gyro-import-error {
+  align-items: center;
+  background: var(--gyro-danger-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  display: flex;
+  font-size: var(--gyro-font-support);
+  gap: 16px;
+  justify-content: space-between;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.gyro-import-job {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  display: grid;
+  gap: 12px;
+  overflow: hidden;
+  padding: calc(16px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-job progress {
+  accent-color: var(--gyro-accent);
+  height: 5px;
+  width: 100%;
+}
+
+.gyro-import-job-results > summary,
+.gyro-import-diagnostics > summary {
+  color: var(--gyro-muted);
+  cursor: pointer;
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+  width: fit-content;
+}
+
+.gyro-import-result {
+  padding: 12px 0;
+}
+.gyro-import-result:last-child {
+  padding-bottom: 0;
+}
+.gyro-import-diagnostics {
+  min-width: 0;
+}
+.gyro-import-diagnostics ul {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+  padding-left: 18px;
+}
+
+.gyro-import-projects-toolbar,
+.gyro-import-selection-footer {
+  padding: calc(12px * var(--gyro-ui-scale, 1))
+    calc(16px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-projects-toolbar {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-import-selection-footer {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-import-search {
+  align-items: center;
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  max-width: calc(330px * var(--gyro-ui-scale, 1));
+  padding: 7px 9px;
+}
+
+.gyro-import-search:focus-within {
+  border-color: var(--gyro-focus-ring);
+}
+.gyro-import-search input {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  margin: 0;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+  width: 100%;
+}
+
+.gyro-import-search input::placeholder {
+  color: var(--gyro-muted);
+}
+
+.gyro-project-import-settings .gyro-import-search input:focus,
+.gyro-project-import-settings .gyro-import-search input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+.gyro-import-checkbox {
+  accent-color: var(--gyro-accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: calc(14px * var(--gyro-ui-scale, 1));
+  margin: 0;
+  width: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-checkbox:disabled {
+  cursor: default;
+}
+.gyro-import-project-expand {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.gyro-import-project-expand > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.gyro-import-project-expand > svg {
+  flex-shrink: 0;
+}
+.gyro-import-project-meta {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  flex-shrink: 0;
+  font-size: var(--gyro-font-micro);
+  gap: 10px;
+}
+.gyro-import-provider-list {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+.gyro-import-provider-list .gyro-import-provider-mark {
+  height: 14px;
+  width: 14px;
+}
+.gyro-import-project-header.is-selected,
+.gyro-import-chat.is-selected {
+  background: var(--gyro-accent-soft);
+}
+.gyro-import-chats {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-import-chat {
+  gap: 10px;
+  padding-left: calc(38px * var(--gyro-ui-scale, 1));
+}
+.gyro-import-chat + .gyro-import-chat {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-import-row-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gyro-import-empty {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 28px 20px;
+  text-align: center;
+}
+.gyro-import-empty > span {
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+.gyro-import-loading {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-font-support);
+  gap: 8px;
+  padding: var(--gyro-space-card);
+}
+.gyro-import-spinner {
+  animation: gyro-import-spin 1s linear infinite;
+}
+@keyframes gyro-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-import-spinner {
+    animation: none;
+  }
+}
+:root[data-reduce-motion="true"] .gyro-import-spinner {
+  animation: none;
+}
+
+.gyro-project-import-callout {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  max-width: calc(580px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+}
+
+/* The suggestion belongs to the top of the canvas, outside the welcome stack.
+   Showing or dismissing it must never change the logo or composer's position. */
+.gyro-chat-surface.is-empty > .gyro-project-import-callout {
+  left: 50%;
+  margin: 0;
+  max-width: min(calc(580px * var(--gyro-ui-scale, 1)), calc(100% - 48px));
+  position: absolute;
+  top: clamp(48px, 8vh, 88px);
+  transform: translateX(-50%);
+  z-index: 66;
+}
+
+@media (max-height: 650px) {
+  .gyro-chat-surface.is-empty > .gyro-project-import-callout {
+    top: 38px;
+  }
+
+  .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout
+    .gyro-import-callout-copy
+    > span {
+    display: none;
+  }
+
+  .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout
+    .gyro-import-callout-open {
+    padding: 6px;
+  }
+
+  .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout
+    .gyro-import-callout-providers
+    > .gyro-import-provider-mark,
+  .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout
+    .gyro-import-callout-gyro {
+    height: 28px;
+    width: 28px;
+  }
+}
+
+@media (max-height: 440px) {
+  .gyro-chat-surface.is-empty > .gyro-project-import-callout {
+    top: 12px;
+  }
+
+  .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout
+    .gyro-import-callout-marks {
+    display: none;
+  }
+}
+
+.gyro-import-callout-open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-lg);
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: flex;
+  gap: calc(14px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+  padding: 10px;
+  text-align: left;
+}
+
+.gyro-import-callout-open:hover {
+  background: var(--gyro-accent-soft);
+}
+.gyro-import-callout-marks,
+.gyro-import-callout-providers {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+}
+.gyro-import-callout-marks {
+  gap: 8px;
+}
+.gyro-import-callout-providers > .gyro-import-provider-mark,
+.gyro-import-callout-gyro {
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 6px;
+  width: calc(32px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-import-callout-providers
+  > .gyro-import-provider-mark
+  + .gyro-import-provider-mark {
+  margin-left: -4px;
+}
+.gyro-import-callout-arrow,
+.gyro-import-callout-chevron {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+}
+.gyro-import-callout-gyro img {
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+.gyro-import-callout-gyro .is-light {
+  display: none;
+}
+:root[data-theme="light"] .gyro-import-callout-gyro .is-light {
+  display: block;
+}
+:root[data-theme="light"] .gyro-import-callout-gyro .is-dark {
+  display: none;
+}
+.gyro-import-callout-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.gyro-import-callout-copy strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 530;
+  line-height: 1.45;
+}
+.gyro-import-callout-copy > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.45;
+}
+.gyro-import-callout-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.gyro-import-callout-dismiss:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-import-recovery {
+  align-items: center;
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 12px 14px;
+}
+.gyro-import-recovery > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.gyro-import-recovery span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+
+.gyro-import-tool-details {
+  min-width: 0;
+}
+
+.gyro-import-tool-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.gyro-import-tool-summary::-webkit-details-marker {
+  display: none;
+}
+
+.gyro-import-tool-summary:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-import-tool-summary:focus-visible,
+.gyro-import-tool-content pre:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-import-tool-chevron {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.gyro-import-tool-details[open] > summary .gyro-import-tool-chevron {
+  transform: rotate(90deg);
+}
+
+.gyro-import-tool-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 0 12px 22px;
+}
+
+.gyro-import-tool-content > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-import-tool-content pre {
+  background: var(--gyro-code-bg);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-code-text);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+  margin: 0;
+  max-height: calc(320px * var(--gyro-ui-scale, 1));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 850px) {
+  .gyro-import-source {
+    flex-wrap: wrap;
+  }
+  .gyro-import-source-copy {
+    flex-basis: 55%;
+  }
+  .gyro-import-source > .gyro-import-button {
+    margin-left: auto;
+  }
+  .gyro-import-project-meta time {
+    display: none;
+  }
+  .gyro-import-result {
+    flex-wrap: wrap;
+  }
+  .gyro-import-result > .gyro-import-row-actions {
+    margin-left: auto;
+  }
+  .gyro-import-recovery {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 600px) {
+  .gyro-import-scan-controls {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .gyro-import-scan-controls > .gyro-import-button {
+    align-self: flex-end;
+  }
+  .gyro-import-project-header {
+    flex-wrap: wrap;
+  }
+  .gyro-import-project-expand {
+    flex-basis: calc(100% - 36px);
+  }
+  .gyro-import-project-meta {
+    margin-left: 28px;
+  }
+  .gyro-import-project-header > .gyro-import-button {
+    margin-left: auto;
+  }
+  .gyro-import-chat {
+    flex-wrap: wrap;
+    padding-left: 24px;
+  }
+  .gyro-import-chat-copy {
+    flex-basis: calc(100% - 68px);
+  }
+  .gyro-import-chat > .gyro-import-row-actions {
+    margin-left: 44px;
+  }
+  .gyro-import-callout-marks {
+    gap: 5px;
+  }
+  .gyro-import-callout-chevron {
+    display: none;
+  }
+  .gyro-import-selection-footer {
+    align-items: flex-start;
+  }
+}

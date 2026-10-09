@@ -70,6 +70,17 @@ refresh("/workspace/b");
 assert.equal(pending.length, 1, "failed RPCs release the in-flight guard");
 pending.shift().resolve({ branch: "recovered" });
 await flush();
+refresh("/workspace/b");
+const eventCountBeforeNoWorkspace = events.length;
+refresh(undefined);
+pending.shift().resolve({ branch: "late previous workspace" });
+await flush();
+assert.equal(
+  events.length,
+  eventCountBeforeNoWorkspace,
+  "switching to no workspace rejects a late Git result and its queued follow-up",
+);
+assert.equal(pending.length, 0);
 
 let config;
 let finishDiscovery;
@@ -148,4 +159,92 @@ for (const modelId of ["qwen3:0.6b", "namespace/model:tag", "gpt-5.6-sol"]) {
 }
 console.log(
   "Local-model menu checks passed: tags and namespaces reach provider selection intact.",
+);
+
+const listing = {};
+const compileModule = (path) =>
+  ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+    },
+  }).outputText;
+runInNewContext(compileModule("../apps/desktop/src/session-listing.ts"), {
+  exports: listing,
+});
+const scope = {};
+runInNewContext(compileModule("../apps/desktop/src/source-control-scope.ts"), {
+  exports: scope,
+  require: (id) => (id === "react" ? { useMemo: (fn) => fn() } : listing),
+});
+const snapshot = {
+  available: true,
+  workspacePath: "/workspace/a",
+  files: [{ path: "changed.ts" }],
+};
+assert.equal(
+  scope.sourceControlForWorkspace(snapshot, "/workspace/a/"),
+  snapshot,
+);
+for (const root of [
+  undefined,
+  "",
+  "/workspace/b",
+  "/workspace/a/subfolder",
+  "/workspace/ab",
+]) {
+  assert.equal(
+    scope.sourceControlForWorkspace(snapshot, root),
+    undefined,
+    "snapshots cannot supply a different root or no-workspace chat",
+  );
+}
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: undefined },
+    "/workspace/a",
+  ),
+  undefined,
+);
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: 42 },
+    "/workspace/a",
+  ),
+  undefined,
+);
+const ide = { sourceControl: snapshot, tabs: ["keep-editor-state"] };
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: "/workspace/a " },
+    "/workspace/a",
+  ),
+  undefined,
+  "whitespace in a real directory name cannot alias a different workspace",
+);
+assert.equal(
+  scope.useScopedIdeState(ide, "/workspace/a"),
+  ide,
+  "matching snapshots retain render identity",
+);
+const unownedIde = scope.useScopedIdeState(ide, "/workspace/b");
+assert.equal(unownedIde.tabs, ide.tabs);
+assert.equal(unownedIde.sourceControl.available, false);
+assert.equal(unownedIde.sourceControl.files.length, 0);
+assert.ok(
+  !source.includes("ide={workbench.ide}"),
+  "all IDE surfaces consume scoped data",
+);
+assert.ok(
+  !source.includes("workbench.ide.sourceControl.files"),
+  "action and baseline inputs consume scoped data",
+);
+assert.ok(
+  source.includes(
+    "sourceControlForWorkspace(workbench.ide.sourceControl, pane.workspacePath)",
+  ),
+  "each tiled pane validates its own workspace rather than the focused pane",
+);
+console.log(
+  "Git snapshot ownership passed: no workspace, other roots, subfolders, malformed legacy state, pane wiring and stable matching renders.",
 );

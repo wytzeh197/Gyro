@@ -11,9 +11,6 @@ import {
   SettingsRow,
   SettingsSegmented,
 } from "./settings-controls";
-import themePreviewSystem from "./assets/theme-preview-system.png";
-import themePreviewLight from "./assets/theme-preview-light.png";
-import themePreviewDark from "./assets/theme-preview-dark.png";
 
 type AppearanceSettingsProps = {
   themeMode: ThemeMode;
@@ -59,12 +56,11 @@ export function AppearanceSettings({
               {
                 mode: "system",
                 label: "System",
-                image: themePreviewSystem,
               },
-              { mode: "light", label: "Light", image: themePreviewLight },
-              { mode: "dark", label: "Dark", image: themePreviewDark },
+              { mode: "light", label: "Light" },
+              { mode: "dark", label: "Dark" },
             ] as const
-          ).map(({ mode, label, image }) => (
+          ).map(({ mode, label }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
@@ -72,7 +68,7 @@ export function AppearanceSettings({
               onClick={() => onThemeChange(mode)}
               type="button"
             >
-              <img src={image} alt="" draggable={false} />
+              <ThemePreview mode={mode} />
               <span>{label}</span>
             </button>
           ))}
@@ -170,6 +166,38 @@ export function AppearanceSettings({
         </SettingsRow>
       </SettingsGroup>
     </>
+  );
+}
+
+function ThemePreview({ mode }: { mode: ThemeMode }) {
+  const palettes = mode === "system" ? ["light", "dark"] : [mode];
+  return (
+    <div className={`gyro-theme-preview is-${mode}`} aria-hidden="true">
+      {palettes.map((palette) => (
+        <div
+          className={`gyro-theme-preview-workspace is-${palette}`}
+          key={palette}
+        >
+          <div className="gyro-theme-preview-sidebar">
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="gyro-theme-preview-main">
+            <div className="gyro-theme-preview-lines">
+              <i />
+              <i />
+              <i />
+            </div>
+            <div className="gyro-theme-preview-composer">
+              <i />
+              <i />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { sessionQuestionCounts } from "../packages/ui/src/session-approvals.ts";
 import {
   formatChatAnswers,
   latestChatQuestions,
@@ -92,12 +93,12 @@ const structured = {
   message: "A few decisions first.",
   payload: { questions: payload },
 };
-assert.equal(latestChatQuestions([structured])?.questions[0]?.title, "Which release?");
-// A marker-only reply still asks, even with no visible text.
 assert.equal(
-  latestChatQuestions([{ ...structured, message: "" }])?.id,
-  "s",
+  latestChatQuestions([structured])?.questions[0]?.title,
+  "Which release?",
 );
+// A marker-only reply still asks, even with no visible text.
+assert.equal(latestChatQuestions([{ ...structured, message: "" }])?.id, "s");
 
 // Answers travel as one message and fold back into the transcript row.
 const answered = formatChatAnswers(
@@ -116,3 +117,103 @@ assert.deepEqual(parseChatAnswers(answered), {
 });
 assert.equal(parseChatAnswers("Which release? Stable"), undefined);
 console.log("Chat question detection checks passed.");
+
+const sidebarSessions = [
+  { id: "question-chat" },
+  { id: "other-chat" },
+  { id: "imported-chat", importSource: { sourceKind: "codex" } },
+];
+const sidebarUser = {
+  id: "question-user",
+  kind: "user-message",
+  turnId: "question-turn",
+  message: "Help me choose a release.",
+  payload: {},
+};
+const sidebarQuestion = { ...structured, turnId: "question-turn" };
+const sidebarEvents = [sidebarUser, sidebarQuestion];
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": sidebarEvents,
+    "other-chat": [sidebarUser],
+    "imported-chat": sidebarEvents.map((event) => ({
+      ...event,
+      payload: { ...event.payload, historical: true },
+    })),
+  }),
+  { "question-chat": 1 },
+  "questions stay session scoped and imported history cannot signal live input",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, { "question-chat": sidebarEvents }, [
+    "question-chat",
+  ]),
+  {},
+  "a streaming reply cannot prematurely signal that it needs an answer",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": [
+      ...sidebarEvents,
+      {
+        ...sidebarUser,
+        id: "answer-user",
+        turnId: "answer-turn",
+        message: answered,
+      },
+    ],
+  }),
+  {},
+  "sending answers clears the question marker",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": [
+      sidebarUser,
+      { ...sidebarUser, id: "next-user", turnId: "next-turn" },
+      sidebarQuestion,
+    ],
+  }),
+  {},
+  "a delayed question from an old turn cannot mark a new turn",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": [
+      sidebarUser,
+      { ...sidebarQuestion, message: "Done.", payload: {} },
+    ],
+  }),
+  {},
+  "an ordinary reply cannot create a question pill",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, { "imported-chat": sidebarEvents }),
+  { "imported-chat": 1 },
+  "new native questions in an imported chat remain actionable",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": [null, ...sidebarEvents, undefined],
+  }),
+  { "question-chat": 1 },
+  "an absent context receipt cannot crash sidebar attention rendering",
+);
+assert.deepEqual(
+  sessionQuestionCounts(sidebarSessions, {
+    "question-chat": [
+      sidebarUser,
+      {
+        ...sidebarQuestion,
+        payload: {},
+        message:
+          "Which theme?\n- Light\n- Dark\n\nWhich layout?\n- Wide\n- Compact",
+      },
+    ],
+  }),
+  { "question-chat": 2 },
+  "prose questions use the same parser and retain their question count",
+);
+console.log(
+  "Sidebar question checks passed: session scope, streaming, answers, stale turns, and imported history.",
+);

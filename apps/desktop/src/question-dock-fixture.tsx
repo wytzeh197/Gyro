@@ -6,6 +6,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ChatSurface,
+  applyAppearancePreferences,
   providersForConfig,
   type GyroConfig,
   type SessionEvent,
@@ -94,5 +95,21 @@ function Fixture() {
 }
 
 if (import.meta.env.DEV) {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme") === "light" ? "light" : "dark";
+  const size = params.get("size");
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.density =
+    params.get("density") === "comfortable" ? "comfortable" : "compact";
+  applyAppearancePreferences(
+    document.documentElement,
+    {
+      interfaceSize: size === "small" || size === "large" ? size : "default",
+      mainColor: "#0874df",
+      secondaryColor: "#8b6fcb",
+      motionSpeed: "default",
+    },
+    theme,
+  );
   createRoot(document.getElementById("root")!).render(<Fixture />);
 }

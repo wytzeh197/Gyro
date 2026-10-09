@@ -35,11 +35,18 @@ export function colorContrast(first: string, second: string): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-function mix(color: string, target: string, amount: number) {
-  const from = rgb(color);
-  return `#${rgb(target)
-    .map((channel, index) =>
-      Math.round(from[index]! * (1 - amount) + channel * amount)
+/** Change HSL lightness without washing the chosen hue into white or gray. */
+function tone(color: string, amount: number, lighter: boolean) {
+  const channels = rgb(color).map((channel) => channel / 255);
+  const lightness = (Math.max(...channels) + Math.min(...channels)) / 2;
+  const next = lightness + ((lighter ? 1 : 0) - lightness) * amount;
+  const span = 1 - Math.abs(2 * lightness - 1);
+  const scale = span === 0 ? 0 : (1 - Math.abs(2 * next - 1)) / span;
+  return `#${channels
+    .map((channel) =>
+      Math.round(
+        Math.max(0, Math.min(1, next + (channel - lightness) * scale)) * 255,
+      )
         .toString(16)
         .padStart(2, "0"),
     )
@@ -62,7 +69,7 @@ export function appearanceAccentProperties(
   const target = dark ? "#ffffff" : "#101724";
   const readable = (color: string, initial: number, against = backgrounds) => {
     for (let step = 0; step <= 100; step++) {
-      const candidate = mix(color, target, Math.min(1, initial + step / 100));
+      const candidate = tone(color, Math.min(1, initial + step / 100), dark);
       if (
         against.every(
           (background) => colorContrast(candidate, background) >= 4.5,
@@ -74,12 +81,12 @@ export function appearanceAccentProperties(
   };
   const foreground = dark ? "#101724" : "#ffffff";
   return {
-    "--gyro-accent": readable(main, dark ? 0.14 : 0.18),
-    "--gyro-accent-strong": readable(main, dark ? 0.32 : 0.3),
-    "--gyro-secondary-accent": readable(secondary, dark ? 0.16 : 0.2),
-    "--gyro-secondary-accent-strong": readable(secondary, dark ? 0.34 : 0.32),
-    "--gyro-primary-bg": readable(main, dark ? 0.44 : 0.16, [foreground]),
-    "--gyro-primary-hover": readable(main, dark ? 0.6 : 0.28, [foreground]),
+    "--gyro-accent": readable(main, 0.12),
+    "--gyro-accent-strong": readable(main, dark ? 0.42 : 0.24),
+    "--gyro-secondary-accent": readable(secondary, 0.12),
+    "--gyro-secondary-accent-strong": readable(secondary, dark ? 0.34 : 0.24),
+    "--gyro-primary-bg": readable(main, dark ? 0.32 : 0.12, [foreground]),
+    "--gyro-primary-hover": readable(main, dark ? 0.42 : 0.24, [foreground]),
     "--gyro-primary-text": foreground,
   };
 }

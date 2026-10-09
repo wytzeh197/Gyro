@@ -112,6 +112,43 @@ hidden.api.committedTurnTiming([
 ]);
 hidden.paint();
 assert.equal(hidden.saved.length, 0, "hidden documents do not claim a paint");
+const background = harness(true);
+await background.api.initializeTurnTiming();
+background.api.beginTurnTiming("background");
+background.api.receiveTurnTiming({
+  turnId: "background",
+  phase: "delta",
+  textDelta: "x",
+});
+const backgroundEvents = [
+  { turnId: "background", payload: { kind: "provider-stream" } },
+];
+let surfaceVisible = false;
+background.api.committedTurnTiming(backgroundEvents, () => surfaceVisible);
+background.paint();
+assert.equal(
+  background.saved.length,
+  0,
+  "another page must not claim chat paint",
+);
+surfaceVisible = true;
+background.api.committedTurnTiming(backgroundEvents, () => surfaceVisible);
+surfaceVisible = false;
+background.paint();
+assert.equal(
+  background.saved.length,
+  0,
+  "switching away between frames cancels paint measurement",
+);
+surfaceVisible = true;
+background.at(200);
+background.api.committedTurnTiming(backgroundEvents, () => surfaceVisible);
+background.paint();
+assert.equal(
+  background.saved[0].receivedToPaintMs,
+  200,
+  "returning records the actual visible opportunity",
+);
 console.log(
   "Turn timing: opt-out, failed sends, heartbeat exclusion, committed paint, and content exclusion passed.",
 );

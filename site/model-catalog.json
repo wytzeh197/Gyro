@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-10-02.1",
+  "revision": "2026-10-08.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -36,6 +36,17 @@
       "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-haiku-5-5",
+      "displayName": "Claude Haiku 5.5",
+      "description": "Fast model for lighter coding and high-volume tasks.",
+      "minClientRevision": 1,
+      "insertBefore": "claude-haiku-4-5",
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
     },
     {
       "providerId": "openai",

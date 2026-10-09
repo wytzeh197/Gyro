@@ -33,6 +33,18 @@ export function listedTerminalPanes<Pane extends ListableTerminalPane>(
   );
 }
 
+/** Resolve only among the panes this surface has already chosen to list.
+ * Restored selection can refer to a closed pane; that must not hide a new shell.
+ */
+export function activeTerminalPaneId(
+  panes: readonly ListableTerminalPane[],
+  selectedId: string | undefined,
+): string | undefined {
+  return panes.some((pane) => pane.id === selectedId)
+    ? selectedId
+    : panes[0]?.id;
+}
+
 /** Move an existing terminal into a split without duplicating or restarting it. */
 export function placeTerminalTab(
   layout: TerminalSplitLayout,

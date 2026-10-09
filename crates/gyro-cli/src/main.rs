@@ -1,4 +1,5 @@
 mod codex_app_server;
+mod provider_deadline;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand};
@@ -14,7 +15,7 @@ use gyro_core::{
     create_worktree,
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
-    ollama_chat, prepare_claude_provider_mutation_transaction,
+    prepare_claude_provider_mutation_transaction,
     prepare_provider_mutation_transaction, provider_descriptor,
     recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
     AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
@@ -756,6 +757,13 @@ impl Cli {
 }
 
 fn main() {
+    if let Some(code) = gyro_core::process_guard::run_crash_helper() {
+        std::process::exit(code);
+    }
+    if let Some(code) = gyro_core::keychain::run_read_helper() {
+        std::process::exit(code);
+    }
+    gyro_core::process_guard::enable_crash_cleanup();
     let cli = Cli::parse();
     let json = cli.wants_json();
     if let Err(error) = run_cli(cli) {
@@ -784,6 +792,7 @@ fn main() {
 }
 
 fn run_cli(cli: Cli) -> Result<()> {
+    let _process_scope = gyro_core::process_guard::ProcessLeaseScope::unleased();
     recover_provider_mutations_on_startup()?;
     match cli.command {
         Some(Commands::Chat(args)) => interactive_chat(args),
@@ -1855,6 +1864,7 @@ struct CliProviderExecution {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CliProviderFailureKind {
+    AccessRestricted,
     Authentication,
     Network,
     Other,
@@ -1955,6 +1965,7 @@ impl CliStreamDecoder {
 
 fn cli_provider_failure_priority(kind: CliProviderFailureKind) -> u8 {
     match kind {
+        CliProviderFailureKind::AccessRestricted => 3,
         CliProviderFailureKind::Other => 0,
         CliProviderFailureKind::Network => 1,
         CliProviderFailureKind::Authentication => 2,
@@ -1962,6 +1973,12 @@ fn cli_provider_failure_priority(kind: CliProviderFailureKind) -> u8 {
 }
 
 fn cli_provider_failure_from_event(value: &serde_json::Value) -> Option<CliProviderFailure> {
+    if gyro_core::provider_stream::claude_subscription_access_refusal_event(value) {
+        return Some(CliProviderFailure {
+            kind: CliProviderFailureKind::AccessRestricted,
+            message: gyro_core::provider_stream::CLAUDE_SUBSCRIPTION_ACCESS_DETAIL.into(),
+        });
+    }
     let event_type = value
         .get("type")
         .or_else(|| value.get("event"))
@@ -2295,8 +2312,10 @@ fn build_cli_provider_invocation(
     // environment, so it keeps only the provider's own auth.
     request.credentials =
         CredentialPolicy::for_provider(profile.provider_id.as_deref().unwrap_or_default());
+    #[cfg(not(test))]
     if let Some((name, value)) =
-        gyro_core::stored_provider_api_key_env(profile.provider_id.as_deref().unwrap_or_default())
+        gyro_core::try_stored_provider_api_key_env(profile.provider_id.as_deref().unwrap_or_default())
+            .map_err(|error| cli_failure(CliErrorCategory::ProviderUnavailable, error.to_string()))?
     {
         request.env.push((name, Some(value)));
     }
@@ -3472,6 +3491,78 @@ fn execute_ollama_provider(
     turn_id: Uuid,
     attempt_id: Uuid,
     cancellation: &CancellationToken,
+    timeout_seconds: u64,
+) -> Result<CliRunOutput> {
+    let started = std::time::Instant::now();
+    let mut deadline = provider_deadline::ProviderDeadline::start(
+        cancellation.clone(),
+        Duration::from_secs(timeout_seconds),
+    );
+    let result = execute_ollama_provider_inner(
+        store,
+        session,
+        profile,
+        model.clone(),
+        prompt,
+        mode,
+        config,
+        turn_id,
+        attempt_id,
+        cancellation,
+        &mut deadline,
+    );
+    deadline.finish();
+    match result {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            let (category, detail, status) = if deadline.expired() {
+                (
+                    CliErrorCategory::ExecutionFailed,
+                    format!("Ollama run timed out after {timeout_seconds} seconds"),
+                    HarnessRunStatus::Failed,
+                )
+            } else if cancellation.is_cancelled() {
+                (
+                    CliErrorCategory::Cancelled,
+                    "Ollama run cancelled".into(),
+                    HarnessRunStatus::Cancelled,
+                )
+            } else {
+                let category = cli_failure_details(&error).0;
+                let detail = gyro_core::sanitize_harness_text(&error.to_string());
+                (category, detail, HarnessRunStatus::Failed)
+            };
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                status,
+                profile,
+                model,
+                &detail,
+                Some(&detail),
+                Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+            )?;
+            Err(cli_failure(category, detail))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_ollama_provider_inner(
+    store: &SessionStore,
+    session: &Session,
+    profile: &CommandProfile,
+    model: Option<String>,
+    prompt: &str,
+    mode: &str,
+    config: &GyroConfig,
+    turn_id: Uuid,
+    attempt_id: Uuid,
+    cancellation: &CancellationToken,
+    deadline: &mut provider_deadline::ProviderDeadline,
 ) -> Result<CliRunOutput> {
     let started = std::time::Instant::now();
     let provider = config
@@ -3494,20 +3585,18 @@ fn execute_ollama_provider(
                 "select an installed model with `--model <ollama-model>`",
             )
         })?;
-    let selected = gyro_core::discover_ollama_model(provider.base_url.as_deref(), model).map_err(|error| {
+    let selected = gyro_core::discover_ollama_model_with_cancellation(provider.base_url.as_deref(), model, cancellation).map_err(|error| {
         cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
         )
     })?;
-    if selected.is_none() {
-        return Err(cli_failure(
+    let selected = selected.ok_or_else(|| cli_failure(
             CliErrorCategory::InvalidInput,
             format!(
                 "Ollama model `{model}` is not installed; run `ollama pull {model}` and retry."
             ),
-        ));
-    }
+        ))?;
     if cancellation.is_cancelled() {
         return Err(cli_failure(
             CliErrorCategory::Cancelled,
@@ -3521,29 +3610,18 @@ fn execute_ollama_provider(
     } else {
         format!("Prior conversation in this Gyro session:\n{history}\n\nUser message:\n{prompt}")
     };
-    let result = ollama_chat(OllamaChatRequest {
+    let result = gyro_core::ollama_chat_with_cancellation(OllamaChatRequest {
         base_url: provider.base_url.as_deref(),
         model,
         system,
         user: &user,
-    });
+        context_window_tokens: selected.context_window_tokens,
+    }, cancellation);
+    deadline.finish();
     let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let response = match result {
         Ok(result) if !cancellation.is_cancelled() => result.content,
         Ok(_) => {
-            append_cli_run_status(
-                store,
-                session,
-                turn_id,
-                attempt_id,
-                mode,
-                HarnessRunStatus::Cancelled,
-                profile,
-                Some(model.to_string()),
-                "Ollama run cancelled.",
-                None,
-                Some(duration_ms),
-            )?;
             return Err(cli_failure(
                 CliErrorCategory::Cancelled,
                 "Ollama run cancelled",
@@ -3551,19 +3629,6 @@ fn execute_ollama_provider(
         }
         Err(error) => {
             let detail = gyro_core::sanitize_harness_text(&error.to_string());
-            append_cli_run_status(
-                store,
-                session,
-                turn_id,
-                attempt_id,
-                mode,
-                HarnessRunStatus::Failed,
-                profile,
-                Some(model.to_string()),
-                "Ollama run failed.",
-                Some(&detail),
-                Some(duration_ms),
-            )?;
             return Err(cli_failure(CliErrorCategory::ExecutionFailed, detail));
         }
     };
@@ -3696,6 +3761,7 @@ fn execute_cli_provider(
             turn_id,
             attempt_id,
             &cancellation,
+            timeout_seconds,
         );
     }
     if provider_kind == CliProviderKind::Codex {
@@ -3787,7 +3853,7 @@ fn execute_cli_provider(
         claude_permission_mcp_config(session, profile, turn_id, config, approved, json)?;
     let active_attempt_id = attempt_id;
     let resumed = resume_cursor.is_some();
-    let invocation = build_cli_provider_invocation(
+    let invocation = match build_cli_provider_invocation(
         profile,
         &session.workspace_path,
         prompt,
@@ -3795,7 +3861,17 @@ fn execute_cli_provider(
         resume_cursor,
         Some(&permission_mcp_config),
         timeout_seconds,
-    )?;
+    ) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            let detail = gyro_core::sanitize_harness_text(&error.to_string());
+            update_cli_provider_binding_status(store, session.id, &provider_id, "failed", Some(&detail))?;
+            append_cli_run_status(store, session, turn_id, attempt_id, mode,
+                HarnessRunStatus::Failed, profile, model.clone(),
+                "CLI provider setup failed.", Some(&detail), None)?;
+            return Err(error);
+        }
+    };
     if let Some(provider_session_id) = invocation.proposed_session_id.as_deref() {
         store.upsert_provider_session_binding(
             session.id,
@@ -3898,7 +3974,11 @@ fn execute_cli_provider(
         && turn_has_provider_action_status(store, session.id, turn_id, "failed")?;
     let status = if approval_rejected {
         HarnessRunStatus::Blocked
-    } else if approval_failed {
+    } else if approval_failed
+        || decoder.provider_failure.as_ref().is_some_and(|failure| {
+            failure.kind == CliProviderFailureKind::AccessRestricted
+        })
+    {
         HarnessRunStatus::Failed
     } else {
         match outcome.termination {
@@ -3952,6 +4032,10 @@ fn execute_cli_provider(
                         };
                         let resume = format!("`gyro resume {}`", session.id);
                         match failure.kind {
+                            CliProviderFailureKind::AccessRestricted => (
+                                CliErrorCategory::ProviderUnavailable,
+                                format!("{}. The Gyro session was saved; retry with {resume} after access is restored.", failure.message),
+                            ),
                             CliProviderFailureKind::Authentication => (
                                 CliErrorCategory::ProviderUnavailable,
                                 format!(

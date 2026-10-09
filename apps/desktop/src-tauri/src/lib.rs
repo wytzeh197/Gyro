@@ -11,6 +11,8 @@ use provider_activity::*;
 mod context_compaction;
 mod provider_mcp;
 mod provider_reliability;
+mod provider_session_lifecycle;
+use provider_session_lifecycle::{reconcile_interrupted_provider_turns, ProviderSessionLease};
 mod provider_tool_batch;
 use provider_reliability::{
     is_transient_provider_error, provider_failure_recovery, readable_provider_error,
@@ -30,6 +32,8 @@ mod performance_benchmark;
 mod session_goal;
 mod session_model;
 use session_model::set_session_model;
+mod project_import;
+mod project_import_continuation;
 mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
@@ -68,7 +72,7 @@ use gyro_core::{
     ollama_tool_chat_with_progress, openai_compat_endpoint, openai_compat_host_is_loopback,
     openai_compat_tool_chat_with_progress, parse_council_synthesis, parse_summary_response,
     prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    provider_api_key_env_name, provider_api_key_value, provider_descriptor,
+    provider_api_key_env_name, provider_descriptor,
     recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
     run_kimi_acp, seat_label_map, start_account_login as account_start_login,
     stored_account_session as account_stored_session, successful_seat_answers,
@@ -610,6 +614,7 @@ struct ProviderRunControl {
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
     timing: Mutex<timing::Handle>,
+    process_owner: Mutex<Option<gyro_core::process_guard::ProcessOwner>>,
     request: Mutex<Option<ProviderChatRequest>>,
     usage_offset: Mutex<Option<UsageTokens>>,
 }
@@ -626,6 +631,7 @@ impl Default for ProviderRunControl {
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
             timing: Mutex::new(timing::Handle::default()),
+            process_owner: Mutex::new(None),
             request: Mutex::new(None),
             usage_offset: Mutex::new(None),
         }
@@ -1099,6 +1105,8 @@ struct MainComparisonStats {
 #[serde(rename_all = "camelCase")]
 struct SourceControlStatus {
     provider: String,
+    /// The requested workspace, whose relative paths this snapshot describes.
+    workspace_path: Option<String>,
     available: bool,
     branch: Option<String>,
     upstream: Option<String>,
@@ -1115,6 +1123,8 @@ struct SourceControlStatus {
     additions: usize,
     deletions: usize,
     stats_partial: bool,
+    /// Preparation has not attempted line counts or commit history yet.
+    details_loaded: bool,
     compared_to_main: Option<MainComparisonStats>,
     files: Vec<SourceControlFile>,
     history: Vec<source_control_review::HistoryEntry>,
@@ -1431,7 +1441,7 @@ struct DebugAdapterManager {
 }
 
 struct DebugAdapterProcess {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
     stdin: ChildStdin,
     messages: mpsc::Receiver<Result<serde_json::Value, String>>,
     next_sequence: u64,
@@ -1459,6 +1469,12 @@ struct TerminalPaneRequest {
     workspace_path: Option<String>,
     workspace_mode: Option<String>,
     working_directory: Option<String>,
+    /// A chat whose imported provider data home the explicit login should use.
+    #[serde(default)]
+    provider_auth_session_id: Option<String>,
+    /// Resolved from persisted import metadata, never accepted as renderer env.
+    #[serde(skip)]
+    provider_data_home: Option<(String, String)>,
     cols: Option<u16>,
     rows: Option<u16>,
     /// Ask Gyro to run this pane under its approval policy.
@@ -4499,6 +4515,17 @@ fn run_provider_chat_blocking(
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&request.session_id)?;
+    let _session_lease = ProviderSessionLease::for_run(&store, session_id).map_err(to_string)?;
+    if let Some(control) = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+    {
+        *control.process_owner.lock().map_err(to_string)? =
+            Some(_session_lease.process_owner());
+    }
     let session = store
         .get_session(session_id)
         .map_err(to_string)?
@@ -4659,7 +4686,7 @@ fn run_provider_chat_blocking(
     let binding = store
         .get_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?
-        .and_then(|binding| compatible_provider_session_binding(binding, &request));
+        .and_then(|binding| project_import_continuation::compatible_binding(&store, binding, &request));
     let runner_output = match run_provider_chat_with_retry(
         &store,
         &app,
@@ -5155,7 +5182,7 @@ fn compact_provider_chat_blocking(
     let resume_cursor = store
         .get_provider_session_binding(session_uuid, &request.provider_id)
         .map_err(to_string)?
-        .and_then(|binding| compatible_provider_session_binding(binding, &request))
+        .and_then(|binding| project_import_continuation::compatible_binding(&store, binding, &request))
         .as_ref()
         .and_then(provider_resume_cursor_from_binding)
         .filter(|cursor| cursor.kind == "codex-session");
@@ -9004,7 +9031,7 @@ impl DebugAdapterManager {
         if let Some(root) = root.as_ref() {
             command.current_dir(root);
         }
-        let mut child = command.spawn().map_err(|error| {
+        let mut child = gyro_core::process_guard::spawn_service(&mut command).map_err(|error| {
             anyhow::anyhow!("failed to start debug adapter {command_name}: {error}")
         })?;
         let stdin = child
@@ -10586,14 +10613,29 @@ fn content_hash(bytes: &[u8]) -> String {
 async fn create_terminal_pane(
     app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
+    request: TerminalPaneRequest,
+) -> Result<TerminalPaneSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        create_terminal_pane_blocking(&app, &manager, request)
+    })
+    .await
+    .map_err(|error| format!("terminal create worker failed: {error}"))?
+}
+
+fn create_terminal_pane_blocking(
+    app: &tauri::AppHandle,
+    manager: &TerminalProcessManager,
     mut request: TerminalPaneRequest,
 ) -> Result<TerminalPaneSnapshot, String> {
     // Governance is resolved here, never taken from the renderer, so the
     // session identity and approval environment an agent CLI inherits always
     // come from persisted backend state.
     request.governance = None;
+    request.provider_data_home =
+        project_import_continuation::resolve_login_data_home(&request).map_err(to_string)?;
     if request.governed {
-        request.governance = Some(resolve_pane_governance(&app, &request).map_err(to_string)?);
+        request.governance = Some(resolve_pane_governance(app, &request).map_err(to_string)?);
     }
     let governed_session = request
         .governance
@@ -10604,19 +10646,18 @@ async fn create_terminal_pane(
     // approve. `restart` deliberately does not come through here: it reuses the
     // same governance so a restarted pane keeps its session identity.
     let displaced = manager.governed_session(&request.pane_id);
-    let manager = manager.inner().clone();
-    let result =
-        tauri::async_runtime::spawn_blocking(move || manager.create(request).map_err(to_string))
-            .await
-            .map_err(|error| format!("terminal create worker failed: {error}"))?;
-    if let Some(displaced) = displaced.filter(|session| Some(session) != governed_session.as_ref())
-    {
-        release_pane_governance(&app, &displaced);
+    let result = manager.create(request).map_err(to_string);
+    if result.is_ok() {
+        if let Some(displaced) =
+            displaced.filter(|session| Some(session) != governed_session.as_ref())
+        {
+            release_pane_governance(app, &displaced);
+        }
     }
     if result.is_err() {
         // A pane that never started must not leave approval authority behind.
         if let Some(session_id) = governed_session {
-            release_pane_governance(&app, &session_id);
+            release_pane_governance(app, &session_id);
         }
     }
     result
@@ -10783,29 +10824,40 @@ async fn list_active_capability_resources(
     session_id: String,
 ) -> Result<Vec<CapabilityResourceRef>, String> {
     parse_uuid(&session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        list_active_capability_resources_blocking(&app, &session_id)
+    })
+    .await
+    .map_err(|error| format!("capability resource worker failed: {error}"))?
+}
+
+fn list_active_capability_resources_blocking(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> Result<Vec<CapabilityResourceRef>, String> {
     let resources = app.state::<ProviderCapabilityResourceManager>();
     let terminal = resources
         .terminals
         .lock()
         .map_err(|_| "terminal capability state is unavailable".to_string())?
-        .get(&session_id)
+        .get(session_id)
         .cloned();
     let browser = resources
         .browsers
         .lock()
         .map_err(|_| "browser capability state is unavailable".to_string())?
-        .get(&session_id)
+        .get(session_id)
         .cloned();
     let mut active = Vec::new();
     if let Some(terminal) = terminal {
-        let snapshot = app
+        let label = app
             .state::<TerminalProcessManager>()
-            .read(&terminal.pane_id, None)
+            .title(&terminal.pane_id)
             .map_err(to_string)?;
         active.push(CapabilityResourceRef {
             id: terminal.resource_id,
             kind: "terminal".into(),
-            label: snapshot.title,
+            label,
         });
     }
     if let Some(browser) = browser {
@@ -10859,10 +10911,28 @@ async fn restore_terminal_panes(
 #[tauri::command]
 async fn check_provider_health(
     request: ProviderHealthRequest,
+    imported_session_id: Option<String>,
 ) -> Result<ProviderHealthCheck, String> {
-    tauri::async_runtime::spawn_blocking(move || check_provider_health_blocking(request))
-        .await
-        .map_err(|error| format!("provider health worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let scope = imported_session_id
+            .as_deref()
+            .map(|id| {
+                project_import_continuation::imported_auth_data_home(id, &request.provider_id)
+            })
+            .transpose()
+            .map_err(to_string)?
+            .flatten();
+        match scope {
+            Some((_, home)) => gyro_core::provider_health::provider_health_with_data_home(
+                request,
+                Path::new(&home),
+            )
+            .map_err(to_string),
+            None => check_provider_health_blocking(request),
+        }
+    })
+    .await
+    .map_err(|error| format!("provider health worker failed: {error}"))?
 }
 
 /// Discover models installed in the configured loopback Ollama runtime.
@@ -11601,7 +11671,7 @@ fn usage_refresh_fallback(
 /// cached OIDC token — not on the public inference API. The TUI's
 /// "Weekly limit: 46%" is exactly `creditUsagePercent` from that response.
 fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_for_provider("grok", "xai");
+    let mut process = command_for_provider("grok", "xai").map_err(to_string)?;
     process
         .args([
             "--no-auto-update",
@@ -11614,8 +11684,7 @@ fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, 
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = process
-        .spawn()
+    let mut child = gyro_core::process_guard::spawn_service(&mut process)
         .map_err(|error| format!("could not start the Grok usage service: {error}"))?;
     let result = (|| {
         let mut stdin = child
@@ -12101,14 +12170,13 @@ fn warn_unrecorded_rate_limits(error: &str) {
 }
 
 fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_for_provider("codex", "openai");
+    let mut process = command_for_provider("codex", "openai").map_err(to_string)?;
     process
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = process
-        .spawn()
+    let mut child = gyro_core::process_guard::spawn_service(&mut process)
         .map_err(|error| format!("could not start the Codex usage service: {error}"))?;
     let result = (|| {
         let mut stdin = child
@@ -12835,6 +12903,7 @@ where
     let binding_cursor = binding
         .as_ref()
         .and_then(provider_resume_cursor_from_binding);
+    project_import_continuation::check_continuation(store, request, binding_cursor.as_ref())?;
     if let Some(stop) = stopped() {
         anyhow::bail!(stop);
     }
@@ -12843,6 +12912,14 @@ where
         Ok(mut output) => {
             output.resumed = binding_cursor.is_some();
             Ok(output)
+        }
+        Err(error)
+            if project_import_continuation::requires_native_session(store, request)?
+                && is_stale_resume_error(&format!("{error:#}")) =>
+        {
+            project_import_continuation::unavailable(store, request,
+                "The original provider session could not be resumed. Retry, or choose Continue in a new session to use the imported history.")?;
+            Err(error)
         }
         // A dead provider cursor is not a user-visible failure: clear it and
         // immediately retry once without resume. Local history is injected by
@@ -13602,8 +13679,15 @@ fn run_openai_codex_chat(
     );
 
     gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
-    let mut process = command_for_provider("codex", "openai");
+    let mut process = command_for_provider("codex", "openai")?;
+    project_import_continuation::apply_data_home(&mut process, request)?;
     process.current_dir(cwd);
+    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    process.args(gyro_core::fast_mode::cli_args(
+        &speed_config,
+        "openai",
+        request.model_id.as_deref(),
+    ));
     let args = codex_chat_args(
         resume_cursor.and_then(|cursor| {
             (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
@@ -13800,8 +13884,15 @@ fn run_openai_codex_app_server_chat(
         request.mode == ChatMode::Normal,
         can_resume,
     );
-    let mut process = command_for_provider("codex", "openai");
+    let mut process = command_for_provider("codex", "openai")?;
     let capability_args = codex_capability_mcp_config_args(app, request)?;
+    project_import_continuation::apply_data_home(&mut process, request)?;
+    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    process.args(gyro_core::fast_mode::cli_args(
+        &speed_config,
+        "openai",
+        request.model_id.as_deref(),
+    ));
     process
         .current_dir(&cwd)
         .args(capability_args)
@@ -13812,8 +13903,7 @@ fn run_openai_codex_app_server_chat(
         .stderr(Stdio::null());
     configure_provider_process_group(&mut process);
     timing::mark(TimingStage::ProcessStart);
-    let child = process
-        .spawn()
+    let child = gyro_core::process_guard::spawn_guarded(&mut process)
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     timing::mark(TimingStage::ProcessSpawned);
     let mut child = ProviderProcessGuard::new(child);
@@ -13947,6 +14037,7 @@ fn run_openai_codex_app_server_chat(
             "input": input,
             "cwd": cwd,
             "model": model,
+            "serviceTier": gyro_core::fast_mode::codex_service_tier(&speed_config, request.model_id.as_deref()),
             "approvalPolicy": approval_policy,
             "approvalsReviewer": "user",
             "sandboxPolicy": sandbox_policy,
@@ -14306,7 +14397,8 @@ fn run_openai_codex_context_compaction(
     resume_cursor: &ProviderResumeCursor,
 ) -> anyhow::Result<Option<ProviderContextUsage>> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let mut process = command_for_provider("codex", "openai");
+    let mut process = command_for_provider("codex", "openai")?;
+    project_import_continuation::apply_data_home(&mut process, request)?;
     process
         .current_dir(&cwd)
         .args(["app-server", "--stdio"])
@@ -14314,8 +14406,7 @@ fn run_openai_codex_context_compaction(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     configure_provider_process_group(&mut process);
-    let child = process
-        .spawn()
+    let child = gyro_core::process_guard::spawn_guarded(&mut process)
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     let mut child = ProviderProcessGuard::new(child);
     let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
@@ -15512,7 +15603,8 @@ fn run_anthropic_claude_chat(
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let mut process = command_for_provider("claude", "anthropic");
+    let mut process = command_for_provider("claude", "anthropic")?;
+    project_import_continuation::apply_data_home(&mut process, request)?;
     process.current_dir(cwd);
     // `--print` exits when the reply ends, and takes native background shells
     // and monitors with it: a dev build started that way died mid-compile and
@@ -15521,6 +15613,12 @@ fn run_anthropic_claude_chat(
     process
         .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")
         .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1");
+    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    process.args(gyro_core::fast_mode::cli_args(
+        &speed_config,
+        "anthropic",
+        request.model_id.as_deref(),
+    ));
     let mut args = claude_chat_args(
         resume_cursor
             .filter(|cursor| cursor.kind == "claude-session")
@@ -15577,6 +15675,11 @@ fn run_anthropic_claude_chat(
             "Could not complete Anthropic through Claude Code. Run `claude auth login` in Terminal if needed, then try again.",
         )
     })?;
+    if let Some(detail) = gyro_core::provider_stream::claude_subscription_access_refusal(&output.stdout)
+        .or_else(|| output.assistant_text.as_deref().and_then(gyro_core::provider_stream::claude_subscription_access_refusal))
+    {
+        anyhow::bail!("{detail}");
+    }
     if output.status_success {
         // Falling back to raw stdout is only sane when the CLI printed prose.
         // Claude Code prints a JSON stream, so the same fallback answered a
@@ -17011,6 +17114,10 @@ fn append_provider_status_event(
     let mut payload = gyro_core::harness_payload_value(&payload)?;
     if let Some(object) = payload.as_object_mut() {
         object.insert(
+            "sessionLeaseVersion".into(),
+            serde_json::Value::from(provider_session_lifecycle::SESSION_LEASE_VERSION),
+        );
+        object.insert(
             "reasoningEffort".into(),
             request
                 .reasoning_effort
@@ -17115,126 +17222,6 @@ fn provider_turn_has_unfinished_attempt(
         })
         .next_back();
     Ok(last_status.as_deref() == Some("running"))
-}
-
-/// Close out turns whose provider run died with a previous Gyro process.
-///
-/// `session_turn_status` is written when a run starts and rewritten when it
-/// ends, so a crash, a force-quit, or an update that replaced the binary
-/// mid-turn leaves a `running` row with no process behind it. Nothing reaps it
-/// later, and [`provider_turn_has_unfinished_attempt`] refuses every further
-/// attempt on a turn that still reads as running — so one interrupted send made
-/// that turn permanently unsendable, and the chat could not be picked back up.
-///
-/// Startup is the one moment where no run can be in flight, which is what makes
-/// the sweep safe: every row is finished, it just never got to say so. Each is
-/// closed with a `failed` status event carrying the interrupted recovery hint,
-/// which restores Retry and replaces a spinner that would never stop.
-///
-/// The provider identity is copied from the turn's own last status event so the
-/// closing event renders like the one it replaces. A turn whose events have
-/// aged past the read window still gets closed, just with a bare payload — the
-/// status row is what blocks the retry, and clearing it is the point.
-fn reconcile_interrupted_provider_turns(store: &SessionStore) -> anyhow::Result<usize> {
-    let running = store.list_running_turns()?;
-    if running.is_empty() {
-        return Ok(0);
-    }
-    let mut turns_by_session: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-    for (session_id, turn_id) in running {
-        turns_by_session
-            .entry(session_id)
-            .or_default()
-            .push(turn_id);
-    }
-    let mut closed = 0usize;
-    for (session_id, turn_ids) in turns_by_session {
-        // Read once per session rather than once per turn: a session that was
-        // killed repeatedly can hold several of these.
-        let events = match store.read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ) {
-            Ok(events) => events,
-            Err(error) => {
-                eprintln!("could not read events for interrupted session {session_id}: {error}");
-                Vec::new()
-            }
-        };
-        for turn_id in turn_ids {
-            let payload = interrupted_provider_status_payload(&events, turn_id);
-            let provider_label = payload
-                .get("providerLabel")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Provider")
-                .to_string();
-            match store.append_event_with_turn_id(
-                session_id,
-                SessionEventKind::SystemEvent,
-                provider_chat_status_message(&HarnessRunStatus::Failed, &provider_label),
-                payload,
-                Some(turn_id),
-            ) {
-                // The append is what rewrites the status row, through the same
-                // payload indexing every other status event uses.
-                Ok(_) => closed += 1,
-                Err(error) => {
-                    eprintln!("could not close interrupted turn {turn_id}: {error}");
-                }
-            }
-        }
-    }
-    Ok(closed)
-}
-
-/// The closing payload for an interrupted turn, shaped like the run's own.
-fn interrupted_provider_status_payload(
-    events: &[SessionEvent],
-    turn_id: Uuid,
-) -> serde_json::Value {
-    let previous = events
-        .iter()
-        .rfind(|event| {
-            event.turn_id == Some(turn_id)
-                && event
-                    .payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("provider-status")
-        })
-        .and_then(|event| event.payload.as_object())
-        .cloned()
-        .unwrap_or_default();
-    let mut payload = serde_json::Value::Object(previous);
-    let (recovery_kind, recovery_message) = provider_failure_recovery(PROVIDER_INTERRUPTED_MARKER);
-    if let Some(object) = payload.as_object_mut() {
-        object.insert(
-            "kind".into(),
-            serde_json::Value::String("provider-status".into()),
-        );
-        object.insert(
-            "status".into(),
-            serde_json::Value::String(HarnessRunStatus::Failed.as_str().into()),
-        );
-        object.insert(
-            "error".into(),
-            serde_json::Value::String(PROVIDER_INTERRUPTED_MARKER.into()),
-        );
-        object.insert(
-            "recoveryKind".into(),
-            serde_json::Value::String(recovery_kind.into()),
-        );
-        object.insert(
-            "recoveryMessage".into(),
-            serde_json::Value::String(recovery_message.into()),
-        );
-        object.insert(
-            "turnId".into(),
-            serde_json::Value::String(turn_id.to_string()),
-        );
-        object.insert(
-            "completedAt".into(),
-            serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-        );
-    }
-    payload
 }
 
 fn provider_activity_event_entry(
@@ -19201,20 +19188,26 @@ fn command_with_gui_path(command: &str) -> Command {
     process
 }
 
-fn command_for_provider(command: &str, provider_id: &str) -> Command {
+fn command_for_provider(command: &str, provider_id: &str) -> anyhow::Result<Command> {
+    #[allow(unused_mut)]
     let mut process = command_with_gui_path(command);
-    gyro_core::apply_stored_provider_api_key(&mut process, provider_id);
-    process
+    // Unit CLI peers do not consume the user's credential store; the compiled
+    // native benchmark verifies authentication through the production reader.
+    #[cfg(not(test))]
+    gyro_core::try_apply_stored_provider_api_key(&mut process, provider_id)?;
+    #[cfg(test)]
+    let _ = provider_id;
+    Ok(process)
 }
 
 struct ProviderProcessGuard {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
 }
 
 impl ProviderProcessGuard {
     /// Registered so quitting Gyro tears the group down: it runs in its own
     /// process group and gets no SIGHUP from the app exiting.
-    fn new(child: Child) -> Self {
+    fn new(child: gyro_core::process_guard::GuardedChild) -> Self {
         gyro_core::register_process_group(child.id());
         Self { child }
     }
@@ -21149,6 +21142,14 @@ fn handle_desktop_provider_capability_request(
             .map(|trace| trace.clone())
             .unwrap_or_default(),
     );
+    let process_owner = match control.process_owner.lock() {
+        Ok(owner) => owner.clone(),
+        Err(_) => return fail("run-state-unavailable", "The provider run state is unavailable.".into()),
+    };
+    if process_owner.is_none() && gyro_core::process_guard::crash_cleanup_enabled() {
+        return fail("unbound-run", "Gyro tools are not ready for this run.".into());
+    }
+    let _process_scope = process_owner.map(|owner| owner.enter());
     let bound = match control
         .capability_context
         .lock()
@@ -22133,6 +22134,7 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(project_import::ProjectImportManager::default())
         .manage(delegated_agents::AgentManager::default())
         .manage(ProviderApprovalManager::default())
         .manage(ProviderCapabilityApprovalManager::default())
@@ -22213,8 +22215,17 @@ pub fn run() {
             canvas_preview::response(request)
         })
         .invoke_handler(tauri::generate_handler![
+            project_import::get_project_import_sources,
+            project_import::scan_project_imports,
+            project_import::start_project_import,
+            project_import::get_project_import_job,
+            project_import::cancel_project_import,
+            project_import::relocate_imported_project,
+            project_import::continue_import_in_new_session,
+            project_import_continuation::get_imported_chat_state,
             turn_timing::timing_diagnostics_enabled,
             turn_timing::record_frontend_timing,
+            turn_timing::record_surface_timing,
             delegated_agents::list_subagents,
             delegated_agents::stop_subagent,
             append_chat_context_event,
@@ -27013,55 +27024,6 @@ while True:
             provider_stream_failure_detail(transcript, ""),
             transcript.trim()
         );
-    }
-
-    #[test]
-    fn an_interrupted_turn_is_closed_so_the_chat_can_be_picked_back_up() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
-        let session = store
-            .create_session(temp.path(), SessionOrigin::Desktop, "chat session")
-            .unwrap();
-        let turn_id = Uuid::new_v4();
-        store
-            .append_event_with_turn_id(
-                session.id,
-                SessionEventKind::SystemEvent,
-                "Claude is working",
-                serde_json::json!({
-                    "kind": "provider-status",
-                    "status": "running",
-                    "providerId": "anthropic",
-                    "providerLabel": "Claude",
-                    "modelId": "sonnet",
-                    "turnId": turn_id.to_string(),
-                }),
-                Some(turn_id),
-            )
-            .unwrap();
-        // This is the state a force-quit leaves behind, and it refused every
-        // further attempt on the turn.
-        assert!(provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
-
-        assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 1);
-
-        assert!(!provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
-        let closing = store
-            .read_recent_events(session.id, 32)
-            .unwrap()
-            .into_iter()
-            .rfind(|event| event.turn_id == Some(turn_id))
-            .expect("the interrupted turn is closed with an event");
-        assert_eq!(closing.payload["status"], "failed");
-        assert_eq!(closing.payload["recoveryKind"], "interrupted");
-        // The closing event keeps the run's identity so it renders like the one
-        // it replaces rather than as an anonymous failure.
-        assert_eq!(closing.payload["providerLabel"], "Claude");
-        assert_eq!(closing.payload["modelId"], "sonnet");
-        assert_eq!(closing.message, "Claude send needs attention");
-
-        // A second startup has nothing left to close.
-        assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 0);
     }
 
     #[test]

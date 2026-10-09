@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -124,12 +124,12 @@ fn process_group_exists(process_group: i32) -> bool {
 /// panic unwinds out of an output callback — so a failed turn cannot leak
 /// the provider CLI or its tool children.
 struct ProcessGroupChild {
-    child: Child,
+    child: crate::process_guard::GuardedChild,
     settled: bool,
 }
 
 impl ProcessGroupChild {
-    fn new(child: Child) -> Self {
+    fn new(child: crate::process_guard::GuardedChild) -> Self {
         register_process_group(child.id());
         Self {
             child,
@@ -324,8 +324,7 @@ where
 
     crate::timing::mark(crate::timing::Stage::ProcessStart);
     let mut child = ProcessGroupChild::new(
-        command
-            .spawn()
+        crate::process_guard::spawn_guarded(&mut command)
             .with_context(|| format!("start {}", request.program.to_string_lossy()))?,
     );
     crate::timing::mark(crate::timing::Stage::ProcessSpawned);

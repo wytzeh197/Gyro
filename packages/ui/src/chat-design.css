@@ -113,7 +113,8 @@
 
 :root[data-theme="light"]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-user-message-bubble p {
+  .gyro-user-message-bubble
+  p {
   color: var(--gyro-text);
 }
 
@@ -342,7 +343,11 @@
   margin: 0;
   padding: 0;
 }
-:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-calls > li {
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-calls
+  > li {
   min-width: 0;
 }
 :root[data-theme]
@@ -354,7 +359,10 @@
   border: 0;
   color: var(--gyro-muted);
   display: flex;
-  font: calc(14px * var(--gyro-ui-scale, 1))/calc(20px * var(--gyro-ui-scale, 1)) var(--gyro-font-sans);
+  font: calc(14px * var(--gyro-ui-scale, 1))/calc(
+      20px * var(--gyro-ui-scale, 1)
+    )
+    var(--gyro-font-sans);
   gap: 8px;
   letter-spacing: -0.005em;
   max-width: 100%;
@@ -366,13 +374,21 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
-  :is(.gyro-run-segment-toggle, .gyro-run-calls-more, .gyro-run-call.is-actionable) {
+  :is(
+    .gyro-run-segment-toggle,
+    .gyro-run-calls-more,
+    .gyro-run-call.is-actionable
+  ) {
   cursor: pointer;
 }
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
-  :is(.gyro-run-segment-toggle, .gyro-run-calls-more, .gyro-run-call.is-actionable):hover {
+  :is(
+    .gyro-run-segment-toggle,
+    .gyro-run-calls-more,
+    .gyro-run-call.is-actionable
+  ):hover {
   color: var(--gyro-text);
 }
 :root[data-theme]
@@ -381,6 +397,32 @@
   .gyro-run-calls-more {
   color: var(--gyro-faint);
   padding-left: 22px;
+}
+.gyro-run-hidden-failures {
+  color: var(--gyro-danger);
+}
+/* The composer owns the outer outline; notices join its inner top corners. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-shell
+  > .gyro-plan-usage-notice {
+  border: 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  border-radius: calc(var(--gyro-radius-composer) - 1px)
+    calc(var(--gyro-radius-composer) - 1px) 0 0;
+  margin: 0;
+}
+/* Informational usage notices stay readable without competing with a blocked
+   run or an approval. Warning and critical tones retain their semantic cues. */
+:root[data-theme] .gyro-chat-surface .gyro-plan-usage-notice.is-info {
+  background: transparent;
+  border-color: var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-chat-surface .gyro-plan-usage-notice.is-info > svg {
+  color: color-mix(in srgb, var(--gyro-warn) 55%, var(--gyro-danger));
+}
+:root[data-theme] .gyro-chat-surface .gyro-plan-usage-notice.is-info strong {
+  font-weight: 500;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -536,10 +578,7 @@
   min-height: 44px;
 }
 
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-keep-alive-text
-  strong {
+:root[data-theme] .gyro-chat-surface .gyro-keep-alive-text strong {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 500;
 }
@@ -594,7 +633,8 @@
   .gyro-chat-composer-dock
   .gyro-composer-shell
   > .gyro-composer-bar {
-  padding: calc(2px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(2px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
   background: transparent;
   border: 0;
   box-shadow: none;

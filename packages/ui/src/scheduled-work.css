@@ -27,15 +27,17 @@
   margin-bottom: 24px;
 }
 .gyro-scheduled-heading h1 {
-  font-size: calc(26px * var(--gyro-ui-scale, 1));
-  letter-spacing: -0.02em;
-  font-weight: 620;
+  font-size: var(--gyro-font-heading);
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  line-height: 1.3;
   margin: 0 0 6px;
 }
 .gyro-scheduled-heading p {
   margin: 0;
   font-size: calc(13px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
+  line-height: 1.55;
 }
 .gyro-scheduled-search-field {
   position: relative;
@@ -52,8 +54,8 @@
 .gyro-scheduled-search {
   box-sizing: border-box;
   width: 100%;
-  height: 36px;
-  border: 1px solid var(--gyro-premium-hairline);
+  height: max(32px, calc(var(--gyro-control-height) + 6px));
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   padding: 6px 12px 6px 34px;
   background: var(--gyro-control-bg);
@@ -96,6 +98,7 @@
   font: inherit;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 500;
+  min-height: max(24px, var(--gyro-control-height));
   padding: 5px 12px;
   cursor: pointer;
   transition:
@@ -108,18 +111,16 @@
 .gyro-scheduled-filters button[aria-pressed="true"] {
   background: var(--gyro-segment-active);
   color: var(--gyro-segment-active-text);
-  box-shadow:
-    0 1px 2px var(--gyro-premium-shadow-soft),
-    inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
 }
 /* Scheduled work and suggestions sit in grouped cards: one hairline frame,
    rows divided by inset rules, like a native settings list. */
 .gyro-scheduled-list,
 .gyro-scheduled-suggestions > div {
-  border: 1px solid var(--gyro-premium-hairline);
+  border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-lg);
-  background: var(--gyro-page-card);
-  box-shadow: 0 1px 2px var(--gyro-premium-shadow-soft);
+  background: color-mix(in srgb, var(--gyro-surface) 35%, var(--gyro-pane));
+  box-shadow: none;
   overflow: hidden;
 }
 .gyro-scheduled-item,
@@ -157,12 +158,12 @@
 .gyro-scheduled-item > svg:first-child,
 .gyro-scheduled-suggestions button > svg:first-child {
   box-sizing: border-box;
-  width: 32px;
-  height: 32px;
-  padding: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
   border-radius: var(--gyro-radius-md);
-  background: var(--gyro-control-bg);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  background: transparent;
+  box-shadow: none;
   color: var(--gyro-muted);
   flex-shrink: 0;
 }
@@ -236,13 +237,13 @@
 }
 .gyro-scheduled-empty {
   margin: 0;
-  padding: 48px 0;
+  padding: 32px 12px;
   font-size: calc(13px * var(--gyro-ui-scale, 1));
   text-align: center;
   color: var(--gyro-muted);
 }
 .gyro-scheduled-suggestions {
-  margin-top: 28px;
+  margin-top: 24px;
 }
 .gyro-scheduled-suggestions h2 {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
@@ -492,7 +493,17 @@
   padding: 4px;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-empty {
-  padding: 70px 0;
+  padding: 32px 12px;
+}
+.gyro-scheduled-page.has-detail
+  .gyro-scheduled-index
+  > :is(
+    .gyro-scheduled-filters,
+    .gyro-scheduled-list,
+    .gyro-scheduled-suggestions,
+    .gyro-scheduled-local-note
+  ) {
+  flex-shrink: 0;
 }
 .gyro-scheduled-page.has-detail .gyro-scheduled-suggestions {
   margin-top: 20px;

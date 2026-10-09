@@ -1,19 +1,17 @@
-// Tauri runs `async fn` commands on the shared async runtime and non-async ones
-// on a blocking pool. A command that opens the session store, runs a migration
-// or fsyncs a mutation journal directly inside an `async fn` therefore parks a
-// runtime worker for the whole disk round trip, and every other IPC call queues
-// behind it. `resolve_provider_approval` did exactly that: approving a large
+// Tauri runs `async fn` commands on the shared async runtime; synchronous
+// command wrappers call their functions inline. Disk and database work can
+// therefore block either the command handler or an async runtime worker.
+// `resolve_provider_approval` did exactly that: approving a large
 // reviewed file set stalled session lists, event reads and terminal reads until
 // the writes landed. Blocking work belongs on `spawn_blocking`.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const sources = [
-  "apps/desktop/src-tauri/src/lib.rs",
-  "apps/desktop/src-tauri/src/session_browser.rs",
-  "apps/desktop/src-tauri/src/menu_bar.rs",
-];
+const commandRoot = "apps/desktop/src-tauri/src/";
+const sources = (await readdir(new URL(commandRoot, root), { recursive: true }))
+  .filter((path) => path.endsWith(".rs"))
+  .map((path) => commandRoot + path);
 
 // Calls that reach the disk or the database and so must not run inline.
 const BLOCKING = [
@@ -22,26 +20,31 @@ const BLOCKING = [
   /\bopen_automation_store\(\)/,
   /\bAutomationStore::open\b/,
   /\bGyroConfig::(load|update|save)\b/,
-  /\bstd::process::Command::new\b/,
+  /\b(?:std::process::)?Command::new\b/,
   /\bfs::(read|write|copy|rename|remove_file|remove_dir_all|create_dir_all)\b/,
+  /\bresolve_pane_governance\(/,
+  /\bresolve_login_data_home\(/,
+  /\bcreate_terminal_pane_blocking\(/,
+  /\blist_active_capability_resources_blocking\(/,
+  /\btiming::record_(?:frontend|surface)\(/,
 ];
 
 // Warm-up runs before any window exists, so nothing is waiting behind it.
 const ALLOWED_INLINE = new Set(["warm_desktop_shell"]);
 
-function commandBodies(source) {
+function commandBodies(source, path = "fixture") {
   const lines = source.split("\n");
   const found = [];
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() !== "#[tauri::command]") continue;
     let start = -1;
     for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
-      if (/^\s*(pub )?(async )?fn /.test(lines[j])) {
+      if (/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+/.test(lines[j])) {
         start = j;
         break;
       }
     }
-    if (start < 0) continue;
+    assert.ok(start >= 0, `unparsed Tauri command in ${path}:${i + 1}`);
     const signature = lines[start].trim();
     let depth = 0;
     let opened = false;
@@ -66,13 +69,33 @@ function commandBodies(source) {
   return found;
 }
 
+// Scope-limited visibility must not hide commands from this guard. A parser
+// failure is a failed check rather than an invitation to skip a command.
+const scopedFixture = commandBodies(`
+#[tauri::command]
+pub(crate) async fn inspect() { open_store(); }
+#[tauri::command]
+pub(super) fn update() {}
+`);
+assert.deepEqual(
+  scopedFixture.map(({ name, isAsync }) => ({ name, isAsync })),
+  [
+    { name: "inspect", isAsync: true },
+    { name: "update", isAsync: false },
+  ],
+);
+assert.match(scopedFixture[0].body, /open_store/);
+assert.throws(
+  () => commandBodies("#[tauri::command]\nunknown declaration"),
+  /unparsed Tauri command/,
+);
+
 let checked = 0;
 const offenders = [];
 for (const path of sources) {
   const source = await readFile(new URL(path, root), "utf8");
-  for (const command of commandBodies(source)) {
+  for (const command of commandBodies(source, path)) {
     checked += 1;
-    if (!command.isAsync) continue;
     if (ALLOWED_INLINE.has(command.name)) continue;
     if (command.body.includes("spawn_blocking")) continue;
     const blocking = BLOCKING.filter((pattern) => pattern.test(command.body));
@@ -86,11 +109,14 @@ for (const path of sources) {
   }
 }
 
-assert.ok(checked > 100, `expected to scan the command surface, saw ${checked}`);
+assert.ok(
+  checked > 100,
+  `expected to scan the command surface, saw ${checked}`,
+);
 assert.deepEqual(
   offenders,
   [],
-  `async Tauri commands must move disk and database work onto tauri::async_runtime::spawn_blocking:\n  ${offenders.join("\n  ")}`,
+  `Tauri commands must move disk and database work onto tauri::async_runtime::spawn_blocking:\n  ${offenders.join("\n  ")}`,
 );
 
 console.log(`command blocking checks passed (${checked} commands)`);

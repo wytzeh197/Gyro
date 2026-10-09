@@ -189,7 +189,10 @@ where
     let started_at = Instant::now();
     let mut protocol_guard = ProtocolGuard::new(started_at, request.timeout);
     let mut command = Command::new(&request.program);
-    gyro_core::apply_stored_provider_api_key(&mut command, "openai");
+    // Unit protocol peers use fixture credentials; the binary integration
+    // suite exercises the real Keychain protocol without a test-harness entry.
+    #[cfg(not(test))]
+    gyro_core::try_apply_stored_provider_api_key(&mut command, "openai")?;
     command
         .args(&request.program_args)
         .args(["app-server", "--stdio"])
@@ -198,8 +201,7 @@ where
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_process_group(&mut command);
-    let child = command
-        .spawn()
+    let child = gyro_core::process_guard::spawn_guarded(&mut command)
         .with_context(|| format!("start {} app-server", request.program))?;
     let mut child = ChildGuard::new(child);
     let mut stdin = child
@@ -779,11 +781,11 @@ fn elapsed_ms(started_at: Instant) -> u64 {
 }
 
 struct ChildGuard {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
 }
 
 impl ChildGuard {
-    fn new(child: Child) -> Self {
+    fn new(child: gyro_core::process_guard::GuardedChild) -> Self {
         Self { child }
     }
 

@@ -31,6 +31,9 @@ pub fn extract_provider_session_id(value: &Value) -> Option<String> {
 }
 
 pub fn extract_provider_text_chunk(value: &Value) -> Option<ProviderTextChunk> {
+    if claude_subscription_access_refusal_event(value) {
+        return None;
+    }
     // Claude Code moved its partial messages inside a `stream_event` envelope,
     // which hid every text delta from the matches below. Nothing extracted the
     // answer, so the chat rendered the raw stream instead. Unwrap the envelope
@@ -82,6 +85,44 @@ pub fn extract_provider_text_chunk(value: &Value) -> Option<ProviderTextChunk> {
         return Some(ProviderTextChunk::Final(text));
     }
     extract_codex_agent_message_text(value).map(ProviderTextChunk::Final)
+}
+
+pub const CLAUDE_SUBSCRIPTION_ACCESS_DETAIL: &str = "Your organization has disabled Claude subscription access for Claude Code. Ask your organization administrator to enable access, or explicitly configure API-key access in Settings > Providers.";
+
+/// Claude Code can emit this access refusal as a synthetic assistant and a
+/// successful result, with exit code zero. Match the standalone vendor notice,
+/// not ordinary prose that quotes or discusses organization policy.
+pub fn claude_subscription_access_refusal(output: &str) -> Option<&'static str> {
+    (is_claude_subscription_notice(output)
+        || output
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .any(|value| claude_subscription_access_refusal_event(&value)))
+    .then_some(CLAUDE_SUBSCRIPTION_ACCESS_DETAIL)
+}
+
+fn is_claude_subscription_notice(text: &str) -> bool {
+    let text = text.trim();
+    let prefix = "Your organization has disabled Claude subscription access for Claude Code";
+    text.strip_prefix(prefix).is_some_and(|suffix| {
+        matches!(
+            suffix,
+            "" | " · Use an Anthropic API key"
+                | " · Use an Anthropic API key instead, or ask your admin to enable access"
+        )
+    })
+}
+
+pub fn claude_subscription_access_refusal_event(value: &Value) -> bool {
+    match value.get("type").and_then(Value::as_str) {
+        Some("assistant") => extract_assistant_message_text(value)
+            .is_some_and(|text| is_claude_subscription_notice(&text)),
+        Some("result") => value
+            .get("result")
+            .and_then(Value::as_str)
+            .is_some_and(is_claude_subscription_notice),
+        _ => false,
+    }
 }
 
 /// The Anthropic event inside Claude Code's `stream_event` envelope.
@@ -183,6 +224,37 @@ fn looks_like_session_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn organization_refusal_is_not_a_successful_assistant_response() {
+        let notice = "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access";
+        for value in [
+            serde_json::json!({"type":"assistant", "message":{"role":"assistant", "content":[{"type":"text", "text":notice}]}}),
+            serde_json::json!({"type":"result", "subtype":"success", "is_error":false, "result":notice}),
+        ] {
+            assert!(claude_subscription_access_refusal_event(&value));
+            assert_eq!(extract_provider_text_chunk(&value), None);
+            assert_eq!(
+                claude_subscription_access_refusal(&value.to_string()),
+                Some(CLAUDE_SUBSCRIPTION_ACCESS_DETAIL)
+            );
+        }
+        assert_eq!(
+            claude_subscription_access_refusal(&format!("The error says: {notice}")),
+            None
+        );
+        assert_eq!(
+            claude_subscription_access_refusal(
+                &serde_json::json!({"type":"user", "message":{"role":"user", "content":notice}})
+                    .to_string()
+            ),
+            None
+        );
+        assert_eq!(
+            claude_subscription_access_refusal("Organization access is enabled."),
+            None
+        );
+    }
 
     #[test]
     fn parses_delta_snapshot_final_and_nested_session_identity() {

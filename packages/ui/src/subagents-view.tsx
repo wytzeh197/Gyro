@@ -1,5 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Square } from "lucide-react";
+import {
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  CircleStop,
+  LoaderCircle,
+  Square,
+  ChevronRight,
+  Bot,
+} from "lucide-react";
 import subagentMark from "./assets/subagent-mark.png";
 import { ChatRun } from "./chat-run-view";
 import { buildRunModel, formatRunDuration } from "./chat-run";
@@ -9,6 +18,8 @@ import {
   subagentProcessEvents,
   subagentElapsedMs,
   subagentTokensLabel,
+  subagentStatusLabel,
+  subagentActivitySummary,
   type SubagentSnapshot,
   type SubagentSurfaceState,
 } from "./subagents";
@@ -16,6 +27,55 @@ import type { SessionEvent } from "./types";
 import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
 import "./subagents.css";
 const EMPTY_EVENTS: SessionEvent[] = [];
+
+/** Keeps delegated work visible while the detailed process rail is closed. */
+export function SubagentStrip({
+  state,
+  turnId,
+}: {
+  state: SubagentSurfaceState;
+  turnId?: string;
+}) {
+  const agents = sortedSubagents(
+    state.agents.filter(
+      (agent) =>
+        !turnId ||
+        !agent.parentTurnId ||
+        agent.parentTurnId === turnId ||
+        isSubagentLive(agent),
+    ),
+  );
+  if (!agents.length) return null;
+  const status = subagentActivitySummary(agents);
+  return (
+    <details className="gyro-subagent-strip">
+      <summary
+        aria-label={`${agents.length} ${agents.length === 1 ? "sub-agent" : "sub-agents"} · ${status.label}`}
+      >
+        <ChevronRight
+          className="gyro-subagent-strip-chevron"
+          size={12}
+          aria-hidden="true"
+        />
+        <Bot size={14} aria-hidden="true" />
+        <span>
+          {agents.length} {agents.length === 1 ? "sub-agent" : "sub-agents"}
+        </span>
+        <span
+          className={
+            status.needsAttention
+              ? "gyro-subagent-strip-status is-attention"
+              : "gyro-subagent-strip-status"
+          }
+          role="status"
+        >
+          {status.label}
+        </span>
+      </summary>
+      <SubagentList state={{ ...state, agents }} />
+    </details>
+  );
+}
 
 export function SubagentMark({ agentId }: { agentId: string }) {
   // Keep an agent's color stable across its list row and process panel.
@@ -67,14 +127,34 @@ export function SubagentList({
             <button
               type="button"
               onClick={() => state.onSelect(agent.agentId)}
-              aria-label={`Open ${agent.name} working process`}
-              title={`${agent.name} · ${agent.status === "waiting" ? "Needs approval" : agent.status}`}
+              aria-label={`Open ${agent.name} working process · ${subagentStatusLabel(agent.status)}`}
+              title={`${agent.name} · ${subagentStatusLabel(agent.status)}`}
               className={
                 state.selectedAgentId === agent.agentId ? "is-selected" : ""
               }
             >
-              <SubagentMark agentId={agent.agentId} />
+              <span
+                className={`gyro-subagent-status-icon is-${agent.status}`}
+                aria-hidden="true"
+              >
+                {agent.status === "completed" ? (
+                  <CheckCircle2 size={13} />
+                ) : agent.status === "failed" ||
+                  agent.status === "interrupted" ? (
+                  <CircleAlert size={13} />
+                ) : agent.status === "waiting" ? (
+                  <Clock3 size={13} />
+                ) : agent.status === "cancelled" ||
+                  agent.status === "stopping" ? (
+                  <CircleStop size={13} />
+                ) : (
+                  <LoaderCircle size={13} />
+                )}
+              </span>
               <strong className="gyro-subagent-name">{agent.name}</strong>
+              <span className={`gyro-subagent-status is-${agent.status}`}>
+                {subagentStatusLabel(agent.status)}
+              </span>
               <span className="gyro-subagent-runtime">
                 {formatRunDuration(
                   Math.floor(subagentElapsedMs(agent, now) / 1_000),

@@ -203,7 +203,7 @@ pub(super) fn run_ollama_chat(
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .ok_or_else(|| anyhow::anyhow!("select an installed Ollama model before sending"))?;
-    let discovered = gyro_core::discover_ollama_model(provider.base_url.as_deref(), model)?
+    let discovered = gyro_core::discover_ollama_model_with_cancellation(provider.base_url.as_deref(), model, &cancellation)?
         .ok_or_else(|| anyhow::anyhow!(
             "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
         ))?;
@@ -310,8 +310,7 @@ pub(super) fn run_ollama_chat(
     // The window the live context note measures against: the catalog's value
     // when it has one for the model, otherwise the note says no window is
     // known and reports the prompt count alone.
-    let context_window =
-        crate::provider_context::provider_model_context_window(&request.provider_id, Some(model));
+    let mut context_window = None;
     // `usageGuard.autoCompactPercent`, read once: the guard is native-owned and
     // a settings save cannot change it mid-turn.
     let auto_compact_percent = config.usage_guard.auto_compact_percent;
@@ -388,6 +387,8 @@ pub(super) fn run_ollama_chat(
                     model,
                     messages: messages.clone(),
                     tools: round_tools,
+                    context_window_tokens: discovered.context_window_tokens,
+                    minimum_context_window_tokens: context_window,
                 },
                 &cancellation,
                 |delta| {
@@ -418,6 +419,7 @@ pub(super) fn run_ollama_chat(
                 provider_accounting::emit_turn_tokens(app, request, provider_accounting::usage_tokens(&usage));
             }
             // What the live context note reports before the next request.
+            context_window = turn.context_window_tokens;
             last_measured = Some((turn.input_tokens, turn.output_tokens));
             if compatibility {
                 anyhow::ensure!(
@@ -594,7 +596,7 @@ pub(super) fn run_ollama_chat(
                     .input_tokens
                     .zip(response.output_tokens)
                     .map(|(input, output)| input + output),
-                model_context_window: discovered.context_window_tokens,
+                model_context_window: response.context_window_tokens,
                 ..ProviderContextUsage::default()
             }),
             billed_usage: turn_usage.measured(),

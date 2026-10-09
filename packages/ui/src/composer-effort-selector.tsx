@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Zap } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -16,6 +16,7 @@ export function ComposerEffortSelector({
   placement,
   onSelect,
   onModels,
+  fastMode,
 }: {
   id: string;
   modelLabel: string;
@@ -24,6 +25,7 @@ export function ComposerEffortSelector({
   placement: "up" | "down";
   onSelect: (index: number) => void;
   onModels: () => void;
+  fastMode?: { enabled: boolean; onToggle: () => void };
 }) {
   const normalizedIndex = Math.max(
     0,
@@ -71,6 +73,7 @@ export function ComposerEffortSelector({
       className="gyro-composer-popover gyro-effort-slider-popover"
       data-max-effort={labels.length > 1 && index === labels.length - 1}
       data-dragging={dragging}
+      data-fast-mode-supported={Boolean(fastMode)}
       data-align="end"
       data-placement={placement}
       id={id}
@@ -78,23 +81,29 @@ export function ComposerEffortSelector({
       role="dialog"
     >
       <div className="gyro-effort-slider-header">
-        <div className="gyro-effort-slider-heading">
+        {fastMode ? (
           <button
-            className="gyro-effort-value-button"
-            aria-label={`Select model: ${modelLabel}`}
-            onClick={onModels}
+            aria-label="Fast mode"
+            aria-pressed={fastMode.enabled}
+            className="gyro-effort-fast-button"
+            onClick={fastMode.onToggle}
+            title={`Fast mode ${fastMode.enabled ? "on" : "off"} · higher usage`}
             type="button"
           >
-            {labels[index]}
-            <ChevronRight size={16} />
+            <Zap aria-hidden="true" size={15} />
           </button>
+        ) : null}
+        <div className="gyro-effort-slider-heading">
+          <span className="gyro-effort-value">{labels[index]}</span>
           <button
             className="gyro-effort-model-button"
+            aria-label={`Select model: ${modelLabel}`}
             onClick={onModels}
             title={`Select model: ${modelLabel}`}
             type="button"
           >
-            {modelLabel}
+            <span>{modelLabel}</span>
+            <ChevronRight aria-hidden="true" size={14} />
           </button>
         </div>
       </div>
@@ -120,6 +129,7 @@ export function ComposerEffortSelector({
         </div>
         <span aria-hidden="true" className="gyro-effort-slider-thumb" />
         <input
+          autoFocus
           aria-label="Reasoning effort"
           aria-valuetext={labels[index]}
           disabled={labels.length < 2}

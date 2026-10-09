@@ -1,6 +1,12 @@
 // Explicit, billable integration benchmark. No provider calls without --spec.
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile, realpath } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  writeFile,
+  realpath,
+  lstat,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +36,15 @@ if (
   spec.trials > 5 ||
   !Number.isInteger(spec.timeoutSeconds) ||
   spec.timeoutSeconds < 10 ||
-  spec.timeoutSeconds > 300
+  spec.timeoutSeconds > 300 ||
+  (spec.tasks !== undefined &&
+    (!Array.isArray(spec.tasks) ||
+      spec.tasks.length < 1 ||
+      spec.tasks.length > 4 ||
+      new Set(spec.tasks).size !== spec.tasks.length ||
+      spec.tasks.some(
+        (task) => !["readme", "code", "follow-up", "no-tool"].includes(task),
+      )))
 ) {
   throw new Error("Invalid bounded benchmark spec");
 }
@@ -41,9 +55,37 @@ const temp = await realpath(tmpdir());
 if (!root.startsWith(temp + "/") && !root.startsWith("/private/tmp/"))
   throw new Error("Use a disposable temporary directory");
 const specPath = join(root, "spec.json");
-await writeFile(specPath, JSON.stringify(spec, null, 2) + "\n", {
-  mode: 0o600,
-});
+if (values.resume) {
+  const metadata = await lstat(specPath);
+  if (!metadata.isFile() || metadata.isSymbolicLink())
+    throw new Error("Resume spec must be a regular file");
+  const previous = JSON.parse(await readFile(specPath, "utf8"));
+  const canonical = (value) =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, canonical(value[key])]),
+          )
+        : value;
+  const normalize = (value) =>
+    canonical({
+      ...value,
+      tasks: value.tasks ?? ["readme", "code", "follow-up"],
+    });
+  if (JSON.stringify(normalize(previous)) !== JSON.stringify(normalize(spec))) {
+    throw new Error(
+      "Resume requires the original benchmark spec; changing cohorts would mix incomparable results",
+    );
+  }
+} else {
+  await writeFile(specPath, JSON.stringify(spec, null, 2) + "\n", {
+    mode: 0o600,
+    flag: "wx",
+  });
+}
 const run = (command, args, env = process.env) =>
   new Promise((ok, fail) => {
     const child = spawn(command, args, { cwd: repo, env, stdio: "inherit" });

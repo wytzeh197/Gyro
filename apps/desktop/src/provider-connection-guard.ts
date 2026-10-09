@@ -3,7 +3,7 @@ import type { ProviderId } from "@gyro-dev/ui";
 
 export type ProviderConnectionRunner = (
   providerId: ProviderId,
-  options?: { forceLogin?: boolean },
+  options?: { forceLogin?: boolean; importedSessionId?: string },
 ) => Promise<boolean>;
 
 /**
@@ -21,7 +21,7 @@ export function useProviderConnectionGuard(
   const connectProvider = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean },
+      options?: { forceLogin?: boolean; importedSessionId?: string },
     ): Promise<boolean> => {
       if (inFlight.current.has(providerId)) return false;
       inFlight.current.add(providerId);

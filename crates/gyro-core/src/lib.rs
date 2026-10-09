@@ -11,6 +11,7 @@ pub mod credentials;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
+pub mod fast_mode;
 pub mod file_review;
 pub mod github;
 pub mod harness;
@@ -22,6 +23,8 @@ pub mod ollama;
 pub mod openai_compatible;
 pub mod paths;
 pub mod policy;
+pub mod process_guard;
+pub mod project_import;
 pub mod provider_contract;
 pub mod provider_health;
 pub mod provider_observation;
@@ -84,7 +87,8 @@ pub use credentials::{
     provider_api_key_env_name, provider_api_key_value, provider_credential_env_vars,
     provider_has_api_key, provider_id_from_program, provider_supports_api_key,
     relative_path_is_in_credential_store, set_stored_provider_api_key, stored_provider_api_key,
-    stored_provider_api_key_env, CredentialPolicy,
+    stored_provider_api_key_env, try_apply_stored_provider_api_key, try_provider_api_key_value,
+    try_stored_provider_api_key_env, CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
@@ -134,7 +138,8 @@ pub use mutations::{
     ProviderMutationResult,
 };
 pub use ollama::{
-    discover_ollama_model, discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat,
+    discover_ollama_model, discover_ollama_model_with_cancellation, discover_ollama_models,
+    ollama_chat, ollama_chat_with_cancellation, ollama_endpoint, ollama_tool_chat,
     ollama_tool_chat_with_progress, OllamaChatRequest, OllamaChatResponse, OllamaDiscovery,
     OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,

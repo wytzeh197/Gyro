@@ -529,6 +529,9 @@ function Fixture() {
 }
 
 if (import.meta.env.DEV) {
-  document.documentElement.dataset.theme = "dark";
+  document.documentElement.dataset.theme =
+    new URLSearchParams(location.search).get("theme") === "light"
+      ? "light"
+      : "dark";
   createRoot(document.getElementById("root")!).render(<Fixture />);
 }

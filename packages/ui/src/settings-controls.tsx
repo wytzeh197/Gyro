@@ -1,5 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { SelectionTrack } from "./selection-track";
+import { ChevronDown } from "lucide-react";
+import "./settings-design.css";
 
 /**
  * The settings controls every section is built from.
@@ -26,12 +28,15 @@ export function settingsSearchKey(label: string) {
 
 export function SettingsSelect(props: ComponentProps<"select">) {
   return (
-    <select
-      {...props}
-      className={["gyro-settings-select", props.className]
-        .filter(Boolean)
-        .join(" ")}
-    />
+    <span className="gyro-settings-select-field">
+      <select
+        {...props}
+        className={["gyro-settings-select", props.className]
+          .filter(Boolean)
+          .join(" ")}
+      />
+      <ChevronDown aria-hidden="true" size={13} />
+    </span>
   );
 }
 

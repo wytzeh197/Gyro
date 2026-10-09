@@ -43,6 +43,7 @@ import type {
   WorkItem,
 } from "./chat-run";
 import type { SessionEvent } from "./types";
+import { pendingSubagentApprovals } from "./subagents";
 
 /**
  * The run rail: a timestamp-free working summary.
@@ -156,15 +157,19 @@ export function ChatRun({
   layout = "segments",
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
+  const needsApproval =
+    pendingSubagentApprovals(
+      model.steps.flatMap((step) => (step.kind === "ask" ? [step.event] : [])),
+    ).length > 0;
   // A finished turn leads with its final response. Work remains available
   // behind the header; live work and failures stay open for visibility.
   const isDone = model.phase.name === "done";
-  const [isCollapsed, setIsCollapsed] = useState(isDone);
+  const [isCollapsed, setIsCollapsed] = useState(isDone && !needsApproval);
   useEffect(() => {
-    setIsCollapsed(isDone);
-  }, [isLive, isDone]);
-  const canCollapse = !isLive && model.steps.length > 0;
-  const showSteps = isLive || !isCollapsed;
+    setIsCollapsed(isDone && !needsApproval);
+  }, [isLive, isDone, needsApproval]);
+  const canCollapse = !isLive && !needsApproval && model.steps.length > 0;
+  const showSteps = isLive || needsApproval || !isCollapsed;
   const isSegments = layout === "segments";
   // Reasoning headlines only ever speak at the live tail, so the phase view
   // never sees them.
@@ -235,7 +240,7 @@ export function ChatRun({
   return (
     <div className={shellClass}>
       <RunHeader
-        statusLabel={statusLabel}
+        statusLabel={needsApproval ? "Needs approval" : statusLabel}
         canCollapse={canCollapse}
         headerActions={headerActions}
         isCollapsed={isCollapsed}
@@ -543,6 +548,9 @@ function RunCalls({
     windowed && !showAll
       ? liveWindow(calls, LIVE_CALL_WINDOW)
       : { visible: calls, hiddenCount: 0 };
+  const hiddenFailures = calls
+    .slice(0, hiddenCount)
+    .filter((step) => step.item.status === "failed").length;
   return (
     <ol aria-label="Tool calls" className="gyro-run-calls">
       {hiddenCount > 0 ? (
@@ -553,6 +561,12 @@ function RunCalls({
             type="button"
           >
             +{hiddenCount} more tool {hiddenCount === 1 ? "call" : "calls"}
+            {hiddenFailures > 0 ? (
+              <span className="gyro-run-hidden-failures">
+                {" · "}
+                {hiddenFailures} failed
+              </span>
+            ) : null}
           </button>
         </li>
       ) : null}
@@ -637,6 +651,16 @@ function RunCallRow({
     </>
   );
 
+  if (item.kind === "tool" && item.historicalDetail !== undefined) {
+    return (
+      <HistoricalToolDetails
+        className={className}
+        detail={item.historicalDetail}
+      >
+        {body}
+      </HistoricalToolDetails>
+    );
+  }
   if (file && onOpenChanges) {
     return (
       <button
@@ -789,6 +813,16 @@ function RunRow({
     </>
   );
 
+  if (item?.kind === "tool" && item.historicalDetail !== undefined) {
+    return (
+      <HistoricalToolDetails
+        className={className}
+        detail={item.historicalDetail}
+      >
+        {body}
+      </HistoricalToolDetails>
+    );
+  }
   // A file row is the way into Source Control. Keeping the affordance on the row
   // is what lets the rail stay card-free.
   if (file && onOpenChanges) {
@@ -813,6 +847,36 @@ function RunRow({
     <div className={className} title={title}>
       {body}
     </div>
+  );
+}
+
+/** Native disclosure preserves keyboard access without giving old tools actions. */
+function HistoricalToolDetails({
+  children,
+  className,
+  detail,
+}: {
+  children: ReactNode;
+  className: string;
+  detail: string;
+}) {
+  return (
+    <details className="gyro-import-tool-details">
+      <summary className={`${className} gyro-import-tool-summary`}>
+        {children}
+        <ChevronRight
+          aria-hidden="true"
+          className="gyro-import-tool-chevron"
+          size={12}
+        />
+      </summary>
+      <div className="gyro-import-tool-content">
+        <span>Imported tool history</span>
+        <pre aria-label="Imported tool arguments and result" tabIndex={0}>
+          {detail || "No arguments or result were recorded in this history."}
+        </pre>
+      </div>
+    </details>
   );
 }
 

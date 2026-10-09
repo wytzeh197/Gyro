@@ -1,8 +1,7 @@
+import { Folder, FolderPlus } from "./workspace-folder-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
-  Folder,
-  FolderPlus,
   MessageCircle,
   Pin,
   Settings,

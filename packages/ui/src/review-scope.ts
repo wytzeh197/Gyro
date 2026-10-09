@@ -1,4 +1,9 @@
-import type { SourceControlFile, SourceControlState } from "./types.ts";
+import type {
+  SessionEvent,
+  SourceControlFile,
+  SourceControlState,
+} from "./types.ts";
+import { latestFileReviewTurn, turnReviewPatches } from "./file-review.ts";
 import {
   sourceControlTotals,
   type SourceControlTotals,
@@ -31,6 +36,23 @@ export type ReviewScopeListing = {
   files: ReviewFile[];
   limitation?: string;
 };
+
+/** Reopening a chat's Review uses its recorded files, never another chat's repo edits. */
+export function defaultChatReview(
+  events: SessionEvent[],
+  hasProposedFiles: boolean,
+): { scope: ReviewScope; turnFiles?: ReviewFile[] } {
+  const turn = hasProposedFiles ? undefined : latestFileReviewTurn(events);
+  if (!turn) return { scope: { kind: "proposed" } };
+  const turnEvents = events.filter((event) => event.turnId === turn.turnId);
+  return {
+    scope: { kind: "turn", turnId: turn.turnId },
+    turnFiles: turn.files.map((file) => ({
+      ...file,
+      patches: turnReviewPatches(turnEvents, file.path),
+    })),
+  };
+}
 
 export function reviewScopeFromTotals(
   totals: SourceControlTotals,

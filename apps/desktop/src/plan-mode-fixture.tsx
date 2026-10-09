@@ -290,7 +290,10 @@ function Fixture() {
   );
 }
 
-document.documentElement.dataset.theme = "dark";
+document.documentElement.dataset.theme =
+  new URLSearchParams(location.search).get("theme") === "light"
+    ? "light"
+    : "dark";
 if (import.meta.env.DEV) {
   createRoot(document.getElementById("root")!).render(<Fixture />);
 }

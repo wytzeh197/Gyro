@@ -1,0 +1,221 @@
+/* Small shared details: preserve surface geometry and use the existing theme,
+   density, scale, and semantic colors throughout. */
+:root[data-theme]
+  :is(
+    .gyro-sidebar-shortcut,
+    .gyro-settings-key,
+    .gyro-account-menu-row kbd,
+    .gyro-command-palette kbd,
+    .gyro-global-search-footer kbd,
+    .gyro-slash-command-list kbd
+  ) {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-xs);
+  box-shadow: inset 0 -1px 0
+    color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Give short action menus one icon gutter; long labels stay on one line. */
+:root[data-theme] .gyro-session-menu {
+  box-sizing: border-box;
+  left: 0;
+  right: auto;
+  width: min(212px, calc(188px * var(--gyro-ui-scale, 1)));
+  max-width: min(calc(100vw - 24px), 100%);
+  border-radius: var(--gyro-radius-lg);
+}
+:root[data-theme] .gyro-session-menu > button {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  padding-inline: 6px;
+  white-space: nowrap;
+}
+:root[data-theme]
+  :is(
+    .gyro-session-menu,
+    .gyro-editor-action-menu,
+    .gyro-terminal-actions-menu,
+    .gyro-scm-file-actions-menu,
+    .gyro-explorer-context-menu,
+    .gyro-sidebar-new-session-menu
+  )
+  > button {
+  font-weight: 400;
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  :is(
+    .gyro-session-menu,
+    .gyro-editor-action-menu,
+    .gyro-terminal-actions-menu,
+    .gyro-scm-file-actions-menu,
+    .gyro-explorer-context-menu,
+    .gyro-sidebar-new-session-menu
+  )
+  > button
+  > svg {
+  flex: none;
+  color: var(--gyro-muted);
+  stroke-width: 1.75;
+}
+:root[data-theme]
+  :is(
+    .gyro-session-menu,
+    .gyro-editor-action-menu,
+    .gyro-terminal-actions-menu,
+    .gyro-scm-file-actions-menu,
+    .gyro-explorer-context-menu,
+    .gyro-sidebar-new-session-menu
+  )
+  > button:not(:disabled):is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+:root[data-theme]
+  :is(
+    .gyro-session-menu,
+    .gyro-editor-action-menu,
+    .gyro-terminal-actions-menu,
+    .gyro-scm-file-actions-menu,
+    .gyro-explorer-context-menu,
+    .gyro-sidebar-new-session-menu
+  )
+  > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme]
+  :is(
+    .gyro-session-menu,
+    .gyro-editor-action-menu,
+    .gyro-terminal-actions-menu,
+    .gyro-scm-file-actions-menu,
+    .gyro-explorer-context-menu
+  )
+  > button.is-danger
+  > svg {
+  color: var(--gyro-danger);
+}
+
+/* Utility icons have the same optical weight without altering brand marks. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading:has(.gyro-sidebar-explorer-toolbar) {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: calc(var(--gyro-space-compact) / 2);
+  row-gap: 0;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading:has(.gyro-sidebar-explorer-toolbar)
+  > .gyro-nav-label {
+  flex: 1 0 auto;
+  padding-inline: 0;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading
+  .gyro-sidebar-explorer-toolbar {
+  flex: none;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-left: auto;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading
+  .gyro-sidebar-explorer-toolbar
+  button {
+  flex: none;
+  width: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
+  height: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  :is(
+    .gyro-sidebar-explorer-toolbar,
+    .gyro-change-summary-actions,
+    .gyro-settings-control-column
+  )
+  button
+  > svg {
+  flex: none;
+  stroke-width: 1.75;
+}
+:root[data-theme]
+  :is(
+    .gyro-session-action,
+    .gyro-sidebar-explorer-toolbar button,
+    .gyro-change-summary-actions > button
+  ):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Identity is shared with Explorer; de-emphasize directories, not filenames. */
+:root[data-theme] .gyro-file-identity {
+  color: var(--gyro-file-tone, var(--gyro-file-default));
+  flex: none;
+}
+:root[data-theme] .gyro-change-file-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+}
+.gyro-change-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-change-file-directory {
+  color: var(--gyro-muted);
+}
+
+/* A clear rim and thumb keep on/off states crisp at every interface size. */
+:root[data-theme] .gyro-settings-switch {
+  border-color: var(--gyro-border-strong);
+}
+:root[data-theme] .gyro-settings-switch > span {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 40%, transparent);
+}
+:root[data-theme] .gyro-settings-switch.is-on {
+  border-color: color-mix(in srgb, var(--gyro-accent) 80%, var(--gyro-text));
+}
+:root[data-theme] .gyro-settings-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:root[data-theme] .gyro-settings-select-field:has(select:disabled) > svg {
+  opacity: 0.45;
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-select:not(:disabled):hover {
+  border-color: var(--gyro-border-strong);
+}
+:root[data-theme] .gyro-copy-value:not(:disabled):hover {
+  color: var(--gyro-text);
+}
+
+/* Counts should keep a stable rhythm as work updates. */
+:root[data-theme]
+  :is(
+    .gyro-session-time,
+    .gyro-workspace-search-count,
+    .gyro-scm-count,
+    .gyro-change-summary-files small,
+    .gyro-review-tree-directory small,
+    .gyro-settings-status,
+    .gyro-chat-environment-popover strong
+  ) {
+  font-variant-numeric: tabular-nums;
+}

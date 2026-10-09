@@ -11,6 +11,7 @@
   overflow: visible;
 }
 .gyro-effort-slider-header {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -32,7 +33,7 @@
   gap: 1.9px;
   min-width: 0;
 }
-.gyro-effort-slider-header .gyro-effort-value-button {
+.gyro-effort-slider-header .gyro-effort-value {
   display: flex;
   align-items: center;
   gap: 2.85px;
@@ -42,18 +43,52 @@
   line-height: calc(20.9px * var(--gyro-ui-scale, 1));
   border-radius: 3.8px;
 }
-.gyro-effort-value-button svg {
-  color: var(--gyro-muted);
-}
 .gyro-effort-slider-header .gyro-effort-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.85px;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--gyro-font-support);
   line-height: calc(19px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
   border-radius: 3.8px;
+}
+.gyro-effort-model-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-effort-model-button svg {
+  flex: none;
+}
+.gyro-effort-slider-popover[data-fast-mode-supported="true"]
+  .gyro-effort-slider-header {
+  padding-inline: 32px;
+}
+.gyro-effort-slider-header .gyro-effort-fast-button {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: grid;
+  place-items: center;
+  width: var(--gyro-control-standard);
+  height: var(--gyro-control-standard);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+.gyro-effort-slider-header .gyro-effort-fast-button:hover {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border);
+}
+.gyro-effort-slider-header .gyro-effort-fast-button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-accent) 32%, transparent);
+  color: var(--gyro-accent);
 }
 .gyro-effort-slider-header button:hover {
   color: var(--gyro-text);
@@ -71,18 +106,29 @@
   position: absolute;
   inset: 1.9px 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--gyro-text) 12%, var(--gyro-surface));
+  background: color-mix(in srgb, var(--gyro-text) 10%, var(--gyro-surface));
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-text) 7%, transparent);
+    color-mix(in srgb, var(--gyro-text) 6%, transparent);
   overflow: hidden;
 }
 .gyro-effort-slider-fill {
   height: 100%;
   width: calc(
-    var(--effort-thumb-size) + (100% - var(--effort-thumb-size)) *
+    var(--effort-thumb-size) / 2 + (100% - var(--effort-thumb-size)) *
       var(--effort-progress)
   );
-  background: var(--gyro-accent);
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--gyro-accent) 88%, var(--gyro-surface)) 0%,
+    var(--gyro-accent) 58%,
+    color-mix(in srgb, var(--gyro-accent) 82%, var(--gyro-effort-thumb-ink))
+      100%
+  );
+  box-shadow:
+    inset 0 1px 0
+      color-mix(in srgb, var(--gyro-effort-thumb-ink) 22%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--gyro-surface) 14%, transparent);
 }
 .gyro-effort-slider-stops {
   position: absolute;
@@ -93,16 +139,16 @@
   pointer-events: none;
 }
 .gyro-effort-slider-stops span {
-  width: 4.75px;
-  height: 4.75px;
-  margin: 0 -2.375px;
+  width: 3.8px;
+  height: 3.8px;
+  margin: 0 -1.9px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
 }
 .gyro-effort-slider-stops .is-filled {
-  background: #8fbbff;
+  background: color-mix(in srgb, var(--gyro-effort-thumb-ink) 62%, transparent);
 }
-.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value-button {
+.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value {
   color: var(--gyro-effort-max);
 }
 .gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
@@ -183,13 +229,90 @@
   cursor: default;
 }
 
+/* Two direct actions share the existing quiet chip instead of introducing
+   another toolbar chip or an extra model-picker step. */
+:root[data-theme] .gyro-composer-control-model > .gyro-model-chip {
+  padding-block: 0;
+  gap: 0;
+}
+:root[data-theme]
+  .gyro-model-chip
+  :is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  gap: 5px;
+  padding: 0 3px;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+:root[data-theme] .gyro-model-chip .gyro-composer-model-trigger {
+  flex: 1 1 auto;
+}
+:root[data-theme]
+  .gyro-model-chip
+  .gyro-composer-model-trigger
+  > .gyro-composer-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root[data-theme] .gyro-model-chip .gyro-composer-model-trigger > svg {
+  flex: none;
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root[data-theme]
+  .gyro-model-chip
+  .gyro-composer-model-trigger[aria-expanded="true"]
+  > svg {
+  transform: rotate(180deg);
+}
+:root[data-theme] .gyro-model-chip .gyro-composer-effort-trigger {
+  flex: 0 0 auto;
+  padding-left: 6px;
+}
+:root[data-theme]
+  .gyro-model-chip
+  :is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger):hover,
+:root[data-theme]
+  .gyro-model-chip
+  :is(
+    .gyro-composer-model-trigger,
+    .gyro-composer-effort-trigger
+  )[aria-expanded="true"] {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme]
+  .gyro-model-chip
+  :is(
+    .gyro-composer-model-trigger,
+    .gyro-composer-effort-trigger
+  ):focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 1px;
+}
+.gyro-composer-effort-compact {
+  display: none;
+}
+@container (max-width: 470px) {
+  .gyro-model-chip .gyro-composer-effort-compact {
+    display: block;
+  }
+  .gyro-model-chip .gyro-composer-effort-trigger > .gyro-model-chip-effort {
+    display: none;
+  }
+}
+
 .gyro-effort-icon-button svg {
   width: 16.15px;
   height: 16.15px;
-}
-.gyro-effort-value-button svg {
-  width: 15.2px;
-  height: 15.2px;
 }
 
 /* Position and fill share one progress value and timing. Pointer motion is immediate. */
@@ -202,10 +325,12 @@
   width: var(--effort-thumb-size);
   height: var(--effort-thumb-size);
   box-sizing: border-box;
-  border: 1px solid var(--gyro-border-strong);
+  border: 1px solid color-mix(in srgb, var(--gyro-text) 18%, transparent);
   border-radius: 50%;
   background: var(--gyro-effort-thumb-ink);
-  box-shadow: var(--gyro-premium-shadow-soft);
+  box-shadow:
+    0 1px 3px var(--gyro-premium-shadow-soft),
+    0 0 0 0.5px color-mix(in srgb, var(--gyro-surface) 12%, transparent);
   pointer-events: none;
   transition: inset-inline-start var(--gyro-premium-motion)
     var(--gyro-premium-ease);
@@ -216,7 +341,7 @@
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 .gyro-effort-slider-stops span,
-.gyro-effort-value-button {
+.gyro-effort-value {
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);

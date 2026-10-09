@@ -45,7 +45,7 @@ html[data-theme="light"] .gyro-root-error {
   color: #ededed;
   display: grid;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -89,9 +89,10 @@ html[data-theme="light"] .gyro-early-shell-brand {
 .gyro-early-shell-nav span {
   border-radius: 4px;
   color: #b5b5b5;
-  font-size: 14px;
-  font-weight: 450;
-  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 400;
+  min-height: 30px;
+  padding: 6px 8px;
 }
 
 .gyro-early-shell-nav span.is-active {
@@ -153,13 +154,13 @@ html[data-theme="light"] .gyro-early-shell-composer-row {
   display: grid;
   gap: 22px;
   justify-items: center;
-  max-width: 800px;
-  width: min(100%, 800px);
+  max-width: 720px;
+  width: min(100%, 720px);
 }
 
 .gyro-early-shell-hero h1 {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(20px, 2vw, 24px);
+  font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.03em;
   margin: 0;
@@ -167,10 +168,10 @@ html[data-theme="light"] .gyro-early-shell-composer-row {
 }
 
 .gyro-early-shell-composer {
-  background: #262626;
+  background: #242424;
   border: 1px solid #383838;
-  border-radius: 22px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+  border-radius: 18px;
+  box-shadow: none;
   display: grid;
   gap: 12px;
   padding: 14px 14px 12px;
@@ -180,7 +181,7 @@ html[data-theme="light"] .gyro-early-shell-composer-row {
 html[data-theme="light"] .gyro-early-shell-composer {
   background: #fff;
   border-color: #dedede;
-  box-shadow: 0 14px 34px rgb(24 24 24 / 8%);
+  box-shadow: none;
 }
 
 .gyro-early-shell-input {
@@ -235,6 +236,18 @@ html[data-theme="light"] .gyro-embedded-boundary {
 }
 html[data-theme="light"] .gyro-embedded-boundary h1 {
   color: #222;
+}
+
+@media (max-width: 1280px) {
+  .gyro-early-shell {
+    grid-template-columns: 224px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .gyro-early-shell {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 780px) {

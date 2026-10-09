@@ -79,7 +79,13 @@ for (const framed of [false, true]) {
       if (name === "react-dom/client")
         return { createRoot: () => ({ render: (node) => renders.push(node) }) };
       if (name === "./surface-boundary") return { resolveBootSurface };
-      if (name === "./early-shell" || name.endsWith(".css")) return {};
+      // Both are small boot-only components, with no workbench subscriptions.
+      if (
+        name === "./early-shell" ||
+        name === "./app-failure" ||
+        name.endsWith(".css")
+      )
+        return {};
       throw new Error(`Embedded workbench imported ${name}`);
     },
   });

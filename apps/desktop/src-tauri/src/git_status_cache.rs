@@ -124,6 +124,7 @@ pub(super) fn git_status_read_failure(
 ) -> SourceControlStatus {
     let unavailable = |error: String| SourceControlStatus {
         provider: "git".into(),
+        workspace_path: None,
         available: false,
         branch: None,
         upstream: None,
@@ -137,6 +138,7 @@ pub(super) fn git_status_read_failure(
         additions: 0,
         deletions: 0,
         stats_partial: false,
+        details_loaded: false,
         compared_to_main: None,
         files: Vec::new(),
         history: Vec::new(),
@@ -179,6 +181,17 @@ pub(super) fn inspect_git_status(
 }
 
 pub(super) fn inspect_git_status_before(
+    workspace_path: &str,
+    detailed: bool,
+    deadline: Instant,
+) -> anyhow::Result<SourceControlStatus> {
+    let mut status = inspect_git_status_before_inner(workspace_path, detailed, deadline)?;
+    // Rebind cached/fallback snapshots to this request, including path aliases.
+    status.workspace_path = Some(workspace_path.to_string());
+    Ok(status)
+}
+
+fn inspect_git_status_before_inner(
     workspace_path: &str,
     detailed: bool,
     deadline: Instant,
@@ -247,6 +260,7 @@ pub(super) fn inspect_git_status_before(
             return Ok(cached);
         }
         apply_git_diff_stats(&root, &mut status, deadline);
+        status.details_loaded = true;
         match source_control_review::history(&repo_root, deadline) {
             Ok(history) => status.history = history,
             Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
@@ -268,6 +282,7 @@ pub(super) fn inspect_git_status_before(
     }
     status.repo_root = Some(repo_root.display().to_string());
     status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+    status.stats_partial = true;
     // Kept as the answer for a detailed read that cannot finish, but stored
     // without a stamp so it is never served as a cached detailed snapshot.
     store_git_status(root, String::new(), status.clone());
@@ -297,6 +312,7 @@ fn relativize_git_status_paths(files: &mut Vec<SourceControlFile>, prefix: &str)
 pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
     let mut status = SourceControlStatus {
         provider: "git".into(),
+        workspace_path: None,
         available: true,
         branch: None,
         upstream: None,
@@ -310,6 +326,7 @@ pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         additions: 0,
         deletions: 0,
         stats_partial: false,
+        details_loaded: false,
         compared_to_main: None,
         files: Vec::new(),
         history: Vec::new(),
@@ -744,6 +761,40 @@ mod tests {
     }
 
     #[test]
+    fn git_preparation_preserves_files_without_claiming_unmeasured_details() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        init_git_repo(root);
+        fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "base"]);
+        fs::write(root.join("tracked.txt"), "one\ntwo\n").unwrap();
+        let path = root.to_str().unwrap();
+
+        let preparation = git_status_for_preparation(path).unwrap();
+        assert!(preparation.available);
+        assert_eq!(file(&preparation, "tracked.txt").state, "modified");
+        assert!(!preparation.details_loaded);
+        assert!(preparation.stats_partial);
+        assert_eq!(serde_json::to_value(&preparation).unwrap()["detailsLoaded"], false);
+
+        let detailed = git_status_impl(path).unwrap();
+        assert!(detailed.details_loaded);
+        assert!(!detailed.stats_partial);
+        assert_eq!(detailed.additions, 1);
+        assert_eq!(detailed.history.len(), 1);
+        let cached = git_status_impl(path).unwrap();
+        assert!(cached.details_loaded);
+        assert_eq!(cached.history.len(), 1);
+
+        let preparation = git_status_for_preparation(path).unwrap();
+        assert!(!preparation.details_loaded);
+        let retained = last_git_status(&root.canonicalize().unwrap()).unwrap();
+        assert!(retained.details_loaded, "cheap reads cannot replace detailed cache");
+        assert_eq!(retained.history.len(), 1);
+    }
+
+    #[test]
     fn git_status_keeps_spaced_renamed_unicode_and_conflicted_paths_whole() {
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
@@ -798,6 +849,11 @@ mod tests {
         let workspace_path = workspace.to_str().unwrap().to_string();
 
         let status = git_status_impl(&workspace_path).unwrap();
+        assert_eq!(status.workspace_path.as_deref(), Some(workspace_path.as_str()));
+        assert_eq!(
+            serde_json::to_value(&status).unwrap()["workspacePath"],
+            workspace_path
+        );
         assert_eq!(
             status.repo_root.as_deref(),
             root.canonicalize().unwrap().to_str()
