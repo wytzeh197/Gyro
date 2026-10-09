@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
 import type {
   InterfaceSize,
   MotionSpeed,
@@ -43,7 +43,10 @@ export function AppearanceSettings({
 }: AppearanceSettingsProps) {
   return (
     <>
-      <SettingsGroup label="Theme">
+      <SettingsGroup
+        label="Theme"
+        description="Choose a look for your workspace."
+      >
         <div
           className="gyro-theme-picker"
           data-setting-key="theme"
@@ -56,20 +59,26 @@ export function AppearanceSettings({
               {
                 mode: "system",
                 label: "System",
+                detail: "Match your Mac",
               },
-              { mode: "light", label: "Light" },
-              { mode: "dark", label: "Dark" },
+              { mode: "light", label: "Light", detail: "Always light" },
+              { mode: "dark", label: "Dark", detail: "Always dark" },
             ] as const
-          ).map(({ mode, label }) => (
+          ).map(({ mode, label, detail }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
+              aria-label={`${label} theme`}
               className={`is-${mode}${themeMode === mode ? " is-active" : ""}`}
               onClick={() => onThemeChange(mode)}
               type="button"
             >
               <ThemePreview mode={mode} />
-              <span>{label}</span>
+              <span className="gyro-theme-option-label">
+                {label}
+                <Check aria-hidden="true" size={13} />
+              </span>
+              <small>{detail}</small>
             </button>
           ))}
         </div>
@@ -124,7 +133,10 @@ export function AppearanceSettings({
           />
         </SettingsRow>
       </SettingsGroup>
-      <SettingsGroup label="Colors">
+      <SettingsGroup
+        label="Colors"
+        description="Personalize accents across Gyro. Changes appear immediately."
+      >
         <SettingsRow
           label="Main color"
           detail="Selection, focus, and primary action color."

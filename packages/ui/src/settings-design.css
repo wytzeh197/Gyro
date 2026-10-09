@@ -13,8 +13,8 @@
   --gyro-settings-row-height: calc(76px * var(--gyro-ui-scale, 1));
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-content {
-  width: min(100%, 680px);
-  max-width: 680px;
+  width: min(100%, 720px);
+  max-width: 720px;
 }
 :root[data-theme]
   .gyro-settings-surface
@@ -35,7 +35,7 @@
   > header
   h1 {
   margin: 0;
-  font-size: calc(21px * var(--gyro-ui-scale, 1));
+  font-size: calc(24px * var(--gyro-ui-scale, 1));
   line-height: 1.3;
   font-weight: 600;
   letter-spacing: -0.025em;
@@ -63,10 +63,24 @@
   gap: 10px;
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-group > h2 {
-  padding: 0 8px;
+  padding: 0;
+  color: var(--gyro-text);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-eyebrow {
+  margin: 0 0 8px;
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-group-description {
+  margin: -5px 0 2px;
   color: var(--gyro-muted);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
+  line-height: 1.5;
 }
 :root[data-theme]
   .gyro-settings-surface
@@ -324,7 +338,7 @@
 }
 .gyro-theme-preview {
   display: flex;
-  aspect-ratio: 1.6;
+  aspect-ratio: 2.1;
   min-width: 0;
   border: 2px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-lg);
@@ -339,7 +353,7 @@
   flex: 1;
   min-width: 0;
   background: var(--preview-canvas);
-  padding: 10px;
+  padding: 8px;
 }
 .gyro-theme-preview-workspace.is-dark {
   --preview-canvas: var(--gyro-theme-preview-dark-canvas);
@@ -350,9 +364,9 @@
   width: 28%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   border-right: 1px solid var(--preview-content);
-  padding: 9px 8px 0 0;
+  padding: 6px 6px 0 0;
 }
 .gyro-theme-preview i {
   display: block;
@@ -370,13 +384,13 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
-  padding: 10px 0 0 10px;
+  padding: 6px 0 0 8px;
 }
 .gyro-theme-preview-lines {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 .gyro-theme-preview-lines i:nth-child(2) {
   width: 80%;
@@ -386,7 +400,7 @@
 }
 .gyro-theme-preview-composer {
   display: grid;
-  gap: 12px;
+  gap: 5px;
   border: 1px solid var(--preview-content);
   background: color-mix(
     in srgb,
@@ -394,7 +408,7 @@
     var(--preview-canvas)
   );
   border-radius: 6px;
-  padding: 10px;
+  padding: 6px;
 }
 .gyro-theme-preview-composer i:first-child {
   width: 65%;
@@ -439,10 +453,39 @@
   .gyro-theme-picker
   button.is-active
   > .gyro-theme-preview {
-  border-color: var(--gyro-text);
+  border-color: var(--gyro-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gyro-accent) 12%, transparent);
 }
 :root[data-theme] .gyro-settings-surface .gyro-theme-picker button > span {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+:root[data-theme] .gyro-settings-surface .gyro-theme-picker button {
+  gap: 6px;
+}
+:root[data-theme] .gyro-settings-surface .gyro-theme-option-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 2px;
+  font-weight: 500;
+}
+:root[data-theme] .gyro-settings-surface .gyro-theme-option-label > svg {
+  visibility: hidden;
+  color: var(--gyro-accent);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .is-active
+  > .gyro-theme-option-label
+  > svg {
+  visibility: visible;
+}
+:root[data-theme] .gyro-settings-surface .gyro-theme-picker button > small {
+  margin: 0;
+  padding-inline: 2px;
+  text-align: left;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  line-height: 1.4;
 }
 :root[data-theme] .gyro-settings-surface .gyro-provider-default-label {
   display: block;
@@ -468,6 +511,7 @@
     .gyro-settings-surface
     :is(
       .gyro-settings-row:has(.gyro-settings-select-field),
+      .gyro-settings-row:has(.gyro-settings-segmented),
       .gyro-workspace-settings-list > label
     ) {
     grid-template-columns: minmax(0, 1fr);
@@ -475,7 +519,10 @@
   }
   :root[data-theme]
     .gyro-settings-surface
-    .gyro-settings-row:has(.gyro-settings-select-field)
+    .gyro-settings-row:is(
+      :has(.gyro-settings-select-field),
+      :has(.gyro-settings-segmented)
+    )
     > .gyro-settings-control-column {
     justify-content: flex-start;
   }

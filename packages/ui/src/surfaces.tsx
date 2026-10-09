@@ -16,10 +16,13 @@ import {
 import { AppearanceSettings } from "./appearance-settings";
 import { ProjectImportSettings, type ProjectImportSettingsProps } from "./project-import-settings";
 import { SettingsSection, SettingsStatus, UsageCard, budgetOptions, formatUsageReset, usagePauseDetail } from "./settings-presentation";
+import { providerAllowance } from "./provider-allowance";
+import "./provider-allowance.css";
 import { SettingsSegmented } from "./settings-controls";
 import { SelectionTrack } from "./selection-track";
 import { useDialogDismiss } from "./use-dialog-dismiss";
 import "./scheduled-work.css";
+import "./automation-detail.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
 import { AutomationChoice } from "./automation-choice.tsx";
 import {
@@ -16445,7 +16448,7 @@ export function ToolsSurface({
             </span>
             <span className="gyro-tools-card-copy">
               <strong>Providers</strong>
-              <small>Configure models, auth, and handoffs.</small>
+              <small>Manage connected accounts and models.</small>
             </span>
             <span className="gyro-tools-card-meta">
               {connectedProviderCount} connected
@@ -17224,14 +17227,38 @@ function AutomationDetail({
       ),
   );
   const canRun = automation.status === "current" && !running;
+  const latestRun = history[0];
+  const nextRun = automation.nextRunAt
+    ? automationDateLabel(
+        automation.nextRunAt,
+        automation.execution?.calendar?.timezone,
+      )
+    : automation.status === "paused"
+      ? "Paused"
+      : automation.status === "completed"
+        ? "Completed"
+        : "Not scheduled";
+  const statusLabel = running
+    ? "Running"
+    : automation.status === "current"
+      ? "Active"
+      : automation.status === "paused"
+        ? "Paused"
+        : "Completed";
   return (
-    <section className="gyro-automation-detail">
+    <section className="gyro-automation-detail is-result-layout">
       <header>
-        <div>
-          <strong>{automation.title}</strong>
-          <span>
-            {automation.project} · {automation.provider}
-          </span>
+        <div className="gyro-automation-heading">
+          <div className="gyro-automation-title-row">
+            <h2>{automation.title}</h2>
+            <span
+              className={`gyro-automation-state is-${running ? "running" : automation.status}`}
+            >
+              <Circle size={7} fill="currentColor" aria-hidden="true" />
+              {statusLabel}
+            </span>
+          </div>
+          <p>{automation.project}</p>
         </div>
         <div className="gyro-board-actions">
           <button
@@ -17267,114 +17294,189 @@ function AutomationDetail({
             type="button"
           >
             <Play size={15} />
-            {running ? "Running" : "Run"}
+            {running ? "Running" : "Run now"}
           </button>
         </div>
       </header>
 
-      <div className="gyro-automation-detail-grid">
-        <AutomationFact
-          label="Schedule"
-          value={automationScheduleLabel(automation)}
-        />
-        <AutomationFact
-          label="Next run"
-          value={
-            automation.nextRunAt
-              ? relativeFutureTime(automation.nextRunAt)
-              : automation.status === "paused"
-                ? "Paused"
-                : automation.status === "completed"
-                  ? "Completed"
-                  : "Not scheduled"
-          }
-        />
-        <AutomationFact label="Branch" value={automation.branch} />
-        <AutomationFact
-          label="Workspace"
-          value={
-            automation.worktreeName ??
-            automation.execution?.workspacePath ??
-            automation.workspaceMode
-          }
-        />
-        <AutomationFact
-          label="Model"
-          value={
-            automation.execution?.modelLabel ??
-            automation.execution?.modelId ??
-            "Provider default"
-          }
-        />
-        <AutomationFact
-          label="Lease"
-          value={
-            automation.leaseOwner
-              ? `${automation.leaseOwner} · ${
-                  automation.leaseExpiresAt
-                    ? relativeFutureTime(automation.leaseExpiresAt)
-                    : "active"
-                }`
-              : "available"
-          }
-        />
-      </div>
-
-      <div className="gyro-automation-prompt">
-        <span>Prompt</span>
-        <p>{automation.prompt}</p>
-      </div>
-
-      <div className="gyro-automation-stop">
-        <Check size={15} />
-        <span>{automation.stopCondition ?? "No automatic stop condition"}</span>
-      </div>
-
-      <div className="gyro-automation-result">
-        <div>
-          <strong>Latest result</strong>
-          <span>{automation.lastResult}</span>
-        </div>
-        <button
-          className="gyro-secondary-button"
-          disabled={automation.triageState !== "needs-review"}
-          onClick={onArchive}
-          type="button"
-        >
-          <Archive size={15} />
-          Archive
-        </button>
-      </div>
-
-      <div className="gyro-automation-history">
-        <strong>Run history</strong>
-        <p>Execution requires Gyro to remain running.</p>
-        {history.length === 0 ? (
-          <div className="gyro-empty-row">No runs recorded yet</div>
-        ) : null}
-        {history.map((run) => (
-          <div className="gyro-automation-run" key={run.id}>
-            <span className={`is-${run.status}`}>{run.status}</span>
-            <strong>{run.summary}</strong>
-            {run.sessionId ? (
-              <button
-                type="button"
-                className="gyro-secondary-button"
-                onClick={() => onOpenSession?.(run.sessionId!)}
-              >
-                Open chat
-              </button>
-            ) : null}
-            <small>
-              {run.stopConditionMet === true
-                ? "Stop condition met · "
-                : run.stopConditionMet === false
-                  ? "Condition not met · "
-                  : ""}
-              {relativeSessionTime(run.startedAt)}
-            </small>
+      <div className="gyro-automation-detail-body">
+        <div className="gyro-automation-activity">
+          <div className="gyro-automation-schedule-line">
+            <CalendarClock size={17} aria-hidden="true" />
+            <div>
+              <p>{automationScheduleLabel(automation)}</p>
+              <span>Next run · {nextRun}</span>
+            </div>
           </div>
-        ))}
+
+          <section
+            className="gyro-automation-latest"
+            aria-label="Latest result"
+          >
+            <h3>Latest result</h3>
+            <div className="gyro-automation-latest-copy">
+              {latestRun ? (
+                <AutomationRunMark status={latestRun.status} />
+              ) : (
+                <Clock size={18} aria-hidden="true" />
+              )}
+              <div>
+                <p>{automation.lastResult || "No result yet"}</p>
+                {latestRun ? (
+                  <time
+                    dateTime={latestRun.startedAt}
+                    title={automationDateLabel(
+                      latestRun.startedAt,
+                      automation.execution?.calendar?.timezone,
+                    )}
+                  >
+                    {automationRunLabel(latestRun.status)} ·{" "}
+                    {relativeSessionTime(latestRun.startedAt)}
+                  </time>
+                ) : null}
+              </div>
+            </div>
+            <div className="gyro-automation-result-actions">
+              {latestRun?.sessionId && onOpenSession ? (
+                <button
+                  className="gyro-automation-text-action is-primary"
+                  type="button"
+                  onClick={() => onOpenSession(latestRun.sessionId!)}
+                >
+                  <MessageSquare size={15} aria-hidden="true" />
+                  Open chat
+                </button>
+              ) : null}
+              <button
+                className="gyro-automation-text-action"
+                disabled={automation.triageState !== "needs-review"}
+                onClick={onArchive}
+                type="button"
+              >
+                <Archive size={15} aria-hidden="true" />
+                Archive
+              </button>
+            </div>
+          </section>
+
+          <section
+            className="gyro-automation-run-list"
+            aria-label="Run history"
+          >
+            <h3>Run history</h3>
+            {history.length === 0 ? (
+              <p className="gyro-automation-no-runs">No runs recorded yet</p>
+            ) : null}
+            <ul>
+              {history.map((run) => (
+                <li className="gyro-automation-run-entry" key={run.id}>
+                  <AutomationRunMark status={run.status} />
+                  <div className="gyro-automation-run-copy">
+                    <p>{run.summary}</p>
+                    <small>
+                      {automationRunLabel(run.status)}
+                      {run.stopConditionMet === true
+                        ? " · Stop condition met"
+                        : run.stopConditionMet === false
+                          ? " · Condition not met"
+                          : ""}
+                    </small>
+                  </div>
+                  <time
+                    dateTime={run.startedAt}
+                    title={automationDateLabel(
+                      run.startedAt,
+                      automation.execution?.calendar?.timezone,
+                    )}
+                  >
+                    {relativeSessionTime(run.startedAt)}
+                  </time>
+                  {run.sessionId && onOpenSession ? (
+                    <button
+                      type="button"
+                      className="gyro-icon-button is-subtle gyro-automation-open-run"
+                      aria-label={`Open chat for ${automationRunLabel(run.status).toLowerCase()} run: ${run.summary}`}
+                      title="Open chat"
+                      onClick={() => onOpenSession(run.sessionId!)}
+                    >
+                      <ChevronRight size={16} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+
+        <aside
+          className="gyro-automation-inspector"
+          aria-label="Automation settings"
+        >
+          <section>
+            <h3>Automation</h3>
+            <dl className="gyro-automation-facts">
+              <AutomationFact label="Project" value={automation.project} />
+              <AutomationFact
+                label="Schedule"
+                value={automationScheduleLabel(automation)}
+              />
+              <AutomationFact label="Next run" value={nextRun} />
+              <AutomationFact label="Branch" value={automation.branch} />
+              <AutomationFact
+                label="Model"
+                value={
+                  automation.execution?.modelLabel ??
+                  automation.execution?.modelId ??
+                  "Provider default"
+                }
+              />
+            </dl>
+          </section>
+          <section className="gyro-automation-instructions">
+            <h3>Instructions</h3>
+            <p>{automation.prompt}</p>
+          </section>
+          <details className="gyro-automation-advanced" key={automation.id}>
+            <summary>
+              <ChevronRight size={14} aria-hidden="true" />
+              Advanced settings
+            </summary>
+            <dl className="gyro-automation-facts">
+              <AutomationFact
+                label="Workspace"
+                value={
+                  automation.execution?.workspacePath ??
+                  automation.worktreeName ??
+                  automation.workspaceMode
+                }
+              />
+              <AutomationFact
+                label="Run mode"
+                value={
+                  automation.workspaceMode === "worktree" ? "Worktree" : "Local"
+                }
+              />
+              <AutomationFact label="Provider" value={automation.provider} />
+              <AutomationFact
+                label="Execution"
+                value={
+                  automation.leaseOwner
+                    ? `In use by ${automation.leaseOwner}${automation.leaseExpiresAt ? ` · ${relativeFutureTime(automation.leaseExpiresAt)}` : ""}`
+                    : "Available"
+                }
+              />
+              <AutomationFact
+                label="Stop condition"
+                value={
+                  automation.stopCondition ?? "No automatic stop condition"
+                }
+              />
+            </dl>
+          </details>
+          <p className="gyro-automation-execution-note">
+            Runs on this Mac while Gyro is open.
+          </p>
+        </aside>
       </div>
     </section>
   );
@@ -17382,11 +17484,67 @@ function AutomationDetail({
 
 function AutomationFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="gyro-automation-fact">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
+}
+
+function automationRunLabel(
+  status: Automation["runHistory"][number]["status"],
+) {
+  return {
+    queued: "Queued",
+    running: "Running",
+    passed: "Passed",
+    failed: "Failed",
+    stopped: "Stopped",
+  }[status];
+}
+
+function AutomationRunMark({
+  status,
+}: {
+  status: Automation["runHistory"][number]["status"];
+}) {
+  const Icon =
+    status === "passed"
+      ? Check
+      : status === "failed"
+        ? XCircle
+        : status === "stopped"
+          ? Square
+          : status === "running"
+            ? CircleDashed
+            : Clock;
+  return (
+    <Icon
+      className={`gyro-automation-run-mark is-${status}`}
+      size={18}
+      aria-hidden="true"
+    />
+  );
+}
+
+function automationDateLabel(value: string, timezone?: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  const options: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  };
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      ...options,
+      timeZone: timezone,
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-US", options).format(date);
+  }
 }
 
 function relativeFutureTime(value: string) {
@@ -17406,408 +17564,6 @@ function relativeFutureTime(value: string) {
     return `in ${hours}h`;
   }
   return `in ${Math.round(hours / 24)}d`;
-}
-
-export function ProvidersSurface({
-  config,
-  providerStatuses,
-  providerSessions = [],
-  providerHandoffs = [],
-  onToggleProvider,
-  onTestProvider,
-  providerApiKeyConfigured,
-  savingProviderApiKeyId,
-  onSaveProviderApiKey,
-  onClearProviderApiKey,
-  onQueueProviderHandoff,
-  onAddCustomProfile,
-}: {
-  config: GyroConfig;
-  providerStatuses?: ProviderStatus[];
-  providerSessions?: ProviderSession[];
-  providerHandoffs?: ProviderHandoff[];
-  onToggleProvider?: (providerId: string) => void;
-  onTestProvider?: (providerId: string) => void;
-  providerApiKeyConfigured?: Partial<Record<string, boolean>>;
-  savingProviderApiKeyId?: string;
-  onSaveProviderApiKey?: (
-    providerId: string,
-    value: string,
-  ) => Promise<boolean>;
-  onClearProviderApiKey?: (providerId: string) => void;
-  onQueueProviderHandoff?: (request: {
-    fromProviderId: string;
-    toProviderId: string;
-    contextSummary: string;
-  }) => void;
-  onAddCustomProfile?: () => void;
-}) {
-  const providerConfigs = providersForConfig(config);
-  const commandProfiles = commandProfilesWithDefaults(config.commandProfiles);
-  const statuses =
-    providerStatuses && providerStatuses.length > 0
-      ? providerStatuses
-      : defaultProviderStatuses();
-  const [fromProviderId, setFromProviderId] = useState<string>(
-    providerConfigs[0]?.id ?? "openai",
-  );
-  const [toProviderId, setToProviderId] = useState<string>(
-    providerConfigs[1]?.id ?? providerConfigs[0]?.id ?? "anthropic",
-  );
-  const [handoffSummary, setHandoffSummary] = useState(
-    "Carry the current thread, workspace mode, branch, diff state, and terminal notes.",
-  );
-  const canQueueHandoff = Boolean(
-    fromProviderId &&
-    toProviderId &&
-    fromProviderId !== toProviderId &&
-    handoffSummary.trim(),
-  );
-  const enabledProviderCount = providerConfigs.filter(
-    (provider) => provider.authStatus === "connected",
-  ).length;
-
-  return (
-    <div className="gyro-providers-surface">
-      <header className="gyro-provider-hero gyro-surface-page-header">
-        <div className="gyro-surface-page-title">
-          <span className="gyro-surface-page-icon" aria-hidden="true">
-            <KeyRound size={18} />
-          </span>
-          <div>
-            <span className="gyro-surface-page-eyebrow">Agent stack</span>
-            <h1>Agents &amp; Providers</h1>
-            <p>
-              Gyro local access stays separate from provider CLI, SDK, and env
-              auth. Manage models without blurring local trust boundaries.
-            </p>
-          </div>
-        </div>
-        <span className="gyro-live-pill">{enabledProviderCount} connected</span>
-      </header>
-
-      <section className="gyro-provider-boundary" aria-label="Auth boundary">
-        <div>
-          <strong>Gyro local access</strong>
-          <span>
-            Device sessions, workspace access, app bridge state, and revocation
-            stay Gyro-owned.
-          </span>
-        </div>
-        <div>
-          <strong>Provider accounts</strong>
-          <span>
-            OpenAI, Anthropic, xAI, and Gemini credentials stay in official
-            CLIs, SDK stores, Keychain entries, or env vars.
-          </span>
-        </div>
-        <div>
-          <strong>Diagnostics</strong>
-          <span>
-            Provider event logs are sensitive and opt-in; health output is
-            redacted before it appears in Gyro.
-          </span>
-        </div>
-      </section>
-
-      <section className="gyro-provider-card-grid" aria-label="Providers">
-        {providerConfigs.map((provider) => (
-          <article className="gyro-provider-card" key={provider.id}>
-            {(() => {
-              const status = statuses.find((item) => item.id === provider.id);
-              return (
-                <>
-                  <div className="gyro-provider-card-head">
-                    <div className="gyro-provider-icon">
-                      <ProviderLogo
-                        label={provider.displayName}
-                        providerId={provider.id}
-                      />
-                    </div>
-                    <div>
-                      <strong>{provider.displayName}</strong>
-                      <span>
-                        {provider.authMode.toUpperCase()} ·{" "}
-                        {providerConnectionLabel(provider, status)} ·{" "}
-                        {status?.runtimeStatus ??
-                          status?.connectionStatus ??
-                          "unknown"}
-                      </span>
-                    </div>
-                    <span
-                      className={
-                        provider.authStatus === "connected"
-                          ? "gyro-provider-state is-enabled"
-                          : "gyro-provider-state"
-                      }
-                    >
-                      {provider.authStatus === "connected"
-                        ? "on"
-                        : provider.authStatus === "connecting"
-                          ? "connecting"
-                          : "off"}
-                    </span>
-                  </div>
-                  <div className="gyro-provider-card-body">
-                    <SettingsRow
-                      detail={providerAuthSummary(provider.id)}
-                      label="Auth"
-                      value={providerAuthOwnerLabel(
-                        status?.authOwner ?? status?.healthDetails?.authOwner,
-                      )}
-                    />
-                    <SettingsRow
-                      detail={providerCredentialSummary(
-                        status?.healthDetails?.secretStorage,
-                      )}
-                      label="Storage"
-                      value={provider.apiKeyRef}
-                    />
-                    <div className="gyro-provider-health">
-                      <span
-                        className={`is-${status?.connectionStatus ?? "not-configured"}`}
-                      />
-                      <div aria-live="polite">
-                        <strong>Health</strong>
-                        <small>
-                          {status?.healthSummary ??
-                            (provider.authStatus === "connected"
-                              ? providerConnectedHealthCopy(provider)
-                              : "Connect before checking.")}
-                        </small>
-                      </div>
-                      <em>
-                        {status?.healthCheckedAt
-                          ? relativeSessionTime(status.healthCheckedAt)
-                          : (status?.connectionStatus ?? "not-configured")}
-                      </em>
-                    </div>
-                    <div className="gyro-provider-health-meta">
-                      <span>Runtime: {status?.runtimeStatus ?? "unknown"}</span>
-                      <span>
-                        Logs:{" "}
-                        {status?.healthDetails?.diagnosticsOptIn
-                          ? "opted in"
-                          : "off by default"}
-                      </span>
-                      {status?.healthDetails?.subscriptionLabel ? (
-                        <span>
-                          Plan: {status.healthDetails.subscriptionLabel}
-                        </span>
-                      ) : null}
-                      {status?.healthDetails?.providerMode ? (
-                        <span>Mode: {status.healthDetails.providerMode}</span>
-                      ) : null}
-                    </div>
-                    <div className="gyro-provider-actions">
-                      <button
-                        className="gyro-secondary-button"
-                        disabled={provider.authStatus === "connecting"}
-                        onClick={() => onToggleProvider?.(provider.id)}
-                        type="button"
-                      >
-                        {providerPrimaryActionLabel(provider)}
-                      </button>
-                      <button
-                        className="gyro-secondary-button"
-                        disabled={
-                          provider.authStatus === "connecting" ||
-                          status?.connectionStatus === "checking"
-                        }
-                        onClick={() => onTestProvider?.(provider.id)}
-                        type="button"
-                      >
-                        {status?.connectionStatus === "checking"
-                          ? "Checking…"
-                          : providerTestActionLabel(provider)}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-          </article>
-        ))}
-      </section>
-
-      <section className="gyro-provider-handoff-panel">
-        <header>
-          <div>
-            <strong>Provider sessions</strong>
-            <span>
-              Queue handoffs between local provider profiles without losing
-              thread context.
-            </span>
-          </div>
-          <span className="gyro-live-pill">
-            {providerSessions.length} local
-          </span>
-        </header>
-        <div className="gyro-provider-handoff-form">
-          <label>
-            <span>From</span>
-            <select
-              onChange={(event) => setFromProviderId(event.target.value)}
-              value={fromProviderId}
-            >
-              {providerConfigs.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>To</span>
-            <select
-              onChange={(event) => setToProviderId(event.target.value)}
-              value={toProviderId}
-            >
-              {providerConfigs.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="is-wide">
-            <span>Context</span>
-            <input
-              onChange={(event) => setHandoffSummary(event.target.value)}
-              value={handoffSummary}
-            />
-          </label>
-          <button
-            className="gyro-primary-button"
-            disabled={!canQueueHandoff}
-            onClick={() =>
-              onQueueProviderHandoff?.({
-                fromProviderId,
-                toProviderId,
-                contextSummary: handoffSummary.trim(),
-              })
-            }
-            type="button"
-          >
-            <ChevronRight size={15} />
-            Queue handoff
-          </button>
-        </div>
-        <div className="gyro-provider-handoff-grid">
-          <div>
-            <strong>Active sessions</strong>
-            <div className="gyro-provider-session-list">
-              {providerSessions.length === 0 ? (
-                <div className="gyro-empty-row">No provider sessions yet</div>
-              ) : null}
-              {providerSessions.slice(0, 4).map((session) => (
-                <div className="gyro-provider-session-row" key={session.id}>
-                  <span className={`is-${session.status}`}>
-                    {session.status}
-                  </span>
-                  <div>
-                    <strong>{session.displayName}</strong>
-                    <small>{session.sessionTitle}</small>
-                  </div>
-                  <em>{session.lastEvent}</em>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <strong>Recent handoffs</strong>
-            <div className="gyro-provider-session-list">
-              {providerHandoffs.length === 0 ? (
-                <div className="gyro-empty-row">No handoffs queued yet</div>
-              ) : null}
-              {providerHandoffs.slice(0, 4).map((handoff) => (
-                <div className="gyro-provider-session-row" key={handoff.id}>
-                  <span className={`is-${handoff.status}`}>
-                    {handoff.status}
-                  </span>
-                  <div>
-                    <strong>
-                      {handoff.fromLabel} to {handoff.toLabel}
-                    </strong>
-                    <small>{handoff.contextSummary}</small>
-                  </div>
-                  <em>{relativeSessionTime(handoff.createdAt)}</em>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="gyro-profile-mapping">
-        <header>
-          <div>
-            <strong>Command profile mapping</strong>
-            <span>
-              Name, command, args, working directory, env, and detection.
-            </span>
-          </div>
-          <button
-            className="gyro-secondary-button"
-            onClick={onAddCustomProfile}
-            type="button"
-          >
-            <Plus size={15} />
-            Add custom
-          </button>
-        </header>
-        <div className="gyro-profile-table">
-          <div className="gyro-profile-table-head">
-            <span>Name</span>
-            <span>Command</span>
-            <span>Directory</span>
-            <span>Detection</span>
-          </div>
-          {commandProfiles.map((profile) => (
-            <div className="gyro-profile-table-row" key={profile.id}>
-              <strong>{profile.displayName}</strong>
-              <code>
-                {profile.command} {profile.args.join(" ")}
-              </code>
-              <span>{profile.workingDirectory ?? "Workspace"}</span>
-              <span>waiting/done/failed</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="gyro-provider-policy">
-        <SettingsSection
-          description="Default tool and permission boundaries for agent sessions."
-          icon={ShieldCheck}
-          title="Approval policy"
-        >
-          <SettingsRow
-            detail="Command execution requests stay visible before they run."
-            label="Terminal commands"
-            value={config.requireCommandApproval ? "Ask" : "Allow"}
-          />
-          <SettingsRow
-            detail="Agent-generated changes route through diff review."
-            label="File edits"
-            value={config.requireFileEditApproval ? "Ask" : "Allow"}
-          />
-          <SettingsRow
-            detail="Shell, files, browser preview, tests, and git can be scoped."
-            label="Allowed tools"
-            value="Scoped"
-          />
-        </SettingsSection>
-      </section>
-      <ProviderApiKeySection
-        config={config}
-        providerApiKeyConfigured={providerApiKeyConfigured}
-        savingProviderApiKeyId={savingProviderApiKeyId}
-        onSaveProviderApiKey={onSaveProviderApiKey}
-        onClearProviderApiKey={onClearProviderApiKey}
-      />
-    </div>
-  );
 }
 
 export function DiffReviewSurface({
@@ -19894,7 +19650,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
   {
     id: "open-providers",
     label: "Open providers",
-    meta: "Profiles, health, and handoffs",
+    meta: "Accounts, models, and usage",
     destination: "providers",
     icon: KeyRound,
   },
@@ -20799,6 +20555,126 @@ function systemAccessDetail(scope: SystemAccessScope) {
   return scope.reason;
 }
 
+/** Keep the compact allowance tooltip within its settings section, including
+ * when the provider row wraps beside the sidebar. */
+function positionProviderAllowanceTooltip(anchor: HTMLElement) {
+  const tooltip = anchor.querySelector<HTMLElement>(
+    ".gyro-provider-allowance-tooltip",
+  );
+  const section = anchor.closest(".gyro-connected-provider-strip");
+  if (!tooltip || !section) return;
+  const bounds = section.getBoundingClientRect();
+  const origin = anchor.getBoundingClientRect();
+  tooltip.style.maxWidth = `${Math.max(0, bounds.width - 24)}px`;
+  const width =
+    tooltip.getBoundingClientRect().width || Math.min(200, bounds.width - 24);
+  const left = Math.max(
+    bounds.left + 12,
+    Math.min(
+      origin.left + (origin.width - width) / 2,
+      bounds.right - 12 - width,
+    ),
+  );
+  tooltip.style.left = `${left - origin.left}px`;
+}
+
+function ConnectedProviderAllowances({
+  providers,
+  usageByProvider,
+}: {
+  providers: ModelProviderConfig[];
+  usageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
+}) {
+  return (
+    <section
+      className="gyro-connected-provider-strip"
+      aria-label="Connected CLI accounts"
+    >
+      <div className="gyro-connected-provider-copy">
+        <div>
+          <h2>CLI accounts</h2>
+          <span>{providers.length} connected</span>
+        </div>
+        {providers.length === 0 ? <p>Connect an account below.</p> : null}
+      </div>
+      {providers.length > 0 ? (
+        <ul className="gyro-connected-provider-list">
+          {providers.map((provider) => {
+            const allowance = providerAllowance(usageByProvider?.[provider.id]);
+            const label = `${provider.displayName} · ${allowance.label}`;
+            return (
+              <li key={provider.id}>
+                <div
+                  className={`gyro-provider-allowance is-${allowance.severity}`}
+                  role="group"
+                  tabIndex={0}
+                  onPointerEnter={(event) =>
+                    positionProviderAllowanceTooltip(event.currentTarget)
+                  }
+                  onFocus={(event) =>
+                    positionProviderAllowanceTooltip(event.currentTarget)
+                  }
+                  aria-label={`${label}. ${allowance.detail}`}
+                >
+                  <div
+                    className="gyro-provider-allowance-ring"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      viewBox="0 0 64 64"
+                      className="gyro-provider-allowance-meter"
+                    >
+                      <circle
+                        className="gyro-provider-allowance-track"
+                        cx="32"
+                        cy="32"
+                        r="28"
+                      />
+                      {allowance.remaining !== undefined &&
+                      allowance.remaining > 0 ? (
+                        <circle
+                          className="gyro-provider-allowance-value"
+                          cx="32"
+                          cy="32"
+                          r="28"
+                          pathLength="100"
+                          strokeDasharray={`${allowance.remaining} 100`}
+                          transform="rotate(-90 32 32)"
+                        />
+                      ) : null}
+                    </svg>
+                    <ProviderLogo
+                      providerId={provider.id}
+                      label={provider.displayName}
+                    />
+                  </div>
+                  <span className="gyro-provider-allowance-label">
+                    {allowance.remaining !== undefined
+                      ? allowance.label
+                      : allowance.label === "Loading usage"
+                        ? "Checking…"
+                        : allowance.label === "Awaiting reset"
+                          ? "Resetting…"
+                          : "—"}
+                  </span>
+                  {allowance.stale ? <small>Last reported</small> : null}
+                  <span
+                    className="gyro-provider-allowance-tooltip"
+                    aria-hidden="true"
+                  >
+                    <strong>{label}</strong>
+                    <span>{allowance.detail}</span>
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 type SettingsSurfaceProps = {
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;
@@ -20872,6 +20748,7 @@ type SettingsSurfaceProps = {
   usageVisualization?: "bars" | "wheels";
   dailyPaceWarning?: boolean;
   providerUsage?: ProviderUsageState;
+  providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
   /** Local ledger summary used for spend-limit controls. */
   providerLedger?: ProviderLedgerSummary;
   usageSafety?: UsageSafetySnapshot;
@@ -21496,6 +21373,7 @@ export function SettingsSurface({
   usageVisualization = "bars",
   dailyPaceWarning = true,
   providerUsage,
+  providerUsageByProvider,
   providerLedger,
   usageSafety,
   onProviderBudgetChange,
@@ -21637,7 +21515,7 @@ export function SettingsSurface({
             <SettingsGroup label="App behavior">
               <SettingsRow
                 label="Menu bar"
-                detail="Keep Gyro's logo visible while chats and automations work in the background."
+                detail="Show Gyro in the macOS menu bar for quick access to running work."
               >
                 <SettingsSwitch
                   checked={showMenuBarIcon}
@@ -21656,7 +21534,11 @@ export function SettingsSurface({
             <SettingsGroup label="Model activity">
               <SettingsRow
                 label="Model activity previews"
-                detail="Off hides model activity previews. Peek shows a preview above the composer. Follow switches to the editor, terminal, or browser the model opens."
+                detail={modelFollow === "off"
+                  ? "Keep your current view. Model activity previews are hidden."
+                  : modelFollow === "follow"
+                    ? "Switch to the editor, terminal, or browser as the model works."
+                    : "Preview model activity above the composer and keep your current view."}
               >
                 <SettingsSegmented
                   label="Model activity behavior"
@@ -22033,59 +21915,78 @@ export function SettingsSurface({
           <SettingsSection
             icon={KeyRound}
             title="Providers"
-            description="Connect an account, add an API key, or use a local model. Then choose a model and return to chat."
+            description="Manage accounts and models."
           >
-            <nav
-              className="gyro-provider-connect-path"
-              aria-label="Connection methods"
-            >
-              {(
-                [
+            <ConnectedProviderAllowances
+              providers={enabledProviders.filter(
+                (provider) =>
+                  provider.authMode === "cli" &&
+                  provider.id !== "ollama" &&
+                  !providerNeedsSignInRepair(
+                    provider,
+                    providerStatuses?.find((status) => status.id === provider.id),
+                  ),
+              )}
+              usageByProvider={providerUsageByProvider}
+            />
+            {enabledProviders.length === 0 ? (
+              <nav
+                className="gyro-provider-connect-path"
+                aria-label="Connection methods"
+              >
+                {(
                   [
-                    "gyro-provider-accounts",
-                    "Existing account",
-                    "Use your provider’s sign-in.",
-                  ],
-                  [
-                    "gyro-provider-api-keys",
-                    "API key",
-                    "Use a key from your provider.",
-                  ],
-                  [
-                    "gyro-provider-ollama",
-                    "Local models",
-                    "Connect to Ollama on this Mac.",
-                  ],
-                ] as const
-              ).map(([target, label, detail]) => (
-                <button
-                  key={target}
-                  type="button"
-                  onClick={() => {
-                    const section = document.getElementById(target);
-                    section?.scrollIntoView({
-                      behavior: "instant",
-                      block: "start",
-                    });
-                    section?.focus({ preventScroll: true });
-                  }}
-                >
-                  <strong>{label}</strong>
-                  <span>{detail}</span>
-                </button>
-              ))}
-            </nav>
+                    [
+                      "gyro-provider-accounts",
+                      "Existing account",
+                      "Use your provider’s sign-in.",
+                    ],
+                    [
+                      "gyro-provider-api-keys",
+                      "API key",
+                      "Use a key from your provider.",
+                    ],
+                    [
+                      "gyro-provider-ollama",
+                      "Local models",
+                      "Connect to Ollama on this Mac.",
+                    ],
+                  ] as const
+                ).map(([target, label, detail]) => (
+                  <button
+                    key={target}
+                    type="button"
+                    onClick={() => {
+                      const section = document.getElementById(target);
+                      section?.scrollIntoView({
+                        behavior: "instant",
+                        block: "start",
+                      });
+                      section?.focus({ preventScroll: true });
+                    }}
+                  >
+                    <strong>{label}</strong>
+                    <span>{detail}</span>
+                  </button>
+                ))}
+              </nav>
+            ) : null}
             <div
               className="gyro-provider-connect-help"
               id="gyro-provider-accounts"
               tabIndex={-1}
             >
-              <h2>Connect your provider</h2>
-              <p>
-                Choose your provider below. Sign-in opens a terminal and may
-                continue in your browser. Finish there, then return here to
-                choose “Use in chat”.
-              </p>
+              <h2>
+                {enabledProviders.length
+                  ? "Accounts & models"
+                  : "Connect an account"}
+              </h2>
+              {enabledProviders.length === 0 ? (
+                <p>
+                  Complete sign-in in your terminal or browser, then choose “Use in
+                  chat”.
+                </p>
+              ) : null}
             </div>
             <div className="gyro-provider-table is-native-list">
               <div className="gyro-provider-table-head">
@@ -24476,7 +24377,7 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
-  // Model and effort have direct targets in one shared control.
+  // Model and effort open from independent composer controls.
   const modelMenuEntry = useRef<"root" | "model">("root");
   const modelMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [modelMenuPane, setModelMenuPane] = useState<
@@ -26109,68 +26010,36 @@ function Composer({
         ) : null}
         <div
           className="gyro-composer-control gyro-composer-control-model"
-          ref={activePopover === "provider" ? popoverScopeRef : undefined}
+          ref={
+            activePopover === "provider" && modelMenuPane !== "root"
+              ? popoverScopeRef
+              : undefined
+          }
         >
-          <div
-            className="gyro-composer-chip gyro-model-chip"
-            data-menu-open={activePopover === "provider"}
-            role="group"
-            aria-label="Model and reasoning effort"
+          <button
+            /* Narrow panes hide .gyro-composer-label, so the visible text
+               cannot be the only name this control has. */
+            aria-label={`Model: ${modelChipLabel}`}
+            className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"
+            onClick={(event) =>
+              toggleProviderPopover("model", event.currentTarget)
+            }
+            type="button"
+            {...menuProps("provider")}
+            aria-haspopup="menu"
+            aria-expanded={activePopover === "provider" && isModelRailPane}
+            aria-controls={
+              activePopover === "provider" && isModelRailPane
+                ? `${popoverBaseId}-provider`
+                : undefined
+            }
           >
-            <button
-              /* Narrow panes hide .gyro-composer-label, so the visible text
-                 cannot be the only name this control has. */
-              aria-label={`Model: ${modelChipLabel}`}
-              className="gyro-composer-model-trigger"
-              onClick={(event) =>
-                toggleProviderPopover("model", event.currentTarget)
-              }
-              type="button"
-              {...menuProps("provider")}
-              aria-haspopup="menu"
-              aria-expanded={activePopover === "provider" && isModelRailPane}
-            >
-              {displayProvider ? (
-                <ProviderLogo providerId={displayProvider.id} />
-              ) : null}
-              <span className="gyro-composer-label">{modelChipLabel}</span>
-              <ChevronDown aria-hidden="true" size={13} />
-            </button>
-            {hasEffortChoice && providerReasoningEffort ? (
-              <button
-                className="gyro-composer-effort-trigger"
-                aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
-                aria-haspopup="dialog"
-                aria-expanded={
-                  activePopover === "provider" && modelMenuPane === "root"
-                }
-                aria-controls={
-                  activePopover === "provider" && modelMenuPane === "root"
-                    ? `${popoverBaseId}-provider`
-                    : undefined
-                }
-                onClick={(event) =>
-                  toggleProviderPopover("root", event.currentTarget)
-                }
-                type="button"
-              >
-                <span
-                  className="gyro-model-chip-effort"
-                  data-max-effort={
-                    effortItems.length > 1 &&
-                    effortItems[effortItems.length - 1]?.active
-                  }
-                >
-                  {reasoningEffortLabel(providerReasoningEffort)}
-                </span>
-                <Gauge
-                  className="gyro-composer-effort-compact"
-                  aria-hidden="true"
-                  size={14}
-                />
-              </button>
+            {displayProvider ? (
+              <ProviderLogo providerId={displayProvider.id} />
             ) : null}
-          </div>
+            <span className="gyro-composer-label">{modelChipLabel}</span>
+            <ChevronDown aria-hidden="true" size={13} />
+          </button>
           {activePopover === "provider" && isModelRailPane ? (
             <ComposerModelRail
               activeModelId={
@@ -26201,36 +26070,7 @@ function Composer({
               )}
               warning={providerErrorMessage}
             />
-          ) : activePopover === "provider" &&
-            modelMenuPane === "root" &&
-            hasEffortChoice ? (
-            <ComposerEffortSelector
-              key={`${effectiveProviderId}:${effectiveModelId}`}
-              id={`${popoverBaseId}-provider`}
-              modelLabel={modelChipLabel}
-              fastMode={composerFastMode(
-                config,
-                effectiveProviderId,
-                effectiveModelId,
-                onComposerAction,
-              )}
-              labels={effortItems.map((item) => item.label)}
-              selectedIndex={Math.max(
-                0,
-                effortItems.findIndex((item) => item.active),
-              )}
-              placement={providerPopoverPlacement}
-              onSelect={(index) => {
-                const action = effortItems[index]?.action;
-                if (action) onComposerAction?.(action);
-              }}
-              onModels={() =>
-                setModelMenuPane(
-                  currentModelItems.length ? "model" : "provider",
-                )
-              }
-            />
-          ) : activePopover === "provider" ? (
+          ) : activePopover === "provider" && modelMenuPane !== "root" ? (
             <ComposerPopover
               align="end"
               className={
@@ -26251,6 +26091,72 @@ function Composer({
             />
           ) : null}
         </div>
+        {hasEffortChoice && providerReasoningEffort ? (
+          <div
+            className="gyro-composer-control gyro-composer-control-effort"
+            ref={
+              activePopover === "provider" && modelMenuPane === "root"
+                ? popoverScopeRef
+                : undefined
+            }
+          >
+            <button
+              className="gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger"
+              aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
+              aria-haspopup="dialog"
+              aria-expanded={
+                activePopover === "provider" && modelMenuPane === "root"
+              }
+              aria-controls={
+                activePopover === "provider" && modelMenuPane === "root"
+                  ? `${popoverBaseId}-provider`
+                  : undefined
+              }
+              onClick={(event) =>
+                toggleProviderPopover("root", event.currentTarget)
+              }
+              type="button"
+            >
+              <span
+                className="gyro-effort-chip-label"
+                data-max-effort={
+                  effortItems.length > 1 &&
+                  effortItems[effortItems.length - 1]?.active
+                }
+              >
+                {reasoningEffortLabel(providerReasoningEffort)}
+              </span>
+              <ChevronDown aria-hidden="true" size={13} />
+              <Gauge
+                className="gyro-composer-effort-compact"
+                aria-hidden="true"
+                size={14}
+              />
+            </button>
+            {activePopover === "provider" && modelMenuPane === "root" ? (
+              <ComposerEffortSelector
+                key={`${effectiveProviderId}:${effectiveModelId}`}
+                id={`${popoverBaseId}-provider`}
+                fastMode={composerFastMode(
+                  config,
+                  effectiveProviderId,
+                  effectiveModelId,
+                  onComposerAction,
+                )}
+                labels={effortItems.map((item) => item.label)}
+                selectedIndex={Math.max(
+                  0,
+                  effortItems.findIndex((item) => item.active),
+                )}
+                placement={providerPopoverPlacement}
+                onSelect={(index) => {
+                  const action = effortItems[index]?.action;
+                  if (action) onComposerAction?.(action);
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
         <button
           aria-label={
             isStopAction

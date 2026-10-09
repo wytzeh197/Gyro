@@ -583,7 +583,6 @@ export {
   SessionDeleteConfirmOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
-  ProvidersSurface,
   SettingsSurface,
   SettingsPanel,
   TerminalTerminateConfirmOverlay,

@@ -187,11 +187,9 @@ export function SizingMotionFixture() {
       <div className="gyro-composer-control-model gyro-motion-fixture-effort">
         <ComposerEffortSelector
           id="fixture-effort"
-          modelLabel="Fixture model with a deliberately long descriptive name"
           labels={single ? ["Default"] : ["Low", "Medium", "High", "Maximum"]}
           selectedIndex={index}
           placement="down"
-          onModels={() => {}}
           onSelect={(next) => {
             setIndex(next);
             setCommits((current) => [...current, next]);

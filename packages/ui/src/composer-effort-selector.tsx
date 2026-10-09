@@ -1,4 +1,4 @@
-import { ChevronRight, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -10,21 +10,17 @@ import {
 /** Native stepped range, with local drag feedback and one saved choice on release. */
 export function ComposerEffortSelector({
   id,
-  modelLabel,
   labels,
   selectedIndex,
   placement,
   onSelect,
-  onModels,
   fastMode,
 }: {
   id: string;
-  modelLabel: string;
   labels: string[];
   selectedIndex: number;
   placement: "up" | "down";
   onSelect: (index: number) => void;
-  onModels: () => void;
   fastMode?: { enabled: boolean; onToggle: () => void };
 }) {
   const normalizedIndex = Math.max(
@@ -69,7 +65,7 @@ export function ComposerEffortSelector({
   };
   return (
     <div
-      aria-label="Model and effort"
+      aria-label="Reasoning effort"
       className="gyro-composer-popover gyro-effort-slider-popover"
       data-max-effort={labels.length > 1 && index === labels.length - 1}
       data-dragging={dragging}
@@ -95,16 +91,6 @@ export function ComposerEffortSelector({
         ) : null}
         <div className="gyro-effort-slider-heading">
           <span className="gyro-effort-value">{labels[index]}</span>
-          <button
-            className="gyro-effort-model-button"
-            aria-label={`Select model: ${modelLabel}`}
-            onClick={onModels}
-            title={`Select model: ${modelLabel}`}
-            type="button"
-          >
-            <span>{modelLabel}</span>
-            <ChevronRight aria-hidden="true" size={14} />
-          </button>
         </div>
       </div>
       <div

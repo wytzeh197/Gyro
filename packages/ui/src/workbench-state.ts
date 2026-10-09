@@ -1918,7 +1918,13 @@ export function workbenchReducer(
       };
     }
     case "select-destination":
-      return { ...state, activeDestination: action.destination };
+      return action.destination === "providers"
+        ? {
+            ...state,
+            activeDestination: "settings",
+            preferences: { ...state.preferences, lastSettingsSection: "providers" },
+          }
+        : { ...state, activeDestination: action.destination };
     case "select-surface": {
       const layout = workspaceLayoutForLegacySurface(action.surface);
       return {
@@ -4274,7 +4280,8 @@ export function workbenchReducer(
       );
       return {
         ...state,
-        activeDestination: "providers",
+        activeDestination: "settings",
+        preferences: { ...state.preferences, lastSettingsSection: "providers" },
         selectedProviderSessionId: session.id,
         providerSessions: existingSession
           ? state.providerSessions.map((item) =>

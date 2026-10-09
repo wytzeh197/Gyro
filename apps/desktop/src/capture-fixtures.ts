@@ -75,6 +75,7 @@ const supportedScenes = new Set([
   "workspace-diff",
   "selected-diff",
   "appearance",
+  "providers",
   "cli",
   "ollama",
   "ollama-empty",
@@ -413,6 +414,19 @@ const config = {
         visibility: "standard",
       },
     },
+    ...(scene === "providers"
+      ? [
+          {
+            id: "gemini",
+            displayName: "Gemini CLI",
+            apiKeyRef: "cli",
+            enabled: true,
+            authMode: "cli",
+            authStatus: "connected",
+            models: [],
+          },
+        ]
+      : []),
     ...(isOllamaScene
       ? [
           {
@@ -466,6 +480,15 @@ const config = {
     },
   ],
 };
+
+// First-connection state for the Providers settings visual check.
+if (scene === "providers" && parameters.get("edge") === "disconnected") {
+  config.modelProviders = config.modelProviders.map((provider) => ({
+    ...provider,
+    enabled: false,
+    authStatus: "not-connected",
+  }));
+}
 
 /**
  * A mixed working tree: staged and unstaged sides, several languages, and a
@@ -1496,6 +1519,42 @@ const invoke: Invoke = (command, args) => {
       assistantEvent,
       session: responseSession ?? null,
       statusEvent,
+    };
+  }
+  if (scene === "providers" && command === "get_provider_usage") {
+    const providerId = String(args?.providerId ?? "openai");
+    const edge = parameters.get("edge");
+    return {
+      providerId,
+      windows:
+        edge === "unavailable"
+          ? []
+          : [
+              {
+                id: "five-hour",
+                label: "5-hour window",
+                usedPercent:
+                  edge === "reset-only"
+                    ? undefined
+                    : providerId === "openai"
+                      ? 32
+                      : 76,
+                resetsAt: new Date(
+                  Date.now() + (providerId === "openai" ? 130 : 47) * 60_000,
+                ).toISOString(),
+              },
+              ...(edge === "weekly"
+                ? [
+                    {
+                      id: "weekly",
+                      label: "Weekly window",
+                      usedPercent: 98,
+                      resetsAt: new Date(Date.now() + 86_400_000).toISOString(),
+                    },
+                  ]
+                : []),
+            ],
+      fetchedAt: new Date().toISOString(),
     };
   }
   if (command === "provider_api_key_status") {

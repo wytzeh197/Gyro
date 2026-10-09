@@ -20,12 +20,12 @@ type DesktopNotificationSettingsProps = {
 function permissionDetail(permission: NotificationPermissionState) {
   switch (permission) {
     case "granted":
-      return "Allowed by macOS. Gyro only notifies you while it's in the background.";
+      return "Allowed by macOS. Notifications appear while Gyro is in the background.";
     case "denied":
       return "Blocked by macOS. Change Gyro's notification access in System Settings.";
     case "prompt-with-rationale":
     case "prompt":
-      return "Not allowed yet. Gyro asks macOS when you send a test.";
+      return "macOS permission is needed. Send a test to request access.";
   }
 }
 
@@ -38,7 +38,7 @@ const KINDS: Array<{
     key: "approvals",
     label: "Approval requests",
     detail:
-      "When a model is waiting on you. Clicking it opens the chat; commands can also be approved from the menu bar.",
+      "When a model needs your approval. Click the notification to open its chat.",
   },
   {
     key: "finished",
@@ -62,7 +62,10 @@ export function DesktopNotificationSettings({
   onTest,
 }: DesktopNotificationSettingsProps) {
   return (
-    <SettingsGroup label="macOS notifications">
+    <SettingsGroup
+      label="macOS notifications"
+      description="Choose what needs your attention while work runs in the background."
+    >
       <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
         <SettingsSwitch
           checked={preferences.enabled}

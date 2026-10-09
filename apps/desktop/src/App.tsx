@@ -137,7 +137,6 @@ import {
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
-  ProvidersSurface,
   SettingsSurface,
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
@@ -260,12 +259,10 @@ import {
   type SessionUsageTotals,
   type UsageSafetySnapshot,
   type ProviderLedgerSummary,
-  type ProviderHandoff,
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
   type ReasoningEffort,
   type ResolvedTheme,
-  type ProviderSession,
   type ProblemDiagnostic,
   type Session,
   type SessionEvent,
@@ -13856,81 +13853,6 @@ export function App() {
     persistConfig, // lets the hook add or remove a custom provider
   );
 
-  const queueProviderHandoff = useCallback(
-    ({
-      fromProviderId,
-      toProviderId,
-      contextSummary,
-    }: {
-      fromProviderId: string;
-      toProviderId: string;
-      contextSummary: string;
-    }) => {
-      if (!checkProviderReadiness("handoff", toProviderId)) {
-        return;
-      }
-      const providerConfigs = providersForConfig(config);
-      const fromLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        fromProviderId,
-      );
-      const toLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        toProviderId,
-      );
-      const toStatus = workbench.providerStatuses.find(
-        (provider) => provider.id === toProviderId,
-      );
-      const now = new Date().toISOString();
-      const sessionTitle = activeSession?.title ?? "Desktop session";
-      const providerSession: ProviderSession = {
-        id: `provider-session-${toProviderId}-${activeSessionId ?? "local"}`,
-        providerId: toProviderId,
-        displayName: toLabel,
-        status: "queued",
-        model: toStatus?.defaultModel ?? "Default",
-        sessionId: activeSessionId,
-        sessionTitle,
-        workspaceMode: activeSession?.workspaceMode ?? workbench.workspaceMode,
-        branch: activeSession?.branch ?? "main",
-        worktreeName: activeSession?.worktreeName,
-        lastEvent: `handoff queued from ${fromLabel}`,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const handoff: ProviderHandoff = {
-        id: `handoff-${Date.now()}`,
-        fromProviderId,
-        fromLabel,
-        toProviderId,
-        toLabel,
-        status: "queued",
-        sessionId: activeSessionId,
-        sessionTitle,
-        contextSummary,
-        createdAt: now,
-        updatedAt: now,
-      };
-      dispatchWorkbench({
-        type: "queue-provider-handoff",
-        handoff,
-        session: providerSession,
-      });
-      notify("provider", "Handoff queued", `${fromLabel} to ${toLabel}`);
-    },
-    [
-      activeSession,
-      activeSessionId,
-      checkProviderReadiness,
-      config,
-      notify,
-      workbench.providerStatuses,
-      workbench.workspaceMode,
-    ],
-  );
-
   const runCommandPaletteCommand = useCallback(
     (commandId: string) => {
       dispatchWorkbench({ type: "record-command", commandId });
@@ -17096,10 +17018,14 @@ export function App() {
           ) : null}
         </div>
       ) : null}
-      {activeDestination === "settings" ? (
+      {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
           projectImport={projectImport.settingsProps}
-          activeSection={workbench.preferences.lastSettingsSection}
+          activeSection={
+            activeDestination === "providers"
+              ? "providers"
+              : workbench.preferences.lastSettingsSection
+          }
           activeWorkspaceRoot={workspaceActionRoot}
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
@@ -17185,6 +17111,7 @@ export function App() {
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           providerStatuses={workbench.providerStatuses}
+          providerUsageByProvider={providerUsageByProvider}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
           dailyPaceWarning={workbench.preferences.dailyPaceWarning}
@@ -17419,31 +17346,6 @@ export function App() {
           }
           onToggleAutomation={toggleAutomation}
           selectedAutomationId={workbench.selectedAutomationId}
-        />
-      ) : null}
-      {activeDestination === "providers" ? (
-        <ProvidersSurface
-          config={config}
-          onAddCustomProfile={() => {
-            const customProfile = {
-              id: `custom-${Date.now()}`,
-              displayName: "Custom Agent",
-              command: "./agent.sh",
-              args: [],
-              workingDirectory: "Workspace",
-            };
-            void persistConfig({
-              ...config,
-              commandProfiles: [...commandProfiles, customProfile],
-            });
-          }}
-          onQueueProviderHandoff={queueProviderHandoff}
-          {...providerApiKeyProps}
-          onTestProvider={testProvider}
-          onToggleProvider={toggleProvider}
-          providerHandoffs={workbench.providerHandoffs}
-          providerSessions={workbench.providerSessions}
-          providerStatuses={workbench.providerStatuses}
         />
       ) : null}
       {activeDestination === "onboarding" ? (

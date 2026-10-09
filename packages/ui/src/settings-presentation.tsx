@@ -24,6 +24,7 @@ export function SettingsSection({
     >
       <header>
         <div>
+          <p className="gyro-settings-eyebrow">Settings</p>
           <h1>
             <Icon aria-hidden="true" size={18} />
             {title}

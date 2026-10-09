@@ -43,25 +43,6 @@
   line-height: calc(20.9px * var(--gyro-ui-scale, 1));
   border-radius: 3.8px;
 }
-.gyro-effort-slider-header .gyro-effort-model-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 2.85px;
-  max-width: 100%;
-  font-size: var(--gyro-font-support);
-  line-height: calc(19px * var(--gyro-ui-scale, 1));
-  color: var(--gyro-muted);
-  border-radius: 3.8px;
-}
-.gyro-effort-model-button span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gyro-effort-model-button svg {
-  flex: none;
-}
 .gyro-effort-slider-popover[data-fast-mode-supported="true"]
   .gyro-effort-slider-header {
   padding-inline: 32px;
@@ -229,83 +210,109 @@
   cursor: default;
 }
 
-/* Two direct actions share the existing quiet chip instead of introducing
-   another toolbar chip or an extra model-picker step. */
-:root[data-theme] .gyro-composer-control-model > .gyro-model-chip {
-  padding-block: 0;
-  gap: 0;
+/* Model and effort are independent chips, each with its own menu anchor. */
+:root[data-theme]
+  .gyro-composer-bar
+  .gyro-composer-control
+  > button.gyro-composer-chip:is(
+    .gyro-composer-model-trigger,
+    .gyro-composer-effort-trigger
+  ),
+:root[data-theme]
+  .gyro-composer-bar
+  .gyro-composer-control.gyro-composer-control-approval
+  > button.gyro-composer-chip {
+  border-radius: 999px;
 }
 :root[data-theme]
-  .gyro-model-chip
-  :is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
+  .gyro-composer-bar
+  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger) {
   min-height: calc(28px * var(--gyro-ui-scale, 1));
-  gap: 5px;
-  padding: 0 3px;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
+  padding-inline: calc(8px * var(--gyro-ui-scale, 1));
+  gap: calc(7px * var(--gyro-ui-scale, 1));
+  border: 1px solid transparent;
   background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-:root[data-theme] .gyro-model-chip .gyro-composer-model-trigger {
-  flex: 1 1 auto;
+  color: var(--gyro-text);
+  font-weight: 500;
+  transition:
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 :root[data-theme]
-  .gyro-model-chip
-  .gyro-composer-model-trigger
-  > .gyro-composer-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .gyro-composer-bar
+  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger):is(
+    :hover,
+    [aria-expanded="true"]
+  ) {
+  background: var(--gyro-control-hover);
+  border-color: color-mix(in srgb, var(--gyro-text) 18%, transparent);
 }
-:root[data-theme] .gyro-model-chip .gyro-composer-model-trigger > svg {
+:root[data-theme] .gyro-composer-bar .gyro-model-chip .gyro-provider-logo {
+  width: calc(15px * var(--gyro-ui-scale, 1));
+  height: calc(15px * var(--gyro-ui-scale, 1));
+  opacity: 1;
+}
+:root[data-theme]
+  .gyro-composer-bar
+  .gyro-model-chip
+  .gyro-provider-logo.is-anthropic {
+  color: var(--gyro-provider-anthropic);
+}
+:root[data-theme]
+  .gyro-composer-bar
+  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger)
+  > svg {
+  color: var(--gyro-muted);
+  width: calc(12px * var(--gyro-ui-scale, 1));
+  height: calc(12px * var(--gyro-ui-scale, 1));
+}
+.gyro-composer-control-effort {
+  --gyro-model-popover-width: min(
+    calc(280px * var(--gyro-ui-scale, 1)),
+    calc(100vw - 24px)
+  );
+}
+.gyro-composer-control-effort > .gyro-composer-popover[data-placement="down"] {
+  top: calc(100% + 6px);
+}
+.gyro-composer-control-effort > .gyro-composer-popover[data-placement="up"] {
+  bottom: calc(100% + 6px);
+}
+.gyro-effort-chip-label {
+  color: inherit;
+}
+.gyro-effort-chip-label[data-max-effort="true"] {
+  color: var(--gyro-effort-max);
+}
+.gyro-composer-effort-trigger > svg,
+.gyro-composer-model-trigger > svg:last-child {
   flex: none;
   transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
-:root[data-theme]
-  .gyro-model-chip
-  .gyro-composer-model-trigger[aria-expanded="true"]
-  > svg {
+.gyro-composer-effort-trigger[aria-expanded="true"]
+  > svg:not(.gyro-composer-effort-compact) {
   transform: rotate(180deg);
-}
-:root[data-theme] .gyro-model-chip .gyro-composer-effort-trigger {
-  flex: 0 0 auto;
-  padding-left: 6px;
-}
-:root[data-theme]
-  .gyro-model-chip
-  :is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger):hover,
-:root[data-theme]
-  .gyro-model-chip
-  :is(
-    .gyro-composer-model-trigger,
-    .gyro-composer-effort-trigger
-  )[aria-expanded="true"] {
-  background: var(--gyro-control-hover);
-}
-:root[data-theme]
-  .gyro-model-chip
-  :is(
-    .gyro-composer-model-trigger,
-    .gyro-composer-effort-trigger
-  ):focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 1px;
 }
 .gyro-composer-effort-compact {
   display: none;
 }
 @container (max-width: 470px) {
-  .gyro-model-chip .gyro-composer-effort-compact {
+  :root[data-theme] .gyro-composer-bar button.gyro-composer-model-trigger {
+    gap: calc(5px * var(--gyro-ui-scale, 1));
+    padding-inline: calc(6px * var(--gyro-ui-scale, 1));
+  }
+  :root[data-theme]
+    .gyro-composer-bar
+    .gyro-effort-chip
+    > .gyro-composer-effort-compact {
+    width: calc(14px * var(--gyro-ui-scale, 1));
+    height: calc(14px * var(--gyro-ui-scale, 1));
+  }
+  .gyro-effort-chip .gyro-composer-effort-compact {
     display: block;
   }
-  .gyro-model-chip .gyro-composer-effort-trigger > .gyro-model-chip-effort {
+  .gyro-effort-chip > .gyro-effort-chip-label,
+  .gyro-effort-chip > svg:not(.gyro-composer-effort-compact) {
     display: none;
   }
 }

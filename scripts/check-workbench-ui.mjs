@@ -4063,7 +4063,7 @@ expect(
       'invoke<NotificationPermissionState>("test_notification")',
     ) &&
     surfaceSource.includes("Test notification") &&
-    surfaceSource.includes("Gyro asks macOS when you send a test") &&
+    surfaceSource.includes("Send a test to request access") &&
     !tauriSource.includes("body(automation.prompt)") &&
     !tauriSource.includes("body(automation.last_result)"),
   "Background automation outcomes should require explicit native permission and use generic notices without exposing prompts or results.",
@@ -4148,7 +4148,6 @@ expect(
 for (const readinessCall of [
   'checkProviderReadiness("chat")',
   'checkProviderReadiness("chat", sessionModel.providerId)',
-  'checkProviderReadiness("handoff", toProviderId)',
 ]) {
   expect(
     appSource.includes(readinessCall),
@@ -5088,8 +5087,8 @@ expect(
     typeSource.includes("GyroAccountStatus") &&
     typeSource.includes("GyroAccountOidcConfig") &&
     reducerSource.includes('"account"') &&
-    surfaceSource.includes("Gyro local access") &&
-    surfaceSource.includes("Gyro local access stays separate") &&
+    appSource.includes("<SettingsSurface") &&
+    !appSource.includes("<ProvidersSurface") &&
     !appSource.includes("GyroAccountGate") &&
     !appSource.includes("gyro-account-gate") &&
     !appSource.includes("Use Gyro on this Mac") &&
@@ -5610,7 +5609,7 @@ expect(
     surfaceSource.includes("gyro-settings-sidebar-group") &&
     surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
-    surfaceSource.includes("<h2>{label}</h2>") &&
+    surfaceSource.includes("<h2 id={headingId}>{label}</h2>") &&
     surfaceSource.includes("aria-pressed={themeMode === mode}") &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
     surfaceSource.includes('activeDestination !== "settings"') &&
@@ -6676,8 +6675,8 @@ expect(
     coreCliPathSource.includes(".npm-global/bin") &&
     appSource.includes('destination: "providers"') &&
     appSource.includes("completeProviderLogin") &&
-    surfaceSource.includes("Gyro local access stays separate") &&
-    surfaceSource.includes("Provider event logs are sensitive and opt-in") &&
+    workbenchSource.includes('action.destination === "providers"') &&
+    !surfaceSource.includes("export function ProvidersSurface") &&
     surfaceSource.includes("Claude Code login and claude auth status") &&
     surfaceSource.includes("Codex sign-in with ChatGPT") &&
     surfaceSource.includes("XAI_API_KEY") &&
@@ -6695,7 +6694,7 @@ expect(
     coreCredentialsSource.includes("pub fn set_stored_provider_api_key") &&
     surfaceSource.includes("onTestProvider?.(provider.id)") &&
     surfaceSource.includes("gyro-settings-provider-actions") &&
-    surfaceSource.includes("providerAuthSummary(provider.id)") &&
+    surfaceSource.includes("providerNeedsSignInRepair(provider, health)") &&
     !surfaceSource.includes('label="Selected model"') &&
     !surfaceSource.includes('className="gyro-provider-model-picker"') &&
     surfaceSource.includes("Refresh models") &&
@@ -6857,23 +6856,29 @@ expect(
     !surfaceSource.includes("modelFlyoutShiftX"),
   "Every model/provider pane should open the model rail.",
 );
-// One chip carries model and effort together, still under the provider's own
-// brand mark. Model and effort have separate direct targets within that chip,
-// rather than introducing a separate toolbar chip or an extra model step.
+// Model and effort have independent composer chips with direct menu access.
 expect(
   /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
     surfaceSource,
   ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
-    surfaceSource.includes('className="gyro-model-chip-effort"') &&
+    surfaceSource.includes('className="gyro-effort-chip-label"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
-    surfaceSource.includes('className="gyro-composer-model-trigger"') &&
-    surfaceSource.includes('className="gyro-composer-effort-trigger"') &&
-    surfaceSource.includes('toggleProviderPopover("model", event.currentTarget)') &&
-    surfaceSource.includes('toggleProviderPopover("root", event.currentTarget)') &&
-    !surfaceSource.includes(
-      'className="gyro-composer-chip gyro-effort-chip"',
+    surfaceSource.includes(
+      'className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"',
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger"',
+    ) &&
+    surfaceSource.includes(
+      'toggleProviderPopover("model", event.currentTarget)',
+    ) &&
+    surfaceSource.includes(
+      'toggleProviderPopover("root", event.currentTarget)',
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-composer-control gyro-composer-control-effort"',
     ) &&
     surfaceSource.includes(
       "<ProviderLogo providerId={displayProvider.id} />",
@@ -6894,7 +6899,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer should keep one visual model control with direct model and effort access.",
+  "Composer should expose separate model and effort controls with direct access.",
 );
 
 // Drilling should feel like one card changing its mind, not a stack of
@@ -6955,10 +6960,16 @@ expect(
     surfaceSource.includes("path.includes(triggerRef.current)") &&
     // The dismiss scope is the open control itself, not a whole composer, row,
     // or message, so a press on any neighbouring control still closes it.
-    ["context", "approval", "provider"].every((popover) =>
+    ["context", "approval"].every((popover) =>
       surfaceSource.includes(
         `activePopover === "${popover}" ? popoverScopeRef : undefined`,
       ),
+    ) &&
+    /activePopover === "provider" && modelMenuPane !== "root"\s*\? popoverScopeRef/.test(
+      surfaceSource,
+    ) &&
+    /activePopover === "provider" && modelMenuPane === "root"\s*\? popoverScopeRef/.test(
+      surfaceSource,
     ) &&
     // The slash menu scope is attached through a callback ref because the same
     // node is also the composer shell the goal editor measures.
@@ -7500,14 +7511,20 @@ for (const surface of [
   "IdeSurface",
   "SettingsSurface",
   "AutomationsSurface",
-  "ProvidersSurface",
   "ToolsSurface",
   "WorkspaceToolPanel",
 ]) {
   expect(appSource.includes(`<${surface}`), `Surface not routed: ${surface}`);
 }
 
+expect(
+  !appSource.includes("const queueProviderHandoff") &&
+    !surfaceSource.includes("onQueueProviderHandoff"),
+  "The removed legacy provider screen must not retain its handoff action entry point.",
+);
+
 for (const surface of [
+  "ProvidersSurface",
   "CliWorkspaceSurface",
   "DiffReviewSurface",
   "BrowserPreviewSurface",
