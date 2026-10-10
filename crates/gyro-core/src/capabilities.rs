@@ -321,7 +321,8 @@ impl ProjectCapabilityPolicy {
         // Access in a normal run still skips the prompt.
         classes.insert(CapabilityClass::WorkspaceWrite, CapabilityAccess::Ask);
         // A sub-agent spends the user's provider budget, so it is a decision
-        // rather than a silent call. Full Access still skips the prompt.
+        // rather than a silent call by default. The desktop permission mode
+        // skips the prompt in Full Access or Approve for me within its ceiling.
         classes.insert(CapabilityClass::AgentRun, CapabilityAccess::Ask);
         classes.insert(CapabilityClass::IdeReveal, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::TerminalExecute, CapabilityAccess::Ask);

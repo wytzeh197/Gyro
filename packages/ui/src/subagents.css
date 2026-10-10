@@ -2,6 +2,12 @@
   margin-block: 4px;
   min-width: 0;
 }
+.gyro-subagent-dock {
+  width: 100%;
+  max-width: calc(var(--gyro-composer-width) * var(--gyro-composer-zoom));
+  margin-inline: auto;
+  min-width: 0;
+}
 .gyro-subagent-strip {
   width: 100%;
   max-width: var(--gyro-chat-content-width);
@@ -10,7 +16,6 @@
   min-width: 0;
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
-  border-bottom: 1px solid var(--gyro-border-soft);
 }
 .gyro-subagent-strip > summary {
   display: flex;
@@ -39,6 +44,8 @@
 }
 .gyro-subagent-strip-status {
   margin-left: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 .gyro-subagent-strip-status.is-attention {
@@ -47,9 +54,6 @@
 .gyro-subagent-strip > .gyro-subagents {
   max-height: 180px;
   overflow: auto;
-}
-.gyro-subagent-strip .gyro-subagents li > button {
-  width: 100%;
 }
 .gyro-subagent-strip summary:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
@@ -61,38 +65,45 @@
   padding: 0;
 }
 .gyro-subagents li > button {
-  display: flex;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto 12px;
   align-items: center;
-  gap: 8px;
-  width: fit-content;
-  max-width: 100%;
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  padding: 4px 6px;
+  gap: var(--gyro-space-standard);
+  width: 100%;
+  min-height: max(24px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
   line-height: 1.4;
-  flex-wrap: wrap;
-  color: inherit;
+  color: var(--gyro-text);
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--gyro-radius-sm);
   text-align: left;
   cursor: pointer;
 }
 .gyro-subagents li > button:hover,
 .gyro-subagents li > button.is-selected {
-  background: color-mix(in srgb, currentColor 7%, transparent);
+  background: var(--gyro-control-hover);
 }
-.gyro-subagents li > button:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+.gyro-subagents li > button:focus-visible,
+.gyro-subagent-environment button:focus-visible,
+.gyro-subagent-notice button:focus-visible,
+.gyro-subagent-notice summary:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
 }
 .gyro-subagent-mark {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   flex: none;
   object-fit: contain;
 }
+.gyro-subagent-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  flex: none;
+}
 .gyro-subagent-name {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -100,65 +111,105 @@
   font-size: var(--gyro-font-micro);
   font-weight: 500;
 }
-.gyro-subagent-runtime,
-.gyro-subagent-tokens {
+.gyro-subagent-status,
+.gyro-subagent-open {
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
-.gyro-subagent-status-icon {
-  display: inline-flex;
-  flex: none;
-  color: var(--gyro-muted);
-}
-.gyro-subagent-status {
-  font-size: var(--gyro-font-micro);
-  color: var(--gyro-muted);
-}
-.gyro-subagent-status-icon.is-running,
 .gyro-subagent-status.is-running {
   color: var(--gyro-accent);
 }
-.gyro-subagent-status-icon.is-waiting,
 .gyro-subagent-status.is-waiting,
-.gyro-subagent-status-icon.is-interrupted,
 .gyro-subagent-status.is-interrupted {
   color: var(--gyro-warn);
 }
-.gyro-subagent-status-icon.is-failed,
 .gyro-subagent-status.is-failed {
   color: var(--gyro-danger);
 }
-.gyro-subagent-status-icon.is-completed {
-  color: var(--gyro-success);
+.gyro-subagent-environment {
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-block: var(--gyro-space-standard);
+  min-width: 0;
+  font-size: var(--gyro-font-micro);
 }
-.gyro-subagent-runtime,
-.gyro-subagent-tokens {
+.gyro-subagent-environment > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+}
+.gyro-subagent-environment button,
+.gyro-subagent-notice button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: max(24px, calc(28px * var(--gyro-ui-scale, 1)));
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-subagent-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+}
+.gyro-subagent-filters > button {
+  padding-inline: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+}
+.gyro-subagent-filters > button.is-active,
+.gyro-subagent-filters > button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-subagent-filters span {
+  margin-left: var(--gyro-space-compact);
+}
+.gyro-subagent-environment-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  width: 100%;
+  text-align: left;
+  margin-block: var(--gyro-space-compact);
+  padding-inline: var(--gyro-space-standard);
+}
+.gyro-subagent-environment-summary > svg {
+  margin-left: auto;
   flex: none;
 }
-.gyro-chat-environment-popover .gyro-subagents li > button {
-  display: grid;
-  grid-template-columns: 13px minmax(0, 1fr) auto;
-  width: 100%;
-  gap: 3px 8px;
+.gyro-subagent-environment-summary > svg.is-expanded {
+  transform: rotate(90deg);
 }
-.gyro-chat-environment-popover .gyro-subagent-name {
-  grid-column: 2;
-  grid-row: 1;
+.gyro-subagent-environment-summary:hover {
+  background: var(--gyro-control-hover);
 }
-.gyro-chat-environment-popover .gyro-subagent-status {
-  grid-column: 3;
-  grid-row: 1;
+.gyro-subagent-environment button.gyro-subagent-attention {
+  color: var(--gyro-warn);
 }
-.gyro-chat-environment-popover .gyro-subagent-runtime {
-  grid-column: 2;
-  grid-row: 2;
+.gyro-subagent-notice {
+  padding: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  overflow-wrap: anywhere;
 }
-.gyro-chat-environment-popover .gyro-subagent-tokens {
-  grid-column: 3;
-  grid-row: 2;
-  text-align: right;
+.gyro-subagent-notice p {
+  margin-block: var(--gyro-space-compact);
+}
+.gyro-subagent-notice button {
+  color: var(--gyro-accent);
+}
+.gyro-subagent-notice button:disabled {
+  cursor: default;
+}
+.gyro-subagent-notice details {
+  margin-top: var(--gyro-space-compact);
+}
+.gyro-subagent-notice summary {
+  cursor: pointer;
 }
 .gyro-subagent-panel {
   height: 100%;

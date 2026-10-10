@@ -187,3 +187,30 @@ final result: passed
 ## Follow-up polish
 
 - No blocking polish remains. Run-history timestamps continue using Gyro's existing relative format; their title exposes a scheduled-timezone absolute time.
+
+
+---
+
+# Compact Browser activity and AI pointer — October 10, 2026
+
+**final result: passed**
+
+- Selected source: `docs/design/browser-activity/reference.png`. Production component evidence: `pointer-dark.jpg`, `narrow-light.jpg`, `pointer-detail.jpg` in that directory. Full-context and focused comparisons: `comparison.jpg`, `strip-comparison.jpg`; both were visually inspected.
+- One 33px browser activity row, actual tool text and an explicit Stop control. The AI cursor remains visible for six seconds, marks clicks, follows the drag destination, respects reduced motion and hides/restores during model screenshots.
+- Scoped report: [Browser activity design QA](docs/design/browser-activity/design-qa.md), including source dimensions, density normalization, intentional product constraints, fixture repair, fidelity surfaces and verification.
+- Browser interaction, dark/light and 320px layout checks passed. UI/desktop TypeScript, pointer behavior checks, browser capabilities, hidden-browser input and host bounds passed. Cargo compile/build and the isolated 13-step native Browser smoke passed. The language-server smoke was skipped.
+- The installed app bundle remains unchanged; the native change requires rebuilding/reinstalling Gyro.
+
+---
+
+# Compact sub-agents — October 10, 2026
+
+**final result: passed**
+
+- Scoped report: [Sub-agent design QA](docs/design/subagents/design-qa.md).
+- Corrected Image Gen source: `docs/design/subagents/reference.png`; combined source/component comparison: `comparison.png` in that directory. Browser evidence covers light/default, dark/small/compact, large/custom-accent and refresh failure.
+- Colored identity dots match summaries, rows and process tabs. Environment includes Working/Done filters with measured counts; process metrics remain in the detailed panel. Known agents survive refresh failures with Retry and disclosed diagnostics.
+- Approve for me permits delegation within policy limits and releases eligible waiting requests. Full access retains its normal-run override; explicit denials, child inheritance, Plan and Council ceilings are preserved.
+- Type checks, production build, relevant UI guards and native delegation/policy tests passed. Live provider spawning was not exercised; the installed app bundle remains unchanged.
+
+Sub-agent composer refinement: strip/composer edges match at regular and narrow widths; the strip's bottom divider is removed. Evidence: `docs/design/subagents/composer-aligned.png`. Workbench/token checks passed.

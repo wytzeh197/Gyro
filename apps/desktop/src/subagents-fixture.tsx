@@ -147,14 +147,40 @@ function Fixture() {
             : params.get("size") === "small"
               ? "small"
               : "default",
-        mainColor: "#0874df",
+        mainColor: params.get("accent") ?? "#0874df",
         secondaryColor: "#8b6fcb",
         motionSpeed: "default",
       },
       theme,
     );
   }, [theme]);
-  const [agents, setAgents] = useState(initial);
+  const [agents, setAgents] = useState<SubagentSnapshot[]>(() =>
+    params.get("scenario") === "working"
+      ? [
+          ...initial.map((agent, index) => ({
+            ...agent,
+            status: "running" as const,
+            name:
+              [
+                "Native provider accounting",
+                "ACP usage coverage",
+                "API and local model accounting",
+              ][index] ?? agent.name,
+          })),
+          ...Array.from({ length: 6 }, (_, index) => ({
+            ...base,
+            agentId: `history-${index}`,
+            parentTurnId: "previous-turn",
+            name: `Previous review ${index + 1}`,
+            status: "completed" as const,
+            startedAt: null,
+            elapsedMs: 23000,
+            summary: "Review completed.",
+          })),
+        ]
+      : initial,
+  );
+  const [refreshError, setRefreshError] = useState(false);
   const [tabs, setTabs] = useState<SubagentTabState>({ openAgentIds: [] });
   const [companion, dispatchCompanion] = useReducer(
     chatCompanionReducer,
@@ -200,6 +226,11 @@ function Fixture() {
     openAgentIds: tabs.openAgentIds,
     selectedAgentId: tabs.selectedAgentId,
     eventsByAgentId: { parser: events },
+    error: refreshError ? "Could not refresh sub-agents." : undefined,
+    errorDetail: refreshError
+      ? "Fixture: native connection unavailable"
+      : undefined,
+    onRefresh: () => setRefreshError(false),
     onSelect: (id) => {
       setTabs((current) => openSubagentTab(current, id));
       setPanel("agents");
@@ -231,6 +262,10 @@ function Fixture() {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <nav style={{ padding: 8 }}>
+        <span>Local sample data · </span>
+        <button onClick={() => setRefreshError(true)}>
+          Simulate refresh failure
+        </button>
         <button
           onClick={() =>
             setTheme((current) => (current === "dark" ? "light" : "dark"))

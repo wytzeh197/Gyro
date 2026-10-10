@@ -1,3 +1,24 @@
+.gyro-chat-file-link {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: color-mix(in srgb, var(--gyro-blue) 55%, var(--gyro-muted));
+  cursor: pointer;
+  display: inline;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+  text-align: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.gyro-chat-file-link:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 3px;
+}
+
 .gyro-chat-file-card {
   appearance: none;
   background: var(--gyro-code-bg);
@@ -69,6 +90,40 @@
 }
 .gyro-transcript-attachments > .gyro-chat-file-card {
   margin-block: 0;
+}
+
+/* Thumbnails belong to sent messages; document and assistant cards stay descriptive. */
+.gyro-user-message-bubble .gyro-chat-file-card.is-image.is-thumbnail {
+  border-radius: var(--gyro-radius-lg);
+  position: relative;
+  width: min(112px, 100%);
+}
+.gyro-chat-file-card.is-thumbnail .gyro-chat-file-thumbnail {
+  aspect-ratio: auto;
+  height: 80px;
+}
+.gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption {
+  background: color-mix(in srgb, var(--gyro-code-bg) 92%, transparent);
+  bottom: 0;
+  left: 0;
+  min-height: 0;
+  opacity: 0;
+  padding: 5px 6px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+.gyro-chat-file-card.is-thumbnail:is(:hover, :focus-visible)
+  .gyro-chat-file-caption {
+  opacity: 1;
+}
+.gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption > svg,
+.gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption small {
+  display: none;
+}
+.gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption strong {
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
 }
 .gyro-chat-file-overlay {
   align-items: center;

@@ -1,5 +1,6 @@
+use crate::acp_usage::{self, AcpContextUsage, AcpProvider, AcpRuntimeInfo, AcpUsageObservation};
 use crate::credentials::{
-    try_apply_stored_provider_api_key, provider_id_from_program, CredentialPolicy,
+    provider_id_from_program, try_apply_stored_provider_api_key, CredentialPolicy,
 };
 use crate::execution::{configure_process_group, register_process_group, terminate_process_group};
 use crate::security::redact_secrets;
@@ -105,10 +106,12 @@ pub struct KimiAcpOutput {
     pub stop_reason: String,
     pub resumed: bool,
     pub duration_ms: u64,
-    /// The prompt's token usage as the agent reported it (Grok sends `usage`,
-    /// and `promptUsage` on some builds), summed over every model call the
-    /// turn made. Absent when the agent reports none.
+    /// Compatibility copy of the provider's usage object. Its semantics depend
+    /// on the provider; use usage_observation for accounting.
     pub usage: Option<Value>,
+    pub usage_observation: AcpUsageObservation,
+    /// Occupancy from usage_update, never a billed token reading.
+    pub context_usage: Option<AcpContextUsage>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,6 +148,11 @@ struct KimiAcpConnection {
     inactivity_timeout: Duration,
     cancellation: CancellationToken,
     stderr_text: String,
+    usage_provider: AcpProvider,
+    runtime_info: AcpRuntimeInfo,
+    collecting_usage: bool,
+    usage_observation: Option<AcpUsageObservation>,
+    context_usage: Option<AcpContextUsage>,
 }
 
 impl Drop for KimiAcpConnection {
@@ -283,7 +291,62 @@ impl KimiAcpConnection {
             inactivity_timeout: request.inactivity_timeout,
             cancellation: request.cancellation.clone(),
             stderr_text: String::new(),
+            usage_provider: {
+                let program_name = Path::new(&request.program)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                let provider = AcpProvider::from_label(program_name);
+                if provider == AcpProvider::Unknown {
+                    AcpProvider::from_label(&request.provider_label)
+                } else {
+                    provider
+                }
+            },
+            runtime_info: AcpRuntimeInfo::default(),
+            collecting_usage: false,
+            usage_observation: None,
+            context_usage: None,
         })
+    }
+
+    fn begin_usage(&mut self) {
+        self.collecting_usage = true;
+        // Clear replayed context: a resumed session may send historical updates.
+        self.context_usage = None;
+        let observation = acp_usage::normalize_prompt_usage(
+            self.usage_provider,
+            &Value::Null,
+            self.runtime_info.clone(),
+        );
+        crate::provider_observation::native_acp_usage(&observation);
+        self.usage_observation = Some(observation);
+    }
+
+    fn observe_prompt_response(&mut self, message: &Value) {
+        let value = message.get("result").unwrap_or(message);
+        let mut observation = acp_usage::normalize_prompt_usage(
+            self.usage_provider,
+            value,
+            self.runtime_info.clone(),
+        );
+        if message.get("error").is_some()
+            || value
+                .get("stopReason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| matches!(reason, "cancelled" | "refusal"))
+        {
+            observation.interrupted();
+        }
+        crate::provider_observation::native_acp_usage(&observation);
+        self.usage_observation = Some(observation);
+    }
+
+    fn interrupted_usage(&mut self) {
+        if let Some(observation) = &mut self.usage_observation {
+            observation.interrupted();
+            crate::provider_observation::native_acp_usage(&observation);
+        }
     }
 
     fn send_request(&mut self, method: &str, params: Value) -> Result<u64> {
@@ -490,7 +553,11 @@ where
                 "modelId": acp_model_id(&request.model, &offered_models),
             }),
         )?;
-        let _ = wait_for_response(
+        // An advertised pre-selection model is stale after a successful switch.
+        // Restore it only when the switch failed; otherwise retain only a model
+        // identity returned by the runtime itself.
+        let previous_model = connection.runtime_info.model_id.take();
+        let model_result = wait_for_response(
             &mut connection,
             model_id,
             &request.workspace,
@@ -500,6 +567,9 @@ where
             &mut on_approval,
             &mut on_write_file,
         );
+        if model_result.is_err() {
+            connection.runtime_info.model_id = previous_model;
+        }
     }
     if !skip_in_session_config && request.reasoning_effort.is_some() {
         let thinking_id = connection.send_request(
@@ -577,6 +647,7 @@ where
 
     crate::timing::mark(crate::timing::Stage::PromptSent);
     crate::provider_observation::native_prompt(&json!(prompt));
+    connection.begin_usage();
     let prompt_id = connection.send_request(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),
@@ -594,6 +665,9 @@ where
     if request.cancellation.is_cancelled() {
         let _ = connection.send_notification("session/cancel", json!({"sessionId": session_id}));
     }
+    if result.is_err() {
+        connection.interrupted_usage();
+    }
     let result = result?;
     let stop_reason = result
         .get("stopReason")
@@ -606,17 +680,34 @@ where
             )
         })?
         .to_string();
+    // A JSON-RPC result only establishes that the prompt request ended.
+    // Cancellation and refusal must reach the caller's existing non-success
+    // paths, even when the agent streamed text before stopping.
+    match stop_reason.as_str() {
+        "cancelled" => {
+            request.cancellation.cancel();
+            anyhow::bail!("{} ACP run cancelled", request.provider_label);
+        }
+        "refusal" => {
+            anyhow::bail!("{} ACP agent refused to continue", request.provider_label);
+        }
+        _ => {}
+    }
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
         stop_reason,
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
-        usage: result
-            .get("usage")
-            .or_else(|| result.get("promptUsage"))
-            .filter(|usage| usage.is_object())
-            .cloned(),
+        usage: acp_usage::prompt_usage_object(&result),
+        usage_observation: connection.usage_observation.take().unwrap_or_else(|| {
+            acp_usage::normalize_prompt_usage(
+                connection.usage_provider,
+                &result,
+                connection.runtime_info.clone(),
+            )
+        }),
+        context_usage: connection.context_usage,
     })
 }
 
@@ -877,6 +968,12 @@ where
         if message.get("method").is_none()
             && message.get("id").and_then(Value::as_u64) == Some(expected_id)
         {
+            if connection.collecting_usage {
+                // Observe before any error, refusal or cancellation is propagated.
+                connection.observe_prompt_response(&message);
+            } else if let Some(result) = message.get("result") {
+                connection.runtime_info.observe(result);
+            }
             if let Some(error) = message.get("error") {
                 let mut detail = error
                     .get("message")
@@ -903,6 +1000,11 @@ where
         let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
         match method {
             "session/update" => {
+                if connection.collecting_usage {
+                    if let Some(context) = params.get("update").and_then(acp_usage::context_usage) {
+                        connection.context_usage = Some(context);
+                    }
+                }
                 handle_session_update(
                     &params,
                     &connection.provider_label,
@@ -1534,6 +1636,127 @@ mod tests {
         KimiAcpMode, KimiAcpRequest,
     };
 
+    #[cfg(unix)]
+    #[test]
+    fn acp_prompt_accounting_survives_success_cancel_refusal_and_rpc_error() {
+        use crate::usage::{UsageCoverage, UsageReason};
+        let usage = r#""_meta":{"usage":{"inputTokens":100,"cachedReadTokens":60,"outputTokens":25,"thoughtTokens":5,"totalTokens":125,"modelCalls":2}}"#;
+        let completions = [
+            (format!(r#"{{"jsonrpc":"2.0","id":6,"result":{{"stopReason":"end_turn",{usage}}}}}"#), false),
+            (format!(r#"{{"jsonrpc":"2.0","id":6,"result":{{"stopReason":"cancelled",{usage}}}}}"#), true),
+            (format!(r#"{{"jsonrpc":"2.0","id":6,"result":{{"stopReason":"refusal",{usage}}}}}"#), true),
+            (r#"{"jsonrpc":"2.0","id":6,"error":{"message":"provider failed","data":{"promptUsage":{"inputTokens":100,"outputTokens":25,"totalTokens":125,"modelCalls":2}}}}"#.into(), true),
+        ];
+        for (completion, interrupted) in completions {
+            let _scope = crate::provider_observation::Scope::start();
+            crate::provider_observation::attempt();
+            let (temp, program) = completion_fixture(&completion, false);
+            let mut request = fixture_request(
+                program,
+                temp.path().to_path_buf(),
+                CancellationToken::default(),
+                None,
+            );
+            request.provider_label = "xAI".into();
+            let result = run_kimi_acp(
+                request,
+                |_| {},
+                |_| {},
+                |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+                |_, _| Ok(()),
+            );
+            assert_eq!(result.is_err(), interrupted);
+            if let Ok(output) = result {
+                assert_eq!(output.usage_observation.model_calls, Some(2));
+                assert_eq!(output.usage.as_ref().unwrap()["inputTokens"], 100);
+            }
+            let tokens = crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap();
+            assert_eq!(tokens.total_tokens, 125);
+            let accounting = tokens.effective_accounting();
+            assert_eq!(
+                accounting.coverage,
+                if interrupted {
+                    UsageCoverage::Partial
+                } else {
+                    UsageCoverage::Complete
+                }
+            );
+            if interrupted {
+                assert_eq!(accounting.reason, Some(UsageReason::Interrupted));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acp_usage_update_is_context_only_in_live_adapter_fixture() {
+        let (temp, program) = completion_fixture(
+            "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"usage_update\",\"used\":50000,\"size\":100000}}}\n{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":100,\"outputTokens\":25,\"totalTokens\":125}}}", false);
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.provider_label = "xAI".into();
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            output.context_usage,
+            Some(crate::acp_usage::AcpContextUsage {
+                used: 50000,
+                size: 100000,
+            })
+        );
+        assert_eq!(output.usage_observation.tokens.total_tokens, 125);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_acp_fixture_reports_unavailable_even_with_text_and_synthetic_usage() {
+        use crate::usage::{UsageCoverage, UsageReason};
+        let _scope = crate::provider_observation::Scope::start();
+        crate::provider_observation::attempt();
+        let (temp, program) = completion_fixture(
+            r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn","usage":{"inputTokens":100,"outputTokens":20}}}"#,
+            false,
+        );
+        let output = run_kimi_acp(
+            fixture_request(
+                program,
+                temp.path().to_path_buf(),
+                CancellationToken::default(),
+                None,
+            ),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert!(!output.response.is_empty());
+        let accounting = output.usage_observation.tokens.effective_accounting();
+        assert_eq!(accounting.coverage, UsageCoverage::Unavailable);
+        assert_eq!(accounting.reason, Some(UsageReason::UnsupportedRuntime));
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap()
+                .effective_accounting(),
+            accounting
+        );
+    }
+
     #[test]
     fn acp_diff_content_counts_changed_lines() {
         let content = serde_json::json!([
@@ -1813,6 +2036,39 @@ done
                 |_, _| Ok(()),
             );
             assert!(result.is_err(), "invalid completion accepted: {completion}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_cancelled_or_refused_turns_are_not_successful_even_after_text() {
+        for (reason, expected_detail) in [
+            ("cancelled", "ACP run cancelled"),
+            ("refusal", "ACP agent refused to continue"),
+        ] {
+            let completion = json!({
+                "jsonrpc": "2.0", "id": 6, "result": {"stopReason": reason},
+            });
+            let (temp, program) = completion_fixture(&completion.to_string(), false);
+            let cancellation = CancellationToken::default();
+            let mut streamed = String::new();
+            let result = run_kimi_acp(
+                fixture_request(program, temp.path().into(), cancellation.clone(), None),
+                |text| streamed.push_str(text),
+                |_| {},
+                |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+                |_, _| Ok(()),
+            );
+            assert!(
+                !streamed.is_empty(),
+                "the partial response must still stream"
+            );
+            assert!(
+                result.is_err(),
+                "provider {reason} was incorrectly treated as a completed turn"
+            );
+            assert!(result.unwrap_err().to_string().contains(expected_detail));
+            assert_eq!(cancellation.is_cancelled(), reason == "cancelled");
         }
     }
 

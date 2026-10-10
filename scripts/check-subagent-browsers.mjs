@@ -156,6 +156,18 @@ const injected = browser
   .replaceAll("{{", "{")
   .replaceAll("}}", "}")
   .replaceAll("{background_pointer}", source.trim().replace(/;$/, ""))
+  .replaceAll(
+    "{pointer_feedback}",
+    readFileSync(
+      new URL(
+        "../apps/desktop/src-tauri/src/browser_pointer_feedback.js",
+        import.meta.url,
+      ),
+      "utf8",
+    )
+      .trim()
+      .replace(/;$/, ""),
+  )
   .replaceAll("{nonce}", '"test-nonce"')
   .replace(
     /\{(MAX_[A-Z_]+)\}/g,

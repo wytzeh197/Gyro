@@ -546,6 +546,21 @@ export type RunModel = {
   response?: SessionEvent;
 };
 
+/** A settled work turn must visibly explain an absent closing reply.
+ * This is recovery UI, never an invented assistant answer or a tool replay. */
+export function runNeedsFinalResponse(
+  model: RunModel,
+  completionConfirmed = false,
+): boolean {
+  return (
+    model.phase.name === "done" &&
+    !model.response?.message.trim() &&
+    (completionConfirmed ||
+      model.files.length > 0 ||
+      model.steps.some((step) => step.kind === "work"))
+  );
+}
+
 /** Provider status for the turn, already parsed by the caller. */
 export type RunStatusInput = {
   status: string;

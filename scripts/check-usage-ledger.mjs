@@ -296,7 +296,8 @@ const mixed = summarizeSessionCost(
   }),
 );
 assert.equal(mixed.estimateNote, "2 estimated");
-assert.match(mixed.title, /report no token counts/);
+assert.match(mixed.title, /estimated or unverified counts/);
+assert.equal(mixed.label, "~80K tokens · 5 calls");
 
 const allEstimated = summarizeSessionCost(
   totals({
@@ -310,6 +311,14 @@ const allEstimated = summarizeSessionCost(
 );
 assert.equal(allEstimated.estimateNote, "estimated");
 assert.match(allEstimated.title, /the total is estimated/);
+const partialUsage = summarizeSessionCost(totals({ calls: 2, measuredCalls: 1, partialCalls: 1, totalTokens: 120 }));
+assert.equal(partialUsage.label, "≥120 tokens · 2 calls");
+assert.match(partialUsage.title, /partial usage/);
+const unavailableUsage = summarizeSessionCost(totals({ calls: 1, unavailableCalls: 1 }));
+assert.equal(unavailableUsage.label, "Usage unavailable · 1 call");
+assert.doesNotMatch(unavailableUsage.title, /0 tokens/);
+const mixedUnavailableUsage = summarizeSessionCost(totals({ calls: 2, measuredCalls: 1, unavailableCalls: 1, totalTokens: 100 }));
+assert.equal(mixedUnavailableUsage.label, "≥100 tokens · 2 calls");
 
 // An automation quietly outspending the chat has to be visible in the split.
 const automated = summarizeSessionCost(

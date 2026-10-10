@@ -404,6 +404,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     let background_pointer = include_str!("browser_background_pointer.js")
         .trim()
         .trim_end_matches(';');
+    let pointer_feedback = include_str!("browser_pointer_feedback.js")
+        .trim()
+        .trim_end_matches(';');
     format!(
         r#"(function() {{
   if (window.__gyroBrowserAgentInstalled) return;
@@ -688,8 +691,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     el.dispatchEvent(event);
   }};
 
-  const clickEl = (el) => {{
+  const clickEl = (el, options) => {{
     el.scrollIntoView({{ block: "center", inline: "nearest", behavior: "instant" }});
+    flashTarget(el, Object.assign({{}}, options, {{ action: "click" }}));
     ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {{
       const EventClass = type.startsWith("pointer") ? PointerEvent : MouseEvent;
       el.dispatchEvent(new EventClass(type, {{ bubbles: true, cancelable: true, view: window }}));
@@ -728,88 +732,28 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return {{ ok: true }};
   }};
 
-  // Show the person watching which element the agent just touched. An inert
-  // overlay on the root element keeps page layout, focus, hit-testing, and the
-  // body-rooted accessibility read untouched.
-  let highlight = null;
-  let highlightTimer = 0;
-  const clearHighlight = () => {{
-    window.clearTimeout(highlightTimer);
-    if (highlight) highlight.remove();
-    highlight = null;
-  }};
-  const flashTarget = (el, options = {{}}) => {{
-    try {{
-      clearHighlight();
-      const rect = el.getBoundingClientRect();
-      if (!rect.width && !rect.height) return;
-      const box = document.createElement("div");
-      box.setAttribute("aria-hidden", "true");
-      box.style.cssText = [
-        "position:fixed",
-        "pointer-events:none",
-        "z-index:2147483647",
-        "left:" + (rect.left - 3) + "px",
-        "top:" + (rect.top - 3) + "px",
-        "width:" + (rect.width + 6) + "px",
-        "height:" + (rect.height + 6) + "px",
-        "box-sizing:border-box",
-        "border:2px solid #0874df",
-        "border-radius:6px",
-        "box-shadow:0 0 0 4px rgba(8,116,223,0.18)",
-        "transition:opacity 180ms ease",
-      ].join(";");
-      // A model cursor is separate from the user's system pointer. Keep it
-      // inert and inside the viewport, even for partially visible targets.
-      const cursor = document.createElement("div");
-      cursor.style.cssText = [
-        "position:fixed", "pointer-events:none", "display:flex",
-        "align-items:center", "gap:4px",
-        "left:" + Math.max(0, Math.min(window.innerWidth - 76, (options.x ?? (rect.left + rect.width / 2)))) + "px",
-        "top:" + Math.max(0, Math.min(window.innerHeight - 32, (options.y ?? (rect.top + rect.height / 2)))) + "px",
-        "font:600 11px system-ui", "color:#fff",
-        "filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))",
-      ].join(";");
-      const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      arrow.setAttribute("width", "24");
-      arrow.setAttribute("height", "28");
-      arrow.setAttribute("viewBox", "0 0 24 28");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M2 2 L21 16 L13 17 L9 25 Z");
-      path.setAttribute("fill", "rgb(8, 116, 223)");
-      path.setAttribute("stroke", "white");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linejoin", "round");
-      arrow.appendChild(path);
-      const label = document.createElement("span");
-      label.textContent = String(options.actor || "Model").slice(0, 32);
-      label.style.cssText = "background:#0874df;border-radius:4px;padding:2px 5px";
-      cursor.append(arrow, label);
-      box.appendChild(cursor);
-      if (options.action === "drag" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {{
-        cursor.animate([
-          {{ transform: "translate(0,0)" }},
-          {{ transform: "translate(" + (options.toX - options.x) + "px," + (options.toY - options.y) + "px)" }},
-        ], {{ duration: 240, fill: "forwards", easing: "ease-out" }});
-      }}
-      document.documentElement.appendChild(box);
-      highlight = box;
-      highlightTimer = window.setTimeout(() => {{
-        box.style.opacity = "0";
-        highlightTimer = window.setTimeout(clearHighlight, 200);
-      }}, 900);
-    }} catch (error) {{}}
-  }};
+  const pointerFeedback = {pointer_feedback}(window, document);
+  const clearHighlight = () => pointerFeedback.clear();
+  const flashTarget = (el, options = {{}}) => pointerFeedback.show(el, options);
 
   window.__gyroBrowserAgent = {{
     clearHighlight() {{
       clearHighlight();
       return {{ ok: true }};
     }},
+    hidePointer() {{
+      pointerFeedback.setHidden(true);
+      return {{ ok: true }};
+    }},
+    restorePointer() {{
+      pointerFeedback.setHidden(false);
+      return {{ ok: true }};
+    }},
     showPointer(options) {{
       // A click may already have navigated. Never paint old coordinates on a new page.
       if (options.url !== location.href) return {{ ok: true }};
-      const el = document.elementFromPoint(options.x, options.y);
+      const dragging = options.action === "drag" && options.phase !== "move";
+      const el = document.elementFromPoint(dragging ? options.toX : options.x, dragging ? options.toY : options.y);
       if (el) flashTarget(el, options);
       return {{ ok: true }};
     }},
@@ -890,8 +834,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         click(options) {{
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
-      clickEl(el);
-      flashTarget(el, options);
+      clickEl(el, options);
       return {{ ok: true, ref: options.ref, name: targetName(el) }};
     }},
     type(options) {{

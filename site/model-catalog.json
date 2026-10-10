@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-10-08.1",
+  "revision": "2026-10-10.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -11,7 +11,7 @@
       "description": "Near-Astra performance for coding and professional work.",
       "minClientRevision": 2,
       "insertBefore": "gpt-6-astra",
-      "contextWindowTokens": 272000,
+      "contextWindowTokens": 500000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "defaultReasoningEffort": "medium"
     },

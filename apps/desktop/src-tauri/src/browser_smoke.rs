@@ -21,6 +21,15 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&output)?;
     // The test explicitly owns this isolated window. Production mouse actions
     // refuse to activate Gyro, so establish their foreground precondition here.
+    #[cfg(target_os = "macos")]
+    {
+        let mtm = objc2::MainThreadMarker::new()
+            .ok_or("native browser smoke must start on the main thread")?;
+        // Test-only: a bare debug binary does not receive Launch Services'
+        // activation. Focusing its window alone leaves NSApp inactive.
+        #[allow(deprecated)]
+        objc2_app_kit::NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    }
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.set_focus()?;
@@ -140,6 +149,15 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     if clicked["name"] != "Change visible state" {
         return Err(format!("click did not name its element: {clicked}"));
     }
+    find("[data-gyro-browser-pointer]")?;
+    call("hidePointer", json!({}))?;
+    let hidden = call("find", json!({"selector":"[data-gyro-browser-pointer]"}))?;
+    if hidden["results"].as_array().is_some_and(|items| !items.is_empty()) {
+        return Err("AI cursor was not hidden for capture".into());
+    }
+    call("restorePointer", json!({}))?;
+    find("[data-gyro-browser-pointer]")?;
+    steps.push("AI cursor visible after click; capture hide/restore".into());
     // The action highlight is for the person watching; capture it, then clear.
     let highlighted = capture_session_browser_png(app, session)?;
     std::fs::write(output.join("browser-smoke-highlight.png"), highlighted.png)

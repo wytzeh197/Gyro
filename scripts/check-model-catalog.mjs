@@ -451,7 +451,7 @@ assert.throws(() =>
   applyModelCatalog(published, 0);
   const sol = provider.models.filter((model) => model.id === "gpt-6.1-sol");
   assert.equal(sol.length, 1);
-  assert.equal(sol[0].contextWindowTokens, 272_000);
+  assert.equal(sol[0].contextWindowTokens, 500_000);
   assert.deepEqual(sol[0].supportedReasoningEfforts, [
     "low",
     "medium",

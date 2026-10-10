@@ -45,6 +45,9 @@ export type SubagentSurfaceState = {
   onClose?: (agentId: string) => void;
   onStop: (agentId: string) => void;
   error?: string;
+  errorDetail?: string;
+  isRefreshing?: boolean;
+  onRefresh?: () => void;
   history?: {
     hasMoreBefore: boolean;
     isLoadingEarlier: boolean;
@@ -89,6 +92,34 @@ export function isSubagentLive(agent: SubagentSnapshot) {
   return ["running", "waiting", "stopping"].includes(agent.status);
 }
 
+/** Identity colors stay the same in summaries, rows, and process tabs. */
+export function subagentHue(agentId: string) {
+  let hue = 0;
+  for (const character of agentId)
+    hue = (hue * 31 + character.charCodeAt(0)) % 360;
+  return hue;
+}
+
+export function subagentsForStatus(
+  agents: SubagentSnapshot[],
+  view: "working" | "done",
+) {
+  return sortedSubagents(
+    agents.filter((agent) => isSubagentLive(agent) === (view === "working")),
+  );
+}
+
+/** Preview/draft chat IDs are renderer-only and cannot be queried natively. */
+export function nativeSubagentParents(ids: string[]) {
+  return [...new Set(ids)]
+    .filter((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        id,
+      ),
+    )
+    .sort();
+}
+
 export function subagentElapsedMs(agent: SubagentSnapshot, now: number) {
   const start = agent.startedAt ? Date.parse(agent.startedAt) : NaN;
   return (
@@ -126,10 +157,10 @@ export function sortedSubagents(agents: SubagentSnapshot[]) {
 
 export function subagentStatusLabel(status: SubagentSnapshot["status"]) {
   return {
-    running: "Running",
+    running: "Working",
     waiting: "Needs approval",
     stopping: "Stopping",
-    completed: "Completed",
+    completed: "Done",
     failed: "Failed",
     cancelled: "Cancelled",
     interrupted: "Interrupted",
@@ -144,11 +175,11 @@ export function subagentActivitySummary(agents: SubagentSnapshot[]) {
   const parts = [
     waiting ? `${waiting} ${waiting === 1 ? "needs" : "need"} approval` : "",
     failed ? `${failed} ${failed === 1 ? "needs" : "need"} attention` : "",
-    count(["running"]) ? `${count(["running"])} running` : "",
+    count(["running"]) ? `${count(["running"])} working` : "",
     count(["stopping"]) ? `${count(["stopping"])} stopping` : "",
   ].filter(Boolean);
   if (!parts.length) {
-    if (count(["completed"])) parts.push(`${count(["completed"])} completed`);
+    if (count(["completed"])) parts.push(`${count(["completed"])} done`);
     if (count(["cancelled"])) parts.push(`${count(["cancelled"])} cancelled`);
   }
   return {

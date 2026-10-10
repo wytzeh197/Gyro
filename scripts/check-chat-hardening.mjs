@@ -10,7 +10,7 @@ import {
   preserveDeliveredResponses,
   sameTimelineEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
-import { buildRunModel, segmentRunSteps } from "../packages/ui/src/chat-run.ts";
+import { buildRunModel, segmentRunSteps, runNeedsFinalResponse } from "../packages/ui/src/chat-run.ts";
 import {
   expandAssistantMessageSegments,
   orderedChatTimelineEvents,
@@ -694,3 +694,25 @@ console.log("stray title marker regressions passed");
 console.log(
   "Canonical chronology checks passed: cold replay, refresh, lifecycle updates, segments, turn isolation.",
 );
+
+// Missing replies are recovery UI, not evidence the requested task completed.
+// A refresh/reload must make the same decision without optimistic stream state.
+for (const events of [[user, tool], [user, tool, { ...answer, message: "" }]]) {
+  const model = buildRunModel(events, { status: { status: "done" } });
+  assert.equal(runNeedsFinalResponse(model), true);
+  assert.equal(runNeedsFinalResponse(buildRunModel(JSON.parse(JSON.stringify(events)),
+    { status: { status: "done" } })), true);
+  assert.equal(runNeedsFinalResponse(buildRunModel(events, { isRunning: true })), false);
+  for (const status of ["failed", "cancelled", "blocked", "running"]) {
+    assert.equal(runNeedsFinalResponse(buildRunModel(events, { status: { status } })), false);
+  }
+}
+for (const message of ["Fixed.", "7", "✓"]) {
+  assert.equal(runNeedsFinalResponse(buildRunModel([user, tool, { ...answer, message }])), false);
+}
+assert.equal(runNeedsFinalResponse(buildRunModel([user])), false);
+assert.equal(runNeedsFinalResponse(buildRunModel([user]), true), true,
+  "a confirmed completed turn with no tools or reply must still offer recovery");
+assert.equal(runNeedsFinalResponse(buildRunModel([user], { isRunning: true }), true), false);
+assert.equal(runNeedsFinalResponse(buildRunModel([user, commentary("turn-1")])), false);
+console.log("Missing final reply checks passed: empty replies, reload, live turns, failures, short answers.");

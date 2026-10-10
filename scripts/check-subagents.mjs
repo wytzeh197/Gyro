@@ -11,6 +11,9 @@ import {
   subagentProcessEvents,
   openSubagentTab,
   closeSubagentTab,
+  subagentHue,
+  subagentsForStatus,
+  nativeSubagentParents,
 } from "../packages/ui/src/subagents.ts";
 import { applyProviderChatStreamPresentation } from "../apps/desktop/src/provider-stream-events.ts";
 import {
@@ -224,7 +227,7 @@ assert.deepEqual(
     { status: "running" },
   ]),
   {
-    label: "1 needs approval · 1 needs attention · 1 running",
+    label: "1 needs approval · 1 needs attention · 1 working",
     needsAttention: true,
   },
 );
@@ -378,4 +381,46 @@ assert.deepEqual(
 );
 console.log(
   "Sidebar approval checks passed: reconciliation, independent chats, imports, deduplication, and turn boundaries.",
+);
+
+// The status views partition lifecycle states without dropping failures or approvals.
+const lifecycleAgents = [
+  "running",
+  "waiting",
+  "stopping",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+].map((status) => ({ ...agent, agentId: status, status }));
+assert.deepEqual(
+  subagentsForStatus(lifecycleAgents, "working").map((item) => item.status),
+  ["waiting", "running", "stopping"],
+);
+assert.deepEqual(
+  subagentsForStatus(lifecycleAgents, "done").map((item) => item.status),
+  ["failed", "interrupted", "cancelled", "completed"],
+);
+assert.equal(
+  subagentsForStatus(lifecycleAgents, "working").length +
+    subagentsForStatus(lifecycleAgents, "done").length,
+  lifecycleAgents.length,
+);
+assert.equal(subagentStatusLabel("running"), "Working");
+assert.equal(subagentStatusLabel("completed"), "Done");
+assert.equal(subagentHue("parser"), subagentHue("parser"));
+assert.equal(new Set(["parser", "review", "tests"].map(subagentHue)).size, 3);
+const nativeParent = "a8b13411-24ef-4d02-82aa-112233445566";
+assert.deepEqual(
+  nativeSubagentParents([
+    "preview-123",
+    nativeParent,
+    "parent",
+    "",
+    nativeParent,
+  ]),
+  [nativeParent],
+);
+console.log(
+  "Sub-agent status filters, stable identity colors, and native parent ID checks passed.",
 );

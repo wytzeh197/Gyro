@@ -2306,6 +2306,22 @@ impl SessionStore {
         crate::file_review::store_summaries(&self.conn, workspace_key, summaries)
     }
 
+    pub fn note_usage_call(&self, session_id: Uuid, turn_id: Uuid) -> Result<()> {
+        crate::usage_receipts::note_call(&self.conn, session_id, turn_id)
+    }
+
+    pub fn session_usage_tokens(&self, session_id: Uuid) -> Result<Option<crate::usage::UsageTokens>> {
+        crate::usage_receipts::session_tokens(&self.conn, session_id)
+    }
+
+    pub fn task_usage_tokens(&self, session_id: Uuid, turn_id: Uuid) -> Result<Option<crate::usage::UsageTokens>> {
+        crate::usage_receipts::task_tokens(&self.conn, session_id, turn_id)
+    }
+
+    pub fn link_usage_turn(&self, child_session: Uuid, child_turn: Uuid, parent_session: Uuid, parent_turn: Uuid) -> Result<()> {
+        crate::usage_receipts::link_turn(&self.conn, child_session, child_turn, parent_session, parent_turn)
+    }
+
     /// What one chat has cost, across every call it produced.
     pub fn session_usage_totals(&self, session_id: Uuid) -> Result<crate::usage::UsageTotals> {
         crate::usage::session_usage_totals(&self.conn, session_id)

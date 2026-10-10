@@ -4,6 +4,7 @@
 @import "./press-feedback.css";
 @import "./navigation-design.css";
 @import "./detail-design.css";
+@import "./ui-upgrade.css";
 
 
 .gyro-surface-row {
@@ -445,7 +446,7 @@
   opacity: 0;
   pointer-events: none;
   position: absolute;
-  right: 5px;
+  right: 0;
   top: 50%;
   transform: translate(2px, -50%);
   z-index: 4;
@@ -24057,56 +24058,18 @@ button.gyro-response-changed-files:hover {
   scrollbar-gutter: stable;
 }
 
-.gyro-side-chat-empty {
-  margin-block: auto;
+.gyro-side-chat-empty.gyro-chat-start {
+  gap: 0;
+  margin: auto;
   padding: 32px 0;
+  width: 100%;
+}
+
+.gyro-side-chat-empty h1 {
+  font-size: var(--gyro-font-heading);
+  line-height: 1.3;
+  margin: 0;
   text-align: center;
-}
-
-.gyro-side-chat-empty h2 {
-  color: var(--gyro-text);
-  font-size: clamp(calc(20px * var(--gyro-ui-scale, 1)), 3cqi, calc(26px * var(--gyro-ui-scale, 1)));
-  font-weight: 500;
-  letter-spacing: -0.035em;
-  line-height: 1.25;
-  margin: 0 0 10px;
-}
-
-.gyro-side-chat-empty p {
-  color: var(--gyro-muted);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  line-height: 1.6;
-  margin: 0 auto;
-  max-width: 32ch;
-}
-
-.gyro-side-chat-context {
-  align-items: center;
-  color: var(--gyro-faint);
-  display: flex;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  gap: 6px;
-  justify-content: center;
-  margin-top: 18px;
-  min-width: 0;
-}
-
-.gyro-side-chat-context > svg,
-.gyro-side-chat-model > svg {
-  flex-shrink: 0;
-}
-
-.gyro-side-chat-context > span,
-.gyro-side-chat-model > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-side-chat-context > span + span {
-  border-left: 1px solid var(--gyro-border-soft);
-  padding-left: 6px;
 }
 
 .gyro-side-chat-message {
@@ -24146,15 +24109,8 @@ button.gyro-response-changed-files:hover {
   background: transparent;
   flex-shrink: 0;
   gap: 8px;
-  padding: 12px 14px 10px;
+  padding: 12px 20px 20px;
   position: static;
-}
-
-.gyro-side-chat-note {
-  color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  line-height: 1.5;
-  text-align: center;
 }
 
 /* Tiled panes are too narrow to give the dock a column of its own, so it floats
@@ -39559,8 +39515,9 @@ textarea:focus-visible,
   flex-shrink: 0;
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   gap: 8px;
-  min-height: 28px;
-  padding: 2px 8px;
+  box-sizing: border-box;
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 4px 10px;
 }
 
 .gyro-browser-agent-dot {
@@ -39581,13 +39538,26 @@ textarea:focus-visible,
 }
 
 .gyro-browser-agent-text strong {
-  font-weight: 600;
+  flex: 0 0 auto;
+  font-weight: 500;
 }
 
 .gyro-browser-agent-text span {
+  border-left: 1px solid var(--gyro-border-soft);
   color: var(--gyro-muted);
   overflow: hidden;
+  padding-left: 8px;
   text-overflow: ellipsis;
+}
+
+.gyro-browser-preview.is-chat .gyro-browser-statusbar.is-hidden {
+  display: none;
+}
+
+.gyro-browser-loading-mark {
+  height: 22px;
+  width: 22px;
+  margin-bottom: 8px;
 }
 
 .gyro-browser-agent-stop {
@@ -40040,6 +40010,9 @@ textarea:focus-visible,
    icons from stretching into a banner when the Workspace sidebar is dragged
    wider than its default 224px. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
+  /* Center both control heights on the native traffic lights' visible line. */
+  align-items: center;
+  padding-top: 2px;
   padding-right: 10px;
   position: relative;
 }
@@ -40214,586 +40187,7 @@ textarea:focus-visible,
   }
 }
 
-/* Design polish — shared appearance, with pane geometry owned above. */
-/* Workspace chrome: quiet neutral navigation, with the existing theme,
-   density and native-window positioning kept as the source of geometry. */
-:root[data-theme] .gyro-sidebar {
-  --gyro-shell-row-hover: color-mix(
-    in srgb,
-    var(--gyro-text) 4%,
-    var(--gyro-sidebar)
-  );
-  color: var(--gyro-sidebar-text);
-}
-
-:root[data-theme] .gyro-app-shell .gyro-sidebar,
-:root[data-theme] .gyro-app-shell.is-chat-shell .gyro-sidebar {
-  background: var(--gyro-sidebar);
-  border-right-color: var(--gyro-border-soft);
-  box-shadow: none;
-}
-
-:root[data-theme] .gyro-sidebar .gyro-sidebar-windowbar,
-:root[data-theme] .gyro-sidebar .gyro-sidebar-footer {
-  background: var(--gyro-sidebar);
-}
-
-/* This finish lands after the Workspace chrome band. An opaque windowbar
-   covers that band, so the activity rail's tone stops at the column edge and
-   cuts through the traffic lights. Leave the bar clear and the band painted on
-   the sidebar shows through, meeting the rail as one 48px surface. Settings
-   keeps the solid bar: it has no rail and no band. */
-:root[data-theme]
-  .gyro-app-shell.is-workspace-chrome-active
-  .gyro-sidebar-windowbar:not(.is-settings) {
-  background: transparent;
-}
-
-/* Only set the vertical measure. Horizontal offsets still protect native
-   traffic lights and the hidden-sidebar restore control. */
-:root[data-theme] .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar,
-:root[data-theme] .gyro-sidebar-windowbar.is-settings {
-  height: 48px;
-  min-height: 48px;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-project-row,
-    .gyro-sidebar-project-toggle,
-    .gyro-sidebar-thread,
-    .gyro-sidebar-thread-main,
-    .gyro-footer-button
-  ) {
-  border-radius: var(--gyro-radius-sm);
-  box-shadow: none;
-  color: var(--gyro-sidebar-text);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 400;
-  letter-spacing: -0.005em;
-  line-height: calc(18px * var(--gyro-ui-scale, 1));
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-project-row,
-    .gyro-sidebar-thread,
-    .gyro-session-row,
-    .gyro-footer-button
-  ):hover {
-  background: var(--gyro-shell-row-hover);
-  color: var(--gyro-text);
-  box-shadow: none;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-thread,
-    .gyro-session-row,
-    .gyro-footer-button
-  ).is-active,
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-thread,
-    .gyro-session-row,
-    .gyro-footer-button
-  ).is-active:hover {
-  background: transparent;
-  color: var(--gyro-text);
-  box-shadow: none;
-}
-
-/* The selected row carries no fill; brighter, heavier text marks it, and it
-   still answers the pointer like its neighbours. */
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-thread,
-    .gyro-session-row,
-    .gyro-footer-button
-  ).is-active {
-  font-weight: 600;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-thread,
-    .gyro-session-row,
-    .gyro-footer-button
-  ).is-active:hover {
-  background: var(--gyro-shell-row-hover);
-}
-
-:root[data-theme] .gyro-sidebar .gyro-session-row {
-  border-radius: var(--gyro-radius-sm);
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  .gyro-session-row.is-active
-  .gyro-sidebar-thread-main {
-  color: var(--gyro-text);
-  font-weight: 500;
-}
-
-/* Retain the useful focused-chat marker in a split without a glowing edge. */
-:root[data-theme]
-  .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
-  .gyro-session-row.is-active::before {
-  box-shadow: none;
-  opacity: 0.75;
-  width: 2px;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  :is(.gyro-sidebar-small-title, .gyro-sidebar-time-group, .gyro-nav-label) {
-  color: var(--gyro-faint);
-  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: calc(16px * var(--gyro-ui-scale, 1));
-  text-transform: none;
-}
-
-:root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
-  padding-bottom: 4px;
-}
-
-:root[data-theme] .gyro-sidebar .gyro-sidebar-more-button,
-:root[data-theme] .gyro-sidebar .gyro-session-time,
-:root[data-theme] .gyro-sidebar .gyro-sidebar-shortcut {
-  color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  font-weight: 400;
-}
-
-/* Navigation uses the same line weight as the titlebar. Provider marks and
-   semantic status icons retain their own artwork and color. */
-:root[data-theme]
-  .gyro-sidebar
-  :is(
-    .gyro-sidebar-action,
-    .gyro-sidebar-row,
-    .gyro-sidebar-project-toggle,
-    .gyro-footer-button
-  )
-  > svg,
-:root[data-theme]
-  :is(
-    .gyro-sidebar-window-actions,
-    .gyro-titlebar-switch-option,
-    .gyro-sidebar-restore-button
-  )
-  svg {
-  color: var(--gyro-muted);
-  stroke-width: 1.6;
-}
-
-:root[data-theme] .gyro-titlebar-switch {
-  background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-sidebar));
-  border-radius: var(--gyro-radius-md);
-  box-shadow: none;
-}
-
-:root[data-theme] .gyro-titlebar-switch-option {
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted);
-}
-
-:root[data-theme] .gyro-titlebar-switch-option svg {
-  transition: color var(--gyro-premium-motion) var(--gyro-premium-ease);
-}
-
-:root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover svg {
-  color: var(--gyro-text);
-}
-
-:root[data-theme] .gyro-titlebar-switch-option.is-active,
-:root[data-theme] .gyro-titlebar-switch-option.is-active:hover {
-  background: color-mix(in srgb, var(--gyro-text) 9%, var(--gyro-sidebar));
-  box-shadow: none;
-  color: var(--gyro-text);
-}
-
-:root[data-theme] .gyro-titlebar-switch-option.is-active svg {
-  color: currentColor;
-}
-
-:root[data-theme] .gyro-sidebar-window-actions .gyro-sidebar-toggle-button,
-:root[data-theme] .gyro-sidebar-restore-cluster .gyro-sidebar-restore-button {
-  border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-muted);
-}
-
-:root[data-theme]
-  .gyro-sidebar-window-actions
-  .gyro-sidebar-toggle-button:hover,
-:root[data-theme]
-  .gyro-sidebar-restore-cluster
-  .gyro-sidebar-restore-button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
-  transform: none;
-}
-
-:root[data-theme] .gyro-sidebar .gyro-session-actions {
-  background: var(--gyro-shell-row-hover);
-  border-color: transparent;
-  border-radius: var(--gyro-radius-xs);
-  box-shadow: none;
-}
-
-:root[data-theme] .gyro-sidebar .gyro-session-action:not(.is-pinned) {
-  color: var(--gyro-muted);
-}
-
-:root[data-theme] .gyro-sidebar .gyro-session-action:hover,
-:root[data-theme] .gyro-sidebar .gyro-session-action[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  border-color: transparent;
-  color: var(--gyro-text);
-}
-
-:root[data-theme] .gyro-sidebar .gyro-sidebar-footer {
-  border-top-color: var(--gyro-border-soft);
-}
-
-/* Conversation polish. Append after the existing UI stylesheet so these
-   surface-scoped rules refine its appearance without changing pane geometry. */
-:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
-  --gyro-chat-content-width: 780px;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-user-message-bubble {
-  background: var(--gyro-surface-soft);
-  border-color: transparent;
-  border-radius: 16px;
-  padding: 9px 14px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.55 var(--gyro-font-sans);
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text) {
-  color: var(--gyro-text);
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.6;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-response-body
-  :is(p, li) {
-  line-height: 1.6;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-response-body
-  :is(h2, h3) {
-  font-size: calc(15px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.45;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-response-body {
-  gap: 11px;
-}
-
-/* Progress stays secondary to the answer; failures retain their own colors. */
-:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  line-height: 1.5;
-}
-
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
-  :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  line-height: calc(20px * var(--gyro-ui-scale, 1));
-  min-height: 26px;
-}
-
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
-  :is(.gyro-run-call-meta, .gyro-run-row-repeat, .gyro-run-row-stat) {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-}
-
-/* Scope to the two main composers; nested companion tools keep their density. */
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider {
-  background: var(--gyro-surface-soft);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
-  filter: none;
-}
-
-:root[data-theme="light"]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider {
-  background: var(--gyro-surface);
-}
-
-:root[data-theme="light"] .gyro-chat-message-queue {
-  background: var(--gyro-surface);
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider:focus-within {
-  /* Keep the frame neutral when typing or using composer controls. */
-  border-color: var(--gyro-border);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider
-  > textarea {
-  border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
-  padding: 12px 14px 6px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider
-  > textarea::placeholder {
-  color: var(--gyro-muted);
-  opacity: 0.88;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-start, .gyro-chat-composer-dock)
-  > .gyro-composer-shell.is-hero.has-provider
-  > .gyro-composer-bar {
-  background: transparent;
-  padding: calc(2px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  :is(.gyro-composer-chip, .gyro-composer-tool) {
-  border-radius: var(--gyro-radius-sm);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button {
-  height: calc(28px * var(--gyro-ui-scale, 1));
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  min-width: 28px;
-  width: 28px;
-}
-
-/* A ready send shares the primary action palette across both chat layouts. */
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button:not(:disabled):not(.is-stop) {
-  background: var(--gyro-primary-bg);
-  color: var(--gyro-primary-text);
-}
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button:not(:disabled):not(.is-stop):hover {
-  background: var(--gyro-primary-hover);
-}
-
-/* Artifacts and completed changes share one restrained card treatment. */
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(.gyro-chat-artifact, .gyro-chat-run-change-summary.is-complete) {
-  background: var(--gyro-pane);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-lg);
-  box-shadow: none;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-artifact-header {
-  min-height: 40px;
-  padding-inline: 12px;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-artifact-heading
-  strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
-  letter-spacing: 0;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  :is(
-    .gyro-chat-artifact-heading small,
-    .gyro-chat-artifact-meta,
-    .gyro-chat-artifact-files small,
-    .gyro-chat-artifact-checks small
-  ) {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  font-weight: 450;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-message-queue
-  article
-  p {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  line-height: 1.45;
-}
-
-/* Environment reads as one grouped utility card. Its existing owning-pane
-   bounds, placement, scrolling, and action handlers remain authoritative. */
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  > .gyro-chat-environment-popover {
-  background: var(--gyro-surface);
-  border: 1px solid var(--gyro-border);
-  /* Leave a softer outer corner around the compact utility rows. */
-  border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 10px 30px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
-  padding: 6px;
-}
-
-:root[data-theme] .gyro-chat-environment-popover > header {
-  min-height: 26px;
-  padding: 0 4px 4px 7px;
-}
-
-:root[data-theme] .gyro-chat-environment-popover > header > strong {
-  color: var(--gyro-text);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
-}
-
-:root[data-theme]
-  .gyro-chat-environment-popover
-  :is(
-    .gyro-chat-environment-popover-rows,
-    .gyro-chat-environment-popover-actions
-  )
-  > button {
-  border-radius: var(--gyro-radius-sm);
-  min-height: 28px;
-  padding: 5px 7px;
-}
-
-:root[data-theme]
-  .gyro-chat-environment-popover
-  :is(
-    .gyro-chat-environment-popover-rows,
-    .gyro-chat-environment-popover-actions
-  )
-  > button:not(:disabled):hover {
-  background: var(--gyro-control-hover);
-}
-
-:root[data-theme]
-  .gyro-chat-environment-popover
-  :is(
-    .gyro-chat-environment-popover-rows,
-    .gyro-chat-environment-popover-actions
-  )
-  > button:focus-visible {
-  background: var(--gyro-control-hover);
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: -2px;
-}
-
-:root[data-theme] .gyro-chat-environment-popover-actions {
-  margin-top: 5px;
-  padding-top: 5px;
-}
-
-:root[data-theme] .gyro-chat-environment-popover-sources {
-  padding: 11px 7px 5px;
-}
-
-:root[data-theme] .gyro-chat-environment-popover-sources > ul {
-  gap: 8px;
-}
-
-/* Pane-local compactness: no viewport sizing and no change to scroll owners. */
-@container (max-width: 470px) {
-  :root[data-theme]
-    .gyro-chat-surface:is(.is-thread, .is-empty)
-    :is(.gyro-chat-start, .gyro-chat-composer-dock)
-    > .gyro-composer-shell.is-hero.has-provider {
-    border-radius: 16px;
-  }
-
-  :root[data-theme]
-    .gyro-chat-surface:is(.is-thread, .is-empty)
-    :is(.gyro-chat-start, .gyro-chat-composer-dock)
-    > .gyro-composer-shell.is-hero.has-provider
-    > textarea {
-    border-radius: 16px 16px 0 0;
-    padding-inline: 13px;
-  }
-
-  :root[data-theme]
-    .gyro-chat-surface:is(.is-thread, .is-empty)
-    .gyro-chat-artifact-heading
-    > span {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-}
+/* Conversation and navigation appearance live in chat-design.css and navigation-design.css. */
 
 /* Settings and confirmations: one quiet control language in both themes. */
 .gyro-settings-content {
@@ -42880,4 +42274,27 @@ textarea:focus-visible,
     > .gyro-chat-thread-topbar {
     padding-left: var(--gyro-chat-header-navigation-inset);
   }
+}
+
+/* Keep running terminals mounted while the drawer's add button shows tools. */
+.gyro-workspace-tool-panel.is-resizable {
+  position: relative;
+}
+.gyro-workspace-tool-picker {
+  position: absolute;
+  inset: var(--gyro-tool-header-height) 0 0;
+  display: grid;
+  overflow: auto;
+  background: var(--gyro-pane);
+  z-index: 2;
+}
+.gyro-workspace-tool-launcher {
+  padding-block: 12px;
+}
+.gyro-workspace-tool-launcher > button {
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+}
+.gyro-workspace-tool-launcher > button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: -2px;
 }

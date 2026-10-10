@@ -557,6 +557,62 @@ done
 }
 
 #[test]
+fn real_binary_preserves_acp_cancellation_and_refusal_for_every_acp_provider() {
+    for provider_id in ["kimi", "xai", "gemini", "cursor", "opencode"] {
+        for (reason, code, category, status) in [
+            ("cancelled", 130, "cancelled", "cancelled"),
+            ("refusal", 5, "execution-failed", "failed"),
+        ] {
+            let root = PathBuf::from("/tmp").join(format!(
+                "gyro-acp-stop-{provider_id}-{reason}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let home = root.join("home");
+            let workspace = root.join("workspace");
+            fs::create_dir_all(&home).unwrap();
+            fs::create_dir_all(&workspace).unwrap();
+            let provider = write_script(
+                &root,
+                &format!(
+                    r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{{"id":'"$id"',"result":{{"authMethods":[{{"id":"login"}}]}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"id":'"$id"',"result":{{"sessionId":"stop-session"}}}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{{"method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Partial output"}}}}}}}}'
+      printf '%s\n' '{{"id":'"$id"',"result":{{"stopReason":"{reason}"}}}}' ;;
+    *) printf '%s\n' '{{"id":'"$id"',"result":{{}}}}' ;;
+  esac
+done
+"#
+                ),
+            );
+            write_provider_config(&home, &provider, false, provider_id);
+            let output = gyro_command(&home, &workspace)
+                .args([
+                    "run",
+                    "--profile",
+                    "test-provider",
+                    "--no-open",
+                    "--json",
+                    "say hello",
+                ])
+                .output()
+                .unwrap();
+            assert_failure(&output, code, category);
+            let store = SessionStore::open(GyroPaths::from_base_dir(data_base(&home))).unwrap();
+            let session = store.latest_session().unwrap().unwrap();
+            let events = store.read_events(session.id).unwrap();
+            assert!(events.iter().any(|event| event.payload["status"] == status));
+            assert!(!events.iter().any(|event| event.payload["status"] == "done"));
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+}
+
+#[test]
 fn real_binary_setup_blocks_an_enabled_claude_provider_without_authentication() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");

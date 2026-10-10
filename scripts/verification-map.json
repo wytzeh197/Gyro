@@ -11,6 +11,7 @@
   "check-browser-host-visibility.mjs": { "kind": "behavioral" },
   "check-browser-navigation.mjs": { "kind": "behavioral" },
   "check-browser-observation-cost.mjs": { "kind": "behavioral" },
+  "check-browser-pointer-feedback.mjs": { "kind": "behavioral" },
   "check-browser-reveal.mjs": { "kind": "behavioral" },
   "check-canvas-preview-browser.mjs": {
     "kind": "behavioral",
@@ -19,6 +20,7 @@
   "check-chat-canvas.mjs": { "kind": "behavioral" },
   "check-chat-close-target.mjs": { "kind": "behavioral" },
   "check-chat-companion.mjs": { "kind": "behavioral" },
+  "check-chat-drag.mjs": { "kind": "behavioral" },
   "check-chat-hardening.mjs": { "kind": "behavioral" },
   "check-chat-keep-alive.mjs": { "kind": "behavioral" },
   "check-chat-media-transfer.mjs": { "kind": "behavioral" },
@@ -79,6 +81,7 @@
   "check-model-file-visibility.mjs": { "kind": "behavioral" },
   "check-page-reliability.mjs": { "kind": "behavioral" },
   "check-plan-document.mjs": { "kind": "behavioral" },
+  "check-provider-allowance.mjs": { "kind": "behavioral" },
   "check-provider-benchmark-summary.mjs": { "kind": "behavioral" },
   "check-provider-capability-manifest.mjs": { "kind": "behavioral" },
   "check-provider-identity.mjs": { "kind": "behavioral" },

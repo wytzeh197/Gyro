@@ -3,6 +3,31 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatSurface, type ChatSidePanelId, type SessionGoal, type SessionPlan } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import { deriveSessionPlan } from "./session-context-events";
+
+function completionPlan(status: "in-progress" | "complete" | "blocked"): SessionPlan {
+  const event = (id: string, payload: object) => ({
+    id, sessionId: "goal-plan-fixture", turnId: "fixture-turn",
+    kind: "plan-updated" as const, createdAt: new Date().toISOString(),
+    message: "", payload,
+  });
+  return deriveSessionPlan([
+    event("fixture-plan", {
+      action: "replace", title: "Completion regression fixture",
+      content: "# Completion regression fixture\n\nEight steps with a final verification report.",
+      items: Array.from({ length: 8 }, (_, index) => ({
+        id: `step-${index}`,
+        title: index === 7 ? "Verify themes and accessibility" : `Implementation step ${index + 1}`,
+        status: index === 7 ? "in-progress" : "complete",
+      })),
+    }),
+    event("fixture-final-report", {
+      action: "update-items",
+      items: [{ id: "step-7", status,
+        detail: status === "blocked" ? "Requires native packaged-app acceptance" : undefined }],
+    }),
+  ], "goal-plan-fixture");
+}
 
 const stamp = "2026-09-16T09:00:00Z";
 // The transcript row times itself against now, so a seeded event from last week
@@ -24,7 +49,9 @@ function goalFor(status: SessionGoal["status"]): SessionGoal {
 }
 
 function Fixture() {
-  const [panel, setPanel] = useState<ChatSidePanelId | undefined>("plan");
+  const [panel, setPanel] = useState<ChatSidePanelId | undefined>(
+    new URLSearchParams(location.search).get("panel") === "browser" ? "browser" : "plan",
+  );
   const [goal, setGoal] = useState<SessionGoal | undefined>(() => goalFor("active"));
   // The mark rotates only while a turn is running, so the fixture has to be
   // able to run one.
@@ -52,6 +79,14 @@ function Fixture() {
       <button onClick={() => setRunning(value => !value)}>Toggle running</button>
       <button onClick={() => setGoalEditorOpen(value => !value)}>Toggle goal editor</button>
       <button onClick={() => setGoal(goalFor("active"))}>Restore goal</button>
+      {(["in-progress", "complete", "blocked"] as const).map(status => (
+        <button key={status} onClick={() => {
+          setPlan(completionPlan(status));
+          setRunning(status === "in-progress");
+          setGoal(undefined);
+          setPanel("plan");
+        }}>Fixture: {status === "complete" ? "8/8 completed" : status === "blocked" ? "7/8 blocked" : "7/8 working"}</button>
+      ))}
     </nav>
     <div style={{flex:1,minHeight:0}}>
       <ChatSurface

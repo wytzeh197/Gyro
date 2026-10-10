@@ -6,6 +6,7 @@ import {
   openSubagentTab,
   closeSubagentTab,
   pendingSubagentApprovals,
+  nativeSubagentParents,
   type SubagentSnapshot,
   type SubagentSurfaceState,
   type SubagentTabState,
@@ -35,7 +36,11 @@ export function useSubagents({
   const [tabsByPane, setTabsByPane] = useState<
     Record<string, SubagentTabState>
   >({});
-  const [error, setError] = useState<string>();
+  const [errors, setErrors] = useState<
+    Record<string, { message: string; detail: string } | undefined>
+  >({});
+  const [refreshing, setRefreshing] = useState<string[]>([]);
+  const inFlight = useRef(new Set<string>());
   const loadedParents = useRef(new Set<string>());
   const loadedAgents = useRef(new Set<string>());
   const native =
@@ -46,7 +51,40 @@ export function useSubagents({
       [agent.agentId]: mergeSubagentSnapshot(current[agent.agentId], agent),
     }));
   }, []);
-  const parentKey = [...new Set(parentIds)].sort().join("\n");
+  const parentKey = nativeSubagentParents(parentIds).join("\n");
+  const refresh = useCallback(
+    async (id: string) => {
+      if (
+        !native ||
+        !nativeSubagentParents([id]).length ||
+        inFlight.current.has(id)
+      )
+        return;
+      inFlight.current.add(id);
+      setRefreshing((current) => [...current, id]);
+      try {
+        const agents = await invoke<SubagentSnapshot[]>("list_subagents", {
+          parentSessionId: id,
+        });
+        agents.forEach(merge);
+        loadedParents.current.add(id);
+        setErrors((current) => ({ ...current, [id]: undefined }));
+      } catch (reason) {
+        loadedParents.current.delete(id);
+        setErrors((current) => ({
+          ...current,
+          [id]: {
+            message: "Could not refresh sub-agents.",
+            detail: String(reason),
+          },
+        }));
+      } finally {
+        inFlight.current.delete(id);
+        setRefreshing((current) => current.filter((parent) => parent !== id));
+      }
+    },
+    [merge, native],
+  );
   useEffect(() => {
     if (!native) return;
     let disposed = false;
@@ -67,14 +105,9 @@ export function useSubagents({
     for (const id of parentKey.split("\n").filter(Boolean)) {
       if (loadedParents.current.has(id)) continue;
       loadedParents.current.add(id);
-      void invoke<SubagentSnapshot[]>("list_subagents", { parentSessionId: id })
-        .then((agents) => agents.forEach(merge))
-        .catch((reason) => {
-          loadedParents.current.delete(id);
-          setError(`Could not load sub-agents: ${String(reason)}`);
-        });
+      void refresh(id);
     }
-  }, [merge, native, parentKey]);
+  }, [refresh, native, parentKey]);
   // Persisted lifecycle events also feed browser fixtures and refreshes. They
   // never override a newer live snapshot from the dedicated event channel.
   useEffect(() => {
@@ -148,17 +181,33 @@ export function useSubagents({
       },
       onStop: (agentId) => {
         if (!parentSessionId || !native) return;
-        setError(undefined);
+        setErrors((current) => ({ ...current, [parentSessionId]: undefined }));
         void invoke<SubagentSnapshot>("stop_subagent", {
           parentSessionId,
           agentId,
         })
           .then(merge)
           .catch((reason) =>
-            setError(`Could not stop agent: ${String(reason)}`),
+            setErrors((current) => ({
+              ...current,
+              [parentSessionId]: {
+                message: "Could not stop the sub-agent.",
+                detail: String(reason),
+              },
+            })),
           );
       },
-      error,
+      error: errors[parentSessionId ?? ""]?.message,
+      errorDetail: errors[parentSessionId ?? ""]?.detail,
+      isRefreshing: refreshing.includes(parentSessionId ?? ""),
+      onRefresh:
+        native &&
+        parentSessionId &&
+        nativeSubagentParents([parentSessionId]).length
+          ? () => {
+              void refresh(parentSessionId);
+            }
+          : undefined,
     };
   };
   return { forPane, select };

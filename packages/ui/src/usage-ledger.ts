@@ -112,7 +112,12 @@ export function summarizeSessionCost(
   }
 
   const tokenLabel = formatTokenCount(totals.totalTokens);
-  const label = `${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
+  const partial = totals.partialCalls ?? 0;
+  const unavailable = totals.unavailableCalls ?? 0;
+  const allUnavailable = unavailable === totals.calls;
+  const prefix = totals.estimatedCalls > 0 ? "~" : partial + unavailable > 0 ? "≥" : "";
+  const label = allUnavailable ? `Usage unavailable · ${pluralize(totals.calls, "call")}`
+    : `${prefix}${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
   const breakdown = breakdownLabel(totals.byOrigin);
   const cachedTokens = cachedShare(totals);
   const cachedNote = cachedTokens
@@ -123,10 +128,11 @@ export function summarizeSessionCost(
       ? totals.measuredCalls > 0
         ? `${totals.estimatedCalls} estimated`
         : "estimated"
-      : undefined;
+      : partial + unavailable > 0 ? "incomplete coverage" : undefined;
 
   const titleParts = [
-    `This chat: ${tokenLabel} tokens across ${pluralize(totals.calls, "provider call")}.`,
+    allUnavailable ? `Usage is unavailable for ${pluralize(totals.calls, "provider call")}.`
+      : `This chat: ${prefix}${tokenLabel} tokens across ${pluralize(totals.calls, "provider call")}.`,
   ];
   if (breakdown) {
     titleParts.push(`Breakdown: ${breakdown}.`);
@@ -136,14 +142,15 @@ export function summarizeSessionCost(
       `${formatTokenCount(cachedTokens)} of that was context re-read on each call rather than sent fresh, so the total is larger than the work these calls did.`,
     );
   }
-  if (estimateNote) {
+  if (totals.estimatedCalls > 0) {
     titleParts.push(
-      totals.measuredCalls > 0
-        ? `${totals.estimatedCalls} of those calls came from providers that report no token counts, so their share is estimated.`
-        : "This provider reports no token counts, so the total is estimated.",
+      `${pluralize(totals.estimatedCalls, "call")} used estimated or unverified counts, so the total is estimated.`,
     );
   }
 
+  if (partial + unavailable > 0) {
+    titleParts.push(`${partial} calls have partial usage and ${unavailable} calls have unavailable usage; the complete total cannot be verified.`);
+  }
   return {
     breakdown,
     cachedNote,
@@ -312,7 +319,7 @@ export function ledgerWindows(
       detail: `${formatTokenCount(totals.totalTokens)} of ${formatTokenCount(limit)}`,
       hasBudget,
       id: spec.id,
-      isEstimated: totals.estimatedCalls > 0,
+      isEstimated: totals.estimatedCalls > 0 || (totals.partialCalls ?? 0) > 0 || (totals.unavailableCalls ?? 0) > 0,
       label: spec.label,
       origins: totals.byOrigin.slice(0, 4).map((origin) => ({
         label: origin.label,

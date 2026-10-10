@@ -48,17 +48,6 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
         .and_then(|provider| provider.kind.clone())
 }
 
-/// Publish the running total mid-turn, so the working header can count up.
-///
-/// Emitted after each round of the tool loop rather than once at the end: a
-/// turn that runs tools for a minute is exactly the turn whose cost the user
-/// wants to watch, and a total that only lands when the turn finishes tells
-/// them nothing while it is running.
-fn emit_provider_turn_tokens(app: &tauri::AppHandle, request: &ProviderChatRequest) {
-    let usage = provider_accounting::provider_turn_tokens(request, None);
-    provider_accounting::emit_turn_tokens(app, request, usage);
-}
-
 /// Image support is model-specific: DeepSeek Pro is still text-only.
 pub(super) fn supports_images(request: &ProviderChatRequest) -> bool {
     if request.provider_id != "deepseek" {
@@ -250,6 +239,7 @@ pub(super) fn run_openai_compatible_chat(
     let auto_compact_percent = config.usage_guard.auto_compact_percent;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
+        let mut accounted_usage: Option<UsageTokens> = None;
         let mut last_measured: Option<(Option<u64>, Option<u64>)> = None;
         // What auto-compaction removed this turn, for the activity rail and the
         // event the user can inspect afterwards.
@@ -369,9 +359,20 @@ pub(super) fn run_openai_compatible_chat(
                 Ok(turn) => turn,
             };
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
+            accounted_usage = Some(
+                match accounted_usage {
+                    Some(previous) => previous.combine(turn.accounted_usage),
+                    None => turn.accounted_usage,
+                }
+                .with_scope(gyro_core::usage::UsageScope::Turn),
+            );
             // What the live context note reports before the next request.
             last_measured = Some((turn.input_tokens, turn.output_tokens));
-            emit_provider_turn_tokens(app, request);
+            provider_accounting::emit_turn_tokens(
+                app,
+                request,
+                accounted_usage.expect("a provider request was accounted"),
+            );
             if compatibility {
                 anyhow::ensure!(
                     turn.tool_calls.is_empty(),
@@ -418,8 +419,12 @@ pub(super) fn run_openai_compatible_chat(
                             !round_budget.is_some_and(|limit| round >= limit),
                             "{label} requested another catalog after its tool budget was exhausted"
                         );
-                        let catalog =
-                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset, allow_delegation);
+                        let catalog = ollama_compatibility_catalog(
+                            run_mode,
+                            prefix.as_deref(),
+                            offset,
+                            allow_delegation,
+                        );
                         malformed_responses = 0;
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));
@@ -560,15 +565,25 @@ pub(super) fn run_openai_compatible_chat(
         }
         let response_chars = response.content.chars().count();
         Ok(ProviderRunnerOutput {
-            accounted_usage: None,
+            accounted_usage,
             activities: provider_activities_for_response(auto_compactions, &response.content),
             context_usage: Some(ProviderContextUsage {
                 input_tokens: response.input_tokens,
                 output_tokens: response.output_tokens,
+                cached_input_tokens: response
+                    .accounted_usage
+                    .accounting
+                    .filter(|accounting| accounting.known.cache_read)
+                    .map(|_| response.accounted_usage.cached_input_tokens),
+                reasoning_output_tokens: response
+                    .accounted_usage
+                    .accounting
+                    .filter(|accounting| accounting.known.reasoning)
+                    .map(|_| response.accounted_usage.reasoning_output_tokens),
                 total_tokens: response
                     .input_tokens
                     .zip(response.output_tokens)
-                    .map(|(input, output)| input + output),
+                    .map(|(input, output)| input.saturating_add(output)),
                 // The endpoint reports no window, and a guessed one would
                 // misreport how full the context is.
                 model_context_window: None,

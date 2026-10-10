@@ -1812,7 +1812,7 @@ export function createInitialWorkbenchState(
     activeDestination: "workspace",
     activeWorkspaceLayout: "thread",
     lastSessionsLayout: "thread",
-    activePaneTab: "diff",
+    activePaneTab: "terminal",
     isToolPanelOpen: false,
     terminalTemplate: 4,
     selectedTaskId: undefined,
@@ -1992,7 +1992,7 @@ export function workbenchReducer(
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
     case "open-tool-panel": {
-      const tab = action.tab ?? state.activePaneTab;
+      const tab = action.tab ?? "terminal";
       if (tab === "browser") {
         return { ...state, ...browserRevealState(state) };
       }

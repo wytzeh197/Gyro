@@ -9,6 +9,7 @@ mod provider_activity;
 use provider_accounting::*;
 use provider_activity::*;
 mod context_compaction;
+mod codex_turn_completion;
 mod provider_mcp;
 mod provider_reliability;
 mod provider_session_lifecycle;
@@ -270,7 +271,6 @@ const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 /// quiet (long tools, thinking). The chat idle watchdog is five minutes; this
 /// stays well under that so a silent but healthy process never looks finished.
 const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
-const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
 const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -3434,6 +3434,9 @@ fn run_council_chat_blocking(
         })
         .collect();
 
+    for (seat, _) in &seat_jobs {
+        store.link_usage_turn(session_uuid, seat.run_id, session_uuid, parent_turn_id).map_err(to_string)?;
+    }
     let seat_results: Vec<(Uuid, Result<String, String>, u128)> = std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for (seat, seat_request) in seat_jobs {
@@ -3606,6 +3609,7 @@ fn run_council_chat_blocking(
             let synth_user = build_synthesizer_user_prompt(&request.message, &answers);
             let synth_message = format!("{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}");
             let synth_run_id = Uuid::new_v4();
+            store.link_usage_turn(session_uuid, synth_run_id, session_uuid, parent_turn_id).map_err(to_string)?;
             let synth_request = ProviderChatRequest {
                 session_id: request.session_id.clone(),
                 message: synth_message,
@@ -3767,6 +3771,7 @@ fn run_council_chat_blocking(
         "kind": "council-response",
         "runKind": "council-run",
         "runId": parent_turn_id,
+        "turnTokens": store.task_usage_tokens(session_uuid, parent_turn_id).ok().flatten(),
         "councilRunId": council_run.id,
         "status": council_run.status.as_str(),
         "presetId": council_run.preset_id,
@@ -4039,6 +4044,8 @@ fn retry_council_synthesis_blocking(
     let synth_user = build_synthesizer_user_prompt(&council_run.snapshot.prompt, &answers);
     let synth_message = format!("{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}");
     let synth_run_id = Uuid::new_v4();
+    store.link_usage_turn(session_uuid, synth_run_id, session_uuid, parent_turn_id)
+        .map_err(to_string)?;
     let synth_request = ProviderChatRequest {
         session_id: request.session_id.clone(),
         message: synth_message,
@@ -4196,6 +4203,7 @@ fn retry_council_synthesis_blocking(
         "kind": "council-response",
         "runKind": "council-run",
         "runId": parent_turn_id,
+        "turnTokens": store.task_usage_tokens(session_uuid, parent_turn_id).ok().flatten(),
         "councilRunId": council_run.id,
         "status": council_run.status.as_str(),
         "presetId": council_run.preset_id,
@@ -4756,14 +4764,15 @@ fn run_provider_chat_blocking(
         #[cfg(test)]
         message: control_markers.message.clone(),
     };
-    let plan_extraction = PlanUpdateExtraction {
-        payload: control_markers.plan_update,
-        #[cfg(test)]
-        message: control_markers.message.clone(),
-    };
+    let mut plan_payloads = completed_plan_updates(
+        &runner_output.activities,
+        control_markers.plan_updates,
+    );
     let questions = control_markers.questions;
     let artifact_extraction = ChatArtifactExtraction {
-        items: control_markers.artifacts,
+        // Intermediate previews remain attached to the final reply; emitting
+        // one no longer closes the turn or discards it when the answer arrives.
+        items: completed_chat_artifacts(&runner_output.activities, control_markers.artifacts),
         message: control_markers.message,
     };
     let resume_cursor_value = runner_output
@@ -4923,28 +4932,15 @@ fn run_provider_chat_blocking(
     // Timeline enrichment is intentionally best-effort after the assistant
     // response is durable. A title, activity, or diagnostics failure must not
     // turn a completed provider request into a duplicate retry.
-    let plan_payload = plan_extraction
-        .payload
-        .clone()
-        .or_else(|| {
-            // ACP checklists track execution too; only planning turns should
-            // promote them into a user-facing Plan document.
-            (request.mode == ChatMode::Plan)
-                .then(|| {
-                    runner_output
-                        .activities
-                        .iter()
-                        .rev()
-                        .find_map(kimi_acp_plan_payload)
-                })
-                .flatten()
-        })
-        // The Plan document is a product guarantee, not something that should
-        // disappear because one provider omitted the hidden checklist line.
-        // `deriveSessionPlan` links this replace event back to the already
-        // persisted assistant Markdown by turn id.
-        .or_else(|| {
-            (request.mode == ChatMode::Plan).then(|| {
+    if plan_payloads.is_empty() && request.mode == ChatMode::Plan {
+        // ACP execution checklists only become Plan documents in Plan mode.
+        // Keep the document even if the provider omits its hidden checklist.
+        let payload = runner_output
+            .activities
+            .iter()
+            .rev()
+            .find_map(kimi_acp_plan_payload)
+            .unwrap_or_else(|| {
                 serde_json::json!({
                     "action": "replace",
                     "title": "Plan",
@@ -4955,20 +4951,24 @@ fn run_provider_chat_blocking(
                         "plan-mode-fallback"
                     },
                 })
-            })
-        });
-    let plan_event = plan_payload.and_then(|mut payload| {
-        if request.mode == ChatMode::Plan {
-            if payload.get("content").is_none() && payload.get("markdown").is_none() {
+            });
+        plan_payloads.push(payload);
+    }
+    let plan_events: Vec<_> = plan_payloads
+        .into_iter()
+        .filter_map(|mut payload| {
+            if request.mode == ChatMode::Plan
+                && payload.get("content").is_none()
+                && payload.get("markdown").is_none()
+            {
                 let mut with_content = payload.clone();
                 if let Some(object) = with_content.as_object_mut() {
                     object.insert(
                         "content".into(),
                         serde_json::Value::String(assistant_event.message.clone()),
                     );
-                    // The event payload has a hard 128 KiB limit. Keep a large
-                    // plan marker valid; the context index can carry the
-                    // preceding assistant message as its content fallback.
+                    // Keep within the event limit; the context index can use
+                    // the preceding assistant message as a content fallback.
                     if serde_json::to_vec(&with_content)
                         .is_ok_and(|encoded| encoded.len() <= 96 * 1024)
                     {
@@ -4976,17 +4976,18 @@ fn run_provider_chat_blocking(
                     }
                 }
             }
-        }
-        store
-            .append_event_with_turn_id(
-                session_id,
-                SessionEventKind::PlanUpdated,
-                "Provider updated the plan",
-                payload,
-                Some(run_id),
-            )
-            .ok()
-    });
+            store
+                .append_event_with_turn_id(
+                    session_id,
+                    SessionEventKind::PlanUpdated,
+                    "Provider updated the plan",
+                    payload,
+                    Some(run_id),
+                )
+                .ok()
+        })
+        .collect();
+
     // The model may report that it met the goal, never that the goal changed:
     // the text stays the user's, only the status moves.
     let goal_event = control_markers
@@ -5057,9 +5058,7 @@ fn run_provider_chat_blocking(
         automatic_plan_events.append(&mut activity_events);
         activity_events = automatic_plan_events;
     }
-    if let Some(plan_event) = plan_event {
-        activity_events.push(plan_event);
-    }
+    activity_events.extend(plan_events);
     if let Some(goal_event) = goal_event {
         activity_events.push(goal_event);
     }
@@ -5911,7 +5910,7 @@ fn provider_context_message_with_capabilities_for_turn(
     } else if request.plan.is_some() {
         // Outside Plan mode the model was never told the marker exists, so the
         // checklist sat at all-todo through the whole implementation turn.
-        context.push("The Gyro plan below is live while you work. As you finish or block steps, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list every step whose status changed this turn, keep the JSON on one line, and use only todo, in-progress, complete, or blocked.".into());
+        context.push("The Gyro plan below is live while you work. As you finish or block steps, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list every step whose status changed this turn, keep the JSON on one line, and use only todo, in-progress, complete, or blocked. Before the final reply, reconcile the checklist with the verified outcome: mark finished steps complete; mark steps waiting on user input or external acceptance blocked with a detail explaining what remains; return paused work to todo. Do not leave a step in-progress after stopping work, or claim the whole plan is done while required steps remain.".into());
     }
     // Policy can change between turns, so it is resent even on resume — once.
     if !turn.approvals_sent_separately {
@@ -12760,7 +12759,18 @@ fn run_provider_chat_with_retry(
     let mut output = run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
     let mut continuation = request.clone();
     for round in 0..=8 {
-        let Some(reports) = delegated_agents::collect_for_parent(app, request)? else { return Ok(output); };
+        let Some(reports) = delegated_agents::collect_for_parent(app, request)? else {
+            if let (Ok(session), Some(turn)) = (
+                Uuid::parse_str(&request.session_id),
+                request.turn_id.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
+            ) {
+                if let Some(tokens) = store.task_usage_tokens(session, turn)? {
+                    output.accounted_usage = Some(tokens);
+                    provider_accounting::emit_turn_tokens(app, request, tokens);
+                }
+            }
+            return Ok(output);
+        };
         if round == 8 { anyhow::bail!("the parent reached its delegation synthesis limit; remaining agents were stopped"); }
         continuation.message = format!("Your previous response was held until delegated agents settled. Their reports follow. Incorporate these results and failures, verify any necessary changes, and then give the final response to the original request.\n\nOriginal request:\n{}\n\nPrevious response:\n{}\n\nAgent reports:\n{}", request.message, output.response, reports);
         let binding = output.resume_cursor.as_ref().map(|cursor| ProviderSessionBinding {
@@ -12770,14 +12780,11 @@ fn run_provider_chat_with_retry(
         });
         let a = provider_turn_tokens(request, Some(&output));
         provider_accounting::set_usage_offset(app, &request.session_id, Some(a));
-        let mut next = run_provider_chat_with_retry_inner(store, app, &continuation, binding, usage_context)?;
+        let next_result = run_provider_chat_with_retry_inner(store, app, &continuation, binding, usage_context);
         provider_accounting::set_usage_offset(app, &request.session_id, None);
+        let mut next = next_result?;
         let b = provider_turn_tokens(&continuation, Some(&next));
-        next.accounted_usage = Some(UsageTokens {
-            input_tokens: a.input_tokens.saturating_add(b.input_tokens), cached_input_tokens: a.cached_input_tokens.saturating_add(b.cached_input_tokens),
-            output_tokens: a.output_tokens.saturating_add(b.output_tokens), reasoning_output_tokens: a.reasoning_output_tokens.saturating_add(b.reasoning_output_tokens),
-            total_tokens: a.total_tokens.saturating_add(b.total_tokens), measured: a.measured && b.measured,
-        });
+        next.accounted_usage = Some(a.combine(b).with_scope(gyro_core::usage::UsageScope::Turn));
         let mut activities = output.activities;
         activities.append(&mut next.activities); next.activities = activities;
         output = next;
@@ -12795,6 +12802,10 @@ fn run_provider_chat_with_retry_inner(
 ) -> anyhow::Result<ProviderRunnerOutput> {
     if let Some(reason) = usage_guard_block(store, usage_context.origin, &request.provider_id) {
         anyhow::bail!(reason);
+    }
+    if let (Ok(session), Some(turn)) = (Uuid::parse_str(&request.session_id),
+        request.turn_id.as_deref().and_then(|value| Uuid::parse_str(value).ok())) {
+        let _ = store.note_usage_call(session, turn);
     }
     let started = Instant::now();
     let _observations = gyro_core::provider_observation::Scope::start();
@@ -13569,15 +13580,15 @@ fn run_kimi_acp_chat(
         .clone();
     let response = gyro_core::sanitize_harness_text(&output.response);
     Ok(ProviderRunnerOutput {
-        accounted_usage: None,
+        accounted_usage: Some(output.usage_observation.tokens),
         activities,
-        context_usage: None,
-        // Grok reports what the prompt billed; agents that report nothing are
-        // estimated by the ledger rather than claimed as measured.
-        billed_usage: output
-            .usage
-            .as_ref()
-            .and_then(provider_billed_usage_from_acp),
+        context_usage: output.context_usage.map(|context| ProviderContextUsage {
+            input_tokens: Some(context.used),
+            total_tokens: Some(context.used),
+            model_context_window: Some(context.size),
+            ..ProviderContextUsage::default()
+        }),
+        billed_usage: provider_billed_usage_from_acp_tokens(output.usage_observation.tokens),
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
         paused_at_tool_budget: false,
@@ -14071,15 +14082,9 @@ fn run_openai_codex_app_server_chat(
         let mut pending_usage = None;
         let mut provider_turn_id = None;
         let mut turn_started = false;
-        let mut completed_artifact_response_at: Option<Instant> = None;
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
-            if completed_artifact_response_at.is_some_and(|completed_at| {
-                completed_at.elapsed() >= CODEX_ARTIFACT_COMPLETION_GRACE
-            }) {
-                break;
-            }
             if provider_chat_cancelled(app, &request.session_id) {
                 anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
             }
@@ -14116,7 +14121,6 @@ fn run_openai_codex_app_server_chat(
             }
             let method = message.get("method").and_then(serde_json::Value::as_str);
             if let Some(method) = method.filter(|_| message.get("id").is_some()) {
-                completed_artifact_response_at = None;
                 let params = message.get("params").cloned().unwrap_or_default();
                 handle_codex_app_server_request(
                     app, request, &mut stdin, &message, method, &params, &patches,
@@ -14152,7 +14156,6 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "thread/compacted" => {
-                    completed_artifact_response_at = None;
                     let activity =
                         context_compaction::codex_context_compaction_activity(&params, "done");
                     record_codex_app_server_activity(
@@ -14164,7 +14167,6 @@ fn run_openai_codex_app_server_chat(
                     );
                 }
                 "item/agentMessage/delta" => {
-                    completed_artifact_response_at = None;
                     if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
                         if !response_text_truncated {
                             let pushed = push_bounded(
@@ -14191,7 +14193,6 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "item/fileChange/patchUpdated" => {
-                    completed_artifact_response_at = None;
                     if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
                     {
                         // A `fileChange` item can start before its patch is
@@ -14203,7 +14204,6 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "item/started" => {
-                    completed_artifact_response_at = None;
                     if let Some(item) = params.get("item") {
                         turn_timing::protocol_item(item, "running");
                         match item.get("type").and_then(serde_json::Value::as_str) {
@@ -14257,14 +14257,8 @@ fn run_openai_codex_app_server_chat(
                                     true,
                                 );
                                 commentary_stream.finish_message();
-                                completed_artifact_response_at = text
-                                    .filter(|response| {
-                                        completed_response_has_chat_artifact(response)
-                                    })
-                                    .map(|_| Instant::now());
                             }
                             Some("commandExecution") => {
-                                completed_artifact_response_at = None;
                                 let activity = codex_item_activity(item, "command", "Ran command");
                                 record_codex_app_server_activity(
                                     app,
@@ -14275,7 +14269,6 @@ fn run_openai_codex_app_server_chat(
                                 );
                             }
                             Some("fileChange") => {
-                                completed_artifact_response_at = None;
                                 let patch = item
                                     .get("id")
                                     .and_then(serde_json::Value::as_str)
@@ -14302,8 +14295,7 @@ fn run_openai_codex_app_server_chat(
                                 }
                             }
                             Some("contextCompaction") => {
-                                completed_artifact_response_at = None;
-                                let activity =
+                                                let activity =
                                     context_compaction::codex_context_compaction_activity(
                                         &params, "done",
                                     );
@@ -14320,6 +14312,14 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "turn/completed" => {
+                    if !turn_started {
+                        continue;
+                    }
+                    let Some(status) = codex_turn_completion::completion_status(
+                        method, &params, &thread_id, provider_turn_id.as_deref(),
+                    ) else {
+                        continue;
+                    };
                     commentary_stream.complete_message(&mut activities, None, None);
                     flush_codex_app_server_commentary(
                         app,
@@ -14329,10 +14329,6 @@ fn run_openai_codex_app_server_chat(
                         true,
                     );
                     commentary_stream.finish_message();
-                    let status = params
-                        .pointer("/turn/status")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("failed");
                     if status != "completed" {
                         let detail = params
                             .pointer("/turn/error/message")
@@ -16489,6 +16485,7 @@ struct SessionTitleExtraction {
     message: String,
 }
 
+#[cfg(test)]
 struct PlanUpdateExtraction {
     payload: Option<serde_json::Value>,
     #[cfg(test)]
@@ -16504,7 +16501,7 @@ struct ChatArtifactExtraction {
 fn extract_plan_update_marker(response: &str) -> PlanUpdateExtraction {
     let stripped = strip_hidden_control_markers(response);
     PlanUpdateExtraction {
-        payload: stripped.plan_update,
+        payload: stripped.plan_updates.into_iter().next(),
         message: stripped.message,
     }
 }
@@ -16517,8 +16514,40 @@ fn extract_chat_artifact_marker(response: &str) -> ChatArtifactExtraction {
     }
 }
 
-fn completed_response_has_chat_artifact(response: &str) -> bool {
-    !extract_chat_artifact_marker(response).items.is_empty()
+/// Apply every model-authored progress report in order; the closing reply wins.
+/// Tool output is untrusted and cannot update the plan.
+fn completed_plan_updates(
+    activities: &[ProviderActivity],
+    final_updates: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    activities
+        .iter()
+        .filter(|activity| activity.kind == "commentary")
+        .flat_map(|activity| strip_hidden_control_markers(&activity.label).plan_updates)
+        .chain(final_updates)
+        .collect()
+}
+
+/// Retain intermediate artifacts and their latest revision without promoting
+/// their commentary to the closing reply. Final-message revisions win.
+fn completed_chat_artifacts(
+    activities: &[ProviderActivity],
+    final_artifacts: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let mut artifacts: Vec<serde_json::Value> = Vec::new();
+    for candidate in activities
+        .iter()
+        .filter(|activity| activity.kind == "commentary")
+        .flat_map(|activity| extract_chat_artifact_marker(&activity.label).items)
+        .chain(final_artifacts)
+    {
+        if let Some(index) = artifacts.iter().position(|item| item.get("id") == candidate.get("id")) {
+            artifacts[index] = candidate;
+        } else if artifacts.len() < MAX_CHAT_ARTIFACTS {
+            artifacts.push(candidate);
+        }
+    }
+    artifacts
 }
 
 fn valid_chat_artifact(value: &serde_json::Value) -> bool {
@@ -16682,7 +16711,7 @@ fn extract_session_title_marker(response: &str, allow_title: bool) -> SessionTit
 struct StrippedControlMarkers {
     message: String,
     session_title: Option<String>,
-    plan_update: Option<serde_json::Value>,
+    plan_updates: Vec<serde_json::Value>,
     goal_update: Option<serde_json::Value>,
     questions: Option<serde_json::Value>,
     artifacts: Vec<serde_json::Value>,
@@ -16702,7 +16731,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     // mid-line stripping below still catches markers that remain embedded.
     let normalized = repair_glued_assistant_blocks(&response.replace("\r\n", "\n"));
     let mut session_title = None;
-    let mut plan_update = None;
+    let mut plan_updates = Vec::new();
     let mut goal_update = None;
     let mut questions = None;
     let mut artifacts = Vec::new();
@@ -16712,7 +16741,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
         let cleaned = strip_control_markers_from_line(
             line,
             &mut session_title,
-            &mut plan_update,
+            &mut plan_updates,
             &mut goal_update,
             &mut questions,
             &mut artifacts,
@@ -16738,7 +16767,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     StrippedControlMarkers {
         message,
         session_title,
-        plan_update,
+        plan_updates,
         goal_update,
         questions,
         artifacts,
@@ -16765,7 +16794,7 @@ fn collapse_extra_blank_lines(text: &str) -> String {
 fn strip_control_markers_from_line(
     line: &str,
     session_title: &mut Option<String>,
-    plan_update: &mut Option<serde_json::Value>,
+    plan_updates: &mut Vec<serde_json::Value>,
     goal_update: &mut Option<serde_json::Value>,
     questions: &mut Option<serde_json::Value>,
     artifacts: &mut Vec<serde_json::Value>,
@@ -16788,9 +16817,7 @@ fn strip_control_markers_from_line(
             GYRO_PLAN_UPDATE_MARKER => {
                 match take_leading_json_value(after_marker.trim_start()) {
                     Some((value, remainder)) if value.is_object() => {
-                        if plan_update.is_none() {
-                            *plan_update = Some(value);
-                        }
+                        plan_updates.push(value);
                         rest = remainder;
                     }
                     _ => {
@@ -17508,8 +17535,12 @@ struct StreamingCommandState {
     /// reading: spend is the sum of every request the run made, so a turn that
     /// used tools legitimately bills past the context window.
     billed_usage: Option<ProviderContextUsage>,
+    #[cfg(test)]
     claude_request_usage: HashMap<String, ProviderContextUsage>,
+    #[cfg(test)]
     claude_usage_final: bool,
+    claude_accounting: provider_accounting::ClaudeTurnUsage,
+    accounted_usage: Option<UsageTokens>,
     /// Newest reading per window id. A run can announce the same window more
     /// than once, and only the last reading describes where the plan stands.
     rate_limits: Vec<ProviderRateLimitWindow>,
@@ -17551,8 +17582,12 @@ impl StreamingCommandState {
             resolved_token_ceiling: None,
             token_ceiling_tripped: false,
             billed_usage: None,
+            #[cfg(test)]
             claude_request_usage: HashMap::new(),
+            #[cfg(test)]
             claude_usage_final: false,
+            claude_accounting: provider_accounting::ClaudeTurnUsage::default(),
+            accounted_usage: None,
             rate_limits: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
@@ -17590,6 +17625,7 @@ impl StreamingCommandState {
     /// The closing frame is the only one that names the model's context window,
     /// and the per-request frames are the only ones whose counts describe what
     /// the window actually holds, so each contributes what it alone knows.
+    #[cfg(test)]
     fn apply_claude_context_usage(&mut self, frame: ClaudeUsageFrame, mut usage: ProviderContextUsage, message_id: Option<&str>) {
         // The ledger takes the turn-wide total when the run reports one, and
         // otherwise accumulates the per-request readings, so a tool-using turn
@@ -17643,10 +17679,7 @@ impl StreamingCommandState {
                 self.context_usage_is_per_request = true;
             }
             ClaudeUsageFrame::Turn => {
-                if !self.context_usage_is_per_request {
-                    self.context_usage = Some(usage);
-                    return;
-                }
+                // Aggregate turn spend cannot identify request occupancy.
                 if let (Some(current), Some(window)) =
                     (self.context_usage.as_mut(), usage.model_context_window)
                 {
@@ -17660,6 +17693,7 @@ impl StreamingCommandState {
     ///
     /// Used only until a turn-wide total arrives, which replaces the sum
     /// outright because the provider counted it authoritatively.
+    #[cfg(test)]
     fn accumulate_billed_usage(&mut self, usage: &ProviderContextUsage) {
         let Some(current) = self.billed_usage.as_mut() else {
             self.billed_usage = Some(usage.clone());
@@ -18070,7 +18104,6 @@ fn run_streaming_command(
     });
     heartbeat_stop.store(true, Ordering::Relaxed);
     let _ = heartbeat.join();
-    let outcome = outcome?;
     // Drain every remaining line and force-flush text before the termination
     // check. Completing with a half-applied buffer is what left the chat looking
     // finished while tokens were still sitting in memory.
@@ -18081,6 +18114,20 @@ fn run_streaming_command(
     // Published before the termination checks below, so a stopped or timed-out
     // run reports the session it started rather than losing it to the bail.
     observed_session_id.clone_from(&stream_state.provider_session_id);
+    if outcome.as_ref().is_err() || outcome.as_ref().is_ok_and(|outcome| !outcome.succeeded()) {
+        if request.provider_id == "anthropic" {
+            stream_state.claude_accounting.interrupt();
+            stream_state.accounted_usage = stream_state.claude_accounting.tokens();
+        } else {
+            stream_state.accounted_usage = stream_state.accounted_usage.map(|tokens|
+                tokens.partial(gyro_core::usage::UsageReason::Interrupted));
+        }
+        if let Some(tokens) = stream_state.accounted_usage {
+            gyro_core::provider_observation::native_usage(tokens);
+            provider_accounting::emit_turn_tokens(app, request, tokens);
+        }
+    }
+    let outcome = outcome?;
     match outcome.termination {
         // Nothing else can read the reason back: the token is shared, but the
         // sentence describing why it was cancelled only exists here.
@@ -18302,8 +18349,13 @@ fn handle_provider_stdout_line(
     };
     let previous_usage = stream_state.context_usage.clone();
     let previous_billed_usage = stream_state.billed_usage.clone();
+    let previous_accounted_usage = stream_state.accounted_usage;
     handle_provider_stdout_value(&value, app, request, stream_state);
-    if stream_state.billed_usage != previous_billed_usage {
+    if stream_state.accounted_usage != previous_accounted_usage {
+        if let Some(tokens) = stream_state.accounted_usage {
+            provider_accounting::emit_turn_tokens(app, request, tokens);
+        }
+    } else if stream_state.accounted_usage.is_none() && stream_state.billed_usage != previous_billed_usage {
         if let Some(usage) = &stream_state.billed_usage {
             provider_accounting::emit_turn_tokens(app, request, provider_accounting::usage_tokens(usage));
         }
@@ -18331,16 +18383,37 @@ fn handle_provider_stdout_value(
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(value);
     }
-    if let Some(context_usage) = provider_context_usage_from_codex_exec(value) {
-        // Codex reports the turn's running total, so the newest reading is both
-        // what the window holds and what the turn billed.
-        stream_state.billed_usage = Some(context_usage.clone());
-        stream_state.context_usage = Some(context_usage);
-        stream_state.context_usage_is_per_request = false;
-    } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(value) {
-        stream_state.apply_claude_context_usage(
-            frame, context_usage, value.pointer("/message/id").and_then(serde_json::Value::as_str),
-        );
+    if request.provider_id == "openai" {
+        if let Some(billed) = provider_context_usage_from_codex_exec(value) {
+            let tokens = provider_accounting::usage_tokens(&billed)
+                .with_scope(gyro_core::usage::UsageScope::Turn);
+            stream_state.billed_usage = Some(billed);
+            stream_state.accounted_usage = Some(tokens);
+            gyro_core::provider_observation::native_usage(tokens);
+            // turn.completed is aggregate spend, not context occupancy.
+        }
+    } else if request.provider_id == "anthropic" {
+        stream_state.claude_accounting.observe(value);
+        stream_state.accounted_usage = stream_state.claude_accounting.tokens();
+        if let Some(tokens) = stream_state.accounted_usage {
+            gyro_core::provider_observation::native_usage(tokens);
+            let known = tokens.accounting.map(|metadata| metadata.known).unwrap_or_default();
+            // The ceiling consumes numeric lower bounds, while exact bucket
+            // coverage travels separately in accounted_usage.
+            stream_state.billed_usage = Some(ProviderContextUsage {
+                input_tokens: Some(tokens.input_tokens),
+                cached_input_tokens: Some(tokens.cached_input_tokens.saturating_add(tokens.cache_write_tokens)),
+                output_tokens: known.output.then_some(tokens.output_tokens),
+                total_tokens: Some(tokens.total_tokens),
+                ..ProviderContextUsage::default()
+            });
+        }
+        if let Some(mut usage) = stream_state.claude_accounting.context_usage() {
+            usage.model_context_window = provider_context::claude_stream_context_window(value)
+                .or_else(|| stream_state.context_usage.as_ref().and_then(|current| current.model_context_window));
+            stream_state.context_usage = Some(usage);
+            stream_state.context_usage_is_per_request = true;
+        }
     }
     enforce_call_token_ceiling(app, request, stream_state);
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(value) {
@@ -19920,12 +19993,45 @@ fn wait_for_capability_approval(
         {
             break Err("capability approval was cancelled".to_string());
         }
-        // Selecting Full access also releases an already waiting capability.
-        if capability_id != CapabilityId::WorkspaceReadEditor
-            && bound.policy.mode == CapabilityRunMode::Normal
-            && delegated_agents::full_access_ceiling(app, &bound.session_id)
-            && load_config_blocking().is_ok_and(|config| capability_full_access_enabled(&config))
-        {
+        // A permission-mode change also releases already waiting delegation.
+        // Recheck live project policy so auto approval cannot bypass a denial.
+        let automatic = load_config_blocking().is_ok_and(|config| {
+            let full_access = capability_id != CapabilityId::WorkspaceReadEditor
+                && bound.policy.mode == CapabilityRunMode::Normal
+                && delegated_agents::full_access_ceiling(app, &bound.session_id)
+                && capability_full_access_enabled(&config);
+            full_access
+                || (delegated_agents::delegation_tool(capability_id)
+                    && store
+                        .get_project_capability_policy(&bound.workspace_key)
+                        .is_ok_and(|current| {
+                            let mut access = capability_access_for_call(
+                                bound,
+                                &current,
+                                class,
+                                scope_kind,
+                                scope_value,
+                            );
+                            if bound.policy.mode == CapabilityRunMode::Plan {
+                                access = narrower_capability_access(
+                                    bound
+                                        .policy
+                                        .classes
+                                        .get(&class)
+                                        .copied()
+                                        .unwrap_or(CapabilityAccess::Deny),
+                                    current.access_for(class),
+                                );
+                            }
+                            delegated_agents::permission_access(
+                                access,
+                                capability_id,
+                                bound.policy.mode,
+                                &config,
+                            ) == CapabilityAccess::Allow
+                        }))
+        });
+        if automatic {
             break Ok(CapabilityApprovalDecision::AllowOnce);
         }
         if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT {
@@ -20645,15 +20751,22 @@ fn execute_provider_capability(
                     "title": "",
                 })
             });
-            // A fading action highlight would read as page UI to a model.
+            // Keep agent feedback out of the observation, then restore it for
+            // the person watching (also when capture fails).
             let _ = session_browser::call_agent(
                 app,
                 &bound.session_id,
-                "clearHighlight",
+                "hidePointer",
                 serde_json::json!({}),
             );
-            let snapshot = session_browser::capture_session_browser_png(app, &bound.session_id)
-                .map_err(anyhow::Error::msg)?;
+            let snapshot = session_browser::capture_session_browser_png(app, &bound.session_id);
+            let _ = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "restorePointer",
+                serde_json::json!({}),
+            );
+            let snapshot = snapshot.map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
             let created_at = chrono::Utc::now();
             let mut capture = persist_browser_preview_capture(
@@ -21352,6 +21465,7 @@ fn handle_desktop_provider_capability_request(
         let snapshot = bound.policy.classes.get(&CapabilityClass::AgentRun).copied().unwrap_or(CapabilityAccess::Deny);
         access = narrower_capability_access(snapshot, current_policy.access_for(CapabilityClass::AgentRun));
     }
+    access = delegated_agents::permission_access(access, request.capability_id, bound.policy.mode, &config);
     // Live editor text is not part of ordinary Workspace reads. Even Full
     // Access requires a fresh decision before disclosing an unsaved buffer.
     if request.capability_id == CapabilityId::WorkspaceReadEditor
@@ -24063,6 +24177,8 @@ mod tests {
         // Normal-mode turns are the ones that finish steps, so they get the marker.
         assert!(context.contains("GYRO_PLAN_UPDATE:"));
         assert!(context.contains("update-items"));
+        assert!(context.contains("Before the final reply, reconcile the checklist"));
+        assert!(context.contains("external acceptance blocked"));
 
         let mut planless = anthropic_provider_request();
         planless.plan = None;
@@ -25749,7 +25865,7 @@ while True:
         );
         assert_eq!(
             provider_model_context_window("openai", Some("gpt-6.1-sol")),
-            Some(272_000)
+            Some(500_000)
         );
     }
 
@@ -27287,10 +27403,9 @@ while True:
         assert_eq!(merged.model_context_window, Some(200_000));
     }
 
-    /// A turn that answered in one request has no per-request frame to prefer,
-    /// and there the closing totals are that request.
+    /// Without a request frame, turn spend cannot establish context occupancy.
     #[test]
-    fn claude_turn_totals_stand_in_when_no_request_frame_arrived() {
+    fn claude_turn_totals_do_not_invent_context_when_no_request_frame_arrived() {
         let mut state = StreamingCommandState::new();
         let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
             "type": "result",
@@ -27300,9 +27415,8 @@ while True:
         .unwrap();
         state.apply_claude_context_usage(frame, usage, None);
 
-        let merged = state.context_usage.expect("usage");
-        assert_eq!(merged.total_tokens, Some(4_120));
-        assert_eq!(merged.model_context_window, Some(200_000));
+        assert!(state.context_usage.is_none());
+        assert_eq!(state.billed_usage.as_ref().unwrap().total_tokens, Some(4_120));
     }
 
     #[test]
@@ -27343,7 +27457,7 @@ while True:
         // meter still has to measure against the right window.
         let usage =
             provider_context_usage_with_window(None, "gemini", Some("gemini-default")).unwrap();
-        assert_eq!(usage.model_context_window, Some(1_000_000));
+        assert_eq!(usage.model_context_window, Some(1_048_576));
         assert_eq!(usage.input_tokens, None);
 
         let reported = provider_context_usage_with_window(
@@ -28499,6 +28613,54 @@ while True:
         assert_eq!(extracted.message, "Here is the plan.");
     }
 
+
+    #[test]
+    fn plan_updates_keep_later_completion_and_blocked_reports() {
+        let first = serde_json::json!({"action":"update-items","items":[
+            {"id":"verify","status":"in-progress"},
+            {"id":"acceptance","status":"todo"}
+        ]});
+        let final_update = serde_json::json!({"action":"update-items","items":[
+            {"id":"verify","status":"complete"},
+            {"id":"acceptance","status":"blocked","detail":"Requires native packaged-app acceptance"}
+        ]});
+        for separator in ["\n", ""] {
+            let response = format!(
+                "GYRO_PLAN_UPDATE: {first}{separator}GYRO_PLAN_UPDATE: {final_update}\nVerified the build. Native acceptance remains."
+            );
+            let extracted = strip_hidden_control_markers(&response);
+            assert_eq!(extracted.plan_updates, vec![first.clone(), final_update.clone()]);
+            assert_eq!(extracted.message, "Verified the build. Native acceptance remains.");
+        }
+    }
+
+    #[test]
+    fn plan_updates_retain_commentary_and_ignore_tool_output() {
+        let update = |id: &str, status: &str| serde_json::json!({
+            "action":"update-items","items":[{"id":id,"status":status}]
+        });
+        let activity = |kind: &str, payload: serde_json::Value| ProviderActivity {
+            id: kind.into(), kind: kind.into(),
+            label: format!("GYRO_PLAN_UPDATE: {payload}"),
+            detail: None, note: None, file_counts: None, status: "done".into(),
+        };
+        let first = update("implement", "complete");
+        let working = update("verify", "in-progress");
+        let final_update = update("verify", "complete");
+        assert_eq!(
+            completed_plan_updates(
+                &[
+                    activity("commentary", first.clone()),
+                    activity("tool", update("acceptance", "complete")),
+                    activity("commentary", working.clone()),
+                ],
+                vec![final_update.clone()],
+            ),
+            vec![first, working, final_update],
+        );
+        assert!(completed_plan_updates(&[], vec![]).is_empty());
+    }
+
     #[test]
     fn extracts_bounded_chat_artifacts_and_hides_the_marker() {
         let response = "GYRO_ARTIFACTS: {\"items\":[{\"id\":\"choice\",\"kind\":\"decision\",\"title\":\"Choose\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}]}\n\nPick the best option.";
@@ -28506,8 +28668,36 @@ while True:
         assert_eq!(extracted.items.len(), 1);
         assert_eq!(extracted.items[0]["kind"], "decision");
         assert_eq!(extracted.message, "Pick the best option.");
-        assert!(completed_response_has_chat_artifact(response));
-        assert!(!completed_response_has_chat_artifact("Ordinary response."));
+    }
+
+    #[test]
+    fn retains_intermediate_artifacts_until_the_final_reply() {
+        let preview = |id: &str, title: &str| serde_json::json!({
+            "id": id, "kind": "preview", "title": title,
+            "url": "http://127.0.0.1:1420"
+        });
+        let activity = |kind: &str, items: Vec<serde_json::Value>| ProviderActivity {
+            id: "artifact-note".into(),
+            kind: kind.into(),
+            label: format!("GYRO_ARTIFACTS: {}", serde_json::json!({"items": items})),
+            detail: None, note: None, file_counts: None, status: "done".into(),
+        };
+        let final_reply = extract_chat_artifact_marker("Verified the fix. Tests pass.");
+        assert_eq!(final_reply.message, "Verified the fix. Tests pass.");
+        let artifacts = completed_chat_artifacts(
+            &[
+                activity("commentary", vec![preview("preview", "First version")]),
+                activity("commentary", vec![preview("preview", "Revised version")]),
+                activity("tool", vec![preview("untrusted", "Tool output")]),
+            ],
+            vec![preview("preview", "Final version"), preview("report", "Result")],
+        );
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0]["title"], "Final version");
+        assert_eq!(artifacts[1]["id"], "report");
+        let many = (0..20).map(|index| activity("commentary",
+            vec![preview(&format!("preview-{index}"), "Preview")])).collect::<Vec<_>>();
+        assert_eq!(completed_chat_artifacts(&many, Vec::new()).len(), MAX_CHAT_ARTIFACTS);
     }
 
     #[test]

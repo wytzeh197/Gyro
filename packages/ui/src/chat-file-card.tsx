@@ -21,11 +21,14 @@ export function ChatFileCard({
   previewUrl,
   detail,
   onOpen,
+  variant = "card",
 }: {
   file: ChatFileLink;
   previewUrl?: string;
   detail?: string;
   onOpen?: (target: string) => void;
+  /** Mentions are inline links; sent screenshots use a compact preview. */
+  variant?: "card" | "thumbnail" | "inline";
 }) {
   const actions = useContext(ChatFileActionsContext);
   const trigger = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
@@ -104,6 +107,21 @@ export function ChatFileCard({
     file: badge.icon,
   }[file.kind];
   const hasPreview = Boolean(src && !failed);
+  const thumbnail =
+    variant === "thumbnail" &&
+    file.kind === "image" &&
+    hasPreview &&
+    detail !== "File no longer available";
+  const inline = variant === "inline";
+  const inlineName = inline
+    ? (file.local
+        ? file.target
+        : decodeURIComponent(new URL(file.target).pathname)
+      ).split("/").pop() || file.name
+    : file.name;
+  const className = inline
+    ? "gyro-chat-file-link"
+    : `gyro-chat-file-card is-${file.kind}${thumbnail ? " is-thumbnail" : ""}`;
   const open = () => {
     if (media && hasPreview) setExpanded(true);
     else if (file.local) actions?.open(file.target);
@@ -111,13 +129,15 @@ export function ChatFileCard({
   };
   const label =
     media && hasPreview
-      ? `Preview ${file.name}`
+      ? `Preview ${inlineName}`
       : file.local
-        ? `Show ${file.name} in Finder`
-        : `Open ${file.name}`;
-  const content = (
+        ? `Show ${inlineName} in Finder`
+        : `Open ${inlineName}`;
+  const content = inline ? inlineName : (
     <>
-      {media && file.kind !== "audio" ? (
+      {media &&
+      file.kind !== "audio" &&
+      (variant !== "thumbnail" || file.kind !== "image" || hasPreview) ? (
         <span className="gyro-chat-file-thumbnail">
           {hasPreview && file.kind === "image" ? (
             <img
@@ -162,9 +182,9 @@ export function ChatFileCard({
           ref={(node) => {
             trigger.current = node;
           }}
-          className={`gyro-chat-file-card is-${file.kind}`}
+          className={className}
           onClick={open}
-          title={file.name}
+          title={detail ? `${inlineName} · ${detail}` : inlineName}
           type="button"
         >
           {content}
@@ -175,11 +195,11 @@ export function ChatFileCard({
           ref={(node) => {
             trigger.current = node;
           }}
-          className={`gyro-chat-file-card is-${file.kind}`}
+          className={className}
           href={file.target}
           rel="noreferrer"
           target="_blank"
-          title={file.name}
+          title={detail ? `${inlineName} · ${detail}` : inlineName}
         >
           {content}
         </a>

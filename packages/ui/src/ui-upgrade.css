@@ -1,0 +1,215 @@
+/* Shared finish for the approved UI upgrade. Native geometry and scroll owners
+   remain in their existing components; these rules only refine visible hierarchy. */
+:root[data-theme] .gyro-chat-surface {
+  --gyro-chat-header-height: 48px;
+  --gyro-chat-card-row-height: max(30px, calc(30px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-thread-topbar {
+  align-items: center;
+  min-height: var(--gyro-chat-header-height);
+  padding-block: 0;
+  gap: 8px;
+  box-shadow: none;
+}
+/* Keep the companion tab row aligned with the adjacent conversation header. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-companion
+  > .gyro-chat-companion-tabs {
+  height: var(--gyro-chat-header-height);
+  min-height: var(--gyro-chat-header-height);
+}
+:root[data-theme] .gyro-chat-surface .gyro-chat-thread-identity {
+  min-width: 0;
+  gap: 8px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-chat-thread-topbar strong {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+}
+:root[data-theme] .gyro-chat-surface .gyro-thread-topbar-actions {
+  align-items: center;
+  gap: 4px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-thread-topbar-actions button {
+  min-width: 28px;
+  min-height: 28px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-thread-topbar-actions
+  button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-chat-empty-drag-region > span {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  height: 48px;
+  padding-inline: 16px;
+  pointer-events: none;
+}
+:root[data-theme]
+  .gyro-sidebar
+  :is(.gyro-sidebar-action, .gyro-sidebar-project-toggle, .gyro-footer-button)
+  > svg {
+  color: var(--gyro-muted);
+  stroke-width: 1.75;
+}
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-project-toggle,
+    .gyro-footer-button
+  ):focus-visible {
+  background: var(--gyro-shell-row-hover);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme]
+  .gyro-sidebar
+  :is(.gyro-sidebar-time-group, .gyro-sidebar-section > .gyro-nav-label) {
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* Pane selection stays local to its header; changing focus never dims a reply. */
+:root[data-theme] .gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot {
+  border-color: var(--gyro-border-soft);
+}
+:root[data-theme]
+  .gyro-chat-grid.has-multiple-panes
+  > .is-current-pane
+  .gyro-chat-thread-topbar {
+  box-shadow: inset 0 2px 0
+    color-mix(in srgb, var(--gyro-accent) 38%, transparent);
+}
+:root[data-theme]
+  .gyro-chat-grid.has-multiple-panes
+  > .is-subdued-pane
+  .gyro-chat-thread-topbar {
+  box-shadow: none;
+}
+:root[data-theme] .gyro-chat-grid.has-multiple-panes .gyro-chat-thread-topbar {
+  transition: box-shadow var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
+}
+
+/* Retain the compact composer without shrinking its smallest hit targets. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  :is(.gyro-composer-chip, .gyro-composer-tool, .gyro-send-button) {
+  min-height: max(26px, calc(28px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  :is(.gyro-composer-tool, .gyro-send-button) {
+  min-width: 26px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-shell
+  textarea::placeholder {
+  opacity: 1;
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-reveal {
+  animation: none;
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-user-message-meta {
+  gap: 6px;
+  min-height: 24px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-user-message-meta button {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* Completed work is quiet; decisions and recovery keep explicit semantic color. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments[data-run-state="approval"]
+  .gyro-run-header,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments[data-run-state="retrying"]
+  .gyro-run-header {
+  color: var(--gyro-warn);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-problem:not(.is-cancelled)
+  .gyro-run-header {
+  color: var(--gyro-danger);
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-cancelled .gyro-run-header {
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-header-toggle {
+  min-height: 24px;
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run-change-summary.is-complete {
+  border-color: var(--gyro-border-soft);
+  background: transparent;
+  margin-top: 20px;
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run-change-summary.is-complete
+  > header {
+  min-height: 40px;
+  padding: 6px 10px;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-run-change-summary.is-complete
+  .gyro-change-summary-file:not(.is-reviewable)
+  > button,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-run-change-summary.is-complete
+  .gyro-change-summary-file-static {
+  min-height: var(--gyro-chat-card-row-height);
+  padding-inline: 10px;
+  gap: 8px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-change-summary-actions {
+  gap: 4px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-change-summary-actions > button {
+  min-height: 28px;
+}
+:root[data-theme] .gyro-chat-surface .gyro-chat-environment-popover {
+  box-shadow: 0 6px 20px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 28%, transparent);
+}
+:root[data-theme] .gyro-chat-surface .gyro-chat-companion {
+  border-color: var(--gyro-border-soft);
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme] .gyro-chat-grid.has-multiple-panes .gyro-chat-thread-topbar,
+  .gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption {
+    transition: none;
+  }
+}

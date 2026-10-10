@@ -18,6 +18,9 @@ function read(path) {
 const styles = [
   "styles-foundation.css",
   "styles.css",
+  "chat-design.css",
+  "ui-upgrade.css",
+  "chat-file-card.css",
   "settings-design.css",
   "composer-effort-selector.css",
   "interaction-motion.css",
@@ -87,6 +90,8 @@ expect(
 );
 
 const allowedGradient = [
+  // The dock fade hides content at the measured composer edge; it is not a surface wash.
+  /to top,\s*var\(--gyro-chat-dock-solid\)/,
   /transparent,\s*rgba\(0,\s*0,\s*0/,
   /transparent,\s*var\(--gyro-surface-raised\)/,
   /transparent,\s*rgba\(12,\s*14,\s*18/,

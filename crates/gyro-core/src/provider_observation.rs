@@ -18,6 +18,8 @@ pub struct Summary {
     /// Images and provider-owned context cannot be priced from JSON characters.
     pub unmeasured_content: bool,
     pub provider_attempts: u32,
+    /// Bounded adapter receipts retain the runtime contract without prompt text.
+    pub usage_observations: Vec<crate::acp_usage::AcpUsageObservation>,
     #[serde(skip)]
     native: NativeAttempt,
     #[serde(skip)]
@@ -29,6 +31,7 @@ struct NativeAttempt {
     prompt_chars: usize,
     output_chars: usize,
     reported: Option<UsageTokens>,
+    observation: Option<crate::acp_usage::AcpUsageObservation>,
 }
 impl NativeAttempt {
     fn tokens(&self) -> Option<UsageTokens> {
@@ -47,6 +50,11 @@ pub fn attempt() {
             summary.provider_attempts += 1;
             if let Some(tokens) = summary.native.tokens() {
                 add_usage(&mut summary.previous_native, tokens);
+            }
+            if let Some(observation) = summary.native.observation.take() {
+                if summary.usage_observations.len() < 128 {
+                    summary.usage_observations.push(observation);
+                }
             }
             summary.native = NativeAttempt::default();
         }
@@ -79,6 +87,16 @@ pub fn native_usage(tokens: UsageTokens) {
         }
     });
 }
+pub fn native_acp_usage(observation: &crate::acp_usage::AcpUsageObservation) {
+    native_usage(observation.tokens);
+    ACTIVE.with(|slot| {
+        if let Some(summary) = slot.borrow_mut().as_mut() {
+            let mut receipt = observation.clone();
+            receipt.model_usage.truncate(128);
+            summary.native.observation = Some(receipt);
+        }
+    });
+}
 pub struct Scope(Option<Summary>);
 impl Scope {
     pub fn start() -> Self {
@@ -93,6 +111,11 @@ impl Drop for Scope {
 pub fn snapshot() -> Option<Summary> {
     ACTIVE.with(|slot| {
         slot.borrow().clone().map(|mut summary| {
+            if let Some(observation) = summary.native.observation.take() {
+                if summary.usage_observations.len() < 128 {
+                    summary.usage_observations.push(observation);
+                }
+            }
             if summary.requests == 0 {
                 summary.tokens = summary.previous_native;
                 if let Some(tokens) = summary.native.tokens() {
@@ -102,8 +125,9 @@ pub fn snapshot() -> Option<Summary> {
             } else if summary.requests == summary.rejected && summary.tokens.is_none() {
                 // No generation was observed. Keep this explicit so the ledger
                 // does not fall back to charging an estimate of the user prompt.
-                summary.tokens = Some(UsageTokens::estimated(0, 0));
+                summary.tokens = Some(UsageTokens::unavailable(crate::usage::UsageReason::MissingUsage));
             }
+            summary.tokens = summary.tokens.map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn));
             summary
         })
     })
@@ -128,6 +152,8 @@ pub struct Request {
     unmeasured_content: bool,
     cached: Option<u64>,
     reasoning: Option<u64>,
+    cache_write: Option<u64>,
+    accounted_receipt: Option<UsageTokens>,
 }
 impl Request {
     pub fn start(payload: &Value) -> Self {
@@ -151,6 +177,8 @@ impl Request {
             unmeasured_content,
             cached: None,
             reasoning: None,
+            cache_write: None,
+            accounted_receipt: None,
         }
     }
     pub fn delta(&mut self, text: &str) {
@@ -177,6 +205,13 @@ impl Request {
     pub fn reported_total(&mut self, total: Option<u64>) {
         self.total_tokens = total.or(self.total_tokens);
     }
+    pub fn cache_write_details(&mut self, count: Option<u64>) {
+        self.cache_write = count.or(self.cache_write);
+    }
+    /// The adapter has reconciled final usage independently of answer success.
+    pub fn accounted_usage(&mut self, tokens: UsageTokens) {
+        self.accounted_receipt = Some(tokens.with_scope(crate::usage::UsageScope::Request));
+    }
     pub fn rejected(&mut self) {
         self.rejected = true;
     }
@@ -201,20 +236,17 @@ impl Drop for Request {
             let output = self
                 .output_tokens
                 .or_else(|| self.total_tokens?.checked_sub(self.input_tokens?));
-            let mut tokens = UsageTokens::measured(
-                input.or_else(|| self.total_tokens.is_none().then_some(estimate.input_tokens)),
-                self.cached,
-                output.or_else(|| {
-                    self.total_tokens
-                        .is_none()
-                        .then_some(estimate.output_tokens)
-                }),
-                self.reasoning,
-                self.total_tokens,
-            );
-            tokens.measured &= self.complete
-                && (self.total_tokens.is_some()
-                    || (self.input_tokens.is_some() && self.output_tokens.is_some()));
+            let reported = self.total_tokens.is_some() || input.is_some() || output.is_some()
+                || self.cached.is_some() || self.cache_write.is_some() || self.reasoning.is_some();
+            let mut tokens = self.accounted_receipt.unwrap_or_else(|| if reported {
+                UsageTokens::measured(input, self.cached, output, self.reasoning, self.total_tokens)
+                    .with_cache_write(self.cache_write)
+            } else {
+                estimate
+            });
+            if self.accounted_receipt.is_none() && !self.complete {
+                tokens = tokens.partial(crate::usage::UsageReason::Interrupted);
+            }
             summary.unmeasured_content |= self.unmeasured_content && !tokens.measured;
             add_usage(&mut summary.tokens, tokens);
         });
@@ -222,20 +254,10 @@ impl Drop for Request {
 }
 
 pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
-    if let Some(total) = total {
-        total.input_tokens = total.input_tokens.saturating_add(tokens.input_tokens);
-        total.cached_input_tokens = total
-            .cached_input_tokens
-            .saturating_add(tokens.cached_input_tokens);
-        total.output_tokens = total.output_tokens.saturating_add(tokens.output_tokens);
-        total.reasoning_output_tokens = total
-            .reasoning_output_tokens
-            .saturating_add(tokens.reasoning_output_tokens);
-        total.total_tokens = total.total_tokens.saturating_add(tokens.total_tokens);
-        total.measured &= tokens.measured;
-    } else {
-        *total = Some(tokens);
-    }
+    *total = Some(match *total {
+        Some(previous) => previous.combine(tokens),
+        None => tokens,
+    });
 }
 
 // Count text and schema structure without serializing or cloning large images.
@@ -271,6 +293,30 @@ pub(crate) fn text_size(value: &Value) -> (usize, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_receipts_keep_only_latest_observation_per_attempt() {
+        use crate::acp_usage::{normalize_prompt_usage, AcpProvider, AcpRuntimeInfo};
+        let _scope = Scope::start();
+        attempt();
+        let mut receipt = normalize_prompt_usage(AcpProvider::Grok,
+            &serde_json::json!({"usage": {"inputTokens": 100, "outputTokens": 20, "modelCalls": 2}}),
+            AcpRuntimeInfo { agent_version: Some("fixture".into()), ..Default::default() });
+        native_acp_usage(&receipt);
+        receipt.interrupted();
+        native_acp_usage(&receipt);
+        let summary = snapshot().unwrap();
+        assert_eq!(summary.usage_observations.len(), 1);
+        assert_eq!(summary.usage_observations[0].runtime.agent_version.as_deref(), Some("fixture"));
+        assert_eq!(summary.usage_observations[0].model_calls, Some(2));
+        assert_eq!(summary.tokens.unwrap().total_tokens, 120);
+        attempt();
+        native_acp_usage(&normalize_prompt_usage(AcpProvider::Kimi, &Value::Null, Default::default()));
+        let summary = snapshot().unwrap();
+        assert_eq!(summary.usage_observations.len(), 2);
+        assert_eq!(summary.tokens.unwrap().total_tokens, 120);
+        assert_eq!(summary.tokens.unwrap().effective_accounting().coverage, crate::usage::UsageCoverage::Partial);
+    }
 
     #[test]
     fn explicit_zero_native_usage_survives_prompt_estimation_and_retries() {
@@ -370,7 +416,21 @@ mod tests {
         assert!(summary.unmeasured_content);
     }
     #[test]
-    fn partial_usage_frames_keep_both_sides_and_estimate_the_latest_output() {
+    fn interrupted_subset_only_receipts_keep_provider_counts_without_text_estimation() {
+        let _scope = Scope::start();
+        {
+            let mut request = Request::start(&serde_json::json!("x".repeat(4000)));
+            request.cache_write_details(Some(5));
+            request.details(None, Some(2));
+        }
+        let tokens = snapshot().unwrap().tokens.unwrap();
+        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (5, 2, 7));
+        assert_eq!(tokens.effective_accounting().source, crate::usage::UsageSource::Provider);
+        assert_eq!(tokens.effective_accounting().coverage, crate::usage::UsageCoverage::Partial);
+        assert!(!tokens.effective_accounting().known.input && !tokens.effective_accounting().known.output);
+    }
+    #[test]
+    fn partial_usage_preserves_reported_buckets_without_inventing_output() {
         for finished in [false, true] {
             let _scope = Scope::start();
             {
@@ -384,7 +444,11 @@ mod tests {
             }
             let tokens = snapshot().unwrap().tokens.unwrap();
             assert_eq!(tokens.input_tokens, 100);
-            assert_eq!(tokens.output_tokens, if finished { 30 } else { 20 });
+            assert_eq!(tokens.output_tokens, if finished { 30 } else { 5 });
+            assert_eq!(tokens.effective_accounting().known.output, finished);
+            assert_eq!(tokens.effective_accounting().coverage, if finished {
+                crate::usage::UsageCoverage::Complete
+            } else { crate::usage::UsageCoverage::Partial });
             assert_eq!(tokens.cached_input_tokens, 60);
             assert_eq!(tokens.reasoning_output_tokens, 5);
             assert_eq!(tokens.measured, finished);

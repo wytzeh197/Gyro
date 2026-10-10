@@ -1,0 +1,85 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+.upgrade-fixture {
+  width: 100vw;
+  min-width: 0;
+  height: calc(100dvh - 32px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+}
+.upgrade-fixture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  font: 12px/1.4 var(--gyro-font-sans);
+}
+.upgrade-fixture-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.upgrade-fixture-controls :is(button, select) {
+  color: var(--gyro-text);
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: 4px;
+  font: inherit;
+  min-height: 28px;
+  padding: 3px 6px;
+}
+.upgrade-fixture-controls :is(button, select):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+.upgrade-fixture-controls button:disabled {
+  opacity: 0.5;
+}
+.upgrade-fixture-stage {
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  overflow: hidden;
+}
+.upgrade-fixture-stage > .gyro-app-shell {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+.upgrade-fixture-stage .gyro-app-shell > main {
+  height: 100%;
+  min-height: 0;
+}
+.upgrade-fixture-stage .gyro-compact-navigation-toolbar {
+  position: absolute;
+  top: 0;
+}
+.upgrade-fixture-stage .gyro-sidebar {
+  width: 232px;
+  min-width: 232px;
+}
+.upgrade-fixture-output {
+  padding: 4px 12px;
+  color: var(--gyro-muted);
+  font: 11px/1.4 var(--gyro-font-sans);
+  border-top: 1px solid var(--gyro-border-soft);
+}
+:root[data-fixture-reduced-motion="true"] *,
+:root[data-fixture-reduced-motion="true"] *::before,
+:root[data-fixture-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}

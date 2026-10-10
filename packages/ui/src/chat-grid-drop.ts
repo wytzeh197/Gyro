@@ -176,3 +176,25 @@ export function nearestChatGridDropZone(
   }
   return nearest;
 }
+
+/** Resolve a release before React has painted the placement overlay. */
+export function chatGridDropZoneBeforePaint(
+  zones: ChatGridDropZone[],
+  bounds: Pick<DOMRect, "left" | "top" | "width" | "height">,
+  x: number,
+  y: number,
+): ChatGridDropZone | undefined {
+  if (!zones.length || bounds.width <= 0 || bounds.height <= 0) return undefined;
+  const layout = chatGridDropLayout(zones);
+  const fraction = (x - bounds.left) / bounds.width;
+  if (layout === "full") return zones[0];
+  if (layout === "columns") return zones[fraction <= 0.5 ? 0 : 1];
+  if (layout === "row") {
+    const boundary = Math.max(0, Math.min(zones.length - 1,
+      Math.round(fraction * (zones.length - 1))));
+    return zones[boundary];
+  }
+  const slotIndex = (y >= bounds.top + bounds.height / 2 ? 2 : 0) +
+    (fraction >= 0.5 ? 1 : 0);
+  return zones.find(zone => zone.slotIndex === slotIndex);
+}

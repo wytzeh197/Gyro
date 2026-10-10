@@ -1,9 +1,3 @@
-/* The approved chat study, applied to the existing chat and composer only.
-   Keep sidebar, companion, provider menus, and workspace layouts independent. */
-:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
-  --gyro-chat-content-width: 760px;
-}
-
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   > .gyro-chat-thread-topbar,
@@ -26,10 +20,6 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-transcript {
   background: var(--gyro-app);
-}
-
-:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
-  --gyro-chat-dock-solid: var(--gyro-pane);
 }
 
 :root[data-theme="dark"] .gyro-chat-surface:is(.is-thread, .is-empty) {
@@ -75,7 +65,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-turn
   > .gyro-message.is-user {
-  justify-content: stretch;
+  justify-content: flex-end;
   margin-bottom: 16px;
 }
 
@@ -84,23 +74,12 @@
   .gyro-chat-transcript
   .gyro-message.is-user
   > div.gyro-user-message-content:last-child {
-  align-items: stretch;
-  justify-items: stretch;
-  max-width: 100%;
+  align-items: end;
+  justify-items: end;
+  max-width: min(80%, 560px);
+  min-width: 0;
   position: relative;
-  width: 100%;
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-user-message-bubble {
-  background: var(--gyro-surface-soft);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-lg);
-  color: var(--gyro-text);
-  padding: 12px 16px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
-  box-shadow: none;
+  width: fit-content;
 }
 
 :root[data-theme="light"]
@@ -353,27 +332,6 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
-  :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
-  align-items: center;
-  background: none;
-  border: 0;
-  color: var(--gyro-muted);
-  display: flex;
-  font: calc(14px * var(--gyro-ui-scale, 1))/calc(
-      20px * var(--gyro-ui-scale, 1)
-    )
-    var(--gyro-font-sans);
-  gap: 8px;
-  letter-spacing: -0.005em;
-  max-width: 100%;
-  min-height: 25px;
-  min-width: 0;
-  padding: 0;
-  text-align: left;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
   :is(
     .gyro-run-segment-toggle,
     .gyro-run-calls-more,
@@ -450,14 +408,6 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
-  :is(.gyro-run-call-meta, .gyro-run-row-repeat, .gyro-run-row-stat) {
-  flex: none;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
   white-space: nowrap;
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-meta {
@@ -583,6 +533,15 @@
   font-weight: 500;
 }
 
+/* Scale the composer and every child together, including fixed-size icons
+   and spacing. Zoom participates in layout so the dock measures its new height. */
+:root[data-theme] .gyro-chat-surface {
+  --gyro-composer-zoom: 0.95;
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-shell {
+  zoom: var(--gyro-composer-zoom);
+}
+
 /* The existing composer retains its attachments, approval/model controls,
    context footer, queue behavior, and native Stop action. */
 :root[data-theme]
@@ -676,16 +635,6 @@
   ):active {
   transition-duration: 0s;
 }
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button {
-  width: 28px;
-  height: calc(28px * var(--gyro-ui-scale, 1));
-  min-width: 28px;
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  border-radius: 50%;
-}
 
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme]
@@ -757,4 +706,348 @@
   .gyro-chat-grid-drop-tile {
   font-size: 0;
   overflow: hidden;
+}
+
+/* Conversation polish. Append after the existing UI stylesheet so these
+   surface-scoped rules refine its appearance without changing pane geometry. */
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
+  --gyro-chat-dock-solid: var(--gyro-pane);
+  --gyro-chat-content-width: 780px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  border: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-text);
+  box-shadow: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--gyro-surface-soft);
+  border-color: transparent;
+  border-radius: 16px;
+  padding: 9px 14px;
+  font: calc(14px * var(--gyro-ui-scale, 1))/1.55 var(--gyro-font-sans);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text) {
+  color: var(--gyro-text);
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  .gyro-response-body
+  :is(p, li) {
+  line-height: 1.6;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  .gyro-response-body
+  :is(h2, h3) {
+  font-size: calc(15px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.45;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  .gyro-response-body {
+  gap: 11px;
+}
+
+/* Progress stays secondary to the answer; failures retain their own colors. */
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--gyro-muted);
+  display: flex;
+  font: calc(14px * var(--gyro-ui-scale, 1))/calc(
+      20px * var(--gyro-ui-scale, 1)
+    )
+    var(--gyro-font-sans);
+  gap: 8px;
+  letter-spacing: -0.005em;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  line-height: calc(20px * var(--gyro-ui-scale, 1));
+  min-height: 26px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-call-meta, .gyro-run-row-repeat, .gyro-run-row-stat) {
+  flex: none;
+  white-space: nowrap;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+/* Scope to the two main composers; nested companion tools keep their density. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-composer);
+  box-shadow: 0 2px 8px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+  filter: none;
+}
+
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider {
+  background: var(--gyro-surface);
+}
+
+:root[data-theme="light"] .gyro-chat-message-queue {
+  background: var(--gyro-surface);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:focus-within {
+  /* Keep the frame neutral when typing or using composer controls. */
+  border-color: var(--gyro-border);
+  box-shadow: 0 2px 8px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider
+  > textarea {
+  border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
+  padding: 12px 14px 6px;
+  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider
+  > textarea::placeholder {
+  color: var(--gyro-muted);
+  opacity: 1;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-bar {
+  background: transparent;
+  padding: calc(2px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  :is(.gyro-composer-chip, .gyro-composer-tool) {
+  border-radius: var(--gyro-radius-sm);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button {
+  border-radius: 50%;
+  height: calc(28px * var(--gyro-ui-scale, 1));
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  min-width: 28px;
+  width: 28px;
+}
+
+/* A ready send shares the primary action palette across both chat layouts. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button:not(:disabled):not(.is-stop) {
+  background: var(--gyro-primary-bg);
+  color: var(--gyro-primary-text);
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button:not(:disabled):not(.is-stop):hover {
+  background: var(--gyro-primary-hover);
+}
+
+/* Artifacts and completed changes share one restrained card treatment. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-artifact, .gyro-chat-run-change-summary.is-complete) {
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-artifact-header {
+  min-height: 40px;
+  padding-inline: 12px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-artifact-heading
+  strong {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  letter-spacing: 0;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(
+    .gyro-chat-artifact-heading small,
+    .gyro-chat-artifact-meta,
+    .gyro-chat-artifact-files small,
+    .gyro-chat-artifact-checks small
+  ) {
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-message-queue
+  article
+  p {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+}
+
+/* Environment reads as one grouped utility card. Its existing owning-pane
+   bounds, placement, scrolling, and action handlers remain authoritative. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-environment-popover {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  /* Leave a softer outer corner around the compact utility rows. */
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: 0 10px 30px
+    color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
+  padding: 6px;
+}
+
+:root[data-theme] .gyro-chat-environment-popover > header {
+  min-height: 26px;
+  padding: 0 4px 4px 7px;
+}
+
+:root[data-theme] .gyro-chat-environment-popover > header > strong {
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  :is(
+    .gyro-chat-environment-popover-rows,
+    .gyro-chat-environment-popover-actions
+  )
+  > button {
+  border-radius: var(--gyro-radius-sm);
+  min-height: 28px;
+  padding: 5px 7px;
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  :is(
+    .gyro-chat-environment-popover-rows,
+    .gyro-chat-environment-popover-actions
+  )
+  > button:not(:disabled):hover {
+  background: var(--gyro-control-hover);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  :is(
+    .gyro-chat-environment-popover-rows,
+    .gyro-chat-environment-popover-actions
+  )
+  > button:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+:root[data-theme] .gyro-chat-environment-popover-actions {
+  margin-top: 5px;
+  padding-top: 5px;
+}
+
+:root[data-theme] .gyro-chat-environment-popover-sources {
+  padding: 11px 7px 5px;
+}
+
+:root[data-theme] .gyro-chat-environment-popover-sources > ul {
+  gap: 8px;
+}
+
+/* Pane-local compactness: no viewport sizing and no change to scroll owners. */
+@container (max-width: 470px) {
+  :root[data-theme]
+    .gyro-chat-surface:is(.is-thread, .is-empty)
+    :is(.gyro-chat-start, .gyro-chat-composer-dock)
+    > .gyro-composer-shell.is-hero.has-provider {
+    border-radius: 16px;
+  }
+
+  :root[data-theme]
+    .gyro-chat-surface:is(.is-thread, .is-empty)
+    :is(.gyro-chat-start, .gyro-chat-composer-dock)
+    > .gyro-composer-shell.is-hero.has-provider
+    > textarea {
+    border-radius: 16px 16px 0 0;
+    padding-inline: 13px;
+  }
+
+  :root[data-theme]
+    .gyro-chat-surface:is(.is-thread, .is-empty)
+    .gyro-chat-artifact-heading
+    > span {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
 }

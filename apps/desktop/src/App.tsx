@@ -3660,8 +3660,8 @@ export function App() {
       dispatchWorkbench({ type: "close-tool-panel" });
       return;
     }
-    openToolPanel(workbench.activePaneTab);
-  }, [openToolPanel, workbench.activePaneTab, workbench.isToolPanelOpen]);
+    openToolPanel("terminal");
+  }, [openToolPanel, workbench.isToolPanelOpen]);
 
   const openSettingsSection = useCallback(
     (section: SettingsSectionId) => {

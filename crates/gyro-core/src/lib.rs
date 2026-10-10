@@ -1,4 +1,5 @@
 pub mod account;
+pub mod acp_usage;
 mod api_compatibility;
 pub mod automations;
 pub mod capabilities;
@@ -36,6 +37,7 @@ pub mod sessions;
 pub mod sqlite;
 pub mod timing;
 pub mod usage;
+pub mod usage_receipts;
 pub mod web_fetch;
 pub mod workspace_check;
 pub mod worktrees;

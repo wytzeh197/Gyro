@@ -610,6 +610,8 @@ const styleSource = [
   readRepoFile("packages/ui/src/interaction-motion.css"),
   readRepoFile("packages/ui/src/press-feedback.css"),
   readRepoFile("packages/ui/src/chat-design.css"),
+  readRepoFile("packages/ui/src/navigation-design.css"),
+  readRepoFile("packages/ui/src/ui-upgrade.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
 ].join("\n");
@@ -1010,8 +1012,8 @@ expect(
   "The full chat row should remain directly draggable without a separate dotted grip.",
 );
 expect(
-  surfaceSource.includes(
-    "title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}",
+  readRepoFile("packages/ui/src/transcript-attachments.tsx").includes(
+    "title={`${attachment.name} · ${formatSize(attachment.size)}`}",
   ) &&
     cssRules(
       styleSource,
@@ -1584,7 +1586,7 @@ expect(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
             "low,medium,high,xhigh,max,ultra" &&
-          model.contextWindowTokens === 272_000,
+          model.contextWindowTokens === (model.id === "gpt-6.1-sol" ? 500_000 : 272_000),
       ),
   "OpenAI should expose GPT-6.1 Sol, GPT-6 Astra, and all GPT-5.6 variants with their supported effort levels.",
 );
@@ -2588,6 +2590,14 @@ expect(
     sessionsState.activePaneTab === "terminal" &&
     sessionsState.isToolPanelOpen === true,
   "Sessions should restore the last-used CLI layout and terminal focus.",
+);
+const defaultDrawerState = workbenchReducer(
+  { ...state, activePaneTab: "diff", isToolPanelOpen: false },
+  { type: "open-tool-panel" },
+);
+expect(
+  defaultDrawerState.isToolPanelOpen && defaultDrawerState.activePaneTab === "terminal",
+  "Opening the drawer without choosing a tool should default to Shell.",
 );
 state = workbenchReducer(state, { type: "open-tool-panel", tab: "browser" });
 expect(
@@ -4820,7 +4830,7 @@ expect(
     surfaceSource.includes('aria-label="Terminals"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
     surfaceSource.includes('aria-label="Start a CLI"') &&
-    surfaceSource.includes("<span>New terminal</span>") &&
+    surfaceSource.includes('onShowToolLauncher ? "Add drawer tab" : "New terminal"') &&
     styleSource.includes(
       ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
     ) &&
@@ -5225,7 +5235,7 @@ expect(
   surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
     surfaceSource.includes("onRunCommandProfile(profile.id, launchOptions)") &&
-    surfaceSource.includes("<span>New terminal</span>") &&
+    surfaceSource.includes('onShowToolLauncher ? "Add drawer tab" : "New terminal"') &&
     surfaceSource.includes("cliProfileShortLabel") &&
     !surfaceSource.includes(
       'className="gyro-agent-launcher-heading">Start a terminal',
@@ -5674,7 +5684,7 @@ expect(
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
     surfaceSource.includes("data-active-tab={activePaneTab}") &&
-    surfaceSource.includes("terminalTitle={activeTerminalPane?.title}") &&
+    surfaceSource.includes('terminalTitle={activeTerminalPane?.title ?? "Shell"}') &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
     surfaceSource.includes('tab.id === "terminal"') &&
@@ -5867,9 +5877,8 @@ expect(
       'await invoke<boolean>("delete_session", { sessionId })',
     ) &&
     workbenchSource.includes("sideChatSessionIds") &&
-    surfaceSource.includes(
-      "Temporary chat · Cleared when you close this tab",
-    ) &&
+    surfaceSource.includes("Side chat · Cleared when you close this tab") &&
+    !surfaceSource.includes('className="gyro-side-chat-note"') &&
     styleSource.includes(".gyro-side-chat-composer {"),
   "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
 );
@@ -5908,7 +5917,7 @@ expect(
     surfaceSource.includes("<span>Bottom drawer</span>") &&
     surfaceSource.includes("aria-pressed={isToolPanelOpen}") &&
     appSource.includes("const toggleChatToolPanel = useCallback") &&
-    appSource.includes("openToolPanel(workbench.activePaneTab)") &&
+    appSource.includes('openToolPanel("terminal")') &&
     appSource.includes('openToolPanel("terminal")') &&
     !surfaceSource.includes('"Open last used panel"') &&
     surfaceSource.includes("onToggleToolPanel?.();") &&
@@ -7634,9 +7643,10 @@ expect(
   "Terminal Grid should use the shared panel body without the IDE tool-tab header.",
 );
 expect(
-  surfaceSource.includes('activeTab === "terminal" && onAddPane') &&
-    surfaceSource.includes('aria-label="New terminal"'),
-  "The add control should appear only beside the terminal panel that it affects.",
+  surfaceSource.includes('(compact || activeTab === "terminal") && onAddPane') &&
+    surfaceSource.includes('aria-label={compact ? "Add drawer tab" : "New terminal"}') &&
+    surfaceSource.includes('aria-label="Drawer tools"'),
+  "The IDE drawer add control should open its tool picker while other terminal surfaces keep direct creation.",
 );
 expect(
   surfaceSource.includes("showEmbeddedPanel = true") &&

@@ -238,7 +238,7 @@ export function ChatRun({
     .join(" ");
 
   return (
-    <div className={shellClass}>
+    <div className={shellClass} data-run-state={needsApproval ? "approval" : model.phase.name}>
       <RunHeader
         statusLabel={needsApproval ? "Needs approval" : statusLabel}
         canCollapse={canCollapse}

@@ -33,6 +33,27 @@ assert.equal(estimated.source, "estimated");
 assert.equal(estimated.usedLabel, "400");
 assert.equal(estimated.windowLabel, "400K");
 assert.equal(estimated.percentLabel, "<1%");
+assert.equal(
+  composerContextUsageForModel(estimated, {
+    providerId: "openai",
+    modelId: "gpt-5.4-mini",
+    contextWindowTokens: 500_000,
+  }).contextWindowTokens,
+  500_000,
+  "A catalog update replaces an unreported baseline even for the same model",
+);
+
+for (const providerId of ["cursor", "opencode", "custom:unknown"]) {
+  const unknown = estimateComposerContextUsage([], "x".repeat(1_600), {
+    providerId,
+    modelId: `${providerId}-default`,
+  });
+  assert.equal(unknown.usedTokens, 400);
+  assert.equal(unknown.windowLabel, "Unknown");
+  assert.equal(unknown.percentLabel, "—");
+  assert.equal(unknown.remainingLabel, "Unknown");
+  assert.match(unknown.label, /context window unknown/);
+}
 
 const events = [
   event("1", "assistant-message", "old model", {
@@ -66,10 +87,70 @@ const reported = estimateComposerContextUsage(events, "z".repeat(400), {
 });
 assert.equal(reported.source, "reported");
 assert.equal(reported.usedLabel, "12K");
-// The window is the selected model's, not the one some earlier turn recorded.
-assert.equal(reported.windowLabel, "1.05M");
-assert.equal(reported.percentLabel, "1%");
+// A matching runtime window wins over the API/catalog maximum.
+assert.equal(reported.windowLabel, "100K");
+assert.equal(reported.percentLabel, "12%");
 assert.match(reported.detail, /newer thread content and this draft/);
+assert.equal(
+  composerContextUsageForModel(reported, {
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+    modelLabel: "GPT-5.6 Sol",
+    contextWindowTokens: 1_050_000,
+  }),
+  reported,
+  "Opening the picker on the same model preserves its runtime window",
+);
+
+for (const [providerId, modelId, window] of [
+  ["openai", "gpt-6.1-sol", 500_000],
+  ["xai", "grok-4.3", 1_000_000],
+  ["gemini", "gemini-default", 1_048_576],
+  ["openrouter", "z-ai/glm-5.3", 1_048_576],
+]) {
+  assert.equal(
+    estimateComposerContextUsage([], "", { providerId, modelId })
+      .contextWindowTokens,
+    window,
+  );
+}
+
+// A provisioned Kimi plan and a local Ollama allocation can differ from the
+// offline catalog, in either direction. Counts must use the actual window.
+for (const [providerId, modelId, catalog, runtime] of [
+  ["kimi", "k3", 262_144, 1_048_576],
+  ["ollama", "local-model", 131_072, 4_096],
+]) {
+  const actual = estimateComposerContextUsage(
+    [
+      event("runtime", "assistant-message", "", {
+        providerId,
+        modelId,
+        contextUsage: { inputTokens: 1_024, modelContextWindow: runtime },
+      }),
+    ],
+    "",
+    { providerId, modelId, contextWindowTokens: catalog },
+  );
+  assert.equal(actual.contextWindowTokens, runtime);
+  assert.equal(
+    composerContextUsageForModel(actual, {
+      providerId,
+      modelId,
+      contextWindowTokens: catalog,
+    }).contextWindowTokens,
+    runtime,
+  );
+  // An identical model ID served by a different provider must use its own window.
+  assert.equal(
+    composerContextUsageForModel(actual, {
+      providerId: "custom:other",
+      modelId,
+      contextWindowTokens: 32_768,
+    }).contextWindowTokens,
+    32_768,
+  );
+}
 
 // A model with no window of its own in the catalog still measures against the
 // window the provider reported for it.

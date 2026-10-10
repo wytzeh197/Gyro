@@ -12,6 +12,7 @@
 //! header, never in the URL, and redirects are refused so a Bearer token cannot
 //! be walked to a host the user did not configure.
 
+use crate::usage::{UsageReason, UsageSource, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,69 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_DISCOVERED_MODELS: usize = 500;
 const MAX_ERROR_BODY_CHARS: usize = 400;
+
+/// Finishing generation and receiving its final usage are separate events.
+/// A private transport cancellation lets us bound the receipt phase without
+/// cancelling the user's turn. The watchdog is joined on every exit.
+pub(crate) struct UsageReceipt {
+    pub(crate) transport: CancellationToken,
+    control: std::sync::mpsc::Sender<bool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+    draining: bool,
+}
+pub(crate) const MAX_USAGE_RECEIPT_BYTES: usize = 64 * 1024;
+const USAGE_RECEIPT_TIMEOUT: Duration = Duration::from_secs(2);
+
+impl UsageReceipt {
+    pub(crate) fn start(cancellation: &CancellationToken) -> Self {
+        let transport = CancellationToken::default();
+        let signal = transport.clone();
+        let parent = cancellation.clone();
+        let (control, commands) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut deadline = None;
+            loop {
+                if parent.is_cancelled()
+                    || deadline.is_some_and(|until| std::time::Instant::now() >= until)
+                {
+                    signal.cancel();
+                    break;
+                }
+                match commands.recv_timeout(Duration::from_millis(10)) {
+                    Ok(true) => {
+                        deadline.get_or_insert(std::time::Instant::now() + USAGE_RECEIPT_TIMEOUT);
+                    }
+                    Ok(false) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        });
+        Self {
+            transport,
+            control,
+            worker: Some(worker),
+            draining: false,
+        }
+    }
+    pub(crate) fn begin(&mut self, remaining: &mut usize) {
+        if !self.draining {
+            self.draining = true;
+            *remaining = (*remaining).min(MAX_USAGE_RECEIPT_BYTES);
+            let _ = self.control.send(true);
+        }
+    }
+    pub(crate) fn draining(&self) -> bool {
+        self.draining
+    }
+}
+impl Drop for UsageReceipt {
+    fn drop(&mut self) {
+        let _ = self.control.send(false);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatChatRequest<'a> {
@@ -57,6 +121,8 @@ pub struct OpenAiCompatChatResponse {
     pub reasoning_content: Option<String>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    /// Request-scoped counts and their provenance, including provider subsets.
+    pub accounted_usage: UsageTokens,
     pub tool_calls: Vec<OpenAiCompatToolCall>,
 }
 
@@ -167,10 +233,28 @@ where
 fn openai_compat_tool_chat_once<F>(
     request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
-    mut on_delta: F,
+    on_delta: F,
 ) -> Result<OpenAiCompatChatResponse>
 where
     F: FnMut(&str),
+{
+    openai_compat_tool_chat_once_with_recovery(
+        request,
+        cancellation,
+        on_delta,
+        recover_openrouter_usage,
+    )
+}
+
+fn openai_compat_tool_chat_once_with_recovery<F, R>(
+    request: &OpenAiCompatChatRequest<'_>,
+    cancellation: &CancellationToken,
+    mut on_delta: F,
+    recover_usage: R,
+) -> Result<OpenAiCompatChatResponse>
+where
+    F: FnMut(&str),
+    R: FnOnce(&Url, &str, &str, &CancellationToken) -> Option<OpenRouterUsageReceipt>,
 {
     if cancellation.is_cancelled() {
         return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
@@ -187,6 +271,7 @@ where
     let mut include_usage = crate::api_compatibility::include_usage(identity);
     let initially_include_usage = include_usage;
     let mut observation = None;
+    let mut receipt = UsageReceipt::start(cancellation);
     let response = crate::provider_retry::http_response(cancellation, || {
         let payload = chat_payload(
             model,
@@ -196,7 +281,7 @@ where
             include_usage,
         );
         observation = Some(crate::provider_observation::Request::start(&payload));
-        let result = match post_chat(&url, api_key, &payload, cancellation) {
+        let result = match post_chat(&url, api_key, &payload, &receipt.transport) {
             Err(ureq::Error::Status(400, response)) => {
                 observation.as_mut().unwrap().rejected();
                 let mut body = String::new();
@@ -216,7 +301,7 @@ where
                         false,
                     );
                     observation = Some(crate::provider_observation::Request::start(&payload));
-                    post_chat(&url, api_key, &payload, cancellation)
+                    post_chat(&url, api_key, &payload, &receipt.transport)
                 } else {
                     Err(ureq::Error::Status(
                         400,
@@ -255,6 +340,10 @@ where
     let mut line = String::new();
     let mut saw_stream_frames = false;
     let mut completed = false;
+    let mut receipt_completed = false;
+    let mut final_usage = false;
+    let mut last_frame_had_usage = false;
+    let mut terminal_error = None;
     // Gateways that ignore `stream: true` answer with one JSON object, which may
     // be pretty-printed across lines; collect it until EOF.
     let mut buffered_body = String::new();
@@ -263,9 +352,14 @@ where
         if cancellation.is_cancelled() {
             return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
         }
-        let read = crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining)
-            .context("invalid provider chat stream")?;
+        let read =
+            match crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining) {
+                Ok(read) => read,
+                Err(_) if receipt.draining() && !cancellation.is_cancelled() => break,
+                Err(error) => return Err(error).context("invalid provider chat stream"),
+            };
         if read == 0 {
+            receipt_completed = true;
             break;
         }
         let trimmed = line.trim();
@@ -276,25 +370,78 @@ where
             saw_stream_frames = true;
             let payload = payload.trim();
             if payload == "[DONE]" {
-                completed = true;
+                // The transport marker alone cannot certify a tool generation.
+                completed |= state.tool_calls.is_empty();
+                receipt_completed = true;
+                final_usage |= last_frame_had_usage;
                 break;
             }
             if payload.is_empty() {
                 continue;
             }
-            let frame: WireCompletion =
-                serde_json::from_str(payload).context("invalid provider chat response")?;
+            let frame: WireCompletion = match serde_json::from_str(payload) {
+                Ok(frame) => frame,
+                Err(_) if receipt.draining() => break,
+                Err(error) => return Err(error).context("invalid provider chat response"),
+            };
+            let already_completed = completed;
             completed |= frame
                 .choices
                 .iter()
                 .any(|choice| choice.index == 0 && choice.finish_reason.is_some());
-            if let Some(usage) = &frame.usage {
-                usage.observe(&mut observation);
+            last_frame_had_usage = frame.usage.as_ref().is_some_and(WireUsage::has_counts)
+                || frame
+                    .x_groq
+                    .as_ref()
+                    .and_then(|groq| groq.usage.as_ref())
+                    .is_some_and(WireUsage::has_counts);
+            final_usage |= last_frame_had_usage
+                && (completed
+                    || terminal_error.is_some()
+                    || frame.error.is_some()
+                    || frame
+                        .x_groq
+                        .as_ref()
+                        .is_some_and(|groq| groq.error.is_some()));
+            state.record_usage(&frame);
+            state.usage.observe(&mut observation);
+            if frame.error.is_some()
+                || frame
+                    .x_groq
+                    .as_ref()
+                    .is_some_and(|groq| groq.error.is_some())
+            {
+                terminal_error.get_or_insert_with(|| {
+                    anyhow!("the provider reported a generation error; no tool calls were executed")
+                });
             }
-            state.apply(frame, &mut |text| {
-                observation.delta(text);
-                on_delta(text);
-            })?;
+            if terminal_error.is_none() && !already_completed {
+                for choice in frame.choices.iter().filter(|choice| choice.index == 0) {
+                    let message = choice.effective_message();
+                    if let Some(reasoning) = &message.reasoning_content {
+                        observation.delta(reasoning);
+                    }
+                    for call in &message.tool_calls {
+                        if let Some(function) = &call.function {
+                            if let Some(name) = &function.name {
+                                observation.delta(name);
+                            }
+                            if let Some(arguments) = &function.arguments {
+                                observation.delta(arguments);
+                            }
+                        }
+                    }
+                }
+                if let Err(error) = state.apply(frame, &mut |text| {
+                    observation.delta(text);
+                    on_delta(text);
+                }) {
+                    terminal_error = Some(error);
+                }
+            }
+            if completed || terminal_error.is_some() {
+                receipt.begin(&mut remaining);
+            }
         } else if trimmed.starts_with(':') {
             // SSE comment; gateways send these as keep-alives.
         } else if !saw_stream_frames {
@@ -306,7 +453,10 @@ where
         // Anything else is an SSE field Gyro has no use for (`event:`, `id:`).
     }
 
-    if saw_stream_frames && !completed {
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
+    }
+    if saw_stream_frames && !completed && terminal_error.is_none() {
         return Err(anyhow!(
             "provider stream ended before completion; partial tool calls were not executed"
         ));
@@ -318,17 +468,47 @@ where
         }
         let parsed: WireCompletion =
             serde_json::from_str(body).context("invalid provider chat response")?;
-        if let Some(usage) = &parsed.usage {
-            usage.observe(&mut observation);
-        }
-        state.apply(parsed, &mut |text| {
+        state.record_usage(&parsed);
+        state.usage.observe(&mut observation);
+        if let Err(error) = state.apply(parsed, &mut |text| {
             observation.delta(text);
             on_delta(text);
-        })?;
+        }) {
+            terminal_error = Some(error);
+        }
+        receipt_completed = true;
+        final_usage = state.saw_usage;
+    }
+
+    // The completed answer survives a missing receipt. Release the original
+    // stream/watchdog before a separate, bounded metadata lookup; it is not a
+    // new generation and must not enter retry or observation collectors.
+    drop(reader);
+    drop(receipt);
+    if saw_stream_frames
+        && completed
+        && terminal_error.is_none()
+        && !(receipt_completed && final_usage)
+        && !state.conflicting_generation_id
+    {
+        if let Some(id) = state.generation_id.as_deref() {
+            if let Some(recovered) = recover_usage(&endpoint, api_key, id, cancellation) {
+                receipt_completed = recovered.complete;
+                final_usage = recovered.complete;
+                state.record_usage(&WireCompletion {
+                    usage: Some(recovered.usage),
+                    ..Default::default()
+                });
+                state.usage.observe(&mut observation);
+            }
+        }
+    }
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
     }
 
     let content = state.content.trim().to_string();
-    let reasoning_content = state.reasoning_content.take();
+    let reasoning_content = state.reasoning_content.clone();
     let input_tokens = state.input_tokens;
     let output_tokens = state.output_tokens;
     let output_chars = state.content.chars().count()
@@ -338,7 +518,23 @@ where
             .iter()
             .map(|call| call.name.chars().count() + call.arguments.chars().count())
             .sum::<usize>();
-    observation.complete(input_tokens, output_tokens, output_chars);
+    let input_chars = crate::provider_observation::text_size(
+        &serde_json::json!({"messages": request.messages, "tools": request.tools}),
+    )
+    .0;
+    let accounted_usage =
+        state.accounted_usage(input_chars, output_chars, receipt_completed && final_usage);
+    observation.accounted_usage(accounted_usage);
+    // Accounting completion can precede a failed generation. Preserve the
+    // final provider counts before returning an output-limit/error result.
+    if receipt_completed && state.saw_usage {
+        observation.complete(input_tokens, output_tokens, output_chars);
+    } else if terminal_error.is_none() {
+        observation.complete(input_tokens, output_tokens, output_chars);
+    }
+    if let Some(error) = terminal_error {
+        return Err(error);
+    }
     let tool_calls = state.tool_calls()?;
     if content.is_empty() && tool_calls.is_empty() {
         return Err(anyhow!("the provider finished without a text response"));
@@ -348,6 +544,7 @@ where
         reasoning_content,
         input_tokens,
         output_tokens,
+        accounted_usage,
         tool_calls,
     })
 }
@@ -544,30 +741,98 @@ struct ToolCallAccumulator {
 
 #[derive(Default)]
 struct ChatAccumulator {
+    generation_id: Option<String>,
+    conflicting_generation_id: bool,
     content: String,
     reasoning_content: Option<String>,
     tool_calls: Vec<ToolCallAccumulator>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    usage: WireUsage,
+    saw_usage: bool,
 }
 
 impl ChatAccumulator {
+    fn record_usage(&mut self, frame: &WireCompletion) {
+        if let Some(id) = &frame.id {
+            if let Some(previous) = &self.generation_id {
+                self.conflicting_generation_id |= previous != id;
+            } else {
+                self.generation_id = Some(id.clone());
+            }
+        }
+        // Reconcile both envelopes as snapshots of the same request.
+        if let Some(usage) = frame.x_groq.as_ref().and_then(|groq| groq.usage.clone()) {
+            self.usage.merge(usage);
+            self.saw_usage = true;
+        }
+        if let Some(usage) = frame.usage.clone() {
+            self.usage.merge(usage);
+            self.saw_usage = true;
+        }
+        self.saw_usage &= self.usage.has_counts();
+        self.input_tokens = self.usage.input();
+        self.output_tokens = self.usage.completion_tokens;
+    }
+
+    fn accounted_usage(
+        &self,
+        input_chars: usize,
+        output_chars: usize,
+        receipt_complete: bool,
+    ) -> UsageTokens {
+        if !self.saw_usage {
+            return UsageTokens::estimated(input_chars, output_chars)
+                .partial(UsageReason::MissingUsage);
+        }
+        let mut tokens = self.usage.tokens();
+        let inconsistent =
+            tokens.effective_accounting().reason == Some(UsageReason::InconsistentCounts);
+        // Estimate only an actually absent half. A total can infer the other
+        // half, and an explicit zero never permits a character substitution.
+        let input = self
+            .input_tokens
+            .or_else(|| self.usage.total_tokens?.checked_sub(self.output_tokens?));
+        let output = self
+            .output_tokens
+            .or_else(|| self.usage.total_tokens?.checked_sub(self.input_tokens?));
+        if self.usage.total_tokens.is_none() && (input.is_none() || output.is_none()) {
+            let estimate = UsageTokens::estimated(input_chars, output_chars);
+            if input.is_none() {
+                tokens.input_tokens = estimate.input_tokens.max(tokens.input_tokens);
+            }
+            if output.is_none() {
+                tokens.output_tokens = estimate.output_tokens.max(tokens.output_tokens);
+            }
+            tokens.total_tokens = tokens.input_tokens.saturating_add(tokens.output_tokens);
+            tokens = tokens.partial(UsageReason::MissingUsage);
+            if let Some(accounting) = tokens.accounting.as_mut() {
+                accounting.source = UsageSource::Mixed;
+                accounting.coverage = crate::usage::UsageCoverage::Estimated;
+            }
+        }
+        if inconsistent {
+            tokens = estimated_inconsistent_usage(tokens);
+        } else if !receipt_complete {
+            tokens = tokens.partial(UsageReason::ProviderIncomplete);
+        }
+        tokens
+    }
+
     fn apply<F>(&mut self, frame: WireCompletion, on_delta: &mut F) -> Result<()>
     where
         F: FnMut(&str),
     {
         anyhow::ensure!(
-            frame.error.is_none(),
+            frame.error.is_none()
+                && !frame
+                    .x_groq
+                    .as_ref()
+                    .is_some_and(|groq| groq.error.is_some()),
             "the provider reported a generation error; no tool calls were executed"
         );
-        if let Some(usage) = frame.usage {
-            if usage.prompt_tokens.is_some() {
-                self.input_tokens = usage.prompt_tokens;
-            }
-            if usage.completion_tokens.is_some() {
-                self.output_tokens = usage.completion_tokens;
-            }
-        }
+        self.record_usage(&frame);
+
         // Choices are alternative answers, not parallel work. Mixing them can
         // execute mutually exclusive edits and corrupt tool-call indexes.
         for choice in frame.choices.into_iter().filter(|choice| choice.index == 0) {
@@ -580,6 +845,9 @@ impl ChatAccumulator {
                 ),
                 Some("content_filter") => anyhow::bail!(
                     "the provider filtered the response; no tool calls from this response were executed"
+                ),
+                Some("error" | "cancelled" | "canceled") => anyhow::bail!(
+                    "the provider reported an interrupted generation; no tool calls from this response were executed"
                 ),
                 _ => {}
             }
@@ -694,12 +962,38 @@ fn parse_tool_arguments(raw: &str) -> serde_json::Value {
 
 #[derive(Default, Deserialize)]
 struct WireCompletion {
+    // Non-string ids remain ignorable for custom OpenAI-compatible gateways.
+    #[serde(default, deserialize_with = "optional_generation_id")]
+    id: Option<String>,
     #[serde(default)]
     error: Option<serde_json::Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_vec")]
     choices: Vec<WireChoice>,
     #[serde(default)]
     usage: Option<WireUsage>,
+    #[serde(default)]
+    x_groq: Option<WireGroq>,
+}
+
+#[derive(Default, Deserialize)]
+struct WireGroq {
+    #[serde(default)]
+    usage: Option<WireUsage>,
+    #[serde(default)]
+    error: Option<serde_json::Value>,
+}
+
+fn nullable_vec<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+fn nullable_message<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<WireMessage, D::Error> {
+    Ok(Option::<WireMessage>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Default, Deserialize)]
@@ -709,10 +1003,10 @@ struct WireChoice {
     #[serde(default)]
     finish_reason: Option<String>,
     /// Streaming frames carry the text under `delta`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_message")]
     delta: WireMessage,
     /// A non-streamed completion carries the same shape under `message`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_message")]
     message: WireMessage,
 }
 
@@ -732,7 +1026,7 @@ struct WireMessage {
     content: Option<WireContent>,
     #[serde(default)]
     reasoning_content: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_vec")]
     tool_calls: Vec<WireToolCall>,
 }
 
@@ -801,8 +1095,214 @@ struct WireFunction {
     arguments: Option<String>,
 }
 
-#[derive(Default, Deserialize)]
+// Generation receipts use the model's native tokenizer, matching stream usage.
+// The legacy tokens_prompt/tokens_completion and monetary cache_discount/usage
+// fields are deliberately ignored.
+// https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation
+const OPENROUTER_RECEIPT_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn valid_openrouter_generation_id(id: &str) -> bool {
+    id.len() <= 128
+        && id.strip_prefix("gen-").is_some_and(|suffix| {
+            !suffix.is_empty()
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn optional_generation_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .filter(|id| valid_openrouter_generation_id(id))
+        .map(str::to_owned))
+}
+
+fn optional_receipt_count<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u64>, D::Error> {
+    Ok(serde_json::Value::deserialize(deserializer)?.as_u64())
+}
+
+fn openrouter_generation_endpoint(endpoint: &Url, id: &str) -> Option<Url> {
+    // An OpenRouter-looking model/id on a custom gateway grants no permission
+    // to send its credentials to OpenRouter or to invent a gateway endpoint.
+    if endpoint.scheme() != "https"
+        || endpoint.host_str() != Some("openrouter.ai")
+        || endpoint.port_or_known_default() != Some(443)
+        || endpoint.path().trim_end_matches('/') != "/api/v1"
+        || !valid_openrouter_generation_id(id)
+    {
+        return None;
+    }
+    let mut url = endpoint_child(endpoint, "generation").ok()?;
+    let query: Vec<_> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "id")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    url.query_pairs_mut()
+        .clear()
+        .extend_pairs(query)
+        .append_pair("id", id);
+    Some(url)
+}
+
+struct OpenRouterUsageReceipt {
+    usage: WireUsage,
+    complete: bool,
+}
+
+#[derive(Deserialize)]
+struct WireOpenRouterGenerationResponse {
+    data: WireOpenRouterGeneration,
+}
+
+#[derive(Deserialize)]
+struct WireOpenRouterGeneration {
+    id: String,
+    cancelled: Option<bool>,
+    finish_reason: Option<String>,
+    #[serde(default, deserialize_with = "optional_receipt_count")]
+    native_tokens_prompt: Option<u64>,
+    #[serde(default, deserialize_with = "optional_receipt_count")]
+    native_tokens_completion: Option<u64>,
+    #[serde(default, deserialize_with = "optional_receipt_count")]
+    native_tokens_cached: Option<u64>,
+    #[serde(default, deserialize_with = "optional_receipt_count")]
+    native_tokens_reasoning: Option<u64>,
+}
+
+impl WireOpenRouterGeneration {
+    fn receipt(self, expected_id: &str) -> Option<OpenRouterUsageReceipt> {
+        if self.id != expected_id
+            || (self.native_tokens_prompt.is_none() && self.native_tokens_completion.is_none())
+        {
+            return None;
+        }
+        let total_tokens = self
+            .native_tokens_prompt
+            .zip(self.native_tokens_completion)
+            .and_then(|(input, output)| input.checked_add(output));
+        let complete = self.cancelled == Some(false)
+            && matches!(self.finish_reason.as_deref(), Some("stop" | "tool_calls"))
+            && total_tokens.is_some();
+        Some(OpenRouterUsageReceipt {
+            complete,
+            usage: WireUsage {
+                prompt_tokens: self.native_tokens_prompt,
+                completion_tokens: self.native_tokens_completion,
+                total_tokens,
+                prompt_tokens_details: self.native_tokens_cached.map(|cached_tokens| {
+                    WireTokenDetails {
+                        cached_tokens: Some(cached_tokens),
+                        ..Default::default()
+                    }
+                }),
+                completion_tokens_details: self.native_tokens_reasoning.map(|reasoning_tokens| {
+                    WireTokenDetails {
+                        reasoning_tokens: Some(reasoning_tokens),
+                        ..Default::default()
+                    }
+                }),
+                ..Default::default()
+            },
+        })
+    }
+}
+
+fn recover_openrouter_usage(
+    endpoint: &Url,
+    key: &str,
+    id: &str,
+    cancellation: &CancellationToken,
+) -> Option<OpenRouterUsageReceipt> {
+    let url = openrouter_generation_endpoint(endpoint, id)?;
+    read_openrouter_receipt(&url, key, id, cancellation, OPENROUTER_RECEIPT_TIMEOUT)
+}
+
+fn read_openrouter_receipt(
+    url: &Url,
+    key: &str,
+    id: &str,
+    cancellation: &CancellationToken,
+    timeout: Duration,
+) -> Option<OpenRouterUsageReceipt> {
+    if cancellation.is_cancelled() {
+        return None;
+    }
+    // Reuse a bounded runtime pool: dropping a per-lookup runtime can wait
+    // indefinitely for platform DNS. No reader/watchdog is spawned per receipt;
+    // dropping the lookup future cancels its headers/body and closes the client.
+    static RUNTIME: std::sync::OnceLock<Option<tokio::runtime::Runtime>> =
+        std::sync::OnceLock::new();
+    let runtime = RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .max_blocking_threads(1)
+                .thread_name("gyro-usage-receipt")
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .connect_timeout(timeout)
+        .timeout(timeout);
+    let builder = if openai_compat_host_is_loopback(url) {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    let client = builder.build().ok()?;
+    runtime.block_on(async {
+        let lookup = async {
+            let mut request = client
+                .get(url.as_str())
+                .header("Accept", "application/json")
+                .header("Accept-Encoding", "identity")
+                .header("User-Agent", USER_AGENT);
+            if !key.is_empty() {
+                request = request.bearer_auth(key);
+            }
+            let mut response = request.send().await.ok()?;
+            if response.status() != reqwest::StatusCode::OK
+                || response
+                    .content_length()
+                    .is_some_and(|length| length > MAX_USAGE_RECEIPT_BYTES as u64)
+            {
+                return None;
+            }
+            let mut body = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if chunk.len() > MAX_USAGE_RECEIPT_BYTES - body.len() {
+                    return None;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            let parsed: WireOpenRouterGenerationResponse = serde_json::from_slice(&body).ok()?;
+            parsed.data.receipt(id)
+        };
+        tokio::select! {
+            biased;
+            _ = cancellation.wait_cancelled() => None,
+            result = tokio::time::timeout(timeout, lookup) => result.ok().flatten(),
+        }
+    })
+}
+
+#[derive(Clone, Default, Deserialize)]
 struct WireUsage {
+    // Contradictory snapshots remain unverified even after later increases.
+    #[serde(skip)]
+    regressed: bool,
     #[serde(default)]
     prompt_tokens: Option<u64>,
     #[serde(default)]
@@ -810,27 +1310,183 @@ struct WireUsage {
     #[serde(default)]
     total_tokens: Option<u64>,
     #[serde(default)]
+    prompt_cache_hit_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_cache_miss_tokens: Option<u64>,
+    #[serde(default)]
     prompt_tokens_details: Option<WireTokenDetails>,
     #[serde(default)]
     completion_tokens_details: Option<WireTokenDetails>,
 }
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 struct WireTokenDetails {
     cached_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
     reasoning_tokens: Option<u64>,
 }
+/// Keep the largest observed snapshot, never add it twice or erase it with a
+/// smaller receipt. An absent field supplies no evidence of a regression.
+fn retain_usage_lower_bound(current: &mut Option<u64>, incoming: Option<u64>) -> bool {
+    match (*current, incoming) {
+        (Some(previous), Some(next)) => {
+            *current = Some(previous.max(next));
+            next < previous
+        }
+        (None, Some(next)) => {
+            *current = Some(next);
+            false
+        }
+        _ => false,
+    }
+}
+
+fn estimated_inconsistent_usage(mut tokens: UsageTokens) -> UsageTokens {
+    tokens = tokens.partial(UsageReason::InconsistentCounts);
+    if let Some(accounting) = tokens.accounting.as_mut() {
+        accounting.coverage = crate::usage::UsageCoverage::Estimated;
+    }
+    tokens
+}
+
+impl WireTokenDetails {
+    fn merge(&mut self, other: Self) -> bool {
+        let cached = retain_usage_lower_bound(&mut self.cached_tokens, other.cached_tokens);
+        let written =
+            retain_usage_lower_bound(&mut self.cache_write_tokens, other.cache_write_tokens);
+        let reasoning =
+            retain_usage_lower_bound(&mut self.reasoning_tokens, other.reasoning_tokens);
+        cached || written || reasoning
+    }
+}
 impl WireUsage {
+    fn has_counts(&self) -> bool {
+        self.input().is_some() || self.completion_tokens.is_some() || self.total_tokens.is_some()
+            || self.cached().is_some() || self.cache_write().is_some() || self.reasoning().is_some()
+    }
+    fn merge(&mut self, other: Self) {
+        // Compare normalized aliases too: switching from DeepSeek's cache split
+        // to prompt_tokens/cached_tokens must not hide a smaller snapshot.
+        self.regressed |= other.regressed
+            || [
+                (self.input(), other.input()),
+                (self.cached(), other.cached()),
+                (self.snapshot_total(), other.snapshot_total()),
+            ]
+            .into_iter()
+            .any(|(previous, next)| previous.zip(next).is_some_and(|(a, b)| b < a));
+        // These are request snapshots, never additive deltas.
+        for (current, incoming) in [
+            (&mut self.prompt_tokens, other.prompt_tokens),
+            (&mut self.completion_tokens, other.completion_tokens),
+            (&mut self.total_tokens, other.total_tokens),
+            (&mut self.prompt_cache_hit_tokens, other.prompt_cache_hit_tokens),
+            (&mut self.prompt_cache_miss_tokens, other.prompt_cache_miss_tokens),
+        ] {
+            self.regressed |= retain_usage_lower_bound(current, incoming);
+        }
+        for (current, incoming) in [
+            (&mut self.prompt_tokens_details, other.prompt_tokens_details),
+            (
+                &mut self.completion_tokens_details,
+                other.completion_tokens_details,
+            ),
+        ] {
+            if let Some(incoming) = incoming {
+                self.regressed |= current
+                    .get_or_insert_with(WireTokenDetails::default)
+                    .merge(incoming);
+            }
+        }
+    }
+    fn snapshot_total(&self) -> Option<u64> {
+        let sum = self
+            .input()
+            .zip(self.completion_tokens)
+            .and_then(|(a, b)| a.checked_add(b));
+        self.total_tokens.into_iter().chain(sum).max()
+    }
+    fn input(&self) -> Option<u64> {
+        let cache_split = self
+            .prompt_cache_hit_tokens
+            .zip(self.prompt_cache_miss_tokens)
+            .and_then(|(hit, miss)| hit.checked_add(miss));
+        self.prompt_tokens.into_iter().chain(cache_split).max()
+    }
+    fn cached(&self) -> Option<u64> {
+        self.prompt_tokens_details
+            .as_ref()
+            .and_then(|detail| detail.cached_tokens)
+            .into_iter()
+            .chain(self.prompt_cache_hit_tokens)
+            .max()
+    }
+    fn reasoning(&self) -> Option<u64> {
+        self.completion_tokens_details
+            .as_ref()
+            .and_then(|detail| detail.reasoning_tokens)
+    }
+    fn cache_write(&self) -> Option<u64> {
+        self.prompt_tokens_details
+            .as_ref()
+            .and_then(|detail| detail.cache_write_tokens)
+    }
+    fn tokens(&self) -> UsageTokens {
+        let input = self
+            .input()
+            .or_else(|| self.total_tokens?.checked_sub(self.completion_tokens?));
+        let output = self
+            .completion_tokens
+            .or_else(|| self.total_tokens?.checked_sub(self.input()?));
+        let tokens = UsageTokens::measured(
+            input,
+            self.cached(),
+            output,
+            self.reasoning(),
+            self.total_tokens,
+        )
+        .with_cache_write(self.cache_write());
+        let cache_split = self
+            .prompt_cache_hit_tokens
+            .zip(self.prompt_cache_miss_tokens)
+            .and_then(|(hit, miss)| hit.checked_add(miss));
+        if self.regressed
+            || self
+                .prompt_tokens
+                .zip(cache_split)
+                .is_some_and(|(prompt, split)| prompt != split)
+            || self
+                .cached()
+                .zip(self.prompt_cache_hit_tokens)
+                .is_some_and(|(a, b)| a != b)
+            || self
+                .prompt_cache_hit_tokens
+                .zip(self.prompt_cache_miss_tokens)
+                .is_some_and(|(hit, miss)| hit.checked_add(miss).is_none())
+            || input
+                .zip(self.cached())
+                .is_some_and(|(input, cached)| cached > input)
+            || input
+                .zip(self.cache_write())
+                .is_some_and(|(input, written)| written > input)
+            || output
+                .zip(self.reasoning())
+                .is_some_and(|(output, reasoning)| reasoning > output)
+        {
+            estimated_inconsistent_usage(tokens)
+        } else {
+            tokens
+        }
+    }
     fn observe(&self, observation: &mut crate::provider_observation::Request) {
-        observation.details(
-            self.prompt_tokens_details
-                .as_ref()
-                .and_then(|detail| detail.cached_tokens),
-            self.completion_tokens_details
-                .as_ref()
-                .and_then(|detail| detail.reasoning_tokens),
-        );
-        observation.reported(self.prompt_tokens, self.completion_tokens);
+        observation.details(self.cached(), self.reasoning());
+        observation.reported(self.input(), self.completion_tokens);
         observation.reported_total(self.total_tokens);
+        observation.cache_write_details(self.cache_write());
+        if self.regressed {
+            // Early cancellation/parse errors still retain both the lower bound
+            // and the contradiction; they must not reconstruct Complete usage.
+            observation.accounted_usage(self.tokens());
+        }
     }
 }
 
@@ -855,6 +1511,351 @@ mod tests {
     use super::*;
     use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
+
+    #[test]
+    fn openrouter_receipt_endpoint_preserves_origin_and_rejects_custom_gateways() {
+        let endpoint = openai_compat_endpoint(
+            "https://openrouter.ai:443/api/v1/?tenant=test&id=old",
+        )
+        .unwrap();
+        let receipt = openrouter_generation_endpoint(&endpoint, "gen-example-123").unwrap();
+        assert_eq!(receipt.origin(), endpoint.origin());
+        assert_eq!(receipt.path(), "/api/v1/generation");
+        assert_eq!(receipt.query(), Some("tenant=test&id=gen-example-123"));
+        for base in [
+            "https://openrouter.ai.example/api/v1",
+            "https://gateway.example/api/v1",
+            "https://openrouter.ai:8443/api/v1",
+            "https://openrouter.ai/private/api/v1",
+            "http://127.0.0.1/api/v1",
+        ] {
+            assert!(openrouter_generation_endpoint(
+                &openai_compat_endpoint(base).unwrap(),
+                "gen-example"
+            )
+            .is_none());
+        }
+        for id in ["", "gen-", "chatcmpl-example", "gen-a?other=1", "gen-a/b"] {
+            assert!(openrouter_generation_endpoint(&endpoint, id).is_none());
+        }
+        assert!(openrouter_generation_endpoint(
+            &endpoint,
+            &format!("gen-{}", "a".repeat(125))
+        )
+        .is_none());
+        // A non-string gateway id must not change its formerly valid response.
+        let frame: WireCompletion = serde_json::from_value(serde_json::json!({
+            "id": {"private": 1}, "choices": []
+        }))
+        .unwrap();
+        assert!(frame.id.is_none());
+    }
+
+    fn normalized_openrouter_receipt(value: serde_json::Value) -> Option<OpenRouterUsageReceipt> {
+        serde_json::from_value::<WireOpenRouterGenerationResponse>(value)
+            .ok()?
+            .data
+            .receipt("gen-fixture")
+    }
+
+    #[test]
+    fn openrouter_receipt_normalizes_only_native_numeric_counts_and_preserves_zero() {
+        let recovered = normalized_openrouter_receipt(serde_json::json!({"data": {
+            "id": "gen-fixture", "cancelled": false, "finish_reason": "stop",
+            "native_tokens_prompt": 100, "native_tokens_completion": 25,
+            "native_tokens_cached": 60, "native_tokens_reasoning": 5,
+            "tokens_prompt": 999, "tokens_completion": 888,
+            "usage": 0.01, "cache_discount": 0.005
+        }})).unwrap();
+        let tokens = recovered.usage.tokens();
+        assert!(recovered.complete);
+        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 25, 125));
+        assert_eq!((tokens.cached_input_tokens, tokens.reasoning_output_tokens), (60, 5));
+        assert!(!tokens.accounting.unwrap().known.cache_write);
+
+        let zero = normalized_openrouter_receipt(serde_json::json!({"data": {
+            "id": "gen-fixture", "cancelled": false, "finish_reason": "tool_calls",
+            "native_tokens_prompt": 0, "native_tokens_completion": 0,
+            "native_tokens_cached": 0, "native_tokens_reasoning": 0
+        }})).unwrap();
+        assert!(zero.complete);
+        assert!(zero.usage.tokens().measured);
+        assert_eq!(zero.usage.tokens().total_tokens, 0);
+        assert!(zero.usage.tokens().accounting.unwrap().known.cache_read);
+
+        let partial = normalized_openrouter_receipt(serde_json::json!({"data": {
+            "id": "gen-fixture", "cancelled": false, "finish_reason": "stop",
+            "native_tokens_prompt": 10, "native_tokens_completion": null,
+            "native_tokens_cached": "8", "native_tokens_reasoning": -1,
+            "tokens_completion": 999, "cache_discount": 0.1
+        }})).unwrap();
+        assert!(!partial.complete);
+        assert_eq!(partial.usage.completion_tokens, None);
+        assert_eq!(partial.usage.total_tokens, None);
+        assert_eq!(partial.usage.cached(), None);
+        assert_eq!(partial.usage.reasoning(), None);
+        for cancelled in [true, false] {
+            let receipt = normalized_openrouter_receipt(serde_json::json!({"data": {
+                "id": "gen-fixture", "cancelled": cancelled, "finish_reason": "length",
+                "native_tokens_prompt": 10, "native_tokens_completion": 2
+            }})).unwrap();
+            assert!(!receipt.complete);
+        }
+        for data in [
+            serde_json::json!({"id":"gen-other","native_tokens_prompt":10}),
+            serde_json::json!({"id":"gen-fixture","tokens_prompt":10,"tokens_completion":2}),
+            serde_json::json!({"id":"gen-fixture","native_tokens_cached":2}),
+        ] {
+            assert!(normalized_openrouter_receipt(serde_json::json!({"data":data})).is_none());
+        }
+    }
+
+    fn openrouter_stream_fixture(
+        stream_body: &str,
+        metadata_status: &str,
+        metadata_body: &str,
+    ) -> (Result<OpenAiCompatChatResponse>, Vec<RecordedRequest>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let responses = [
+            http_response("200 OK", "text/event-stream", stream_body),
+            http_response(metadata_status, "application/json", metadata_body),
+        ];
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for response in responses {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(std::time::Instant::now() < deadline, "fixture request missing");
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(error) => panic!("{error}"),
+                    }
+                };
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                requests.push(read_request(&mut stream));
+                let _ = stream.write_all(response.as_bytes());
+            }
+            requests
+        });
+        let result = openai_compat_tool_chat_once_with_recovery(
+            &OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/api/v1?tenant=test"),
+                api_key: " receipt-test-key ",
+                model: "test",
+                messages: vec![serde_json::json!({"role":"user","content":"prompt"})],
+                tools: vec![],
+                reasoning_effort: None,
+            },
+            &CancellationToken::default(),
+            |_| {},
+            // Fixture transport only: production always checks the configured
+            // canonical OpenRouter origin before allowing this bounded GET.
+            |endpoint, key, id, cancellation| {
+                let mut url = endpoint_child(endpoint, "generation").unwrap();
+                url.query_pairs_mut().append_pair("id", id);
+                read_openrouter_receipt(&url, key, id, cancellation, OPENROUTER_RECEIPT_TIMEOUT)
+            },
+        );
+        (result, server.join().unwrap())
+    }
+
+    const OPENROUTER_PARTIAL_STREAM: &str = concat!(
+        "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"answer\",\"reasoning_content\":\"state\",\"tool_calls\":[{\"index\":0,\"id\":\"call\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1}}\n",
+        "data: {\"id\":\"gen-fixture\",\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n",
+        "data: [DONE]\n"
+    );
+
+    #[test]
+    fn openrouter_receipt_recovers_completed_stream_without_a_second_generation_or_double_counting() {
+        let _scope = crate::provider_observation::Scope::start();
+        let (result, sent) = openrouter_stream_fixture(
+            OPENROUTER_PARTIAL_STREAM,
+            "200 OK",
+            r#"{"data":{"id":"gen-fixture","cancelled":false,"finish_reason":"tool_calls","native_tokens_prompt":50,"native_tokens_completion":10,"native_tokens_cached":8,"native_tokens_reasoning":3}}"#,
+        );
+        let response = result.unwrap();
+        assert_eq!(response.content, "answer");
+        assert_eq!(response.reasoning_content.as_deref(), Some("state"));
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].arguments, serde_json::json!({}));
+        assert_eq!((response.input_tokens, response.output_tokens), (Some(50), Some(10)));
+        assert_eq!(response.accounted_usage.total_tokens, 60);
+        assert_eq!(response.accounted_usage.cached_input_tokens, 8);
+        assert_eq!(response.accounted_usage.reasoning_output_tokens, 3);
+        assert!(response.accounted_usage.measured);
+        assert_eq!(response.accounted_usage.accounting.unwrap().scope, crate::usage::UsageScope::Request);
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[1].request_line, "GET /api/v1/generation?tenant=test&id=gen-fixture HTTP/1.1");
+        assert!(sent[1].body.is_empty());
+        assert_eq!(sent[0].header("authorization"), sent[1].header("authorization"));
+        assert_eq!(sent[1].header("authorization").as_deref(), Some("Bearer receipt-test-key"));
+        let observed = crate::provider_observation::snapshot().unwrap();
+        assert_eq!((observed.requests, observed.completed, observed.retries), (1, 1, 0));
+        assert_eq!(
+            observed.tokens.unwrap(),
+            response.accounted_usage.with_scope(crate::usage::UsageScope::Turn)
+        );
+    }
+
+    #[test]
+    fn openrouter_receipt_failure_preserves_response_and_existing_partial_counts() {
+        for (status, body) in [
+            ("404 Not Found", r#"{"error":{"message":"not ready"}}"#),
+            ("500 Internal Server Error", "{}"),
+            ("200 OK", "invalid json"),
+            ("200 OK", r#"{"data":{"id":"gen-other","native_tokens_prompt":999}}"#),
+        ] {
+            let (result, sent) = openrouter_stream_fixture(OPENROUTER_PARTIAL_STREAM, status, body);
+            let response = result.unwrap();
+            assert_eq!(response.content, "answer");
+            assert_eq!(response.tool_calls.len(), 1);
+            assert_eq!((response.input_tokens, response.output_tokens), (Some(9), Some(1)));
+            assert_eq!(response.accounted_usage.total_tokens, 10);
+            assert!(!response.accounted_usage.measured);
+            assert_eq!(response.accounted_usage.accounting.unwrap().reason, Some(UsageReason::ProviderIncomplete));
+            assert_eq!(sent.len(), 2);
+        }
+        let (result, _) = openrouter_stream_fixture(
+            OPENROUTER_PARTIAL_STREAM,
+            "200 OK",
+            r#"{"data":{"id":"gen-fixture","cancelled":false,"finish_reason":"stop","native_tokens_prompt":50}}"#,
+        );
+        let response = result.unwrap();
+        assert_eq!((response.input_tokens, response.output_tokens), (Some(50), Some(1)));
+        assert!(!response.accounted_usage.measured);
+    }
+
+    #[test]
+    fn openrouter_receipt_skips_final_usage_missing_ids_conflicting_ids_and_generation_errors() {
+        for body in [
+            "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}\ndata: [DONE]\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n",
+            "data: {\"id\":\"gen-one\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\ndata: {\"id\":\"gen-two\",\"choices\":[{\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n",
+            "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}\ndata: [DONE]\n",
+            "data: {\"id\":\"gen-fixture\",\"error\":{\"message\":\"failed\"},\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}\ndata: [DONE]\n",
+            "{\"id\":\"gen-fixture\",\"choices\":[{\"message\":{\"content\":\"json answer\"}}]}",
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let (address, server) = serve_once("200 OK", "text/event-stream", body);
+            let result = openai_compat_tool_chat_once_with_recovery(
+                &OpenAiCompatChatRequest {
+                    base_url: &format!("http://{address}/v1"),
+                    api_key: "",
+                    model: "test",
+                    messages: vec![],
+                    tools: vec![],
+                    reasoning_effort: None,
+                },
+                &CancellationToken::default(),
+                |_| {},
+                |_, _, _, _| panic!("this response must not fetch a generation receipt"),
+            );
+            server.join().unwrap();
+            if body.contains("length") || body.contains("\"error\"") {
+                assert!(result.is_err());
+                let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
+                assert_eq!((tokens.input_tokens, tokens.output_tokens), (7, 1));
+            } else {
+                assert!(result.is_ok());
+            }
+        }
+        // Exercise the production origin gate with an otherwise eligible id.
+        let response = accounting_fixture(
+            "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"gateway answer\"},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n"
+        ).unwrap();
+        assert_eq!(response.content, "gateway answer");
+        assert_eq!((response.input_tokens, response.output_tokens), (None, None));
+    }
+
+    #[test]
+    fn openrouter_receipt_refuses_redirects_and_bounds_body_bytes() {
+        let sink = TcpListener::bind("127.0.0.1:0").unwrap();
+        sink.set_nonblocking(true).unwrap();
+        for response in [
+            format!("HTTP/1.1 302 Found\r\nLocation: http://{}/stolen\r\nContent-Length: 0\r\n\r\n", sink.local_addr().unwrap()),
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", MAX_USAGE_RECEIPT_BYTES + 1),
+            format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n", MAX_USAGE_RECEIPT_BYTES + 1, " ".repeat(MAX_USAGE_RECEIPT_BYTES + 1)),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = Url::parse(&format!("http://{}/generation?id=gen-fixture", listener.local_addr().unwrap())).unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let sent = read_request(&mut stream);
+                let _ = stream.write_all(response.as_bytes());
+                sent
+            });
+            assert!(read_openrouter_receipt(&url, "receipt-test-key", "gen-fixture", &CancellationToken::default(), Duration::from_secs(1)).is_none());
+            assert_eq!(server.join().unwrap().header("authorization").as_deref(), Some("Bearer receipt-test-key"));
+            assert!(matches!(sink.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+        }
+    }
+
+    #[test]
+    fn openrouter_receipt_deadline_and_cancellation_close_silent_headers_and_bodies() {
+        for (headers, stop) in [(false, false), (true, false), (false, true), (true, true)] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = Url::parse(&format!("http://{}/generation?id=gen-fixture", listener.local_addr().unwrap())).unwrap();
+            let (started, ready) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let _ = read_request(&mut stream);
+                if headers {
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n").unwrap();
+                }
+                started.send(()).unwrap();
+                let closed = stream.read(&mut [0]);
+                assert!(matches!(closed, Ok(0)) || closed.is_err());
+            });
+            let cancellation = CancellationToken::default();
+            let signal = cancellation.clone();
+            let cancel = std::thread::spawn(move || {
+                ready.recv().unwrap();
+                if stop {
+                    signal.cancel();
+                }
+            });
+            let began = std::time::Instant::now();
+            assert!(read_openrouter_receipt(&url, "", "gen-fixture", &cancellation, Duration::from_millis(100)).is_none());
+            assert!(began.elapsed() < Duration::from_secs(1));
+            cancel.join().unwrap();
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn openrouter_receipt_cancelled_stream_retains_partial_usage_without_a_lookup() {
+        let _scope = crate::provider_observation::Scope::start();
+        let (address, server) = serve_once(
+            "200 OK", "text/event-stream",
+            "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}\n"
+        );
+        let cancellation = CancellationToken::default();
+        let result = openai_compat_tool_chat_once_with_recovery(
+            &OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "",
+                model: "test",
+                messages: vec![],
+                tools: vec![],
+                reasoning_effort: None,
+            },
+            &cancellation,
+            |_| cancellation.cancel(),
+            |_, _, _, _| panic!("cancelled generation must not fetch a receipt"),
+        );
+        server.join().unwrap();
+        assert_eq!(result.unwrap_err().to_string(), OPENAI_COMPAT_CANCELLED_MESSAGE);
+        let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
+        assert_eq!((tokens.input_tokens, tokens.output_tokens), (7, 1));
+        assert!(!tokens.measured);
+        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::Interrupted));
+    }
 
     #[test]
     fn wire_usage_preserves_totals_and_subset_counts_across_frames() {
@@ -883,6 +1884,384 @@ mod tests {
         assert_eq!(tokens.reasoning_output_tokens, 5);
         assert_eq!(tokens.total_tokens, 150);
         assert!(tokens.measured);
+    }
+
+    fn accounting_fixture(body: &str) -> Result<OpenAiCompatChatResponse> {
+        let (address, server) = serve_once("200 OK", "text/event-stream", body);
+        let result = openai_compat_tool_chat_once(
+            &OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "",
+                model: "test",
+                messages: vec![serde_json::json!({"role":"user","content":"prompt"})],
+                tools: vec![],
+                reasoning_effort: None,
+            },
+            &CancellationToken::default(),
+            |_| {},
+        );
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn wire_usage_regressions_retain_lower_bounds_and_stay_estimated() {
+        let baseline = serde_json::json!({
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_cache_hit_tokens": 60, "prompt_cache_miss_tokens": 40,
+            "prompt_tokens_details": {"cached_tokens": 60, "cache_write_tokens": 30},
+            "completion_tokens_details": {"reasoning_tokens": 5}
+        });
+        for incoming in [
+            serde_json::json!({"prompt_tokens": 0}),
+            serde_json::json!({"completion_tokens": 0}),
+            serde_json::json!({"total_tokens": 0}),
+            serde_json::json!({"prompt_cache_hit_tokens": 0}),
+            serde_json::json!({"prompt_cache_miss_tokens": 0}),
+            serde_json::json!({"prompt_tokens_details": {"cached_tokens": 0}}),
+            serde_json::json!({"prompt_tokens_details": {"cache_write_tokens": 0}}),
+            serde_json::json!({"completion_tokens_details": {"reasoning_tokens": 0}}),
+        ] {
+            let mut usage: WireUsage = serde_json::from_value(baseline.clone()).unwrap();
+            usage.merge(serde_json::from_value(incoming).unwrap());
+            let tokens = usage.tokens();
+            assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 20, 120));
+            assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (60, 30, 5));
+            assert_eq!((usage.prompt_cache_hit_tokens, usage.prompt_cache_miss_tokens), (Some(60), Some(40)));
+            assert!(!tokens.measured);
+            assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
+            assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+
+            // Repeated/later snapshots cannot erase the contradiction.
+            usage.merge(serde_json::from_value(baseline.clone()).unwrap());
+            assert_eq!(usage.tokens(), tokens);
+            let mut state = ChatAccumulator::default();
+            state.record_usage(&WireCompletion {
+                usage: Some(usage),
+                ..Default::default()
+            });
+            for final_receipt in [true, false] {
+                let accounted = state.accounted_usage(0, 0, final_receipt);
+                assert_eq!(accounted, tokens);
+            }
+        }
+        let mut unchanged: WireUsage = serde_json::from_value(baseline).unwrap();
+        unchanged.merge(WireUsage::default());
+        assert!(unchanged.tokens().measured);
+        assert_eq!(unchanged.tokens().accounting.unwrap().reason, None);
+    }
+
+    #[test]
+    fn wire_usage_regressions_across_cache_aliases_cannot_reduce_inclusive_counts() {
+        let mut usage: WireUsage = serde_json::from_value(serde_json::json!({
+            "prompt_cache_hit_tokens": 60, "prompt_cache_miss_tokens": 40,
+            "completion_tokens": 20
+        })).unwrap();
+        usage.merge(serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 90, "prompt_tokens_details": {"cached_tokens": 40}
+        })).unwrap());
+        let tokens = usage.tokens();
+        assert_eq!((tokens.input_tokens, tokens.cached_input_tokens, tokens.total_tokens), (100, 60, 120));
+        assert!(!tokens.measured);
+        assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
+        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+    }
+
+    #[test]
+    fn wire_usage_regressions_in_final_stream_receipts_preserve_consumption_on_success_and_error() {
+        let baseline = serde_json::json!({
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 60, "cache_write_tokens": 30},
+            "completion_tokens_details": {"reasoning_tokens": 5}
+        });
+        let zero = serde_json::json!({
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0}
+        });
+        for (receipt, failed) in [
+            (serde_json::json!({"usage":zero}), false),
+            (serde_json::json!({"x_groq":{"usage":zero}}), false),
+            (serde_json::json!({"usage":zero, "error":{"message":"failed"}}), true),
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let response = accounting_fixture(&format!(
+                "data: {}\ndata: {receipt}\ndata: [DONE]\n",
+                serde_json::json!({
+                    "choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}],
+                    "usage":baseline
+                })
+            ));
+            let tokens = if failed {
+                assert!(response.is_err());
+                crate::provider_observation::snapshot().unwrap().tokens.unwrap()
+            } else {
+                let response = response.unwrap();
+                assert_eq!(response.content, "answer");
+                assert_eq!((response.input_tokens, response.output_tokens), (Some(100), Some(20)));
+                response.accounted_usage
+            };
+            assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 20, 120));
+            assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (60, 30, 5));
+            assert!(!tokens.measured);
+            assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
+            assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+        }
+    }
+
+    #[test]
+    fn wire_usage_regressions_remain_estimated_when_the_stream_is_cancelled() {
+        let _scope = crate::provider_observation::Scope::start();
+        let (address, server) = serve_once(
+            "200 OK", "text/event-stream",
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"start\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cache_write_tokens\":30}}}\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"cancel\"}}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0,\"prompt_tokens_details\":{\"cache_write_tokens\":0}}}\n"
+            )
+        );
+        let cancellation = CancellationToken::default();
+        let result = openai_compat_tool_chat_once(
+            &OpenAiCompatChatRequest {
+                base_url: &format!("http://{address}/v1"),
+                api_key: "",
+                model: "test",
+                messages: vec![],
+                tools: vec![],
+                reasoning_effort: None,
+            },
+            &cancellation,
+            |text| {
+                if text == "cancel" {
+                    cancellation.cancel();
+                }
+            },
+        );
+        server.join().unwrap();
+        assert_eq!(result.unwrap_err().to_string(), OPENAI_COMPAT_CANCELLED_MESSAGE);
+        let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
+        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens, tokens.cache_write_tokens), (100, 20, 120, 30));
+        assert!(!tokens.measured);
+        assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
+        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+    }
+
+    #[test]
+    fn openrouter_receipt_regression_cannot_replace_observed_consumption_with_complete_zero() {
+        let (result, _) = openrouter_stream_fixture(
+            OPENROUTER_PARTIAL_STREAM,
+            "200 OK",
+            r#"{"data":{"id":"gen-fixture","cancelled":false,"finish_reason":"tool_calls","native_tokens_prompt":0,"native_tokens_completion":0}}"#,
+        );
+        let response = result.unwrap();
+        assert_eq!(response.content, "answer");
+        assert_eq!((response.input_tokens, response.output_tokens), (Some(9), Some(1)));
+        assert_eq!(response.accounted_usage.total_tokens, 10);
+        assert!(!response.accounted_usage.measured);
+        assert_eq!(response.accounted_usage.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
+        assert_eq!(response.accounted_usage.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+    }
+
+    #[test]
+    fn deepseek_cache_counts_are_inclusive_and_preserve_explicit_zero() {
+        for value in [
+            serde_json::json!({"prompt_tokens":100,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20,"completion_tokens":25}),
+            serde_json::json!({"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20,"completion_tokens":25}),
+        ] {
+            let usage: WireUsage = serde_json::from_value(value).unwrap();
+            let tokens = usage.tokens();
+            assert_eq!(
+                (
+                    tokens.input_tokens,
+                    tokens.cached_input_tokens,
+                    tokens.total_tokens
+                ),
+                (100, 80, 125)
+            );
+            assert!(tokens.accounting.unwrap().known.cache_read);
+        }
+        let zero: WireUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens":0,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":0,"completion_tokens":0,"total_tokens":0
+        })).unwrap();
+        assert!(zero.tokens().measured);
+        assert_eq!(zero.tokens().total_tokens, 0);
+        let inconsistent: WireUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens":90,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20,"completion_tokens":25
+        })).unwrap();
+        assert_eq!(
+            inconsistent.tokens().accounting.unwrap().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+    }
+
+    #[test]
+    fn cumulative_cache_and_reasoning_frames_replace_then_tool_rounds_add() {
+        let first = accounting_fixture(concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: {\"choices\":null,\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":60,\"cache_write_tokens\":20},\"completion_tokens_details\":{\"reasoning_tokens\":5}}}\n",
+            "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":60,\"cache_write_tokens\":20}}}\n",
+            "data: [DONE]\n"
+        )).unwrap();
+        assert_eq!(first.tool_calls.len(), 1);
+        assert_eq!(
+            (
+                first.accounted_usage.total_tokens,
+                first.accounted_usage.cache_write_tokens,
+                first.accounted_usage.reasoning_output_tokens
+            ),
+            (120, 20, 5)
+        );
+        assert!(first.accounted_usage.accounting.unwrap().known.cache_write);
+        let second = accounting_fixture(concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"done\",\"tool_calls\":null},\"finish_reason\":\"stop\"}]}\n",
+            "data: {\"x_groq\":{\"usage\":{\"prompt_tokens\":140,\"completion_tokens\":20,\"total_tokens\":160}}}\n",
+            "data: [DONE]\n"
+        )).unwrap();
+        let turn = first
+            .accounted_usage
+            .combine(second.accounted_usage)
+            .with_scope(crate::usage::UsageScope::Turn);
+        assert_eq!(
+            (turn.input_tokens, turn.output_tokens, turn.total_tokens),
+            (240, 40, 280)
+        );
+        assert!(!turn.accounting.unwrap().known.cache_write);
+    }
+
+    #[test]
+    fn terminal_errors_drain_provider_usage_and_refuse_partial_tools() {
+        for terminal in [
+            "data: {\"choices\":[{\"finish_reason\":\"length\"}]}\n",
+            "data: {\"error\":{\"message\":\"failed\"}}\n",
+            "data: {\"x_groq\":{\"error\":{\"message\":\"failed\"}}}\n",
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let result = accounting_fixture(&format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"name\":\"write_file\",\"arguments\":\"{{}}\"}}}}]}}}}]}}\n{terminal}data: {{\"x_groq\":{{\"usage\":{{\"prompt_tokens\":40,\"completion_tokens\":5,\"total_tokens\":45}}}}}}\ndata: [DONE]\n"
+            ));
+            assert!(result.is_err());
+            let tokens = crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap();
+            assert_eq!(
+                (
+                    tokens.input_tokens,
+                    tokens.output_tokens,
+                    tokens.total_tokens
+                ),
+                (40, 5, 45)
+            );
+        }
+    }
+
+    #[test]
+    fn estimated_missing_halves_never_claim_a_reported_lower_bound() {
+        let mut state = ChatAccumulator::default();
+        let frame: WireCompletion = serde_json::from_value(serde_json::json!({
+            "usage": { "prompt_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 5},
+                "completion_tokens_details": {"reasoning_tokens": 9} }
+        })).unwrap();
+        state.record_usage(&frame);
+        let tokens = state.accounted_usage(80, 40, true);
+        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (25, 10, 35));
+        assert_eq!(tokens.effective_accounting().coverage, crate::usage::UsageCoverage::Estimated);
+        assert_eq!(tokens.effective_accounting().source, UsageSource::Mixed);
+        assert!(!tokens.effective_accounting().known.input && !tokens.effective_accounting().known.output);
+        assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (20, 5, 9));
+    }
+
+    #[test]
+    fn missing_usage_is_estimated_and_a_zero_receipt_stays_zero() {
+        let missing = accounting_fixture("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n").unwrap();
+        assert!(!missing.accounted_usage.measured);
+        assert_eq!(
+            missing.accounted_usage.accounting.unwrap().source,
+            UsageSource::CharacterEstimate
+        );
+        assert_eq!(
+            missing.accounted_usage.accounting.unwrap().reason,
+            Some(UsageReason::MissingUsage)
+        );
+        let zero = accounting_fixture("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}\ndata: [DONE]\n").unwrap();
+        assert_eq!(zero.accounted_usage.total_tokens, 0);
+        assert!(zero.accounted_usage.measured);
+    }
+
+    #[test]
+    fn usage_receipt_is_time_bounded_and_stop_remains_responsive() {
+        for stop in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, released) = std::sync::mpsc::channel();
+            let (started, ready) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _request = read_request(&mut stream);
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 10000\r\n\r\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"partial\"}},\"finish_reason\":\"length\"}}]}}\n").unwrap();
+                stream.flush().unwrap();
+                started.send(()).unwrap();
+                let _ = released.recv_timeout(Duration::from_secs(6));
+            });
+            let cancellation = CancellationToken::default();
+            let signal = cancellation.clone();
+            let cancel = std::thread::spawn(move || {
+                ready.recv().unwrap();
+                if stop {
+                    signal.cancel();
+                }
+            });
+            let began = std::time::Instant::now();
+            let result = openai_compat_tool_chat_once(
+                &OpenAiCompatChatRequest {
+                    base_url: &format!("http://{address}/v1"),
+                    api_key: "",
+                    model: "test",
+                    messages: vec![],
+                    tools: vec![],
+                    reasoning_effort: None,
+                },
+                &cancellation,
+                |_| {},
+            );
+            release.send(()).unwrap();
+            server.join().unwrap();
+            cancel.join().unwrap();
+            let error = result.unwrap_err().to_string();
+            if stop {
+                assert!(cancellation.is_cancelled());
+                assert!(began.elapsed() < Duration::from_secs(1));
+            } else {
+                assert!(error.contains("output token limit"), "{error}");
+                assert!(began.elapsed() < Duration::from_secs(5));
+            }
+        }
+    }
+
+    #[test]
+    fn a_preterminal_usage_snapshot_cannot_claim_final_coverage() {
+        let response = accounting_fixture(concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"start\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\" done\"},\"finish_reason\":\"stop\"}]}\n",
+            "data: [DONE]\n"
+        )).unwrap();
+        assert_eq!(response.accounted_usage.total_tokens, 11);
+        assert!(!response.accounted_usage.measured);
+        assert_eq!(
+            response.accounted_usage.accounting.unwrap().reason,
+            Some(UsageReason::ProviderIncomplete)
+        );
+    }
+
+    #[test]
+    fn done_marker_without_generation_finish_cannot_authorize_tools() {
+        let result = accounting_fixture(concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n",
+            "data: [DONE]\n"
+        ));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("before completion"));
     }
 
     struct RecordedRequest {
@@ -942,15 +2321,16 @@ mod tests {
     fn serve_once(
         status: &'static str,
         content_type: &'static str,
-        body: &'static str,
+        body: &str,
     ) -> (SocketAddr, std::thread::JoinHandle<RecordedRequest>) {
+        let body = body.to_string();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let request = read_request(&mut stream);
             stream
-                .write_all(http_response(status, content_type, body).as_bytes())
+                .write_all(http_response(status, content_type, &body).as_bytes())
                 .unwrap();
             stream.flush().unwrap();
             request
@@ -1196,6 +2576,7 @@ mod tests {
                 "\n",
                 "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":\\\"a.txt\\\"}\"}}]}}]}\n",
                 "\n",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
                 "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n",
                 "\n",
                 "data: [DONE]\n",

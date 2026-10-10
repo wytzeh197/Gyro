@@ -1,3 +1,4 @@
+export type { TurnTokens, UsageAccounting } from "./turn-tokens";
 export { SizingMotionFixture } from "./sizing-motion-fixture";
 export { ChatFileActionsContext } from "./chat-file-card";
 export { AppearanceContext, useAppearance } from "./appearance-context";
@@ -676,6 +677,6 @@ export type { CalendarSchedule } from "./types.ts";
 
 export { ComposerContextCandidates } from "./composer-context.ts";
 
-export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab } from "./subagents";
+export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab, nativeSubagentParents } from "./subagents";
 export type { SubagentSnapshot, SubagentSurfaceState, SubagentTabState } from "./subagents";
 export { sessionApprovalCounts, sessionQuestionCounts } from "./session-approvals";

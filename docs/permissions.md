@@ -11,15 +11,23 @@ update.
 
 ## Mode contract
 
-| Mode              | Normal provider run                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Ask for approval  | Always ask before commands and file edits.                                                           |
-| Approve for me    | Allow commands and edits within Gyro's provider/workspace boundary.                                  |
-| Full access       | Allow normal provider runs to use their unrestricted execution mode without Gyro capability prompts. |
+| Mode             | Normal provider run                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| Ask for approval | Always ask before commands and file edits.                                                           |
+| Approve for me   | Allow commands, edits, and sub-agent delegation within Gyro's provider/workspace boundary.           |
+| Full access      | Allow normal provider runs to use their unrestricted execution mode without Gyro capability prompts. |
 
 Plan remains a non-mutating ceiling and Council remains advisory-only regardless
 of the remembered normal-run mode. Changing mode is always explicit and the
 current mode must remain visible in the composer.
+
+Sub-agent spawning and follow-up tasks inherit the parent's model, workspace,
+and permission ceiling. Approve for me automatically allows delegation unless
+the project policy explicitly denies it; Full access uses the existing normal-run
+override. Switching to either mode also releases eligible delegation requests
+already waiting for approval. Ask for approval retains the explicit spawn
+decision. Plan children stay read-only, Council cannot delegate, and children
+cannot start further agents.
 
 Project capability grants remain separately revisioned. They narrow or approve
 specific Gyro capabilities when Full Access is not active; they do not silently

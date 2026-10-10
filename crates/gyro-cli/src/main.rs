@@ -3209,6 +3209,29 @@ fn decide_kimi_provider_approval(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn record_cli_collected_usage(store: &SessionStore, session: Uuid, turn: Uuid,
+    provider: &str, model: Option<String>, succeeded: bool, cancelled: bool, wall_ms: u64) {
+    let summary = gyro_core::provider_observation::snapshot().unwrap_or_default();
+    let tokens = summary.tokens.unwrap_or_else(||
+        gyro_core::UsageTokens::unavailable(gyro_core::usage::UsageReason::MissingUsage));
+    let entry = gyro_core::UsageEntry {
+        session_id: session, turn_id: Some(turn), seat_id: None,
+        provider_id: provider.into(), model_id: model, reasoning_effort: None,
+        origin: gyro_core::UsageOrigin::Chat,
+        outcome: if cancelled { gyro_core::UsageOutcome::Cancelled }
+            else if succeeded { gyro_core::UsageOutcome::Done } else { gyro_core::UsageOutcome::Failed },
+        tokens, wall_ms, retry_count: summary.retries,
+    };
+    if let Err(error) = store.record_usage(&entry) {
+        eprintln!("could not record usage: {}", gyro_core::security::redact_secrets(&error.to_string()));
+    }
+    let total = store.task_usage_tokens(session, turn).ok().flatten().unwrap_or(tokens);
+    let _ = store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "",
+        serde_json::json!({"kind": "provider-turn-tokens", "accountingVersion": 1,
+            "turnTokens": total, "usageObservations": summary.usage_observations}), Some(turn));
+}
+
+#[allow(clippy::too_many_arguments)]
 fn execute_kimi_acp_provider(
     store: &SessionStore,
     mutation_journal_dir: &Path,
@@ -3242,6 +3265,9 @@ fn execute_kimi_acp_provider(
         .map(Into::into)
         .collect::<Vec<_>>();
     program_args.extend(runtime.args.iter().map(Into::into));
+    let _usage_scope = gyro_core::provider_observation::Scope::start();
+    let _ = store.note_usage_call(session.id, turn_id);
+    let usage_started = std::time::Instant::now();
     let result = run_kimi_acp(
         KimiAcpRequest {
             opened_session: None,
@@ -3379,6 +3405,8 @@ fn execute_kimi_acp_provider(
         },
     );
 
+    record_cli_collected_usage(store, session.id, turn_id, &provider_id, model.clone(),
+        result.is_ok(), cancellation.is_cancelled(), usage_started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
     let output = match result {
         Ok(output) => output,
         Err(error) => {
@@ -3610,6 +3638,8 @@ fn execute_ollama_provider_inner(
     } else {
         format!("Prior conversation in this Gyro session:\n{history}\n\nUser message:\n{prompt}")
     };
+    let _usage_scope = gyro_core::provider_observation::Scope::start();
+    let _ = store.note_usage_call(session.id, turn_id);
     let result = gyro_core::ollama_chat_with_cancellation(OllamaChatRequest {
         base_url: provider.base_url.as_deref(),
         model,
@@ -3619,6 +3649,8 @@ fn execute_ollama_provider_inner(
     }, cancellation);
     deadline.finish();
     let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    record_cli_collected_usage(store, session.id, turn_id, "ollama", Some(model.to_string()),
+        result.is_ok(), cancellation.is_cancelled(), duration_ms);
     let response = match result {
         Ok(result) if !cancellation.is_cancelled() => result.content,
         Ok(_) => {
@@ -6143,6 +6175,39 @@ done
         assert_eq!(mutation_value["target"], "openai");
         assert!(mutation_value.get("value").is_none());
         assert!(mutation_value.get("apiKey").is_none());
+    }
+
+    #[test]
+    fn cli_receipts_preserve_failed_usage_and_unavailable_counts_after_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store.create_session(temp.path(), SessionOrigin::Cli, "Usage fixture").unwrap();
+        let turn = Uuid::new_v4();
+        {
+            let _scope = gyro_core::provider_observation::Scope::start();
+            let tokens = gyro_core::UsageTokens::measured(Some(100), Some(60), Some(20), Some(5), None)
+                .with_cache_write(Some(10)).partial(gyro_core::usage::UsageReason::Interrupted);
+            gyro_core::provider_observation::native_usage(tokens);
+            store.note_usage_call(session.id, turn).unwrap();
+            record_cli_collected_usage(&store, session.id, turn, "grok", Some("fixture".into()), false, true, 1);
+        }
+        let unavailable_turn = Uuid::new_v4();
+        {
+            let _scope = gyro_core::provider_observation::Scope::start();
+            store.note_usage_call(session.id, unavailable_turn).unwrap();
+            record_cli_collected_usage(&store, session.id, unavailable_turn, "kimi", None, false, false, 1);
+        }
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        let result = store.task_usage_tokens(session.id, turn).unwrap().unwrap();
+        assert_eq!((result.total_tokens, result.cache_write_tokens), (120, 10));
+        assert_eq!(result.effective_accounting().coverage, gyro_core::usage::UsageCoverage::Partial);
+        let unavailable = store.task_usage_tokens(session.id, unavailable_turn).unwrap().unwrap();
+        assert_eq!(unavailable.effective_accounting().coverage, gyro_core::usage::UsageCoverage::Unavailable);
+        let events = store.read_events(session.id).unwrap();
+        assert!(events.iter().any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "partial"));
+        assert!(events.iter().any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "unavailable"));
     }
 
     #[test]

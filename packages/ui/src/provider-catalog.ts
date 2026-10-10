@@ -175,8 +175,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "gpt-6.1-sol",
         displayName: "GPT-6.1 Sol",
         description: "Near-Astra performance for coding and professional work.",
-        // Codex's model catalog reports 272K and low through ultra.
-        contextWindowTokens: 272_000,
+        // Codex 0.162.1 reports 500K; the API's 1.05M is a separate limit.
+        contextWindowTokens: 500_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
       },
@@ -356,10 +356,9 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "k3",
         displayName: "Kimi K3",
         description:
-          "Kimi's flagship model for long-horizon coding and knowledge work.",
-        // Every model Kimi Code defines caps at 256K, K3 included. Claiming a
-        // megatoken window made the composer meter measure against a window the
-        // run never had, and disagree with the one `/usage` reported back.
+          "Flagship coding model. Up to 1M context on eligible Kimi Code plans.",
+        // Offline baseline for Plus plans; Pro and above can receive 1M.
+        // A session's runtime-reported window takes precedence over this value.
         contextWindowTokens: 262_144,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
@@ -420,7 +419,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.3",
         displayName: "Grok 4.3",
         description: "General xAI model for chat and reasoning.",
-        contextWindowTokens: 131_072,
+        contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_REASONING_EFFORTS,
       },
@@ -454,7 +453,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Gemini",
         description:
           "Uses Gemini credentials from the local environment or Google-owned tooling.",
-        contextWindowTokens: 1_000_000,
+        // Gemini CLI's tokenLimit default; custom routing may report less.
+        contextWindowTokens: 1_048_576,
       },
     ],
     effort: "medium",
@@ -709,7 +709,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "z-ai/glm-5.3",
         displayName: "GLM 5.3",
         description: "Open-weights coding model, routed by OpenRouter.",
-        contextWindowTokens: 1_310_720,
+        contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },

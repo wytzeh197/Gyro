@@ -990,10 +990,12 @@ export type ProviderChatStreamEvent = {
   turnTokens?: {
     inputTokens?: number;
     cachedInputTokens?: number;
+    cacheWriteTokens?: number;
     outputTokens?: number;
     reasoningOutputTokens?: number;
     totalTokens?: number;
     measured?: boolean;
+    accounting?: import("./turn-tokens").UsageAccounting;
   } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;
@@ -1334,6 +1336,8 @@ export type SessionUsageTotals = {
   measuredCalls: number;
   /** Calls Gyro estimated because the provider reports no counts. */
   estimatedCalls: number;
+  partialCalls?: number;
+  unavailableCalls?: number;
   inputTokens: number;
   /** The share of `inputTokens` that was context re-read rather than sent fresh. */
   cachedInputTokens: number;

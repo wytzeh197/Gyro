@@ -321,39 +321,32 @@ pub(super) fn provider_context_usage_from_app_server(
     })
 }
 
-/// What an ACP prompt billed, from the `usage` object on its response.
-///
-/// Grok reports camelCase counts with cached reads inside `inputTokens`, the
-/// same convention the ledger uses. The counts cover every model call in the
-/// turn, so they are billing, never the context window's occupancy.
+/// Compatibility parser for the Grok PromptUsage contract only. Live ACP
+/// adapters use the provider-specific normalizer, retaining cache writes and
+/// coverage in UsageTokens rather than collapsing them into cached reads.
+#[cfg(test)]
 pub(super) fn provider_billed_usage_from_acp(usage: &Value) -> Option<ProviderContextUsage> {
-    let field = |keys: &[&str]| {
-        keys.iter()
-            .find_map(|key| usage.get(*key).and_then(Value::as_u64))
-    };
-    let input_tokens = field(&["inputTokens", "input_tokens"])?;
-    let cached = field(&[
-        "cachedReadTokens",
-        "cached_read_tokens",
-        "cachedInputTokens",
-    ])
-    .unwrap_or_default()
-    .saturating_add(
-        field(&[
-            "cacheCreationTokens",
-            "cachedWriteTokens",
-            "cached_write_tokens",
-        ])
-        .unwrap_or_default(),
+    let observation = gyro_core::acp_usage::normalize_prompt_usage(
+        gyro_core::acp_usage::AcpProvider::Grok,
+        &serde_json::json!({"usage": usage}),
+        gyro_core::acp_usage::AcpRuntimeInfo::default(),
     );
-    let output_tokens = field(&["outputTokens", "output_tokens"]);
+    provider_billed_usage_from_acp_tokens(observation.tokens)
+}
+
+pub(super) fn provider_billed_usage_from_acp_tokens(
+    tokens: gyro_core::usage::UsageTokens,
+) -> Option<ProviderContextUsage> {
+    let accounting = tokens.effective_accounting();
+    if !accounting.known.input {
+        return None;
+    }
     Some(ProviderContextUsage {
-        input_tokens: Some(input_tokens),
-        cached_input_tokens: (cached > 0).then_some(cached.min(input_tokens)),
-        output_tokens,
-        reasoning_output_tokens: field(&["reasoningTokens", "thoughtTokens", "reasoning_tokens"]),
-        total_tokens: field(&["totalTokens", "total_tokens"])
-            .or_else(|| output_tokens.map(|output| input_tokens.saturating_add(output))),
+        input_tokens: Some(tokens.input_tokens),
+        cached_input_tokens: accounting.known.cache_read.then_some(tokens.cached_input_tokens),
+        output_tokens: accounting.known.output.then_some(tokens.output_tokens),
+        reasoning_output_tokens: accounting.known.reasoning.then_some(tokens.reasoning_output_tokens),
+        total_tokens: Some(tokens.total_tokens),
         model_context_window: None,
     })
 }
@@ -381,42 +374,55 @@ pub(super) fn provider_context_usage_from_codex_exec(
 pub(super) fn provider_context_usage_from_claude_stream(
     value: &Value,
 ) -> Option<(ClaudeUsageFrame, ProviderContextUsage)> {
+    // Child messages are already represented by whole-tree accounting when
+    // verified. They never describe the main conversation's context window.
+    if value.get("parent_tool_use_id").is_some_and(|id| !id.is_null()) {
+        return None;
+    }
     let frame_type = value.get("type").and_then(Value::as_str)?;
     let (frame, usage) = match frame_type {
         "result" => (ClaudeUsageFrame::Turn, value.get("usage")?),
-        "assistant" => (
-            ClaudeUsageFrame::Request,
-            value.get("message")?.get("usage")?,
-        ),
+        "assistant" => (ClaudeUsageFrame::Request, value.get("message")?.get("usage")?),
+        "stream_event" => {
+            let event = value.get("event")?;
+            if event.get("type").and_then(Value::as_str) != Some("message_start") {
+                return None;
+            }
+            (ClaudeUsageFrame::Request, event.get("message")?.get("usage")?)
+        }
         _ => return None,
     };
     let field = |key: &str| usage.get(key).and_then(Value::as_u64);
-    let fresh_input = field("input_tokens")?;
-    let cache_creation = field("cache_creation_input_tokens").unwrap_or_default();
-    let cache_read = field("cache_read_input_tokens").unwrap_or_default();
-    let input_tokens = fresh_input
-        .saturating_add(cache_creation)
-        .saturating_add(cache_read);
+    // Anthropic reports disjoint input buckets, unlike Codex's subsets.
+    // Missing optional buckets stay unknown; observed counts remain a lower bound.
+    let fresh_input = field("input_tokens");
+    let cache_creation = field("cache_creation_input_tokens");
+    let cache_read = field("cache_read_input_tokens");
+    let input_tokens = fresh_input.map(|fresh| fresh
+        .saturating_add(cache_creation.unwrap_or_default())
+        .saturating_add(cache_read.unwrap_or_default()));
     let output_tokens = field("output_tokens");
-    Some((
-        frame,
-        ProviderContextUsage {
-            input_tokens: Some(input_tokens),
-            cached_input_tokens: Some(cache_creation.saturating_add(cache_read)),
-            output_tokens,
-            reasoning_output_tokens: None,
-            total_tokens: output_tokens.map(|output| input_tokens.saturating_add(output)),
-            model_context_window: claude_stream_context_window(value),
+    Some((frame, ProviderContextUsage {
+        input_tokens,
+        // Legacy context display treats both cache buckets as reused context.
+        // The billing parser retains separate read and write buckets.
+        cached_input_tokens: match (cache_creation, cache_read) {
+            (None, None) => None,
+            (write, read) => Some(write.unwrap_or_default().saturating_add(read.unwrap_or_default())),
         },
-    ))
+        output_tokens,
+        reasoning_output_tokens: None,
+        total_tokens: input_tokens.zip(output_tokens).map(|(input, output)| input.saturating_add(output)),
+        model_context_window: claude_stream_context_window(value),
+    }))
 }
 
-fn claude_stream_context_window(value: &Value) -> Option<u64> {
-    value
-        .get("modelUsage")?
-        .as_object()?
-        .values()
-        .find_map(|entry| entry.get("contextWindow").and_then(Value::as_u64))
+pub(super) fn claude_stream_context_window(value: &Value) -> Option<u64> {
+    let entries = value.get("modelUsage")?.as_object()?;
+    let mut windows = entries.values().filter_map(|entry| entry.get("contextWindow").and_then(Value::as_u64));
+    let window = windows.next()?;
+    // A mixed-model result cannot identify which window the last request used.
+    windows.all(|other| other == window).then_some(window)
 }
 
 pub(super) fn provider_model_context_window(
@@ -430,9 +436,9 @@ pub(super) fn provider_model_context_window(
     }
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let window = match provider_id {
-        // Codex serves every current model with a 272K window, whatever the
-        // API allows; the CLI's own report still wins when it sends one.
+        // Codex defaults differ from the API maxima. Runtime reports win.
         "openai" => match model_id {
+            "gpt-6.1-sol" => 500_000,
             "gpt-5.4-mini" => 400_000,
             _ => 272_000,
         },
@@ -440,11 +446,35 @@ pub(super) fn provider_model_context_window(
             "claude-haiku-4-5" => 200_000,
             _ => 1_000_000,
         },
+        // K3's 1M entitlement depends on the plan; retain the Plus baseline
+        // until the runtime reports the session's provisioned window.
         "kimi" => 262_144,
-        "gemini" => 1_000_000,
+        "gemini" => 1_048_576,
         "xai" => match model_id {
-            "grok-4.3" => 131_072,
+            "grok-4.3" => 1_000_000,
             _ => 500_000,
+        },
+        "deepseek" => match model_id {
+            "deepseek-flash" | "deepseek-v4-pro" => 1_000_000,
+            _ => return None,
+        },
+        "mistral" => match model_id {
+            "mistral-medium-latest" | "mistral-large-latest" | "mistral-small-latest" => 256_000,
+            "codestral-latest" => 128_000,
+            _ => return None,
+        },
+        "openrouter" => match model_id {
+            "anthropic/claude-sonnet-5" | "anthropic/claude-opus-5" | "qwen/qwen3.8-max-0902" => {
+                1_000_000
+            }
+            "openai/gpt-6-astra" => 1_050_000,
+            "google/gemini-3.8-flash"
+            | "deepseek/deepseek-v4.1-flash"
+            | "moonshotai/kimi-k3"
+            | "z-ai/glm-5.3" => 1_048_576,
+            "x-ai/grok-4.7" | "x-ai/grok-4.6" => 500_000,
+            "meta-llama/llama-3.3-70b-instruct" => 131_072,
+            _ => return None,
         },
         _ => return None,
     };
@@ -491,6 +521,71 @@ pub(super) fn provider_context_usage_with_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_models_supply_windows_for_usage_and_compaction() {
+        for (provider, model, window) in [
+            ("deepseek", "deepseek-flash", 1_000_000),
+            ("deepseek", "deepseek-v4-pro", 1_000_000),
+            ("mistral", "mistral-medium-latest", 256_000),
+            ("mistral", "mistral-large-latest", 256_000),
+            ("mistral", "mistral-small-latest", 256_000),
+            ("mistral", "codestral-latest", 128_000),
+            ("openrouter", "anthropic/claude-sonnet-5", 1_000_000),
+            ("openrouter", "anthropic/claude-opus-5", 1_000_000),
+            ("openrouter", "openai/gpt-6-astra", 1_050_000),
+            ("openrouter", "google/gemini-3.8-flash", 1_048_576),
+            ("openrouter", "x-ai/grok-4.7", 500_000),
+            ("openrouter", "x-ai/grok-4.6", 500_000),
+            ("openrouter", "deepseek/deepseek-v4.1-flash", 1_048_576),
+            ("openrouter", "moonshotai/kimi-k3", 1_048_576),
+            ("openrouter", "z-ai/glm-5.3", 1_048_576),
+            ("openrouter", "qwen/qwen3.8-max-0902", 1_000_000),
+            ("openrouter", "meta-llama/llama-3.3-70b-instruct", 131_072),
+        ] {
+            let usage = provider_context_usage_with_window(None, provider, Some(model)).unwrap();
+            assert_eq!(
+                usage.model_context_window,
+                Some(window),
+                "{provider}/{model}"
+            );
+            assert_eq!(
+                auto_compaction_fill(
+                    Some((window * 9).div_ceil(10)),
+                    None,
+                    usage.model_context_window,
+                    90
+                ),
+                Some(90)
+            );
+        }
+        assert_eq!(
+            provider_model_context_window("openrouter", Some("unknown")),
+            None
+        );
+    }
+
+    #[test]
+    fn provisioned_runtime_windows_override_offline_baselines() {
+        for (provider, model, window) in [
+            ("kimi", "k3", 1_048_576),
+            ("openai", "gpt-6.1-sol", 475_000),
+            ("xai", "grok-4.3", 131_072),
+        ] {
+            let usage = provider_context_usage_with_window(
+                Some(ProviderContextUsage {
+                    input_tokens: Some(1_024),
+                    model_context_window: Some(window),
+                    ..ProviderContextUsage::default()
+                }),
+                provider,
+                Some(model),
+            )
+            .unwrap();
+            assert_eq!(usage.model_context_window, Some(window));
+            assert_eq!(usage.input_tokens, Some(1_024));
+        }
+    }
 
     #[test]
     fn grok_prompt_usage_is_billed_with_cached_reads_inside_input() {

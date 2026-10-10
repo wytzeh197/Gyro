@@ -5,9 +5,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
-/** Native stepped range, with local drag feedback and one saved choice on release. */
+/** Continuous pointer feedback, with native stepped keys and one saved choice on release. */
 export function ComposerEffortSelector({
   id,
   labels,
@@ -28,9 +29,20 @@ export function ComposerEffortSelector({
     Math.min(selectedIndex, labels.length - 1),
   );
   const [index, setIndex] = useState(normalizedIndex);
-  const [dragging, setDragging] = useState(false);
+  const [dragProgress, setDragProgress] = useState<number>();
+  const isAtMaximum =
+    labels.length > 1 &&
+    index === labels.length - 1 &&
+    dragProgress === undefined;
+  const [showMaxUsageNotice, setShowMaxUsageNotice] = useState(isAtMaximum);
+  useEffect(() => {
+    setShowMaxUsageNotice(isAtMaximum);
+    if (!isAtMaximum) return;
+    const timer = window.setTimeout(() => setShowMaxUsageNotice(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [isAtMaximum]);
   const committedIndex = useRef(normalizedIndex);
-  const pointerStart = useRef<number>();
+  const pointer = useRef<{ id: number; offset: number }>();
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setIndex(normalizedIndex);
@@ -63,12 +75,41 @@ export function ComposerEffortSelector({
     committedIndex.current = next;
     onSelect(next);
   };
+  const progressAtPointer = (event: ReactPointerEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const rect = input.getBoundingClientRect();
+    const thumbSize = Math.min(rect.height, rect.width);
+    const travel = rect.width - thumbSize;
+    if (travel <= 0) return 0;
+    return Math.max(
+      0,
+      Math.min(
+        1,
+        (event.clientX -
+          rect.left -
+          thumbSize / 2 -
+          (pointer.current?.offset ?? 0)) /
+          travel,
+      ),
+    );
+  };
+  const updatePointer = (event: ReactPointerEvent<HTMLInputElement>) => {
+    const progress = progressAtPointer(event);
+    setDragProgress(progress);
+    setIndex(Math.round(progress * Math.max(0, labels.length - 1)));
+    return progress;
+  };
+  const cancelPointer = () => {
+    pointer.current = undefined;
+    setDragProgress(undefined);
+    setIndex(committedIndex.current);
+  };
   return (
     <div
       aria-label="Reasoning effort"
       className="gyro-composer-popover gyro-effort-slider-popover"
       data-max-effort={labels.length > 1 && index === labels.length - 1}
-      data-dragging={dragging}
+      data-dragging={dragProgress !== undefined}
       data-fast-mode-supported={Boolean(fastMode)}
       data-align="end"
       data-placement={placement}
@@ -90,7 +131,16 @@ export function ComposerEffortSelector({
           </button>
         ) : null}
         <div className="gyro-effort-slider-heading">
-          <span className="gyro-effort-value">{labels[index]}</span>
+          <span
+            className="gyro-effort-value"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {showMaxUsageNotice && isAtMaximum
+              ? "Consumes Usage Fastest"
+              : labels[index]}
+          </span>
         </div>
       </div>
       <div
@@ -98,7 +148,8 @@ export function ComposerEffortSelector({
         style={
           {
             "--effort-progress":
-              labels.length > 1 ? index / (labels.length - 1) : 0,
+              dragProgress ??
+              (labels.length > 1 ? index / (labels.length - 1) : 0),
           } as CSSProperties
         }
       >
@@ -124,34 +175,56 @@ export function ComposerEffortSelector({
           step={1}
           type="range"
           value={index}
-          onChange={(event) => setIndex(Number(event.currentTarget.value))}
+          onChange={(event) => {
+            if (!pointer.current) setIndex(Number(event.currentTarget.value));
+          }}
           onPointerDown={(event) => {
-            pointerStart.current = event.clientX;
-            event.currentTarget.setPointerCapture(event.pointerId);
+            if (event.button !== 0 || !event.isPrimary || labels.length < 2)
+              return;
+            event.preventDefault();
+            const input = event.currentTarget;
+            input.focus();
+            const rect = input.getBoundingClientRect();
+            const thumbSize = Math.min(rect.height, rect.width);
+            const center =
+              rect.left +
+              thumbSize / 2 +
+              ((rect.width - thumbSize) * index) / (labels.length - 1);
+            // Keep the original grab point when taking hold of the thumb.
+            // Clicking elsewhere on the track centers the thumb there.
+            pointer.current = {
+              id: event.pointerId,
+              offset:
+                Math.abs(event.clientX - center) <= thumbSize / 2
+                  ? event.clientX - center
+                  : 0,
+            };
+            input.setPointerCapture(event.pointerId);
+            updatePointer(event);
           }}
           onPointerMove={(event) => {
-            if (
-              pointerStart.current !== undefined &&
-              Math.abs(event.clientX - pointerStart.current) > 2
-            ) {
-              setDragging(true);
-            }
+            if (pointer.current?.id === event.pointerId) updatePointer(event);
           }}
           onPointerUp={(event) => {
-            pointerStart.current = undefined;
-            setDragging(false);
-            commit(Number(event.currentTarget.value));
+            if (pointer.current?.id !== event.pointerId) return;
+            const next = Math.round(
+              progressAtPointer(event) * (labels.length - 1),
+            );
+            pointer.current = undefined;
+            setDragProgress(undefined);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            commit(next);
           }}
-          onPointerCancel={() => {
-            pointerStart.current = undefined;
-            setDragging(false);
-            setIndex(committedIndex.current);
+          onPointerCancel={cancelPointer}
+          onLostPointerCapture={() => {
+            if (pointer.current) cancelPointer();
           }}
-          onKeyUp={(event) => commit(Number(event.currentTarget.value))}
+          onKeyUp={(event) => {
+            if (!pointer.current) commit(Number(event.currentTarget.value));
+          }}
           onBlur={(event) => {
-            pointerStart.current = undefined;
-            setDragging(false);
-            commit(Number(event.currentTarget.value));
+            if (pointer.current) cancelPointer();
+            else commit(Number(event.currentTarget.value));
           }}
         />
       </div>

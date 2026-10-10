@@ -1,0 +1,158 @@
+{
+  "date": "2026-10-09",
+  "branch": "v0.1.0",
+  "commit": "1554634",
+  "scope": "Visual comparison of localhost Gyro marketing website with branch UI. No product code changes.",
+  "website": "http://127.0.0.1:8081/",
+  "appPreview": "http://127.0.0.1:1420/capture.html?scene=chat&theme=dark",
+  "appEvidence": "Real branch App UI rendered by the existing development capture harness with invented sessions, repository data and mocked Tauri IPC. Native branch build launched successfully, but audit screenshots are browser UI captures, not verified native-window captures.",
+  "verdict": "The app matches the website product demos structurally. The strongest brand discontinuity is between the cool, strongly accented website shell and neutral, low-emphasis application chrome.",
+  "tokens": {
+    "website": {
+      "background": "#10131a",
+      "surface": "#191e28",
+      "raised": "#1d2330",
+      "text": "#eef2fa",
+      "muted": "#b0bbcf",
+      "primaryAction": "#2056ee",
+      "bodyFont": "Inter",
+      "displayFont": "Inter Tight"
+    },
+    "app": {
+      "sidebar": "#222222",
+      "surface": "#242424",
+      "raised": "#303030",
+      "text": "#ededed",
+      "muted": "#b5b5b5",
+      "baseAccent": "#0874df",
+      "computedAccent": "#5baaf9",
+      "computedPrimary": "#48a1f8",
+      "bodyFont": "System sans",
+      "displayFont": "System sans"
+    }
+  },
+  "steps": [
+    {
+      "step": 1,
+      "name": "Website entry in dark and light themes",
+      "health": "Strong",
+      "screenshots": [
+        "01-site-hero.jpg",
+        "12-site-desktop-hero.jpg",
+        "13-site-light.jpg"
+      ],
+      "notes": "Clear heading, blue primary download CTA, restrained secondary action, ample space and logo consistency. Light theme keeps the same hierarchy."
+    },
+    {
+      "step": 2,
+      "name": "Website task, terminal and editor product examples",
+      "health": "Strong",
+      "screenshots": [
+        "02-site-product.jpg",
+        "03-site-editor.jpg",
+        "04-site-workspace.jpg"
+      ],
+      "notes": "Tasks, edited-file review and test outcome form a clear story. Outer cards are cool gray and softly rounded. Actual workspace demos use neutral charcoal, so the app already shares much of this language."
+    },
+    {
+      "step": 3,
+      "name": "Website download",
+      "health": "Strong",
+      "screenshots": [
+        "05-site-download.jpg"
+      ],
+      "notes": "Distinct blue conversion panel, processor choice and clear primary download action. No downloads were initiated."
+    },
+    {
+      "step": 4,
+      "name": "App new chat",
+      "health": "Needs refinement",
+      "screenshots": [
+        "06-app-new-chat.jpg"
+      ],
+      "notes": "Recognizable Gyro mark and a calm composer. Import banner at top competes with a distant centered task-entry area; the empty state offers little help for choosing a useful first task. Suggest contextual example tasks and align the import action with the first-use flow."
+    },
+    {
+      "step": 5,
+      "name": "App conversation and review in dark and light themes",
+      "health": "Usable; hierarchy needs refinement",
+      "screenshots": [
+        "07-app-chat.jpg",
+        "08-app-review.jpg",
+        "15-app-light-chat.jpg"
+      ],
+      "notes": "Thread, edited-file card and companion preserve the website demo structure. Review, Continue, Undo and metadata appear in similar neutral tones; establish one clearly emphasized next step. Sidebar titles truncate heavily at the default width. The fixture displays unavailable usage, line counts and historical patch: these are limitations of this captured state, not validated production defects."
+    },
+    {
+      "step": 6,
+      "name": "App workspace editor and terminal entry",
+      "health": "Closest visual match",
+      "screenshots": [
+        "09-app-workspace.jpg"
+      ],
+      "notes": "Explorer/editor/terminal geometry and code typography match the advertised workflow. Keep functional density. Active explorer row and terminal tab are predominantly gray; improve selected and focus states. No shell commands were executed."
+    },
+    {
+      "step": 7,
+      "name": "App general settings",
+      "health": "Clear structure; visually subdued",
+      "screenshots": [
+        "10-app-settings.jpg"
+      ],
+      "notes": "Grouped rows and categories are understandable. Supporting labels and navigation items are similar in emphasis; strengthen page/section hierarchy without enlarging every control. Blue switches provide a clearer state cue than many chat actions."
+    },
+    {
+      "step": 8,
+      "name": "App appearance settings in dark and light themes",
+      "health": "Coherent; palette differs from website",
+      "screenshots": [
+        "11-app-appearance.jpg",
+        "14-app-light-appearance.jpg"
+      ],
+      "notes": "Theme cards and customization controls are clear. App palette is neutral grayscale; website light palette is subtly cool. Color customization should retain a consistent default brand palette."
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": 1,
+      "action": "Agree one default brand palette for website and app, using the website blue and blue-gray surfaces as the reference. Preserve custom accent overrides and readable code surfaces."
+    },
+    {
+      "priority": 2,
+      "action": "Define common typography roles. Bring Inter to app prose and chrome; consider Inter Tight selectively for entry/page headings, retaining monospace code and terminal text."
+    },
+    {
+      "priority": 3,
+      "action": "Give each state one emphasized next action: task entry, approval, review or terminal creation. Use muted styling for metadata and quieter secondary actions."
+    },
+    {
+      "priority": 4,
+      "action": "Refine the new-chat composition and integrate project import and useful first-task examples. Preserve the editor architecture and compact work density."
+    },
+    {
+      "priority": 5,
+      "action": "Standardize selected rows, active tabs, focus rings, small-control spacing and surface boundaries in both themes."
+    }
+  ],
+  "accessibility": {
+    "observedStrengths": [
+      "Named icon controls",
+      "Named resizable splitters",
+      "Theme selection exposed in accessibility tree",
+      "Interface size and density controls available"
+    ],
+    "risks": [
+      "Small icon controls and compact toolbar targets",
+      "Subtle selected/hover states",
+      "Low-emphasis supporting text in some surfaces"
+    ],
+    "limits": "No full keyboard, screen reader, contrast-ratio, reduced-motion or minimum-window reflow audit. Screenshot impressions do not establish WCAG compliance."
+  },
+  "limits": [
+    "No live AI/provider task, repository write, commit, push, notification or download action performed.",
+    "Historical patch and unavailable counts in seeded data are not evidence of live backend failures.",
+    "Website captures use the browser default width; app evidence was captured at the native default 1280×820 viewport.",
+    "Installed Gyro window was not used as branch design evidence."
+  ],
+  "captures": 15
+}

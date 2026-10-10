@@ -1,4 +1,5 @@
 import type { ProviderId, ProviderUsageWindow, SessionEvent } from "./types";
+import { providerCatalog } from "./provider-catalog.ts";
 
 export type ContextModelSelection = {
   providerId?: ProviderId;
@@ -21,6 +22,9 @@ export type ComposerLimitWindow = {
 };
 
 export type ComposerContextUsage = {
+  providerId?: ProviderId;
+  modelId?: string;
+  reportedContextWindowTokens?: number;
   detail: string;
   label: string;
   modelLabel: string;
@@ -38,9 +42,9 @@ export type ComposerContextUsage = {
 
 const PROVIDER_CONTEXT_WINDOW_FALLBACKS: Partial<Record<ProviderId, number>> = {
   anthropic: 200_000,
-  gemini: 1_000_000,
+  gemini: 1_048_576,
   kimi: 262_144,
-  openai: 128_000,
+  openai: 272_000,
   xai: 500_000,
 };
 
@@ -118,25 +122,27 @@ function formatCompactTokenCount(tokens: number) {
 /**
  * The window the next send will actually have.
  *
- * Gyro's catalog answers for the model that is selected *now*, so it leads. A
- * reported window is a record of what some earlier turn ran with: a chat that
- * spoke to Claude Code before it served Opus 5 its full window carries a 200K
- * reading forever, and the meter would keep measuring a 1M model against it.
- * The reported figure still answers for models the catalog does not list.
+ * A runtime report for the selected provider and model leads: CLI settings,
+ * account entitlements, and local allocations can differ from the catalog.
+ * The caller excludes reports from other models before resolving the window.
+ * Until a session reports its window, use the selected model's catalog value.
  */
 function resolveContextWindow(
   reportedContextWindow: number | undefined,
   model: ContextModelSelection,
 ) {
   return (
-    (model.contextWindowTokens && model.contextWindowTokens > 0
-      ? model.contextWindowTokens
-      : undefined) ??
     (reportedContextWindow && reportedContextWindow > 0
       ? reportedContextWindow
       : undefined) ??
-    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
-    128_000
+    (model.contextWindowTokens && model.contextWindowTokens > 0
+      ? model.contextWindowTokens
+      : undefined) ??
+    providerCatalog
+      .find((provider) => provider.id === model.providerId)
+      ?.models.find((entry) => entry.id === model.modelId)
+      ?.contextWindowTokens ??
+    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"]
   );
 }
 
@@ -240,7 +246,8 @@ export function estimateComposerContextUsage(
     // ignored and the thread estimate stands in — including for turns recorded
     // before Gyro stopped storing those totals.
     if (
-      occupiedTokens(usage) > resolveContextWindow(reportedContextWindow, model)
+      occupiedTokens(usage) >
+      (resolveContextWindow(reportedContextWindow, model) ?? Infinity)
     ) {
       continue;
     }
@@ -259,10 +266,8 @@ export function estimateComposerContextUsage(
   const reportedInputTokens = finiteNumber(reportedUsage, "inputTokens");
   const reportedOutputTokens = finiteNumber(reportedUsage, "outputTokens") ?? 0;
   const reportedTotalTokens = finiteNumber(reportedUsage, "totalTokens");
-  const contextWindowTokens = resolveContextWindow(
-    reportedContextWindow,
-    model,
-  );
+  const contextWindowTokens =
+    resolveContextWindow(reportedContextWindow, model) ?? 0;
 
   const checkpoint =
     reportedEventIndex >= 0 && reportedUsage
@@ -317,6 +322,9 @@ export function estimateComposerContextUsage(
     : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
   return finishComposerContextUsage({
+    providerId: model.providerId,
+    modelId: model.modelId,
+    reportedContextWindowTokens: reportedContextWindow,
     contextWindowTokens,
     detail,
     modelLabel,
@@ -336,15 +344,31 @@ export function composerContextUsageForModel(
   usage: ComposerContextUsage,
   model: ContextModelSelection,
 ): ComposerContextUsage {
-  const contextWindowTokens = resolveContextWindow(undefined, model);
+  const matchesModel = Boolean(
+    model.modelId &&
+    model.modelId === usage.modelId &&
+    model.providerId === usage.providerId,
+  );
+  const contextWindowTokens =
+    resolveContextWindow(
+      matchesModel ? usage.reportedContextWindowTokens : undefined,
+      model,
+    ) ?? 0;
   const modelLabel = model.modelLabel ?? model.modelId ?? usage.modelLabel;
   if (
+    model.providerId === usage.providerId &&
+    model.modelId === usage.modelId &&
     contextWindowTokens === usage.contextWindowTokens &&
     modelLabel === usage.modelLabel
   ) {
     return usage;
   }
   return finishComposerContextUsage({
+    providerId: model.providerId,
+    modelId: model.modelId,
+    reportedContextWindowTokens: matchesModel
+      ? usage.reportedContextWindowTokens
+      : undefined,
     contextWindowTokens,
     detail: `Thread occupancy shown against ${modelLabel}'s context window.`,
     modelLabel,
@@ -354,18 +378,45 @@ export function composerContextUsageForModel(
 }
 
 function finishComposerContextUsage({
+  providerId,
+  modelId,
+  reportedContextWindowTokens,
   contextWindowTokens,
   detail,
   modelLabel,
   source,
   usedTokens,
 }: {
+  providerId?: ProviderId;
+  modelId?: string;
+  reportedContextWindowTokens?: number;
   contextWindowTokens: number;
   detail: string;
   modelLabel: string;
   source: ComposerContextUsage["source"];
   usedTokens: number;
 }): ComposerContextUsage {
+  // Zero is an unknown window, never a token limit. Adapter defaults and
+  // hand-entered endpoints have no published model-specific size to assume.
+  if (contextWindowTokens <= 0) {
+    return {
+      providerId,
+      modelId,
+      reportedContextWindowTokens,
+      contextWindowTokens: 0,
+      detail: `${detail} The selected model's context window is not available.`,
+      label: `${modelLabel} context: ${formatCompactTokenCount(usedTokens)} tokens used; context window unknown`,
+      modelLabel,
+      percent: 0,
+      usedTokens,
+      percentLabel: "—",
+      remainingLabel: "Unknown",
+      source,
+      title: `${modelLabel} context`,
+      usedLabel: formatCompactTokenCount(usedTokens),
+      windowLabel: "Unknown",
+    };
+  }
   const remainingTokens = Math.max(0, contextWindowTokens - usedTokens);
   const percent = Math.min(
     100,
@@ -376,6 +427,9 @@ function finishComposerContextUsage({
   const remainingLabel = formatCompactTokenCount(remainingTokens);
   const windowLabel = formatCompactTokenCount(contextWindowTokens);
   return {
+    providerId,
+    modelId,
+    reportedContextWindowTokens,
     contextWindowTokens,
     detail,
     label: `${modelLabel} context: ${usedLabel} used, ${remainingLabel} remaining of ${windowLabel} tokens (${percentLabel})`,

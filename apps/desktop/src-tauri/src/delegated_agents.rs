@@ -95,6 +95,17 @@ fn publish(app: &tauri::AppHandle, snapshot: &AgentSnapshot, persist: bool) -> a
                 .transpose()?,
         )?;
         let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
+        // A child may settle after the parent answer or after reopening the
+        // chat. Publish the durable task total so both surfaces see the revision.
+        if let Some(turn) = snapshot.parent_turn_id.as_deref().and_then(|id| Uuid::parse_str(id).ok()) {
+            let parent = Uuid::parse_str(&snapshot.parent_session_id)?;
+            if let Ok(Some(tokens)) = store.task_usage_tokens(parent, turn) {
+                if let Ok(receipt) = store.append_event_with_turn_id(parent, SessionEventKind::SystemEvent, "",
+                    json!({"kind": "provider-turn-tokens", "accountingVersion": 1, "turnTokens": tokens}), Some(turn)) {
+                    let _ = app.emit(PROVIDER_CAPABILITY_EVENT, receipt);
+                }
+            }
+        }
     }
     let _ = app.emit(EVENT, snapshot);
     Ok(())
@@ -286,6 +297,21 @@ fn start_worker(app: tauri::AppHandle, id: String, initial: subagent_capability:
                 Some(request) => request,
                 None => return,
             };
+            if let Some((parent, parent_turn)) = app.state::<AgentManager>().entries.lock().ok()
+                .and_then(|entries| entries.get(&id).map(|entry| (
+                    entry.snapshot.parent_session_id.clone(), entry.snapshot.parent_turn_id.clone())))
+            {
+                if let (Ok(store), Ok(child), Some(child_turn), Ok(parent), Some(parent_turn)) = (
+                    open_store(), Uuid::parse_str(&request.session_id),
+                    request.turn_id.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
+                    Uuid::parse_str(&parent),
+                    parent_turn.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
+                ) {
+                    if let Err(error) = store.link_usage_turn(child, child_turn, parent, parent_turn) {
+                        eprintln!("could not attribute child usage: {error}");
+                    }
+                }
+            }
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_provider_chat_blocking(app.clone(), request.clone(), UsageOrigin::SubAgent)
             }))
@@ -302,21 +328,8 @@ fn start_worker(app: tauri::AppHandle, id: String, initial: subagent_capability:
             };
             settle(entry, outcome, stopped);
             if let Ok(store) = open_store() {
-                if let Ok(totals) = store.session_usage_totals(Uuid::parse_str(&id).unwrap()) {
-                    if totals.calls > 0 {
-                        entry.snapshot.tokens = Some(UsageTokens {
-                            input_tokens: totals.input_tokens,
-                            cached_input_tokens: totals.cached_input_tokens,
-                            output_tokens: totals.output_tokens,
-                            reasoning_output_tokens: entry
-                                .snapshot
-                                .tokens
-                                .map(|tokens| tokens.reasoning_output_tokens)
-                                .unwrap_or(0),
-                            total_tokens: totals.total_tokens,
-                            measured: totals.estimated_calls == 0,
-                        });
-                    }
+                if let Ok(Some(tokens)) = store.session_usage_tokens(Uuid::parse_str(&id).unwrap()) {
+                    entry.snapshot.tokens = Some(tokens);
                 }
             }
             // Decide the queue while holding the same lock as send; no task can
@@ -395,16 +408,7 @@ pub(super) fn add_tokens(
     second: Option<UsageTokens>,
 ) -> Option<UsageTokens> {
     match (first, second) {
-        (Some(a), Some(b)) => Some(UsageTokens {
-            input_tokens: a.input_tokens.saturating_add(b.input_tokens),
-            cached_input_tokens: a.cached_input_tokens.saturating_add(b.cached_input_tokens),
-            output_tokens: a.output_tokens.saturating_add(b.output_tokens),
-            reasoning_output_tokens: a
-                .reasoning_output_tokens
-                .saturating_add(b.reasoning_output_tokens),
-            total_tokens: a.total_tokens.saturating_add(b.total_tokens),
-            measured: a.measured && b.measured,
-        }),
+        (Some(a), Some(b)) => Some(a.combine(b)),
         (a, b) => a.or(b),
     }
 }
@@ -478,6 +482,26 @@ pub(super) fn delegation_tool(id: CapabilityId) -> bool {
         id,
         CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
     )
+}
+
+/// Auto approval includes delegation, while explicit project denials and the
+/// run-mode ceiling remain in force. Child authority is inherited separately.
+pub(super) fn permission_access(
+    access: CapabilityAccess,
+    id: CapabilityId,
+    mode: CapabilityRunMode,
+    config: &GyroConfig,
+) -> CapabilityAccess {
+    if access == CapabilityAccess::Ask
+        && delegation_tool(id)
+        && mode != CapabilityRunMode::Council
+        && !config.require_command_approval
+        && !config.require_file_edit_approval
+    {
+        CapabilityAccess::Allow
+    } else {
+        access
+    }
 }
 
 pub(super) fn can_delegate(session: &str) -> bool {
@@ -875,14 +899,7 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
                     .max(0) as u64,
                 tokens: totals
                     .filter(|totals| totals.calls > 0)
-                    .map(|totals| UsageTokens {
-                        input_tokens: totals.input_tokens,
-                        cached_input_tokens: totals.cached_input_tokens,
-                        output_tokens: totals.output_tokens,
-                        reasoning_output_tokens: 0,
-                        total_tokens: totals.total_tokens,
-                        measured: totals.estimated_calls == 0,
-                    }),
+                    .and_then(|_| store.session_usage_tokens(child.id).ok().flatten()),
                 run_id: response
                     .and_then(|event| event.turn_id)
                     .map(|id| id.to_string())
@@ -924,14 +941,7 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
             // Ledger counts survive even if the last lifecycle write was lost.
             if let Ok(totals) = store.session_usage_totals(Uuid::parse_str(&snapshot.agent_id)?) {
                 if totals.calls > 0 {
-                    snapshot.tokens = Some(UsageTokens {
-                        input_tokens: totals.input_tokens,
-                        cached_input_tokens: totals.cached_input_tokens,
-                        output_tokens: totals.output_tokens,
-                        reasoning_output_tokens: 0,
-                        total_tokens: totals.total_tokens,
-                        measured: totals.estimated_calls == 0,
-                    });
+                    snapshot.tokens = store.session_usage_tokens(Uuid::parse_str(&snapshot.agent_id)?).ok().flatten();
                 }
             }
         }
@@ -1094,6 +1104,73 @@ mod tests {
             pending: Vec::new(),
             delivered: false,
         }
+    }
+
+    #[test]
+    fn auto_approval_allows_delegation_without_crossing_denials_or_council() {
+        let mut config = GyroConfig::default();
+        config.require_command_approval = false;
+        config.require_file_edit_approval = false;
+        config.full_access = false;
+        for id in [
+            CapabilityId::AgentSpawn,
+            CapabilityId::AgentSend,
+            CapabilityId::ResearchRun,
+        ] {
+            for mode in [CapabilityRunMode::Normal, CapabilityRunMode::Plan] {
+                assert_eq!(
+                    permission_access(CapabilityAccess::Ask, id, mode, &config),
+                    CapabilityAccess::Allow
+                );
+                assert_eq!(
+                    permission_access(CapabilityAccess::Deny, id, mode, &config),
+                    CapabilityAccess::Deny
+                );
+            }
+            assert_eq!(
+                permission_access(
+                    CapabilityAccess::Ask,
+                    id,
+                    CapabilityRunMode::Council,
+                    &config
+                ),
+                CapabilityAccess::Ask
+            );
+            for (commands, edits) in [(true, true), (true, false), (false, true)] {
+                config.require_command_approval = commands;
+                config.require_file_edit_approval = edits;
+                assert_eq!(
+                    permission_access(
+                        CapabilityAccess::Ask,
+                        id,
+                        CapabilityRunMode::Normal,
+                        &config
+                    ),
+                    CapabilityAccess::Ask
+                );
+            }
+            config.require_command_approval = false;
+            config.require_file_edit_approval = false;
+        }
+        assert_eq!(
+            permission_access(
+                CapabilityAccess::Ask,
+                CapabilityId::GithubCreatePullRequest,
+                CapabilityRunMode::Normal,
+                &config
+            ),
+            CapabilityAccess::Ask
+        );
+        config.full_access = true;
+        assert_eq!(
+            permission_access(
+                CapabilityAccess::Allow,
+                CapabilityId::AgentSpawn,
+                CapabilityRunMode::Normal,
+                &config
+            ),
+            CapabilityAccess::Allow
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@
   gap: 2px;
 }
 
-/* Approvals stay green; unanswered questions use the blue theme ramp. */
+/* Approvals keep their semantic color; questions use the blue theme ramp. */
 :root[data-theme] .gyro-sidebar .gyro-session-row.is-awaiting-approval {
   --gyro-session-waiting-color: var(--gyro-success);
   --gyro-session-waiting-row: color-mix(
@@ -258,4 +258,266 @@
   > .gyro-editor-tab-actions
   > button:disabled {
   visibility: hidden;
+}
+
+/* Design polish — shared appearance, with pane geometry owned above. */
+/* Workspace chrome: quiet neutral navigation, with the existing theme,
+   density and native-window positioning kept as the source of geometry. */
+:root[data-theme] .gyro-sidebar {
+  --gyro-shell-row-hover: color-mix(
+    in srgb,
+    var(--gyro-text) 4%,
+    var(--gyro-sidebar)
+  );
+  color: var(--gyro-sidebar-text);
+}
+
+:root[data-theme] .gyro-app-shell .gyro-sidebar,
+:root[data-theme] .gyro-app-shell.is-chat-shell .gyro-sidebar {
+  background: var(--gyro-sidebar);
+  border-right-color: var(--gyro-border-soft);
+  box-shadow: none;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-windowbar,
+:root[data-theme] .gyro-sidebar .gyro-sidebar-footer {
+  background: var(--gyro-sidebar);
+}
+
+/* This finish lands after the Workspace chrome band. An opaque windowbar
+   covers that band, so the activity rail's tone stops at the column edge and
+   cuts through the traffic lights. Leave the bar clear and the band painted on
+   the sidebar shows through, meeting the rail as one 48px surface. Settings
+   keeps the solid bar: it has no rail and no band. */
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-sidebar-windowbar:not(.is-settings) {
+  background: transparent;
+}
+
+/* Only set the vertical measure. Horizontal offsets still protect native
+   traffic lights and the hidden-sidebar restore control. */
+:root[data-theme] .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar,
+:root[data-theme] .gyro-sidebar-windowbar.is-settings {
+  height: 48px;
+  min-height: 48px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-project-row,
+    .gyro-sidebar-project-toggle,
+    .gyro-sidebar-thread,
+    .gyro-sidebar-thread-main,
+    .gyro-footer-button
+  ) {
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-sidebar-text);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  line-height: calc(18px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-project-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ):hover {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active,
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active:hover {
+  background: transparent;
+  color: var(--gyro-text);
+  box-shadow: none;
+}
+
+/* The selected row carries no fill; brighter, heavier text marks it, and it
+   still answers the pointer like its neighbours. */
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active {
+  font-weight: 600;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active:hover {
+  background: var(--gyro-shell-row-hover);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-row {
+  border-radius: var(--gyro-radius-sm);
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.is-active
+  .gyro-sidebar-thread-main {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+
+/* Retain the useful focused-chat marker in a split without a glowing edge. */
+:root[data-theme]
+  .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
+  .gyro-session-row.is-active::before {
+  box-shadow: none;
+  opacity: 0.75;
+  width: 2px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(.gyro-sidebar-small-title, .gyro-sidebar-time-group, .gyro-nav-label) {
+  color: var(--gyro-faint);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: calc(16px * var(--gyro-ui-scale, 1));
+  text-transform: none;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
+  padding-bottom: 4px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-more-button,
+:root[data-theme] .gyro-sidebar .gyro-session-time,
+:root[data-theme] .gyro-sidebar .gyro-sidebar-shortcut {
+  color: var(--gyro-faint);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+}
+
+/* Navigation uses the same line weight as the titlebar. Provider marks and
+   semantic status icons retain their own artwork and color. */
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-project-toggle,
+    .gyro-footer-button
+  )
+  > svg,
+:root[data-theme]
+  :is(
+    .gyro-sidebar-window-actions,
+    .gyro-titlebar-switch-option,
+    .gyro-sidebar-restore-button
+  )
+  svg {
+  color: var(--gyro-muted);
+  stroke-width: 1.6;
+}
+
+:root[data-theme] .gyro-titlebar-switch {
+  background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-sidebar));
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+}
+
+:root[data-theme] .gyro-titlebar-switch-option {
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option svg {
+  transition: color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover svg {
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option.is-active,
+:root[data-theme] .gyro-titlebar-switch-option.is-active:hover {
+  background: color-mix(in srgb, var(--gyro-text) 9%, var(--gyro-sidebar));
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option.is-active svg {
+  color: currentColor;
+}
+
+:root[data-theme] .gyro-sidebar-window-actions .gyro-sidebar-toggle-button,
+:root[data-theme] .gyro-sidebar-restore-cluster .gyro-sidebar-restore-button {
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-sidebar-window-actions
+  .gyro-sidebar-toggle-button:hover,
+:root[data-theme]
+  .gyro-sidebar-restore-cluster
+  .gyro-sidebar-restore-button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+  transform: none;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-actions {
+  background: var(--gyro-shell-row-hover);
+  border-color: transparent;
+  border-radius: var(--gyro-radius-xs);
+  box-shadow: none;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-action:not(.is-pinned) {
+  color: var(--gyro-muted);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-action:hover,
+:root[data-theme] .gyro-sidebar .gyro-session-action[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  border-color: transparent;
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-footer {
+  border-top-color: var(--gyro-border-soft);
 }

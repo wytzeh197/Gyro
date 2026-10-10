@@ -282,7 +282,9 @@ pub(super) fn run_ollama_chat(
     let allow_delegation = delegated_agents::can_delegate(&request.session_id);
     let tools = if discovered.supports_tools {
         advertised_capability_descriptors(run_mode)
-            .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
+            .filter(|descriptor| {
+                allow_delegation || !delegated_agents::delegation_tool(descriptor.id)
+            })
             .map(|descriptor| {
                 serde_json::json!({
                     "type": "function",
@@ -316,6 +318,7 @@ pub(super) fn run_ollama_chat(
     let auto_compact_percent = config.usage_guard.auto_compact_percent;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
+        let mut accounted_usage: Option<UsageTokens> = None;
         let mut last_measured: Option<(Option<u64>, Option<u64>)> = None;
         // What auto-compaction removed this turn, for the activity rail and the
         // event the user can inspect afterwards.
@@ -415,9 +418,18 @@ pub(super) fn run_ollama_chat(
                 }
             })?;
             turn_usage.observe(turn.input_tokens, turn.output_tokens);
-            if let Some(usage) = turn_usage.measured() {
-                provider_accounting::emit_turn_tokens(app, request, provider_accounting::usage_tokens(&usage));
-            }
+            accounted_usage = Some(
+                match accounted_usage {
+                    Some(previous) => previous.combine(turn.accounted_usage),
+                    None => turn.accounted_usage,
+                }
+                .with_scope(gyro_core::usage::UsageScope::Turn),
+            );
+            provider_accounting::emit_turn_tokens(
+                app,
+                request,
+                accounted_usage.expect("a provider request was accounted"),
+            );
             // What the live context note reports before the next request.
             context_window = turn.context_window_tokens;
             last_measured = Some((turn.input_tokens, turn.output_tokens));
@@ -464,8 +476,12 @@ pub(super) fn run_ollama_chat(
                         if round_budget.is_some_and(|limit| round >= limit) {
                             anyhow::bail!("This model requested another catalog after its tool budget was exhausted");
                         }
-                        let catalog =
-                            ollama_compatibility_catalog(run_mode, prefix.as_deref(), offset, allow_delegation);
+                        let catalog = ollama_compatibility_catalog(
+                            run_mode,
+                            prefix.as_deref(),
+                            offset,
+                            allow_delegation,
+                        );
                         malformed_responses = 0;
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));
@@ -587,15 +603,25 @@ pub(super) fn run_ollama_chat(
         }
         let response_chars = response.content.chars().count();
         Ok(ProviderRunnerOutput {
-            accounted_usage: None,
+            accounted_usage,
             activities: provider_activities_for_response(auto_compactions, &response.content),
             context_usage: Some(ProviderContextUsage {
                 input_tokens: response.input_tokens,
                 output_tokens: response.output_tokens,
+                cached_input_tokens: response
+                    .accounted_usage
+                    .accounting
+                    .filter(|accounting| accounting.known.cache_read)
+                    .map(|_| response.accounted_usage.cached_input_tokens),
+                reasoning_output_tokens: response
+                    .accounted_usage
+                    .accounting
+                    .filter(|accounting| accounting.known.reasoning)
+                    .map(|_| response.accounted_usage.reasoning_output_tokens),
                 total_tokens: response
                     .input_tokens
                     .zip(response.output_tokens)
-                    .map(|(input, output)| input + output),
+                    .map(|(input, output)| input.saturating_add(output)),
                 model_context_window: response.context_window_tokens,
                 ..ProviderContextUsage::default()
             }),
