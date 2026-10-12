@@ -8,6 +8,7 @@ pub(super) fn execute(
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     let arguments = &request.arguments;
+    let max_bytes = workspace_result_byte_limit(arguments)?;
     let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
         arguments, "path",
     )?)?;
@@ -18,19 +19,8 @@ pub(super) fn execute(
         || ["line", "endLine", "column", "endColumn"]
             .iter()
             .any(|key| arguments.get(key).is_some());
-    let mut data = if !ranged {
-        let file = read_workspace_file_impl(&workspace, &path)?;
-        let candidate =
-            gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(&path))?;
-        let modified_at = candidate
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .map(chrono::DateTime::<chrono::Utc>::from)
-            .map(|v| v.to_rfc3339());
-        json!({"path": file.path, "content": file.content, "truncated": file.truncated,
-            "sizeBytes": file.size_bytes, "contentHash": file.content_hash, "modifiedAt": modified_at,
-            "line": 1, "column": 1})
+    let data = if !ranged {
+        read_disk_file_data(&workspace, &path)?
     } else {
         let context = app
             .state::<CapabilityIdeEvidenceManager>()
@@ -92,7 +82,7 @@ pub(super) fn execute(
                 "disk",
             )
         };
-        let mut data = select_range(&content, arguments)?;
+        let mut data = select_safe_range(&content, arguments)?;
         data["path"] = json!(path);
         data["source"] = json!(source);
         data["dirty"] = json!(dirty);
@@ -107,8 +97,7 @@ pub(super) fn execute(
         }
         data
     };
-    // Redaction can change encoded size, so bound the actual outgoing data.
-    data = bound_read_result(redact_json_strings(data))?;
+    let data = bound_read_result(data, max_bytes)?;
     let summary = if editor_read {
         format!("Read live editor text for {path}")
     } else if ranged {
@@ -122,6 +111,26 @@ pub(super) fn execute(
         label: path,
     };
     Ok((summary, data, Some(resource)))
+}
+
+fn read_disk_file_data(workspace: &str, path: &str) -> anyhow::Result<Value> {
+    // Guarded edits accept a complete-file hash. Reading through the edit
+    // limit avoids advertising a preview hash as the hash of a larger file.
+    let file = read_workspace_file_with_limit(workspace, path, MAX_WORKSPACE_FILE_EDIT_BYTES)?;
+    let candidate =
+        gyro_core::security::assert_path_inside_workspace(Path::new(workspace), Path::new(path))?;
+    let modified_at = candidate
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .map(chrono::DateTime::<chrono::Utc>::from)
+        .map(|v| v.to_rfc3339());
+    Ok(
+        json!({"path": file.path, "content": file.content, "truncated": file.truncated,
+        "sizeBytes": file.size_bytes,
+        "contentHash": if file.truncated { None } else { Some(file.content_hash) },
+        "modifiedAt": modified_at, "line": 1, "column": 1}),
+    )
 }
 
 fn read_range_source(workspace: &str, path: &str) -> anyhow::Result<WorkspaceFileContent> {
@@ -150,27 +159,29 @@ fn select_range(content: &str, arguments: &Value) -> anyhow::Result<Value> {
     if end == line && end_column.is_some_and(|end| end < column) {
         anyhow::bail!("Workspace range endColumn must not precede column");
     }
-    let lines: Vec<_> = content.split('\n').collect();
-    let actual_end = end.min(lines.len() as u64);
+    let mut actual_end = 0;
     let mut text = String::new();
-    if line <= actual_end {
-        for number in line..=actual_end {
+    // Iterate instead of indexing a vector containing every line of the file.
+    // A range near the top of a large file need not enumerate its entire tail.
+    for (index, source) in content.split('\n').enumerate().take(end as usize) {
+        let number = index as u64 + 1;
+        actual_end = number;
+        if number >= line {
             if number > line {
                 text.push('\n');
             }
-            let source = lines[(number - 1) as usize];
             let start = if number == line { column - 1 } else { 0 } as usize;
             let stop = if number == end {
                 end_column.map(|c| (c - 1) as usize)
             } else {
                 None
             };
-            text.extend(
-                source
-                    .chars()
-                    .skip(start)
-                    .take(stop.map_or(usize::MAX, |end| end.saturating_sub(start))),
-            );
+            let start = utf16_offset(source, start)?;
+            let stop = stop
+                .map(|column| utf16_offset(source, column))
+                .transpose()?
+                .unwrap_or(source.len());
+            text.push_str(&source[start..stop]);
         }
     }
     Ok(
@@ -179,25 +190,73 @@ fn select_range(content: &str, arguments: &Value) -> anyhow::Result<Value> {
     )
 }
 
+fn select_safe_range(content: &str, arguments: &Value) -> anyhow::Result<Value> {
+    // Redact the complete source before range selection. A chunk beginning
+    // halfway through a secret must not expose its otherwise unrecognizable
+    // suffix, and masking preserves the requested source positions.
+    let masked = gyro_core::security::redact_secrets_preserving_positions(content);
+    let mut data = select_range(&masked, arguments)?;
+    if masked != content {
+        data["redacted"] = json!(true);
+    }
+    Ok(data)
+}
+
+// All editor, LSP and search positions are 1-based UTF-16 columns. Reject a
+// position within a surrogate pair so neither a read nor continuation drops it.
+fn utf16_offset(line: &str, column: usize) -> anyhow::Result<usize> {
+    let mut units = 0;
+    for (offset, character) in line.char_indices() {
+        if units == column {
+            return Ok(offset);
+        }
+        units += character.len_utf16();
+        if units > column {
+            anyhow::bail!("Workspace column must not split a UTF-16 surrogate pair");
+        }
+    }
+    Ok(line.len())
+}
+
 fn continuation(content: &str, line: u64, column: u64) -> (u64, u64) {
     let newlines = content.bytes().filter(|b| *b == b'\n').count() as u64;
     if newlines == 0 {
-        (line, column + content.chars().count() as u64)
+        (line, column + content.encode_utf16().count() as u64)
     } else {
         (
             line + newlines,
-            content.rsplit('\n').next().unwrap_or("").chars().count() as u64 + 1,
+            content
+                .rsplit('\n')
+                .next()
+                .unwrap_or("")
+                .encode_utf16()
+                .count() as u64
+                + 1,
         )
     }
 }
 
-fn bound_read_result(mut data: Value) -> anyhow::Result<Value> {
+fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value> {
+    // A shorter redaction marker would shift continuation columns and can
+    // skip source characters on the next chunk. Mask while preserving positions
+    // and redact the remaining metadata separately.
+    let raw = data
+        .as_object_mut()
+        .and_then(|object| object.remove("content"))
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let masked = gyro_core::security::redact_secrets_preserving_positions(&raw);
+    data = redact_json_strings(data);
+    if masked != raw {
+        data["redacted"] = json!(true);
+    }
+    data["content"] = json!(masked);
     let full = data["content"].as_str().unwrap_or("");
     let full_len = full.len();
     // The serialized payload is never smaller than its text, so text past the
     // result budget can never fit. Cutting it first keeps the boundary search
     // below from indexing every character of a 64 MB minified line.
-    let mut cap = full_len.min(gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES);
+    let mut cap = full_len.min(max_bytes);
     while !full.is_char_boundary(cap) {
         cap -= 1;
     }
@@ -217,7 +276,7 @@ fn bound_read_result(mut data: Value) -> anyhow::Result<Value> {
         }
     };
     update(&mut data, content.len());
-    if serde_json::to_vec(&data)?.len() <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES {
+    if serde_json::to_vec(&data)?.len() <= max_bytes {
         return Ok(data);
     }
     // Search UTF-8 boundaries using the serialized payload, including escaping
@@ -231,14 +290,16 @@ fn bound_read_result(mut data: Value) -> anyhow::Result<Value> {
     while low < high {
         let mid = low + (high - low).div_ceil(2);
         update(&mut data, boundaries[mid]);
-        if serde_json::to_vec(&data)?.len() <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
-        {
+        if serde_json::to_vec(&data)?.len() <= max_bytes {
             low = mid;
         } else {
             high = mid - 1;
         }
     }
     update(&mut data, boundaries[low]);
+    if serde_json::to_vec(&data)?.len() > max_bytes {
+        anyhow::bail!("Workspace read metadata exceeds maxBytes; increase the byte budget");
+    }
     gyro_core::validate_capability_result_data(data)
 }
 
@@ -263,9 +324,11 @@ mod tests {
     #[test]
     fn workspace_read_bounds_escaped_unicode_and_can_continue() {
         let text = "\u{0001}é\\\"".repeat(50_000);
-        let result =
-            bound_read_result(json!({"content":text,"line":1,"column":1,"truncated":false}))
-                .unwrap();
+        let result = bound_read_result(
+            json!({"content":text,"line":1,"column":1,"truncated":false}),
+            DEFAULT_WORKSPACE_RESULT_BYTES,
+        )
+        .unwrap();
         assert!(result["truncated"].as_bool().unwrap());
         assert!(
             serde_json::to_vec(&result).unwrap().len()
@@ -289,9 +352,11 @@ mod tests {
     #[test]
     fn workspace_read_bounds_a_huge_minified_line() {
         let text = "é".repeat(8 * 1024 * 1024);
-        let result =
-            bound_read_result(json!({"content":text,"line":1,"column":1,"truncated":false}))
-                .unwrap();
+        let result = bound_read_result(
+            json!({"content":text,"line":1,"column":1,"truncated":false}),
+            DEFAULT_WORKSPACE_RESULT_BYTES,
+        )
+        .unwrap();
         assert_eq!(result["truncated"], true);
         assert_eq!(result["nextLine"], 1);
         let returned = result["content"].as_str().unwrap().chars().count() as u64;
@@ -306,6 +371,7 @@ mod tests {
     fn workspace_read_preview_truncation_has_continuation() {
         let result = bound_read_result(
             json!({"content":"first\nseé", "line":1,"column":1,"truncated":true}),
+            DEFAULT_WORKSPACE_RESULT_BYTES,
         )
         .unwrap();
         assert_eq!(result["nextLine"], 2);
@@ -327,5 +393,119 @@ mod tests {
             select_range("text", &json!({"line":3})).unwrap()["content"],
             ""
         );
+    }
+
+    #[test]
+    fn workspace_reads_use_editor_utf16_columns_and_continuations() {
+        let selected = select_range(
+            "a🦀b",
+            &json!({"line":1,"endLine":1,"column":2,"endColumn":4}),
+        )
+        .unwrap();
+        assert_eq!(selected["content"], "🦀");
+        assert!(select_range("a🦀b", &json!({"column":3})).is_err());
+        let text = "🦀".repeat(2000);
+        let result = bound_read_result(json!({"content":text,"line":1,"column":1}), 1024).unwrap();
+        let rest = select_range(
+            &text,
+            &json!({"line":1,"endLine":1,"column":result["nextColumn"]}),
+        )
+        .unwrap();
+        assert_eq!(
+            format!(
+                "{}{}",
+                result["content"].as_str().unwrap(),
+                rest["content"].as_str().unwrap()
+            ),
+            text
+        );
+        assert!(serde_json::to_vec(&result).unwrap().len() <= 1024);
+    }
+
+    #[test]
+    fn workspace_read_hash_covers_complete_editable_file() {
+        let workspace = tempfile::tempdir().unwrap();
+        let content = "x".repeat(MAX_WORKSPACE_FILE_PREVIEW_BYTES + 20);
+        fs::write(workspace.path().join("file.txt"), &content).unwrap();
+        let result = bound_read_result(
+            read_disk_file_data(workspace.path().to_str().unwrap(), "file.txt").unwrap(),
+            DEFAULT_WORKSPACE_RESULT_BYTES,
+        )
+        .unwrap();
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["contentHash"], content_hash(content.as_bytes()));
+        assert!(serde_json::to_vec(&result).unwrap().len() <= DEFAULT_WORKSPACE_RESULT_BYTES);
+        fs::write(
+            workspace.path().join("large.txt"),
+            "x".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES + 1),
+        )
+        .unwrap();
+        let partial = read_disk_file_data(workspace.path().to_str().unwrap(), "large.txt").unwrap();
+        assert!(partial["contentHash"].is_null());
+    }
+
+    #[test]
+    fn redacted_read_chunks_keep_source_columns() {
+        let secret = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        let text = format!("\"token\":\"{secret}\" {}", "🦀".repeat(1000));
+        let result = bound_read_result(json!({"content":text,"line":1,"column":1}), 1024).unwrap();
+        assert_eq!(result["redacted"], true);
+        assert!(!result["content"].as_str().unwrap().contains(secret));
+        let final_result =
+            redact_workspace_capability_result(CapabilityId::WorkspaceRead, result.clone());
+        assert_eq!(result["content"], final_result["content"]);
+        let rest = select_range(
+            &text,
+            &json!({"line":1,"endLine":1,"column":result["nextColumn"]}),
+        )
+        .unwrap();
+        assert_eq!(
+            format!(
+                "{}{}",
+                result["content"].as_str().unwrap(),
+                rest["content"].as_str().unwrap()
+            ),
+            gyro_core::security::redact_secrets_preserving_positions(&text)
+        );
+    }
+
+    #[test]
+    fn redacted_astral_secret_can_continue_at_a_byte_cutoff() {
+        let text = format!("{{\"token\":\"{}\"}} after", "🦀".repeat(1000));
+        let masked = gyro_core::security::redact_secrets_preserving_positions(&text);
+        let result = bound_read_result(json!({"content":text,"line":1,"column":1}), 1024).unwrap();
+        let arguments = json!({"line":1,"endLine":1,"column":result["nextColumn"]});
+        // The returned continuation must be a source codepoint boundary even
+        // when the last source character was itself masked as a secret.
+        assert!(select_range(&text, &arguments).is_ok());
+        let rest = select_range(&masked, &arguments).unwrap();
+        assert_eq!(
+            format!(
+                "{}{}",
+                result["content"].as_str().unwrap(),
+                rest["content"].as_str().unwrap()
+            ),
+            masked
+        );
+    }
+
+    #[test]
+    fn continued_range_inside_a_secret_keeps_its_suffix_masked() {
+        let text = format!("{{\"token\":\"sk-{}\"}} after", "a".repeat(3000));
+        let first = bound_read_result(
+            select_safe_range(&text, &json!({"line":1,"endLine":1})).unwrap(),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(first["truncated"], true);
+        let column = first["nextColumn"].as_u64().unwrap();
+        let arguments = json!({"line":1,"endLine":1,"column":column,"endColumn":column+10});
+        assert_eq!(
+            select_range(&text, &arguments).unwrap()["content"],
+            "a".repeat(10)
+        );
+        let continued = select_safe_range(&text, &arguments).unwrap();
+        assert_eq!(continued["content"], "*".repeat(10));
+        assert_eq!(continued["redacted"], true);
     }
 }

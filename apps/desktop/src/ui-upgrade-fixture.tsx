@@ -304,6 +304,35 @@ function Fixture() {
       />
     );
   };
+  const occupiedPane = layout.slots.some(Boolean);
+  const focusedPane = layout.slots.find(
+    (pane) => pane?.paneId === layout.focusedPaneId,
+  );
+  const fixtureDraftChats = occupiedPane
+    ? layout.slots.flatMap((pane) =>
+        pane?.kind === "draft"
+          ? [
+              {
+                id: pane.paneId,
+                title: "New chat",
+                workspacePath: pane.workspacePath,
+              },
+            ]
+          : [],
+      )
+    : [
+        {
+          id: `start:${projectKey}`,
+          title: "New chat",
+          workspacePath: projectKey,
+        },
+      ];
+  const fixtureActiveDraftId =
+    focusedPane?.kind === "draft"
+      ? focusedPane.paneId
+      : occupiedPane
+        ? undefined
+        : `start:${projectKey}`;
   const chat = (
     <ChatGridSurface
       key={scenario}
@@ -415,7 +444,9 @@ function Fixture() {
           {sidebar ? (
             <AppChrome
               activeDestination="workspace"
-              activeSessionId="0"
+              activeSessionId={fixtureActiveDraftId ? undefined : "0"}
+              activeDraftId={fixtureActiveDraftId}
+              draftChats={fixtureDraftChats}
               activeWorkspaceLayout="thread"
               commandProfiles={[]}
               savedProjects={[]}
@@ -430,6 +461,10 @@ function Fixture() {
               onSelectDestination={() =>
                 setAction("Fixture destination action")
               }
+              onSelectDraftChat={(id) => {
+                if (id.startsWith("start:")) return;
+                dispatch({ type: "focus-pane", projectKey, paneId: id });
+              }}
               onSelectSession={() => {
                 setScenario("completed");
                 setGrid(initial());

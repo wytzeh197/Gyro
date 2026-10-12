@@ -31,7 +31,7 @@ try {
     entryPoints: [entry],
     outfile: output,
     bundle: true,
-    loader: { ".png": "dataurl" },
+    loader: { ".png": "dataurl", ".svg": "dataurl" },
     platform: "node",
     format: "esm",
     logLevel: "silent",
@@ -215,6 +215,76 @@ try {
     ).available,
     false,
   );
+  const vueDefinition = resolveLanguage({ path: "retry.vue" });
+  let failingCalls = 0;
+  let stableCalls = 0;
+  let shouldFail = true;
+  let releaseFailure;
+  const failureGate = new Promise((resolve) => {
+    releaseFailure = resolve;
+  });
+  const retryable = createSyntaxLoader({
+    monaco: async () => {
+      stableCalls++;
+      return "typescript";
+    },
+    textmate: async () => {
+      failingCalls++;
+      await failureGate;
+      if (shouldFail) throw new Error("temporary grammar load failure");
+      return "gyro-tm-vue";
+    },
+  });
+  const stable = await retryable(definition);
+  const firstFailure = retryable(vueDefinition);
+  const sharedFailure = retryable(vueDefinition);
+  assert.equal(
+    firstFailure,
+    sharedFailure,
+    "Concurrent failed loads must share one provider attempt.",
+  );
+  releaseFailure();
+  const [failedA, failedB] = await Promise.all([firstFailure, sharedFailure]);
+  assert.equal(failingCalls, 1);
+  assert.equal(failedA, failedB);
+  assert.equal(failedA.available, false);
+  assert.equal(
+    failedA.language,
+    "plaintext",
+    "A failed grammar must leave editing available.",
+  );
+  assert.equal(
+    await retryable(definition),
+    stable,
+    "A grammar failure must preserve successful unrelated languages.",
+  );
+  assert.equal(stableCalls, 1);
+  shouldFail = false;
+  const recovered = await retryable(vueDefinition);
+  assert.equal(
+    failingCalls,
+    2,
+    "A failed provider must be retried instead of cached permanently.",
+  );
+  assert.equal(recovered.available, true);
+  assert.equal(recovered.language, "gyro-tm-vue");
+  assert.equal(
+    await retryable(vueDefinition),
+    recovered,
+    "The successful retry must be cached.",
+  );
+  assert.equal(failingCalls, 2);
+  let undefinedCalls = 0;
+  const initiallyUnavailable = createSyntaxLoader({
+    textmate: async () => (++undefinedCalls === 1 ? undefined : "gyro-tm-vue"),
+  });
+  assert.equal((await initiallyUnavailable(vueDefinition)).available, false);
+  assert.equal(
+    (await initiallyUnavailable(vueDefinition)).language,
+    "gyro-tm-vue",
+    "A provider returning no grammar must also remain retryable.",
+  );
+  assert.equal(undefinedCalls, 2);
   const legend = {
     tokenTypes: ["function", "variable"],
     tokenModifiers: ["readonly"],

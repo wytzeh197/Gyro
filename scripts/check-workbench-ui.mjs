@@ -244,8 +244,10 @@ for (const sessionId of ["three", "four"]) {
 const fullRow = reorderedGrid.layouts["/Users/example/Gyro"];
 expect(
   chatGridDropZones(fullRow.slots, "columns").length === 0 &&
-    chatGridDropZones(fullRow.slots, "columns", true).length === 5,
-  "A full row should expose boundaries only when rearranging one of its chats.",
+    chatGridDropZones(fullRow.slots, "columns", true).length === 5 &&
+    chatGridDropZones(fullRow.slots, "grid").length === 0 &&
+    chatGridDropZones(fullRow.slots, "grid", true).length === 4,
+  "A full row or grid should expose destinations only when rearranging one of its chats.",
 );
 reorderedGrid = chatGridReducer(reorderedGrid, {
   type: "select-pane",
@@ -464,8 +466,8 @@ expect(
     chatGridDropZones(
       [gridPane("one"), gridPane("two"), null, null],
       "rows",
-    ).every((zone) => zone.position.startsWith("position-")),
-  "A full row of four should offer no target, while a stack and a 2×2 grid keep their quadrants.",
+    ).every((zone) => zone.position.startsWith("stack-") && zone.placement?.arrangement === "rows"),
+  "A full row rejects new chats; stacks use horizontal insertion boundaries and grids use quadrants.",
 );
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
@@ -549,6 +551,10 @@ const captureFixtureSource = readRepoFile(
 );
 const workbenchSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
+const workspaceCodeEditorSource = readRepoFile("apps/desktop/src/editor/workspace-code-editor.tsx");
+const languageSessionsHookSource = readRepoFile("apps/desktop/src/editor/use-language-sessions.ts");
+const languageSessionsSource = readRepoFile("apps/desktop/src/editor/language-sessions.ts");
+const workspaceRenameSource = readRepoFile("apps/desktop/src/editor/use-workspace-rename.ts");
 const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
@@ -582,9 +588,12 @@ const readinessAuditSource = readLocalOnlyFile(
 const surfaceSource = [
   readRepoFile("packages/ui/src/diff-file-tree.ts"),
   readRepoFile("packages/ui/src/surfaces.tsx"),
+  readRepoFile("packages/ui/src/cli-session-list.tsx"),
   readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/menu-dismiss.ts"),
+  readRepoFile("packages/ui/src/provider-settings-fields.tsx"),
   readRepoFile("packages/ui/src/settings-presentation.tsx"),
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
@@ -606,6 +615,7 @@ const styleSource = [
   readRepoFile("packages/ui/src/styles-foundation.css"),
   readRepoFile("packages/ui/src/styles.css"),
   readRepoFile("packages/ui/src/appearance.css"),
+  readRepoFile("packages/ui/src/cli-view.css"),
   readRepoFile("packages/ui/src/composer-effort-selector.css"),
   readRepoFile("packages/ui/src/interaction-motion.css"),
   readRepoFile("packages/ui/src/press-feedback.css"),
@@ -728,7 +738,7 @@ expect(
   "Chat headers should keep the title clean and move workspace context into the Environment control.",
 );
 expect(
-  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong title=\{sessionTitle \?\? "Gyro session"\}>\s*\{sessionTitle \?\? "Gyro session"\}\s*<\/strong>/.test(
+  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,600}?<strong[\s\S]{0,600}?data-chat-pane-drag=\{paneKey\}[\s\S]{0,600}?\{sessionTitle \?\? "Gyro session"\}\s*<\/strong>/.test(
     surfaceSource,
   ) &&
     !surfaceSource.includes("items={threadWorkspaceItems}") &&
@@ -780,7 +790,7 @@ expect(
     surfaceSource.includes('className="gyro-chat-grid-empty"') &&
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
-    chatGridDropSource.includes("function chatGridRowDropZones") &&
+    chatGridDropSource.includes("function chatGridLinearDropZones") &&
     chatDesignSource.includes(
       '.gyro-chat-grid-drop-zone[data-position="row-seam-1"]',
     ) &&
@@ -799,13 +809,13 @@ expect(
       "const dropLayout = chatGridDropLayout(dropZones)",
     ) &&
     surfaceSource.includes("data-layout={dropLayout}") &&
-    surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
-    surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
+    surfaceSource.includes("subscribeChatDrag(observe)") &&
+    surfaceSource.includes("endChatDragForTransfer(event.dataTransfer)") &&
     surfaceSource.includes("didDrop && maximizedPaneId") &&
     appSource.includes("const displayedChatLayout =") &&
     appSource.includes("createChatProjectLayout(currentChatProjectKey)") &&
     appSource.includes("!activeChatLayout?.slots.some(Boolean)") &&
-    appSource.includes("sourceProjectKey !== displayedChatLayout.projectKey") &&
+    appSource.includes("projectKey !== displayedChatLayout.projectKey") &&
     !surfaceSource.includes("Drag another chat here") &&
     !surfaceSource.includes("Choose one of four chat slots") &&
     styleSource.includes(".gyro-chat-grid-empty") &&
@@ -822,7 +832,7 @@ expect(
   chatGridDropSource.includes("function nearestChatGridDropZone") &&
     surfaceSource.includes("nearestChatGridDropZone(") &&
     surfaceSource.includes("highlightZoneUnderPointer") &&
-    surfaceSource.includes("isChatDragging && dropTargetId === undefined") &&
+    surfaceSource.includes("if (isChatDragging) highlightZoneUnderPointer()") &&
     surfaceSource.includes("paneElementCache") &&
     surfaceSource.includes("cached.renderPane === renderPane") &&
     surfaceSource.includes("cached.isTiled === isTiled") &&
@@ -833,7 +843,8 @@ expect(
   !surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
     !surfaceSource.includes("Drag chat to rearrange split") &&
     !styleSource.includes(".gyro-chat-pane-drag-handle") &&
-    !appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    surfaceSource.includes("data-chat-pane-drag={paneKey}") &&
     surfaceSource.includes("CHAT_SESSION_DRAG_MIME") &&
     surfaceSource.includes("onDropSession(") &&
     surfaceSource.includes("function dataTransferHasType") &&
@@ -845,11 +856,13 @@ expect(
     surfaceSource.includes("event.clientX < bounds.left") &&
     surfaceSource.includes("Updating a provider CLI. Sending will unlock") &&
     surfaceSource.includes("!isCliUpdating &&") &&
-    appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
+    appSource.includes("isCliUpdating={paneComposerCliUpdating}") &&
+    appSource.includes("isCliUpdating={activeComposerCliUpdating}") &&
+    !appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
     styleSource.includes("Sessions/Workspace is navigation") &&
     styleSource.includes("var(--gyro-sidebar-mode-active)") &&
     surfaceSource.includes("{zone.label}"),
-  "Split placement comes from dragging a sidebar chat onto the grid. The chat header has no pane drag handle.",
+  "Sidebar chats and pane titles can rearrange splits; toolbar controls stay separate from draggable titles.",
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
@@ -1129,18 +1142,17 @@ expect(
   "Workspace preparation should expose honest native stages, bound Git inspect, and disable steady polling when the event watcher is healthy.",
 );
 expect(
-  desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_BYTES") &&
-    desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_FILES") &&
+  desktopRustSource.includes("untracked_lines_before(&path, deadline)") &&
     desktopRustSource.includes("fn cached_git_status") &&
     desktopRustSource.includes("fn git_status_stamp") &&
     desktopRustSource.includes("--untracked-files=normal") &&
-    !desktopRustSource.includes("--untracked-files=all") &&
+    desktopRustSource.includes("--untracked-files=all") &&
     appSource.includes("workspaceChangeGeneration === 0") &&
     appSource.includes(
       'if (workspaceWatchMode === "event") {\n      return;',
     ) &&
     !appSource.includes("refreshIdeSourceControl(root),\n      800"),
-  "Git status should reuse porcelain stamps, cap untracked line counts, and not poll a full scan every 800ms.",
+  "Git status should reuse porcelain stamps, count all untracked files within its deadline, and not poll a full scan every 800ms.",
 );
 expect(
   surfaceSource.includes("function clampWorkspacePreparationPopover") &&
@@ -2407,9 +2419,15 @@ expect(
     workspacePanelContributions.some(
       (panel) => panel.id === "test-results" && panel.label === "Test Results",
     ) &&
-    appSource.includes('"textDocument/definition"') &&
-    appSource.includes('"textDocument/references"') &&
-    appSource.includes('"textDocument/rename"'),
+    workspaceCodeEditorSource.includes("registerDefinitionProvider") &&
+    workspaceCodeEditorSource.includes('"textDocument/definition"') &&
+    workspaceCodeEditorSource.includes("registerReferenceProvider") &&
+    workspaceCodeEditorSource.includes('"textDocument/references"') &&
+    appSource.includes("onRenameSymbol={workspaceRename.begin}") &&
+    workspaceCodeEditorSource.includes('id: "gyro.workspace.renameSymbol"') &&
+    workspaceCodeEditorSource.includes("propsRef.current.onRenameSymbol?.(path, position)") &&
+    workspaceRenameSource.includes('"textDocument/rename"') &&
+    workspaceRenameSource.includes("prepareWorkspaceEdit(raw, snapshots)"),
   "Developer workflows should include batch SCM, structured test results, and LSP definition, reference, and rename providers.",
 );
 state = workbenchReducer(state, {
@@ -5315,12 +5333,9 @@ expect(
     /data-theme="dark"[\s\S]{0,160}gyro-chat-thread-topbar,[\s\S]{0,500}background: var\(--gyro-app\);/.test(
       chatDesignSource,
     ) &&
-    // Only the composer is solid; the changes pill and queue float over the
-    // transcript, which runs down behind them.
-    /gyro-chat-composer-dock \{\n  background: linear-gradient\([\s\S]{0,120}var\(--gyro-chat-dock-solid\) var\(--gyro-composer-solid-height/.test(
-      chatDesignSource,
-    ),
-  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, with only the composer solid in the dock.",
+    // The composer card is the only solid surface. The dock stays clear.
+    /gyro-chat-composer-dock \{\n  background: transparent;/.test(chatDesignSource),
+  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, and the composer dock stays clear.",
 );
 
 expect(
@@ -7446,13 +7461,13 @@ expect(
     ) &&
     tauriSource.includes("write_workspace_file") &&
     appSource.includes("<MonacoEditorPane") &&
-    appSource.includes('lazy(() => import("./monaco-editor"))') &&
+    workspaceCodeEditorSource.includes('lazy(() => import("../monaco-editor"))') &&
     monacoEditorSource.includes("loader.config({ monaco })") &&
     monacoEditorSource.includes("MonacoEnvironment") &&
     monacoEditorSource.includes("export function disposeMonacoModel") &&
     monacoEditorSource.includes("new EditorWorker()") &&
     monacoEditorSource.includes("new TypeScriptWorker()") &&
-    appSource.includes("keepCurrentModel") &&
+    workspaceCodeEditorSource.includes("keepCurrentModel") &&
     appSource.includes("function disposeEditorModels") &&
     surfaceSource.includes("renderEditor") &&
     !surfaceSource.includes("gyro-editor-ai-bar") &&
@@ -7483,8 +7498,14 @@ expect(
     appSource.includes("const stopIdeDebugSession = useCallback") &&
     appSource.includes("const closesLastReference") &&
     appSource.includes("Discard unsaved changes in") &&
-    appSource.includes('method: "textDocument/didOpen"') &&
-    appSource.includes('method: "textDocument/didChange"') &&
+    appSource.includes("useLanguageSessions({") &&
+    languageSessionsHookSource.includes("getManager().reconcile(documents)") &&
+    languageSessionsHookSource.includes('"lsp_start"') &&
+    languageSessionsHookSource.includes('"lsp_request"') &&
+    languageSessionsHookSource.includes('"lsp_stop"') &&
+    languageSessionsSource.includes('"textDocument/didOpen"') &&
+    languageSessionsSource.includes('"textDocument/didChange"') &&
+    languageSessionsSource.includes('"textDocument/didClose"') &&
     reducerSource.includes('case "ide-select-group"') &&
     reducerSource.includes('case "ide-rename-path"') &&
     reducerSource.includes('case "ide-delete-path"') &&
@@ -8086,7 +8107,7 @@ expect(
     appSource.includes(
       "stickyScroll: { enabled: !limited, maxLineCount: 3 }",
     ) &&
-    appSource.includes(
+    workspaceCodeEditorSource.includes(
       'theme={theme === "light" ? "gyro-light" : "gyro-dark"}',
     ),
   "The IDE editor should match the Sessions neutral palette and retain built-in navigation aids.",
@@ -8221,9 +8242,9 @@ expect(
     surfaceSource.includes('aria-label="Usage provider"') &&
     surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&
-    surfaceSource.includes("`${usedLabel}% used`") &&
-    surfaceSource.includes("<small>used</small>") &&
-    surfaceSource.includes('"--usage": `${(used ?? 0) * 3.6}deg`') &&
+    surfaceSource.includes("`${remaining.percentLabel} left`") &&
+    surfaceSource.includes("<small>left</small>") &&
+    surfaceSource.includes('"--usage": `${(remaining.percent ?? 0) * 3.6}deg`') &&
     surfaceSource.includes("No plan window API on this provider") &&
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&

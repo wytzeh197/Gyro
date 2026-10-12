@@ -6,10 +6,15 @@
   },
   "commands": [
     {
-      "description": "Open a URL in this chat's app-owned Gyro Browser rail. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+      "description": "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "reveal": {
+            "default": false,
+            "description": "Show the Browser panel for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Omit for background reading, research, or rendering fallback.",
+            "type": "boolean"
+          },
           "url": {
             "type": "string"
           }
@@ -62,10 +67,15 @@
       "name": "gyro_browser_screenshot"
     },
     {
-      "description": "Navigate this chat's open browser to a URL. Same origin gate as browser.open.",
+      "description": "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff. Same origin gate as browser.open.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "reveal": {
+            "default": false,
+            "description": "Show the Browser panel for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Omit for background reading, research, or rendering fallback.",
+            "type": "boolean"
+          },
           "url": {
             "type": "string"
           }
@@ -133,7 +143,7 @@
             "type": "string"
           },
           "rootId": {
-            "description": "Workspace root ID from gyro_workspace_get_context. Required when this session has multiple roots.",
+            "description": "Workspace root ID; required for multiple roots.",
             "type": "string"
           },
           "toX": {
@@ -231,10 +241,27 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "maxBytes": {
+            "default": 16384,
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "maximum": 131072,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "maxChars": {
+            "default": 6000,
+            "maximum": 48000,
+            "minimum": 1024,
+            "type": "integer"
+          },
           "maxDepth": {
             "maximum": 8,
             "minimum": 1,
             "type": "integer"
+          },
+          "ref": {
+            "description": "Read one element subtree using a ref from read_page or find; use to expand omitted children.",
+            "type": "string"
           }
         },
         "required": [],
@@ -247,6 +274,23 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "limit": {
+            "default": 20,
+            "maximum": 40,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxBytes": {
+            "default": 16384,
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "maximum": 131072,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "query": {
             "type": "string"
           },
@@ -265,8 +309,20 @@
         "additionalProperties": false,
         "properties": {
           "limit": {
+            "default": 20,
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "maxBytes": {
+            "default": 16384,
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "maximum": 131072,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -281,8 +337,20 @@
         "additionalProperties": false,
         "properties": {
           "limit": {
+            "default": 20,
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "maxBytes": {
+            "default": 16384,
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "maximum": 131072,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -324,5 +392,5 @@
       "tool": "gyro_browser_read_page"
     }
   ],
-  "workflowNote": "Illustrative local fixture. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy."
+  "workflowNote": "Illustrative browser interaction fixture, not the default for reading links. Prefer gyro_web_fetch for text-only research; reveal the browser only for an explicit open/show request, visual preview, or user handoff. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy."
 }

@@ -22,7 +22,6 @@ const MEMORY_HEADER: &str =
 const MAX_MEMORY_FILE_BYTES: usize = 256 * 1024;
 const MAX_MEMORY_ENTRIES: usize = 200;
 const MAX_MEMORY_ENTRY_CHARS: usize = 500;
-const MAX_MEMORY_RAW_CHARS: usize = 32 * 1024;
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -37,28 +36,12 @@ pub(super) fn execute(
     let content = read_memory(&candidate)?;
     match request.capability_id {
         CapabilityId::MemoryRead => {
-            let entries = memory_entries(&content);
-            let raw = arguments
-                .get("raw")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let mut data = json!({
-                "schema": MEMORY_SCHEMA,
-                "path": MEMORY_PATH,
-                "exists": candidate.exists(),
-                "entries": entries,
-                "total": entries.len(),
-            });
-            if raw {
-                data["raw"] = json!(content
-                    .chars()
-                    .take(MAX_MEMORY_RAW_CHARS)
-                    .collect::<String>());
-            }
-            let summary = if entries.is_empty() {
+            let data = memory_read_result(&content, candidate.exists(), arguments)?;
+            let total = data["total"].as_u64().unwrap_or(0);
+            let summary = if total == 0 {
                 format!("Project memory is empty at {MEMORY_PATH}")
             } else {
-                format!("Read {} project memory entr(ies)", entries.len())
+                format!("Read project memory ({total} entries)")
             };
             Ok((summary, data, None))
         }
@@ -136,6 +119,40 @@ pub(super) fn execute(
             ))
         }
         other => anyhow::bail!("memory_capability does not handle {other}"),
+    }
+}
+
+fn memory_read_result(content: &str, exists: bool, arguments: &Value) -> anyhow::Result<Value> {
+    let entries = memory_entries(content);
+    let mut data =
+        json!({"schema":MEMORY_SCHEMA,"path":MEMORY_PATH,"exists":exists,"total":entries.len()});
+    if arguments["raw"].as_bool().unwrap_or(false) {
+        // Raw text already contains every parsed entry; return one format.
+        data["raw"] = json!(content);
+        capability_output_budget::text_result(
+            data,
+            &[capability_output_budget::TextField {
+                pointer: "/raw",
+                window: "rawWindow",
+                offset: "offset",
+                tail: false,
+            }],
+            arguments,
+        )
+    } else {
+        let offset = capability_output_budget::offset(arguments, "offset")?.unwrap_or(0);
+        let limit = capability_output_budget::page_limit(arguments, 20, MAX_MEMORY_ENTRIES)?;
+        data["offset"] = json!(offset);
+        data["entries"] = json!(entries
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>());
+        capability_output_budget::array_result(
+            data,
+            "entries",
+            workspace_result_byte_limit(arguments)?,
+        )
     }
 }
 
@@ -274,7 +291,10 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (properties, required) = match id {
         CapabilityId::MemoryRead => (
             json!({
-                "raw": { "type": "boolean", "description": "Also return the memory file as written." }
+                "raw": { "type": "boolean", "description": "Return raw file text instead of parsed entries." },
+                "offset": capability_output_budget::offset_schema(),
+                "limit": { "type":"integer","minimum":1,"maximum":MAX_MEMORY_ENTRIES,"default":20 },
+                "maxBytes": workspace_result_bytes_schema()
             }),
             vec![],
         ),
@@ -298,6 +318,40 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_raw_and_entry_pages_are_not_duplicated_or_lost() {
+        let content = (0..200)
+            .map(|index| format!("- 2026-10-11 — entry {index} {}\n", "x".repeat(400)))
+            .collect::<String>();
+        let raw = memory_read_result(&content, true, &json!({"raw":true})).unwrap();
+        assert!(raw.get("entries").is_none());
+        assert_eq!(raw["rawWindow"]["truncated"], true);
+        assert!(serde_json::to_vec(&raw).unwrap().len() <= DEFAULT_WORKSPACE_RESULT_BYTES);
+        let first = memory_read_result(&content, true, &json!({})).unwrap();
+        assert_eq!(first["returned"], 20);
+        assert_eq!(first["nextOffset"], 20);
+        let second =
+            memory_read_result(&content, true, &json!({"offset":first["nextOffset"]})).unwrap();
+        assert!(second["entries"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("entry 20 "));
+    }
+
+    #[test]
+    fn explicit_memory_page_limit_is_not_silently_capped_at_fifty() {
+        let content = (0..200)
+            .map(|index| format!("- entry {index}\n"))
+            .collect::<String>();
+        let page =
+            memory_read_result(&content, true, &json!({"limit":200,"maxBytes":131072})).unwrap();
+        assert_eq!(page["returned"], 200);
+        assert_eq!(page["hasMore"], false);
+        for limit in [json!(0), json!(201), json!("200"), json!(1.5)] {
+            assert!(memory_read_result(&content, true, &json!({"limit":limit})).is_err());
+        }
+    }
 
     #[test]
     fn entries_parse_dates_and_tolerate_plain_lines() {

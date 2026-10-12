@@ -609,7 +609,7 @@ where
     }
 
     crate::timing::mark(crate::timing::Stage::ProtocolReady);
-    let mut prompt = request.prompt.clone();
+    let mut prompt = request.prompt;
     if resumed {
         if let Some(short_prompt) = request.resumed_prompt.as_deref() {
             if let Some(text) = prompt.first_mut().and_then(|part| part.get_mut("text")) {
@@ -1004,14 +1004,18 @@ where
                     if let Some(context) = params.get("update").and_then(acp_usage::context_usage) {
                         connection.context_usage = Some(context);
                     }
+                    // Reopening/loading a session can replay its old replies and
+                    // tool activities. They already belong to native history;
+                    // rendering them as this turn duplicates saved replies and
+                    // can cause later continuation prompts to resend old work.
+                    handle_session_update(
+                        &params,
+                        &connection.provider_label,
+                        response,
+                        on_delta,
+                        on_activity,
+                    );
                 }
-                handle_session_update(
-                    &params,
-                    &connection.provider_label,
-                    response,
-                    on_delta,
-                    on_activity,
-                );
             }
             "session/request_permission" => {
                 let Some(id) = message.get("id").cloned() else {
@@ -2486,6 +2490,59 @@ done
         )
         .unwrap();
         assert_eq!(output.response, "ready");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resumed_history_replay_is_not_rendered_or_saved_as_the_new_response() {
+        let (temp, program) = acp_fixture(
+            r#"
+    while IFS= read -r line; do
+      case "$line" in
+        *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}' ;;
+        *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+        *'"method":"session/load"'*)
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Old reply replayed from history."}}}}'
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"old-call","title":"Old read","kind":"read","status":"completed"}}}'
+          printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{}}' ;;
+        *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+        *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
+        *'"method":"session/prompt"'*)
+          case "$line" in *'Prior conversation'*|*'full opening context'*) exit 9 ;; esac
+          case "$line" in *'short resumed context'*'explicit attachment'*) ;; *) exit 9 ;; esac
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"new-call","title":"New read","kind":"read","status":"completed"}}}'
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"New reply."}}}}'
+          printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}' ;;
+      esac
+    done
+    "#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            Some("saved-session".into()),
+        );
+        request.prompt[0]["text"] = "full opening context".into();
+        request.prompt.push(json!({"type": "resource", "resource": {"uri": "file:///fixture", "text": "explicit attachment"}}));
+        request.resumed_prompt = Some("short resumed context".into());
+        request.conversation_history_text =
+            Some("This local history must not be sent on resume".into());
+        let mut deltas = String::new();
+        let mut activities = Vec::new();
+        let output = run_kimi_acp(
+            request,
+            |delta| deltas.push_str(delta),
+            |activity| activities.push(activity.clone()),
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert!(output.resumed);
+        assert_eq!(output.response, "New reply.");
+        assert_eq!(deltas, "New reply.");
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0].label, "New read");
     }
 
     #[cfg(unix)]

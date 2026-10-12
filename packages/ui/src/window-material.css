@@ -1,0 +1,113 @@
+/* Keep navigation ink fully opaque. Only the backdrop receives a tint.
+   This is enabled by the macOS main window, or explicitly by a labeled fixture. */
+:root[data-native-material="sidebar"] {
+  --gyro-window-tint: 92%;
+  --gyro-window-blur: blur(24px) saturate(1.04);
+  --gyro-sidebar-material: color-mix(
+    in srgb, var(--gyro-sidebar) var(--gyro-window-tint), transparent
+  );
+}
+
+:root[data-native-material="sidebar"][data-theme="light"] {
+  --gyro-window-tint: 94%;
+}
+
+/* Workspace tone is defined on the shell, so resolve its material there. */
+:root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
+  --gyro-chrome-material: color-mix(
+    in srgb, var(--gyro-workspace-chrome) var(--gyro-window-tint), transparent
+  );
+}
+
+/* Clear every ancestor between the chrome and the native material.
+   Error and auxiliary surfaces retain their opaque canvas. */
+:root[data-native-material="sidebar"]:has(.gyro-app-shell),
+:root[data-native-material="sidebar"]:has(.gyro-app-shell) body,
+:root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
+  background: transparent;
+}
+
+/* Sessions, Settings, and other universal navigation: one continuous material,
+   including the title bar and footer. A separate paint layer avoids making
+   the sidebar a containing block for fixed menus and tooltips. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-sidebar {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-sidebar::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-sidebar-material);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar :is(.gyro-sidebar-windowbar, .gyro-sidebar-footer) {
+  background: transparent;
+}
+
+/* Scrolling section labels share the continuous material. Project titles
+   retain their existing opaque sticky backing when chats scroll beneath them. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar .gyro-sidebar-small-title {
+  background: transparent;
+}
+
+/* Workspace: the outside activity rail and its 48px title band only.
+   Explorer, source control, and sidebar chat remain solid below the band. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar {
+  background: linear-gradient(
+    to bottom, transparent 48px, var(--gyro-sidebar) 48px
+  );
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-chrome-material);
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-chrome-material);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-native-material="sidebar"][data-theme] {
+    --gyro-window-tint: 100%;
+    --gyro-window-blur: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-native-material="sidebar"][data-theme] {
+    --gyro-window-tint: 100%;
+    --gyro-window-blur: none;
+  }
+}

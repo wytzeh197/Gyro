@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ProviderUsageState, UsageSafetySnapshot } from "./types";
 import { settingsSearchKey } from "./settings-controls";
 import { formatTokenCount, summarizeUsageSafety } from "./usage-ledger";
+import { remainingUsage } from "./usage-remaining";
 type IconComponent = LucideIcon;
 
 export function SettingsSection({
@@ -104,8 +105,7 @@ export function UsageCard({
   resetCaption?: string;
 }) {
   if (!window) return null;
-  // Plan windows report how much of the allowance is *spent* this period.
-  // The bar fills as spend builds up.
+  // Provider reports are spend; the meter presents the allowance still available.
   const measured =
     typeof window.usedPercent === "number" &&
     Number.isFinite(window.usedPercent);
@@ -120,21 +120,16 @@ export function UsageCard({
       : window.status === "warning" || (used !== undefined && used >= 80)
         ? "warning"
         : "normal";
-  const usedLabel =
-    used === undefined
-      ? "—"
-      : used === 0 && measured && (window.usedPercent ?? 0) > 0
-        ? "<1"
-        : String(used);
+  const remaining = remainingUsage(window.usedPercent, window.status === "exhausted");
   return (
     <article className={`gyro-usage-card is-${severity}`}>
       <header>
         <strong>{window.label}</strong>
         <span>
           {severity === "critical"
-            ? "Limit reached"
+            ? remaining.percent === 0 ? "No allowance left" : "Almost empty"
             : severity === "warning"
-              ? "High usage"
+              ? "Low allowance"
               : used === undefined
                 ? "Unmeasured"
                 : "Within limit"}
@@ -143,15 +138,20 @@ export function UsageCard({
       {visualization === "wheels" ? (
         <div
           className="gyro-usage-wheel"
+          role="progressbar"
+          aria-label={remaining.percent === undefined ? `${window.label}: level not reported` : `${window.label}: ${remaining.percentLabel} left`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={remaining.percent}
           style={
             {
-              "--usage": `${(used ?? 0) * 3.6}deg`,
+              "--usage": `${(remaining.percent ?? 0) * 3.6}deg`,
             } as CSSProperties
           }
         >
           <span>
-            <strong>{used === undefined ? "—" : `${usedLabel}%`}</strong>
-            <small>used</small>
+            <strong>{remaining.percentLabel}</strong>
+            <small>left</small>
           </span>
         </div>
       ) : (
@@ -160,17 +160,17 @@ export function UsageCard({
           aria-label={
             used === undefined
               ? `${window.label}: level not reported`
-              : `${usedLabel}% used`
+              : `${window.label}: ${remaining.percentLabel} left`
           }
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          {...(used !== undefined ? { "aria-valuenow": used } : {})}
+          {...(remaining.percent !== undefined ? { "aria-valuenow": remaining.percent } : {})}
         >
           {used !== undefined ? (
             <span
               style={{
-                width: `${Math.max(used, used > 0 ? 2 : 0)}%`,
+                width: `${remaining.percent}%`,
               }}
             />
           ) : null}
@@ -178,7 +178,7 @@ export function UsageCard({
       )}
       <div className="gyro-usage-card-meta">
         <strong>
-          {used === undefined ? "Level not reported" : `${usedLabel}% used`}
+          {remaining.percent === undefined ? "Level not reported" : `${remaining.percentLabel} left`}
         </strong>
         <span>
           {resetCaption ??

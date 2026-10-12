@@ -1,13 +1,24 @@
 // Development-only browser chrome preview; no native commands or model calls.
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserPreviewSurface } from "@gyro-dev/ui";
 import type { BrowserFeedback, BrowserPreview } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 
 function Fixture() {
-  const pointerDemo = new URLSearchParams(location.search).has("pointer");
+  const nativeDemo = new URLSearchParams(location.search).has("native");
+  const pointerDemo = nativeDemo || new URLSearchParams(location.search).has("pointer");
   const [active, setActive] = useState(true);
+  const [device, setDevice] = useState<BrowserPreview["device"]>("desktop");
+  const [occluded, setOccluded] = useState(false);
+  const [hostVisible, setHostVisible] = useState(false);
+  const [hiddenReports, setHiddenReports] = useState(0);
+  const reportHostBounds = useCallback((bounds: {
+    x: number; y: number; width: number; height: number;
+  } | null) => {
+    setHostVisible(bounds !== null);
+    if (bounds === null) setHiddenReports((count) => count + 1);
+  }, []);
   const [narrow, setNarrow] = useState(false);
   const [captureVisible, setCaptureVisible] = useState(false);
   const [feedback, setFeedback] = useState<BrowserFeedback | null>(null);
@@ -62,7 +73,28 @@ function Fixture() {
         color: "var(--gyro-text)",
       }}
     >
-      <nav style={{ display: "flex", gap: 12, padding: 12 }}>
+      <style>{`
+        .fixture-native-host .gyro-browser-native-host {
+          background: linear-gradient(135deg, #e7efff, #e3f4ee);
+          display: grid; place-items: center;
+        }
+        .fixture-native-host .gyro-browser-native-host::after {
+          content: "Simulated native page · fixture"; color: #28465c;
+          font: 16px system-ui; text-align: center;
+        }
+      `}</style>
+      <nav style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: 12 }}>
+        <strong>Browser chrome fixture</strong>
+        {nativeDemo ? (
+          <>
+            <output data-testid="host-visibility">
+              Host {hostVisible ? "visible" : "hidden"} · Hidden reports: {hiddenReports}
+            </output>
+            <button onClick={() => setOccluded((value) => !value)}>
+              Toggle covering overlay
+            </button>
+          </>
+        ) : null}
         <button
           onClick={() => {
             document.documentElement.dataset.theme =
@@ -85,7 +117,10 @@ function Fixture() {
         ) : null}
       </nav>
       <div
+        className={`gyro-chat-companion${nativeDemo ? " fixture-native-host" : ""}`}
         style={{
+          display: "grid",
+          gridTemplateRows: "minmax(0, 1fr)",
           flex: 1,
           minHeight: 0,
           width: narrow ? (pointerDemo ? 320 : 440) : "100%",
@@ -103,7 +138,11 @@ function Fixture() {
                 : "Read the current page"
               : undefined
           }
-          browserPreview={browserPreview}
+          browserPreview={browserPreview ? { ...browserPreview, device } : undefined}
+          nativeHost={nativeDemo}
+          overlayOccluded={occluded}
+          onHostBoundsChange={nativeDemo ? reportHostBounds : undefined}
+          onDeviceChange={setDevice}
           onScreenshot={(action, note) => {
             if (action === "feedback" && note) setFeedback(note);
           }}

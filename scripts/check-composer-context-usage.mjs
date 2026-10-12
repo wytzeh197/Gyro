@@ -1,4 +1,21 @@
 import assert from "node:assert/strict";
+import { remainingUsage } from "../packages/ui/src/usage-remaining.ts";
+
+for (const [used, expected, label] of [
+  [0, 100, "100%"], [46, 54, "54%"], [100, 0, "0%"],
+  [105, 0, "0%"], [-5, 100, "100%"],
+  [99.6, 0.4, "<1%"], [0.4, 99.6, ">99%"],
+]) {
+  const left = remainingUsage(used);
+  assert.ok(Math.abs(left.percent - expected) < 1e-9);
+  assert.equal(left.percentLabel, label);
+}
+for (const unknown of [undefined, NaN, Infinity]) {
+  assert.equal(remainingUsage(unknown).percent, undefined);
+  assert.equal(remainingUsage(unknown).percentLabel, "—");
+}
+assert.deepEqual(remainingUsage(undefined, true), { percent: 0, percentLabel: "0%" });
+assert.deepEqual(remainingUsage(25, true), { percent: 0, percentLabel: "0%" });
 import {
   providerUsageFromSnapshot,
   providerUsageAfterError,
@@ -33,6 +50,7 @@ assert.equal(estimated.source, "estimated");
 assert.equal(estimated.usedLabel, "400");
 assert.equal(estimated.windowLabel, "400K");
 assert.equal(estimated.percentLabel, "<1%");
+assert.equal(estimated.remainingPercentLabel, ">99%");
 assert.equal(
   composerContextUsageForModel(estimated, {
     providerId: "openai",
@@ -52,6 +70,8 @@ for (const providerId of ["cursor", "opencode", "custom:unknown"]) {
   assert.equal(unknown.windowLabel, "Unknown");
   assert.equal(unknown.percentLabel, "—");
   assert.equal(unknown.remainingLabel, "Unknown");
+  assert.equal(unknown.remainingPercent, undefined);
+  assert.equal(unknown.remainingPercentLabel, "—");
   assert.match(unknown.label, /context window unknown/);
 }
 
@@ -90,6 +110,8 @@ assert.equal(reported.usedLabel, "12K");
 // A matching runtime window wins over the API/catalog maximum.
 assert.equal(reported.windowLabel, "100K");
 assert.equal(reported.percentLabel, "12%");
+assert.equal(reported.remainingPercentLabel, "88%");
+assert.match(reported.label, /12K of 100K tokens used \(12% used\)/);
 assert.match(reported.detail, /newer thread content and this draft/);
 assert.equal(
   composerContextUsageForModel(reported, {
@@ -193,6 +215,8 @@ const clamped = estimateComposerContextUsage(
 );
 assert.equal(clamped.percent, 100);
 assert.equal(clamped.remainingLabel, "0");
+assert.equal(clamped.remainingPercent, 0);
+assert.equal(clamped.remainingPercentLabel, "0%");
 
 // A turn total is not what the window holds. Claude Code's closing frame sums
 // every request the turn made, which read as "1.18M of 200K · 0 remaining"
@@ -439,6 +463,8 @@ const merged = composerLimitWindows(
 );
 assert.equal(merged[0].id, "five-hour");
 assert.equal(merged[0].percent, 84);
+assert.equal(merged[0].remainingPercent, 16);
+assert.equal(merged[0].remainingPercentLabel, "16%");
 assert.equal(merged[0].severity, "warning");
 assert.equal(merged.length, 1);
 

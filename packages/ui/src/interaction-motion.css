@@ -105,3 +105,82 @@
 :root .gyro-run-header-toggle[aria-expanded="true"] > svg {
   transform: rotate(90deg);
 }
+
+/* Shared surface motion: small distances, no delay before controls are usable.
+   Opacity-only arrival avoids creating containing blocks for positioned menus. */
+:root :is(
+    .gyro-settings-content,
+    .gyro-providers-content,
+    .gyro-automations-content,
+    .gyro-board-content,
+    .gyro-browser-feedback-form,
+    .gyro-chat-environment-popover-notice,
+    .gyro-inline-approval,
+    .gyro-browser-agent-strip
+  ) {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+/* Anchored menus share a quick arrival; specialized model flyouts keep their
+   directional animations. Use individual translate, preserving existing transforms. */
+:root :is(
+    .gyro-chat-switcher-menu,
+    .gyro-account-menu,
+    .gyro-explorer-context-menu,
+    .gyro-sidebar-new-session-menu,
+    .gyro-chat-message-queue-menu,
+    .gyro-chat-companion-menu,
+    .gyro-chat-environment-popover,
+    .gyro-environment-branch-menu,
+    .gyro-terminal-diff-popover,
+    .gyro-scm-branch-menu,
+    .gyro-terminal-corner-menu,
+    .gyro-workspace-preparation-popover,
+    .gyro-composer-slash-menu,
+    .gyro-composer-command-popover
+  ) {
+  animation: gyro-anchored-surface-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root :is(.gyro-sidebar-update-tip, .gyro-provider-allowance-tooltip, .gyro-composer-context-tooltip) {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+:root :is(.gyro-command-overlay, .gyro-model-standard-overlay) {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root :is(.gyro-command-palette, .gyro-model-standard-card) {
+  animation: gyro-dialog-in var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+}
+:root :is(.gyro-branch-name-dialog, .gyro-quit-dialog)[open] {
+  animation: gyro-dialog-in var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+}
+:root :is(.gyro-branch-name-dialog, .gyro-quit-dialog)::backdrop {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+/* Opacity changes remain interruptible and do not move hit targets. */
+:root .gyro-chat-companion-resizer::after,
+:root .gyro-chat-grid-slot::after,
+:root :is(
+    .gyro-browser-rail-resize-handle > span,
+    .gyro-tool-panel-resize-handle span,
+    .gyro-browser-agent-strip,
+    .gyro-activity-rail-badge
+  ) {
+  transition:
+    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+@keyframes gyro-anchored-surface-in {
+  from { opacity: 0; translate: 0 var(--gyro-popover-offset, 4px); }
+  to { opacity: 1; translate: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root *, :root *::before, :root *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+}
+

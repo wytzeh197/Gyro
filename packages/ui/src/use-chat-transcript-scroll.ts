@@ -80,13 +80,16 @@ export function useChatTranscriptScroll({
     const distanceFromBottom =
       transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
     const isAtBottom = distanceFromBottom <= BOTTOM_SLACK;
-    if (isAtBottom) {
-      isFollowingBottomRef.current = true;
-    } else if (
+    if (
       pointerDownRef.current &&
       transcript.scrollTop < lastScrollTopRef.current
     ) {
       isFollowingBottomRef.current = false;
+    } else if (isAtBottom && transcript.scrollTop > lastScrollTopRef.current) {
+      // Only moving back toward latest resumes following. Activity and pane
+      // resize updates can run within the bottom slack (or before a wheel
+      // gesture scrolls); they must not undo the reader's upward intent.
+      isFollowingBottomRef.current = true;
     }
     lastScrollTopRef.current = transcript.scrollTop;
     setIsTranscriptAwayFromBottom(!isAtBottom);
@@ -168,8 +171,10 @@ export function useChatTranscriptScroll({
     requestedEarlierCursorRef.current = undefined;
     pendingEarlierScrollRef.current = undefined;
     lastScrollTopRef.current = 0;
-    if (transcript && restored !== undefined) transcript.scrollTop = restored;
-    else pinToBottom();
+    if (transcript && restored !== undefined) {
+      transcript.scrollTop = restored;
+      lastScrollTopRef.current = transcript.scrollTop;
+    } else pinToBottom();
     updateScrollPosition();
   }, [sessionId, pinToBottom, updateScrollPosition]);
   useLayoutEffect(() => {

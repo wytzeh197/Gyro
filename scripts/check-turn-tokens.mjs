@@ -51,12 +51,26 @@ const actual = turnTokensFromValue({
     input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true } }),
 });
 const reading = turnTokenReadingForResponse(actual, undefined, "", "");
-assert.equal(reading.label, "3.9M tokens · 3.7M cached");
+assert.equal(reading.label, "3.89M tokens · includes 3.75M cached");
 assert.match(reading.title, /3,894,989 tokens/);
 assert.match(reading.title, /not additional/);
 assert.match(reading.title, /100 cache-write/);
 assert.match(reading.title, /2,825 reasoning/);
 assert.deepEqual(turnTokensFromValue(JSON.parse(JSON.stringify(actual))), actual);
+
+// The screenshot's two rounded 1.8M values are distinct; cache is part of total.
+const screenshot = turnTokensFromValue({
+  inputTokens: 1834057, cachedInputTokens: 1786368, outputTokens: 3120,
+  totalTokens: 1837177, measured: true,
+  accounting: metadata("complete", { known: {
+    input: true, output: true, cacheRead: true, cacheWrite: false, reasoning: false } }),
+});
+const screenshotReading = turnTokenReadingForResponse(screenshot, undefined, "", "");
+assert.equal(screenshot.totalTokens, screenshot.inputTokens + screenshot.outputTokens);
+assert.equal(screenshotReading.label, "1.84M tokens · includes 1.79M cached");
+assert.match(screenshotReading.title, /1,837,177 tokens reported/);
+assert.match(screenshotReading.title, /1,834,057 input · 3,120 output/);
+assert.match(screenshotReading.title, /Includes 1,786,368 cached input tokens, already part of input, not additional tokens/);
 
 // Actual reported zero differs from missing halves represented as zero internally.
 const zero = turnTokensFromValue({ inputTokens: 0, outputTokens: 0, totalTokens: 0, measured: true, accounting: metadata() });
@@ -85,12 +99,35 @@ for (const value of [undefined, null, "1540", [], {}, { inputTokens: 100 },
 ]) assert.equal(turnTokensFromValue(value), undefined);
 assert.equal(turnTokensFromValue({ inputTokens: 100, outputTokens: 20, cachedInputTokens: 999,
   reasoningOutputTokens: 999, totalTokens: 120 }).cachedInputTokens, 100);
+for (const invalidSubset of [
+  { cachedInputTokens: 101 },
+  { cacheWriteTokens: 101 },
+  { cachedInputTokens: 80, cacheWriteTokens: 21 },
+  { reasoningOutputTokens: 21 },
+]) {
+  const tokens = turnTokensFromValue({ inputTokens: 100, outputTokens: 20, totalTokens: 120,
+    measured: true, accounting: metadata("complete", { known: {
+      input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true } }),
+    ...invalidSubset });
+  assert.equal(tokens.measured, false);
+  assert.equal(tokens.accounting.coverage, "estimated");
+  assert.equal(tokens.accounting.reason, "inconsistent-counts");
+  assert.equal(turnTokensLabel(tokens), "~120 tokens");
+  assert.match(turnTokensDetail(tokens), /inconsistent/);
+}
+const unavailableConflict = turnTokensFromValue({ inputTokens: 100, outputTokens: 20,
+  cachedInputTokens: 101, totalTokens: 120, measured: false,
+  accounting: metadata("unavailable", { reason: "unverified-runtime" }) });
+assert.equal(turnTokensLabel(unavailableConflict), "Usage unavailable");
+assert.equal(unavailableConflict.accounting.coverage, "unavailable");
 assert.equal(formatTokenCount(0), "0");
 assert.equal(formatTokenCount(9999), (9999).toLocaleString());
 assert.equal(formatTokenCount(12400), "12.4k");
 assert.equal(formatTokenCount(128000), "128k");
 assert.equal(formatTokenCount(999999), "1.0M");
 assert.equal(formatTokenCount(2400000), "2.4M");
+assert.equal(formatTokenCount(1837177), "1.84M");
+assert.equal(formatTokenCount(1786368), "1.79M");
 assert.equal(formatTokenCount(NaN), "—");
 assert.equal(formatTokenCount(-1), "—");
 console.log("turn token checks passed: complete, partial, estimated, unavailable, legacy, scope, subsets and persistence");

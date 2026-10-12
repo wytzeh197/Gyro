@@ -55,17 +55,25 @@ export function turnTokensFromValue(value: unknown): TurnTokens | undefined {
   const reported = count("totalTokens");
   const totalTokens = reported === undefined ? sum : Math.max(reported, sum ?? 0);
   if (totalTokens === undefined) return undefined;
-  const inconsistent = reported !== undefined && sum !== undefined && reported < sum;
+  const cached = count("cachedInputTokens");
+  const written = count("cacheWriteTokens");
+  const reasoning = count("reasoningOutputTokens");
+  const invalidCacheRead = cached !== undefined && inputTokens !== undefined && cached > inputTokens;
+  const invalidCacheWrite = written !== undefined && inputTokens !== undefined &&
+    (written > inputTokens || written > inputTokens - (cached ?? 0));
+  const invalidReasoning = reasoning !== undefined && outputTokens !== undefined && reasoning > outputTokens;
+  const inconsistent = (reported !== undefined && sum !== undefined && reported < sum) ||
+    invalidCacheRead || invalidCacheWrite || invalidReasoning;
   if (accounting && inconsistent) {
-    accounting.coverage = "estimated";
+    if (accounting.coverage !== "unavailable") accounting.coverage = "estimated";
     accounting.reason = "inconsistent-counts";
+    if (invalidCacheRead) accounting.known.cacheRead = false;
+    if (invalidCacheWrite) accounting.known.cacheWrite = false;
+    if (invalidReasoning) accounting.known.reasoning = false;
   } else if (accounting && record.measured === false && accounting.coverage === "complete") {
     accounting.coverage = "partial";
     accounting.reason = "provider-incomplete";
   }
-  const cached = count("cachedInputTokens");
-  const written = count("cacheWriteTokens");
-  const reasoning = count("reasoningOutputTokens");
   return {
     inputTokens, outputTokens, totalTokens,
     ...(cached !== undefined && inputTokens !== undefined ? { cachedInputTokens: Math.min(cached, inputTokens) } : {}),
@@ -90,7 +98,7 @@ export function formatTokenCount(tokens: number): string {
   if (!validCount(tokens)) return "—";
   if (tokens < 10_000) return tokens.toLocaleString();
   if (tokens < 999_500) return `${(tokens / 1_000).toFixed(tokens < 100_000 ? 1 : 0)}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}M`;
+  return `${(tokens / 1_000_000).toFixed(2).replace(/0$/, "")}M`;
 }
 
 export function turnTokensLabel(tokens: TurnTokens): string {
@@ -144,7 +152,7 @@ export function turnTokenReadingForResponse(
 ): TurnTokenReading {
   if (turnTokens) {
     const cache = !unavailable(turnTokens) && turnTokens.cachedInputTokens && turnTokens.accounting?.known.cacheRead
-      ? ` · ${formatTokenCount(turnTokens.cachedInputTokens)} cached` : "";
+      ? ` · includes ${formatTokenCount(turnTokens.cachedInputTokens)} cached` : "";
     return { label: turnTokensLabel(turnTokens) + cache, title: turnTokensDetail(turnTokens) };
   }
   // Only a typed request observation can establish a lower bound. Old context

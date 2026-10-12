@@ -576,7 +576,10 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
                     },
                 );
             }
-            "gyro-menu-quit" => app.exit(0),
+            "gyro-menu-quit" => {
+                hide_popover(app);
+                crate::quit_confirmation::request_quit(app);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

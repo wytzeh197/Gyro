@@ -209,7 +209,7 @@ export function SubagentPanel({
   if (!state || !agent)
     return (
       <div className="gyro-subagent-empty">
-        Select a sub-agent from Environment or Working process.
+        Select a sub-agent from Environment or the composer.
       </div>
     );
   const runIds = [

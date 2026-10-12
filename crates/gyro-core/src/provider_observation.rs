@@ -11,6 +11,7 @@ thread_local! { static ACTIVE: RefCell<Option<Summary>> = const { RefCell::new(N
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub requests: u32,
+    pub context_attribution: crate::efficiency::context::Attribution,
     pub completed: u32,
     pub rejected: u32,
     pub retries: u32,
@@ -22,6 +23,8 @@ pub struct Summary {
     pub usage_observations: Vec<crate::acp_usage::AcpUsageObservation>,
     #[serde(skip)]
     native: NativeAttempt,
+    #[serde(skip)]
+    prepared_context: crate::efficiency::context::Attribution,
     #[serde(skip)]
     previous_native: Option<UsageTokens>,
 }
@@ -66,6 +69,10 @@ pub fn native_prompt(payload: &Value) {
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
             summary.native.prompt_chars = text_size(payload).0;
+            let mut attribution = categorize_prompt(crate::efficiency::context::Attribution::from_request(payload), &summary.prepared_context);
+            attribution.hidden_content = true;
+            if attribution.estimated_tokens == 0 { attribution.other_text = summary.native.prompt_chars as u64; attribution.estimated_tokens = attribution.other_text.div_ceil(4); }
+            summary.context_attribution.combine(&attribution);
         }
     });
 }
@@ -96,6 +103,19 @@ pub fn native_acp_usage(observation: &crate::acp_usage::AcpUsageObservation) {
             summary.native.observation = Some(receipt);
         }
     });
+}
+/// Categories are supplied by the prompt builder, never inferred from user/source text.
+pub fn prepared_context(attribution: crate::efficiency::context::Attribution) {
+    ACTIVE.with(|slot| { if let Some(summary) = slot.borrow_mut().as_mut() { summary.prepared_context = attribution; } });
+}
+fn categorize_prompt(mut attribution: crate::efficiency::context::Attribution, prepared: &crate::efficiency::context::Attribution) -> crate::efficiency::context::Attribution {
+    let available = attribution.other_text;
+    let classified = prepared.instructions + prepared.history + prepared.task_state + prepared.source_excerpts + prepared.tool_results;
+    if classified <= available {
+        attribution.other_text -= classified; attribution.instructions += prepared.instructions; attribution.history += prepared.history;
+        attribution.task_state += prepared.task_state; attribution.source_excerpts += prepared.source_excerpts; attribution.tool_results += prepared.tool_results;
+    }
+    attribution
 }
 pub struct Scope(Option<Summary>);
 impl Scope {
@@ -132,6 +152,24 @@ pub fn snapshot() -> Option<Summary> {
         })
     })
 }
+
+/// Read live numeric usage without cloning adapter receipts on every frame.
+pub fn current_usage() -> Option<(u32, Option<UsageTokens>)> {
+    ACTIVE.with(|slot| {
+        let slot = slot.borrow();
+        let summary = slot.as_ref()?;
+        let mut tokens = summary.tokens;
+        if summary.requests == 0 {
+            tokens = summary.previous_native;
+            if let Some(native) = summary.native.tokens() {
+                add_usage(&mut tokens, native);
+            }
+        } else if summary.requests == summary.rejected && tokens.is_none() {
+            tokens = Some(UsageTokens::unavailable(crate::usage::UsageReason::MissingUsage));
+        }
+        Some((summary.requests, tokens.map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn))))
+    })
+}
 pub fn retry() {
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
@@ -160,6 +198,8 @@ impl Request {
         let index = ACTIVE.with(|slot| {
             slot.borrow_mut().as_mut().map_or(0, |summary| {
                 summary.requests = summary.requests.saturating_add(1);
+                let attribution = categorize_prompt(crate::efficiency::context::Attribution::from_request(payload), &summary.prepared_context);
+                summary.context_attribution.combine(&attribution);
                 summary.requests
             })
         });
@@ -260,9 +300,10 @@ pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
     });
 }
 
-// Count text and schema structure without serializing or cloning large images.
-// Image bytes are not text tokens and must not become fictitious token spend.
-pub(crate) fn text_size(value: &Value) -> (usize, bool) {
+/// Estimate text and schema characters without serializing or cloning images.
+/// The flag indicates image content whose token cost is unknown; its encoded
+/// bytes are excluded rather than treated as text tokens.
+pub fn text_size(value: &Value) -> (usize, bool) {
     match value {
         Value::String(text) if text.starts_with("data:image/") => (0, true),
         Value::String(text) => (text.chars().count().saturating_add(2), false),
@@ -293,6 +334,29 @@ pub(crate) fn text_size(value: &Value) -> (usize, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lightweight_live_usage_preserves_native_restarts_http_retries_and_rejections() {
+        let _scope = Scope::start();
+        attempt();
+        native_prompt(&serde_json::json!("prompt"));
+        native_usage(UsageTokens::measured(Some(100), Some(80), Some(20), None, None));
+        attempt();
+        native_usage(UsageTokens::measured(Some(50), None, Some(10), None, None));
+        assert_eq!(current_usage().unwrap().1, snapshot().unwrap().tokens);
+        {
+            let mut request = Request::start(&serde_json::json!({"messages":"request"}));
+            request.complete(Some(25), Some(5), 0);
+        }
+        {
+            let mut rejected = Request::start(&serde_json::json!({"messages":"not generated"}));
+            rejected.rejected();
+        }
+        let (requests, tokens) = current_usage().unwrap();
+        assert_eq!(requests, 2);
+        assert_eq!(tokens, snapshot().unwrap().tokens);
+        assert_eq!(tokens.unwrap().total_tokens, 30);
+    }
 
     #[test]
     fn acp_receipts_keep_only_latest_observation_per_attempt() {

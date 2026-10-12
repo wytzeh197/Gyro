@@ -111,7 +111,12 @@ impl CodexTurnUsage {
 }
 
 fn counts_regressed(total: UsageTokens, old: UsageTokens) -> bool {
-    let known = |tokens: UsageTokens| tokens.accounting.map(|metadata| metadata.known).unwrap_or_default();
+    let known = |tokens: UsageTokens| {
+        tokens
+            .accounting
+            .map(|metadata| metadata.known)
+            .unwrap_or_default()
+    };
     let a = known(total);
     let b = known(old);
     (a.input && b.input && total.input_tokens < old.input_tokens)
@@ -206,7 +211,12 @@ fn parse_counts(value: &serde_json::Value) -> Option<UsageTokens> {
     Some(tokens)
 }
 fn subtract(total: UsageTokens, baseline: UsageTokens) -> UsageTokens {
-    let known = |tokens: UsageTokens| tokens.accounting.map(|metadata| metadata.known).unwrap_or_default();
+    let known = |tokens: UsageTokens| {
+        tokens
+            .accounting
+            .map(|metadata| metadata.known)
+            .unwrap_or_default()
+    };
     let a = known(total);
     let b = known(baseline);
     let delta = |value: u64, old: u64, supplied: bool| supplied.then(|| value.saturating_sub(old));
@@ -253,11 +263,50 @@ pub(super) fn set_usage_offset(app: &tauri::AppHandle, session: &str, tokens: Op
     }
 }
 
+struct TokenEmission {
+    display: UsageTokens,
+    spend: Option<(UsageTokens, u32)>,
+}
+
+impl TokenEmission {
+    fn live(
+        tokens: UsageTokens,
+        observed: Option<(u32, Option<UsageTokens>)>,
+        offset: Option<UsageTokens>,
+    ) -> Self {
+        // API retries belong to the collector even when the runner retained
+        // only successfully returned rounds.
+        let tokens = observed
+            .filter(|(requests, _)| *requests > 0)
+            .and_then(|(_, tokens)| tokens)
+            .unwrap_or(tokens);
+        let worker_tokens = observed.and_then(|(_, tokens)| tokens).unwrap_or(tokens);
+        Self {
+            display: delegated_agents::add_tokens(offset, Some(tokens)).unwrap(),
+            spend: Some((
+                delegated_agents::add_tokens(offset, Some(worker_tokens)).unwrap(),
+                observed.map_or(0, |(requests, _)| requests),
+            )),
+        }
+    }
+
+    fn task(tokens: UsageTokens) -> Self {
+        // The worker receipts were checked while running. This cumulative
+        // display reading may also include child receipts in the ledger, so
+        // feeding it back into the live guard would count those children twice.
+        Self {
+            display: tokens,
+            spend: None,
+        }
+    }
+}
+
 pub(super) fn emit_turn_tokens(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     tokens: UsageTokens,
 ) {
+    let observed = gyro_core::provider_observation::current_usage();
     let offset = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -265,7 +314,22 @@ pub(super) fn emit_turn_tokens(
         .ok()
         .and_then(|flags| flags.get(&request.session_id).cloned())
         .and_then(|control| control.usage_offset.lock().ok().and_then(|offset| *offset));
-    let tokens = delegated_agents::add_tokens(offset, Some(tokens)).unwrap();
+    emit_tokens(app, request, TokenEmission::live(tokens, observed, offset));
+}
+
+pub(super) fn emit_task_tokens(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    tokens: UsageTokens,
+) {
+    emit_tokens(app, request, TokenEmission::task(tokens));
+}
+
+fn emit_tokens(app: &tauri::AppHandle, request: &ProviderChatRequest, emission: TokenEmission) {
+    if let Some((tokens, requests)) = emission.spend {
+        provider_spend_guard::observe(app, request, tokens, requests);
+    }
+    let tokens = emission.display;
     delegated_agents::observe_tokens(app, request, tokens);
     let _ = app.emit(
         PROVIDER_CHAT_EVENT,
@@ -373,11 +437,22 @@ pub(super) fn record_provider_usage(
             .map_or(0, |output| output.retry_count)
             .max(gyro_core::provider_observation::snapshot().map_or(0, |summary| summary.retries)),
     };
-    if let Err(error) = store.record_usage(&entry) {
-        eprintln!(
-            "provider call completed but its usage was not recorded: {}",
-            gyro_core::security::redact_secrets(&error.to_string())
-        );
+    match store.record_usage(&entry) {
+        Ok(id) => {
+            let cfg = efficiency::config();
+            let attribution = gyro_core::provider_observation::snapshot().map(|s|s.context_attribution).unwrap_or_default();
+            let price = if gyro_core::efficiency::controls(&request.provider_id).owns_requests && request.provider_id != "ollama" {
+                request.model_id.as_deref().and_then(|model|gyro_core::efficiency::pricing::snapshot(&cfg.prices,&request.provider_id,model,&chrono::Utc::now().format("%Y-%m-%d").to_string()))
+            } else {None};
+            let _ = store.record_efficiency_metadata(id,price,&attribution);
+            if let Some(turn) = entry.turn_id {
+                let task = efficiency::checkpoint(store,session_id,request.workspace_path.as_deref().unwrap_or(""),0).map(|c|c.task_id).unwrap_or(session_id);
+                let _ = store.link_efficiency_task(task,session_id,turn);
+                let totals = store.efficiency_task_totals(task).ok();
+                let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":gyro_core::provider_observation::snapshot().map(|s|s.requests.max(s.provider_attempts)),"estimatedCost":price.and_then(|p|p.price(tokens)),"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
+            }
+        }
+        Err(error) => eprintln!("Provider usage recording failed: {}",gyro_core::security::redact_secrets(&error.to_string())),
     }
     // Terminal receipts survive reload even when no assistant answer exists.
     if let Some(turn_id) = entry.turn_id {
@@ -424,6 +499,111 @@ pub(super) fn tool_timing(call_id: Uuid, status: CapabilityStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_totals_display_children_once_without_rebilling_them_to_the_live_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "parent")
+            .unwrap();
+        let child = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "child")
+            .unwrap();
+        let prior = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "prior")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let child_turn = Uuid::new_v4();
+        for (session_id, turn_id, amount) in [
+            (prior.id, Uuid::new_v4(), 600),
+            (parent.id, turn, 100),
+            (child.id, child_turn, 200),
+        ] {
+            store
+                .record_usage(&UsageEntry {
+                    session_id,
+                    turn_id: Some(turn_id),
+                    seat_id: None,
+                    provider_id: "openrouter".into(),
+                    model_id: None,
+                    reasoning_effort: None,
+                    origin: UsageOrigin::Chat,
+                    outcome: UsageOutcome::Done,
+                    tokens: UsageTokens::measured(Some(amount), None, Some(0), None, None),
+                    wall_ms: 0,
+                    retry_count: 0,
+                })
+                .unwrap();
+        }
+        store
+            .link_usage_turn(child.id, child_turn, parent.id, turn)
+            .unwrap();
+        let task = store.task_usage_tokens(parent.id, turn).unwrap().unwrap();
+        let outside = store
+            .provider_usage_outside_turn_since(
+                "openrouter",
+                chrono::Utc::now() - chrono::Duration::hours(24),
+                parent.id,
+                turn,
+            )
+            .unwrap();
+        assert_eq!(task.total_tokens, 300);
+        assert_eq!(outside.total_tokens, 800);
+        let display = TokenEmission::task(task);
+        assert_eq!(display.display.total_tokens, 300);
+        assert!(
+            display.spend.is_none(),
+            "child spend is already in the outside-turn ledger"
+        );
+        let live = TokenEmission::live(
+            UsageTokens::measured(Some(100), None, Some(0), None, None),
+            None,
+            None,
+        );
+        assert_eq!(
+            outside.total_tokens + live.spend.unwrap().0.total_tokens,
+            900
+        );
+    }
+
+    #[test]
+    fn live_emissions_include_interrupted_retries_and_continuation_offsets_once() {
+        let _scope = gyro_core::provider_observation::Scope::start();
+        {
+            let mut interrupted =
+                gyro_core::provider_observation::Request::start(&serde_json::json!("prompt"));
+            interrupted.reported(Some(60), Some(10));
+        }
+        {
+            let mut completed =
+                gyro_core::provider_observation::Request::start(&serde_json::json!("prompt"));
+            completed.complete(Some(40), Some(10), 0);
+        }
+        let successful_round = UsageTokens::measured(Some(40), None, Some(10), None, None);
+        let prior_continuation = UsageTokens::measured(Some(20), Some(10), Some(10), None, None);
+        let emission = TokenEmission::live(
+            successful_round,
+            gyro_core::provider_observation::current_usage(),
+            Some(prior_continuation),
+        );
+        assert_eq!(emission.display.total_tokens, 150);
+        let (spend, requests) = emission.spend.unwrap();
+        assert_eq!((requests, spend.total_tokens), (2, 150));
+        assert_eq!(
+            gyro_core::call_ceiling_tokens(
+                Some(spend.input_tokens),
+                Some(spend.cached_input_tokens),
+                Some(spend.output_tokens),
+            ),
+            140
+        );
+        assert!(
+            !spend.measured,
+            "the interrupted retry remains explicitly partial"
+        );
+    }
+
     #[test]
     fn rejected_http_requests_do_not_fall_back_to_prompt_token_estimates() {
         let _scope = gyro_core::provider_observation::Scope::start();
@@ -457,6 +637,43 @@ mod tests {
         assert!(tokens.measured);
         assert_eq!(usage.observe(&final_reading), Some(tokens));
     }
+
+    #[test]
+    fn screenshot_codex_receipt_differences_cached_subsets_once() {
+        let _scope = gyro_core::provider_observation::Scope::start();
+        let mut usage = CodexTurnUsage::new(true);
+        usage.set_baseline(parse_counts(&serde_json::json!({
+            "inputTokens": 1_754_476,
+            "cachedInputTokens": 1_681_792,
+            "outputTokens": 3_430,
+            "reasoningOutputTokens": 676,
+            "totalTokens": 1_757_906
+        })));
+        let reading = serde_json::json!({"tokenUsage": {"total": {
+            "inputTokens": 3_588_533,
+            "cachedInputTokens": 3_468_160,
+            "outputTokens": 6_550,
+            "reasoningOutputTokens": 1_722,
+            "totalTokens": 3_595_083
+        }}});
+        for _ in 0..3 {
+            let tokens = usage.observe(&reading).unwrap();
+            assert_eq!(tokens.input_tokens, 1_834_057);
+            assert_eq!(tokens.cached_input_tokens, 1_786_368);
+            assert_eq!(tokens.output_tokens, 3_120);
+            assert_eq!(tokens.reasoning_output_tokens, 1_046);
+            assert_eq!(tokens.total_tokens, 1_837_177);
+            assert_eq!(tokens.total_tokens, tokens.input_tokens + tokens.output_tokens);
+            assert!(tokens.measured);
+            let metadata = tokens.accounting.unwrap();
+            assert_eq!(metadata.scope, gyro_core::usage::UsageScope::Turn);
+            assert!(metadata.known.cache_read && metadata.known.reasoning);
+            gyro_core::provider_observation::native_usage(tokens);
+            assert_eq!(gyro_core::provider_observation::current_usage().unwrap().1, Some(tokens));
+            assert_eq!(gyro_core::provider_observation::snapshot().unwrap().tokens, Some(tokens));
+        }
+    }
+
     #[test]
     fn resumed_usage_excludes_history_and_marks_missing_baseline_and_resets() {
         let mut usage = CodexTurnUsage::new(true);

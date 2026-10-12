@@ -21,9 +21,17 @@ Plan remains a non-mutating ceiling and Council remains advisory-only regardless
 of the remembered normal-run mode. Changing mode is always explicit and the
 current mode must remain visible in the composer.
 
+Automatic sub-agent delegation is available at **Max** and **Ultra** effort.
+Low, Medium, High, XHigh, and an unspecified effort run with one agent unless
+the current user request explicitly asks to use sub-agents. An explicit request
+to work without sub-agents takes precedence at every effort. Permission mode
+does not enable delegation by itself. Gyro applies this rule to tool discovery,
+model instructions, and execution, including resumed chats with older tool lists.
+Existing children can still be inspected, waited for, and stopped.
+
 Sub-agent spawning and follow-up tasks inherit the parent's model, workspace,
-and permission ceiling. Approve for me automatically allows delegation unless
-the project policy explicitly denies it; Full access uses the existing normal-run
+and permission ceiling. For an eligible turn, Approve for me automatically allows
+delegation unless the project policy explicitly denies it; Full access uses the existing normal-run
 override. Switching to either mode also releases eligible delegation requests
 already waiting for approval. Ask for approval retains the explicit spawn
 decision. Plan children stay read-only, Council cannot delegate, and children

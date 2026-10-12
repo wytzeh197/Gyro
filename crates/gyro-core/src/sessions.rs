@@ -32,7 +32,7 @@ const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 7;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 8;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -109,6 +109,7 @@ pub enum SessionEventKind {
     ApprovalRequested,
     PlanUpdated,
     GoalUpdated,
+    TaskCheckpoint,
     ChatModeChanged,
     CouncilRunStarted,
     CouncilSeatStarted,
@@ -137,6 +138,7 @@ impl SessionEventKind {
             Self::ApprovalRequested => "approval-requested",
             Self::PlanUpdated => "plan-updated",
             Self::GoalUpdated => "goal-updated",
+            Self::TaskCheckpoint => "task-checkpoint",
             Self::ChatModeChanged => "chat-mode-changed",
             Self::CouncilRunStarted => "council-run-started",
             Self::CouncilSeatStarted => "council-seat-started",
@@ -1713,6 +1715,13 @@ impl SessionStore {
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(session_id,false)
+    }
+    /// Latest structured records plus durable routing evidence, without loading every old checkpoint.
+    pub fn read_efficiency_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(session_id,true)
+    }
+    fn read_context_events_filtered(&self, session_id: Uuid, efficiency: bool) -> Result<Vec<SessionEvent>> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1793,7 +1802,8 @@ impl SessionStore {
                     SessionEventKind::GoalUpdated
                         | SessionEventKind::PlanUpdated
                         | SessionEventKind::ChatModeChanged
-                ) {
+                        | SessionEventKind::TaskCheckpoint
+                ) || (event.kind == SessionEventKind::SystemEvent && event.payload["kind"] == "efficiency-phase-route") {
                     context_events.push((offset, event));
                 }
             }
@@ -1860,10 +1870,10 @@ impl SessionStore {
             transaction.commit()?;
         }
 
-        let mut statement = self.conn.prepare(
-            "select event_json from session_context_events
-             where session_id = ?1 order by log_offset asc",
-        )?;
+        let sql = if efficiency {
+            "select event_json from session_context_events e where session_id=?1 and (json_extract(event_json,'$.payload.kind')='efficiency-phase-route' or json_extract(event_json,'$.kind')='goal-updated' or log_offset=(select max(log_offset) from session_context_events n where n.session_id=e.session_id and json_extract(n.event_json,'$.kind')=json_extract(e.event_json,'$.kind'))) order by log_offset asc"
+        } else {"select event_json from session_context_events where session_id = ?1 order by log_offset asc"};
+        let mut statement = self.conn.prepare(sql)?;
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             row.get::<_, String>(0)
         })?;
@@ -2284,6 +2294,16 @@ impl SessionStore {
     ///
     /// Callers record every call, including failed and cancelled ones: a run
     /// that burned tokens and then timed out still spent them.
+    pub fn link_efficiency_task(&self, task: Uuid, session: Uuid, turn: Uuid) -> Result<()> {
+        crate::efficiency::accounting::link(&self.conn, task, session, turn)
+    }
+    pub fn record_efficiency_metadata(&self, usage: Uuid, price: Option<&crate::efficiency::pricing::PriceSnapshot>, attribution: &crate::efficiency::context::Attribution) -> Result<()> {
+        crate::efficiency::accounting::metadata(&self.conn, usage, price, attribution)
+    }
+    pub fn efficiency_task_totals(&self, task: Uuid) -> Result<crate::efficiency::accounting::TaskTotals> {
+        crate::efficiency::accounting::totals(&self.conn, task)
+    }
+
     pub fn record_usage(&self, entry: &crate::usage::UsageEntry) -> Result<Uuid> {
         crate::usage::insert_usage_entry(&self.conn, entry)
     }
@@ -2316,6 +2336,16 @@ impl SessionStore {
 
     pub fn task_usage_tokens(&self, session_id: Uuid, turn_id: Uuid) -> Result<Option<crate::usage::UsageTokens>> {
         crate::usage_receipts::task_tokens(&self.conn, session_id, turn_id)
+    }
+
+    pub fn provider_usage_outside_turn_since(
+        &self,
+        provider_id: &str,
+        since: chrono::DateTime<chrono::Utc>,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<crate::usage::UsageTotals> {
+        crate::usage::provider_usage_outside_turn_since(&self.conn, provider_id, since, session_id, turn_id)
     }
 
     pub fn link_usage_turn(&self, child_session: Uuid, child_turn: Uuid, parent_session: Uuid, parent_turn: Uuid) -> Result<()> {

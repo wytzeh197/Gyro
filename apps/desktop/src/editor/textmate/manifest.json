@@ -1,0 +1,1262 @@
+{
+  "schemaVersion": 1,
+  "roots": {
+    "vue": "text.html.vue",
+    "svelte": "source.svelte",
+    "astro": "source.astro",
+    "sass": "source.sass"
+  },
+  "scopes": {
+    "text.html.vue": "grammars/vue.tmLanguage.json",
+    "vue.directives": "grammars/vue-directives.tmLanguage.json",
+    "vue.interpolations": "grammars/vue-interpolations.tmLanguage.json",
+    "vue.sfc.script.leading-operator-fix": "grammars/vue-leading-operator.tmLanguage.json",
+    "vue.sfc.style.variable.injection": "grammars/vue-style-variable.tmLanguage.json",
+    "source.svelte": "grammars/svelte.tmLanguage.json",
+    "source.css.postcss": "grammars/postcss.tmLanguage.json",
+    "svelte.pug": "grammars/svelte-pug.tmLanguage.json",
+    "svelte.pug.tags": "grammars/svelte-pug-tags.tmLanguage.json",
+    "svelte.pug.dotblock": "grammars/svelte-pug-dotblock.tmLanguage.json",
+    "source.astro": "grammars/astro.tmLanguage.json",
+    "source.sass": "grammars/sass.tmLanguage.json",
+    "text.html.basic": "grammars/html.tmLanguage.json",
+    "text.html.derivative": "grammars/html-derivative.tmLanguage.json",
+    "source.css": "grammars/css.tmLanguage.json",
+    "source.css.scss": "grammars/scss.tmLanguage.json",
+    "source.sassdoc": "grammars/sassdoc.tmLanguage.json",
+    "source.css.less": "grammars/less.tmLanguage.json",
+    "source.js": "grammars/javascript.tmLanguage.json",
+    "source.js.jsx": "grammars/javascriptreact.tmLanguage.json",
+    "source.ts": "grammars/typescript.tmLanguage.json",
+    "source.tsx": "grammars/typescriptreact.tmLanguage.json",
+    "documentation.injection.js.jsx": "grammars/jsdoc-javascript.tmLanguage.json",
+    "documentation.injection.ts": "grammars/jsdoc-typescript.tmLanguage.json",
+    "source.json": "grammars/json.tmLanguage.json",
+    "source.json.comments": "grammars/jsonc.tmLanguage.json",
+    "text.html.markdown": "grammars/markdown.tmLanguage.json",
+    "text.pug": "grammars/pug.tmLanguage.json"
+  },
+  "scopeAliases": {
+    "source.html": "text.html.basic",
+    "source.less": "source.css.less",
+    "source.postcss": "source.css.postcss"
+  },
+  "requiredScopes": [
+    "text.html.basic",
+    "text.html.derivative",
+    "source.css",
+    "source.css.scss",
+    "source.sassdoc",
+    "source.css.less",
+    "source.css.postcss",
+    "source.js",
+    "source.js.jsx",
+    "source.ts",
+    "source.tsx",
+    "source.json",
+    "source.json.comments"
+  ],
+  "grammars": [
+    {
+      "id": "vue",
+      "scopeName": "text.html.vue",
+      "file": "grammars/vue.tmLanguage.json",
+      "embeddedLanguages": {
+        "text.html.vue": "vue",
+        "text": "plaintext",
+        "text.html.derivative": "html",
+        "text.html.markdown": "markdown",
+        "text.pug": "jade",
+        "source.css": "css",
+        "source.css.scss": "scss",
+        "source.css.less": "less",
+        "source.sass": "sass",
+        "source.stylus": "stylus",
+        "source.postcss": "postcss",
+        "source.js": "javascript",
+        "source.ts": "typescript",
+        "source.js.jsx": "javascriptreact",
+        "source.tsx": "typescriptreact",
+        "source.coffee": "coffeescript",
+        "meta.tag.js": "jsx-tags",
+        "meta.tag.tsx": "jsx-tags",
+        "meta.tag.without-attributes.js": "jsx-tags",
+        "meta.tag.without-attributes.tsx": "jsx-tags",
+        "source.json": "json",
+        "source.json.comments": "jsonc",
+        "source.json5": "json5",
+        "source.yaml": "yaml",
+        "source.toml": "toml",
+        "source.graphql": "graphql"
+      },
+      "injectTo": [],
+      "includes": [
+        "source.coffee",
+        "source.css",
+        "source.css#comment-block",
+        "source.css#escapes",
+        "source.css#font-features",
+        "source.css#property-names",
+        "source.css#property-values",
+        "source.css.less",
+        "source.css.scss",
+        "source.graphql",
+        "source.js",
+        "source.js.jsx",
+        "source.json",
+        "source.json#value",
+        "source.json.comments",
+        "source.json5",
+        "source.postcss",
+        "source.sass",
+        "source.stylus",
+        "source.toml",
+        "source.ts",
+        "source.ts#comment",
+        "source.ts#expression",
+        "source.ts#punctuation-comma",
+        "source.ts#type",
+        "source.tsx",
+        "source.yaml",
+        "text.html.basic",
+        "text.html.basic#attribute",
+        "text.html.derivative",
+        "text.html.markdown",
+        "text.html.vue",
+        "text.pug"
+      ],
+      "provenance": {
+        "repository": "https://github.com/vuejs/language-tools",
+        "commit": "f2d92d3f1cb5513268fff358993f163e78d4821a",
+        "commitDate": "2026-10-10T14:30:59Z",
+        "path": "extensions/vscode/syntaxes/vue.tmLanguage.json",
+        "url": "https://github.com/vuejs/language-tools/blob/f2d92d3f1cb5513268fff358993f163e78d4821a/extensions/vscode/syntaxes/vue.tmLanguage.json",
+        "sourceSha256": "9068dd68b205234eb229969e45ae611860f4b3f6c4868ad0396b08887006b2ca",
+        "bundledSha256": "9068dd68b205234eb229969e45ae611860f4b3f6c4868ad0396b08887006b2ca"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vue-language-tools.MIT.txt"
+      },
+      "unbalancedBracketScopes": [
+        "keyword.operator.relational",
+        "storage.type.function.arrow",
+        "keyword.operator.bitwise.shift",
+        "meta.brace.angle",
+        "punctuation.definition.tag"
+      ]
+    },
+    {
+      "id": "vue-directives",
+      "scopeName": "vue.directives",
+      "file": "grammars/vue-directives.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "text.html.vue",
+        "text.html.markdown",
+        "text.html.derivative",
+        "text.pug"
+      ],
+      "includes": [
+        "text.html.vue#vue-directives"
+      ],
+      "provenance": {
+        "repository": "https://github.com/vuejs/language-tools",
+        "commit": "f2d92d3f1cb5513268fff358993f163e78d4821a",
+        "commitDate": "2026-10-10T14:30:59Z",
+        "path": "extensions/vscode/syntaxes/vue-directives.json",
+        "url": "https://github.com/vuejs/language-tools/blob/f2d92d3f1cb5513268fff358993f163e78d4821a/extensions/vscode/syntaxes/vue-directives.json",
+        "sourceSha256": "7bc149edb548e204dc3f06f50d5c6f1e77216a5cdeb1d5b1866371b373ba91f7",
+        "bundledSha256": "7bc149edb548e204dc3f06f50d5c6f1e77216a5cdeb1d5b1866371b373ba91f7"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vue-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "vue-interpolations",
+      "scopeName": "vue.interpolations",
+      "file": "grammars/vue-interpolations.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "text.html.vue",
+        "text.html.markdown",
+        "text.html.derivative",
+        "text.pug"
+      ],
+      "includes": [
+        "text.html.vue#vue-interpolations"
+      ],
+      "provenance": {
+        "repository": "https://github.com/vuejs/language-tools",
+        "commit": "f2d92d3f1cb5513268fff358993f163e78d4821a",
+        "commitDate": "2026-10-10T14:30:59Z",
+        "path": "extensions/vscode/syntaxes/vue-interpolations.json",
+        "url": "https://github.com/vuejs/language-tools/blob/f2d92d3f1cb5513268fff358993f163e78d4821a/extensions/vscode/syntaxes/vue-interpolations.json",
+        "sourceSha256": "e037237455339b0da084e9358674477238184b0ed57fdda6dee568a885738f2b",
+        "bundledSha256": "e037237455339b0da084e9358674477238184b0ed57fdda6dee568a885738f2b"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vue-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "vue-leading-operator",
+      "scopeName": "vue.sfc.script.leading-operator-fix",
+      "file": "grammars/vue-leading-operator.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "text.html.vue"
+      ],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/vuejs/language-tools",
+        "commit": "f2d92d3f1cb5513268fff358993f163e78d4821a",
+        "commitDate": "2026-10-10T14:30:59Z",
+        "path": "extensions/vscode/syntaxes/vue-sfc-script-leading-operator-fix.json",
+        "url": "https://github.com/vuejs/language-tools/blob/f2d92d3f1cb5513268fff358993f163e78d4821a/extensions/vscode/syntaxes/vue-sfc-script-leading-operator-fix.json",
+        "sourceSha256": "ecc0b4d11d20b43678da8389ba1d0574f107acc57ffd4ad90a0a5939733f848b",
+        "bundledSha256": "ecc0b4d11d20b43678da8389ba1d0574f107acc57ffd4ad90a0a5939733f848b"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vue-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "vue-style-variable",
+      "scopeName": "vue.sfc.style.variable.injection",
+      "file": "grammars/vue-style-variable.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "text.html.vue"
+      ],
+      "includes": [
+        "source.js"
+      ],
+      "provenance": {
+        "repository": "https://github.com/vuejs/language-tools",
+        "commit": "f2d92d3f1cb5513268fff358993f163e78d4821a",
+        "commitDate": "2026-10-10T14:30:59Z",
+        "path": "extensions/vscode/syntaxes/vue-sfc-style-variable-injection.json",
+        "url": "https://github.com/vuejs/language-tools/blob/f2d92d3f1cb5513268fff358993f163e78d4821a/extensions/vscode/syntaxes/vue-sfc-style-variable-injection.json",
+        "sourceSha256": "ddc245b1ea8434ba912883ca2a7b59c2675db633192310f0018a288871fa4b3e",
+        "bundledSha256": "ddc245b1ea8434ba912883ca2a7b59c2675db633192310f0018a288871fa4b3e"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vue-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "svelte",
+      "scopeName": "source.svelte",
+      "file": "grammars/svelte.tmLanguage.json",
+      "embeddedLanguages": {
+        "text.html.basic": "html",
+        "text.html.markdown": "markdown",
+        "text.pug": "jade",
+        "meta.tag.start.svelte": "svelte-start-tag",
+        "punctuation.definition.tag.begin.svelte": "svelte",
+        "source.css": "css",
+        "source.css.less": "less",
+        "source.css.scss": "scss",
+        "source.css.postcss": "postcss",
+        "source.sass": "sass",
+        "source.stylus": "stylus",
+        "source.js": "javascript",
+        "source.ts": "typescript",
+        "source.coffee": "coffeescript"
+      },
+      "injectTo": [],
+      "includes": [
+        "source.coffee",
+        "source.css",
+        "source.css.less",
+        "source.css.postcss",
+        "source.css.scss",
+        "source.js",
+        "source.sass",
+        "source.stylus",
+        "source.ts",
+        "source.ts#array-binding-pattern",
+        "source.ts#array-binding-pattern-const",
+        "source.ts#comment",
+        "source.ts#object-binding-pattern",
+        "source.ts#object-binding-pattern-const",
+        "source.ts#object-literal",
+        "source.ts#punctuation-comma",
+        "source.ts#type",
+        "text.html.markdown",
+        "text.pug"
+      ],
+      "provenance": {
+        "repository": "https://github.com/sveltejs/language-tools",
+        "commit": "af7c6a505a8aa631f5ca7794f41163e46cb0bc33",
+        "commitDate": "2026-10-07T14:24:50Z",
+        "path": "packages/svelte-vscode/syntaxes/svelte.tmLanguage.src.yaml",
+        "url": "https://github.com/sveltejs/language-tools/blob/af7c6a505a8aa631f5ca7794f41163e46cb0bc33/packages/svelte-vscode/syntaxes/svelte.tmLanguage.src.yaml",
+        "sourceSha256": "222e3b63e1c78996234b3b0bfbc068189bdfbb805a996cc9e6c3255abe0588a2",
+        "bundledSha256": "d09aa60aed1046f9cd64fde7acd7b37090d7cf019225cb0826cb18c60547caa9",
+        "conversion": {
+          "tool": "js-yaml",
+          "version": "4.1.0",
+          "operation": "yaml.load -> JSON.stringify(data, null, 2) + newline"
+        },
+        "sourceFile": "sources/svelte.tmLanguage.src.yaml"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/svelte-language-tools.MIT.txt"
+      },
+      "tokenTypes": {
+        "punctuation.definition.template-expression": "other",
+        "entity.name.type.instance.jsdoc": "other",
+        "entity.name.function.tagged-template": "other",
+        "meta.import string.quoted": "other",
+        "variable.other.jsdoc": "other"
+      },
+      "unbalancedBracketScopes": [
+        "keyword.operator.relational",
+        "storage.type.function.arrow",
+        "keyword.operator.bitwise.shift",
+        "meta.brace.angle",
+        "punctuation.definition.tag"
+      ]
+    },
+    {
+      "id": "postcss",
+      "scopeName": "source.css.postcss",
+      "file": "grammars/postcss.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "source.svelte"
+      ],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/sveltejs/language-tools",
+        "commit": "af7c6a505a8aa631f5ca7794f41163e46cb0bc33",
+        "commitDate": "2026-10-07T14:24:50Z",
+        "path": "packages/svelte-vscode/syntaxes/postcss.src.yaml",
+        "url": "https://github.com/sveltejs/language-tools/blob/af7c6a505a8aa631f5ca7794f41163e46cb0bc33/packages/svelte-vscode/syntaxes/postcss.src.yaml",
+        "sourceSha256": "b525366b44d536717370d7a716890e74c8ca7cfb177f04067dc10f6c88571529",
+        "bundledSha256": "05883dcd6f90d8abfb0f24b86168bbe88c088b166526b15cec57fc37ad78de63",
+        "conversion": {
+          "tool": "js-yaml",
+          "version": "4.1.0",
+          "operation": "yaml.load -> JSON.stringify(data, null, 2) + newline"
+        },
+        "sourceFile": "sources/postcss.src.yaml"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/svelte-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "svelte-pug",
+      "scopeName": "svelte.pug",
+      "file": "grammars/svelte-pug.tmLanguage.json",
+      "embeddedLanguages": {
+        "source.ts": "typescript",
+        "text.pug": "jade"
+      },
+      "injectTo": [
+        "source.svelte"
+      ],
+      "includes": [
+        "source.ts",
+        "source.ts#object-literal",
+        "text.pug#tag_attributes"
+      ],
+      "provenance": {
+        "repository": "https://github.com/sveltejs/language-tools",
+        "commit": "af7c6a505a8aa631f5ca7794f41163e46cb0bc33",
+        "commitDate": "2026-10-07T14:24:50Z",
+        "path": "packages/svelte-vscode/syntaxes/pug-svelte.json",
+        "url": "https://github.com/sveltejs/language-tools/blob/af7c6a505a8aa631f5ca7794f41163e46cb0bc33/packages/svelte-vscode/syntaxes/pug-svelte.json",
+        "sourceSha256": "04246371cd6b76446d971400ce6c6157e5c4f960a3017348553b9c20e0e9cf78",
+        "bundledSha256": "04246371cd6b76446d971400ce6c6157e5c4f960a3017348553b9c20e0e9cf78"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/svelte-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "svelte-pug-tags",
+      "scopeName": "svelte.pug.tags",
+      "file": "grammars/svelte-pug-tags.tmLanguage.json",
+      "embeddedLanguages": {
+        "source.ts": "typescript",
+        "text.pug": "jade"
+      },
+      "injectTo": [
+        "source.svelte"
+      ],
+      "includes": [
+        "source.ts",
+        "source.ts#object-literal"
+      ],
+      "provenance": {
+        "repository": "https://github.com/sveltejs/language-tools",
+        "commit": "af7c6a505a8aa631f5ca7794f41163e46cb0bc33",
+        "commitDate": "2026-10-07T14:24:50Z",
+        "path": "packages/svelte-vscode/syntaxes/pug-svelte-tags.json",
+        "url": "https://github.com/sveltejs/language-tools/blob/af7c6a505a8aa631f5ca7794f41163e46cb0bc33/packages/svelte-vscode/syntaxes/pug-svelte-tags.json",
+        "sourceSha256": "65124af1634823894d1800595989ffdd0294d3f469372aabb7ad214f7ae8960d",
+        "bundledSha256": "65124af1634823894d1800595989ffdd0294d3f469372aabb7ad214f7ae8960d"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/svelte-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "svelte-pug-dotblock",
+      "scopeName": "svelte.pug.dotblock",
+      "file": "grammars/svelte-pug-dotblock.tmLanguage.json",
+      "embeddedLanguages": {
+        "source.ts": "typescript"
+      },
+      "injectTo": [
+        "source.svelte"
+      ],
+      "includes": [
+        "source.ts",
+        "source.ts#object-literal"
+      ],
+      "provenance": {
+        "repository": "https://github.com/sveltejs/language-tools",
+        "commit": "af7c6a505a8aa631f5ca7794f41163e46cb0bc33",
+        "commitDate": "2026-10-07T14:24:50Z",
+        "path": "packages/svelte-vscode/syntaxes/pug-svelte-dotblock.json",
+        "url": "https://github.com/sveltejs/language-tools/blob/af7c6a505a8aa631f5ca7794f41163e46cb0bc33/packages/svelte-vscode/syntaxes/pug-svelte-dotblock.json",
+        "sourceSha256": "b92db50772ffe8ffd423536610b8ee717626bab7c2c42e0aa292fa25f88600d7",
+        "bundledSha256": "b92db50772ffe8ffd423536610b8ee717626bab7c2c42e0aa292fa25f88600d7"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/svelte-language-tools.MIT.txt"
+      }
+    },
+    {
+      "id": "astro",
+      "scopeName": "source.astro",
+      "file": "grammars/astro.tmLanguage.json",
+      "embeddedLanguages": {
+        "text.html": "html",
+        "text.html.markdown": "markdown",
+        "source.css": "css",
+        "source.css.less": "less",
+        "source.css.scss": "scss",
+        "source.sass": "sass",
+        "source.stylus": "stylus",
+        "source.js": "javascript",
+        "source.ts": "typescript",
+        "source.json": "json",
+        "source.tsx": "typescriptreact",
+        "meta.tag.tsx": "jsx-tags",
+        "meta.tag.without-attributes.tsx": "jsx-tags",
+        "meta.tag.attributes.tsx": "typescriptreact",
+        "meta.embedded.expression.tsx": "typescriptreact"
+      },
+      "injectTo": [],
+      "includes": [
+        "source.css",
+        "source.css.less",
+        "source.css.postcss",
+        "source.css.scss",
+        "source.js",
+        "source.json",
+        "source.sass",
+        "source.stylus",
+        "source.ts",
+        "source.tsx",
+        "source.tsx#object-literal",
+        "source.tsx#string-character-escape",
+        "source.tsx#template-substitution-element"
+      ],
+      "provenance": {
+        "repository": "https://github.com/withastro/astro",
+        "commit": "9050e3819c51b0383cced278c278bc6f45c63468",
+        "commitDate": "2026-10-09T17:50:22Z",
+        "path": "packages/language-tools/vscode/syntaxes/astro.tmLanguage.json",
+        "url": "https://github.com/withastro/astro/blob/9050e3819c51b0383cced278c278bc6f45c63468/packages/language-tools/vscode/syntaxes/astro.tmLanguage.json",
+        "sourceSha256": "7316dbb4a1701865fcdb9e3b0afd029491b7eaafbb83f65746be7a80bfef52e8",
+        "bundledSha256": "7316dbb4a1701865fcdb9e3b0afd029491b7eaafbb83f65746be7a80bfef52e8"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/astro-vscode.MIT.txt"
+      },
+      "unbalancedBracketScopes": [
+        "keyword.operator.relational",
+        "storage.type.function.arrow",
+        "keyword.operator.bitwise.shift",
+        "meta.brace.angle",
+        "punctuation.definition.tag",
+        "keyword.operator.assignment.compound.bitwise.ts"
+      ]
+    },
+    {
+      "id": "sass",
+      "scopeName": "source.sass",
+      "file": "grammars/sass.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [
+        "source.css#color-keywords",
+        "source.css#functional-pseudo-classes",
+        "source.css#media-features",
+        "source.css#media-types",
+        "source.css#numeric-values",
+        "source.css#property-keywords",
+        "source.css#property-names",
+        "source.css#pseudo-classes",
+        "source.css#pseudo-elements",
+        "source.css#tag-names",
+        "source.sassdoc"
+      ],
+      "provenance": {
+        "repository": "https://github.com/atom/language-sass",
+        "commit": "0f7fb5de95073f46c7b9662c873336ee1bb38f50",
+        "commitDate": "2022-09-28T10:52:01Z",
+        "path": "grammars/sass.cson",
+        "url": "https://github.com/atom/language-sass/blob/0f7fb5de95073f46c7b9662c873336ee1bb38f50/grammars/sass.cson",
+        "sourceSha256": "134d9775d6bf99b45e5679f6418ebb0187f332867656ad2f33be265d9d3e7b7e",
+        "bundledSha256": "ca9242e16f06663ced43e607ff2744b24b0ea43c3e462cc6fe0e151fc5d6502d",
+        "conversion": {
+          "tool": "cson-parser",
+          "version": "4.0.9",
+          "operation": "cson.parse -> JSON.stringify(data, null, 2) + newline"
+        },
+        "notes": "Official Atom package, archived in 2022; derived from alexsancho/Sass.tmbundle. Both MIT notices are retained. This grammar covers indented Sass, not SCSS.",
+        "sourceFile": "sources/sass.cson"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/atom-language-sass.MIT.txt"
+      }
+    },
+    {
+      "id": "html",
+      "scopeName": "text.html.basic",
+      "file": "grammars/html.tmLanguage.json",
+      "embeddedLanguages": {
+        "text.html": "html",
+        "source.css": "css",
+        "source.js": "javascript",
+        "source.python": "python",
+        "source.smarty": "smarty"
+      },
+      "injectTo": [],
+      "includes": [
+        "source.css",
+        "source.js",
+        "text.html.basic"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/html/syntaxes/html.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/html/syntaxes/html.tmLanguage.json",
+        "sourceSha256": "80dedf4fb27e88889ac8fb72763954a6d2660502c686f4415208d8c8d00352cd",
+        "bundledSha256": "80dedf4fb27e88889ac8fb72763954a6d2660502c686f4415208d8c8d00352cd"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "meta.tag string.quoted": "other"
+      }
+    },
+    {
+      "id": "html-derivative",
+      "scopeName": "text.html.derivative",
+      "file": "grammars/html-derivative.tmLanguage.json",
+      "embeddedLanguages": {
+        "text.html": "html",
+        "source.css": "css",
+        "source.js": "javascript",
+        "source.python": "python",
+        "source.smarty": "smarty"
+      },
+      "injectTo": [],
+      "includes": [
+        "text.html.basic#attribute",
+        "text.html.basic#core-minus-invalid"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/html/syntaxes/html-derivative.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/html/syntaxes/html-derivative.tmLanguage.json",
+        "sourceSha256": "0d6495edf9edfb25ae89ef43d64c4b6ee2bbb2468179001c7c9574c789a1ed77",
+        "bundledSha256": "0d6495edf9edfb25ae89ef43d64c4b6ee2bbb2468179001c7c9574c789a1ed77"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "meta.tag string.quoted": "other"
+      }
+    },
+    {
+      "id": "css",
+      "scopeName": "source.css",
+      "file": "grammars/css.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/css/syntaxes/css.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/css/syntaxes/css.tmLanguage.json",
+        "sourceSha256": "55a3e184f702da6a5a64dc4d7ce82ab298a1bae8d35e2924483941eb223d54b1",
+        "bundledSha256": "55a3e184f702da6a5a64dc4d7ce82ab298a1bae8d35e2924483941eb223d54b1"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "meta.function.url string.quoted": "other"
+      }
+    },
+    {
+      "id": "scss",
+      "scopeName": "source.css.scss",
+      "file": "grammars/scss.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [
+        "source.css#color-keywords",
+        "source.css#functional-pseudo-classes",
+        "source.css#media-features",
+        "source.css#media-types",
+        "source.css#numeric-values",
+        "source.css#property-keywords",
+        "source.css#property-names",
+        "source.css#pseudo-classes",
+        "source.css#pseudo-elements",
+        "source.css#tag-names",
+        "source.sassdoc"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/scss/syntaxes/scss.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/scss/syntaxes/scss.tmLanguage.json",
+        "sourceSha256": "8f2824a80a7c6fd558fc538ec52d0a7a42a4d7ecb7ddf20d79f0d1f00fa6602b",
+        "bundledSha256": "8f2824a80a7c6fd558fc538ec52d0a7a42a4d7ecb7ddf20d79f0d1f00fa6602b"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "sassdoc",
+      "scopeName": "source.sassdoc",
+      "file": "grammars/sassdoc.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [
+        "source.css.scss",
+        "source.html",
+        "source.js"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/scss/syntaxes/sassdoc.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/scss/syntaxes/sassdoc.tmLanguage.json",
+        "sourceSha256": "e733d9c2ca02f250ffa5501732f3a1117d2f59d88ae8efaa7c471587fb7237b3",
+        "bundledSha256": "e733d9c2ca02f250ffa5501732f3a1117d2f59d88ae8efaa7c471587fb7237b3"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "less",
+      "scopeName": "source.css.less",
+      "file": "grammars/less.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/less/syntaxes/less.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/less/syntaxes/less.tmLanguage.json",
+        "sourceSha256": "7fe291c887e1bd51cef76efec09b03acdf62e2f28dae1260f358240372c16de9",
+        "bundledSha256": "7fe291c887e1bd51cef76efec09b03acdf62e2f28dae1260f358240372c16de9"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "javascript",
+      "scopeName": "source.js",
+      "file": "grammars/javascript.tmLanguage.json",
+      "embeddedLanguages": {
+        "meta.tag.js": "jsx-tags",
+        "meta.tag.without-attributes.js": "jsx-tags",
+        "meta.tag.attributes.js": "javascript",
+        "meta.embedded.expression.js": "javascript"
+      },
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+        "sourceSha256": "db6f17f15bc4f5e860a3b8fa6055a69720a53df845c8d5121cdc4f128c16291f",
+        "bundledSha256": "db6f17f15bc4f5e860a3b8fa6055a69720a53df845c8d5121cdc4f128c16291f"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "punctuation.definition.template-expression": "other",
+        "entity.name.type.instance.jsdoc": "other",
+        "entity.name.function.tagged-template": "other",
+        "meta.import string.quoted": "other",
+        "variable.other.jsdoc": "other"
+      }
+    },
+    {
+      "id": "javascriptreact",
+      "scopeName": "source.js.jsx",
+      "file": "grammars/javascriptreact.tmLanguage.json",
+      "embeddedLanguages": {
+        "meta.tag.js": "jsx-tags",
+        "meta.tag.without-attributes.js": "jsx-tags",
+        "meta.tag.attributes.js.jsx": "javascriptreact",
+        "meta.embedded.expression.js": "javascriptreact"
+      },
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/javascript/syntaxes/JavaScriptReact.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/javascript/syntaxes/JavaScriptReact.tmLanguage.json",
+        "sourceSha256": "dd29ed97c74d9be896c76c1e8ba51534ca29b253ab50b2abb575f321cb2ac635",
+        "bundledSha256": "dd29ed97c74d9be896c76c1e8ba51534ca29b253ab50b2abb575f321cb2ac635"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "punctuation.definition.template-expression": "other",
+        "entity.name.type.instance.jsdoc": "other",
+        "entity.name.function.tagged-template": "other",
+        "meta.import string.quoted": "other",
+        "variable.other.jsdoc": "other"
+      }
+    },
+    {
+      "id": "typescript",
+      "scopeName": "source.ts",
+      "file": "grammars/typescript.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+        "sourceSha256": "4e92e0d7de560217d6c8d3236d85e6e17a5d77825b15729a230c761743122661",
+        "bundledSha256": "4e92e0d7de560217d6c8d3236d85e6e17a5d77825b15729a230c761743122661"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "punctuation.definition.template-expression": "other",
+        "entity.name.type.instance.jsdoc": "other",
+        "entity.name.function.tagged-template": "other",
+        "meta.import string.quoted": "other",
+        "variable.other.jsdoc": "other"
+      },
+      "unbalancedBracketScopes": [
+        "keyword.operator.relational",
+        "storage.type.function.arrow",
+        "keyword.operator.bitwise.shift",
+        "meta.brace.angle",
+        "punctuation.definition.tag",
+        "keyword.operator.assignment.compound.bitwise.ts"
+      ]
+    },
+    {
+      "id": "typescriptreact",
+      "scopeName": "source.tsx",
+      "file": "grammars/typescriptreact.tmLanguage.json",
+      "embeddedLanguages": {
+        "meta.tag.tsx": "jsx-tags",
+        "meta.tag.without-attributes.tsx": "jsx-tags",
+        "meta.tag.attributes.tsx": "typescriptreact",
+        "meta.embedded.expression.tsx": "typescriptreact"
+      },
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+        "sourceSha256": "532fb887df3117e9f4eaf5d3ea1e850114fb6899fe3d3ddabedb153bec08b32a",
+        "bundledSha256": "532fb887df3117e9f4eaf5d3ea1e850114fb6899fe3d3ddabedb153bec08b32a"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "tokenTypes": {
+        "punctuation.definition.template-expression": "other",
+        "entity.name.type.instance.jsdoc": "other",
+        "entity.name.function.tagged-template": "other",
+        "meta.import string.quoted": "other",
+        "variable.other.jsdoc": "other"
+      },
+      "unbalancedBracketScopes": [
+        "keyword.operator.relational",
+        "storage.type.function.arrow",
+        "keyword.operator.bitwise.shift",
+        "punctuation.definition.tag",
+        "keyword.operator.assignment.compound.bitwise.ts"
+      ]
+    },
+    {
+      "id": "jsdoc-javascript",
+      "scopeName": "documentation.injection.js.jsx",
+      "file": "grammars/jsdoc-javascript.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "source.js",
+        "source.js.jsx"
+      ],
+      "includes": [
+        "source.ts#docblock"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/typescript-basics/syntaxes/jsdoc.js.injection.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/typescript-basics/syntaxes/jsdoc.js.injection.tmLanguage.json",
+        "sourceSha256": "c11fde5c9bb2d9b6bd6faaad51f398b127438a93b3047641a270552a760e76b6",
+        "bundledSha256": "c11fde5c9bb2d9b6bd6faaad51f398b127438a93b3047641a270552a760e76b6"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "jsdoc-typescript",
+      "scopeName": "documentation.injection.ts",
+      "file": "grammars/jsdoc-typescript.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [
+        "source.ts",
+        "source.tsx"
+      ],
+      "includes": [
+        "source.ts#docblock"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/typescript-basics/syntaxes/jsdoc.ts.injection.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/typescript-basics/syntaxes/jsdoc.ts.injection.tmLanguage.json",
+        "sourceSha256": "526076af53f330358ae3f5293a7779ac0dbd19d5ef27b71effd94faeef4f1249",
+        "bundledSha256": "526076af53f330358ae3f5293a7779ac0dbd19d5ef27b71effd94faeef4f1249"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "json",
+      "scopeName": "source.json",
+      "file": "grammars/json.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/json/syntaxes/JSON.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/json/syntaxes/JSON.tmLanguage.json",
+        "sourceSha256": "d7238f1cc9033993b9816b0945cab4bb8ea108de0399663c551f28f913e94c70",
+        "bundledSha256": "d7238f1cc9033993b9816b0945cab4bb8ea108de0399663c551f28f913e94c70"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "jsonc",
+      "scopeName": "source.json.comments",
+      "file": "grammars/jsonc.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/json/syntaxes/JSONC.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/json/syntaxes/JSONC.tmLanguage.json",
+        "sourceSha256": "9f927bb3aa53e66efc3cace9d2fa1185822b2adfa3f4a9299e7c078f136e1ee2",
+        "bundledSha256": "9f927bb3aa53e66efc3cace9d2fa1185822b2adfa3f4a9299e7c078f136e1ee2"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    },
+    {
+      "id": "markdown",
+      "scopeName": "text.html.markdown",
+      "file": "grammars/markdown.tmLanguage.json",
+      "embeddedLanguages": {
+        "meta.embedded.block.html": "html",
+        "source.js": "javascript",
+        "source.css": "css",
+        "meta.embedded.block.frontmatter": "yaml",
+        "meta.embedded.block.css": "css",
+        "meta.embedded.block.ini": "ini",
+        "meta.embedded.block.java": "java",
+        "meta.embedded.block.lua": "lua",
+        "meta.embedded.block.makefile": "makefile",
+        "meta.embedded.block.perl": "perl",
+        "meta.embedded.block.r": "r",
+        "meta.embedded.block.ruby": "ruby",
+        "meta.embedded.block.php": "php",
+        "meta.embedded.block.sql": "sql",
+        "meta.embedded.block.vs_net": "vs_net",
+        "meta.embedded.block.xml": "xml",
+        "meta.embedded.block.xsl": "xsl",
+        "meta.embedded.block.yaml": "yaml",
+        "meta.embedded.block.dosbatch": "dosbatch",
+        "meta.embedded.block.clojure": "clojure",
+        "meta.embedded.block.coffee": "coffee",
+        "meta.embedded.block.c": "c",
+        "meta.embedded.block.cpp": "cpp",
+        "meta.embedded.block.diff": "diff",
+        "meta.embedded.block.dockerfile": "dockerfile",
+        "meta.embedded.block.go": "go",
+        "meta.embedded.block.groovy": "groovy",
+        "meta.embedded.block.pug": "jade",
+        "meta.embedded.block.ignore": "ignore",
+        "meta.embedded.block.javascript": "javascript",
+        "meta.embedded.block.json": "json",
+        "meta.embedded.block.jsonc": "jsonc",
+        "meta.embedded.block.jsonl": "jsonl",
+        "meta.embedded.block.latex": "latex",
+        "meta.embedded.block.less": "less",
+        "meta.embedded.block.objc": "objc",
+        "meta.embedded.block.scss": "scss",
+        "meta.embedded.block.perl6": "perl6",
+        "meta.embedded.block.powershell": "powershell",
+        "meta.embedded.block.python": "python",
+        "meta.embedded.block.restructuredtext": "restructuredtext",
+        "meta.embedded.block.rust": "rust",
+        "meta.embedded.block.scala": "scala",
+        "meta.embedded.block.shellscript": "shellscript",
+        "meta.embedded.block.typescript": "typescript",
+        "meta.embedded.block.typescriptreact": "typescriptreact",
+        "meta.embedded.block.csharp": "csharp",
+        "meta.embedded.block.fsharp": "fsharp"
+      },
+      "injectTo": [],
+      "includes": [
+        "source.abap",
+        "source.asp.vb.net",
+        "source.batchfile",
+        "source.c",
+        "source.clojure",
+        "source.coffee",
+        "source.cpp",
+        "source.cs",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.dart",
+        "source.diff",
+        "source.dockerfile",
+        "source.elixir",
+        "source.erlang",
+        "source.fsharp",
+        "source.go",
+        "source.groovy",
+        "source.ignore",
+        "source.ini",
+        "source.java",
+        "source.js",
+        "source.js.regexp",
+        "source.json",
+        "source.json.comments",
+        "source.json.lines",
+        "source.julia",
+        "source.lua",
+        "source.makefile",
+        "source.objc",
+        "source.perl",
+        "source.perl.6",
+        "source.php",
+        "source.powershell",
+        "source.python",
+        "source.r",
+        "source.regexp.python",
+        "source.rst",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.sql",
+        "source.swift",
+        "source.ts",
+        "source.tsx",
+        "source.twig",
+        "source.yaml",
+        "source.yang",
+        "text.bibtex",
+        "text.git-commit",
+        "text.git-rebase",
+        "text.html.basic",
+        "text.html.derivative",
+        "text.html.handlebars",
+        "text.html.markdown",
+        "text.log",
+        "text.pug",
+        "text.tex.latex",
+        "text.xml",
+        "text.xml.xsl"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/markdown-basics/syntaxes/markdown.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/markdown-basics/syntaxes/markdown.tmLanguage.json",
+        "sourceSha256": "ff4c245072aa0628b298481de17a1c8026b1587410bbb8ab74f3c29cc0f19b9e",
+        "bundledSha256": "ff4c245072aa0628b298481de17a1c8026b1587410bbb8ab74f3c29cc0f19b9e"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      },
+      "unbalancedBracketScopes": [
+        "markup.underline.link.markdown",
+        "punctuation.definition.list.begin.markdown",
+        "keyword.operator.relational.cs",
+        "keyword.operator.arrow.cs",
+        "punctuation.accessor.pointer.cs",
+        "keyword.operator.bitwise.shift.cs",
+        "keyword.operator.assignment.compound.bitwise.cs",
+        "keyword.operator.relational.ts",
+        "storage.type.function.arrow.ts",
+        "keyword.operator.bitwise.shift.ts",
+        "keyword.operator.assignment.compound.bitwise.ts",
+        "keyword.operator.relational.tsx",
+        "storage.type.function.arrow.tsx",
+        "keyword.operator.bitwise.shift.tsx",
+        "keyword.operator.assignment.compound.bitwise.tsx"
+      ]
+    },
+    {
+      "id": "pug",
+      "scopeName": "text.pug",
+      "file": "grammars/pug.tmLanguage.json",
+      "embeddedLanguages": {},
+      "injectTo": [],
+      "includes": [
+        "source.coffee",
+        "source.css",
+        "source.css.scss",
+        "source.js",
+        "source.less",
+        "source.sass",
+        "source.stylus",
+        "text.html.basic"
+      ],
+      "provenance": {
+        "repository": "https://github.com/microsoft/vscode",
+        "commit": "e3c2316227ee9a4b24449b779409e3ff4d0126a9",
+        "commitDate": "2026-10-11T14:24:35Z",
+        "path": "extensions/pug/syntaxes/pug.tmLanguage.json",
+        "url": "https://github.com/microsoft/vscode/blob/e3c2316227ee9a4b24449b779409e3ff4d0126a9/extensions/pug/syntaxes/pug.tmLanguage.json",
+        "sourceSha256": "4f8be868584155102e3fcda3a2e643865db08f37e5534bd70db6e5dee257af99",
+        "bundledSha256": "4f8be868584155102e3fcda3a2e643865db08f37e5534bd70db6e5dee257af99"
+      },
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode.MIT.txt",
+        "additionalNotices": [
+          "licenses/vscode.ThirdPartyNotices.txt"
+        ]
+      }
+    }
+  ],
+  "optionalMissingScopes": [
+    "source.abap",
+    "source.asp.vb.net",
+    "source.batchfile",
+    "source.c",
+    "source.clojure",
+    "source.coffee",
+    "source.cpp",
+    "source.cs",
+    "source.dart",
+    "source.diff",
+    "source.dockerfile",
+    "source.elixir",
+    "source.erlang",
+    "source.fsharp",
+    "source.go",
+    "source.graphql",
+    "source.groovy",
+    "source.ignore",
+    "source.ini",
+    "source.java",
+    "source.js.regexp",
+    "source.json.lines",
+    "source.json5",
+    "source.julia",
+    "source.lua",
+    "source.makefile",
+    "source.objc",
+    "source.perl",
+    "source.perl.6",
+    "source.php",
+    "source.powershell",
+    "source.python",
+    "source.r",
+    "source.regexp.python",
+    "source.rst",
+    "source.ruby",
+    "source.rust",
+    "source.scala",
+    "source.shell",
+    "source.sql",
+    "source.stylus",
+    "source.swift",
+    "source.toml",
+    "source.twig",
+    "source.yaml",
+    "source.yang",
+    "text.bibtex",
+    "text.git-commit",
+    "text.git-rebase",
+    "text.html.handlebars",
+    "text.log",
+    "text.tex.latex",
+    "text.xml",
+    "text.xml.xsl"
+  ],
+  "runtimeLicenses": [
+    {
+      "package": "vscode-textmate",
+      "version": "9.3.2",
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode-textmate.MIT.txt",
+        "sha256": "b5cb7ff7859e7d282d98fc43ab081b0dda5dc659dc3385cf65740c759a7e6a6c"
+      },
+      "notices": []
+    },
+    {
+      "package": "vscode-oniguruma",
+      "version": "2.0.1",
+      "license": {
+        "spdx": "MIT",
+        "file": "licenses/vscode-oniguruma.MIT.txt",
+        "sha256": "ddde8aba8fe72b4830e27901fc78733eb6db7b6c653161075de213a6adeda3fd"
+      },
+      "notices": [
+        {
+          "file": "licenses/vscode-oniguruma.NOTICES.txt",
+          "sha256": "615d94d89eacc046241518c247f6650a5df80d1adf4b284a756f500867620b35"
+        }
+      ]
+    }
+  ]
+}

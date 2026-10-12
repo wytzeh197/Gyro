@@ -42,6 +42,7 @@ pub enum UsageOrigin {
     ChangeSummary,
     /// A read-only research sub-agent started by a chat turn.
     SubAgent,
+    Optimization,
 }
 
 impl UsageOrigin {
@@ -54,6 +55,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
             Self::SubAgent => "sub-agent",
+            Self::Optimization => "optimization",
         }
     }
 
@@ -65,6 +67,7 @@ impl UsageOrigin {
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
             "sub-agent" => Self::SubAgent,
+            "optimization" => Self::Optimization,
             _ => Self::Chat,
         }
     }
@@ -79,6 +82,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
             Self::SubAgent => "Sub-agents",
+            Self::Optimization => "Optimization",
         }
     }
 }
@@ -983,6 +987,7 @@ pub fn ensure_usage_schema(conn: &Connection) -> Result<()> {
          );",
     )?;
     crate::usage_receipts::ensure_schema(conn)?;
+    crate::efficiency::accounting::ensure_schema(conn)?;
     Ok(())
 }
 
@@ -1140,11 +1145,21 @@ fn totals_from_rows(
 /// What one chat has cost, across every call it produced.
 pub fn session_usage_totals(conn: &Connection, session_id: Uuid) -> Result<UsageTotals> {
     let session = session_id.to_string();
+    // A reused child session can contain work owned by other chats. Follow
+    // linked turn identities so only this chat's descendants are counted.
     totals_from_rows(conn,
-        "session_id in (with recursive owned(id) as (
-            select ?1 union select child_session_id from usage_turn_links
-            join owned on usage_turn_links.parent_session_id = owned.id
-         ) select id from owned)", &[&session])
+        "session_id = ?1 or exists(
+            with recursive owned(session_id, turn_id) as (
+                select child_session_id, child_turn_id from usage_turn_links
+                where parent_session_id = ?1
+                union
+                select links.child_session_id, links.child_turn_id from usage_turn_links links
+                join owned on links.parent_session_id = owned.session_id
+                    and links.parent_turn_id = owned.turn_id
+            )
+            select 1 from owned where owned.session_id = usage_ledger.session_id
+                and owned.turn_id = usage_ledger.turn_id
+         )", &[&session])
 }
 
 /// What every provider has cost since a point in time. The budgets in the next
@@ -1165,6 +1180,25 @@ pub fn provider_usage_totals_since(
         conn,
         "provider_id = ?1 and occurred_at >= ?2",
         &[&provider_id, &since],
+    )
+}
+
+/// Rolling spend from other turns. The active turn supplies its live receipt,
+/// including any continuations already recorded in the ledger, separately.
+pub fn provider_usage_outside_turn_since(
+    conn: &Connection,
+    provider_id: &str,
+    since: DateTime<Utc>,
+    session_id: Uuid,
+    turn_id: Uuid,
+) -> Result<UsageTotals> {
+    let since = since.to_rfc3339();
+    let session_id = session_id.to_string();
+    let turn_id = turn_id.to_string();
+    totals_from_rows(
+        conn,
+        "provider_id = ?1 and occurred_at >= ?2 and (session_id != ?3 or turn_id is null or turn_id != ?4)",
+        &[&provider_id, &since, &session_id, &turn_id],
     )
 }
 

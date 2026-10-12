@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /** Cancel can settle visually; destructive confirmation callbacks remain immediate. */
-export function useDialogDismiss(onDismiss: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
+export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(onDismiss: () => void) {
+  const ref = useRef<T>(null);
   const callback = useRef(onDismiss);
   const animations = useRef<Animation[]>([]);
   const closing = useRef(false);
@@ -59,7 +59,15 @@ export function useDialogDismiss(onDismiss: () => void) {
       easing,
       fill: "forwards",
     });
-    animations.current = [fade];
+    // Settle the card as well as the scrim, continuing from interrupted entry.
+    const card = root instanceof HTMLDialogElement ? root : root.firstElementChild;
+    const cardAnimation = card instanceof HTMLElement && card !== root
+      ? card.animate([
+          { transform: getComputedStyle(card).transform },
+          { transform: "translateY(4px) scale(0.99)" },
+        ], { duration: duration || 0, easing, fill: "forwards" })
+      : undefined;
+    animations.current = cardAnimation ? [fade, cardAnimation] : [fade];
     root.inert = true;
     fade.finished.then(
       () => callback.current(),

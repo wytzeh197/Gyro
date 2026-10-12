@@ -1283,11 +1283,38 @@ function workItemFromCapabilityCall(
   if (!capabilityId) {
     return undefined;
   }
+  // Workflow children remain inspectable inside their parent card, without flooding the live rail.
+  if (text(payload, "groupId")) return undefined;
   const id = event.id;
   const status = capabilityWorkStatus(text(payload, "status"));
   const summary = text(payload, "summary");
   const resource = record(payload?.resource);
   const resourceLabel = text(resource, "label");
+  if (capabilityId === "code-mode-execute" || capabilityId === "code-mode-discover") {
+    const workflow = record(payload?.codeMode);
+    return {
+      kind: "tool", id, status,
+      tool: text(workflow, "label") ?? (capabilityId === "code-mode-discover" ? "Finding available workspace actions" : "Inspecting workspace"),
+      note: summary,
+    };
+  }
+
+  // Record the launch where it happened; ongoing child state belongs to the
+  // sub-agent strip and Environment rather than the parent's work timeline.
+  if (capabilityId === "agent-spawn") {
+    return {
+      kind: "tool",
+      id,
+      status,
+      tool:
+        status === "running"
+          ? "Starting sub-agent"
+          : status === "failed"
+            ? "Could not start sub-agent"
+            : "Started sub-agent",
+      note: resourceLabel,
+    };
+  }
 
   // Terminal-shaped work → command row (matches "Ran command").
   if (

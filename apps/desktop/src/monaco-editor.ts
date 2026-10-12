@@ -1,4 +1,5 @@
 import { createMonacoTheme } from "./editor/monaco-theme";
+import { canonicalFileUri } from "./editor/document-uri";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
@@ -54,14 +55,35 @@ typescriptDefaults.setCompilerOptions({
 // semantic pass is both wrong and the dominant cost on large buffers.
 typescriptDefaults.setDiagnosticsOptions({
   noSemanticValidation: true,
-  noSyntaxValidation: false,
+  noSyntaxValidation: true,
   noSuggestionDiagnostics: true,
 });
 monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
   noSemanticValidation: true,
-  noSyntaxValidation: false,
+  noSyntaxValidation: true,
   noSuggestionDiagnostics: true,
 });
+// Diagnostics options alone do not disable the worker's language providers.
+// Let the workspace LSP own semantic requests instead of returning competing
+// single-file definitions, references, completions and rename edits.
+for (const defaults of [
+  typescriptDefaults,
+  monaco.languages.typescript.javascriptDefaults,
+]) {
+  defaults.setModeConfiguration({
+    ...defaults.modeConfiguration,
+    completionItems: false,
+    hovers: false,
+    definitions: false,
+    references: false,
+    rename: false,
+    diagnostics: false,
+    documentHighlights: false,
+    signatureHelp: false,
+    codeActions: false,
+    inlayHints: false,
+  });
+}
 
 const GYRO_RUST_LANGUAGE_ID = "gyro-rust";
 
@@ -95,7 +117,7 @@ monaco.languages.setMonarchTokensProvider(GYRO_RUST_LANGUAGE_ID, {
 });
 
 export function disposeMonacoModel(path: string) {
-  monaco.editor.getModel(monaco.Uri.parse(path))?.dispose();
+  monaco.editor.getModel(monaco.Uri.parse(canonicalFileUri(path)))?.dispose();
 }
 
 // @monaco-editor/react creates the editor inside a `display: none` container

@@ -116,7 +116,10 @@ const basic: Record<
 // each file opened in the same language flashed uncoloured. Install each once.
 const installed = new Set<string>();
 // Optional local grammar adapters can be installed without changing detection or editors.
-let textmateProvider: SyntaxProvider | undefined;
+let textmateProvider: SyntaxProvider = (definition) =>
+  import("./textmate-syntax").then((module) =>
+    module.loadTextMateSyntax(definition),
+  );
 export function registerTextMateSyntaxProvider(provider: SyntaxProvider) {
   textmateProvider = provider;
 }

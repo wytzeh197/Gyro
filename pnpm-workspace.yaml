@@ -6,3 +6,6 @@ onlyBuiltDependencies:
 allowBuilds:
   "@swc/core": true
   esbuild: true
+  bun: true
+minimumReleaseAgeExclude:
+  - '@opencode/codemode@2.0.27'

@@ -1,4 +1,5 @@
 import React from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
 import { AppFailure } from "./app-failure";
@@ -13,6 +14,11 @@ const bootSurface = resolveBootSurface({
 });
 const isMenuBarSurface = bootSurface === "menu-bar";
 document.documentElement.dataset.surface = bootSurface;
+// The macOS main window owns a native Sidebar material; embedded pages and
+// auxiliary windows retain their normal opaque backgrounds.
+if (bootSurface === "main" && isTauri() && navigator.platform.includes("Mac")) {
+  document.documentElement.dataset.nativeMaterial = "sidebar";
+}
 
 const systemTheme = () =>
   window.matchMedia?.("(prefers-color-scheme: dark)").matches

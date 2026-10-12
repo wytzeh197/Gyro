@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useContext, useEffect, useState } from "react";
 import {
   Book,
   ChevronRight,
@@ -44,6 +44,9 @@ import type {
 } from "./chat-run";
 import type { SessionEvent } from "./types";
 import { pendingSubagentApprovals } from "./subagents";
+import { ChatRetryContext } from "./chat-retry-context";
+import "./chat-recovery.css";
+import { MotionDisclosure } from "./motion-disclosure";
 
 /**
  * The run rail: a timestamp-free working summary.
@@ -87,7 +90,10 @@ function workIcon(item: WorkItem): LucideIcon {
 
 export type ChatRunProps = {
   model: RunModel;
+  /** @deprecated Live agent lists no longer render inside a run. */
   agentRows?: ReactNode;
+  /** Child approval requests stay actionable without a live agent list. */
+  agentApprovals?: SessionEvent[];
   /** Optional host state when work is preparing or waiting for a person. */
   statusLabel?: string;
   suppressThinkingIndicator?: boolean;
@@ -95,6 +101,11 @@ export type ChatRunProps = {
   aggregateFileStats?: { additions: number; deletions: number };
   onOpenChanges?: () => void;
   onRetry?: () => void;
+  /** Failed status identity used to read the host's automatic retry deadline. */
+  recoveryEventId?: string;
+  /** Native continuation waits keep this turn's invoke and child tasks alive. */
+  nativeRetry?: { retryAt: number; attempt?: number; maxAttempts?: number };
+  onCancelNativeRetry?: () => void;
   onReconnect?: () => void;
   reconnectLabel?: string;
   /** Trailing header content, such as a Continue button on a settled turn. */
@@ -140,12 +151,15 @@ const LIVE_CALL_WINDOW = 4;
 
 export function ChatRun({
   model,
-  agentRows,
+  agentApprovals = [],
   statusLabel,
   suppressThinkingIndicator = false,
   aggregateFileStats,
   onOpenChanges,
   onRetry,
+  recoveryEventId,
+  nativeRetry,
+  onCancelNativeRetry,
   onReconnect,
   reconnectLabel,
   headerActions,
@@ -156,8 +170,29 @@ export function ChatRun({
   onContinueAfterToolBudget,
   layout = "segments",
 }: ChatRunProps) {
+  const retryState = useContext(ChatRetryContext);
+  const isProblem =
+    model.phase.name === "failed" || model.phase.name === "interrupted";
+  const nativeWait = model.phase.name === "retrying" ? nativeRetry : undefined;
+  const retryAt =
+    nativeWait?.retryAt ??
+    (isProblem && onRetry && recoveryEventId
+      ? retryState.pending[recoveryEventId]?.retryAt
+      : undefined);
+  const cancelAutoRetry = nativeWait
+    ? onCancelNativeRetry
+    : recoveryEventId
+      ? () => retryState.cancel(recoveryEventId)
+      : undefined;
+  const retryNow = onRetry
+    ? () => {
+        cancelAutoRetry?.();
+        onRetry();
+      }
+    : undefined;
   const isLive = isRunPhaseLive(model.phase);
   const needsApproval =
+    agentApprovals.length > 0 ||
     pendingSubagentApprovals(
       model.steps.flatMap((step) => (step.kind === "ask" ? [step.event] : [])),
     ).length > 0;
@@ -206,6 +241,7 @@ export function ChatRun({
     (step) => step.kind === "work" && step.item.status === "running",
   );
   const showThinkingPulse =
+    !nativeWait &&
     !suppressThinkingIndicator &&
     isLive &&
     (model.phase.name === "thinking" ||
@@ -213,13 +249,13 @@ export function ChatRun({
   const showFinalizingPulse = model.phase.name === "finalizing";
   // The retry beat replaces the other live beats rather than joining them: two
   // things breathing at the tail of the rail reads as two runs.
-  const retryPhase = model.phase.name === "retrying" ? model.phase : undefined;
+  const retryPhase =
+    model.phase.name === "retrying" && !nativeWait ? model.phase : undefined;
   const showRail =
-    showSteps &&
-    (model.steps.length > 0 ||
-      showThinkingPulse ||
-      showFinalizingPulse ||
-      retryPhase !== undefined);
+    model.steps.length > 0 ||
+    showThinkingPulse ||
+    showFinalizingPulse ||
+    retryPhase !== undefined;
 
   const shellClass = [
     "gyro-run",
@@ -233,14 +269,26 @@ export function ChatRun({
         ? "is-problem"
         : "is-settled",
     isCancelledRunPhase(model.phase) ? "is-cancelled" : "",
+    isProblem || nativeWait ? "is-recovery" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <div className={shellClass} data-run-state={needsApproval ? "approval" : model.phase.name}>
+    <div
+      className={shellClass}
+      data-run-state={
+        nativeWait ? "retrying" : needsApproval ? "approval" : model.phase.name
+      }
+    >
       <RunHeader
-        statusLabel={needsApproval ? "Needs approval" : statusLabel}
+        statusLabel={
+          retryAt !== undefined
+            ? "Waiting to retry"
+            : needsApproval
+              ? "Needs approval"
+              : statusLabel
+        }
         canCollapse={canCollapse}
         headerActions={headerActions}
         isCollapsed={isCollapsed}
@@ -248,10 +296,9 @@ export function ChatRun({
         activeLabel={activeLabel}
         onToggle={() => setIsCollapsed((current) => !current)}
       />
-      {showSteps ? agentRows : null}
-      {showRail ? (
+      <MotionDisclosure open={showSteps && showRail}>
         <ol aria-label="Work timeline" className="gyro-run-rail">
-          {showSteps && isSegments
+          {isSegments
             ? segments.map((segment) => {
                 if (segment.kind === "say") {
                   return (
@@ -309,7 +356,7 @@ export function ChatRun({
                 );
               })
             : null}
-          {showSteps && !isSegments
+          {!isSegments
             ? displaySteps.map((step) => {
                 if (step.kind === "work-group") {
                   return (
@@ -370,11 +417,32 @@ export function ChatRun({
             </li>
           ) : null}
         </ol>
+      </MotionDisclosure>
+      {agentApprovals.length > 0 && renderAsk ? (
+        <div className="gyro-run-agent-approvals">
+          {agentApprovals.map((event) => (
+            <div key={event.id}>{renderAsk(event)}</div>
+          ))}
+        </div>
       ) : null}
-      {model.phase.name === "failed" || model.phase.name === "interrupted" ? (
+      {nativeWait ? (
+        <RunProblem
+          onCancelAutoRetry={onCancelNativeRetry}
+          retryAt={nativeWait.retryAt}
+          continuation={nativeWait}
+          phase={{
+            name: "failed",
+            message: "Model is temporarily busy",
+            recoveryKind: "model-capacity",
+          }}
+        />
+      ) : model.phase.name === "failed" ||
+        model.phase.name === "interrupted" ? (
         <RunProblem
           onReconnect={onReconnect}
-          onRetry={onRetry}
+          onRetry={retryNow}
+          onCancelAutoRetry={cancelAutoRetry}
+          retryAt={retryAt}
           phase={model.phase}
           reconnectLabel={reconnectLabel}
         />
@@ -452,7 +520,7 @@ function RunWorkGroup({
           <ChevronRight size={13} />
         </span>
       </button>
-      {isExpanded ? (
+      <MotionDisclosure open={isExpanded}>
         <ol aria-label="Technical details" className="gyro-run-group-details">
           {group.steps.map((step) => (
             <li key={step.id}>
@@ -464,7 +532,7 @@ function RunWorkGroup({
             </li>
           ))}
         </ol>
-      ) : null}
+      </MotionDisclosure>
     </div>
   );
 }
@@ -514,14 +582,14 @@ function RunSegmentSummary({
           size={12}
         />
       </button>
-      {isExpanded ? (
+      <MotionDisclosure open={isExpanded}>
         <RunCalls
           aggregateFileStats={aggregateFileStats}
           calls={calls}
           onOpenChanges={onOpenChanges}
           windowed={false}
         />
-      ) : null}
+      </MotionDisclosure>
     </div>
   );
 }
@@ -686,7 +754,7 @@ function RunCallRow({
 }
 
 /** A clock for "Ns elapsed", ticking only while something is running. */
-function useNow(isTicking: boolean) {
+function useNow(isTicking: boolean, deadline?: number) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!isTicking) {
@@ -695,7 +763,7 @@ function useNow(isTicking: boolean) {
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [isTicking]);
+  }, [isTicking, deadline]);
   return now;
 }
 
@@ -981,39 +1049,127 @@ function RunBudgetNotice({
 }
 
 function RunProblem({
+  onCancelAutoRetry,
   onReconnect,
   onRetry,
   phase,
   reconnectLabel,
+  retryAt,
+  continuation,
 }: {
+  onCancelAutoRetry?: () => void;
   onReconnect?: () => void;
   onRetry?: () => void;
   phase: Extract<RunPhase, { name: "failed" | "interrupted" }>;
   reconnectLabel?: string;
+  retryAt?: number;
+  continuation?: { attempt?: number; maxAttempts?: number };
 }) {
+  const now = useNow(retryAt !== undefined, retryAt);
   const isInterrupted = phase.name === "interrupted";
   const isCancelled =
     phase.name === "failed" && phase.recoveryKind === "cancelled";
   if (isCancelled) return null; // The neutral Stopped header is sufficient.
-  const detail = isInterrupted
-    ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
-    : phase.recoveryMessage;
-  const title = isInterrupted ? "Previous send was interrupted" : phase.message;
+  const isScheduled = retryAt !== undefined;
+  const isCapacityExhausted =
+    !isInterrupted && phase.recoveryKind === "model-capacity-exhausted";
+  // Capacity is also the backend's output/tool-budget category. It is not the
+  // temporary model-capacity failure shown in the user's recovery notice.
+  const isPermanent =
+    !isInterrupted &&
+    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
+      phase.recoveryKind ?? "",
+    );
+  const isInactivityLimit =
+    !isInterrupted &&
+    /inactiv|idle timeout|(?:acp|cli|agent).*?(?:timed? out|timeout|no activity)/i.test(
+      phase.message,
+    );
+  const canBeTransient = !isInterrupted && !isPermanent && !isInactivityLimit;
+  const isBusy =
+    canBeTransient &&
+    (phase.recoveryKind === "model-capacity" ||
+      /model\s+(?:is\s+)?at\s+capacity|overload|temporarily busy|server.*busy/i.test(
+        phase.message,
+      ));
+  const isRateLimit =
+    canBeTransient && /rate.limit|too many requests/i.test(phase.message);
+  const isConnection =
+    canBeTransient &&
+    (/^(?:network|offline|timeout)$/.test(phase.recoveryKind ?? "") ||
+      /network|connection (?:lost|closed|reset|interrupted)|(?:request|connection|provider) timed out|failed to fetch|fetch failed|econnreset|etimedout/i.test(
+        phase.message,
+      ));
+  const isTransient = isScheduled || isBusy || isRateLimit || isConnection;
+  const attemptLabel =
+    continuation?.attempt === undefined
+      ? ""
+      : continuation.maxAttempts === undefined
+        ? ` Retry ${continuation.attempt}.`
+        : ` Retry ${continuation.attempt} of ${continuation.maxAttempts}.`;
+  const detail = continuation
+    ? `Recorded work and active tasks are preserved.${attemptLabel}`
+    : isInterrupted
+      ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
+      : isBusy
+        ? "The conversation context is preserved."
+        : [phase.message, phase.recoveryMessage].filter(Boolean).join(" ");
+  const title = isCapacityExhausted
+    ? "Model is still busy"
+    : isInterrupted
+      ? "Previous send was interrupted"
+      : isBusy
+        ? "Model is temporarily busy"
+        : isRateLimit
+          ? "Provider is temporarily limiting requests"
+          : isConnection
+            ? "Could not reach the provider"
+            : "Could not complete this turn";
+  const secondsLeft =
+    retryAt === undefined ? 0 : Math.max(0, Math.ceil((retryAt - now) / 1_000));
   return (
     <div
-      className={["gyro-run-problem", isInterrupted ? "is-interrupted" : ""]
+      className={[
+        "gyro-run-problem",
+        "gyro-run-recovery",
+        isInterrupted ? "is-interrupted" : "",
+      ]
         .filter(Boolean)
         .join(" ")}
-      role="alert"
+      role={isTransient ? "status" : "alert"}
+      aria-live={isTransient ? "polite" : undefined}
     >
       <span className="gyro-run-problem-text">
         <strong>{title}</strong>
         {detail ? <span>{detail}</span> : null}
       </span>
       <span className="gyro-run-problem-actions">
+        {isScheduled ? (
+          <>
+            <span
+              aria-hidden="true"
+              aria-live="off"
+              className="gyro-run-retry-countdown"
+            >
+              {secondsLeft > 0 ? `Retrying in ${secondsLeft}s` : "Retrying…"}
+            </span>
+            <span className="gyro-sr-only">
+              An automatic retry is scheduled.
+            </span>
+          </>
+        ) : null}
         {onRetry ? (
           <button onClick={onRetry} type="button">
-            Retry
+            {isScheduled ? "Retry now" : "Retry"}
+          </button>
+        ) : null}
+        {isScheduled && onCancelAutoRetry ? (
+          <button
+            className="is-subtle"
+            onClick={onCancelAutoRetry}
+            type="button"
+          >
+            Cancel
           </button>
         ) : null}
         {onReconnect ? (

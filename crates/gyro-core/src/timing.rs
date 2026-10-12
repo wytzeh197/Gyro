@@ -49,6 +49,14 @@ pub enum Outcome {
     Cancelled,
     Interrupted,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all="kebab-case")]
+pub enum EfficiencyComponent {Checkpoint,StructuredEvidence,RequestAssembly,Retrieval,Progress,CacheControls}
+pub struct EfficiencyTimer {component:EfficiencyComponent,started:Instant,active:bool}
+impl EfficiencyTimer {pub fn start(component:EfficiencyComponent)->Self {Self{component,started:Instant::now(),active:ACTIVE.with(|slot|slot.borrow().is_some())}}}
+impl Drop for EfficiencyTimer {fn drop(&mut self){if self.active {let elapsed=self.started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;ACTIVE.with(|slot|{if let Some(mut trace)=slot.borrow().as_ref().and_then(|t|t.lock().ok()){let value=trace.efficiency_overhead.entry(self.component).or_default();*value=value.saturating_add(elapsed);}});}}}
+pub fn efficiency_overhead()->HashMap<EfficiencyComponent,u64>{ACTIVE.with(|slot|slot.borrow().as_ref().and_then(|t|t.lock().ok()).map(|t|t.efficiency_overhead.clone()).unwrap_or_default())}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Point {
@@ -73,6 +81,8 @@ struct Trace {
     truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_requests: Option<crate::provider_observation::Summary>,
+    #[serde(skip_serializing_if="HashMap::is_empty")]
+    efficiency_overhead: HashMap<EfficiencyComponent,u64>,
     #[serde(skip)]
     started: Option<Instant>,
     #[serde(skip)]
@@ -153,6 +163,7 @@ impl Scope {
                     outcome: Outcome::Interrupted,
                     truncated: false,
                     provider_requests: None,
+                    efficiency_overhead: HashMap::new(),
                     started: Some(Instant::now()),
                     attempt: 0,
                     tools: HashMap::new(),

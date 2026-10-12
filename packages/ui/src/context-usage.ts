@@ -1,5 +1,6 @@
 import type { ProviderId, ProviderUsageWindow, SessionEvent } from "./types";
 import { providerCatalog } from "./provider-catalog.ts";
+import { remainingUsage } from "./usage-remaining.ts";
 
 export type ContextModelSelection = {
   providerId?: ProviderId;
@@ -16,6 +17,8 @@ export type ComposerLimitWindow = {
   percent?: number;
   /** `<1%`, `84%`, or an em dash when the level is unknown. */
   percentLabel: string;
+  remainingPercent?: number;
+  remainingPercentLabel: string;
   resetsLabel?: string;
   severity: "normal" | "warning" | "critical";
   status: "ok" | "warning" | "exhausted" | "unknown";
@@ -34,6 +37,8 @@ export type ComposerContextUsage = {
   contextWindowTokens: number;
   percentLabel: string;
   remainingLabel: string;
+  remainingPercent?: number;
+  remainingPercentLabel: string;
   source: "estimated" | "reported";
   title: string;
   usedLabel: string;
@@ -411,6 +416,8 @@ function finishComposerContextUsage({
       usedTokens,
       percentLabel: "—",
       remainingLabel: "Unknown",
+      remainingPercent: undefined,
+      remainingPercentLabel: "—",
       source,
       title: `${modelLabel} context`,
       usedLabel: formatCompactTokenCount(usedTokens),
@@ -418,6 +425,7 @@ function finishComposerContextUsage({
     };
   }
   const remainingTokens = Math.max(0, contextWindowTokens - usedTokens);
+  const remaining = remainingUsage((usedTokens / contextWindowTokens) * 100);
   const percent = Math.min(
     100,
     Math.max(0, Math.round((usedTokens / contextWindowTokens) * 100)),
@@ -432,12 +440,14 @@ function finishComposerContextUsage({
     reportedContextWindowTokens,
     contextWindowTokens,
     detail,
-    label: `${modelLabel} context: ${usedLabel} used, ${remainingLabel} remaining of ${windowLabel} tokens (${percentLabel})`,
+    label: `${modelLabel} context: ${usedLabel} of ${windowLabel} tokens used (${percentLabel} used)`,
     modelLabel,
     percent,
     usedTokens,
     percentLabel,
     remainingLabel,
+    remainingPercent: remaining.percent,
+    remainingPercentLabel: remaining.percentLabel,
     source,
     title: `${modelLabel} context`,
     usedLabel,
@@ -537,6 +547,7 @@ function toLimitWindow(
       ? Math.min(100, Math.max(0, Math.round(window.usedPercent)))
       : undefined;
   const status = window.status ?? (percent === undefined ? "unknown" : "ok");
+  const remaining = remainingUsage(window.usedPercent, status === "exhausted");
   return {
     id: window.id,
     label: window.label,
@@ -549,6 +560,8 @@ function toLimitWindow(
         : percent === 0 && window.usedPercent
           ? "<1%"
           : `${percent}%`,
+    remainingPercent: remaining.percent,
+    remainingPercentLabel: remaining.percentLabel,
     resetsLabel: formatLimitReset(window.resetsAt, now),
     severity: limitSeverity(percent, status),
     status,

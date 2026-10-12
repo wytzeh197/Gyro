@@ -107,12 +107,31 @@ const parentEvents = [
     label: "Read parser tests",
     status: "done",
   }),
-  ...initial.map((agent) =>
+  ...initial.flatMap((agent) => [
+    event(parent, turn, `spawn-${agent.agentId}`, "system-event", "Agent launched", {
+      schema: "gyro.capability.v1",
+      kind: "capability-call",
+      callId: `spawn-${agent.agentId}`,
+      capabilityId: "agent-spawn",
+      providerId: "openai",
+      policyRevision: 1,
+      status: "completed",
+      summary: "Started sub-agent",
+      resource: { id: agent.agentId, kind: "chat", label: agent.name },
+    }),
     event(parent, turn, agent.agentId, "system-event", "Agent launched", {
       kind: "subagent-state",
       agent,
     }),
-  ),
+  ]),
+  event(parent, turn, "parser-edit", "system-event", "Updated src/parser.ts", {
+    kind: "provider-activity",
+    activityKind: "file",
+    status: "done",
+    path: "src/parser.ts",
+    additions: 11,
+    deletions: 9,
+  }),
 ];
 const childEvents = [
   event("parser", "parser-run", "child-user", "user-message", base.task),
@@ -347,6 +366,24 @@ function Fixture() {
           }}
           isComposerSending
           subagents={state}
+          chatNotice={
+            params.get("scenario") === "changes" ? (
+              <p role="status" style={{ margin: "0 auto 8px" }}>
+                Local sample notice
+              </p>
+            ) : undefined
+          }
+          queuedMessages={
+            params.get("scenario") === "changes"
+              ? [{
+                  id: "queued-followup",
+                  message: "Check the parser documentation next.",
+                  attachmentCount: 0,
+                  hasFailed: false,
+                  isDispatching: false,
+                }]
+              : []
+          }
           activeChatPanel={
             panel ?? (environmentOpen ? "environment" : undefined)
           }

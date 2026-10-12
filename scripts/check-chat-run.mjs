@@ -1042,6 +1042,40 @@ assert.deepEqual(
 
 // --- what never reaches the rail ----------------------------------------------------
 
+// Delegation records the launch in place, without pinning live children above
+// the parent's work or replaying each later lifecycle update.
+const launch = event("system-event", "Updated 1 sub-agent(s)", {
+  schema: "gyro.capability.v1",
+  kind: "capability-call",
+  capabilityId: "agent-spawn",
+  status: "completed",
+  resource: { id: "child", kind: "chat", label: "Parser implementation" },
+}, 1);
+const delegationRun = buildRunModel([
+  activity("commentary", "I’ll inspect the parser first.", {}, 0),
+  launch,
+  ...["running", "waiting", "completed"].map((status, index) =>
+    event("system-event", `Parser: ${status}`, {
+      kind: "subagent-state",
+      agent: { agentId: "child", name: "Parser implementation", status },
+    }, index + 2),
+  ),
+  activity("commentary", "I’m checking the result.", {}, 5),
+], { isRunning: true });
+assert.deepEqual(delegationRun.steps.map((step) => step.kind), ["say", "work", "say"]);
+assert.deepEqual(runRowText(delegationRun.steps[1]), {
+  label: "Started sub-agent",
+  description: "Parser implementation",
+});
+for (const [status, label] of [
+  ["running", "Starting sub-agent"],
+  ["denied", "Could not start sub-agent"],
+  ["failed", "Could not start sub-agent"],
+]) {
+  const item = workItemFromEvent({ ...launch, payload: { ...launch.payload, status } });
+  assert.equal(runRowText({ kind: "work", item }).label, label);
+}
+
 // Commentary is prose, never a work row or a generic system-event card.
 assert.equal(
   workItemFromEvent(activity("commentary", "Let me check the config.")),

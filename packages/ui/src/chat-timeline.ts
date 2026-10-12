@@ -6,6 +6,7 @@ import {
   structuredCommentaryBlocks,
 } from "./chat-commentary.ts";
 import type { SessionEvent } from "./types.ts";
+import { groupWorkflowEvents } from "./code-mode.ts";
 
 export type InterleavedChatTimelineItem =
   | { kind: "event"; event: SessionEvent }
@@ -424,9 +425,9 @@ function isBlankMessage(item: InterleavedChatTimelineItem) {
 export function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   const fileEvents: SessionEvent[] = [];
-  for (const event of orderedChatTimelineEvents(
+  for (const event of groupWorkflowEvents(orderedChatTimelineEvents(
     expandAssistantMessageSegments(events),
-  )) {
+  ))) {
     const activityKind = providerActivityKind(event);
     if (activityKind === "file") {
       fileEvents.push(event);

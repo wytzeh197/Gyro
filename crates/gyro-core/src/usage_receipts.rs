@@ -148,7 +148,7 @@ mod tests {
     fn count(n: u64) -> UsageTokens { UsageTokens::measured(Some(n), None, Some(0), None, Some(n)) }
 
     #[test]
-    fn task_attribution_counts_continuations_and_children_once() {
+    fn session_and_task_attribution_counts_continuations_and_children_once() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_usage_schema(&conn).unwrap();
         let parent = Uuid::new_v4(); let turn = Uuid::new_v4();
@@ -165,6 +165,9 @@ mod tests {
         assert_eq!(result.total_tokens, 170);
         assert_eq!(result.effective_accounting().scope, UsageScope::Task);
         assert!(result.measured);
+        let session_total = crate::usage::session_usage_totals(&conn, parent).unwrap();
+        assert_eq!(session_total.total_tokens, 170);
+        assert_eq!(session_total.calls, 3);
     }
 
     #[test]

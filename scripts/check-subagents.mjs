@@ -42,13 +42,17 @@ assert.equal(
   12000,
 );
 assert.equal(subagentElapsedMs({ ...agent, startedAt: "invalid" }, now), 5000);
-assert.equal(subagentTokensLabel(agent), "100 tokens");
+assert.equal(subagentTokensLabel(agent), "Usage unavailable");
+const accounting = (coverage = "complete") => ({
+  source: "provider", scope: "turn", coverage,
+  known: { input: false, output: false, cacheRead: false, cacheWrite: false, reasoning: false },
+});
 assert.equal(
   subagentTokensLabel({
     ...agent,
-    tokens: { totalTokens: 123456, measured: true },
+    tokens: { totalTokens: 123456, measured: true, accounting: accounting() },
   }),
-  `${(123456).toLocaleString()} tokens`,
+  "123k tokens",
 );
 assert.equal(
   subagentTokensLabel({
@@ -58,12 +62,20 @@ assert.equal(
   "~100 tokens",
 );
 assert.equal(
+  subagentTokensLabel({ ...agent, tokens: { totalTokens: 100, measured: false, accounting: accounting("partial") } }),
+  "≥100 tokens",
+);
+assert.equal(
+  subagentTokensLabel({ ...agent, tokens: { totalTokens: 0, measured: true, accounting: accounting() } }),
+  "0 tokens",
+);
+assert.equal(
   subagentTokensLabel({ ...agent, tokens: null }),
   "Usage unavailable",
 );
 assert.equal(
   subagentTokensLabel({ ...agent, tokens: { totalTokens: 0 } }),
-  "0 tokens",
+  "Usage unavailable",
 );
 const settled = {
   ...agent,

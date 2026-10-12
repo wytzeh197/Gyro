@@ -1,3 +1,9 @@
+/* Paint the whole light-mode chat, including the reserved Environment gutter. */
+:root[data-theme="light"]
+  .gyro-chat-surface.has-environment-popover:is(.is-thread, .is-empty) {
+  background: var(--gyro-pane);
+}
+
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   > .gyro-chat-thread-topbar,
@@ -26,18 +32,12 @@
   --gyro-chat-dock-solid: var(--gyro-app);
 }
 
-/* Only the composer is solid. The live changes pill and queue float over the
-   transcript, which runs down behind them to the composer;
-   a short fade keeps text from meeting the composer's edge. Until the dock
-   is measured the whole dock stays solid. */
+/* The composer card is the only solid surface. The dock stays clear so
+   transcript text meets the card without a fade. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-composer-dock {
-  background: linear-gradient(
-    to top,
-    var(--gyro-chat-dock-solid) var(--gyro-composer-solid-height, 100%),
-    transparent calc(var(--gyro-composer-solid-height, 100%) + 16px)
-  );
+  background: transparent;
 }
 
 :root[data-theme]
@@ -46,7 +46,11 @@
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty).is-thread:not(.is-tiled)
   .gyro-chat-composer-dock {
-  padding-inline: clamp(20px, 4%, 64px);
+  /* Center one shared column; both containers include the same outer gutter. */
+  padding-inline: max(
+    clamp(20px, 4%, 64px),
+    calc((100% - var(--gyro-chat-content-width)) / 2)
+  );
 }
 
 :root[data-theme]
@@ -117,7 +121,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
   .gyro-assistant-response {
-  font: calc(14.5px * var(--gyro-ui-scale, 1))/1.65 var(--gyro-font-sans);
+  font: var(--gyro-chat-font-body)/1.6 var(--gyro-font-sans);
   text-align: left;
 }
 
@@ -214,6 +218,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-run-row-label {
   color: var(--gyro-text);
+  font-size: var(--gyro-chat-font-work);
   font-weight: 450;
 }
 :root[data-theme]
@@ -229,14 +234,15 @@
 }
 :root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-run-pulse {
   animation: none;
+  font-size: var(--gyro-chat-font-work);
 }
 
-/* Segment layout: narration as body text, each stretch of work as muted 14px
-   lines on a 25px pitch, flush left under a 13px header and hairline. No spine
+/* Segment layout: narration as body text, each stretch of work as muted 12px
+   lines on a 25px pitch, flush left under a 12px header and hairline. No spine
    and no indent — the type does the structuring. */
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
   color: var(--gyro-muted);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-work);
   font-weight: 400;
   line-height: calc(18px * var(--gyro-ui-scale, 1));
   min-height: 0;
@@ -301,7 +307,7 @@
   .gyro-run-row-label {
   color: var(--gyro-text);
   display: block;
-  font-size: calc(14.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-body);
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1.4;
@@ -451,7 +457,7 @@
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-pulse {
   animation: gyro-run-breathe 1.6s ease-in-out infinite;
   display: block;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-work);
   line-height: calc(20px * var(--gyro-ui-scale, 1));
   margin-top: 4px;
   padding: 0;
@@ -581,7 +587,7 @@
   padding: 10px 12px 6px;
   background: transparent;
   color: var(--gyro-text);
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
+  font: var(--gyro-chat-font-body)/1.5 var(--gyro-font-sans);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -708,11 +714,65 @@
   overflow: hidden;
 }
 
-/* Conversation polish. Append after the existing UI stylesheet so these
-   surface-scoped rules refine its appearance without changing pane geometry. */
+/* Chat typography shares a compact scale across messages and live work. */
+:root[data-theme] :is(.gyro-chat-surface, .gyro-side-chat) {
+  --gyro-chat-font-body: calc(13px * var(--gyro-ui-scale, 1));
+  --gyro-chat-font-work: calc(12px * var(--gyro-ui-scale, 1));
+  --gyro-chat-font-meta: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+/* Keep inherited paragraphs and composer placeholders on the same chat scale. */
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat)
+  :is(
+    .gyro-chat-transcript,
+    .gyro-chat-start,
+    .gyro-chat-composer-dock,
+    .gyro-side-chat-transcript
+  ) {
+  --gyro-font-body: var(--gyro-chat-font-body);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-thread-topbar
+  strong {
+  font-size: var(--gyro-chat-font-body);
+}
+
+:root[data-theme] .gyro-chat-surface .gyro-chat-run-change-summary-trigger {
+  font-size: var(--gyro-chat-font-work);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat)
+  :is(.gyro-response-inline-code, .gyro-response-command-list code) {
+  font-size: var(--gyro-chat-font-work);
+}
+
 :root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) {
   --gyro-chat-dock-solid: var(--gyro-pane);
-  --gyro-chat-content-width: 780px;
+  /* Match the new-chat composer's 720px card after its control scaling. */
+  --gyro-chat-content-width: calc(720px * var(--gyro-composer-zoom));
+}
+
+/* Keep the hero card capped to the shared column, including when a companion
+   adds is-constrained. Narrow panes may shrink below the hero width floor. */
+:root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-composer-dock > .gyro-composer-shell.is-hero {
+  max-width: calc(var(--gyro-chat-content-width) / var(--gyro-composer-zoom));
+  min-width: 0;
+  width: min(100%, calc(var(--gyro-chat-content-width) / var(--gyro-composer-zoom)));
+}
+
+/* Turns, standalone events and composer cards share the exact same edges.
+   The floating jump button keeps its own compact dimensions. */
+:root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-transcript > *,
+:root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-composer-dock > :where(:not(.gyro-chat-jump-to-bottom)) {
+  box-sizing: border-box;
+  margin-inline: auto;
+  max-width: var(--gyro-chat-content-width);
+  min-width: 0;
+  width: min(100%, var(--gyro-chat-content-width));
 }
 
 :root[data-theme]
@@ -727,7 +787,7 @@
   border-color: transparent;
   border-radius: 16px;
   padding: 9px 14px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.55 var(--gyro-font-sans);
+  font: var(--gyro-chat-font-body)/1.55 var(--gyro-font-sans);
 }
 
 :root[data-theme]
@@ -735,7 +795,7 @@
   .gyro-chat-run
   :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text) {
   color: var(--gyro-text);
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-body);
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1.6;
@@ -754,7 +814,7 @@
   .gyro-chat-run
   .gyro-response-body
   :is(h2, h3) {
-  font-size: calc(15px * var(--gyro-ui-scale, 1));
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.45;
@@ -769,7 +829,7 @@
 
 /* Progress stays secondary to the answer; failures retain their own colors. */
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-work);
   line-height: 1.5;
 }
 
@@ -782,9 +842,7 @@
   border: 0;
   color: var(--gyro-muted);
   display: flex;
-  font: calc(14px * var(--gyro-ui-scale, 1))/calc(
-      20px * var(--gyro-ui-scale, 1)
-    )
+  font: var(--gyro-chat-font-work)/calc(20px * var(--gyro-ui-scale, 1))
     var(--gyro-font-sans);
   gap: 8px;
   letter-spacing: -0.005em;
@@ -792,7 +850,6 @@
   min-width: 0;
   padding: 0;
   text-align: left;
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
   line-height: calc(20px * var(--gyro-ui-scale, 1));
   min-height: 26px;
 }
@@ -803,7 +860,7 @@
   :is(.gyro-run-call-meta, .gyro-run-row-repeat, .gyro-run-row-stat) {
   flex: none;
   white-space: nowrap;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-chat-font-meta);
 }
 
 /* Scope to the two main composers; nested companion tools keep their density. */
@@ -847,7 +904,7 @@
   > textarea {
   border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
   padding: 12px 14px 6px;
-  font: calc(14px * var(--gyro-ui-scale, 1))/1.5 var(--gyro-font-sans);
+  font: var(--gyro-chat-font-body)/1.5 var(--gyro-font-sans);
 }
 
 :root[data-theme]
@@ -1050,4 +1107,69 @@
     flex-direction: column;
     gap: 2px;
   }
+}
+
+/* Stacked chats use the same insertion boundaries along their height. */
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] {
+  --gyro-chat-grid-drop-track: calc(
+    (100% - (var(--gyro-grid-count, 1) - 1) * 1px) / var(--gyro-grid-count, 1) + 1px
+  );
+  background: none;
+  display: block;
+  padding: 0;
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone {
+  height: 8px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-start"] {
+  top: 0;
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-1"] {
+  top: var(--gyro-chat-grid-drop-track);
+  transform: translateY(-50%);
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-2"] {
+  top: calc(var(--gyro-chat-grid-drop-track) * 2);
+  transform: translateY(-50%);
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-3"] {
+  top: calc(var(--gyro-chat-grid-drop-track) * 3);
+  transform: translateY(-50%);
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-end"] {
+  bottom: 0;
+}
+:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-tile {
+  font-size: 0;
+  overflow: hidden;
+}
+
+:root[data-theme] [data-chat-pane-drag][draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+:root[data-theme] [data-chat-pane-drag][draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Native WebKit rechecks the drag source after dragstart. Placement feedback
+   must not become the element under that source while the drag begins. The
+   grid capture handlers own hit-testing and release geometry. */
+:root[data-theme] .gyro-chat-grid-drop-overlay,
+:root[data-theme] .gyro-chat-grid-drop-overlay * {
+  pointer-events: none;
+}
+
+/* Internal chat gestures stay in the renderer, including over popovers and
+   composers. Pointer capture must not select text or leave a native ghost. */
+:root.gyro-chat-pointer-dragging,
+:root.gyro-chat-pointer-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+:root[data-theme] .gyro-sidebar-thread-main {
+  user-select: none;
 }

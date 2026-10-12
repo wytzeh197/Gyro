@@ -123,6 +123,7 @@ const recordedFiles = comparisonFiles.map((file) => ({
 }));
 function Fixture() {
   const [selectedPath, select] = useState("src/chat.ts");
+  const [layout, setLayout] = useState("");
   const [chatPanel, setChatPanel] = useState<ChatSidePanelId | undefined>(
     "review",
   );
@@ -130,7 +131,7 @@ function Fixture() {
     const base = {
       sessionId: "review-chat",
       turnId: "recorded-turn",
-      createdAt: "2026-10-07T12:00:00Z",
+      createdAt: params.has("running") ? new Date(Date.now() - 25_000).toISOString() : "2026-10-07T12:00:00Z",
       payload: {},
     };
     const events: SessionEvent[] = [
@@ -179,9 +180,32 @@ function Fixture() {
     ];
     return (
       <div
-        style={{ height: "100vh", display: "flex", flexDirection: "column" }}
+        style={{
+          height: "100vh",
+          width: Number(params.get("width")) || "100%",
+          maxWidth: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
       >
-        <nav aria-label="Fixture controls">
+        <nav
+          aria-label="Fixture controls"
+          style={{ flexShrink: 0, minHeight: 46, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, padding: 8 }}
+        >
+          <span>
+            Review layout fixture · {params.has("running") ? "Editing in progress" : "Completed turn"}
+          </span>
+          <button onClick={() => {
+            document.querySelector(".gyro-chat-companion")?.getAnimations().forEach((animation) => animation.finish());
+            window.setTimeout(() => {
+              const card = document.querySelector(".gyro-composer-shell")?.getBoundingClientRect();
+              const pane = document.querySelector(".gyro-chat-thread-canvas")?.getBoundingClientRect();
+              setLayout(card && pane ? `Composer ${Math.round(card.width)}px · Chat ${Math.round(pane.width)}px · ${card.left >= pane.left && card.right <= pane.right ? "Fits chat" : "Overflow"}` : "Layout unavailable");
+            }, 50);
+          }}>
+            Settle layout
+          </button>
+          <output>{layout}</output>
           <button
             onClick={() => setChatPanel(chatPanel ? undefined : "review")}
           >
@@ -198,7 +222,9 @@ function Fixture() {
           }}
           onSend={() => {}}
           shellReady
-          events={events}
+          isTiled={params.has("tiled")}
+          isComposerSending={params.has("running")}
+          events={params.has("running") ? events.slice(0, -1) : events}
           activeChatPanel={chatPanel}
           onSelectChatPanel={setChatPanel}
           onLoadComparisonDiff={loadDiff}

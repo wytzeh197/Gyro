@@ -1,9 +1,85 @@
 use super::*;
 
+// Keep routine model inspection small; callers can opt into the hard tool
+// ceiling when the additional context is actually needed.
+pub(super) const DEFAULT_WORKSPACE_RESULT_BYTES: usize = 16 * 1024;
+pub(super) const MIN_WORKSPACE_RESULT_BYTES: usize = 1024;
+
+pub(super) fn workspace_result_bytes_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "integer", "minimum": MIN_WORKSPACE_RESULT_BYTES,
+        "maximum": gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
+        "default": DEFAULT_WORKSPACE_RESULT_BYTES,
+        "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed."
+    })
+}
+
+pub(super) fn redact_workspace_capability_result(
+    id: CapabilityId,
+    mut data: serde_json::Value,
+) -> serde_json::Value {
+    if matches!(
+        id,
+        CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::WorkspaceReadEditor
+    ) {
+        // These modules mask content before selecting/truncating it. A second
+        // generic redaction would change source columns to a shorter marker.
+        let content = data
+            .as_object_mut()
+            .and_then(|object| object.remove("content"));
+        let mut data = redact_json_strings(data);
+        if let Some(content) = content {
+            data["content"] = content;
+        }
+        data
+    } else if id == CapabilityId::WorkspaceSearch {
+        if let Some(matches) = data.as_array_mut() {
+            for matched in matches {
+                // Search previews also preserve full-source UTF-16 ranges.
+                let line = matched
+                    .as_object_mut()
+                    .and_then(|object| object.remove("line"));
+                *matched = redact_json_strings(std::mem::take(matched));
+                if let Some(line) = line {
+                    matched["line"] = line;
+                }
+            }
+        }
+        data
+    } else {
+        redact_json_strings(data)
+    }
+}
+
+pub(super) fn workspace_result_byte_limit(arguments: &serde_json::Value) -> anyhow::Result<usize> {
+    let Some(value) = arguments.get("maxBytes") else {
+        return Ok(DEFAULT_WORKSPACE_RESULT_BYTES);
+    };
+    let bytes = value
+        .as_u64()
+        .filter(|bytes| {
+            (MIN_WORKSPACE_RESULT_BYTES as u64
+                ..=gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES as u64)
+                .contains(bytes)
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "capability argument `maxBytes` must be an integer between {} and {}",
+                MIN_WORKSPACE_RESULT_BYTES,
+                gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
+            )
+        })?;
+    Ok(bytes as usize)
+}
+
 pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
     !matches!(
         id,
         CapabilityId::WorkspaceContext
+            | CapabilityId::CodeModeDiscover
+            | CapabilityId::CodeModeExecute
             | CapabilityId::BrowserOpen
             | CapabilityId::BrowserInspect
             | CapabilityId::BrowserReload
@@ -92,4 +168,29 @@ pub(super) fn normalize_workspace_context_paths(
         normalize_value_path(test)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn workspace_result_budgets_are_explicit_and_validated() {
+        assert_eq!(workspace_result_byte_limit(&json!({})).unwrap(), 16 * 1024);
+        assert_eq!(
+            workspace_result_byte_limit(&json!({"maxBytes":1024})).unwrap(),
+            1024
+        );
+        for value in [
+            json!(0),
+            json!(1023),
+            json!(131073),
+            json!(1.5),
+            json!("4096"),
+            Value::Null,
+        ] {
+            assert!(workspace_result_byte_limit(&json!({"maxBytes":value})).is_err());
+        }
+    }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./branch-name-dialog.css";
+import { useDialogDismiss } from "@gyro-dev/ui";
 
 /** Native HTML dialog provides focus containment and Escape in the desktop webview. */
 export function BranchNameDialog({
@@ -13,7 +14,7 @@ export function BranchNameDialog({
   mode?: "create" | "rename";
   onFinish: (name?: string) => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { ref: dialogRef, dismiss } = useDialogDismiss<HTMLDialogElement>(() => onFinish());
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(initialValue);
   useEffect(() => {
@@ -37,7 +38,7 @@ export function BranchNameDialog({
       aria-describedby="gyro-branch-name-description"
       onCancel={(event) => {
         event.preventDefault();
-        onFinish();
+        dismiss();
       }}
       onKeyDown={(event) => event.stopPropagation()}
     >
@@ -78,7 +79,7 @@ export function BranchNameDialog({
           <button
             className="gyro-secondary-button"
             type="button"
-            onClick={() => onFinish()}
+            onClick={dismiss}
           >
             Cancel
           </button>

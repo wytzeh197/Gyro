@@ -92,8 +92,9 @@ the Browser context attachment UX, and complete the acceptance matrix below.
 A model navigating used to reveal the Browser panel every time. In a split
 layout that put one chat's page over the transcript of the pane beside it, for
 work the user had not asked to watch. Revealing is now a decision
-(`packages/ui/src/browser-reveal.ts`): the user's own action always reveals, a
-solo chat still reveals, and a tiled layout leaves the page on the backend.
+(`packages/ui/src/browser-reveal.ts`): the user's own action always reveals;
+model browsing stays in the background in both solo and tiled chats unless
+`reveal: true` requests a visible preview or user handoff.
 `browser-navigate` takes a `background` flag so recording the page no longer
 implies taking a surface.
 

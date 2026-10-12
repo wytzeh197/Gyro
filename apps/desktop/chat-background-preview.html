@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gyro chat background preview</title>
+<style>
+body{margin:0;background:#f4f4f4;color:#222;font:14px system-ui}
+header{padding:12px 16px}h1{margin:0 0 8px;font-size:16px}
+button{font:inherit;margin-right:8px}output{display:block;margin-top:8px}
+#stage{position:relative;overflow:hidden;margin:0 8px}
+iframe{width:1440px;height:1050px;border:0;transform-origin:top left}
+</style>
+</head>
+<body>
+<header><h1>Chat background · production component fixture</h1>
+<button id="theme">Switch theme</button><button id="environment">Toggle Environment</button>
+<output id="result">Loading fixture…</output></header>
+<div id="stage"><iframe title="Actual chat components at desktop width" src="/ui-upgrade-fixture.html"></iframe></div>
+<script>
+const frame=document.querySelector('iframe'), stage=document.querySelector('#stage'), result=document.querySelector('#result');
+function fit(){const scale=stage.clientWidth/1440;frame.style.transform='scale('+scale+')';stage.style.height=(1050*scale)+'px'}
+new ResizeObserver(fit).observe(stage);
+function report(){
+ const doc=frame.contentDocument, surface=doc?.querySelector('.gyro-chat-surface'), canvas=doc?.querySelector('.gyro-chat-thread-canvas');
+ if(!surface||!canvas)return;
+ const win=frame.contentWindow, a=win.getComputedStyle(surface).backgroundColor, b=win.getComputedStyle(canvas).backgroundColor;
+ const sw=surface.getBoundingClientRect().width, cw=canvas.getBoundingClientRect().width;
+ result.textContent=doc.documentElement.dataset.theme+' · '+(a===b?'Matching backgrounds':'Different backgrounds')+' · surround '+a+' · chat '+b+' · surface '+Math.round(sw)+'px / canvas '+Math.round(cw)+'px';
+}
+function setup(){
+ const doc=frame.contentDocument, button=doc?.querySelector('button[aria-label="Environment"]');
+ if(!button){setTimeout(setup,100);return}
+ button.click();
+ new MutationObserver(report).observe(doc.documentElement,{attributes:true,childList:true,subtree:true});
+ report();
+}
+frame.addEventListener('load',setup);
+document.querySelector('#theme').onclick=()=>{
+ const doc=frame.contentDocument, select=doc.querySelector('select[aria-label="Fixture theme"]');
+ select.value=doc.documentElement.dataset.theme==='light'?'dark':'light';
+ select.dispatchEvent(new frame.contentWindow.Event('change',{bubbles:true}));
+ setTimeout(report,200);
+};
+document.querySelector('#environment').onclick=()=>{
+ frame.contentDocument.querySelector('button[aria-label="Environment"]').click();
+ setTimeout(report,200);
+};
+</script>
+</body></html>

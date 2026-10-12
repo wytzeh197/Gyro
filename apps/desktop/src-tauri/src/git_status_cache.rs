@@ -219,7 +219,11 @@ fn inspect_git_status_before_inner(
         .arg("--porcelain=v2")
         .arg("-z")
         .arg("--branch")
-        .arg("--untracked-files=normal");
+        .arg(if detailed {
+            "--untracked-files=all"
+        } else {
+            "--untracked-files=normal"
+        });
     // Porcelain paths are repository-relative from any directory, but stage,
     // discard, review and the Explorer resolve them against the workspace
     // folder, so a subfolder workspace reads its own subtree only.
@@ -529,7 +533,6 @@ pub(super) fn apply_git_diff_stats(
     }
 
     let mut untracked_additions = 0usize;
-    let mut untracked_counted = 0usize;
     for file in &mut status.files {
         if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
             file.original_path
@@ -550,14 +553,7 @@ pub(super) fn apply_git_diff_stats(
         if metadata.is_dir() {
             continue;
         }
-        if untracked_counted >= MAX_UNTRACKED_LINE_COUNT_FILES
-            || metadata.len() > MAX_UNTRACKED_LINE_COUNT_BYTES
-        {
-            status.stats_partial = true;
-            continue;
-        }
-        untracked_counted += 1;
-        let additions = match git_line_counts::untracked_lines(&path) {
+        let additions = match git_line_counts::untracked_lines_before(&path, deadline) {
             Ok(lines) => lines,
             Err(_) => {
                 status.stats_partial = true;

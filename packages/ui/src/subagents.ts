@@ -1,5 +1,5 @@
 import type { SessionEvent } from "./types.ts";
-import { turnTokensFromValue } from "./turn-tokens.ts";
+import { turnTokensFromValue, turnTokensLabel } from "./turn-tokens.ts";
 
 export type SubagentSnapshot = {
   agentId: string;
@@ -132,9 +132,7 @@ export function subagentElapsedMs(agent: SubagentSnapshot, now: number) {
 
 export function subagentTokensLabel(agent: SubagentSnapshot) {
   const tokens = turnTokensFromValue(agent.tokens);
-  return tokens
-    ? `${tokens.measured === false ? "~" : ""}${tokens.totalTokens.toLocaleString()} tokens`
-    : "Usage unavailable";
+  return tokens ? turnTokensLabel(tokens) : "Usage unavailable";
 }
 
 export function sortedSubagents(agents: SubagentSnapshot[]) {

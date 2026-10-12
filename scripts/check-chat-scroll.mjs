@@ -116,6 +116,11 @@ function mount(sessionId, ids = ["first"], height = 1000) {
   return {
     hook,
     node,
+    activityUpdate: () => {
+      effects[0]();
+      [...frames.values()].forEach((callback) => callback());
+      frames.clear();
+    },
     unmount: () => cleanup.forEach((callback) => callback()),
   };
 }
@@ -152,6 +157,64 @@ assert.equal(
   "explicit latest resumes following after remount",
 );
 following.unmount();
+for (const input of ["wheel", "touch", "keyboard", "pointer"]) {
+  const reader = mount(`small-${input}`);
+  if (input === "wheel") reader.hook.onTranscriptWheel({ deltaY: -10 });
+  if (input === "touch") {
+    reader.hook.onTranscriptTouchStart({ touches: [{ clientY: 100 }] });
+    reader.hook.onTranscriptTouchMove({ touches: [{ clientY: 110 }] });
+  }
+  if (input === "keyboard") reader.hook.onTranscriptKeyDown({ key: "ArrowUp" });
+  if (input === "pointer") reader.hook.onTranscriptPointerDown();
+  else {
+    // A pending activity frame can run before the browser applies the gesture.
+    reader.activityUpdate();
+  }
+  reader.node.scrollTop -= 10;
+  reader.hook.onTranscriptScroll({ currentTarget: reader.node });
+  reader.activityUpdate();
+  assert.equal(
+    reader.node.scrollTop,
+    790,
+    `${input}: activity must not snap a small upward gesture back to latest`,
+  );
+  reader.node.scrollHeight += 20;
+  reader.activityUpdate();
+  assert.equal(
+    reader.node.scrollTop,
+    790,
+    `${input}: streaming preserves position`,
+  );
+  reader.node.scrollTop = 820;
+  reader.hook.onTranscriptScroll({ currentTarget: reader.node });
+  reader.node.scrollHeight += 100;
+  reader.activityUpdate();
+  assert.equal(
+    reader.node.scrollTop,
+    920,
+    `${input}: scrolling down resumes following`,
+  );
+  reader.unmount();
+}
+const smallReader = mount("small-remount");
+smallReader.hook.onTranscriptWheel({ deltaY: -10 });
+smallReader.node.scrollTop = 790;
+smallReader.hook.onTranscriptScroll({ currentTarget: smallReader.node });
+smallReader.unmount();
+const smallRestored = mount("small-remount");
+assert.equal(
+  smallRestored.node.scrollTop,
+  790,
+  "near-bottom reading survives remount",
+);
+smallRestored.node.scrollHeight += 20;
+smallRestored.activityUpdate();
+assert.equal(
+  smallRestored.node.scrollTop,
+  790,
+  "restoration does not resume following",
+);
+smallRestored.unmount();
 console.log(
-  "Chat scroll: actual-hook remount, reader/following state, older-page geometry, sibling isolation and bounded memory passed.",
+  "Chat scroll: small wheel/touch/key/pointer gestures, activity updates, remount, reader/following state, older-page geometry, sibling isolation and bounded memory passed.",
 );

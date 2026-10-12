@@ -91,6 +91,10 @@ export type ChatGridState = {
 };
 
 export type CapabilityId =
+  | "code-mode-discover"
+  | "code-mode-execute"
+  | "workspace-outline"
+  | "task-checkpoint"
   | "workspace-context"
   | "workspace-check"
   | "workspace-list"
@@ -308,6 +312,7 @@ export type ProviderCapabilitySupport = {
   supportsImages: boolean;
   supportsResume: boolean;
   supportsUsage: boolean;
+  efficiency?: { ownsRequests: boolean; nativeContinuation: "supported" | "unsupported" | "unknown"; effort: "supported" | "unsupported" | "unknown"; cacheControls: "supported" | "unsupported" | "unknown"; usage: "supported" | "unsupported" | "unknown"; hiddenContext: boolean };
   capabilities: CapabilityId[];
   reason?: string;
 };
@@ -947,6 +952,9 @@ export type ProviderChatStreamPhase =
   /** Running cost of the turn so far, for the providers Gyro meters itself. */
   | "turn-tokens"
   | "started"
+  /** Native session recovery keeps the current invoke alive while waiting. */
+  | "retry-wait"
+  | "retry-started"
   | "activity"
   | "delta"
   /** Backend keep-alive while the provider process is quiet but still running. */
@@ -974,6 +982,10 @@ export type ProviderChatStreamEvent = {
       }[]
     | null;
   phase: ProviderChatStreamPhase;
+  /** Native recovery deadline in UTC; distinct from host-owned resend timers. */
+  retryAt?: string | null;
+  retryAttempt?: number | null;
+  retryMaxAttempts?: number | null;
   contextUsage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -1321,7 +1333,8 @@ export type UsageOrigin =
   | "automation"
   | "council-seat"
   | "council-synthesis"
-  | "council-resynthesis";
+  | "council-resynthesis"
+  | "optimization";
 
 export type UsageOriginTotals = {
   origin: UsageOrigin;
@@ -1931,6 +1944,7 @@ export type SessionEvent = {
     | "approval-requested"
     | "plan-updated"
     | "goal-updated"
+    | "task-checkpoint"
     | "chat-mode-changed"
     | "council-run-started"
     | "council-seat-started"
@@ -2312,6 +2326,19 @@ export type GyroAccountOidcConfig = {
   scopes: string[];
 };
 
+export type PriceSnapshot = {
+  id: string; provider: string; model: string; effectiveDate: string; currency: string;
+  inputMicrosPerMillion: number; cachedMicrosPerMillion: number | null;
+  cacheWriteMicrosPerMillion: number | null; outputMicrosPerMillion: number;
+};
+export type EfficiencyRoute = {phase: string; provider: string; model: string};
+export type EfficiencyConfig = {
+  enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
+  parallelAgents: boolean; prices: PriceSnapshot[];
+  routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
+  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean;
+};
+
 export type GyroConfig = {
   automaticUpdateChecks?: boolean;
   telemetryEnabled: boolean;
@@ -2324,6 +2351,7 @@ export type GyroConfig = {
   selectedProviderId?: ProviderId;
   /** Explicit per-model opt-in; absent choices use standard speed. */
   fastModeModels?: Record<string, boolean>;
+  efficiency?: EfficiencyConfig;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];
   council?: CouncilConfig;

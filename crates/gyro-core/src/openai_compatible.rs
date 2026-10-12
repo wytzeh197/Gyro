@@ -138,6 +138,64 @@ pub struct OpenAiCompatToolCall {
     pub arguments: serde_json::Value,
 }
 
+/// A confirmed native-tool rejection is remembered briefly for this endpoint,
+/// model and credential. Callers can retain tools through their structured
+/// bridge without paying for the same rejected native request on every turn.
+pub fn openai_compat_native_tools_available(
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+) -> Result<bool> {
+    let endpoint = openai_compat_endpoint(base_url)?;
+    Ok(crate::api_compatibility::native_tools_available(
+        crate::api_compatibility::identity(endpoint.as_str(), model.trim(), api_key.trim()),
+    ))
+}
+
+/// Only call after the provider explicitly rejects native tool support. A
+/// malformed schema, unrelated option error, or interrupted stream is not a
+/// compatibility verdict.
+pub fn remember_openai_compat_native_tool_rejection(
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+) -> Result<()> {
+    let endpoint = openai_compat_endpoint(base_url)?;
+    crate::api_compatibility::remember_tools_rejection(crate::api_compatibility::identity(
+        endpoint.as_str(),
+        model.trim(),
+        api_key.trim(),
+    ));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tool_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn confirmed_tool_rejection_survives_later_turns_without_another_native_probe() {
+        let model = uuid::Uuid::new_v4().to_string();
+        let endpoint = "https://native-tool-cache-fixture.invalid/v1";
+        assert!(openai_compat_native_tools_available(endpoint, &model, "key-a").unwrap());
+        remember_openai_compat_native_tool_rejection(endpoint, &model, "key-a").unwrap();
+        for _ in 0..3 {
+            assert!(!openai_compat_native_tools_available(endpoint, &model, "key-a").unwrap());
+        }
+        assert!(
+            !openai_compat_native_tools_available(endpoint, &format!(" {model} "), " key-a ")
+                .unwrap()
+        );
+        assert!(openai_compat_native_tools_available(endpoint, &model, "key-b").unwrap());
+        assert!(openai_compat_native_tools_available(
+            "https://other-native-tool-cache-fixture.invalid/v1",
+            &model,
+            "key-a"
+        )
+        .unwrap());
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiCompatDiscovery {
@@ -273,13 +331,15 @@ where
     let mut observation = None;
     let mut receipt = UsageReceipt::start(cancellation);
     let response = crate::provider_retry::http_response(cancellation, || {
-        let payload = chat_payload(
+        let mut payload = chat_payload(
             model,
             &request.messages,
             &request.tools,
             request.reasoning_effort,
             include_usage,
         );
+        let efficiency = crate::GyroPaths::for_current_user().ok().and_then(|p|crate::GyroConfig::load(&p).ok()).map(|c|c.efficiency).unwrap_or_default();
+        crate::efficiency::cache::apply(&mut payload,&endpoint,model,efficiency.policies() && efficiency.cache_assembly);
         observation = Some(crate::provider_observation::Request::start(&payload));
         let result = match post_chat(&url, api_key, &payload, &receipt.transport) {
             Err(ureq::Error::Status(400, response)) => {
@@ -293,13 +353,14 @@ where
                     && crate::provider_retry::compatibility_retry()
                 {
                     include_usage = false;
-                    let payload = chat_payload(
+                    let mut payload = chat_payload(
                         model,
                         &request.messages,
                         &request.tools,
                         request.reasoning_effort,
                         false,
                     );
+                    crate::efficiency::cache::apply(&mut payload,&endpoint,model,efficiency.policies() && efficiency.cache_assembly);
                     observation = Some(crate::provider_observation::Request::start(&payload));
                     post_chat(&url, api_key, &payload, &receipt.transport)
                 } else {

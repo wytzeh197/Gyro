@@ -226,6 +226,8 @@ pub struct GyroConfig {
     pub council: CouncilConfig,
     #[serde(default)]
     pub usage_guard: UsageGuardConfig,
+    #[serde(default)]
+    pub efficiency: crate::efficiency::Config,
 }
 
 impl Default for GyroConfig {
@@ -243,6 +245,7 @@ impl Default for GyroConfig {
             fast_mode_models: HashMap::new(),
             council: CouncilConfig::default(),
             usage_guard: UsageGuardConfig::default(),
+            efficiency: crate::efficiency::Config::default(),
             model_providers: vec![
                 ModelProviderConfig {
                     id: "openai".into(),

@@ -1,14 +1,9 @@
 import type { ProviderUsageState, ProviderUsageWindow } from "./types";
 import { formatLimitReset } from "./context-usage.ts";
+import { remainingUsage } from "./usage-remaining.ts";
 
 function remainingIn(window: ProviderUsageWindow) {
-  if (window.status === "exhausted") return 0;
-  if (
-    typeof window.usedPercent !== "number" ||
-    !Number.isFinite(window.usedPercent)
-  )
-    return undefined;
-  return Math.max(0, Math.min(100, 100 - window.usedPercent));
+  return remainingUsage(window.usedPercent, window.status === "exhausted").percent;
 }
 
 /** A single ring must reflect the window that will stop work first. Never
@@ -35,7 +30,7 @@ export function providerAllowance(
   );
   const label =
     remaining !== undefined
-      ? `${remaining > 0 && remaining < 1 ? "<1" : Math.round(remaining)}% left`
+      ? `${remainingUsage(limiting!.window.usedPercent, limiting!.window.status === "exhausted").percentLabel} left`
       : usage?.status === "loading"
         ? "Loading usage"
         : usage?.windows.length && !windows.length
@@ -49,7 +44,7 @@ export function providerAllowance(
             window.label,
             left === undefined
               ? "Level not reported"
-              : `${left > 0 && left < 1 ? "<1" : Math.round(left)}% left`,
+              : `${remainingUsage(window.usedPercent, window.status === "exhausted").percentLabel} left`,
             formatLimitReset(window.resetsAt, now),
           ]
             .filter(Boolean)

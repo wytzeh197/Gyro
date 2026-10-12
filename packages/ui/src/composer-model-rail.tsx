@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { groupModelsByClass } from "./model-classes";
+import { clippingBounds } from "./composer-popover-bounds";
 
 export type ModelRailProvider = {
   id: string;
@@ -71,6 +72,7 @@ export function ComposerModelRail({
   );
   const preview = providers.find((provider) => provider.id === previewId);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -85,26 +87,70 @@ export function ComposerModelRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep the panel inside the window when the chip sits near an edge.
+  // Anchor to this composer's chip, then fit inside its split pane or clipping
+  // container. Re-measure on pane resize, not only when the window resizes.
   useLayoutEffect(() => {
     const panel = panelRef.current;
-    if (!panel) return;
-    const position = () => {
-      panel.style.translate = "";
-      const rect = panel.getBoundingClientRect();
-      const shift = Math.max(
-        12 - rect.left,
-        Math.min(0, window.innerWidth - 12 - rect.right),
+    const control = panel?.parentElement;
+    if (!panel || !control) return;
+    const position = (event?: Event) => {
+      if (event?.target instanceof Node && panel.contains(event.target)) return;
+      const listScroll = listRef.current?.scrollTop ?? 0;
+      const railScroll = railRef.current?.scrollTop ?? 0;
+      const bounds = clippingBounds(panel);
+      const pad = 12;
+      const gap = 6;
+      const anchor = control.getBoundingClientRect();
+      // Gyro's interface zoom scales CSS pixels; bounds are viewport pixels.
+      const controlStyle = window.getComputedStyle(control);
+      const scaleX = anchor.width / parseFloat(controlStyle.width) || 1;
+      const scaleY = anchor.height / parseFloat(controlStyle.height) || 1;
+      const availableWidth =
+        Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX;
+      panel.style.maxWidth = `${availableWidth}px`;
+      panel.style.maxHeight = "";
+      const above = Math.max(0, anchor.top - bounds.top - pad - gap);
+      const below = Math.max(0, bounds.bottom - anchor.bottom - pad - gap);
+      const preferred = placement === "up" ? above : below;
+      const opposite = placement === "up" ? below : above;
+      const direction =
+        panel.offsetHeight * scaleY > preferred && opposite > preferred
+          ? placement === "up"
+            ? "down"
+            : "up"
+          : placement;
+      panel.style.top = direction === "down" ? "calc(100% + 6px)" : "auto";
+      panel.style.bottom = direction === "up" ? "calc(100% + 6px)" : "auto";
+      panel.style.maxHeight = `${(direction === "up" ? above : below) / scaleY}px`;
+      // Use layout dimensions so the opening animation cannot skew the anchor.
+      const width = panel.offsetWidth * scaleX;
+      const naturalLeft = anchor.right - width;
+      const left = Math.min(
+        Math.max(naturalLeft, bounds.left + pad),
+        bounds.right - pad - width,
       );
-      panel.style.translate = `${shift}px 0`;
+      panel.style.translate = `${(left - naturalLeft) / scaleX}px 0`;
+      setResolvedPlacement(direction);
+      if (listRef.current) listRef.current.scrollTop = listScroll;
+      if (railRef.current) railRef.current.scrollTop = railScroll;
     };
     position();
-    const observer = new ResizeObserver(position);
-    observer.observe(panel.parentElement!);
+    const observer = new ResizeObserver(() => position());
+    // A companion dock can resize an inner container while the pane and chip
+    // keep their dimensions. Observe the whole layout path to the window.
+    for (
+      let ancestor: HTMLElement | null = control;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
     window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
     };
   }, [placement]);
 
@@ -228,7 +274,7 @@ export function ComposerModelRail({
       aria-label="Choose a model"
       className="gyro-composer-popover gyro-model-rail"
       data-align="end"
-      data-placement={placement}
+      data-placement={resolvedPlacement}
       id={id}
       ref={panelRef}
       role="dialog"

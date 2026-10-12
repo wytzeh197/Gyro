@@ -539,7 +539,7 @@ const throttled = summarizeUsageSafety({
   ],
 });
 assert.equal(throttled.tone, "warning");
-assert.match(throttled.title, /anthropic: 94% of budget used/);
+assert.match(throttled.title, /anthropic: 6% of budget left/);
 assert.match(throttled.title, /partly estimated/);
 assert.match(throttled.detail, /Ordinary turns still work/);
 assert.equal(throttled.canResume, false);
@@ -574,7 +574,7 @@ const windows = ledgerWindows({
 assert.equal(windows.length, 1);
 assert.equal(windows[0].id, "week");
 // The week scales the daily reference (2M × 7).
-assert.equal(windows[0].detail, "1.4M of 14M");
+assert.equal(windows[0].detail, "13M of 14M tokens left");
 assert.equal(windows[0].percentLabel, "10%");
 assert.equal(windows[0].hasBudget, false);
 assert.equal(windows[0].isEstimated, false);
@@ -604,10 +604,10 @@ assert.equal(budgeted[0].id, "five-hour");
 assert.equal(budgeted[0].hasBudget, true);
 // 1M daily budget × 5/24 ≈ 208K; 187.5K is ~90%.
 assert.equal(budgeted[0].percentLabel, "90%");
-assert.equal(budgeted[0].detail, "188K of 208K");
+assert.equal(budgeted[0].detail, "21K of 208K tokens left");
 assert.equal(budgeted[1].id, "week");
 assert.equal(budgeted[1].hasBudget, true);
-assert.equal(budgeted[1].detail, "2M of 7M");
+assert.equal(budgeted[1].detail, "5M of 7M tokens left");
 assert.equal(budgeted[1].percentLabel, "29%");
 
 // xAI-style weekly only: tiny spend reads as <1%; huge spend caps at 100%.
@@ -636,7 +636,7 @@ const idle = ledgerWindows({
   week: totals(),
 });
 assert.equal(idle[0].percentLabel, "0%");
-assert.equal(idle[0].detail, "0 of 14M");
+assert.equal(idle[0].detail, "14M of 14M tokens left");
 assert.deepEqual(idle[0].origins, []);
 
 console.log("usage ledger checks passed");

@@ -1,0 +1,55 @@
+.gyro-efficiency-details {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #8884);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 12px;
+}
+.gyro-efficiency-details summary {
+  cursor: pointer;
+}
+.gyro-efficiency-details p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.gyro-efficiency-details dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gyro-efficiency-details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.gyro-efficiency-details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.gyro-efficiency-input {
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  min-height: var(--gyro-control-height);
+  padding: 5px 9px;
+  font: inherit;
+  max-width: 100%;
+  width: 190px;
+}
+.gyro-efficiency-price-entry {
+  padding: 12px;
+}
+.gyro-efficiency-price-entry > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gyro-text);
+}
+.gyro-efficiency-details {
+  border-color: var(--gyro-border);
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+}

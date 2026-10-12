@@ -16,7 +16,9 @@ const GIT_HISTORY_SCHEMA: &str = "gyro.git-history.v1";
 const GIT_HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 const GIT_HISTORY_INACTIVITY: Duration = Duration::from_secs(10);
 const MAX_REVISION_CHARS: usize = 200;
+#[cfg(test)]
 const MAX_GIT_OUTPUT_BYTES: usize = 96 * 1024;
+#[cfg(test)]
 const MAX_GIT_OUTPUT_LINES: usize = 400;
 const DEFAULT_LOG_ENTRIES: usize = 20;
 const MAX_LOG_ENTRIES: usize = 50;
@@ -68,7 +70,8 @@ pub(super) fn execute(
                 command.arg(path);
             }
             let output = run_git_history(command)?;
-            let (text, truncated) = bounded_text(&output.stdout);
+            let text = output.stdout;
+            let truncated = false;
             (
                 format!("Read git show {revision}"),
                 json!({
@@ -116,7 +119,22 @@ pub(super) fn execute(
         }
         other => anyhow::bail!("git_history_capability does not handle {other}"),
     };
-    let data = bound_git_result(data)?;
+    let data = if data.get("output").is_some() {
+        let mut data = capability_output_budget::text_result(
+            data,
+            &[capability_output_budget::TextField {
+                pointer: "/output",
+                window: "outputWindow",
+                offset: "offset",
+                tail: false,
+            }],
+            arguments,
+        )?;
+        data["truncated"] = data["outputWindow"]["truncated"].clone();
+        data
+    } else {
+        bound_git_result(data, workspace_result_byte_limit(arguments)?)?
+    };
     let summary = if matches!(request.capability_id, CapabilityId::WorkspaceGitBlame) {
         format!(
             "Read git blame for {} lines {}-{}",
@@ -166,16 +184,19 @@ fn read_git_log(root: &Path, arguments: &Value) -> anyhow::Result<Value> {
     let mut commits = parse_log(&output.stdout);
     let has_more = commits.len() > limit;
     commits.truncate(limit);
-    bound_git_result(json!({
-        "schema": GIT_HISTORY_SCHEMA,
-        "revision": revision.unwrap_or_else(|| "HEAD".into()),
-        "path": path,
-        "offset": offset,
-        "limit": limit,
-        "hasMore": has_more,
-        "nextOffset": has_more.then_some(offset.saturating_add(commits.len() as u64)),
-        "commits": commits,
-    }))
+    bound_git_result(
+        json!({
+            "schema": GIT_HISTORY_SCHEMA,
+            "revision": revision.unwrap_or_else(|| "HEAD".into()),
+            "path": path,
+            "offset": offset,
+            "limit": limit,
+            "hasMore": has_more,
+            "nextOffset": has_more.then_some(offset.saturating_add(commits.len() as u64)),
+            "commits": commits,
+        }),
+        workspace_result_byte_limit(arguments)?,
+    )
 }
 
 /// A revision is data for git, never syntax: the argv list already removes
@@ -230,7 +251,7 @@ fn blame_range(arguments: &Value, file_lines: u64) -> anyhow::Result<(u64, u64)>
     let requested_start = capability_argument_u64(arguments, "lineStart").ok();
     let requested_end = capability_argument_u64(arguments, "lineEnd").ok();
     let start = requested_start.unwrap_or(1).max(1);
-    let default_end = start.saturating_add(MAX_BLAME_LINES - 1).min(file_lines);
+    let default_end = start.saturating_add(99).min(file_lines);
     let end = requested_end.unwrap_or(default_end).min(file_lines);
     // Check the start against the file before comparing the two ends: a start
     // past EOF would otherwise be reported as an end that precedes it, which
@@ -353,6 +374,7 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 
 /// Keep patches and blame inside both a line and a byte budget, and say so
 /// rather than silently dropping the tail.
+#[cfg(test)]
 fn bounded_text(value: &str) -> (String, bool) {
     let redacted = gyro_core::security::redact_secrets(value);
     let mut text = String::new();
@@ -370,7 +392,7 @@ fn bounded_text(value: &str) -> (String, bool) {
 
 /// The capability result has its own hard limit, so halve the entry list until
 /// the payload fits instead of failing the call.
-fn bound_git_result(mut data: Value) -> anyhow::Result<Value> {
+fn bound_git_result(data: Value, max_bytes: usize) -> anyhow::Result<Value> {
     let key = if data.get("commits").is_some() {
         "commits"
     } else if data.get("lines").is_some() {
@@ -378,26 +400,24 @@ fn bound_git_result(mut data: Value) -> anyhow::Result<Value> {
     } else {
         return Ok(data);
     };
-    while serde_json::to_vec(&data)?.len() > gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES {
-        let length = data[key].as_array().map(Vec::len).unwrap_or(0);
-        if length <= 1 {
-            break;
-        }
-        if let Some(items) = data[key].as_array_mut() {
-            items.truncate(length / 2);
-        }
-        data["truncated"] = json!(true);
-        data["hasMore"] = json!(true);
-        if key == "commits" {
-            let offset = data["offset"].as_u64().unwrap_or(0);
-            data["nextOffset"] = json!(offset.saturating_add((length / 2) as u64));
-        } else if let Some(last_line) = data["lines"]
+    let original_length = data[key].as_array().map_or(0, Vec::len);
+    let mut data = capability_output_budget::array_result(
+        data,
+        key,
+        if key == "lines" {
+            max_bytes.saturating_sub(128)
+        } else {
+            max_bytes
+        },
+    )?;
+    if key == "lines" && data[key].as_array().map_or(0, Vec::len) < original_length {
+        if let Some(last) = data[key]
             .as_array()
             .and_then(|lines| lines.last())
             .and_then(|line| line["line"].as_u64())
         {
-            data["lineEnd"] = json!(last_line);
-            data["nextLineStart"] = json!(last_line + 1);
+            data["lineEnd"] = json!(last);
+            data["nextLineStart"] = json!(last + 1);
         }
     }
     Ok(data)
@@ -415,7 +435,8 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 },
                 "limit": { "type": "integer", "minimum": 1, "maximum": MAX_LOG_ENTRIES },
                 "offset": { "type": "integer", "minimum": 0, "description": "Number of matching commits to skip. Defaults to 0. Continue with nextOffset from the previous result, keeping revision and path unchanged." },
-                "path": { "type": "string", "description": "Optional workspace-relative path to limit history to." }
+                "path": { "type": "string", "description": "Optional workspace-relative path to limit history to." },
+                "maxBytes": workspace_result_bytes_schema()
             }),
             vec![],
         ),
@@ -426,7 +447,9 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                     "description": "Revision to show, such as HEAD, a commit sha, or a tag. Must not start with a dash."
                 },
                 "path": { "type": "string", "description": "Optional workspace-relative path to limit the diff to." },
-                "stat": { "type": "boolean", "description": "Return only the changed-file summary instead of the full patch." }
+                "stat": { "type": "boolean", "description": "Return only the changed-file summary instead of the full patch." },
+                "offset": capability_output_budget::offset_schema(),
+                "maxBytes": workspace_result_bytes_schema()
             }),
             vec!["revision"],
         ),
@@ -434,7 +457,8 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             json!({
                 "path": { "type": "string", "description": "Workspace-relative file to blame." },
                 "lineStart": { "type": "integer", "minimum": 1, "description": "First line to blame. Defaults to 1." },
-                "lineEnd": { "type": "integer", "minimum": 1, "description": "Last line to blame. Defaults to a bounded window from lineStart." }
+                "lineEnd": { "type": "integer", "minimum": 1, "description": "Last line to blame. Defaults to 100 lines from lineStart; explicit windows can contain up to 400 lines." },
+                "maxBytes": workspace_result_bytes_schema()
             }),
             vec!["path"],
         ),
@@ -586,12 +610,15 @@ mod tests {
         let commits = (0..MAX_LOG_ENTRIES)
             .map(|index| json!({ "sha": index, "subject": "界".repeat(MAX_LOG_SUBJECT_CHARS) }))
             .collect::<Vec<_>>();
-        let page = bound_git_result(json!({
-            "offset": 20,
-            "commits": commits,
-            "hasMore": false,
-            "nextOffset": null,
-        }))
+        let page = bound_git_result(
+            json!({
+                "offset": 20,
+                "commits": commits,
+                "hasMore": false,
+                "nextOffset": null,
+            }),
+            gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
+        )
         .unwrap();
         let returned = page["commits"].as_array().unwrap().len();
         assert!(returned < MAX_LOG_ENTRIES);
@@ -601,13 +628,16 @@ mod tests {
         let lines = (100..100 + MAX_BLAME_LINES)
             .map(|line| json!({ "line": line, "content": "界".repeat(MAX_BLAME_LINE_CHARS) }))
             .collect::<Vec<_>>();
-        let page = bound_git_result(json!({
-            "lines": lines,
-            "lineStart": 100,
-            "lineEnd": 499,
-            "hasMore": false,
-            "nextLineStart": null,
-        }))
+        let page = bound_git_result(
+            json!({
+                "lines": lines,
+                "lineStart": 100,
+                "lineEnd": 499,
+                "hasMore": false,
+                "nextLineStart": null,
+            }),
+            gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
+        )
         .unwrap();
         let last_line = page["lines"].as_array().unwrap().last().unwrap()["line"]
             .as_u64()

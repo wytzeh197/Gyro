@@ -15,6 +15,8 @@ export type BrowserRevealRequest = {
    * "show" on a tool call. Their own action always wins.
    */
   isUserInitiated: boolean;
+  /** The model explicitly requested a visible preview or user handoff. */
+  revealRequested?: boolean;
   /** Two or more chat panes are tiled, so any panel covers a live transcript. */
   isSplitView: boolean;
   /** The Browser surface is already up, so there is nothing to reveal. */
@@ -22,7 +24,11 @@ export type BrowserRevealRequest = {
 };
 
 export type BrowserRevealReason =
-  "user-initiated" | "already-visible" | "split-view-background" | "reveal";
+  | "user-initiated"
+  | "already-visible"
+  | "split-view-background"
+  | "model-background"
+  | "reveal";
 
 export type BrowserRevealDecision = {
   reveal: boolean;
@@ -30,9 +36,8 @@ export type BrowserRevealDecision = {
 };
 
 /**
- * A single chat still reveals: with one transcript and a free rail, watching
- * the page the model is reading is the point. A split does not, because the
- * width it would take belongs to a conversation the user chose to keep open.
+ * Model browsing stays behind the chat in every layout unless a visible
+ * preview or user handoff was explicitly requested.
  */
 export function resolveBrowserReveal(
   request: BrowserRevealRequest,
@@ -43,18 +48,20 @@ export function resolveBrowserReveal(
   if (request.isBrowserVisible) {
     return { reveal: false, reason: "already-visible" };
   }
+  if (request.revealRequested) {
+    return { reveal: true, reason: "reveal" };
+  }
   if (request.isSplitView) {
     return { reveal: false, reason: "split-view-background" };
   }
-  return { reveal: true, reason: "reveal" };
+  return { reveal: false, reason: "model-background" };
 }
 
 /**
  * Whether a chat layout counts as split for this decision.
  *
- * Maximizing a pane gives that chat the whole grid back, so it is a single
- * chat again and reveals like one. This mirrors how the grid itself decides a
- * pane is tiled.
+ * Maximizing a pane gives that chat the whole grid back. This mirrors how the
+ * grid itself decides a pane is tiled; it does not imply a browser reveal.
  */
 export function isSplitChatLayout(options: {
   occupiedPaneCount: number;

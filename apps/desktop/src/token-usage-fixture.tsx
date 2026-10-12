@@ -26,6 +26,9 @@ const cases: Record<string, { title: string; message: string; tokens: TurnTokens
   cached: { title: "Cache and reasoning", message: "Cache reads and writes are included in input. Reasoning is included in output.",
     tokens: { inputTokens: 1200, cachedInputTokens: 800, cacheWriteTokens: 100, outputTokens: 340, reasoningOutputTokens: 40, totalTokens: 1540, measured: true,
       accounting: accounting("complete", { known: { input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true } }) } },
+  screenshot: { title: "Screenshot receipt", message: "This turn used 1,837,177 tokens: 1,834,057 input plus 3,120 output. The total includes 1,786,368 cached input tokens.",
+    tokens: { inputTokens: 1834057, cachedInputTokens: 1786368, outputTokens: 3120, totalTokens: 1837177, measured: true,
+      accounting: accounting("complete", { known: { input: true, output: true, cacheRead: true, cacheWrite: false, reasoning: false } }) } },
 };
 const config: GyroConfig = { commandProfiles: [], modelProviders: [], requireCommandApproval: true, requireFileEditApproval: true, telemetryEnabled: false };
 function Fixture() {

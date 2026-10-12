@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 const SUBAGENT_SCHEMA: &str = "gyro.subagent.v1";
 const MAX_QUESTION_CHARS: usize = 4_000;
+#[cfg(test)]
 const MAX_SUMMARY_CHARS: usize = 8_000;
 const MAX_TITLE_CHARS: usize = 60;
 /// How often a child run checks whether the chat that started it was stopped.
@@ -13,27 +14,52 @@ const PARENT_STOP_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// with nobody left to read its report.
 const RESEARCH_MAX_RUNTIME: Duration = Duration::from_secs(14 * 60);
 
+pub(super) fn retrieves_existing(arguments: &Value) -> bool {
+    arguments
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
+}
+
 pub(super) fn execute(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
-    let question = normalize_question(capability_argument_string(&request.arguments, "question")?)?;
-    let title = truncate_chars(
-        &format!("Research: {}", title_from(&question)),
-        MAX_TITLE_CHARS,
-    )
-    .0;
-    let agent = delegated_agents::spawn(app, bound, &title, &research_prompt(&question))?;
-    let result =
-        delegated_agents::wait(app, bound, &[agent.agent_id.clone()], RESEARCH_MAX_RUNTIME)?;
-    let finished = result
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("research agent disappeared"))?;
-    if finished.status != "completed" {
+    // Validate before starting a paid run; existing results are read without
+    // starting or messaging an agent.
+    workspace_result_byte_limit(&request.arguments)?;
+    capability_output_budget::offset(&request.arguments, "summaryOffset")?;
+    let agent = if request.arguments.get("sessionId").is_some() {
+        let id = capability_argument_string(&request.arguments, "sessionId")?;
+        delegated_agents::wait(app, bound, &[id.to_owned()], Duration::ZERO)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("research agent disappeared"))?
+    } else {
+        let question =
+            normalize_question(capability_argument_string(&request.arguments, "question")?)?;
+        let title = truncate_chars(
+            &format!("Research: {}", title_from(&question)),
+            MAX_TITLE_CHARS,
+        )
+        .0;
+        let agent = delegated_agents::spawn_with_runtime(
+            app,
+            bound,
+            &title,
+            &research_prompt(&question),
+            Some(RESEARCH_MAX_RUNTIME),
+        )?;
+        delegated_agents::wait(app, bound, &[agent.agent_id], RESEARCH_MAX_RUNTIME)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("research agent disappeared"))?
+    };
+    if agent.status != "completed" {
         anyhow::bail!(
             "the research sub-agent did not finish: {}",
-            finished.error.as_deref().unwrap_or(&finished.status)
+            agent.error.as_deref().unwrap_or(&agent.status)
         );
     }
     let store = open_store().map_err(anyhow::Error::msg)?;
@@ -42,20 +68,30 @@ pub(super) fn execute(
         .into_iter()
         .rev()
         .find(|event| event.kind == SessionEventKind::AssistantMessage);
-    let (summary, truncated) = truncate_chars(
-        response
-            .as_ref()
-            .map(|event| event.message.as_str())
-            .unwrap_or_else(|| finished.summary.as_deref().unwrap_or("")),
-        MAX_SUMMARY_CHARS,
-    );
-    Ok((
-        format!("Research finished in chat {}", agent.agent_id),
+    let summary = response
+        .as_ref()
+        .map(|event| event.message.as_str())
+        .unwrap_or_else(|| agent.summary.as_deref().unwrap_or(""));
+    let mut data = capability_output_budget::text_result(
         json!({
             "schema": SUBAGENT_SCHEMA, "sessionId": agent.agent_id, "title": agent.name,
             "providerId": agent.provider_id, "modelId": agent.model_id,
-            "question": question, "truncated": truncated, "summary": summary,
+            "truncated": false, "summary": summary,
+            "fullResultAvailableInChat": true,
         }),
+        &[capability_output_budget::TextField {
+            pointer: "/summary",
+            window: "summaryWindow",
+            offset: "summaryOffset",
+            tail: false,
+        }],
+        &request.arguments,
+    )?;
+    data["truncated"] = data["summaryWindow"]["truncated"].clone();
+    delegated_agents::acknowledge_reports(app, &bound.session_id, &[agent.clone()])?;
+    Ok((
+        format!("Read research results in chat {}", agent.agent_id),
+        data,
         Some(CapabilityResourceRef {
             id: agent.agent_id,
             kind: "chat".into(),
@@ -77,18 +113,45 @@ fn claim_child_run_control(
     if flags.contains_key(session_id) {
         anyhow::bail!("a provider turn is already running for this research chat");
     }
+    let parent = flags
+        .get(parent_session_id)
+        .ok_or_else(|| anyhow::anyhow!("the chat that asked for research is no longer running"))?;
+    if parent.cancellation.is_cancelled() {
+        anyhow::bail!("the chat that asked for research was already stopped");
+    }
     if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
         anyhow::bail!("Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once");
-    }
-    if flags
-        .get(parent_session_id)
-        .is_some_and(|parent| parent.cancellation.is_cancelled())
-    {
-        anyhow::bail!("the chat that asked for research was already stopped");
     }
     let control = Arc::new(ProviderRunControl::default());
     flags.insert(session_id.to_string(), Arc::clone(&control));
     Ok(control)
+}
+
+/// Replace a child's finished turn without releasing its concurrency slot.
+fn renew_child_run_control(
+    flags: &mut HashMap<String, Arc<ProviderRunControl>>,
+    session_id: &str,
+    parent_session_id: &str,
+    current: &Arc<ProviderRunControl>,
+) -> anyhow::Result<Arc<ProviderRunControl>> {
+    if !flags
+        .get(session_id)
+        .is_some_and(|control| Arc::ptr_eq(control, current))
+    {
+        anyhow::bail!("the sub-agent run control changed before its next task");
+    }
+    let Some(parent) = flags.get(parent_session_id) else {
+        current.cancellation.cancel();
+        anyhow::bail!("the chat that asked for research is no longer running");
+    };
+    if current.cancellation.is_cancelled() || parent.cancellation.is_cancelled() {
+        // Reflect the parent's stop now, without waiting for the poll watcher.
+        current.cancellation.cancel();
+        anyhow::bail!("the chat or sub-agent was already stopped");
+    }
+    let next = Arc::new(ProviderRunControl::default());
+    flags.insert(session_id.into(), Arc::clone(&next));
+    Ok(next)
 }
 
 /// Removes a child's control, but only while it is still that child's own, so a
@@ -121,33 +184,37 @@ struct ParentStopWatcher {
 impl ParentStopWatcher {
     #[cfg(test)]
     fn start(parent: &CancellationToken, child: &CancellationToken) -> Self {
-        Self::start_until(parent, child, RESEARCH_MAX_RUNTIME)
+        Self::start_until(parent, child, Some(RESEARCH_MAX_RUNTIME)).unwrap()
     }
 
     /// Also stops the child once `runtime` has passed.
     fn start_until(
         parent: &CancellationToken,
         child: &CancellationToken,
-        runtime: Duration,
-    ) -> Self {
-        let deadline = Instant::now() + runtime;
+        runtime: Option<Duration>,
+    ) -> anyhow::Result<Self> {
+        let deadline = runtime.map(|runtime| Instant::now() + runtime);
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let parent = parent.clone();
         let child = child.clone();
-        let worker = std::thread::spawn(move || {
-            while !worker_stopped.load(Ordering::SeqCst) {
-                if parent.is_cancelled() || Instant::now() >= deadline {
-                    child.cancel();
-                    return;
+        let worker = std::thread::Builder::new()
+            .name("gyro-parent-stop".into())
+            .spawn(move || {
+                while !worker_stopped.load(Ordering::SeqCst) {
+                    if parent.is_cancelled()
+                        || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+                    {
+                        child.cancel();
+                        return;
+                    }
+                    std::thread::park_timeout(PARENT_STOP_POLL_INTERVAL);
                 }
-                std::thread::park_timeout(PARENT_STOP_POLL_INTERVAL);
-            }
-        });
-        Self {
+            })?;
+        Ok(Self {
             stopped,
             worker: Some(worker),
-        }
+        })
     }
 }
 
@@ -176,8 +243,7 @@ pub(super) struct ChildRunControl {
     app: tauri::AppHandle,
     session_id: String,
     control: Arc<ProviderRunControl>,
-    /// Absent only if the parent's control was already gone, which the broker
-    /// makes practically impossible while the tool call it dispatched runs.
+    /// Held until teardown; each new task gets a fresh watcher and control.
     watcher: Option<ParentStopWatcher>,
 }
 
@@ -187,24 +253,67 @@ impl ChildRunControl {
         session_id: &str,
         parent_session_id: &str,
     ) -> anyhow::Result<Self> {
+        Self::claim_with_runtime(app, session_id, parent_session_id, None)
+    }
+
+    pub(super) fn claim_with_runtime(
+        app: &tauri::AppHandle,
+        session_id: &str,
+        parent_session_id: &str,
+        runtime: Option<Duration>,
+    ) -> anyhow::Result<Self> {
         let manager = app.state::<ProviderCancellationManager>();
         let mut flags = manager
             .flags
             .lock()
             .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?;
         let control = claim_child_run_control(&mut flags, session_id, parent_session_id)?;
-        let parent = flags
-            .get(parent_session_id)
-            .map(|parent| parent.cancellation.clone());
+        let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
+        let watcher = match ParentStopWatcher::start_until(&parent, &control.cancellation, runtime)
+        {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                release_child_run_control(&mut flags, session_id, &control);
+                return Err(error.context("could not start the sub-agent stop watcher"));
+            }
+        };
         drop(flags);
         Ok(Self {
             app: app.clone(),
             session_id: session_id.to_string(),
-            watcher: parent.map(|parent| {
-                ParentStopWatcher::start_until(&parent, &control.cancellation, RESEARCH_MAX_RUNTIME)
-            }),
+            watcher: Some(watcher),
             control,
         })
+    }
+
+    pub(super) fn is_cancelled(&self) -> bool {
+        self.control.cancellation.is_cancelled()
+    }
+
+    pub(super) fn renew(&mut self, parent_session_id: &str) -> anyhow::Result<()> {
+        let manager = self.app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?;
+        let next = renew_child_run_control(
+            &mut flags,
+            &self.session_id,
+            parent_session_id,
+            &self.control,
+        )?;
+        let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
+        let watcher = match ParentStopWatcher::start_until(&parent, &next.cancellation, None) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                flags.insert(self.session_id.clone(), Arc::clone(&self.control));
+                return Err(error.context("could not start the sub-agent stop watcher"));
+            }
+        };
+        self.watcher.take();
+        self.control = next;
+        self.watcher = Some(watcher);
+        Ok(())
     }
 }
 
@@ -260,10 +369,13 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             json!({
                 "question": {
                     "type": "string",
-                    "description": "One self-contained research question. The sub-agent starts with no memory of this chat, so include the paths, symbols, or behaviour it needs to know about."
-                }
+                    "description": "Required to start research: one self-contained question with the paths or behavior needed. Omit when reading an existing sessionId."
+                },
+                "maxBytes": workspace_result_bytes_schema(),
+                "sessionId": { "type":"string","description":"Read a previously returned research session without starting another model run." },
+                "summaryOffset": capability_output_budget::offset_schema()
             }),
-            vec!["question"],
+            vec![],
         ),
         _ => return None,
     };
@@ -273,6 +385,25 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_existing_research_does_not_admit_a_new_paid_run() {
+        assert!(retrieves_existing(
+            &json!({"sessionId":"owned-session","summaryOffset":500})
+        ));
+        for arguments in [
+            json!({"question":"new research"}),
+            json!({"sessionId":""}),
+            json!({"sessionId":"  "}),
+            json!({"sessionId":42}),
+        ] {
+            assert!(!retrieves_existing(&arguments));
+        }
+        let (properties, required) = schema(CapabilityId::ResearchRun).unwrap();
+        assert!(properties["sessionId"].is_object());
+        assert!(properties["summaryOffset"].is_object());
+        assert!(required.is_empty());
+    }
 
     #[test]
     fn questions_collapse_whitespace_and_are_bounded() {
@@ -316,15 +447,16 @@ mod tests {
     }
 
     #[test]
-    fn schema_requires_a_question_and_ignores_other_capabilities() {
+    fn schema_supports_new_questions_and_existing_result_reads() {
         let (properties, required) = schema(CapabilityId::ResearchRun).unwrap();
         assert!(properties["question"].is_object());
-        assert_eq!(required, vec!["question"]);
+        assert!(properties["sessionId"].is_object());
+        assert!(required.is_empty());
         assert!(schema(CapabilityId::CodeDefinition).is_none());
     }
 
     fn provider_run_flags() -> HashMap<String, Arc<ProviderRunControl>> {
-        HashMap::new()
+        HashMap::from([("parent".into(), Arc::new(ProviderRunControl::default()))])
     }
 
     #[test]
@@ -333,7 +465,8 @@ mod tests {
         let control = claim_child_run_control(&mut flags, "child", "parent").unwrap();
         assert!(Arc::ptr_eq(flags.get("child").unwrap(), &control));
         release_child_run_control(&mut flags, "child", &control);
-        assert!(flags.is_empty());
+        assert_eq!(flags.len(), 1);
+        assert!(flags.contains_key("parent"));
     }
 
     #[test]
@@ -351,7 +484,7 @@ mod tests {
     #[test]
     fn the_app_wide_run_ceiling_applies_to_research_too() {
         let mut flags = provider_run_flags();
-        for index in 0..MAX_CONCURRENT_PROVIDER_RUNS {
+        for index in 1..MAX_CONCURRENT_PROVIDER_RUNS {
             flags.insert(
                 format!("chat-{index}"),
                 Arc::new(ProviderRunControl::default()),
@@ -386,6 +519,69 @@ mod tests {
         let replacement = claim_child_run_control(&mut flags, "child", "parent").unwrap();
         release_child_run_control(&mut flags, "child", &control);
         assert!(Arc::ptr_eq(flags.get("child").unwrap(), &replacement));
+    }
+
+    #[test]
+    fn a_missing_parent_cannot_leave_an_unwatched_child() {
+        let mut flags = HashMap::new();
+        assert!(claim_child_run_control(&mut flags, "child", "missing").is_err());
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn queued_child_turn_keeps_its_slot_even_at_full_capacity() {
+        let mut flags = provider_run_flags();
+        let old = claim_child_run_control(&mut flags, "child", "parent").unwrap();
+        for index in 2..MAX_CONCURRENT_PROVIDER_RUNS {
+            flags.insert(
+                format!("other-{index}"),
+                Arc::new(ProviderRunControl::default()),
+            );
+        }
+        assert_eq!(flags.len(), MAX_CONCURRENT_PROVIDER_RUNS);
+        let next = renew_child_run_control(&mut flags, "child", "parent", &old).unwrap();
+        assert_eq!(flags.len(), MAX_CONCURRENT_PROVIDER_RUNS);
+        assert!(!Arc::ptr_eq(&old, &next));
+        assert!(!next.cancellation.is_cancelled());
+        release_child_run_control(&mut flags, "child", &old);
+        assert!(Arc::ptr_eq(&flags["child"], &next));
+        assert!(renew_child_run_control(&mut flags, "child", "parent", &old).is_err());
+        next.cancellation.cancel();
+        assert!(renew_child_run_control(&mut flags, "child", "parent", &next).is_err());
+        assert!(Arc::ptr_eq(&flags["child"], &next));
+    }
+
+    #[test]
+    fn queued_child_handoff_detects_parent_stop_without_polling_delay() {
+        for removed in [false, true] {
+            let mut flags = provider_run_flags();
+            let current = claim_child_run_control(&mut flags, "child", "parent").unwrap();
+            if removed {
+                flags.remove("parent");
+            } else {
+                flags["parent"].cancellation.cancel();
+            }
+            assert!(!current.cancellation.is_cancelled());
+            assert!(renew_child_run_control(&mut flags, "child", "parent", &current).is_err());
+            assert!(current.cancellation.is_cancelled());
+            assert!(Arc::ptr_eq(&flags["child"], &current));
+        }
+    }
+
+    #[test]
+    fn async_agent_watcher_has_no_research_deadline_and_still_honors_parent_stop() {
+        let parent = CancellationToken::default();
+        let child = CancellationToken::default();
+        let watcher = ParentStopWatcher::start_until(&parent, &child, None).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(!child.is_cancelled());
+        parent.cancel();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !child.is_cancelled() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(child.is_cancelled());
+        drop(watcher);
     }
 
     #[test]
@@ -427,7 +623,8 @@ mod tests {
     fn research_past_its_runtime_is_stopped() {
         let parent = CancellationToken::default();
         let child = CancellationToken::default();
-        let _watcher = ParentStopWatcher::start_until(&parent, &child, Duration::ZERO);
+        let _watcher =
+            ParentStopWatcher::start_until(&parent, &child, Some(Duration::ZERO)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !child.is_cancelled() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
@@ -435,4 +632,5 @@ mod tests {
         assert!(child.is_cancelled(), "research outlived its runtime");
         assert!(!parent.is_cancelled());
     }
+
 }

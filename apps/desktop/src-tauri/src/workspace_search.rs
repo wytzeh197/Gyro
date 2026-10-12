@@ -1,5 +1,187 @@
-use super::{WorkspaceSearchRange, WorkspaceSearchResult};
+use super::*;
 use serde::Deserialize;
+
+pub(super) struct WorkspaceSearchScan {
+    pub results: Vec<WorkspaceSearchResult>,
+    pub incomplete: bool,
+}
+
+pub(super) fn run_workspace_rg_search(
+    root: &Path,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
+    Ok(run_workspace_rg_search_scan(root, query, globs, max_results, use_regex)?.results)
+}
+
+pub(super) fn run_workspace_rg_search_scan(
+    root: &Path,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<WorkspaceSearchScan> {
+    let mut command = command_with_gui_path("rg");
+    command
+        .current_dir(root)
+        .args(["--json", "--line-buffered"]);
+    command.arg("--max-count").arg(max_results.to_string());
+    command.args(["--max-filesize", "4M"]);
+    if !use_regex {
+        command.arg("--fixed-strings");
+    }
+    if let Some(globs) = globs {
+        for glob in globs {
+            command.arg("--glob").arg(glob);
+        }
+    }
+    command.arg("--").arg(query).arg(".");
+
+    let mut request = ExecutionRequest::new(command.get_program().to_os_string());
+    request.args = command
+        .get_args()
+        .map(std::ffi::OsStr::to_os_string)
+        .collect();
+    request.current_dir = Some(root.to_path_buf());
+    request.env = command
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
+        .collect();
+    request.timeout = Duration::from_secs(120);
+    request.inactivity_timeout = Some(Duration::from_secs(60));
+    request.max_stdout_chars = 8 * 1024 * 1024;
+    request.max_stderr_chars = 64 * 1024;
+    request.max_total_output_bytes = 8 * 1024 * 1024;
+    let cancellation = CancellationToken::default();
+    let mut progress = SearchOutputProgress::default();
+    let output = gyro_core::run_command(request, cancellation.clone(), |chunk| {
+        if chunk.stream == ExecutionStream::Stdout && progress.push(&chunk.text, max_results) {
+            // --max-count limits each file. Stop the whole process as soon as
+            // the global result count is met instead of scanning the rest.
+            cancellation.cancel();
+        }
+    })?;
+    let results = parse_rg_output(&output.stdout, max_results);
+    if output.succeeded() || output.exit_code() == Some(1) {
+        return Ok(WorkspaceSearchScan {
+            results,
+            incomplete: false,
+        });
+    }
+    // An invalid regex, malformed glob, or permission error is not a successful
+    // empty search merely because ripgrep emitted a begin/summary record.
+    if output.exit_code().is_some() || results.is_empty() {
+        return Err(bounded_command_error("workspace search failed", &output));
+    }
+    Ok(WorkspaceSearchScan {
+        results,
+        incomplete: true,
+    })
+}
+
+#[derive(Default)]
+struct SearchOutputProgress {
+    pending: String,
+    matches: usize,
+}
+
+impl SearchOutputProgress {
+    fn push(&mut self, chunk: &str, max_results: usize) -> bool {
+        if self.matches >= max_results {
+            return true;
+        }
+        self.pending.push_str(chunk);
+        if let Some(last_newline) = self.pending.rfind('\n') {
+            let remainder = self.pending.split_off(last_newline + 1);
+            let complete = std::mem::replace(&mut self.pending, remainder);
+            self.matches += parse_rg_output(&complete, max_results - self.matches).len();
+        }
+        self.matches >= max_results
+    }
+}
+
+pub(super) fn bound_model_search_results(
+    results: Vec<WorkspaceSearchResult>,
+    max_bytes: usize,
+) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
+    let mut results = results
+        .into_iter()
+        .map(model_search_preview)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let original_count = results.len();
+    let (mut low, mut high) = (0, original_count);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        let data = serde_json::to_value(&results[..mid])?;
+        if serde_json::to_vec(&data)?.len() <= max_bytes {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    if low == 0 && original_count > 0 {
+        anyhow::bail!("A Workspace search match exceeds maxBytes; narrow the query or increase the byte budget");
+    }
+    results.truncate(low);
+    Ok((results, low < original_count))
+}
+
+fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_json::Value> {
+    const PREVIEW_COLUMNS: usize = 512;
+    const LEADING_CONTEXT_COLUMNS: usize = 80;
+    const MAX_PREVIEW_RANGES: usize = 50;
+    // Mask the full line first: a snippet beginning within a credential must
+    // not disclose its suffix, and match ranges keep their source coordinates.
+    let line = gyro_core::security::redact_secrets_preserving_positions(&result.line);
+    let first_match = result
+        .ranges
+        .first()
+        .map(|range| range.start_column.saturating_sub(1))
+        .unwrap_or(0);
+    let desired_start = first_match.saturating_sub(LEADING_CONTEXT_COLUMNS);
+    let mut units = 0;
+    let mut start = None;
+    let mut end = line.len();
+    for (offset, character) in line.char_indices() {
+        if start.is_none() && units >= desired_start {
+            start = Some((offset, units));
+        }
+        if start.is_some_and(|(_, start)| units + character.len_utf16() > start + PREVIEW_COLUMNS) {
+            end = offset;
+            break;
+        }
+        units += character.len_utf16();
+    }
+    let (start, start_column) = start.unwrap_or((0, 0));
+    let end_column = units;
+    let visible = result
+        .ranges
+        .iter()
+        .filter(|range| range.end_column > start_column + 1 && range.start_column <= end_column + 1)
+        .collect::<Vec<_>>();
+    let mut data = serde_json::json!({
+        "path": result.path, "lineNumber": result.line_number,
+        "line": &line[start..end],
+        "ranges": visible.iter().take(MAX_PREVIEW_RANGES).collect::<Vec<_>>(),
+    });
+    if start != 0 || end != line.len() {
+        data["lineStartColumn"] = serde_json::json!(start_column + 1);
+        data["lineTruncated"] = serde_json::json!(true);
+    }
+    if visible.len() > MAX_PREVIEW_RANGES {
+        data["rangesTruncated"] = serde_json::json!(true);
+    }
+    if line != result.line {
+        data["redacted"] = serde_json::json!(true);
+    }
+    // Preserve the positional line mask while scrubbing path metadata.
+    let displayed_line = data.as_object_mut().unwrap().remove("line").unwrap();
+    data = redact_json_strings(data);
+    data["line"] = displayed_line;
+    Ok(data)
+}
 
 #[derive(Deserialize)]
 struct RgText {
@@ -125,5 +307,107 @@ mod tests {
         assert_eq!(results[0].ranges[0].start_column, 6);
         assert_eq!(results[0].ranges[0].end_column, 12);
         assert_eq!(results[0].ranges[1].end_column, 20);
+    }
+
+    #[test]
+    fn search_stops_at_a_global_limit_across_split_records() {
+        let record = serde_json::json!({"type":"match","data":{
+            "path":{"text":"file.txt"},"lines":{"text":"needle\n"},"line_number":1,
+            "submatches":[{"start":0,"end":6}]
+        }})
+        .to_string();
+        let mut progress = SearchOutputProgress::default();
+        assert!(!progress.push("{\"type\":\"begin\"}\n", 2));
+        let split = record.len() / 2;
+        assert!(!progress.push(&record[..split], 2));
+        assert!(!progress.push(&format!("{}\n", &record[split..]), 2));
+        assert!(progress.push(&format!("{record}\n"), 2));
+        assert_eq!(progress.matches, 2);
+    }
+
+    #[test]
+    fn search_does_not_report_bad_globs_as_empty_success() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("file.txt"), "needle\n").unwrap();
+        assert!(run_workspace_rg_search(
+            workspace.path(),
+            "needle",
+            Some(&vec!["[".to_owned()]),
+            50,
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn search_scan_reports_a_global_limit_as_incomplete() {
+        let workspace = tempfile::tempdir().unwrap();
+        for index in 0..100 {
+            fs::write(
+                workspace.path().join(format!("file-{index:03}.txt")),
+                "needle\n".repeat(20),
+            )
+            .unwrap();
+        }
+        let scan =
+            run_workspace_rg_search_scan(workspace.path(), "needle", None, 10, true).unwrap();
+        assert_eq!(scan.results.len(), 10);
+        // Very small scans can naturally finish before cancellation is polled.
+        // The model also marks results.len() == maxResults as a limit hit.
+        assert!(scan.incomplete || scan.results.len() == 10);
+    }
+
+    #[test]
+    fn search_respects_the_serialized_response_budget() {
+        let results = (0..100)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("file-{index}.txt"),
+                line_number: 1,
+                line: "\"🦀".repeat(100),
+                ranges: Vec::new(),
+            })
+            .collect();
+        let (bounded, limited) = bound_model_search_results(results, 1024).unwrap();
+        assert!(limited);
+        assert!(!bounded.is_empty());
+        assert!(serde_json::to_vec(&bounded).unwrap().len() <= 1024);
+    }
+
+    #[test]
+    fn model_search_previews_keep_late_unicode_matches_and_source_ranges() {
+        let line = format!("{}🦀 needle {}", "x".repeat(5000), "y".repeat(1000));
+        let ranges = literal_search_ranges(&line, "needle");
+        let start_column = ranges[0].start_column;
+        let end_column = ranges[0].end_column;
+        let preview = model_search_preview(WorkspaceSearchResult {
+            path: "long.txt".into(),
+            line_number: 42,
+            line,
+            ranges,
+        })
+        .unwrap();
+        assert!(preview["line"].as_str().unwrap().contains("🦀 needle"));
+        assert!(preview["line"].as_str().unwrap().encode_utf16().count() <= 512);
+        assert_eq!(preview["lineNumber"], 42);
+        assert_eq!(preview["lineTruncated"], true);
+        assert!(preview["lineStartColumn"].as_u64().unwrap() > 4000);
+        assert_eq!(preview["ranges"][0]["startColumn"], start_column);
+        assert_eq!(preview["ranges"][0]["endColumn"], end_column);
+    }
+
+    #[test]
+    fn model_search_previews_bound_dense_match_metadata() {
+        let line = "needle ".repeat(1000);
+        let ranges = literal_search_ranges(&line, "needle");
+        let preview = model_search_preview(WorkspaceSearchResult {
+            path: "dense.txt".into(),
+            line_number: 1,
+            line,
+            ranges,
+        })
+        .unwrap();
+        assert_eq!(preview["ranges"].as_array().unwrap().len(), 50);
+        assert_eq!(preview["rangesTruncated"], true);
+        assert!(serde_json::to_vec(&preview).unwrap().len() < DEFAULT_WORKSPACE_RESULT_BYTES);
     }
 }

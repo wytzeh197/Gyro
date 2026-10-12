@@ -118,6 +118,116 @@ function normalizedChatArrangement(
 const MAX_RESTORED_EDITOR_TABS = 100;
 const MAX_RESTORED_EDITOR_GROUPS = 8;
 
+export const EDITOR_RECOVERY_MAX_BUFFERS = 30;
+export const EDITOR_RECOVERY_MAX_BUFFER_CHARS = 500_000;
+export const EDITOR_RECOVERY_MAX_TOTAL_CHARS = 1_000_000;
+
+export type EditorBufferBatchUpdate = {
+  path: string;
+  /** Omit only when the buffer must not exist yet. */
+  expectedContent?: string;
+  /** An explicitly present undefined value requires an absent disk hash. */
+  expectedHash?: string;
+  expectedSavedContent?: string;
+  /** null removes a buffer introduced by a transaction when undoing it. */
+  buffer: EditorBuffer | null;
+};
+
+/** Transactions must fit recovery in full; no file is silently excluded. */
+export function editorBufferRecoveryCapacity(
+  buffers: WorkbenchState["ide"]["buffers"],
+): { ok: boolean; count: number; totalChars: number; reason?: string } {
+  const dirty = Object.values(buffers).filter(
+    (buffer) => buffer.content !== buffer.savedContent,
+  );
+  const count = dirty.length;
+  const totalChars = dirty.reduce(
+    (sum, buffer) => sum + buffer.content.length + buffer.savedContent.length,
+    0,
+  );
+  const oversized = dirty.find(
+    (buffer) =>
+      buffer.content.length + buffer.savedContent.length >
+      EDITOR_RECOVERY_MAX_BUFFER_CHARS,
+  );
+  const reason = oversized
+    ? `Unsaved recovery is too large for ${oversized.path}. Save it before applying a workspace edit.`
+    : count > EDITOR_RECOVERY_MAX_BUFFERS
+      ? `Workspace edits support recovery for up to ${EDITOR_RECOVERY_MAX_BUFFERS} unsaved files. Save existing changes or narrow the edit.`
+      : totalChars > EDITOR_RECOVERY_MAX_TOTAL_CHARS
+        ? "Unsaved recovery exceeds the workspace edit limit. Save existing changes or narrow the edit."
+        : undefined;
+  return { ok: !reason, count, totalChars, ...(reason ? { reason } : {}) };
+}
+
+export function persistableDirtyEditorBuffers(
+  buffers: WorkbenchState["ide"]["buffers"],
+): WorkbenchState["ide"]["buffers"] {
+  const capacity = editorBufferRecoveryCapacity(buffers);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return Object.fromEntries(
+    Object.entries(buffers)
+      .filter(([, buffer]) => buffer.content !== buffer.savedContent)
+      .map(([path, buffer]) => [path, { ...buffer, status: "dirty" as const }]),
+  );
+}
+
+/** Validate every precondition before returning any changed buffer. */
+export function prepareEditorBufferBatch(
+  buffers: WorkbenchState["ide"]["buffers"],
+  updates: readonly EditorBufferBatchUpdate[],
+): WorkbenchState["ide"]["buffers"] {
+  const paths = new Set<string>();
+  for (const update of updates) {
+    if (
+      storedRelativeEditorPath(update.path) !== update.path ||
+      paths.has(update.path)
+    ) {
+      throw new Error(
+        "A workspace edit contains an invalid or duplicate buffer path.",
+      );
+    }
+    paths.add(update.path);
+    const current = buffers[update.path];
+    if (
+      (update.expectedContent === undefined
+        ? current !== undefined
+        : !current || current.content !== update.expectedContent) ||
+      (Object.hasOwn(update, "expectedHash") &&
+        current?.contentHash !== update.expectedHash) ||
+      (update.expectedSavedContent !== undefined &&
+        current?.savedContent !== update.expectedSavedContent)
+    )
+      throw new Error(
+        `The buffer changed while preparing edits: ${update.path}`,
+      );
+    if (update.buffer && update.buffer.path !== update.path) {
+      throw new Error(
+        "A workspace edit buffer does not match its target path.",
+      );
+    }
+  }
+  const next = { ...buffers };
+  for (const update of updates) {
+    if (!update.buffer) {
+      delete next[update.path];
+      continue;
+    }
+    const dirty = update.buffer.content !== update.buffer.savedContent;
+    next[update.path] = {
+      ...update.buffer,
+      status: dirty
+        ? "dirty"
+        : update.buffer.status === "dirty"
+          ? "ready"
+          : update.buffer.status,
+    };
+  }
+  const capacity = editorBufferRecoveryCapacity(next);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return next;
+}
+
 export type ChatGridAction =
   | { type: "activate-project"; projectKey: string }
   | {
@@ -142,6 +252,9 @@ export type ChatGridAction =
       projectKey: string;
       paneId: string;
       slotIndex: number;
+      insertPosition?: "before" | "after";
+      splitDirection?: "horizontal" | "vertical";
+      arrangement?: ChatGridArrangement;
     }
   | { type: "toggle-maximize-pane"; paneId: string }
   | {
@@ -272,20 +385,24 @@ export function persistableChatGridState(state: ChatGridState): ChatGridState {
  * quadrant under the pointer can read as occupied even though its own cell is
  * free. That pane steps aside into its partner cell and the new chat takes the
  * half the pointer was actually over. Only when the whole column is taken does
- * the drop fall back to the first free slot, and only a full grid lets a drop
- * replace the chat underneath it.
+ * the drop fall back to the first free slot. A full grid or invalid position
+ * rejects the drop so no open chat can be silently replaced.
  */
 export function resolveChatGridDropSlot(
   slots: Array<ChatPaneRef | null>,
   slotIndex: number,
-): { displacedIndex?: number; targetIndex: number } {
+): { displacedIndex?: number; targetIndex: number } | undefined {
+  if (normalizedChatSlotIndex(slotIndex) === undefined) return undefined;
   if (!slots[slotIndex]) return { targetIndex: slotIndex };
   const partnerIndex = slotIndex < 2 ? slotIndex + 2 : slotIndex - 2;
   if (!slots[partnerIndex]) {
     return { displacedIndex: partnerIndex, targetIndex: slotIndex };
   }
-  const emptyIndex = slots.findIndex((pane) => pane === null);
-  return { targetIndex: emptyIndex >= 0 ? emptyIndex : slotIndex };
+  const emptyIndex = Array.from(
+    { length: CHAT_GRID_MAX_SLOTS },
+    (_, index) => index,
+  ).find((index) => !slots[index]);
+  return emptyIndex === undefined ? undefined : { targetIndex: emptyIndex };
 }
 
 export function chatGridReducer(
@@ -426,53 +543,42 @@ export function chatGridReducer(
     if (chatProjectKey(action.pane.workspacePath) !== projectKey) {
       return state;
     }
+    const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
+    // An invalid explicit position is a rejected gesture, not an invitation
+    // to insert at the focused pane or another fallback position.
+    if (
+      action.mode === "drop" &&
+      ((action.slotIndex !== undefined && requestedIndex === undefined) ||
+        !validChatInsertPosition(action.insertPosition) ||
+        (action.insertPosition &&
+          current.slots.some(Boolean) &&
+          (requestedIndex === undefined || !current.slots[requestedIndex])))
+    ) {
+      return state;
+    }
     const existingIndex = current.slots.findIndex(
       (pane) =>
         pane && chatPaneIdentity(pane) === chatPaneIdentity(action.pane),
     );
     if (existingIndex >= 0) {
       const existing = current.slots[existingIndex]!;
-      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
       if (action.mode === "drop" && requestedIndex !== undefined) {
-        const slots = current.slots.slice();
-        if (action.insertPosition && slots[requestedIndex]) {
-          const occupied = slots.filter((pane): pane is ChatPaneRef =>
-            Boolean(pane),
-          );
-          const fromPosition = occupied.findIndex(
-            (pane) => pane.paneId === existing.paneId,
-          );
-          const targetPosition = occupied.findIndex(
-            (pane) => pane.paneId === slots[requestedIndex]?.paneId,
-          );
-          let insertionIndex =
-            targetPosition + (action.insertPosition === "after" ? 1 : 0);
-          if (fromPosition < insertionIndex) insertionIndex -= 1;
-          occupied.splice(fromPosition, 1);
-          occupied.splice(insertionIndex, 0, existing);
-          const reordered: Array<ChatPaneRef | null> = occupied;
-          while (reordered.length < CHAT_GRID_MAX_SLOTS) reordered.push(null);
-          next = {
-            ...current,
-            slots: reordered,
-            focusedPaneId: existing.paneId,
-            arrangement: action.arrangement ?? current.arrangement,
-          };
-        } else {
-          slots[existingIndex] = slots[requestedIndex] ?? null;
-          slots[requestedIndex] = existing;
-          next = { ...current, slots, focusedPaneId: existing.paneId };
-        }
+        next = chatLayoutWithMovedPane(
+          current,
+          existingIndex,
+          requestedIndex,
+          action,
+        );
+        if (next === current) return state;
       } else {
         next = { ...current, focusedPaneId: existing.paneId };
       }
     } else {
-      // A full row has reorder targets only for a chat already in it. A stale
-      // or synthetic drop must not silently evict the last conversation.
+      // At capacity, only an already-open chat can move. A stale overlay or
+      // synthetic drop must never silently evict any open conversation.
       if (
         action.mode === "drop" &&
-        action.insertPosition &&
-        current.slots.every(Boolean)
+        current.slots.filter(Boolean).length >= CHAT_GRID_MAX_SLOTS
       ) {
         return state;
       }
@@ -485,7 +591,6 @@ export function chatGridReducer(
         (pane) => pane?.paneId === current.focusedPaneId,
       );
       const emptyIndex = current.slots.findIndex((pane) => pane === null);
-      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
       if (action.mode === "drop" && action.insertPosition) {
         const occupied = current.slots.filter((pane): pane is ChatPaneRef =>
           Boolean(pane),
@@ -516,7 +621,10 @@ export function chatGridReducer(
           focusedPaneId: incoming.paneId,
           splitDirection:
             occupied.length === 2
-              ? (action.splitDirection ?? "horizontal")
+              ? (action.splitDirection ??
+                ((action.arrangement ?? current.arrangement) === "rows"
+                  ? "vertical"
+                  : "horizontal"))
               : undefined,
           // An explicit drop arrangement wins; otherwise keep whatever the
           // user last chose so a row/stack survives adding more panes.
@@ -537,6 +645,7 @@ export function chatGridReducer(
         let displacedIndex: number | undefined;
         if (action.mode === "drop") {
           const resolved = resolveChatGridDropSlot(slots, targetIndex);
+          if (!resolved) return state;
           displacedIndex = resolved.displacedIndex;
           targetIndex = resolved.targetIndex;
         }
@@ -595,13 +704,16 @@ export function chatGridReducer(
       (pane) => pane?.paneId === action.paneId,
     );
     const toIndex = normalizedChatSlotIndex(action.slotIndex);
-    if (fromIndex >= 0 && toIndex !== undefined && fromIndex !== toIndex) {
-      const slots = current.slots.slice();
-      const fromPane = slots[fromIndex] ?? null;
-      slots[fromIndex] = slots[toIndex] ?? null;
-      slots[toIndex] = fromPane;
-      next = { ...current, slots, focusedPaneId: action.paneId };
+    if (
+      fromIndex < 0 ||
+      toIndex === undefined ||
+      !validChatInsertPosition(action.insertPosition) ||
+      (action.insertPosition && !current.slots[toIndex])
+    ) {
+      return state;
     }
+    next = chatLayoutWithMovedPane(current, fromIndex, toIndex, action);
+    if (next === current) return state;
   }
   // Keep state identity stable when nothing about the layout changed. Grid
   // slots dispatch focus on every pointerdown; a fresh object forced the chat
@@ -623,6 +735,65 @@ export function chatGridReducer(
         ? undefined
         : state.maximizedPaneId,
   });
+}
+
+function validChatInsertPosition(value?: "before" | "after") {
+  return value === undefined || value === "before" || value === "after";
+}
+
+/** Sidebar and pane-header drags share the same insertion/swap semantics. */
+function chatLayoutWithMovedPane(
+  layout: ChatProjectLayout,
+  fromIndex: number,
+  toIndex: number,
+  placement: {
+    insertPosition?: "before" | "after";
+    splitDirection?: "horizontal" | "vertical";
+    arrangement?: ChatGridArrangement;
+  },
+): ChatProjectLayout {
+  if (fromIndex === toIndex) return layout;
+  const moving = layout.slots[fromIndex];
+  if (!moving) return layout;
+  let slots: Array<ChatPaneRef | null>;
+  if (placement.insertPosition) {
+    const target = layout.slots[toIndex];
+    if (!target) return layout;
+    const occupied = layout.slots.filter((pane): pane is ChatPaneRef =>
+      Boolean(pane),
+    );
+    const fromPosition = occupied.indexOf(moving);
+    const targetPosition = occupied.indexOf(target);
+    let insertionIndex =
+      targetPosition + (placement.insertPosition === "after" ? 1 : 0);
+    if (fromPosition < insertionIndex) insertionIndex -= 1;
+    // A boundary immediately before/after the source is a cancelled move.
+    // Keep focus, maximization and the slots array untouched in this case.
+    if (insertionIndex === fromPosition) return layout;
+    occupied.splice(fromPosition, 1);
+    occupied.splice(insertionIndex, 0, moving);
+    slots = occupied;
+    while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+  } else {
+    slots = layout.slots.slice();
+    slots[fromIndex] = slots[toIndex] ?? null;
+    slots[toIndex] = moving;
+  }
+  return {
+    ...layout,
+    slots,
+    focusedPaneId: moving.paneId,
+    arrangement: placement.arrangement ?? layout.arrangement,
+    splitDirection:
+      slots.filter(Boolean).length === 2
+        ? (placement.splitDirection ??
+          (placement.arrangement === "rows"
+            ? "vertical"
+            : placement.arrangement === "columns"
+              ? "horizontal"
+              : layout.splitDirection))
+        : undefined,
+  };
 }
 
 /** A removed/replaced pane cannot keep every pane in the active grid hidden. */
@@ -787,12 +958,17 @@ export function sanitizeStoredIdeState(
         ? "explorer"
         : base.activeView;
 
+  // Recovery belongs to buffers, including files edited in the background.
+  // Turning off layout restoration must not discard their unsaved text.
+  const buffers = restoredDirtyEditorBuffers(ide.buffers);
+
   if (!restoreOnLaunch) {
     return {
       ...base,
       activePath: undefined,
       activeView,
       tabs: [],
+      buffers,
       layout: {
         ...base.layout,
         ...layoutPreferences,
@@ -949,42 +1125,6 @@ export function sanitizeStoredIdeState(
       );
     return { ...tab, groupId: ownerGroup?.id };
   });
-  const buffers: Record<string, EditorBuffer> = {};
-  const rawBuffers = storedRecord(ide.buffers);
-  let remainingBufferChars = 1_000_000;
-  if (rawBuffers) {
-    for (const [storedPath, value] of Object.entries(rawBuffers).slice(0, 30)) {
-      const buffer = storedRecord(value);
-      const path = storedRelativeEditorPath(buffer?.path ?? storedPath);
-      if (!path || !tabByPath.has(path) || buffer?.status !== "dirty") continue;
-      const content = typeof buffer.content === "string" ? buffer.content : "";
-      const savedContent =
-        typeof buffer.savedContent === "string" ? buffer.savedContent : "";
-      const chars = content.length + savedContent.length;
-      if (chars > 500_000 || chars > remainingBufferChars) continue;
-      remainingBufferChars -= chars;
-      buffers[path] = {
-        path,
-        content,
-        savedContent,
-        contentHash:
-          typeof buffer.contentHash === "string"
-            ? buffer.contentHash.slice(0, 256)
-            : undefined,
-        sizeBytes:
-          typeof buffer.sizeBytes === "number" &&
-          Number.isFinite(buffer.sizeBytes)
-            ? Math.max(0, Math.round(buffer.sizeBytes))
-            : content.length,
-        truncated: buffer.truncated === true,
-        status: "dirty",
-        updatedAt:
-          typeof buffer.updatedAt === "string"
-            ? buffer.updatedAt.slice(0, 64)
-            : new Date(0).toISOString(),
-      };
-    }
-  }
   const dirtyPaths = new Set(Object.keys(buffers));
   const tabsWithRecovery = restoredTabs.map((tab) => ({
     ...tab,
@@ -1010,6 +1150,50 @@ export function sanitizeStoredIdeState(
       activeGroupId,
     },
   };
+}
+
+function restoredDirtyEditorBuffers(
+  value: unknown,
+): Record<string, EditorBuffer> {
+  const rawBuffers = storedRecord(value);
+  const buffers: Record<string, EditorBuffer> = {};
+  if (!rawBuffers) return buffers;
+  for (const [storedPath, value] of Object.entries(rawBuffers)) {
+    const buffer = storedRecord(value);
+    const path = storedRelativeEditorPath(buffer?.path ?? storedPath);
+    if (
+      !path ||
+      path !== storedRelativeEditorPath(storedPath) ||
+      buffer?.status !== "dirty" ||
+      typeof buffer.content !== "string" ||
+      typeof buffer.savedContent !== "string" ||
+      buffer.content === buffer.savedContent
+    )
+      continue;
+    buffers[path] = {
+      path,
+      content: buffer.content,
+      savedContent: buffer.savedContent,
+      contentHash:
+        typeof buffer.contentHash === "string"
+          ? buffer.contentHash.slice(0, 256)
+          : undefined,
+      sizeBytes:
+        typeof buffer.sizeBytes === "number" &&
+        Number.isFinite(buffer.sizeBytes)
+          ? Math.max(0, Math.round(buffer.sizeBytes))
+          : buffer.content.length,
+      truncated: buffer.truncated === true,
+      status: "dirty",
+      updatedAt:
+        typeof buffer.updatedAt === "string"
+          ? buffer.updatedAt.slice(0, 64)
+          : new Date(0).toISOString(),
+    };
+  }
+  const capacity = editorBufferRecoveryCapacity(buffers);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return buffers;
 }
 
 function storedRecord(value: unknown): Record<string, unknown> | undefined {
@@ -1522,6 +1706,7 @@ export type WorkbenchAction =
   | { type: "ide-toggle-minimap" }
   | { type: "ide-toggle-assistant" }
   | { type: "ide-upsert-buffer"; buffer: EditorBuffer }
+  | { type: "ide-apply-buffer-batch"; updates: EditorBufferBatchUpdate[] }
   | { type: "ide-update-buffer"; path: string; content: string }
   | {
       type: "ide-mark-buffer-saved";
@@ -2757,11 +2942,13 @@ export function workbenchReducer(
       };
     }
     case "ide-close-group": {
-      if (
-        !state.ide.layout.groups.some((group) => group.id === action.groupId)
-      ) {
+      const closingGroup = state.ide.layout.groups.find(
+        (group) => group.id === action.groupId,
+      );
+      if (!closingGroup) {
         return state;
       }
+      const closingPaths = new Set(closingGroup.tabs.map((tab) => tab.path));
       const remainingGroups = state.ide.layout.groups.filter(
         (group) => group.id !== action.groupId,
       );
@@ -2786,8 +2973,8 @@ export function workbenchReducer(
           return { ...tab, groupId: ownerGroup?.id };
         });
       const buffers = Object.fromEntries(
-        Object.entries(state.ide.buffers).filter(([path]) =>
-          openPaths.has(path),
+        Object.entries(state.ide.buffers).filter(
+          ([path]) => openPaths.has(path) || !closingPaths.has(path),
         ),
       );
       const activePath = groups.find(
@@ -2902,6 +3089,40 @@ export function workbenchReducer(
         },
       };
     }
+    case "ide-apply-buffer-batch": {
+      let buffers: WorkbenchState["ide"]["buffers"];
+      try {
+        buffers = prepareEditorBufferBatch(state.ide.buffers, action.updates);
+      } catch {
+        return state;
+      }
+      const changedPaths = new Set(action.updates.map((update) => update.path));
+      const updateTab = (tab: EditorTab): EditorTab => {
+        if (!changedPaths.has(tab.path)) return tab;
+        const buffer = buffers[tab.path];
+        const dirty = Boolean(buffer && buffer.content !== buffer.savedContent);
+        return {
+          ...tab,
+          dirty,
+          ...(dirty ? { pinned: true, preview: false } : {}),
+        };
+      };
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          buffers,
+          tabs: state.ide.tabs.map(updateTab),
+          layout: {
+            ...state.ide.layout,
+            groups: state.ide.layout.groups.map((group) => ({
+              ...group,
+              tabs: group.tabs.map(updateTab),
+            })),
+          },
+        },
+      };
+    }
     case "ide-update-buffer": {
       const existing = state.ide.buffers[action.path];
       if (!existing) {
@@ -2943,6 +3164,9 @@ export function workbenchReducer(
       if (!existing) {
         return state;
       }
+      // A save writes its captured snapshot. Keystrokes made while it was
+      // pending belong to the current buffer and must remain unsaved.
+      const dirty = existing.content !== action.content;
       return {
         ...state,
         ide: {
@@ -2951,20 +3175,27 @@ export function workbenchReducer(
             ...state.ide.buffers,
             [action.path]: {
               ...existing,
-              content: action.content,
+              content: existing.content,
               savedContent: action.content,
               contentHash: action.contentHash,
               error: undefined,
               sizeBytes: action.sizeBytes,
-              status: "saved",
+              status: dirty ? "dirty" : "saved",
               updatedAt: new Date().toISOString(),
             },
           },
           tabs: state.ide.tabs.map((tab) =>
-            tab.path === action.path ? { ...tab, dirty: false } : tab,
+            tab.path === action.path
+              ? {
+                  ...tab,
+                  dirty,
+                  ...(dirty ? { pinned: true, preview: false } : {}),
+                }
+              : tab,
           ),
           layout: updateEditorTabInLayout(state.ide.layout, action.path, {
-            dirty: false,
+            dirty,
+            ...(dirty ? { pinned: true, preview: false } : {}),
           }),
         },
       };

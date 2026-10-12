@@ -1,0 +1,17 @@
+CLI view polish — 2026-10-11
+
+Production changes: contextual session rows with explicit status, folder context and terminal count; clearer selection; tighter tabs with consistent task names and a toolbar divider. Existing process controls and provider icons are retained.
+
+Preview: http://127.0.0.1:1420/cli-preview.html
+Real CliSessionList and TerminalPanel components; labeled local fixture output; no native IPC or commands. Fixture-only transitions are disabled for deterministic captures in the backgrounded Browser.
+
+Verified: switching tabs synchronizes the sidebar; adding a terminal creates and selects session four; closing it returns to three and selects Codex. Dark/default/comfortable, light/large/compact at an 860x620 component frame, and dark/small/comfortable at a 1280x720 frame with a custom purple accent were visually inspected.
+
+Terminal layout/tab-navigation and UI token checks pass. The extracted sidebar is included in the existing smoke check and its CLI assertion passes. Full workbench smoke remains blocked by three unrelated chat-drag and Environment geometry checks. UI/desktop typechecks report unrelated chat-grid errors in the changing working tree; the fixture typing error was fixed.
+
+Native PTY behavior and drag/hover were not verified. The mouse tool required a visible Browser despite panel-open calls. This is a component preview, not a desktop build.
+
+Screenshot evidence in Gyro browser-captures:
+browser-preview-20261011T190931594Z-e0cbd57f-36db-4893-96cc-10592287037d.png
+browser-preview-20261011T190947369Z-d2907e8a-f887-4a98-b006-abaaf4ad4b48.png
+browser-preview-20261011T191109610Z-b10fd530-0be1-478c-bec5-61d966787f47.png

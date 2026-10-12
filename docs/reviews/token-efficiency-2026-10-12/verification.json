@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-12",
+  "status": "implemented; live savings evaluation pending",
+  "liveGenerationCalls": 0,
+  "implementationNotes": "docs/features/token-efficiency.md",
+  "validation": {
+    "coreLibrary": {
+      "passed": 579,
+      "failed": 0,
+      "log": "/private/tmp/gyro-efficiency-library-tests.log"
+    },
+    "desktopLibrary": {
+      "passed": 638,
+      "failed": 0,
+      "ignored": 5,
+      "log": "/private/tmp/gyro-efficiency-library-tests.log"
+    },
+    "checkpointIntegration": {
+      "passed": 3,
+      "failed": 0
+    },
+    "releasedEventCompatibility": {
+      "passed": 1,
+      "failed": 0
+    },
+    "liveOllamaIntegrations": "2 intentionally unexecuted",
+    "pilot": "40 failing baselines and 40 passing reference solutions; independent verifiers and report integrity gates passed",
+    "ui": "Headless interactions, light/dark screenshots and 600px layout passed; visually inspected",
+    "checkPassed": [
+      "UI and desktop TypeScript",
+      "architecture boundaries",
+      "usage ledger",
+      "provider capability manifest",
+      "context compaction lifecycle",
+      "terminal output",
+      "subagents",
+      "legacy benchmark summary"
+    ],
+    "workbenchStaticSmoke": {
+      "status": "five pre-existing source assertions remain",
+      "baselineEvidence": "The same five failures reproduced while reading the three touched source files from the saved pre-change snapshot; baseline was not raised.",
+      "failures": [
+        "Environment canvas reservation",
+        "Companion dock wiring",
+        "Research child control lifetime",
+        "Expired-sign-in recovery",
+        "Composer context telemetry assertion"
+      ]
+    },
+    "buildLimitation": "A combined test build exhausted disk while archiving the desktop static library. Removed only generated desktop incremental caches and successfully ran the library suites with incremental caching disabled."
+  },
+  "rollout": {
+    "experimentalPoliciesDefault": false,
+    "modelAndEffortSelection": "preserved unless the user explicitly chooses a profile/phase handoff",
+    "installedApp": "not replaced; rebuild/restart required"
+  },
+  "limitations": [
+    "The pilot uses synthetic fixtures and has not run live model evaluation.",
+    "No production saving or subscription-allowance improvement is claimed.",
+    "Unknown usage and prices remain unknown.",
+    "Observed budgets can overshoot during an in-flight request.",
+    "Learned retrieval/compression and hosted inference remain deferred candidates."
+  ],
+  "previewFiles": [
+    "docs/reviews/token-efficiency-2026-10-12/light.png",
+    "docs/reviews/token-efficiency-2026-10-12/dark.png"
+  ]
+}

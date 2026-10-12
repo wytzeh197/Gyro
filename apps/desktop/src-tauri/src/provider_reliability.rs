@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn is_transient_provider_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     if is_provider_cancellation(error)
+        || error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
         || is_stale_resume_error(error)
         || gyro_core::is_workspace_unavailable_error(error)
         || is_hopeless_provider_timeout(error)
@@ -30,6 +31,7 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         || normalized.contains("timed out")
         || normalized.contains("timeout")
         || normalized.contains("temporarily unavailable")
+        || is_model_capacity_error(error)
         || normalized.contains("try again")
         || normalized.contains("network is unreachable")
         || normalized.contains("could not resolve host")
@@ -41,6 +43,31 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         ]
         .iter()
         .any(|status| normalized.contains(status))
+}
+
+pub(super) fn is_model_capacity_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    (normalized.contains("model is at capacity")
+        || normalized.contains("model at capacity")
+        || normalized.contains("model is temporarily at capacity")
+        || normalized.contains("overloaded_error")
+        || normalized.contains("model is overloaded"))
+        && ![
+            "size limit",
+            "tool-call limit",
+            "output exceeded",
+            "http 401",
+            "http 403",
+            "unauthorized",
+            "authentication",
+            "insufficient_quota",
+            "http 402",
+            "status 402",
+            "payment required",
+            "balance exhausted",
+        ]
+        .iter()
+        .any(|cause| normalized.contains(cause))
 }
 
 fn is_hopeless_provider_timeout(error: &str) -> bool {
@@ -226,6 +253,11 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
                 "spend-ceiling",
                 "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
             )
+        } else if normalized.contains("rolling token budget") {
+            (
+                "spend-ceiling",
+                "This provider's token budget is spent. Wait for its rolling window to free up, or adjust the provider budget in usage settings.",
+            )
         } else {
             ("stopped", "You stopped this turn. Send again to continue.")
         };
@@ -315,6 +347,21 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
         return (
             "authentication",
             "Reconnect this provider, then retry the message.",
+        );
+    }
+    // Model availability is temporary and distinct from the output/tool
+    // capacity branch below. Keep the recovery structured so the UI does not
+    // have to interpret a provider's urgent wording as an action requirement.
+    if error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED) {
+        return (
+            "model-capacity-exhausted",
+            "Your work is saved. Retry when you are ready to continue.",
+        );
+    }
+    if is_model_capacity_error(error) {
+        return (
+            "model-capacity",
+            "Your conversation is saved. You can retry or choose another model.",
         );
     }
     if normalized.contains("http 429")
@@ -431,6 +478,42 @@ mod recovery_tests {
         let error = "Missing environment variable: `DEEPSEEK_API_KEY`.";
         assert_eq!(provider_failure_recovery(error).0, "provider-config");
         assert!(!is_transient_provider_error(error));
+    }
+
+    #[test]
+    fn model_availability_is_distinct_from_a_turn_output_budget() {
+        for error in [
+            "Selected model is at capacity. Please try a different model.",
+            "The model is temporarily at capacity.",
+            "API error: overloaded_error",
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "model-capacity");
+            assert!(message.contains("conversation is saved"));
+            assert!(is_transient_provider_error(error));
+        }
+        for permanent in [
+            "HTTP 401: model is at capacity",
+            "HTTP 403: model is at capacity",
+            "HTTP 402: model is at capacity",
+            "authentication failed: model is at capacity",
+            "output exceeded its size limit: model is at capacity",
+        ] {
+            assert!(!is_model_capacity_error(permanent));
+            assert!(!is_transient_provider_error(permanent));
+        }
+        assert_eq!(
+            provider_failure_recovery("output exceeded its size limit").0,
+            "capacity"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 402: model is at capacity").0,
+            "plan-exhausted"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 401: model is at capacity").0,
+            "authentication"
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex, MutexGuard, OnceLock,
     },
-    time::SystemTime,
+    time::{Instant, SystemTime},
 };
 
 /// Entries the cache holds before it evicts. A source-control refresh over a
@@ -59,7 +59,29 @@ fn cache() -> MutexGuard<'static, HashMap<PathBuf, Entry>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(test)]
 pub fn untracked_lines(path: &Path) -> io::Result<usize> {
+    count_untracked_lines(path, None)
+}
+
+/// Stream with bounded memory, stopping between reads when the shared status
+/// deadline expires. File size and file count alone do not make totals partial.
+pub fn untracked_lines_before(path: &Path, deadline: Instant) -> io::Result<usize> {
+    count_untracked_lines(path, Some(deadline))
+}
+
+fn check_deadline(deadline: Option<Instant>) -> io::Result<()> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Line count deadline expired",
+        ));
+    }
+    Ok(())
+}
+
+fn count_untracked_lines(path: &Path, deadline: Option<Instant>) -> io::Result<usize> {
+    check_deadline(deadline)?;
     let metadata = fs::symlink_metadata(path)?;
     // Git stores a symlink's target as its content; do not follow it outside the repo.
     if metadata.file_type().is_symlink() {
@@ -89,6 +111,7 @@ pub fn untracked_lines(path: &Path) -> io::Result<usize> {
         let mut last = prefix.last().copied();
         let mut buffer = [0u8; 64 * 1024];
         loop {
+            check_deadline(deadline)?;
             let read = file.read(&mut buffer)?;
             if read == 0 {
                 break;
@@ -98,6 +121,7 @@ pub fn untracked_lines(path: &Path) -> io::Result<usize> {
         }
         lines + usize::from(last.is_some() && last != Some(b'\n'))
     };
+    check_deadline(deadline)?;
     if before != fingerprint(&fs::symlink_metadata(path)?)? {
         return Err(io::Error::other("File changed while counting"));
     }
@@ -137,6 +161,16 @@ mod tests {
         assert_eq!(untracked_lines(&path).unwrap(), 0);
         fs::write(&path, "").unwrap();
         assert_eq!(untracked_lines(&path).unwrap(), 0);
+    }
+
+    #[test]
+    fn expired_deadline_does_not_publish_or_reuse_a_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        fs::write(&path, "one\n").unwrap();
+        assert_eq!(untracked_lines(&path).unwrap(), 1);
+        let error = untracked_lines_before(&path, Instant::now()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]

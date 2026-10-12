@@ -10,8 +10,8 @@ import {
   X,
 } from "lucide-react";
 import { SettingsGroup, SettingsSwitch } from "./settings-controls";
-import gyroLogoLight from "./assets/gyro-logo-transparent-dark.png";
-import gyroLogoDark from "./assets/gyro-logo-transparent.png";
+import gyroLogoLight from "./assets/gyro-logo.svg";
+import gyroLogoDark from "./assets/gyro-logo-white.svg";
 import type {
   ProjectImportCandidate,
   ProjectImportJob,

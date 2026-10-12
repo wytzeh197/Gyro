@@ -15,7 +15,6 @@ const MAX_CODE_LOCATIONS: usize = 50;
 const MAX_CODE_SYMBOLS: usize = 200;
 const MAX_CODE_PREVIEWS: usize = 20;
 const MAX_CODE_PREVIEW_CHARS: usize = 400;
-const MAX_CODE_HOVER_CHARS: usize = 4_000;
 
 const SYMBOL_KINDS: &[&str] = &[
     "",
@@ -117,8 +116,7 @@ pub(super) fn execute(
                     "schema": CODE_OBSERVATION_SCHEMA,
                     "path": &path,
                     "status": "ok",
-                    "truncated": text.chars().count() > MAX_CODE_HOVER_CHARS,
-                    "hover": text.chars().take(MAX_CODE_HOVER_CHARS).collect::<String>(),
+                    "hover": text,
                 })
             }
             CapabilityId::CodeSymbols => {
@@ -138,7 +136,20 @@ pub(super) fn execute(
             _ => anyhow::bail!("lsp_capability does not handle {}", request.capability_id),
         },
     };
-    let data = bound_code_result(redact_json_strings(data))?;
+    let data = if data.get("hover").is_some() {
+        capability_output_budget::text_result(
+            data,
+            &[capability_output_budget::TextField {
+                pointer: "/hover",
+                window: "hoverWindow",
+                offset: "offset",
+                tail: false,
+            }],
+            arguments,
+        )?
+    } else {
+        bound_code_result(data, workspace_result_byte_limit(arguments)?)?
+    };
     let summary = if data["status"] == "indexing" {
         format!("Language server is indexing for {path}")
     } else {
@@ -199,7 +210,14 @@ impl CodePage {
                     }),
             }
         };
-        let limit = integer("limit", maximum)?;
+        let limit = integer(
+            "limit",
+            if id == CapabilityId::CodeSymbols {
+                50
+            } else {
+                20
+            },
+        )?;
         if limit == 0 || limit > maximum {
             anyhow::bail!("capability argument `limit` must be between 1 and {maximum}");
         }
@@ -475,7 +493,7 @@ fn symbol_kind(symbol: &Value) -> &'static str {
 
 /// Keep the observation inside the shared capability budget by trimming
 /// whole trailing entries; a half entry would be worse than a smaller list.
-fn bound_code_result(mut data: Value) -> anyhow::Result<Value> {
+fn bound_code_result(data: Value, max_bytes: usize) -> anyhow::Result<Value> {
     let key = if data.get("locations").is_some() {
         "locations"
     } else if data.get("symbols").is_some() {
@@ -483,17 +501,7 @@ fn bound_code_result(mut data: Value) -> anyhow::Result<Value> {
     } else {
         return Ok(data);
     };
-    while serde_json::to_vec(&data)?.len() > gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES {
-        let length = data[key].as_array().map(Vec::len).unwrap_or(0);
-        if length <= 1 {
-            anyhow::bail!("a code navigation entry exceeds the tool response size limit");
-        }
-        if let Some(items) = data[key].as_array_mut() {
-            items.truncate(length / 2);
-        }
-        data = paged_result(data, key);
-    }
-    Ok(data)
+    capability_output_budget::array_result(data, key, max_bytes)
 }
 
 /// Tool schemas live here so `lib.rs` keeps a single delegation guard instead
@@ -525,7 +533,10 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         ),
         _ => return None,
     };
-    if id != CapabilityId::CodeHover {
+    properties["maxBytes"] = workspace_result_bytes_schema();
+    if id == CapabilityId::CodeHover {
+        properties["offset"] = capability_output_budget::offset_schema();
+    } else {
         properties["offset"] = json!({
             "type": "integer", "minimum": 0,
             "description": "Zero-based result offset. Use nextOffset from the previous result to read the next page. Results may change when the workspace changes."
@@ -533,7 +544,8 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         properties["limit"] = json!({
             "type": "integer", "minimum": 1,
             "maximum": if id == CapabilityId::CodeSymbols { MAX_CODE_SYMBOLS } else { MAX_CODE_LOCATIONS },
-            "description": "Maximum entries to return in this page. Omit to use the maximum."
+            "default": if id == CapabilityId::CodeSymbols { 50 } else { 20 },
+            "description": "Maximum entries to return in this page. Use nextOffset to retrieve more."
         });
     }
     Some((properties, required))
@@ -864,7 +876,8 @@ mod tests {
             json!({ "symbols": symbols, "total": 10, "offset": 3 }),
             "symbols",
         );
-        let bounded = bound_code_result(data).unwrap();
+        let bounded =
+            bound_code_result(data, gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES).unwrap();
         assert_eq!(bounded["returned"], 2);
         assert_eq!(bounded["nextOffset"], 5);
         assert_eq!(bounded["hasMore"], true);
@@ -873,7 +886,8 @@ mod tests {
                 <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
         );
         assert!(bound_code_result(
-            json!({ "symbols": [{ "name": "x".repeat(200_000) }], "total": 1, "offset": 0 })
+            json!({ "symbols": [{ "name": "x".repeat(200_000) }], "total": 1, "offset": 0 }),
+            gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
         )
         .is_err());
     }

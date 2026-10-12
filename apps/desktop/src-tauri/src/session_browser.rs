@@ -250,24 +250,6 @@ impl SessionBrowserManager {
         })
     }
 
-    pub fn network_entries(
-        &self,
-        session_id: &str,
-        limit: usize,
-    ) -> Result<Vec<BrowserNetworkEntry>, String> {
-        self.with_slot_mut(session_id, |slot| {
-            slot.network
-                .iter()
-                .rev()
-                .take(limit.clamp(1, MAX_NETWORK_ENTRIES))
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect()
-        })
-    }
-
     fn push_console(&self, session_id: &str, entry: BrowserConsoleEntry) {
         let _ = self.with_slot_mut(session_id, |slot| {
             if slot.console.len() >= MAX_CONSOLE_ENTRIES {
@@ -628,7 +610,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
 
   const pageState = () => ({{
     url: location.href,
-    title: document.title || "",
+    title: (document.title || "").slice(0, 400),
+    titleTruncated: (document.title || "").length > 400,
     readyState: document.readyState,
     viewport: {{
       width: Math.max(0, Math.round(window.innerWidth || 0)),
@@ -758,20 +741,27 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true }};
     }},
     readPage(options) {{
+      const root = options && options.ref ? resolveRef(options.ref) : (document.body || document.documentElement);
+      if (!root) return {{ ok: false, error: "element ref is stale; use find to locate it again" }};
       refMap.clear();
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
-      const budget = {{ left: {MAX_TREE_CHARS} }};
-      const tree = serializeTree(document.body || document.documentElement, 0, maxDepth, budget);
+      const maxChars = Math.min({MAX_TREE_CHARS}, Math.max(1024, (options && options.maxChars) || 6000));
+      const budget = {{ left: maxChars }};
+      const tree = serializeTree(root, 0, maxDepth, budget);
       return Object.assign({{
         ok: true,
         framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED",
         tree,
+        truncated: budget.left <= 0,
       }}, pageState());
     }},
     find(options) {{
       const query = ((options && options.query) || "").trim();
       const selector = ((options && options.selector) || "").trim();
       const results = [];
+      const limit = Math.min({MAX_FIND_RESULTS}, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      let matched = 0;
       let candidates = [];
       if (selector) {{
         try {{ candidates = Array.from(document.querySelectorAll(selector)); }}
@@ -786,6 +776,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         if (needle && !name.toLowerCase().includes(needle) && !(el.innerText || "").toLowerCase().includes(needle)) {{
           continue;
         }}
+        if (matched++ < offset) continue;
         const rect = el.getBoundingClientRect();
         results.push({{
           ref: assignRef(el),
@@ -799,9 +790,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
             height: Math.round(rect.height),
           }},
         }});
-        if (results.length >= {MAX_FIND_RESULTS}) break;
+        if (results.length > limit) break;
       }}
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results }};
+      const hasMore = results.length > limit;
+      if (hasMore) results.pop();
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results, offset, hasMore, nextOffset: hasMore ? offset + results.length : null }};
     }},
     pointerTarget(options) {{
       const x = Number(options && options.x);
@@ -883,12 +876,16 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, dx, dy }};
     }},
     console(options) {{
-      const limit = Math.min(MAX_CONSOLE, Math.max(1, (options && options.limit) || 50));
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries: consoleBuf.slice(-limit) }};
+      const limit = Math.min(MAX_CONSOLE, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = consoleBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: consoleBuf.length, order: "newest-first" }};
     }},
     network(options) {{
-      const limit = Math.min(MAX_NETWORK, Math.max(1, (options && options.limit) || 50));
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries: networkBuf.slice(-limit) }};
+      const limit = Math.min(MAX_NETWORK, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = networkBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: networkBuf.length, order: "newest-first" }};
     }},
     status() {{
       return Object.assign({{ ok: true }}, pageState());
@@ -1936,5 +1933,22 @@ mod tests {
         assert!(script.contains("readPage"));
         assert!(script.contains("credential fields"));
         assert!(script.contains("OBSERVED_PAGE_CONTENT_UNTRUSTED"));
+    }
+
+    #[test]
+    fn browser_paging_script_is_valid_javascript() {
+        let script = agent_initialization_script("test-nonce");
+        let mut command = crate::command_with_gui_path("node");
+        command
+            .args(["-e", "new Function(process.env.GYRO_BROWSER_TEST_SCRIPT)"])
+            .env("GYRO_BROWSER_TEST_SCRIPT", script);
+        let output = command
+            .output()
+            .expect("Node is required by the desktop frontend tests");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

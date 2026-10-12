@@ -1,6 +1,13 @@
+export { EfficiencyDetails } from "./efficiency-details";
+export { CodeModeActivityCard } from "./code-mode-card";
+export { groupWorkflowEvents } from "./code-mode";
 export type { TurnTokens, UsageAccounting } from "./turn-tokens";
 export { SizingMotionFixture } from "./sizing-motion-fixture";
+export { MotionDisclosure } from "./motion-disclosure";
+export { UsageCard } from "./settings-presentation";
+export { useDialogDismiss } from "./use-dialog-dismiss";
 export { ChatFileActionsContext } from "./chat-file-card";
+export { CliSessionList } from "./cli-session-list";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
 export { interfaceScales } from "./appearance";
@@ -292,7 +299,7 @@ export type {
   ReviewScope,
   ReviewScopeListing,
 } from "./review-scope";
-export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
+export { default as gyroLogoMark } from "./assets/gyro-logo.svg";
 export {
   createInitialWorkbenchState,
   createNotification,
@@ -309,6 +316,12 @@ export {
   isUserSelectedWorkspacePath,
   parseProviderHealthOutput,
   sanitizeStoredIdeState,
+  editorBufferRecoveryCapacity,
+  persistableDirtyEditorBuffers,
+  prepareEditorBufferBatch,
+  EDITOR_RECOVERY_MAX_BUFFERS,
+  EDITOR_RECOVERY_MAX_BUFFER_CHARS,
+  EDITOR_RECOVERY_MAX_TOTAL_CHARS,
   workbenchReducer,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
@@ -478,7 +491,11 @@ export type {
   TurnCostEstimate,
   UsageSafetyNotice,
 } from "./usage-ledger";
-export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
+export type {
+  ChatGridAction,
+  WorkbenchAction,
+  EditorBufferBatchUpdate,
+} from "./workbench-state";
 export {
   promoteQueuedMessage,
   selectQueuedMessageDelivery,
@@ -569,6 +586,7 @@ export {
   ChatThread,
   ChatGridSurface,
   ChatSurface,
+  ChatEnvironmentPopover,
   NEW_CHAT_DRAFT_KEY,
   CliUpdateBanner,
   ChatUtilityBar,
@@ -647,6 +665,8 @@ export {
 } from "./terminal-profiles";
 
 export { ChatRun } from "./chat-run-view";
+export { ChatRetryContext } from "./chat-retry-context";
+export type { ChatRetryState } from "./chat-retry-context";
 export type { RunModel } from "./chat-run";
 export {
   decideKeepAlive,
@@ -680,3 +700,7 @@ export { ComposerContextCandidates } from "./composer-context.ts";
 export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab, nativeSubagentParents } from "./subagents";
 export type { SubagentSnapshot, SubagentSurfaceState, SubagentTabState } from "./subagents";
 export { sessionApprovalCounts, sessionQuestionCounts } from "./session-approvals";
+
+export { WorkspaceRenameDialog, WorkspaceEditBar, type RenamePreviewFile } from "./workspace-rename";
+
+export { currentChatDrag } from "./chat-session-drag";

@@ -7,6 +7,7 @@ import type {
   UsageOriginTotals,
   UsageSafetySnapshot,
 } from "./types";
+import { remainingUsage } from "./usage-remaining.ts";
 
 /** The session cost line, as the chat surface renders it. */
 export type SessionCostSummary = {
@@ -316,7 +317,7 @@ export function ledgerWindows(
       Math.round((totals.totalTokens / limit) * 100),
     );
     return {
-      detail: `${formatTokenCount(totals.totalTokens)} of ${formatTokenCount(limit)}`,
+      detail: `${formatTokenCount(Math.max(0, limit - totals.totalTokens))} of ${formatTokenCount(limit)} tokens left`,
       hasBudget,
       id: spec.id,
       isEstimated: totals.estimatedCalls > 0 || (totals.partialCalls ?? 0) > 0 || (totals.unavailableCalls ?? 0) > 0,
@@ -480,10 +481,10 @@ export function dailyPaceNotice(
 }
 
 function budgetHeadline(budget: BudgetState) {
-  const used = formatTokenCount(budget.usedTokens);
+  const left = formatTokenCount(Math.max(0, budget.maxTokens - budget.usedTokens));
   const cap = formatTokenCount(budget.maxTokens);
   const estimate = budget.hasEstimates ? ", partly estimated" : "";
-  return `${budget.providerId}: ${budget.percent}% of budget used (${used} of ${cap}${estimate})`;
+  return `${budget.providerId}: ${remainingUsage(budget.percent).percentLabel} of budget left (${left} of ${cap} tokens left${estimate})`;
 }
 
 /**

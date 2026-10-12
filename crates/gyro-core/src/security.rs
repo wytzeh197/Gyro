@@ -153,6 +153,41 @@ pub fn redact_secrets(input: &str) -> String {
     current.into_owned()
 }
 
+/// Mask secrets without moving the editor positions of the surrounding text.
+/// Workspace read continuations use UTF-16 columns, so a replacement must keep
+/// both line breaks and UTF-16 width even when the secret contains Unicode.
+pub fn redact_secrets_preserving_positions(input: &str) -> String {
+    let mut current = Cow::Borrowed(input);
+    for regex in redaction_patterns() {
+        if !regex.is_match(current.as_ref()) {
+            continue;
+        }
+        current = Cow::Owned(
+            regex
+                .replace_all(current.as_ref(), |caps: &regex::Captures<'_>| {
+                    let matched = caps.get(0).expect("redaction match").as_str();
+                    let prefix = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                    let mut masked = prefix.to_owned();
+                    for character in matched[prefix.len()..].chars() {
+                        if matches!(character, '\n' | '\r') {
+                            masked.push(character);
+                        } else if character.len_utf16() == 2 {
+                            // Keep surrogate pairs atomic: two ASCII masks
+                            // would permit a chunk to split within the source
+                            // character's two-column width.
+                            masked.push('🔒');
+                        } else {
+                            masked.push('*');
+                        }
+                    }
+                    masked
+                })
+                .into_owned(),
+        );
+    }
+    current.into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +214,19 @@ mod tests {
             redacted,
             r#"{"loggedIn":false,"token":"[REDACTED]","password":"[REDACTED]"}"#
         );
+    }
+
+    #[test]
+    fn workspace_redaction_preserves_utf16_columns_and_lines() {
+        let source = "before\n{\"token\":\"🦀hidden\nvalue\"} after\nOPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456";
+        let masked = redact_secrets_preserving_positions(source);
+        assert!(!masked.contains("hidden"));
+        assert!(!masked.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        for (source, masked) in source.split('\n').zip(masked.split('\n')) {
+            assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        }
+        assert_eq!(source.lines().count(), masked.lines().count());
     }
 
     #[test]

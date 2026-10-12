@@ -14,10 +14,10 @@ struct Spec {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Provider {
-    id: String,
-    model: String,
-    effort: String,
+pub(super) struct Provider {
+    pub(super) id: String,
+    pub(super) model: String,
+    pub(super) effort: String,
 }
 
 pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
@@ -34,7 +34,9 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
     {
         return Err("benchmark data must be in an absolute temporary directory".into());
     }
-    let spec: Spec = serde_json::from_slice(&fs::read(spec_path)?)?;
+    let raw: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
+    if raw["schema"] == "gyro.efficiency-benchmark.v2" {return super::efficiency_benchmark::start(app, root, raw).map_err(Into::into);}
+    let spec: Spec = serde_json::from_value(raw)?;
     if !(1..=5).contains(&spec.trials)
         || !(10..=300).contains(&spec.timeout_seconds)
         || spec.providers.is_empty()
@@ -397,7 +399,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     }
     Ok(())
 }
-fn turn(
+pub(super) fn turn(
     app: &tauri::AppHandle,
     store: &SessionStore,
     session: Uuid,
@@ -435,7 +437,7 @@ fn selected_effort(provider: &Provider) -> Option<&str> {
     (!effort.is_empty()).then_some(effort)
 }
 
-fn failure_class(error: &str) -> &'static str {
+pub(super) fn failure_class(error: &str) -> &'static str {
     let e = error.to_lowercase();
     if [
         "not logged in",

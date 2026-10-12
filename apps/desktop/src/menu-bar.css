@@ -194,8 +194,7 @@
   --tone: var(--menu-ok);
 }
 
-/* The app mark ships as an opaque square with built-in padding, so it is
-   scaled past the tile and cropped rather than sized by hand. */
+/* The transparent vector mark fits inside the tile in either theme. */
 .gyro-menu-bar-brand-mark {
   border: 1px solid var(--menu-border);
   border-radius: var(--menu-radius-xs);
@@ -209,9 +208,13 @@
 
 .gyro-menu-bar-brand-mark img {
   display: block;
-  height: 136%;
-  max-width: none;
-  width: 136%;
+  height: 76%;
+  object-fit: contain;
+  width: 76%;
+}
+
+:root[data-theme="dark"] .gyro-menu-bar-brand-mark img {
+  filter: brightness(0) invert(1);
 }
 
 /* Provider and automation glyphs — small and quiet, so the status dot and

@@ -83,7 +83,7 @@ pub(super) fn context_checkpoint_note(
         None => "with no window size known for this model".to_string(),
     };
     Some(format!(
-        "{CONTEXT_CHECKPOINT_MARKER} Live context checkpoint: the previous request measured {reading} {window}. Gyro rewrites this note before each request; size your own reads to the space left."
+        "{CONTEXT_CHECKPOINT_MARKER} Previous request measured: {reading} {window}. Size reads to the remaining space; this checkpoint is replaced each request."
     ))
 }
 
@@ -125,7 +125,7 @@ pub(super) const CONTEXT_COMPACTION_MARKER: &str = "[gyro.compact]";
 pub(super) struct ContextCompaction {
     /// Tool exchanges dropped from the in-flight list.
     pub(super) exchanges: usize,
-    /// Serialized characters removed, reported as an estimated token count.
+    /// Estimated text characters removed; encoded image bytes are excluded.
     pub(super) characters: u64,
     /// Measured fill of the window when the compaction fired.
     pub(super) percent: u64,
@@ -203,40 +203,68 @@ pub(super) fn auto_compact_messages(
     let previous_note = messages
         .iter()
         .position(is_context_compaction)
-        .map(|index| messages.remove(index));
+        .map(|index| (index, messages.remove(index)));
     // The head is the system prompt plus this turn's context message: identity,
     // the workspace briefing and the standing instructions. It is what the turn
     // is, so it is budgeted for but never elided.
-    let head_characters = messages
+    let sizes = messages.iter().map(message_size).collect::<Vec<_>>();
+    let head_characters = sizes
         .iter()
         .take(2)
-        .filter_map(message_characters)
+        .map(|(characters, _)| *characters)
         .sum::<u64>();
     let target_percent = u64::from(percent) / COMPACT_TARGET_DIVISOR;
     let budget = (window.saturating_mul(target_percent) / 100)
         .saturating_mul(CHARS_PER_TOKEN)
         .saturating_sub(head_characters)
         .max(MIN_COMPACTED_TAIL_CHARS);
-    // Walk backwards from the newest message: it always stays, and everything
-    // recent that fits the budget stays with it.
-    let mut split = messages.len() - 1;
-    let mut used = message_characters(&messages[split]).unwrap_or_default();
-    for index in (2..split).rev() {
-        let characters = message_characters(&messages[index]).unwrap_or_default();
+    // An exchange starts at the assistant request and includes all its tool
+    // results and image observations. A screenshot can follow a result or sit
+    // between results, so contiguous `tool` roles do not describe its boundary.
+    // The newest complete exchange must survive even if its result is large.
+    let exchanges = messages
+        .iter()
+        .enumerate()
+        .skip(2)
+        .filter_map(|(index, message)| {
+            (message_role(message) == Some("assistant")).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let Some(mut split) = exchanges.last().copied() else {
+        if let Some((index, note)) = previous_note {
+            messages.insert(index, note);
+        }
+        return None;
+    };
+    let mut used = sizes[split..]
+        .iter()
+        .map(|(characters, _)| *characters)
+        .sum::<u64>();
+    let mut retained_image = sizes[split..].iter().any(|(_, image)| *image);
+    for index in exchanges.iter().rev().skip(1).copied() {
+        let has_image = sizes[index..split].iter().any(|(_, image)| *image);
+        // Measured occupancy includes visual tokens, but their cost cannot be
+        // inferred from encoded bytes. When the window is full, keep the latest
+        // image exchange and stop before an older one rather than allowing a
+        // text-only estimate to retain every screenshot indefinitely.
+        if has_image && retained_image {
+            break;
+        }
+        let characters = sizes[index..split]
+            .iter()
+            .map(|(characters, _)| *characters)
+            .sum::<u64>();
         if used.saturating_add(characters) > budget {
             break;
         }
-        used += characters;
+        used = used.saturating_add(characters);
+        retained_image |= has_image;
         split = index;
     }
-    // A tool result answers the call before it, so the kept region cannot open
-    // on one: step back to the assistant message carrying those calls.
-    while split > 2 && message_role(&messages[split]) == Some("tool") {
-        split -= 1;
-    }
-    if split <= 2 || message_role(&messages[split]) == Some("tool") {
-        if let Some(previous_note) = previous_note {
-            messages.insert(2, previous_note);
+    // A preceding checkpoint alone is not work worth replacing with a note.
+    if !exchanges.iter().any(|index| *index < split) {
+        if let Some((index, note)) = previous_note {
+            messages.insert(index, note);
         }
         return None;
     }
@@ -244,9 +272,11 @@ pub(super) fn auto_compact_messages(
     let compaction = ContextCompaction {
         exchanges: elided
             .iter()
-            .filter(|message| carries_tool_calls(message))
+            .filter(|message| {
+                carries_tool_calls(message) || carries_compatibility_tool_call(message)
+            })
             .count(),
-        characters: elided.iter().filter_map(message_characters).sum(),
+        characters: sizes[2..split].iter().map(|(characters, _)| *characters).sum(),
         percent: fill,
     };
     messages.insert(
@@ -261,7 +291,7 @@ pub(super) fn auto_compact_messages(
 
 fn auto_compaction_note(compaction: &ContextCompaction, window: u64, percent: u32) -> String {
     format!(
-        "{CONTEXT_COMPACTION_MARKER} Auto-compaction: the previous request filled {}% of this model's {window}-token window, past the {percent}% Gyro compacts at, so the {exchanges} oldest tool exchanges -- about {tokens} estimated tokens of earlier results -- were replaced by this note. Nothing is undone: re-read or re-run anything whose result you no longer see.",
+        "{CONTEXT_COMPACTION_MARKER} At {}% of the {window}-token window (trigger {percent}%), the {exchanges} oldest tool exchanges were replaced: about {tokens} estimated text tokens. Completed actions still stand. Re-read missing data; inspect current state before retrying an action whose result was removed.",
         compaction.percent,
         exchanges = compaction.exchanges,
         tokens = estimated_tokens(compaction.characters),
@@ -291,11 +321,20 @@ fn carries_tool_calls(message: &Value) -> bool {
         .is_some_and(|calls| !calls.is_empty())
 }
 
-/// Serialized characters of one message: what the request actually carries.
-fn message_characters(message: &Value) -> Option<u64> {
-    serde_json::to_string(message)
-        .ok()
-        .map(|serialized| serialized.chars().count() as u64)
+fn carries_compatibility_tool_call(message: &Value) -> bool {
+    message_role(message) == Some("assistant")
+        && message
+            .get("content")
+            .and_then(Value::as_str)
+            .and_then(|content| serde_json::from_str::<Value>(content).ok())
+            .is_some_and(|action| action.get("type").and_then(Value::as_str) == Some("tool"))
+}
+
+/// Text and schema characters of a message, excluding encoded image bytes.
+/// Image token costs are provider-owned and cannot be inferred from base64.
+fn message_size(message: &Value) -> (u64, bool) {
+    let (characters, image) = gyro_core::provider_observation::text_size(message);
+    (characters as u64, image)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -488,7 +527,7 @@ fn exceeds_context_window(usage: &ProviderContextUsage) -> bool {
     let occupied = usage
         .total_tokens
         .unwrap_or_default()
-        .max(usage.input_tokens.unwrap_or_default() + usage.output_tokens.unwrap_or_default());
+        .max(usage.input_tokens.unwrap_or_default().saturating_add(usage.output_tokens.unwrap_or_default()));
     occupied > window
 }
 
@@ -699,7 +738,8 @@ mod tests {
                         "tool result {id} lost the assistant call it answers"
                     );
                 }
-                _ => open.clear(),
+                // Image observations can appear between tool results.
+                _ => {}
             }
         }
     }
@@ -795,6 +835,135 @@ mod tests {
         assert_eq!(messages[3]["tool_calls"][0]["id"], "call-9");
         assert_eq!(messages[4]["tool_call_id"], "call-9");
         assert_calls_and_results_stay_paired(&messages);
+    }
+
+    #[test]
+    fn compaction_keeps_the_newest_exchange_with_its_trailing_image_and_checkpoint() {
+        let mut messages = loop_with_exchanges(2, 100);
+        messages.extend(tool_exchange(9, 400_000));
+        messages.push(serde_json::json!({
+            "role": "user", "content": "screenshot observation", "images": ["image-data"]
+        }));
+        refresh_context_checkpoint(&mut messages, Some(99_000), Some(0), Some(8_000));
+        auto_compact_messages(&mut messages, Some(99_000), Some(0), Some(8_000), 80)
+            .expect("older exchanges can be compacted");
+        assert_eq!(messages[3]["tool_calls"][0]["id"], "call-9");
+        assert_eq!(messages[4]["tool_call_id"], "call-9");
+        assert_eq!(messages[5]["images"][0], "image-data");
+        assert_calls_and_results_stay_paired(&messages);
+    }
+
+    #[test]
+    fn compaction_keeps_all_results_when_images_separate_a_multi_tool_exchange() {
+        let mut messages = loop_with_exchanges(2, 100);
+        let mut newest = tool_exchange(9, 400_000);
+        newest[0]["tool_calls"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "call-10", "type": "function",
+                "function": { "name": "gyro_workspace_read", "arguments": "{}" }
+            }));
+        messages.extend(newest);
+        messages.push(serde_json::json!({
+            "role": "user", "content": "screenshot observation", "images": ["image-data"]
+        }));
+        messages.push(serde_json::json!({
+            "role": "tool", "tool_call_id": "call-10", "content": "second result"
+        }));
+        auto_compact_messages(&mut messages, Some(99_000), Some(0), Some(8_000), 80)
+            .expect("older exchanges can be compacted");
+        assert_eq!(messages[3]["tool_calls"].as_array().unwrap().len(), 2);
+        assert_eq!(messages[4]["tool_call_id"], "call-9");
+        assert_eq!(messages[6]["tool_call_id"], "call-10");
+        assert_calls_and_results_stay_paired(&messages);
+    }
+
+    #[test]
+    fn a_checkpoint_before_the_only_exchange_does_not_trigger_compaction() {
+        let mut messages = loop_with_exchanges(0, 0);
+        refresh_context_checkpoint(&mut messages, Some(7_000), Some(0), Some(8_000));
+        messages.extend(tool_exchange(1, 400_000));
+        let unchanged = messages.clone();
+        assert!(
+            auto_compact_messages(&mut messages, Some(7_000), Some(0), Some(8_000), 80).is_none()
+        );
+        assert_eq!(messages, unchanged);
+    }
+
+    #[test]
+    fn compaction_counts_compatibility_tools_and_keeps_the_newest_result() {
+        let mut messages = loop_with_exchanges(0, 0);
+        for round in 0..6 {
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": format!(r#"{{"type":"tool","name":"gyro_workspace_read","arguments":{{"path":"file-{round}"}}}}"#)
+            }));
+            messages.push(serde_json::json!({"role": "user", "content": "x".repeat(4_000)}));
+        }
+        let compaction =
+            auto_compact_messages(&mut messages, Some(7_000), Some(0), Some(8_000), 80)
+                .expect("compatibility tool results can be compacted");
+        assert!(compaction.exchanges > 0);
+        assert!(messages[messages.len() - 2]["content"]
+            .as_str()
+            .unwrap()
+            .contains("file-5"));
+        assert_eq!(
+            messages.last().unwrap()["content"].as_str().unwrap().len(),
+            4_000
+        );
+    }
+
+    #[test]
+    fn encoded_images_are_not_reported_as_estimated_text_tokens() {
+        let text = serde_json::json!({"role": "user", "content": "observation"});
+        let ollama = serde_json::json!({"role": "user", "content": "observation", "images": ["x".repeat(1_000_000)]});
+        let openai = serde_json::json!({"role": "user", "content": [
+            {"type": "text", "text": "observation"},
+            {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{}", "x".repeat(1_000_000))}}
+        ]});
+        assert!(message_size(&ollama).0 - message_size(&text).0 < 100);
+        assert!(message_size(&openai).0 < 200);
+    }
+
+    #[test]
+    fn measured_visual_occupancy_still_prunes_older_image_exchanges() {
+        let mut messages = loop_with_exchanges(0, 0);
+        for round in 0..3 {
+            messages.extend(tool_exchange(round, 10));
+            messages.push(serde_json::json!({
+                "role": "user", "content": format!("screenshot {round}"), "images": ["x".repeat(100_000)]
+            }));
+        }
+        let compaction =
+            auto_compact_messages(&mut messages, Some(7_000), Some(0), Some(8_000), 80)
+                .expect("visual occupancy triggers pruning despite small text");
+        assert_eq!(compaction.exchanges, 2);
+        assert!(
+            compaction.characters < 1_000,
+            "image bytes are not text token savings"
+        );
+        assert_eq!(messages[3]["tool_calls"][0]["id"], "call-2");
+        assert_eq!(messages.last().unwrap()["content"], "screenshot 2");
+        assert_calls_and_results_stay_paired(&messages);
+    }
+
+    #[test]
+    fn serialized_tool_arguments_and_results_remain_in_the_text_budget() {
+        let messages = tool_exchange(0, 4_000);
+        assert!(message_size(&messages[0]).0 > 100);
+        assert!(message_size(&messages[1]).0 >= 4_000);
+    }
+
+    #[test]
+    fn oversized_usage_counters_do_not_overflow_window_validation() {
+        assert!(exceeds_context_window(&ProviderContextUsage {
+            input_tokens: Some(u64::MAX),
+            output_tokens: Some(1),
+            model_context_window: Some(8_000),
+            ..ProviderContextUsage::default()
+        }));
     }
 
     #[test]

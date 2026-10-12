@@ -7,8 +7,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn cache() -> &'static Mutex<HashMap<u64, Instant>> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Instant>>> = OnceLock::new();
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+enum RejectedField {
+    Usage,
+    Tools,
+}
+
+fn cache() -> &'static Mutex<HashMap<(u64, RejectedField), Instant>> {
+    static CACHE: OnceLock<Mutex<HashMap<(u64, RejectedField), Instant>>> = OnceLock::new();
     CACHE.get_or_init(Mutex::default)
 }
 pub(crate) fn identity(url: &str, model: &str, key: &str) -> u64 {
@@ -17,13 +23,25 @@ pub(crate) fn identity(url: &str, model: &str, key: &str) -> u64 {
     hash.finish()
 }
 pub(crate) fn include_usage(identity: u64) -> bool {
+    field_available(identity, RejectedField::Usage)
+}
+pub(crate) fn native_tools_available(identity: u64) -> bool {
+    field_available(identity, RejectedField::Tools)
+}
+fn field_available(identity: u64, field: RejectedField) -> bool {
     let Ok(mut entries) = cache().lock() else {
         return true;
     };
     entries.retain(|_, at| at.elapsed() < Duration::from_secs(15 * 60));
-    !entries.contains_key(&identity)
+    !entries.contains_key(&(identity, field))
 }
 pub(crate) fn remember_usage_rejection(identity: u64) {
+    remember_rejection(identity, RejectedField::Usage);
+}
+pub(crate) fn remember_tools_rejection(identity: u64) {
+    remember_rejection(identity, RejectedField::Tools);
+}
+fn remember_rejection(identity: u64, field: RejectedField) {
     if let Ok(mut entries) = cache().lock() {
         if entries.len() >= 128 {
             if let Some(oldest) = entries
@@ -34,7 +52,7 @@ pub(crate) fn remember_usage_rejection(identity: u64) {
                 entries.remove(&oldest);
             }
         }
-        entries.insert(identity, Instant::now());
+        entries.insert((identity, field), Instant::now());
     }
 }
 pub(crate) fn rejects_usage_field(body: &str) -> bool {
@@ -83,5 +101,34 @@ mod tests {
             identity("https://a/v1", "m", "a"),
             identity("https://a/v1", "m", "b")
         );
+    }
+
+    #[test]
+    fn tool_rejection_isolated_from_usage_endpoint_model_and_credential() {
+        let id = identity("https://tools-fixture/v1", "model-a", "key-a");
+        assert!(native_tools_available(id));
+        remember_tools_rejection(id);
+        assert!(!native_tools_available(id));
+        assert!(include_usage(id));
+        for other in [
+            identity("https://other-tools-fixture/v1", "model-a", "key-a"),
+            identity("https://tools-fixture/v1", "model-b", "key-a"),
+            identity("https://tools-fixture/v1", "model-a", "key-b"),
+        ] {
+            assert!(native_tools_available(other));
+        }
+        remember_usage_rejection(id);
+        assert!(!include_usage(id));
+        assert!(!native_tools_available(id));
+    }
+
+    #[test]
+    fn tool_support_is_probed_again_when_the_rejection_expires() {
+        let id = identity("https://expiring-tools-fixture/v1", "m", "k");
+        cache().lock().unwrap().insert(
+            (id, RejectedField::Tools),
+            Instant::now() - Duration::from_secs(15 * 60 + 1),
+        );
+        assert!(native_tools_available(id));
     }
 }

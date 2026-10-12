@@ -12,6 +12,7 @@ pub mod credentials;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
+pub mod efficiency;
 pub mod fast_mode;
 pub mod file_review;
 pub mod github;

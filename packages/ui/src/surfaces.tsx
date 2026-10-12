@@ -1,7 +1,28 @@
+import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu } from "./provider-settings-fields";
+import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
+import { CodeModeActivityCard } from "./code-mode-card";
+import { groupWorkflowEvents, workflowDetails } from "./code-mode";
+import { EfficiencySettings } from "./efficiency-settings";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
-import { CHAT_SESSION_DRAG_MIME, beginChatSessionDrag, currentChatSessionDrag, endChatSessionDrag, readChatSessionDrag } from "./chat-session-drag";
+import {
+  CHAT_SESSION_DRAG_MIME,
+  beginChatSessionDrag,
+  beginChatPaneDrag,
+  currentChatDrag,
+  readChatDrag,
+  chatDragSource,
+  subscribeChatDrag,
+  endChatDrag,
+  endChatDragForTransfer,
+} from "./chat-session-drag";
+import {
+  registerChatPointerDropTarget,
+  startChatPointerDrag,
+} from "./chat-pointer-drag";
+import type { ChatPointerDropTarget } from "./chat-pointer-drag";
 import "./workspace-folder-icons.css";
 import { navigateTabList } from "./tab-navigation";
+import { CliSessionList } from "./cli-session-list";
 import { buildDiffFileTree, type DiffTreeNode } from "./diff-file-tree";
 import { ChatFileCard, chatFileKind } from "./chat-file-card";
 import {
@@ -9,7 +30,7 @@ import {
   linkedChatFile,
   parseChatMarkdownLink,
 } from "./chat-file-links";
-import { SubagentList, SubagentPanel, SubagentMark, SubagentStrip } from "./subagents-view";
+import { SubagentPanel, SubagentMark, SubagentStrip } from "./subagents-view";
 import { SubagentsEnvironment } from "./subagents-environment";
 import {
   pendingSubagentApprovals,
@@ -33,6 +54,8 @@ import {
 } from "./composer-context.ts";
 import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
+import { CompanionMotionContext, useCompanionMotion, useCompanionPresence } from "./use-companion-motion";
+import "./companion-motion.css";
 import {
   BrowserCaptureView,
   browserPreviewLocationLabel,
@@ -82,6 +105,7 @@ import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
 import { composerFastMode } from "./provider-fast-mode";
 import { ComposerModelRail } from "./composer-model-rail";
+import { clippingBounds } from "./composer-popover-bounds";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import { LanguagePicker } from "./editor/languages/language-picker";
 import {
@@ -208,8 +232,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
-import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
-import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
+import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
+import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
 import {
   finalAssistantResponseText,
   stripHiddenControlMarkers,
@@ -274,6 +298,7 @@ import {
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
+import { remainingUsage } from "./usage-remaining";
 import {
   turnTokenReadingForResponse,
   turnTokensDetail,
@@ -333,6 +358,7 @@ import type {
   ChatGridArrangement,
   ChatPaneRef,
   ChatProjectLayout,
+  ChatGridState,
   ChatMode,
   CouncilActionRequest,
   CouncilResponsePayload,
@@ -428,6 +454,8 @@ import {
   isUserSelectedWorkspacePath,
   normalizedDesktopNotifications,
   resolveChatGridDropSlot,
+  chatGridReducer,
+  chatProjectKey,
 } from "./workbench-state";
 import {
   chatGridDropLayout,
@@ -531,7 +559,6 @@ const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
   "source-control": GitPullRequest,
   terminal: Terminal,
 };
-const CHAT_PANE_DRAG_MIME = "application/x-gyro-chat-pane";
 const TOOL_PANEL_DEFAULT_HEIGHT = 280;
 /** Comfortable height when opening Browser so the iframe is usable. */
 const TOOL_PANEL_BROWSER_HEIGHT = 420;
@@ -666,106 +693,6 @@ function ChatSwitcher({
   );
 }
 
-type OpenMenu = {
-  element: HTMLElement;
-  dismiss: () => void;
-};
-const openMenus: OpenMenu[] = [];
-
-function dismissOpenMenus() {
-  for (const menu of [...openMenus].reverse()) menu.dismiss();
-}
-
-function useOutsidePointerDismiss<T extends HTMLElement>(
-  isOpen: boolean,
-  onDismiss: () => void,
-  triggerRef?: RefObject<HTMLElement | null>,
-  onEscapeSubmenu?: () => boolean,
-) {
-  const ref = useRef<T | null>(null);
-  const dismissRef = useRef(onDismiss);
-  dismissRef.current = onDismiss;
-  const escapeRef = useRef(onEscapeSubmenu);
-  escapeRef.current = onEscapeSubmenu;
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!isOpen || !element) return;
-    const returnFocus =
-      triggerRef?.current ??
-      (element.querySelector("[aria-haspopup]") as HTMLElement | null) ??
-      (document.activeElement as HTMLElement | null);
-    // Nested menus stay open together; unrelated overlays never stack.
-    for (const menu of [...openMenus]) {
-      if (!menu.element.contains(element) && !element.contains(menu.element)) {
-        menu.dismiss();
-      }
-    }
-    const menu = { element, dismiss: () => dismissRef.current() };
-    openMenus.push(menu);
-    const handlePointerDown = (event: PointerEvent) => {
-      const path = event.composedPath();
-      if (
-        path.includes(element) ||
-        (triggerRef?.current && path.includes(triggerRef.current))
-      )
-        return;
-      menu.dismiss();
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || openMenus.at(-1) !== menu) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (escapeRef.current?.()) return;
-        menu.dismiss();
-        const focusTarget = triggerRef?.current ?? returnFocus;
-        if (focusTarget?.isConnected) focusTarget.focus();
-        return;
-      }
-      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        !target ||
-        target.matches("input, textarea, select, [contenteditable=true]")
-      )
-        return;
-      const items = [
-        ...element.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ].filter(
-        (item) =>
-          !item.matches(":disabled, [aria-disabled=true]") &&
-          item.getClientRects().length > 0,
-      );
-      if (!items.length) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const current = items.indexOf(target);
-      const next =
-        event.key === "Home"
-          ? 0
-          : event.key === "End"
-            ? items.length - 1
-            : event.key === "ArrowDown"
-              ? (current + 1) % items.length
-              : current < 0
-                ? items.length - 1
-                : (current - 1 + items.length) % items.length;
-      items[next]?.focus();
-    };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      const index = openMenus.indexOf(menu);
-      if (index >= 0) openMenus.splice(index, 1);
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen, triggerRef]);
-
-  return ref;
-}
-
 type AppChromeProps = {
   sessions: Session[];
   commandProfiles: CommandProfile[];
@@ -784,6 +711,10 @@ type AppChromeProps = {
   notifications?: Notification[];
   pinnedSessionIds?: string[];
   openChatSessionIds?: string[];
+  /** Open unsent chats. These are not sessions yet, so the session list cannot see them. */
+  draftChats?: SidebarDraftChat[];
+  activeDraftId?: string;
+  onSelectDraftChat?: (draftId: string) => void;
   isChatsCollapsed?: boolean;
   terminalPanes?: TerminalPane[];
   selectedTerminalPaneId?: string;
@@ -1627,6 +1558,9 @@ export function AppChrome({
   notifications = [],
   pinnedSessionIds = [],
   openChatSessionIds = [],
+  draftChats = [],
+  activeDraftId,
+  onSelectDraftChat,
   isChatsCollapsed = false,
   terminalPanes = [],
   selectedTerminalPaneId,
@@ -2524,6 +2458,9 @@ export function AppChrome({
               }
               pinnedSessionIds={pinnedSessionIds}
               openChatSessionIds={openChatSessionIds}
+              draftChats={draftChats}
+              activeDraftId={activeDraftId}
+              onSelectDraftChat={onSelectDraftChat}
               savedProjects={savedProjects}
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
@@ -3672,6 +3609,9 @@ function WorkspaceSidebarContent({
   workspacePath,
   pinnedSessionIds,
   openChatSessionIds,
+  draftChats = [],
+  activeDraftId,
+  onSelectDraftChat,
   onSelectSession,
   onAddSessionToGrid,
   onSelectDestination,
@@ -3761,6 +3701,9 @@ function WorkspaceSidebarContent({
   workspacePath?: string;
   pinnedSessionIds: string[];
   openChatSessionIds: string[];
+  draftChats?: SidebarDraftChat[];
+  activeDraftId?: string;
+  onSelectDraftChat?: (draftId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -3856,7 +3799,7 @@ function WorkspaceSidebarContent({
   const pinnedSessions = sidebarSessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
   );
-  // Hide empty "New chat" / "New mission" shells until something real happens.
+  // Placeholder shells stay hidden until activity, including open chats.
   const recentSessions = sidebarSessions.filter((session) => {
     if (pinnedSessionIds.includes(session.id)) {
       return false;
@@ -3881,6 +3824,28 @@ function WorkspaceSidebarContent({
     label: string;
   }>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
+  const sidebarDragId = useRef<number>();
+  useEffect(() => {
+    const unsubscribe = subscribeChatDrag((drag) => {
+      if (drag?.kind === "session") {
+        setDraggedSessionId(drag.sessionId);
+        if (drag.inputMode === "pointer") sidebarDragId.current = drag.dragId;
+      } else {
+        setDraggedSessionId(undefined);
+      }
+    });
+    return () => {
+      unsubscribe();
+      if (sidebarDragId.current !== undefined) endChatDrag(sidebarDragId.current);
+    };
+  }, []);
+  useEffect(() => {
+    const drag = currentChatDrag();
+    if (drag?.kind === "session" && drag.dragId === sidebarDragId.current &&
+        !sessions.some((session) => session.id === drag.sessionId)) {
+      endChatDrag(drag.dragId);
+    }
+  }, [sessions]);
   const [newSessionMenuView, setNewSessionMenuView] = useState<
     "closed" | "root" | "more"
   >("closed");
@@ -3920,8 +3885,14 @@ function WorkspaceSidebarContent({
     Record<string, number>
   >({});
   const discoveredSessionNavigation = useMemo(
-    () => sidebarProjectGroups(projectSessions, savedProjects, workspacePath),
-    [projectSessions, savedProjects, workspacePath],
+    () =>
+      sidebarProjectGroups(
+        projectSessions,
+        savedProjects,
+        workspacePath,
+        draftChats,
+      ),
+    [draftChats, projectSessions, savedProjects, workspacePath],
   );
   const discoveredProjectGroups = discoveredSessionNavigation;
   const [projectOrder, setProjectOrder] = useState<string[]>(() =>
@@ -3948,6 +3919,33 @@ function WorkspaceSidebarContent({
         Number(projectSettings?.details[b.key]?.pinned ?? false) -
         Number(projectSettings?.details[a.key]?.pinned ?? false),
     );
+  const draftsByProjectKey = new Map<string, SidebarDraftChat[]>();
+  const unprojectedDraftChats: SidebarDraftChat[] = [];
+  for (const draft of draftChats) {
+    // Empty draft panes remain available in the grid, but are not chats yet.
+    if (isSidebarPlaceholderSessionTitle(draft.title)) continue;
+    if (!isUserSelectedWorkspacePath(draft.workspacePath)) {
+      unprojectedDraftChats.push(draft);
+      continue;
+    }
+    const key = sidebarDraftGroupKey(
+      draft.workspacePath,
+      workspacePath,
+      savedProjects,
+    );
+    const list = draftsByProjectKey.get(key) ?? [];
+    list.push(draft);
+    draftsByProjectKey.set(key, list);
+  }
+  const renderDraftRow = (draft: SidebarDraftChat, isNested = false) => (
+    <DraftSidebarRow
+      isActive={draft.id === activeDraftId}
+      isNested={isNested}
+      key={draft.id}
+      onSelect={() => onSelectDraftChat?.(draft.id)}
+      title={draft.title.trim() || "New chat"}
+    />
+  );
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -4436,15 +4434,26 @@ function WorkspaceSidebarContent({
           sessionId: session.id,
           projectKey: normalizeSidebarPath(session.workspacePath),
         };
-        beginChatSessionDrag(payload);
-        event.dataTransfer.setData(CHAT_SESSION_DRAG_MIME, JSON.stringify(payload));
+        sidebarDragId.current = beginChatSessionDrag(payload, event.dataTransfer)?.dragId;
         // Chat IDs are internal data, never text to insert into a composer.
         guardChatDragsOutsideGrid();
         setDraggedSessionId(session.id);
       }}
+      onPointerDown={(event) => {
+        if (
+          !(event.target instanceof Element) ||
+          !event.target.closest(".gyro-sidebar-thread-main")
+        ) return;
+        startChatPointerDrag(event.nativeEvent, event.currentTarget, {
+          kind: "session",
+          sessionId: session.id,
+          projectKey: normalizeSidebarPath(session.workspacePath),
+        });
+      }}
       onDragEnd={() => {
-        endChatSessionDrag(session.id);
-        setDraggedSessionId(undefined);
+        // The lifecycle checks the native event token before clearing state.
+        // A late dragend from an older source must leave the new drag alone.
+        if (!currentChatDrag()) setDraggedSessionId(undefined);
       }}
       session={session}
     />
@@ -6160,65 +6169,26 @@ function WorkspaceSidebarContent({
           </div>
 
           {isCliSidebar ? (
-            <section
-              className="gyro-cli-sidebar-list"
-              aria-label="CLI sessions"
-            >
-              <button
-                className="gyro-sidebar-action gyro-cli-back"
-                onClick={() => onSelectWorkspaceLayout("thread")}
-                type="button"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to chats</span>
-              </button>
-              {terminalPanes.length > 0 ? (
-                <div className="gyro-sidebar-small-title">Open terminals</div>
-              ) : null}
-              {terminalPanes.map((pane) => {
+            <CliSessionList
+              selectedId={selectedTerminalPaneId}
+              onBack={() => onSelectWorkspaceLayout("thread")}
+              onSelect={onSelectTerminalPane}
+              onClose={onCloseTerminalPane}
+              items={terminalPanes.map((pane) => {
                 const providerId = commandProfiles.find(
                   (profile) => profile.id === pane.profileId,
                 )?.providerId;
-                const status =
-                  pane.attention ??
-                  (pane.status === "running" && !terminalPaneHasActiveWork(pane)
-                    ? "idle"
-                    : pane.status);
-                return (
-                  <div className="gyro-cli-sidebar-item" key={pane.id}>
-                    <button
-                      className={`gyro-cli-sidebar-select${pane.id === selectedTerminalPaneId ? " is-active" : ""}`}
-                      onClick={() => onSelectTerminalPane?.(pane.id)}
-                      type="button"
-                      title={`${pane.title} · ${status}`}
-                      aria-current={
-                        pane.id === selectedTerminalPaneId ? "true" : undefined
-                      }
-                    >
-                      {providerId ? (
-                        <ProviderLogo providerId={providerId as ProviderId} />
-                      ) : (
-                        <Terminal size={16} />
-                      )}
-                      <span>{pane.taskTitle ?? pane.title}</span>
-                      <i
-                        className={`gyro-ring is-${status}`}
-                        aria-label={status}
-                      />
-                    </button>
-                    <button
-                      className="gyro-cli-sidebar-close"
-                      onClick={() => onCloseTerminalPane?.(pane.id)}
-                      aria-label={`Close ${pane.title}`}
-                      title={`Close ${pane.title}`}
-                      type="button"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                );
+                return {
+                  pane,
+                  status: pane.attention ??
+                    (pane.status === "running" && !terminalPaneHasActiveWork(pane)
+                      ? "idle" : pane.status),
+                  icon: providerId
+                    ? <ProviderLogo providerId={providerId as ProviderId} />
+                    : <Terminal size={16} />,
+                };
               })}
-            </section>
+            />
           ) : (
             <div className="gyro-sidebar-project-chat-list">
               {pinnedSessions.length > 0 ? (
@@ -6232,6 +6202,8 @@ function WorkspaceSidebarContent({
               ) : null}
               {projectGroups.map((project, projectIndex) => {
                 const isCollapsed = collapsedProjectIds.includes(project.key);
+                const projectDrafts =
+                  draftsByProjectKey.get(project.key) ?? [];
                 const projectVisibleCount =
                   projectVisibleCounts[project.key] ??
                   SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
@@ -6376,11 +6348,14 @@ function WorkspaceSidebarContent({
                     </SidebarProjectCard>
                     {!isCollapsed ? (
                       <>
+                        {projectDrafts.map((draft) =>
+                          renderDraftRow(draft, true),
+                        )}
                         {visibleProjectSessions.length > 0 ? (
                           visibleProjectSessions.map((session) =>
                             renderSessionRow(session, true),
                           )
-                        ) : (
+                        ) : projectDrafts.length > 0 ? null : (
                           <button
                             className="gyro-sidebar-thread is-empty"
                             onClick={onCreateSession}
@@ -6431,11 +6406,12 @@ function WorkspaceSidebarContent({
                 className="gyro-sidebar-recents"
               >
                 <div className="gyro-sidebar-small-title">Recents</div>
+                {unprojectedDraftChats.map((draft) => renderDraftRow(draft))}
                 {unprojectedRecentSessions.length > 0 ? (
                   unprojectedRecentSessions.map((session) =>
                     renderSessionRow(session),
                   )
-                ) : (
+                ) : unprojectedDraftChats.length > 0 ? null : (
                   <div className="gyro-sidebar-recents-empty">
                     No standalone chats yet
                   </div>
@@ -6602,6 +6578,42 @@ function SidebarProjectRow({
   );
 }
 
+function DraftSidebarRow({
+  title,
+  isActive,
+  isNested,
+  onSelect,
+}: {
+  title: string;
+  isActive: boolean;
+  isNested?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      className={[
+        "gyro-session-row",
+        "is-draft",
+        isActive ? "is-active" : "",
+        isNested ? "is-nested" : "",
+      ].join(" ")}
+    >
+      <button
+        aria-current={isActive ? "page" : undefined}
+        aria-label={title}
+        className="gyro-sidebar-thread-main"
+        onClick={onSelect}
+        title={title}
+        type="button"
+      >
+        <span className="gyro-sidebar-thread-title">
+          <span>{title}</span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function SessionSidebarRow({
   session,
   isActive,
@@ -6623,6 +6635,7 @@ function SessionSidebarRow({
   onDelete,
   onDragStart,
   onDragEnd,
+  onPointerDown,
 }: {
   session: Session;
   isActive: boolean;
@@ -6644,6 +6657,7 @@ function SessionSidebarRow({
   onDelete: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -6696,6 +6710,7 @@ function SessionSidebarRow({
       draggable={Boolean(onDragStart)}
       onDragEnd={onDragEnd}
       onDragStart={onDragStart}
+      onPointerDown={onPointerDown}
     >
       <button
         aria-current={isActive ? "page" : undefined}
@@ -6856,6 +6871,12 @@ function providerIdForSession(session: Session): ProviderId | undefined {
   return isProviderId(session.providerId) ? session.providerId : undefined;
 }
 
+type SidebarDraftChat = {
+  id: string;
+  title: string;
+  workspacePath: string;
+};
+
 type SidebarProjectGroupData = {
   hasWorkspace: boolean;
   key: string;
@@ -6872,6 +6893,7 @@ function sidebarProjectGroups(
   sessions: Session[],
   savedProjects: Array<{ path: string; label: string }>,
   workspacePath?: string,
+  drafts: SidebarDraftChat[] = [],
 ): SidebarProjectGroupData[] {
   const groups = new Map<string, SidebarProjectGroupData>();
   const primaryGyroProjectPath = [
@@ -6900,6 +6922,18 @@ function sidebarProjectGroups(
         items: [session],
       });
     }
+  }
+
+  for (const draft of drafts) {
+    if (!isUserSelectedWorkspacePath(draft.workspacePath)) continue;
+    const key = groupKeyForPath(draft.workspacePath);
+    if (groups.has(key)) continue;
+    groups.set(key, {
+      hasWorkspace: key !== "gyro" && isUserSelectedWorkspacePath(key),
+      key,
+      label: projectSidebarName(draft.workspacePath),
+      items: [],
+    });
   }
 
   if (workspacePath && !groups.has(currentProjectKey)) {
@@ -6936,7 +6970,7 @@ function isSidebarPlaceholderSessionTitle(title: string) {
 }
 
 /**
- * Whether a chat/mission should list in the Projects sidebar.
+ * Whether a chat should list in the Projects sidebar.
  * Unstarted shells (empty New chat / New mission) stay out until activity.
  */
 function sessionHasStartedForSidebar(session: Session) {
@@ -7012,6 +7046,24 @@ function mergeSidebarProjectOrder(current: string[], discovered: string[]) {
     ...current.filter((key) => discoveredSet.has(key)),
     ...discovered.filter((key) => !current.includes(key)),
   ];
+}
+
+function sidebarDraftGroupKey(
+  draftPath: string | undefined,
+  workspacePath: string | undefined,
+  savedProjects: Array<{ path: string }>,
+) {
+  const primaryGyroProjectPath = [
+    workspacePath,
+    ...savedProjects.map((project) => project.path),
+  ]
+    .map(normalizeSidebarPath)
+    .find(
+      (path) =>
+        isUserSelectedWorkspacePath(path) &&
+        projectSidebarName(path) === "Gyro",
+    );
+  return projectGroupKey(draftPath, primaryGyroProjectPath);
 }
 
 function projectGroupKey(path?: string, primaryGyroProjectPath?: string) {
@@ -7472,9 +7524,13 @@ export function ChatGridSurface({
     sourceProjectKey: string,
     slotIndex: number,
     placement?: ChatGridDropPlacement,
-  ) => void;
+  ) => boolean | void;
   onFocusPane: (pane: ChatPaneRef) => void;
-  onMovePane: (paneId: string, slotIndex: number) => void;
+  onMovePane: (
+    paneId: string,
+    slotIndex: number,
+    placement?: ChatGridDropPlacement,
+  ) => boolean | void;
   onToggleMaximize: (paneId: string) => void;
   renderPane: (
     pane: ChatPaneRef,
@@ -7483,14 +7539,18 @@ export function ChatGridSurface({
       isTiled: boolean;
       onPaneDragEnd: () => void;
       onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+      onPanePointerDown: (event: ReactPointerEvent<HTMLSpanElement>) => void;
     },
   ) => ReactNode;
 }) {
   const [dragSource, setDragSource] = useState<"session" | "pane">();
-  const [dragSessionId, setDragSessionId] = useState<string>();
+  const [dragIdentity, setDragIdentity] =
+    useState<ReturnType<typeof readChatDrag>>();
+  const paneDragId = useRef<number>();
+  const observedDragId = useRef<number>();
   const [dropTargetId, setDropTargetId] = useState<string>();
   const isChatDragging = dragSource !== undefined;
-  const occupiedCount = layout.slots.filter(Boolean).length;
+  const occupiedCount = layout.slots.slice(0, 4).filter(Boolean).length;
   const hasMultiplePanes = occupiedCount > 1;
   const focusedPaneId =
     layout.focusedPaneId ?? layout.slots.find(Boolean)?.paneId;
@@ -7498,12 +7558,48 @@ export function ChatGridSurface({
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
-  const reorderingSession =
-    dragSource === "session" &&
-    slots.some(
-      (pane) => pane?.kind === "session" && pane.sessionId === dragSessionId,
+  const reorderingSession = slots.some(
+    (pane) =>
+      pane &&
+      (dragIdentity?.kind === "pane"
+        ? pane.paneId === dragIdentity.paneId
+        : dragIdentity?.kind === "session" &&
+          pane.kind === "session" &&
+          pane.sessionId === dragIdentity.sessionId),
+  );
+  const zonesForDrag = (identity: ReturnType<typeof readChatDrag>) => {
+    // A chat belongs to its own project. Switching projects has one target;
+    // coordinates from this layout cannot address another project's panes.
+    if (
+      identity?.kind === "session" &&
+      chatProjectKey(identity.projectKey) !== chatProjectKey(layout.projectKey)
+    ) {
+      return [
+        {
+          id: "project",
+          label: "Open in its project",
+          position: "full",
+          slotIndex: 0,
+        },
+      ];
+    }
+    const reordering = slots.some(
+      (pane) =>
+        pane &&
+        (identity?.kind === "pane"
+          ? pane.paneId === identity.paneId
+          : identity?.kind === "session" &&
+            pane.kind === "session" &&
+            pane.sessionId === identity.sessionId),
     );
-  const dropZones = chatGridDropZones(slots, arrangement, reorderingSession);
+    return chatGridDropZones(slots, arrangement, reordering);
+  };
+  const dropZones =
+    dragIdentity?.kind === "session" &&
+    chatProjectKey(dragIdentity.projectKey) !==
+      chatProjectKey(layout.projectKey)
+      ? zonesForDrag(dragIdentity)
+      : chatGridDropZones(slots, arrangement, reorderingSession);
   const dropLayout = chatGridDropLayout(dropZones);
   const gridRef = useRef<HTMLDivElement>(null);
   // The pointer position of the last grid-level drag event. macOS only
@@ -7534,8 +7630,16 @@ export function ChatGridSurface({
   // preview that disagrees with the drop is worse than no preview.
   const highlightedZoneId = (() => {
     const hovered = dropZones.find((zone) => zone.id === dropTargetId);
-    if (!hovered || hovered.placement) return dropTargetId;
-    const { targetIndex } = resolveChatGridDropSlot(slots, hovered.slotIndex);
+    if (
+      !hovered ||
+      hovered.placement ||
+      hovered.position === "full" ||
+      reorderingSession
+    )
+      return dropTargetId;
+    const resolved = resolveChatGridDropSlot(slots, hovered.slotIndex);
+    if (!resolved) return undefined;
+    const { targetIndex } = resolved;
     return (
       dropZones.find((zone) => zone.slotIndex === targetIndex)?.id ?? hovered.id
     );
@@ -7544,9 +7648,19 @@ export function ChatGridSurface({
   const finishDrag = useCallback(() => {
     dragPointer.current = undefined;
     setDragSource(undefined);
-    setDragSessionId(undefined);
+    setDragIdentity(undefined);
     setDropTargetId(undefined);
   }, []);
+
+  const sourceSlotForDrag = (
+    identity: ReturnType<typeof readChatDrag>,
+  ) => slots.findIndex((pane) =>
+    pane && (identity?.kind === "pane"
+      ? pane.paneId === identity.paneId
+      : identity?.kind === "session" &&
+        chatProjectKey(identity.projectKey) === chatProjectKey(layout.projectKey) &&
+        pane.kind === "session" && pane.sessionId === identity.sessionId),
+  );
 
   // Hover preview and drop share one resolution so the lit tile is always the
   // tile a release would use — including the gaps and padding between tiles,
@@ -7555,55 +7669,112 @@ export function ChatGridSurface({
     const grid = gridRef.current;
     const pointer = dragPointer.current;
     if (!grid || !pointer) return;
-    const zone = nearestChatGridDropZone(
-      grid.querySelectorAll<HTMLElement>(".gyro-chat-grid-drop-zone"),
-      dropZones,
-      pointer.x,
-      pointer.y,
-    );
-    if (!zone) return;
-    setDropTargetId((current) => (current === zone.id ? current : zone.id));
-  }, [dropZones]);
+    const bounds = grid.getBoundingClientRect();
+    const zone =
+      nearestChatGridDropZone(
+        grid.querySelectorAll<HTMLElement>(".gyro-chat-grid-drop-zone"),
+        dropZones,
+        pointer.x,
+        pointer.y,
+        bounds,
+        sourceSlotForDrag(dragIdentity),
+      ) ??
+      chatGridDropZoneBeforePaint(
+        dropZones, bounds, pointer.x, pointer.y, sourceSlotForDrag(dragIdentity),
+      );
+    setDropTargetId((current) => (current === zone?.id ? current : zone?.id));
+  }, [dropZones, dragIdentity, layout.projectKey, layout.slots]);
 
   // The dragover that mounts the overlay is the only event that ever named a
   // pointer position; resolve its tile in the same commit so the highlight
   // paints with the tiles instead of after the next mouse move.
   useLayoutEffect(() => {
-    if (isChatDragging && dropTargetId === undefined) {
-      highlightZoneUnderPointer();
-    }
+    if (isChatDragging) highlightZoneUnderPointer();
   }, [dropTargetId, highlightZoneUnderPointer, isChatDragging]);
 
-  // Arm the overlay while the pointer is still in the sidebar. Waiting for
-  // a grid dragover can lose a fast release as WebKit re-hit-tests the new DOM.
+  // Subscribe to the same identity used at release. Cancellation clears both
+  // the overlay and sidebar feedback, even if the source unmounts mid-drag.
   useEffect(() => {
-    const start = () => {
-      const payload = currentChatSessionDrag();
-      if (!payload) return;
-      dragPointer.current = undefined;
-      setDragSessionId(payload.sessionId);
-      setDragSource("session");
-      setDropTargetId(undefined);
+    const observe = (drag: ReturnType<typeof currentChatDrag>) => {
+      if (
+        !drag ||
+        (drag.kind === "pane" &&
+          !layout.slots.some((pane) => pane?.paneId === drag.paneId))
+      ) {
+        if (drag?.kind === "pane" && drag.dragId === paneDragId.current)
+          endChatDrag(drag.dragId);
+        finishDrag();
+        return;
+      }
+      if (observedDragId.current !== drag.dragId) {
+        dragPointer.current = undefined;
+        setDropTargetId(undefined);
+      }
+      observedDragId.current = drag.dragId;
+      setDragIdentity(drag);
+      setDragSource(drag.kind);
     };
-    window.addEventListener("dragstart", start);
-    window.addEventListener("dragend", finishDrag);
-    window.addEventListener("drop", finishDrag);
-    return () => {
-      window.removeEventListener("dragstart", start);
-      window.removeEventListener("dragend", finishDrag);
-      window.removeEventListener("drop", finishDrag);
-    };
-  }, [finishDrag]);
+    return subscribeChatDrag(observe);
+  }, [finishDrag, layout.projectKey, layout.slots]);
 
-  useEffect(() => {
-    if (!isChatDragging) return;
-    window.addEventListener("blur", finishDrag);
-    window.addEventListener("dragend", finishDrag);
-    return () => {
-      window.removeEventListener("blur", finishDrag);
-      window.removeEventListener("dragend", finishDrag);
-    };
-  }, [finishDrag, isChatDragging]);
+  useEffect(
+    () => () => {
+      if (paneDragId.current !== undefined) endChatDrag(paneDragId.current);
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!isChatDragging || !grid) return;
+    const observer = new ResizeObserver(highlightZoneUnderPointer);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [highlightZoneUnderPointer, isChatDragging]);
+
+  const commitDrop = (
+    identity: NonNullable<ReturnType<typeof readChatDrag>>,
+    zone: ChatGridDropZone,
+  ) => {
+    const sourcePane = slots.find(
+      (pane) =>
+        pane &&
+        (identity.kind === "pane"
+          ? pane.paneId === identity.paneId
+          : chatProjectKey(identity.projectKey) ===
+              chatProjectKey(layout.projectKey) &&
+            pane.kind === "session" &&
+            pane.sessionId === identity.sessionId),
+    );
+    if (identity.kind === "pane" && !sourcePane) return;
+    if (sourcePane) {
+      const state: ChatGridState = {
+        activeProjectKey: layout.projectKey,
+        layouts: { [layout.projectKey]: layout },
+        maximizedPaneId,
+      };
+      const projected = chatGridReducer(state, {
+        type: "move-pane",
+        projectKey: layout.projectKey,
+        paneId: sourcePane.paneId,
+        slotIndex: zone.slotIndex,
+        ...zone.placement,
+      });
+      // Dropping on either boundary of the source is a cancellation. Keep
+      // focus, maximization and every draft exactly where they were.
+      if (projected === state) return;
+    }
+    const didDrop =
+      identity.kind === "pane"
+        ? onMovePane(identity.paneId, zone.slotIndex, zone.placement) !== false
+        : onDropSession(
+            identity.sessionId,
+            identity.projectKey,
+            zone.slotIndex,
+            zone.placement,
+          ) !== false;
+    if (didDrop && maximizedPaneId) onToggleMaximize(maximizedPaneId);
+  };
 
   const handleDrop = (
     event: ReactDragEvent<HTMLDivElement>,
@@ -7611,38 +7782,70 @@ export function ChatGridSurface({
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    let didDrop = false;
-    // An internal sidebar drag does not need WebKit's protected payload store.
-    const paneId = currentChatSessionDrag()
-      ? ""
-      : event.dataTransfer.getData(CHAT_PANE_DRAG_MIME);
-    if (paneId) {
-      // A drop back on the source tile should leave even maximized mode alone.
-      // Without this guard, a harmless cancelled move restored the grid.
-      if (
-        slots.findIndex((pane) => pane?.paneId === paneId) !== zone.slotIndex
-      ) {
-        onMovePane(paneId, zone.slotIndex);
-        didDrop = true;
-      }
-    } else {
-      const payload = readChatSessionDrag(event.dataTransfer);
-      if (payload) {
-        onDropSession(
-          payload.sessionId,
-          payload.projectKey,
-          zone.slotIndex,
-          zone.placement,
-        );
-        didDrop = true;
-      }
+    try {
+      const identity = readChatDrag(event.dataTransfer);
+      if (identity) commitDrop(identity, zone);
+    } finally {
+      endChatDragForTransfer(event.dataTransfer);
+      if (!currentChatDrag()) finishDrag();
     }
-    if (didDrop && maximizedPaneId) {
-      onToggleMaximize(maximizedPaneId);
-    }
-    endChatSessionDrag();
-    finishDrag();
   };
+
+  const pointerDropHandlers = useRef<Omit<ChatPointerDropTarget, "element">>();
+  const pointerZone = (
+    identity: NonNullable<ReturnType<typeof readChatDrag>>,
+    point: { x: number; y: number },
+  ) => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const zones = zonesForDrag(identity);
+    const bounds = grid.getBoundingClientRect();
+    return (
+      nearestChatGridDropZone(
+        grid.querySelectorAll<HTMLElement>(".gyro-chat-grid-drop-zone"),
+        zones,
+        point.x,
+        point.y,
+        bounds,
+        sourceSlotForDrag(identity),
+      ) ??
+      chatGridDropZoneBeforePaint(
+        zones, bounds, point.x, point.y, sourceSlotForDrag(identity),
+      )
+    );
+  };
+  pointerDropHandlers.current = {
+    hover: (identity, point) => {
+      if (
+        identity.kind === "pane" &&
+        !slots.some((pane) => pane?.paneId === identity.paneId)
+      ) {
+        finishDrag();
+        return;
+      }
+      dragPointer.current = point;
+      setDragIdentity(identity);
+      setDragSource(identity.kind);
+      setDropTargetId(pointerZone(identity, point)?.id);
+    },
+    drop: (identity, point) => {
+      const zone = pointerZone(identity, point);
+      if (zone) commitDrop(identity, zone);
+    },
+    leave: finishDrag,
+  };
+  useLayoutEffect(() => {
+    const element = gridRef.current;
+    if (!element) return;
+    return registerChatPointerDropTarget({
+      element,
+      hover: (identity, point) =>
+        pointerDropHandlers.current?.hover(identity, point),
+      drop: (identity, point) =>
+        pointerDropHandlers.current?.drop(identity, point),
+      leave: () => pointerDropHandlers.current?.leave(),
+    });
+  }, []);
 
   // Keep the cache to the panes on screen; a closed pane must not pin its
   // last element (and its handlers) for the life of the grid.
@@ -7668,17 +7871,28 @@ export function ChatGridSurface({
     const element = renderPane(pane, {
       isMaximized: paneMaximized,
       isTiled,
-      onPaneDragEnd: finishDrag,
+      onPaneDragEnd: () => {
+        if (!currentChatDrag()) finishDrag();
+      },
       onPaneDragStart: (event) => {
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData(CHAT_PANE_DRAG_MIME, pane.paneId);
+        paneDragId.current = beginChatPaneDrag(
+          { paneId: pane.paneId },
+          event.dataTransfer,
+        )?.dragId;
         guardChatDragsOutsideGrid();
         // Render the targets before the pointer leaves the title bar.
         // Previously the grid consumed pane drops but no chat ever produced
         // this payload, so reordering a split was impossible.
         dragPointer.current = undefined;
+        setDragIdentity(currentChatDrag());
         setDragSource("pane");
         setDropTargetId(undefined);
+      },
+      onPanePointerDown: (event) => {
+        startChatPointerDrag(event.nativeEvent, event.currentTarget, {
+          kind: "pane", paneId: pane.paneId,
+        });
       },
     });
     paneElementCache.current.set(pane.paneId, {
@@ -7711,7 +7925,6 @@ export function ChatGridSurface({
           "--gyro-grid-count": occupiedCount,
         } as CSSProperties
       }
-      onDragEnd={finishDrag}
       onDragLeave={(event) => {
         // When the overlay mounts beneath a native macOS drag, WebKit reports
         // a leave with a null relatedTarget even though the pointer never left
@@ -7723,43 +7936,32 @@ export function ChatGridSurface({
       }}
       onDragOverCapture={(event) => {
         const source = chatDragSource(event.dataTransfer);
-        if (!source) return;
-        // Always cancel, so the composer underneath cannot accept the drag
-        // as text; a grid with no room left says so with a no-drop cursor.
-        event.preventDefault();
-        event.dataTransfer.dropEffect = dropZones.length ? "move" : "none";
-        dragPointer.current = { x: event.clientX, y: event.clientY };
-        if (source === "session") {
-          const sessionId = readChatSessionDrag(event.dataTransfer)?.sessionId;
-          if (sessionId && dragSessionId !== sessionId) {
-            setDragSessionId(sessionId);
-          }
-        }
-        if (dragSource !== source) {
-          // First sighting of this drag: mount the overlay, then let the
-          // layout effect light the tile it is already sitting on.
-          setDragSource(source);
+        if (!source) {
+          finishDrag();
           return;
         }
-        // The overlay is up, so every move keeps the preview on the nearest
-        // tile — no zone-level enter event required to update it.
-        highlightZoneUnderPointer();
-      }}
-      onDropCapture={(event) => {
-        if (!chatDragSource(event.dataTransfer)) return;
-        // Own the entire grid drop, including floating panels and the gaps
-        // between tiles. A child must not swallow a valid chat drop, and a
-        // drop with no zone (a full row) must not fall through to the
-        // composer, which inserted the chat's id as text.
         event.preventDefault();
         event.stopPropagation();
-        // Read the identity at release, not from a possibly uncommitted hover.
-        const payload = readChatSessionDrag(event.dataTransfer);
-        const zones = chatGridDropZones(
-          slots,
-          arrangement,
-          slots.some(pane => pane?.kind === "session" && pane.sessionId === payload?.sessionId),
-        );
+        const identity = readChatDrag(event.dataTransfer);
+        if (!identity && currentChatDrag()) {
+          event.dataTransfer.dropEffect = "none";
+          return;
+        }
+        const zones = zonesForDrag(identity);
+        const validPane =
+          source !== "pane" ||
+          (identity?.kind === "pane" &&
+            slots.some((pane) => pane?.paneId === identity.paneId));
+        event.dataTransfer.dropEffect =
+          validPane && zones.length ? "move" : "none";
+        if (!validPane) {
+          finishDrag();
+          return;
+        }
+        dragPointer.current = { x: event.clientX, y: event.clientY };
+        setDragIdentity(identity);
+        setDragSource(source);
+        const bounds = event.currentTarget.getBoundingClientRect();
         const zone =
           nearestChatGridDropZone(
             event.currentTarget.querySelectorAll<HTMLElement>(
@@ -7768,16 +7970,53 @@ export function ChatGridSurface({
             zones,
             event.clientX,
             event.clientY,
-          ) ?? chatGridDropZoneBeforePaint(
+            bounds,
+            sourceSlotForDrag(identity),
+          ) ??
+          chatGridDropZoneBeforePaint(
             zones,
-            event.currentTarget.getBoundingClientRect(),
+            bounds,
             event.clientX,
             event.clientY,
+            sourceSlotForDrag(identity),
+          );
+        setDropTargetId(zone?.id);
+      }}
+      onDropCapture={(event) => {
+        if (!chatDragSource(event.dataTransfer)) {
+          finishDrag();
+          return;
+        }
+        // Capture owns even rejected drops so no child can insert a chat ID
+        // as composer text or treat it as an attachment.
+        event.preventDefault();
+        event.stopPropagation();
+        const identity = readChatDrag(event.dataTransfer);
+        if (!identity && currentChatDrag()) return;
+        const zones = zonesForDrag(identity);
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const zone =
+          nearestChatGridDropZone(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              ".gyro-chat-grid-drop-zone",
+            ),
+            zones,
+            event.clientX,
+            event.clientY,
+            bounds,
+            sourceSlotForDrag(identity),
+          ) ??
+          chatGridDropZoneBeforePaint(
+            zones,
+            bounds,
+            event.clientX,
+            event.clientY,
+            sourceSlotForDrag(identity),
           );
         if (zone) handleDrop(event, zone);
         else {
-          endChatSessionDrag();
-          finishDrag();
+          endChatDragForTransfer(event.dataTransfer);
+          if (!currentChatDrag()) finishDrag();
         }
       }}
     >
@@ -7847,27 +8086,20 @@ export function ChatGridSurface({
                   .join(" ")}
                 data-position={zone.position}
                 key={zone.id}
-                onDragOver={(event) => {
-                  // Keep the zone itself a valid drop target; the highlight
-                  // stays with the grid so preview and drop agree.
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(event) => handleDrop(event, zone)}
               >
                 <span
                   aria-label={zone.label}
                   className="gyro-chat-grid-drop-tile"
-                >
-                  {zone.label}
-                </span>
+                />
               </div>
             ))}
           </div>
           <span aria-live="polite" className="gyro-sr-only">
             {dropLayout === "row"
               ? "Choose where the chat joins the row: left edge, between chats, or right edge."
-              : "Choose where to place the chat: above, beside, or below another chat."}
+              : dropLayout === "stack"
+                ? "Choose where the chat joins the stack: top, between chats, or bottom."
+                : "Choose where to place the chat."}
           </span>
         </>
       ) : null}
@@ -7894,22 +8126,10 @@ function guardChatDragsOutsideGrid() {
     }
     event.preventDefault();
     if (event.type === "dragover") event.dataTransfer.dropEffect = "none";
-    else endChatSessionDrag();
+    else { event.stopPropagation(); endChatDragForTransfer(event.dataTransfer); }
   };
   window.addEventListener("dragover", block, true);
   window.addEventListener("drop", block, true);
-  window.addEventListener("dragend", () => endChatSessionDrag(), true);
-}
-
-function chatDragSource(dataTransfer: DataTransfer | null | undefined) {
-  if (!dataTransfer) return undefined;
-  if (dataTransferHasType(dataTransfer, CHAT_PANE_DRAG_MIME)) {
-    return "pane" as const;
-  }
-  if (currentChatSessionDrag() || dataTransferHasType(dataTransfer, CHAT_SESSION_DRAG_MIME)) {
-    return "session" as const;
-  }
-  return undefined;
 }
 
 /**
@@ -8243,6 +8463,9 @@ type ChatSurfaceProps = {
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
   onCloseChat?: () => void;
+  onPaneDragStart?: (event: ReactDragEvent<HTMLSpanElement>) => void;
+  onPaneDragEnd?: () => void;
+  onPanePointerDown?: (event: ReactPointerEvent<HTMLSpanElement>) => void;
   onContinueChat?: () => void;
   /** Older transcript pages exist before the current window. */
   hasMoreBefore?: boolean;
@@ -8488,6 +8711,9 @@ export function ChatSurface({
   onReusePrompt,
   onStopChat,
   onCloseChat,
+  onPaneDragStart,
+  onPaneDragEnd,
+  onPanePointerDown,
   onContinueChat,
   hasMoreBefore = false,
   isLoadingEarlier = false,
@@ -9132,10 +9358,16 @@ export function ChatSurface({
   // The Environment is a transient context popover. The persistent right-hand
   // surface is reserved for companion tabs and the plan document.
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
-  const activeCompanionTab = isChatCompanionTab(railPanel)
-    ? railPanel
+  const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools";
+  const companionPresence = useCompanionPresence(
+    isCompanionPanel ? railPanel : undefined,
+    !activeRailPanel,
+  );
+  const displayedRailPanel = companionPresence.panel ?? railPanel;
+  const activeCompanionTab = isChatCompanionTab(displayedRailPanel)
+    ? displayedRailPanel
     : undefined;
-  const isCompanionPanel = Boolean(activeCompanionTab) || railPanel === "tools";
+  const hasCompanion = companionPresence.panel !== undefined;
   // Hiding the dock leaves the strip intact, so reopening returns to the tab
   // that was on screen. Closing the last tab is what empties it.
   const closeCompanion = () => {
@@ -9160,10 +9392,10 @@ export function ChatSurface({
   const isEnvironmentPopoverOpen =
     !isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel;
   const legacySidePanel =
-    activeRailPanel && railPanel !== "tools" && railPanel !== "environment" ? (
+    (activeRailPanel || hasCompanion) && displayedRailPanel !== "tools" && displayedRailPanel !== "environment" ? (
       <ChatSidePanel
-        activePanel={railPanel === "review" ? "changes" : railPanel}
-        chromeless={isCompanionPanel}
+        activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}
+        chromeless={hasCompanion}
         browserPreview={browserPreview}
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
@@ -9217,8 +9449,10 @@ export function ChatSurface({
       />
     ) : null;
   const sidePanel =
-    !activeRailPanel || isEnvironmentPopoverOpen ? null : isCompanionPanel ? (
+    hasCompanion ? (
       <ChatCompanionDock
+        open={isCompanionPanel}
+        onExitComplete={companionPresence.finishExit}
         activeTab={activeCompanionTab}
         subagents={subagents}
         onClose={closeCompanion}
@@ -9249,7 +9483,7 @@ export function ChatSurface({
             : companionWidth
         }
       >
-        {railPanel === "canvas" ? (
+        {displayedRailPanel === "canvas" ? (
           <ChatCanvas
             key={transcriptSessionId ?? "draft"}
             artifacts={canvasArtifacts}
@@ -9266,13 +9500,13 @@ export function ChatSurface({
               }))
             }
           />
-        ) : railPanel === "files" ? (
+        ) : displayedRailPanel === "files" ? (
           <CompanionFiles
             files={files}
             onOpenFile={onOpenCompanionFile}
             workspacePath={workspacePath}
           />
-        ) : railPanel === "agents" ? (
+        ) : displayedRailPanel === "agents" ? (
           <SubagentPanel
             key={subagents?.selectedAgentId}
             state={subagents}
@@ -9297,7 +9531,7 @@ export function ChatSurface({
               ))
             }
           />
-        ) : railPanel === "side-chat" ? (
+        ) : displayedRailPanel === "side-chat" ? (
           <SideChatPanel
             onOpenBrowserUrl={onBrowserNavigate}
             sideChat={sideChat}
@@ -9330,7 +9564,7 @@ export function ChatSurface({
           legacySidePanel
         )}
       </ChatCompanionDock>
-    ) : (
+    ) : !activeRailPanel || isEnvironmentPopoverOpen ? null : (
       legacySidePanel
     );
   const environmentPopover = isEnvironmentPopoverOpen ? (
@@ -9371,11 +9605,11 @@ export function ChatSurface({
         className={[
           "gyro-chat-surface",
           "is-empty",
-          activeRailPanel && activeRailPanel !== "environment"
+          hasCompanion || (activeRailPanel && activeRailPanel !== "environment")
             ? "has-environment"
             : "",
           isEnvironmentPopoverOpen ? "has-environment-popover" : "",
-          isCompanionPanel ? "has-companion" : "",
+          hasCompanion ? "has-companion" : "",
           isTiled ? "is-tiled" : "",
         ]
           .filter(Boolean)
@@ -9395,7 +9629,14 @@ export function ChatSurface({
                 className="gyro-thread-project-icon"
                 size={16}
               />
-              <strong title="New chat">New chat</strong>
+              <strong
+                data-chat-pane-drag={paneKey}
+                draggable={Boolean(onPaneDragStart)}
+                onDragStart={onPaneDragStart}
+                onDragEnd={onPaneDragEnd}
+                onPointerDown={onPanePointerDown}
+                title={onPaneDragStart ? "Drag to rearrange chats" : "New chat"}
+              >New chat</strong>
             </div>
             <div className="gyro-thread-topbar-actions">
               <ChatSurfaceControls
@@ -9414,9 +9655,7 @@ export function ChatSurface({
             aria-label="New chat"
             className="gyro-chat-empty-drag-region"
             data-tauri-drag-region
-          >
-            {!chatSwitcher ? <span>New chat</span> : null}
-          </div>
+          />
         )}
         {chatSwitcher && !isTiled ? (
           <div className="gyro-chat-start-switcher">
@@ -9537,11 +9776,11 @@ export function ChatSurface({
       className={[
         "gyro-chat-surface",
         "is-thread",
-        activeRailPanel && activeRailPanel !== "environment"
+        hasCompanion || (activeRailPanel && activeRailPanel !== "environment")
           ? "has-environment"
           : "",
         isEnvironmentPopoverOpen ? "has-environment-popover" : "",
-        isCompanionPanel ? "has-companion" : "",
+        hasCompanion ? "has-companion" : "",
         isTiled ? "is-tiled" : "",
         activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
         workspaceMode === "worktree" ? "is-agent-workspace" : "",
@@ -9560,7 +9799,14 @@ export function ChatSurface({
             className="gyro-thread-project-icon"
             size={16}
           />
-          <strong title={sessionTitle ?? "Gyro session"}>
+          <strong
+            data-chat-pane-drag={paneKey}
+            draggable={Boolean(onPaneDragStart)}
+            onDragStart={onPaneDragStart}
+            onDragEnd={onPaneDragEnd}
+            onPointerDown={onPanePointerDown}
+            title={onPaneDragStart ? `${sessionTitle ?? "Chat"} · Drag to rearrange chats` : sessionTitle ?? "Gyro session"}
+          >
             {sessionTitle ?? "Gyro session"}
           </strong>
           <ChatSurfaceControls
@@ -9649,6 +9895,11 @@ export function ChatSurface({
         </div>
 
         <div className="gyro-chat-composer-dock">
+          {/* File changes lead every composer accessory, including agents. */}
+          <div
+            className="gyro-composer-live-changes"
+            ref={setLiveChangesTarget}
+          />
           {subagents ? <SubagentStrip state={subagents} turnId={activeTurnId ?? turns.at(-1)?.id} /> : null}
           {isTranscriptAwayFromBottom ? (
             <button
@@ -9661,12 +9912,7 @@ export function ChatSurface({
               <ArrowDown aria-hidden="true" size={20} strokeWidth={1.8} />
             </button>
           ) : null}
-          {/* Keep the running turn's file count above queued messages. */}
           {chatNotice}
-          <div
-            className="gyro-composer-live-changes"
-            ref={setLiveChangesTarget}
-          />
           {queuedMessages.length > 0 ? (
             <div className="gyro-chat-message-queue-wrap">
               <ChatMessageQueue
@@ -10960,6 +11206,8 @@ function useBrowserAgentPresence(
 }
 
 function ChatCompanionDock({
+  open,
+  onExitComplete,
   activeTab,
   subagents,
   browserTabLabel,
@@ -10976,6 +11224,8 @@ function ChatCompanionDock({
   openTabs,
   width,
 }: {
+  open: boolean;
+  onExitComplete: () => void;
   activeTab?: ChatCompanionTabId;
   subagents?: SubagentSurfaceState;
   /** The open page title becomes the selected browser tab label. */
@@ -11021,10 +11271,12 @@ function ChatCompanionDock({
     resizeMinimum,
     resizeWidth,
     resizeWithKeyboard,
-  } = useCompanionResize(dockRef, width, onWidthChange, widthMode);
+  } = useCompanionResize(dockRef, width, onWidthChange, widthMode, open);
   const overlay = shouldOverlayChatCompanion(availableWidth);
   const fillSurface = isExpanded || overlay;
   const cannotExpand = overlay && !isTiled && !isExpanded;
+  const targetWidth = fillSurface ? "100%" : `${resizeWidth}px`;
+  const companionMoving = useCompanionMotion(dockRef, open, targetWidth, isResizing, onExitComplete);
   const activeAgent = subagents?.agents.find(
     (agent) => agent.agentId === subagents.selectedAgentId,
   );
@@ -11079,16 +11331,20 @@ function ChatCompanionDock({
     const selected = dockRef.current?.querySelector<HTMLElement>(
       '[role="tab"][aria-selected="true"]',
     );
+    if (!open) {
+      focusTabAfterCloseRef.current = false;
+      return;
+    }
     selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
     if (focusTabAfterCloseRef.current) {
       selected?.focus();
       focusTabAfterCloseRef.current = false;
     }
-  }, [selectedTab?.key, tabs.length]);
+  }, [open, selectedTab?.key, tabs.length]);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       const surface = dockRef.current?.parentElement;
-      if (!surface || !surface.contains(document.activeElement)) return;
+      if (!open || !surface || !surface.contains(document.activeElement)) return;
       const tab =
         event.metaKey && !event.altKey && event.key.toLowerCase() === "t"
           ? "browser"
@@ -11109,13 +11365,17 @@ function ChatCompanionDock({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [onOpenTab]);
+  }, [open, onOpenTab]);
 
   return (
     <aside
       aria-label="Chat companion"
+      aria-hidden={!open || undefined}
       className={[
         "gyro-chat-companion",
+        "has-companion-motion",
+        companionMoving ? "is-companion-moving" : "",
+        !open ? "is-companion-closing" : "",
         isResizing ? "is-resizing" : "",
         isBrowserFocus ? "is-browser-focus" : "",
         isExpanded ? "is-expanded" : "",
@@ -11125,7 +11385,7 @@ function ChatCompanionDock({
         .filter(Boolean)
         .join(" ")}
       ref={dockRef}
-      style={{ width: fillSurface ? "100%" : `${resizeWidth}px` }}
+      style={{ width: targetWidth }}
     >
       <button
         aria-label="Resize companion"
@@ -11273,6 +11533,7 @@ function ChatCompanionDock({
         className="gyro-chat-companion-content"
         role="tabpanel"
       >
+        <CompanionMotionContext.Provider value={companionMoving}>
         {activeTab ? (
           children
         ) : (
@@ -11298,6 +11559,7 @@ function ChatCompanionDock({
             ))}
           </nav>
         )}
+        </CompanionMotionContext.Provider>
       </section>
     </aside>
   );
@@ -11313,6 +11575,7 @@ function useCompanionResize(
   width: number | undefined,
   onWidthChange?: (width: number, mode?: ChatCompanionWidthMode) => void,
   mode: ChatCompanionWidthMode = "tool",
+  active = true,
 ) {
   const [draftWidth, setDraftWidth] = useState<number>();
   const [isResizing, setIsResizing] = useState(false);
@@ -11365,7 +11628,7 @@ function useCompanionResize(
   }, [dockRef]);
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
+    if (!active || event.button !== 0) return;
     const dock = dockRef.current;
     if (!dock) return;
     event.preventDefault();
@@ -11376,6 +11639,7 @@ function useCompanionResize(
       startX: event.clientX,
       startWidth: dock.getBoundingClientRect().width,
     };
+    setDraftWidth(resizeRef.current.startWidth);
     event.currentTarget.setPointerCapture(event.pointerId);
     setIsResizing(true);
   };
@@ -11392,7 +11656,13 @@ function useCompanionResize(
     onWidthChange?.(next, mode);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!active) {
+      resizeRef.current = null;
+      setIsResizing(false);
+      setDraftWidth(undefined);
+      return;
+    }
     if (!isResizing) return;
     const clampToParent = (value: number) =>
       clamp(
@@ -11426,7 +11696,7 @@ function useCompanionResize(
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
     };
-  }, [dockRef, isResizing, mode, onWidthChange]);
+  }, [active, dockRef, isResizing, mode, onWidthChange]);
 
   return {
     availableWidth,
@@ -11835,7 +12105,7 @@ function ChatContextSection({
   );
 }
 
-function ChatEnvironmentPopover({
+export function ChatEnvironmentPopover({
   attachments,
   branchLabel,
   branchItems,
@@ -12064,17 +12334,20 @@ function ChatEnvironmentPopover({
             ) : (
               changesDetail
             )}
-            {stashCount > 0 ? (
-              <small
-                title={`${stashCount} stash${stashCount === 1 ? "" : "es"}`}
-              >
-                {" · "}
-                {stashCount} stashed
-              </small>
+            {changeTotals.kind === "working-tree" ? (
+              <small> {sourceControlTotalsBadge(changeTotals)}</small>
             ) : null}
           </strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
+        {stashCount > 0 ? (
+          <button onClick={openReview} type="button">
+            <Archive size={14} />
+            <span>Stashes</span>
+            <strong>{stashCount} stashed</strong>
+            <ChevronRight aria-hidden="true" size={13} />
+          </button>
+        ) : null}
         {lastCommit ? (
           <button
             aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
@@ -13278,6 +13551,12 @@ type IdeSurfaceProps = {
   activeBuffer?: EditorBuffer;
   editorSelection?: EditorSelection;
   editorRevealTarget?: EditorRevealTarget;
+  editorNavigation?: {
+    canBack: boolean;
+    canForward: boolean;
+    onBack: () => void;
+    onForward: () => void;
+  };
   onOpenWorkspace?: () => void;
   onTrustWorkspace?: () => void;
   onSelectFile: (path: string) => void;
@@ -13365,6 +13644,7 @@ export function IdeSurface({
   activeBuffer,
   editorSelection,
   editorRevealTarget,
+  editorNavigation,
   onOpenWorkspace,
   onTrustWorkspace,
   onSelectFile,
@@ -13576,6 +13856,7 @@ export function IdeSurface({
                   group={group}
                   groupCount={editorGroups.length}
                   isActive={group.id === activeGroupId}
+                  editorNavigation={group.id === activeGroupId ? editorNavigation : undefined}
                   key={group.id}
                   minimapEnabled={
                     effectiveMinimapEnabled ??
@@ -13916,6 +14197,7 @@ export function IdeStatusBar({
 }
 
 type EditorGroupPaneProps = {
+  editorNavigation?: IdeSurfaceProps["editorNavigation"];
   group: EditorGroup;
   groupCount: number;
   isActive: boolean;
@@ -13948,6 +14230,7 @@ type EditorGroupPaneProps = {
 };
 
 function EditorGroupPane({
+  editorNavigation,
   group,
   groupCount,
   isActive,
@@ -14144,6 +14427,28 @@ function EditorGroupPane({
           <span className="gyro-preview-tag">{group.title}</span>
         ) : null}
         <div className="gyro-editor-tab-actions">
+          {editorNavigation && (editorNavigation.canBack || editorNavigation.canForward) ? (
+            <>
+              <button
+                aria-label="Go back in editor"
+                disabled={!editorNavigation.canBack}
+                onClick={editorNavigation.onBack}
+                title="Go back (⌃−)"
+                type="button"
+              >
+                <ArrowLeft aria-hidden="true" size={14} />
+              </button>
+              <button
+                aria-label="Go forward in editor"
+                disabled={!editorNavigation.canForward}
+                onClick={editorNavigation.onForward}
+                title="Go forward (⌃⇧−)"
+                type="button"
+              >
+                <ArrowRight aria-hidden="true" size={14} />
+              </button>
+            </>
+          ) : null}
           <button
             aria-label="Split editor"
             aria-expanded={actionMenu?.kind === "split"}
@@ -15160,7 +15465,7 @@ export function TerminalPanel({
                 type="button"
               >
                 <SquareTerminal size={15} aria-hidden="true" />
-                <span>{pane.title}</span>
+                <span>{pane.taskTitle ?? pane.title}</span>
                 <GripVertical
                   className="gyro-terminal-tab-grip"
                   size={12}
@@ -15169,7 +15474,8 @@ export function TerminalPanel({
               </button>
               <button
                 className="gyro-terminal-tab-close"
-                aria-label={`Close ${pane.title}`}
+                aria-label={`Close ${pane.taskTitle ?? pane.title}`}
+                title={`Close ${pane.taskTitle ?? pane.title}`}
                 onClick={() => onCloseTerminalPane?.(pane.id)}
                 type="button"
               >
@@ -18952,11 +19258,13 @@ export function BrowserPreviewSurface({
     (preview.status === "idle" ||
       preview.status === "verification-failed" ||
       overlayOccluded);
-  // Hide the native webview while inspecting a freeze-frame capture.
+  // Browser options occupy their own toolbar row, outside the page bounds.
+  // Only surfaces covering the page require hiding the native child.
+  const companionMoving = useContext(CompanionMotionContext);
   const hostShouldHide =
-    overlayOccluded || showingCapture || isBlank || isBrowserMenuOpen;
+    companionMoving || overlayOccluded || showingCapture || isBlank;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!useNativeHost || !onHostBoundsChange) {
       return;
     }
@@ -18975,7 +19283,7 @@ export function BrowserPreviewSurface({
     hostShouldHide,
     compact,
     isChat,
-    preview.device,
+    // The bounds observer follows device resizing without hiding the page.
     // The first bounds report can run before Tauri creates its child webview.
     // Report again after navigation settles so the new child receives the host
     // rectangle instead of staying hidden at its initial 1×1 size.
@@ -19106,7 +19414,6 @@ export function BrowserPreviewSurface({
               aria-label="Browser options"
               title="Browser options"
               aria-expanded={isBrowserMenuOpen}
-              aria-haspopup="menu"
               onClick={() => setIsBrowserMenuOpen((open) => !open)}
               type="button"
             >
@@ -20782,7 +21089,7 @@ function ConnectedProviderAllowances({
   );
 }
 
-type SettingsSurfaceProps = {
+export type SettingsSurfaceProps = {
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;
   cliLaunchPreset?: CliLaunchPreset;
@@ -20816,6 +21123,8 @@ type SettingsSurfaceProps = {
   onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
+  onEfficiencyChange?: (value: import("./types").EfficiencyConfig) => Promise<void>;
+  onEfficiencyRoute?: (phase: string, escalate: boolean) => Promise<void>;
   onCheckForUpdates?: () => void;
   /** Runs the updater's next step (download, install, or retry) from Settings. */
   onUpdateAction?: (state: UpdateState) => void;
@@ -20890,398 +21199,6 @@ type SettingsSurfaceProps = {
   onToggleWorkspaceContribution?: (id: string, enabled: boolean) => void;
   onRemoveWorkspaceContribution?: (id: string) => void;
 };
-
-function ProviderApiKeySection({
-  config,
-  selectedProviderId,
-  onSelectedProviderChange,
-  onUseProvider,
-  providerStatuses,
-  connectingProviderIds = [],
-  providerApiKeyConfigured,
-  savingProviderApiKeyId,
-  onSaveProviderApiKey,
-  onClearProviderApiKey,
-}: Pick<
-  SettingsSurfaceProps,
-  | "config"
-  | "onUseProvider"
-  | "providerStatuses"
-  | "connectingProviderIds"
-  | "providerApiKeyConfigured"
-  | "savingProviderApiKeyId"
-  | "onSaveProviderApiKey"
-  | "onClearProviderApiKey"
-> & {
-  selectedProviderId?: ProviderId;
-  onSelectedProviderChange?: (id: ProviderId) => void;
-}) {
-  const providers = providersForConfig(config).filter((provider) =>
-    providerSupportsApiKey(provider.id),
-  );
-  const [selectedId, setSelectedId] = useState("openai");
-  const provider =
-    providers.find((item) => item.id === (selectedProviderId ?? selectedId)) ??
-    providers[0];
-  if (!provider) return null;
-  const health = providerStatuses?.find((status) => status.id === provider.id);
-  const modelId = providerDefaultModelId(provider);
-  const canUse =
-    modelId &&
-    !savingProviderApiKeyId &&
-    !connectingProviderIds.includes(provider.id) &&
-    providerApiKeyConfigured?.[provider.id] &&
-    isProviderRuntimeUsable(provider, health) &&
-    !providerNeedsSignInRepair(provider, health) &&
-    health?.connectionStatus !== "failed" &&
-    health?.connectionStatus !== "checking";
-  return (
-    <SettingsGroup label="Connect with an API key">
-      <div className="gyro-provider-api-key-section">
-        <ProviderApiKeyField
-          key={provider.id}
-          configured={Boolean(providerApiKeyConfigured?.[provider.id])}
-          envName={providerApiKeyEnvName(provider.id)}
-          onClear={() => onClearProviderApiKey?.(provider.id)}
-          onSave={
-            onSaveProviderApiKey
-              ? (value) => onSaveProviderApiKey(provider.id, value)
-              : undefined
-          }
-          saving={Boolean(savingProviderApiKeyId)}
-        >
-          <SettingsSelect
-            aria-label="API key provider"
-            disabled={Boolean(savingProviderApiKeyId)}
-            onChange={(event) => {
-              setSelectedId(event.target.value);
-              onSelectedProviderChange?.(event.target.value as ProviderId);
-            }}
-            value={provider.id}
-          >
-            {providers.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.displayName}
-              </option>
-            ))}
-          </SettingsSelect>
-        </ProviderApiKeyField>
-        {canUse && onUseProvider ? (
-          <button
-            className="gyro-primary-button"
-            type="button"
-            onClick={() => onUseProvider(provider.id, modelId!)}
-          >
-            Use in chat
-          </button>
-        ) : null}
-      </div>
-    </SettingsGroup>
-  );
-}
-
-/**
- * Picker, key and action on one line.
- *
- * The group is already titled "Connect with an API key", so the field carries
- * no heading of its own and keeps a single line of consequence underneath:
- * where the key is kept, and what quietly overrides it.
- */
-function ProviderApiKeyField({
-  children,
-  configured,
-  envName,
-  onClear,
-  onSave,
-  saving = false,
-}: {
-  /** The provider picker, laid out inline with the key field. */
-  children: ReactNode;
-  configured: boolean;
-  envName?: string;
-  onClear?: () => void;
-  onSave?: (value: string) => Promise<boolean> | undefined;
-  saving?: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-  return (
-    <div className="gyro-provider-api-key">
-      <div className="gyro-provider-api-key-row">
-        {children}
-        <input
-          aria-label="Provider API key"
-          autoComplete="off"
-          disabled={saving}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={
-            configured ? "Key saved — paste to replace" : "Paste API key"
-          }
-          spellCheck={false}
-          type="password"
-          value={draft}
-        />
-        <button
-          className="gyro-primary-button"
-          disabled={saving || !onSave || draft.trim().length === 0}
-          onClick={async () => {
-            if (await onSave?.(draft.trim())) setDraft("");
-          }}
-          type="button"
-        >
-          {saving ? "Saving…" : configured ? "Replace" : "Save"}
-        </button>
-        {configured ? (
-          <button
-            className="gyro-danger-button"
-            disabled={saving}
-            onClick={() => onClear?.()}
-            type="button"
-          >
-            Remove
-          </button>
-        ) : null}
-      </div>
-      <span>
-        Kept in the macOS Keychain.
-        {envName ? (
-          <>
-            {" "}
-            An existing <code>{envName}</code> takes priority.
-          </>
-        ) : null}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Add or remove an endpoint the user defines.
- *
- * A custom provider is a config entry plus a Keychain key. The form collects
- * the endpoint and its model ids; the id itself is derived by the desktop layer
- * so the `custom:` prefix stays an implementation detail the user never types.
- */
-function CustomProviderSection({
-  config,
-  savingProviderApiKeyId,
-  onAddCustomProvider,
-  onRemoveCustomProvider,
-  onFetchCustomProviderModels,
-}: Pick<
-  SettingsSurfaceProps,
-  | "config"
-  | "savingProviderApiKeyId"
-  | "onAddCustomProvider"
-  | "onRemoveCustomProvider"
-  | "onFetchCustomProviderModels"
->) {
-  const [displayName, setDisplayName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [modelIds, setModelIds] = useState("");
-  const [fetching, setFetching] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  const busy = saving || fetching || Boolean(savingProviderApiKeyId);
-  const customProviders = providersForConfig(config).filter((provider) =>
-    isCustomProviderId(provider.id),
-  );
-  const parsedModelIds = modelIds
-    .split(/[\n,]/)
-    .map((model) => model.trim())
-    .filter(Boolean);
-  const canSubmit =
-    Boolean(onAddCustomProvider) &&
-    !busy &&
-    displayName.trim().length > 0 &&
-    baseUrl.trim().length > 0 &&
-    parsedModelIds.length > 0;
-  return (
-    <SettingsGroup label="Custom providers">
-      <div className="gyro-provider-custom-section">
-        {customProviders.length > 0 ? (
-          <ul className="gyro-provider-custom-list">
-            {customProviders.map((provider) => (
-              <li key={provider.id}>
-                <div>
-                  <strong>{provider.displayName}</strong>
-                  <span>
-                    <code>{provider.baseUrl}</code> · {provider.models.length}{" "}
-                    model{provider.models.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <button
-                  className="gyro-danger-button"
-                  disabled={busy}
-                  onClick={async () => {
-                    setError(undefined);
-                    setSaving(true);
-                    try {
-                      await onRemoveCustomProvider?.(provider.id);
-                    } catch (failure) {
-                      setError(String(failure));
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  type="button"
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <div className="gyro-provider-custom-form">
-          <label>
-            <span>Display name</span>
-            <input
-              aria-label="Custom provider display name"
-              disabled={busy}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="My gateway"
-              value={displayName}
-            />
-          </label>
-          <label>
-            <span>Base URL</span>
-            <input
-              aria-label="Custom provider base URL"
-              autoComplete="off"
-              disabled={busy}
-              onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="https://gateway.example.com/v1"
-              spellCheck={false}
-              value={baseUrl}
-            />
-          </label>
-          <label>
-            <span>API key</span>
-            <input
-              aria-label="Custom provider API key"
-              autoComplete="off"
-              disabled={busy}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Leave empty for a local server"
-              spellCheck={false}
-              type="password"
-              value={apiKey}
-            />
-          </label>
-          <div className="gyro-provider-custom-fetch">
-            <button
-              className="gyro-secondary-button"
-              disabled={
-                !onFetchCustomProviderModels ||
-                busy ||
-                baseUrl.trim().length === 0
-              }
-              onClick={async () => {
-                setError(undefined);
-                setFetching(true);
-                try {
-                  const models = await onFetchCustomProviderModels?.(
-                    baseUrl.trim(),
-                    apiKey,
-                  );
-                  if (models && models.length > 0) {
-                    setModelIds(models.map((model) => model.id).join("\n"));
-                  } else {
-                    setError("The endpoint reported no models.");
-                  }
-                } catch (failure) {
-                  setError(String(failure));
-                } finally {
-                  setFetching(false);
-                }
-              }}
-              type="button"
-            >
-              <RefreshCw size={14} />
-              {fetching ? "Fetching…" : "Fetch models"}
-            </button>
-          </div>
-          <label className="is-wide">
-            <span>Model ids</span>
-            <textarea
-              aria-label="Custom provider model ids"
-              disabled={busy}
-              onChange={(event) => setModelIds(event.target.value)}
-              placeholder={"llama-3.3-70b\nqwen3-coder"}
-              rows={3}
-              spellCheck={false}
-              value={modelIds}
-            />
-          </label>
-          <div className="gyro-provider-custom-actions">
-            <button
-              className="gyro-primary-button"
-              disabled={!canSubmit}
-              onClick={async () => {
-                setError(undefined);
-                setSaving(true);
-                try {
-                  const added = await onAddCustomProvider?.({
-                    displayName: displayName.trim(),
-                    baseUrl: baseUrl.trim(),
-                    apiKey,
-                    modelIds: parsedModelIds,
-                  });
-                  if (added) {
-                    setDisplayName("");
-                    setBaseUrl("");
-                    setApiKey("");
-                    setModelIds("");
-                  }
-                } catch (failure) {
-                  setError(String(failure));
-                } finally {
-                  setSaving(false);
-                }
-              }}
-              type="button"
-            >
-              <Plus size={15} />
-              Add provider
-            </button>
-          </div>
-          {error ? <p className="gyro-provider-custom-error">{error}</p> : null}
-          <p className="gyro-provider-custom-note">
-            Plain HTTP is accepted only for localhost.
-          </p>
-        </div>
-      </div>
-    </SettingsGroup>
-  );
-}
-
-/** Dismiss the disclosure when clicking outside its controls. */
-function ProviderDetailsMenu({
-  children,
-  label,
-}: {
-  children: ReactNode;
-  label: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const detailsRef = useOutsidePointerDismiss<HTMLDetailsElement>(isOpen, () =>
-    setIsOpen(false),
-  );
-
-  return (
-    <details
-      className="gyro-provider-details"
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
-      open={isOpen}
-      ref={detailsRef}
-    >
-      <summary aria-label={label}>
-        <MoreHorizontal size={16} />
-      </summary>
-      {children}
-    </details>
-  );
-}
 
 function CliLaunchPresetEditor({
   onChange,
@@ -21450,6 +21367,8 @@ export function SettingsSurface({
   onMenuBarVisibilityChange,
   onSectionChange,
   onConfigChange,
+  onEfficiencyChange,
+  onEfficiencyRoute,
   onCheckForUpdates,
   onUpdateAction,
   onCliLaunchPresetChange,
@@ -21876,10 +21795,7 @@ export function SettingsSurface({
                         visualization={usageVisualization}
                         window={{
                           id: window.id,
-                          label:
-                            window.id === "five-hour"
-                              ? "5-hour spend · local"
-                              : "Weekly spend · local",
+                          label: `${window.id === "five-hour" ? "5-hour" : "Weekly"} ${window.hasBudget ? "budget" : "reference"} · local`,
                           usedPercent: window.percent,
                         }}
                       />
@@ -21915,7 +21831,7 @@ export function SettingsSurface({
                 }
                 detail={
                   providerLedger?.budget
-                    ? "Holds council runs and automations at 90%, and stops this provider at 100%."
+                    ? "Holds council runs and automations at 10% left, and stops this provider at 0% left."
                     : "Set a cap and Gyro measures against it instead of the default reference."
                 }
               >
@@ -21970,12 +21886,8 @@ export function SettingsSurface({
                 value="Manual"
                 detail="Provider billing and allowance controls remain provider-owned."
               />
-              <SettingsRow
-                label="Parallel agents"
-                value="Ask first"
-                detail="Multiple CLI agents stay explicit until provider health is stable."
-              />
             </SettingsGroup>
+            <EfficiencySettings config={config} onChange={onEfficiencyChange} onRoute={onEfficiencyRoute} />
             <SettingsGroup label="Auto Context Compact">
               <SettingsRow
                 label="Auto-compact context"
@@ -23144,14 +23056,14 @@ function useLimitClock(enabled: boolean) {
 }
 
 function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
-  const measured = window.percent !== undefined;
+  const measured = window.remainingPercent !== undefined;
   return (
     <div className={`gyro-composer-limit-row is-${window.severity}`}>
       <div className="gyro-composer-limit-heading">
         <strong>{window.label}</strong>
         <b className={measured ? undefined : "is-unmeasured"}>
           {measured
-            ? `${window.percentLabel} used`
+            ? `${window.remainingPercentLabel} left`
             : window.status === "exhausted"
               ? window.percentLabel
               : "Not reported"}
@@ -23159,15 +23071,15 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
       </div>
       <div
         aria-label={`${window.label}: ${
-          measured ? `${window.percentLabel} used` : "level not reported"
+          measured ? `${window.remainingPercentLabel} left` : "level not reported"
         }`}
         aria-valuemax={100}
         aria-valuemin={0}
-        {...(measured ? { "aria-valuenow": window.percent } : {})}
+        {...(measured ? { "aria-valuenow": window.remainingPercent } : {})}
         className={`gyro-composer-limit-bar${measured ? "" : " is-unmeasured"}`}
         role="progressbar"
       >
-        {measured ? <span style={{ width: `${window.percent}%` }} /> : null}
+        {measured ? <span style={{ width: `${window.remainingPercent}%` }} /> : null}
       </div>
       {window.resetsLabel ? (
         <em className="gyro-composer-limit-reset">{window.resetsLabel}</em>
@@ -23271,13 +23183,13 @@ function PlanUsageNotification({
       : notice.threshold >= 90
         ? "Plan limit is close"
         : notice.threshold >= 80
-          ? "Plan usage is getting high"
-          : "Half of this plan window is used";
+          ? "Plan allowance is running low"
+          : "Half of this plan window is left";
   const detail = isDailyPace
     ? notice.windowId === "day"
-      ? `Today is ${notice.percent}% of the weekly/100% limit (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
-      : `${notice.windowLabel} is ${notice.percent}% used — more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
-    : `${notice.windowLabel} is ${notice.percent}% used.${
+      ? `Today’s activity is above an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
+      : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left and is more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
+    : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left.${
         notice.threshold >= 90 ? " Consider wrapping up this window." : ""
       }`;
 
@@ -25263,7 +25175,8 @@ function Composer({
     const panel = scope?.querySelector<HTMLElement>(
       ":scope > .gyro-composer-popover, :scope > .gyro-provider-picker",
     );
-    if (!scope || !panel) {
+    // The model rail owns its pane-aware placement and resize observation.
+    if (!scope || !panel || isModelRailPane) {
       return;
     }
     const anchor = scope.getBoundingClientRect();
@@ -25271,18 +25184,6 @@ function Composer({
     const gap = 6;
     const edgePad = 12;
     panel.style.maxHeight = "";
-    // Keep the model list anchored to the same bottom edge as the slider.
-    // Long lists scroll into the available space instead of jumping below it.
-    const roomAbove = anchor.top - bounds.top - gap - edgePad;
-    if (
-      isModelRailPane &&
-      preferredProviderPlacement === "up" &&
-      roomAbove >= 96
-    ) {
-      panel.style.maxHeight = `${roomAbove}px`;
-      setProviderPopoverPlacement("up");
-      return;
-    }
     const height = panel.offsetHeight;
     const fitsBelow = anchor.bottom + gap + height <= bounds.bottom - edgePad;
     const fitsAbove = anchor.top - gap - height >= bounds.top + edgePad;
@@ -25298,6 +25199,7 @@ function Composer({
   }, [
     activePopover,
     isModelMenuAdvancedOpen,
+    isModelRailPane,
     modelMenuPane,
     preferredProviderPlacement,
     popoverScopeRef,
@@ -25554,64 +25456,77 @@ function Composer({
       {isSlashMenuOpen ? (
         <div
           aria-label="Chat commands"
-          className="gyro-composer-slash-menu"
+          className="gyro-composer-slash-menu is-commands"
           id={`${popoverBaseId}-slash-menu`}
-          onScroll={() => setSlashHint(undefined)}
           role="menu"
         >
-          {isSlashHelpOpen ? (
-            <header>
-              <strong>Chat commands</strong>
-              <span>↑↓ navigate · Tab select · Esc close</span>
-            </header>
-          ) : null}
-          {visibleSlashCommands.map((command, index) => {
-            const Icon = command.icon;
-            return (
-              <button
-                aria-current={
-                  index === selectedSlashCommandIndex ? "true" : undefined
-                }
-                className={
-                  index === selectedSlashCommandIndex ? "is-selected" : ""
-                }
-                id={`${popoverBaseId}-slash-command-${index}`}
-                key={command.command}
-                onClick={() => runSlashCommand(command)}
-                onPointerDown={(event) => event.preventDefault()}
-                onPointerEnter={() => setActiveSlashCommandIndex(index)}
-                ref={(element) => {
-                  slashCommandRefs.current[index] = element;
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <Icon size={14} />
-                <code>{command.command}</code>
-                <span className="gyro-composer-slash-command-copy">
-                  <strong>{command.label}</strong>
-                  {isSlashHelpOpen ? (
-                    <small>{command.description}</small>
+          <header role="presentation">
+            <strong>Chat commands</strong>
+            <span>{visibleSlashCommands.length} available</span>
+          </header>
+          <div
+            className="gyro-composer-slash-list"
+            onScroll={() => setSlashHint(undefined)}
+            role="presentation"
+          >
+            {visibleSlashCommands.map((command, index) => {
+              const Icon = command.icon;
+              return (
+                <button
+                  aria-current={
+                    index === selectedSlashCommandIndex ? "true" : undefined
+                  }
+                  className={
+                    index === selectedSlashCommandIndex ? "is-selected" : ""
+                  }
+                  id={`${popoverBaseId}-slash-command-${index}`}
+                  key={command.command}
+                  onClick={() => runSlashCommand(command)}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerEnter={() => {
+                    setActiveSlashCommandIndex(index);
+                    setSlashHint(undefined);
+                  }}
+                  ref={(element) => {
+                    slashCommandRefs.current[index] = element;
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={16} />
+                  <code>{command.command}</code>
+                  <span className="gyro-composer-slash-command-copy">
+                    <strong>{command.label}</strong>
+                    {isSlashHelpOpen ? (
+                      <small>{command.description}</small>
+                    ) : null}
+                  </span>
+                  {command.hint ? (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="gyro-composer-slash-hint-mark"
+                        onPointerEnter={(event) =>
+                          showSlashHint(command.hint ?? "", event.currentTarget)
+                        }
+                        onPointerLeave={() => setSlashHint(undefined)}
+                      >
+                        ?
+                      </span>
+                      <span className="gyro-sr-only">{command.hint}</span>
+                    </>
                   ) : null}
-                </span>
-                {command.hint ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      className="gyro-composer-slash-hint-mark"
-                      onPointerEnter={(event) =>
-                        showSlashHint(command.hint ?? "", event.currentTarget)
-                      }
-                      onPointerLeave={() => setSlashHint(undefined)}
-                    >
-                      ?
-                    </span>
-                    <span className="gyro-sr-only">{command.hint}</span>
-                  </>
-                ) : null}
-              </button>
-            );
-          })}
+                </button>
+              );
+            })}
+          </div>
+          <footer className="gyro-composer-slash-footer" role="presentation">
+            <span>
+              <kbd>↑</kbd><kbd>↓</kbd> Navigate
+            </span>
+            <span><kbd>↵</kbd> Select</span>
+            <span><kbd>esc</kbd> Close</span>
+          </footer>
         </div>
       ) : null}
       {activePopover === "branch" ? (
@@ -26042,7 +25957,7 @@ function Composer({
               role="progressbar"
               style={
                 {
-                  "--context-usage": `${contextUsage.percent * 3.6}deg`,
+                  "--context-usage": `${(contextUsage.percent ?? 0) * 3.6}deg`,
                 } as CSSProperties
               }
               tabIndex={0}
@@ -26072,22 +25987,22 @@ function Composer({
                     contextSource === "empty"
                       ? "Measured once the model replies"
                       : contextUsage.contextWindowTokens > 0
-                        ? `${contextUsage.remainingLabel} left`
+                        ? `${contextUsage.usedLabel} used`
                         : "Context window unknown"
                   }
                 >
                   <strong>
                     {contextSource === "empty"
                       ? "—"
-                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
+                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.contextWindowTokens > 0 ? contextUsage.usedLabel : "—"}`}
                   </strong>
                   <span>
                     {contextUsage.contextWindowTokens > 0
-                      ? `/ ${contextUsage.windowLabel} tokens`
+                      ? `/ ${contextUsage.windowLabel} tokens used`
                       : "Window unknown"}
                   </span>
                   {contextSource === "empty" ? null : (
-                    <b>{contextUsage.percentLabel}</b>
+                    <b>{contextUsage.percentLabel} used</b>
                   )}
                 </div>
                 <div
@@ -26107,7 +26022,7 @@ function Composer({
                   className="gyro-composer-context-bar"
                   role="progressbar"
                 >
-                  <span style={{ width: `${contextUsage.percent}%` }} />
+                  <span style={{ width: `${contextUsage.percent ?? 0}%` }} />
                 </div>
               </section>
               {limitWindows.length > 0 || providerUsage ? (
@@ -26569,6 +26484,9 @@ const ChatEvent = memo(function ChatEvent({
     );
   }
   const capabilityCall = capabilityCallFromEvent(event);
+  if (capabilityCall && workflowDetails(event)) {
+    return <CodeModeActivityCard event={event} onAction={onProviderStatusAction} />;
+  }
   if (capabilityCall) {
     return (
       <CapabilityActivityCard
@@ -26876,7 +26794,7 @@ function CapabilityActivityCard({
     >
       <span className="gyro-capability-activity-icon">{icon}</span>
       <div>
-        <strong>{activity.capabilityId.replaceAll("-", " ")}</strong>
+        <strong>{activity.capabilityId === "code-mode-discover" ? "Finding available workspace actions" : activity.capabilityId.replaceAll("-", " ")}</strong>
         <span>{activity.summary}</span>
         {activity.resource ? <small>{activity.resource.label}</small> : null}
       </div>
@@ -27170,7 +27088,7 @@ function deriveTranscriptState(events: SessionEvent[]) {
     }
   }
   for (const turn of turns) {
-    turn.timelineEvents = orderedChatTimelineEvents(turn.timelineEvents);
+    turn.timelineEvents = groupWorkflowEvents(orderedChatTimelineEvents(turn.timelineEvents), turn.runStatus);
   }
   // First-seen provider sequences survive streaming updates and persistence,
   // so completion timing cannot move an early item below later activity.
@@ -27302,10 +27220,16 @@ function ChatTurn({
   turn: ChatTranscriptTurn;
   isOnline: boolean;
 }) {
+  const agentApprovals = (subagents?.agents ?? [])
+    .filter((agent) => agent.parentTurnId === turn.id)
+    .flatMap((agent) =>
+      pendingSubagentApprovals(subagents?.eventsByAgentId[agent.agentId] ?? []),
+    );
   const providerStatus = turn.statusEvent
     ? providerStatusFromEvent(turn.statusEvent)
     : undefined;
   const isRunning = isActive;
+  const nativeRetry = isRunning ? providerStatus?.nativeRetry : undefined;
   const startedAt = turn.runStartedAt ?? turn.startedAt;
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
@@ -27332,14 +27256,15 @@ function ChatTurn({
           recoveryMessage: providerStatus.recoveryMessage,
         }
       : undefined,
-    // Two ways a live turn ends up waiting on the wire: the machine lost its
-    // network, or the provider already reported a transport failure the surface
-    // is dialling back from. Both are the same beat to the reader.
-    retry: !isOnline
-      ? { reason: "Waiting for the network" }
-      : providerIsUnreachable(providerStatus)
-        ? { reason: "Reconnecting to the provider" }
-        : undefined,
+    // Native capacity recovery owns its wait while this invoke stays alive;
+    // otherwise transport loss uses the existing reconnect beat.
+    retry: nativeRetry
+      ? { reason: "Model is temporarily busy", attempt: nativeRetry.attempt }
+      : !isOnline
+        ? { reason: "Waiting for the network" }
+        : providerIsUnreachable(providerStatus)
+          ? { reason: "Reconnecting to the provider" }
+          : undefined,
   });
   // File summaries must be backed by paths reported by the provider. The Git
   // working tree is shared by all chats, so using it to fill a pathless
@@ -27401,7 +27326,9 @@ function ChatTurn({
   // summary and file review answer "what changed"; the final response answers
   // whether the request is actually done and names any remaining caveat.
   const shouldShowFinalResponse = Boolean(responseEvent);
-  const needsApproval = pendingSubagentApprovals(turn.timelineEvents).length > 0;
+  const needsApproval =
+    agentApprovals.length > 0 ||
+    pendingSubagentApprovals(turn.timelineEvents).length > 0;
   const missingFinalResponse =
     !isCompactionResult &&
     !needsApproval &&
@@ -27453,26 +27380,7 @@ function ChatTurn({
       ) : null}
       <div className="gyro-chat-run">
         <ChatRun
-          agentRows={
-            subagents ? (
-              <SubagentList
-                state={subagents}
-                turnId={turn.id}
-                renderApproval={(agentId) =>
-                  pendingSubagentApprovals(
-                    subagents.eventsByAgentId[agentId] ?? [],
-                  ).map((event) => (
-                    <ChatEvent
-                      key={event.id}
-                      event={event}
-                      onMutationApprovalAction={onMutationApprovalAction}
-                      onProviderApprovalAction={onProviderApprovalAction}
-                    />
-                  ))
-                }
-              />
-            ) : undefined
-          }
+          agentApprovals={agentApprovals}
           aggregateFileStats={aggregateFileStats}
           headerActions={
             <>
@@ -27493,6 +27401,14 @@ function ChatTurn({
             </>
           }
           model={runModel}
+          recoveryEventId={turn.statusEvent?.id}
+          nativeRetry={nativeRetry}
+          onCancelNativeRetry={
+            nativeRetry && turn.statusEvent
+              ? () =>
+                  onProviderStatusAction?.("cancel-retry", turn.statusEvent as SessionEvent)
+              : undefined
+          }
           onOpenChanges={openTurnChanges}
           onReconnect={
             canReconnect && turn.statusEvent
@@ -28877,7 +28793,17 @@ function providerStatusFromEvent(event: SessionEvent) {
     return undefined;
   }
   const status = stringFromEventPayload(payload, "status") ?? "queued";
+  const nativeRetryAt = payload?.nativeRetry === true
+    ? Date.parse(stringFromEventPayload(payload, "retryAt") ?? "")
+    : NaN;
   return {
+    nativeRetry: Number.isFinite(nativeRetryAt)
+      ? {
+          retryAt: nativeRetryAt,
+          attempt: numberFromEventPayload(payload, "retryAttempt"),
+          maxAttempts: numberFromEventPayload(payload, "retryMaxAttempts"),
+        }
+      : undefined,
     error: stringFromEventPayload(payload, "error"),
     modelLabel: stringFromEventPayload(payload, "modelLabel"),
     providerId: stringFromEventPayload(payload, "providerId"),
@@ -29677,54 +29603,6 @@ function workspaceName(path?: string) {
     return "No workspace";
   }
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-}
-
-/// The rectangle a popover actually has to stay inside.
-///
-/// An overflow-clipped ancestor, not the viewport, is what cuts a flyout off:
-/// the Workspace AI sidebar panel is `overflow: hidden`, so anything the
-/// composer opens past its right edge is simply not drawn. Walk up to the
-/// nearest such ancestor and use it; fall back to the viewport when the
-/// composer really does own the full width.
-function clippingBounds(element: HTMLElement) {
-  const viewport = {
-    left: 0,
-    right: window.innerWidth,
-    top: 0,
-    bottom: window.innerHeight,
-  };
-  const chatPane = element.closest<HTMLElement>(".gyro-chat-surface.is-tiled");
-  if (chatPane) {
-    const rect = chatPane.getBoundingClientRect();
-    viewport.left = Math.max(viewport.left, rect.left);
-    viewport.right = Math.min(viewport.right, rect.right);
-    viewport.top = Math.max(viewport.top, rect.top);
-    viewport.bottom = Math.min(viewport.bottom, rect.bottom);
-  }
-  for (
-    let node = element.parentElement;
-    node && node !== document.body;
-    node = node.parentElement
-  ) {
-    const style = window.getComputedStyle(node);
-    const clips = [style.overflowX, style.overflowY].some(
-      (value) => value !== "visible",
-    );
-    if (!clips) {
-      continue;
-    }
-    const rect = node.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      continue;
-    }
-    return {
-      left: Math.max(viewport.left, rect.left),
-      right: Math.min(viewport.right, rect.right),
-      top: Math.max(viewport.top, rect.top),
-      bottom: Math.min(viewport.bottom, rect.bottom),
-    };
-  }
-  return viewport;
 }
 
 function workspaceParentFolder(path?: string) {

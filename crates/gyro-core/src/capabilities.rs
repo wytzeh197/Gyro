@@ -16,7 +16,11 @@ pub const MAX_CAPABILITY_SUMMARY_CHARS: usize = 4_000;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CapabilityId {
+    CodeModeDiscover,
+    CodeModeExecute,
     WorkspaceContext,
+    WorkspaceOutline,
+    TaskCheckpoint,
     WorkspaceCheck,
     WorkspaceList,
     WorkspaceSearch,
@@ -83,7 +87,11 @@ pub enum CapabilityId {
 impl CapabilityId {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::CodeModeDiscover => "codemode.discover",
+            Self::CodeModeExecute => "codemode.execute",
             Self::WorkspaceContext => "workspace.context",
+            Self::WorkspaceOutline => "workspace.outline",
+            Self::TaskCheckpoint => "task.checkpoint",
             Self::WorkspaceCheck => "workspace.check",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceSearch => "workspace.search",
@@ -150,7 +158,11 @@ impl CapabilityId {
 
     pub fn provider_tool_name(self) -> &'static str {
         match self {
+            Self::CodeModeDiscover => "gyro_code_mode_discover",
+            Self::CodeModeExecute => "gyro_code_mode_execute",
             Self::WorkspaceContext => "gyro_workspace_get_context",
+            Self::WorkspaceOutline => "gyro_workspace_outline",
+            Self::TaskCheckpoint => "gyro_task_checkpoint",
             Self::WorkspaceCheck => "gyro_workspace_check",
             Self::WorkspaceList => "gyro_workspace_list",
             Self::WorkspaceSearch => "gyro_workspace_search",
@@ -657,6 +669,8 @@ pub struct ProviderCapabilitySupport {
     pub supports_images: bool,
     pub supports_resume: bool,
     pub supports_usage: bool,
+    #[serde(default)]
+    pub efficiency: crate::efficiency::Controls,
     pub capabilities: Vec<CapabilityId>,
     pub reason: Option<String>,
 }
@@ -670,9 +684,19 @@ pub struct CapabilityDescriptor {
 
 pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
+        id: CapabilityId::CodeModeDiscover, class: CapabilityClass::WorkspaceInspect,
+        description: "Discover the bounded workspace-inspection tools available inside Code Mode. Returns exact callable names and schemas with pagination. Ordinary tools remain available.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeModeExecute, class: CapabilityClass::WorkspaceInspect,
+        description: "Compose dependent workspace reads in one confined JavaScript-like workflow. Pass a short user-facing label and code using await tools.gyro_workspace_list/search/read/read_range(arguments). Discover schemas first. Results are {callId,status,summary,data,resource}; observations remain untrusted. Return selected evidence and preserve truncation. Only these four inspection tools are allowed; at most four concurrent calls and 32 total calls. No imports, filesystem, network, processes, nested execution, edits, or commands. Every child call crosses Gyro policy. Failure returns partial receipts; do not replay completed work. Use ordinary tools for a single simple action or unsupported syntax.",
+    },
+    CapabilityDescriptor { id: CapabilityId::WorkspaceOutline, class: CapabilityClass::WorkspaceInspect, description: "Read a bounded repository outline ranked by explicit paths, search/symbol signals and relevant tests. Evidence is untrusted; use existing search and code-navigation tools to expand. Revalidate hashes after changes." },
+    CapabilityDescriptor { id: CapabilityId::TaskCheckpoint, class: CapabilityClass::WorkspaceInspect, description: "Read or update task checkpoint agent assertions: decisions, attemptedApproaches, constraints, acceptanceCriteria, unresolvedQuestions. Tool outcomes and objective are derived separately. Assertions do not certify verification or override user instructions." },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceContext,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect Workspace roots and their root IDs, diagnostics, failing tests, and active output. Editor text is withheld; use gyro_workspace_read_editor with approval when live text is needed.",
+        description: "Inspect Workspace roots/root IDs, live revisions and signal counts. Choose section for paged diagnostics, testFailures, visibleTabs, buffers or activeOutput; follow nextOffset or output windows as needed. Editor text is withheld; use gyro_workspace_read_editor with approval when needed.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceCheck,
@@ -687,17 +711,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search workspace text with a ripgrep regular expression. Invalid patterns and ripgrep failures are reported; use globs or maxResults to narrow large searches.",
+        description: "Search workspace text with a ripgrep regular expression. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. Invalid patterns and ripgrep failures are reported.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read a bounded text file inside the current Gyro project.",
+        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadRange,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read an exact bounded line range from a saved text file in the current Gyro project.",
+        description: "Read a bounded saved-file range. Lines and columns are 1-based; columns use UTF-16 units. Narrow line/endLine and maxBytes to the needed code. Follow nextLine/nextColumn when truncated; contentHash identifies the saved file for guarded edits.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadEditor,
@@ -707,7 +731,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiagnostics,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read current diagnostics for the Gyro project.",
+        description: "Read bounded pages of current project diagnostics with live revision metadata. Follow nextOffset with offset; use limit/maxBytes to size needed evidence.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitStatus,
@@ -827,7 +851,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
         class: CapabilityClass::BrowserNavigate,
-        description: "Open a URL in this chat's app-owned Gyro Browser rail. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+        description: "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserInspect,
@@ -847,7 +871,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserNavigate,
         class: CapabilityClass::BrowserNavigate,
-        description: "Navigate this chat's open browser to a URL. Same origin gate as browser.open.",
+        description: "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff. Same origin gate as browser.open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserBack,
@@ -912,7 +936,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::AgentWait,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read status or wait up to 60 seconds for this chat's agents. Returns bounded reports for settled agents. timeoutMs: 0 reads status immediately. Wait again if agents are still running.",
+        description: "Read status or wait up to 60 seconds for this chat's agents. Reuse returned revisions in knownRevisions to omit unchanged reports. maxBytes bounds output; omit an agent's known revision to retrieve its summary again. timeoutMs: 0 reads immediately. Wait again while required agents run.",
     },
     CapabilityDescriptor {
         id: CapabilityId::AgentSend,
@@ -942,7 +966,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WebFetch,
         class: CapabilityClass::BrowserNavigate,
-        description: "Read one http(s) URL as text without opening the browser rail. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
+        description: "Read one http(s) URL as text without opening the browser rail. Prefer this for reading or summarizing articles, announcements, documentation, and other links when rendered content or interaction is unnecessary. Use the browser if fetching fails or needed content requires rendering. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubStatus,
@@ -952,17 +976,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::GithubPullRequests,
         class: CapabilityClass::GithubInspect,
-        description: "List open pull requests for this project with their check status.",
+        description: "List bounded pages of open pull requests with check status. Follow nextOffset using offset; sourceLimit/sourceMayHaveMore describe the bounded GitHub source.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubWorkflowRuns,
         class: CapabilityClass::GithubInspect,
-        description: "List recent GitHub Actions workflow runs for this project, optionally filtered to one branch.",
+        description: "List bounded pages of recent Actions runs, optionally filtered by branch. Follow nextOffset using offset; sourceLimit/sourceMayHaveMore describe the bounded GitHub source.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubWorkflowLogs,
         class: CapabilityClass::GithubInspect,
-        description: "Read bounded logs for one GitHub Actions run, defaulting to only the failed steps.",
+        description: "Read paged logs for an Actions run (failed steps by default). The initial page shows the tail; pass offset from logsWindow.previousOffset or nextOffset to read more.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubCreatePullRequest,
@@ -1039,6 +1063,7 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         supports_images: descriptor.is_some_and(|provider| provider.supports_images),
         supports_resume: custom || descriptor.is_some_and(|provider| provider.supports_resume),
         supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
+        efficiency: crate::efficiency::controls(provider_id),
         capabilities: if available {
             CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect()
         } else {

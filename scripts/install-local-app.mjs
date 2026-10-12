@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -92,6 +92,19 @@ if (hasValidDeveloperIdSignature(destinationApp)) {
       "Ad-hoc signing failed; continuing with the copied local app bundle.",
     );
   }
+}
+
+// Re-register the replaced bundle so Finder and Dock refresh its icon.
+// Touch only the bundle directory; signed resources remain unchanged.
+const installedAt = new Date();
+utimesSync(destinationApp, installedAt, installedAt);
+const launchServices =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+const registration = spawnSync(launchServices, ["-f", destinationApp], {
+  stdio: "inherit",
+});
+if (registration.status !== 0) {
+  console.warn("macOS app registration could not be refreshed.");
 }
 
 const open = spawnSync("open", [destinationApp], { stdio: "inherit" });

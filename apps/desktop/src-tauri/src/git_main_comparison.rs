@@ -5,8 +5,6 @@ use super::{
 use std::path::Path;
 use std::time::Instant;
 
-const MAX_COMPARISON_FILES: usize = 400;
-
 // Prefer the fetched remote main; a local main may lag behind many releases.
 // Local-only repositories retain their existing comparison behavior. Both
 // candidates share the caller's deadline.
@@ -78,15 +76,12 @@ pub(crate) fn git_main_comparison(
         result.deletions = result.deletions.saturating_add(*deletions);
     }
     for file in untracked {
-        if files.iter().any(|existing| existing.path == file.path) {
+        if stats.contains_key(&file.path) {
             continue;
         }
         files.push(file.clone());
     }
-    if files.len() > MAX_COMPARISON_FILES {
-        files.truncate(MAX_COMPARISON_FILES);
-        result.partial = true;
-    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
     result.files = files;
     Some(result)
 }

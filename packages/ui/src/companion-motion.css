@@ -1,0 +1,19 @@
+/* The hook owns width motion; drag resizing and settled widths stay immediate. */
+.gyro-chat-companion.has-companion-motion {
+  animation: none !important;
+  transition: none !important;
+}
+
+.gyro-chat-companion.has-companion-motion.is-companion-closing {
+  pointer-events: none;
+}
+
+.gyro-chat-companion.has-companion-motion.is-companion-moving {
+  will-change: width, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-chat-companion.has-companion-motion {
+    will-change: auto;
+  }
+}

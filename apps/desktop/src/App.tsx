@@ -1,3 +1,10 @@
+import { MonacoEditorPane, type WorkspaceNavigationSource } from "./editor/workspace-code-editor";
+import { canonicalFileUri, filePathFromUri } from "./editor/document-uri";
+import { useLanguageSessions } from "./editor/use-language-sessions";
+import { useWorkspaceRename, editorBufferFromFile } from "./editor/use-workspace-rename";
+import { recoverWorkspaceBuffers, hasEditRecovery, writeEditRecovery } from "./editor/edit-recovery";
+import { WorkspaceRenameDialog, WorkspaceEditBar } from "@gyro-dev/ui";
+import { ManagedDiffEditor } from "./managed-diff-editor";
 import { providerLoginProfile, providerLoginCommandText } from "./provider-login-profile";
 import { useSubagents } from "./use-subagents";
 import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
@@ -5,12 +12,15 @@ import { sourceControlForWorkspace, useScopedIdeState } from "./source-control-s
 import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
 import { fastModeConfigFromAction } from "@gyro-dev/ui";
 import { useProjectImport } from "./use-project-import";
+import { useChatAutoRetry } from "./use-chat-auto-retry";
+import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
+import { createChatRetryDispatcher, isChatRetryCurrent } from "./chat-retry-dispatch";
+import { ChatRetryContext } from "@gyro-dev/ui";
 import {
   compareSessionEventsForHistory,
   mergeSessionHistoryPages,
 } from "./session-event-order";
 import { createPreviewSession, createPreviewWorkspaceFileContent, createTauriThreadSession, newSessionModelFromConfig, normalizeSessionTitleInput, previewFiles, selectedSessionModelFromConfig, sessionModelSelectionFromSession, workspaceRunMetadata } from "./session-creation";
-import { workspaceEditorOptions } from "./editor-presentation";
 import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
 import {
   turnIdFromSessionEvent,
@@ -44,6 +54,7 @@ import { persistAutoCompactPercent } from "./auto-compaction";
 import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
 import { useProviderConnectionGuard } from "./provider-connection-guard";
+import { isComposerCliUpdating } from "./cli-update-scope";
 import {
   providerHealthDetailsFromCheck,
   providerHealthRequest,
@@ -99,8 +110,9 @@ import {
   useCoalescedByKey,
   useDebouncedPersist,
 } from "./responsiveness";
-import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
+import { QuitConfirmDialog } from "./quit-confirm-dialog";
+import { useQuitConfirmation } from "./use-quit-confirmation";
 import {
   chatAttachmentKindForPath,
   chatAttachmentPickerFilters,
@@ -109,12 +121,10 @@ import {
   type ChatAttachmentPickerKind,
 } from "./chat-attachment-picker";
 import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
-import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { OnMount } from "@monaco-editor/react";
 import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
@@ -243,7 +253,6 @@ import {
   type IdeAiToolCall,
   type IdeAssistantAction,
   type IdeAssistantRequest,
-  type LanguageServerState,
   type MenuBarOutcome,
   type MenuBarSnapshot,
   type OutputChannel,
@@ -319,6 +328,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   applyProviderChatStreamPresentation,
@@ -349,7 +359,6 @@ import {
 } from "./menu-bar-state";
 import { useUnreadCompletedChats } from "./unread-completed-chats";
 
-const MonacoEditor = lazy(() => import("./monaco-editor"));
 const SourceControlDiffEditor = lazy(
   () => import("./source-control-diff-editor"),
 );
@@ -397,14 +406,6 @@ type TerminalPaneSnapshot = {
   rows: number;
   governedSessionId?: string | null;
   governedProviderId?: string | null;
-};
-
-type LspSessionResult = {
-  serverId: string;
-  languageId: string;
-  command: string;
-  status: string;
-  message: string;
 };
 
 type LspBridgeResponse = {
@@ -476,6 +477,8 @@ type ChatTurnContextSnapshot = {
   preserveDraft?: boolean;
   turnId?: string;
   retryTurnId?: string;
+  /** Cancel a retry that is still preparing when Stop or a new send wins. */
+  retryDispatchGuard?: () => boolean;
 };
 
 type QueuedChatMessage = {
@@ -755,6 +758,7 @@ type BrowserOwner = {
 };
 
 export function App() {
+  const quitConfirmation = useQuitConfirmation();
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(loadInitialWorkbenchState);
   const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -789,10 +793,25 @@ export function App() {
     useState<Record<string, ChatBrowserResource>>({});
   const [capabilityResourceDataByCallId, setCapabilityResourceDataByCallId] =
     useState<Record<string, unknown>>({});
-  const [chatGrid, dispatchChatGrid] = useReducer(
+  const [chatGrid, reduceChatGrid] = useReducer(
     chatGridReducer,
     undefined,
     loadChatGridState,
+  );
+  const chatGridRef = useRef(chatGrid);
+  chatGridRef.current = chatGrid;
+  // Keep acceptance and queued layout updates on the same state, including
+  // multiple drops dispatched before React commits another render.
+  const dispatchChatGrid = useCallback(
+    (action: Parameters<typeof chatGridReducer>[1]) => {
+      const current = chatGridRef.current;
+      const next = chatGridReducer(current, action);
+      if (next === current) return false;
+      chatGridRef.current = next;
+      reduceChatGrid(action);
+      return true;
+    },
+    [],
   );
   const events = activeSessionId
     ? (sessionEventsById[activeSessionId] ?? [])
@@ -829,6 +848,8 @@ export function App() {
     [setEventsForSession],
   );
   const eventsRef = useRef<SessionEvent[]>([]);
+  const sessionEventsByIdRef = useRef(sessionEventsById);
+  sessionEventsByIdRef.current = sessionEventsById;
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
   const [workspacePath, setWorkspacePath] = useState<string | undefined>(
     loadInitialWorkspacePath,
@@ -839,6 +860,12 @@ export function App() {
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+  const editorBuffersRef = useRef(workbench.ide.buffers);
+  editorBuffersRef.current = workbench.ide.buffers;
+  const navigationRequestRef = useRef(0);
+  const [navigationHistory, setNavigationHistory] = useState<{ entries: WorkspaceNavigationSource[]; index: number }>({ entries: [], index: -1 });
   const [languageOverrides, setLanguageOverrides] = useState<
     Record<string, string>
   >({});
@@ -980,6 +1007,18 @@ export function App() {
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
+  const retryProviderStatusRef = useRef<(event: SessionEvent) => void>(() => {});
+  const retryDispatchRef = useRef(createChatRetryDispatcher());
+  useEffect(() => () => retryDispatchRef.current.cancelAll(), []);
+  const chatAutoRetry = useChatAutoRetry({
+    enabled: isTauriRuntime(), eventsBySessionId: sessionEventsById,
+    sendingSessionIds, queueVersion: chatMessageQueues, pauseVersion: queueRetryTick,
+    blockedSessionIds: () => new Set([
+      ...sendingSessionIdsRef.current, ...stoppedChatSessionsRef.current,
+      ...queuedChatDispatchesRef.current,
+    ]),
+    onRetry: (event) => retryProviderStatusRef.current(event),
+  });
   const pendingPaneSendRef = useRef<{
     paneId: string;
     message: string;
@@ -1108,8 +1147,6 @@ export function App() {
   const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
-  const languageServerIdsRef = useRef<Record<string, string>>({});
-  const languageServerOpenedDocsRef = useRef(new Set<string>());
   // Providers that rejected the sign-in Gyro sent with, mirrored into a ref so
   // the stream and health callbacks read the live set without re-subscribing.
   // The writers below update it eagerly: a sign-in and the health check that
@@ -3208,7 +3245,9 @@ export function App() {
         streamEvent.phase === "completed" ||
         streamEvent.phase === "failed" ||
         streamEvent.phase === "cancelled" ||
-        streamEvent.phase === "heartbeat"
+        streamEvent.phase === "heartbeat" ||
+        streamEvent.phase === "retry-wait" ||
+        streamEvent.phase === "retry-started"
       ) {
         flushProviderStreamBatches();
         applyProviderChatStreamEvent(
@@ -5348,7 +5387,7 @@ export function App() {
         .filter((path) => editorPathMatches(path, fromPath));
       if (
         affectedEditorPaths.some(
-          (path) => workbench.ide.buffers[path]?.status === "dirty",
+          (path) => editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         )
       ) {
         notify(
@@ -5427,7 +5466,7 @@ export function App() {
       const buffer = workbench.ide.buffers[path];
       if (
         affectedEditorPaths.some(
-          (editorPath) => workbench.ide.buffers[editorPath]?.status === "dirty",
+          (editorPath) => editorBufferHasUnsavedChanges(workbench.ide.buffers[editorPath]),
         )
       ) {
         notify(
@@ -9818,18 +9857,29 @@ export function App() {
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
+      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      if (requestedSessionId && message.length <= MAX_CHAT_MESSAGE_CHARS &&
+          (message || draftAttachments.length > 0)) {
+        chatAutoRetry.cancelSession(requestedSessionId);
+        if (!overrideContext?.retryTurnId && !overrideContext?.retryDispatchGuard) {
+          retryDispatchRef.current.cancelSession(requestedSessionId);
+        }
+      }
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // An image dropped a moment ago may still be uploading.
       const turnAttachments = draftAttachments.some((item) => item.pending)
         ? await settlePendingMedia(draftAttachments)
         : draftAttachments;
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
       const turnGoal =
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
           : activeSessionGoal;
-      const turnPlan = overrideContext?.plan ?? activeSessionPlan;
-      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const turnPlan = overrideContext && "plan" in overrideContext
+        ? (overrideContext.plan ?? { title: "Plan", items: [] })
+        : activeSessionPlan;
       const previewSessionId =
         isTauriRuntime() && requestedSessionId?.startsWith("preview-")
           ? requestedSessionId
@@ -9934,6 +9984,9 @@ export function App() {
         targetSessionId &&
         sendingSessionIdsRef.current.has(targetSessionId)
       ) {
+        // Recovery keeps the original turn. The dispatch controller waits for
+        // a finishing invoke; it must never fall into the normal send queue.
+        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard) return false;
         if (
           (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
@@ -10555,6 +10608,10 @@ export function App() {
         await pendingModelSave(targetSessionId);
       }
       await configSaveQueueRef.current;
+      // Preparation can await media, provider health and model saves. A new
+      // send or Stop may win meanwhile, or another sender may have started.
+      if (overrideContext?.retryDispatchGuard?.() === false ||
+          (isRetry && sendingSessionIdsRef.current.has(targetSessionId))) return false;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
@@ -10786,6 +10843,7 @@ export function App() {
       applyProviderChatResponse,
       chatDraftModels,
       chatMessageQueues,
+      chatAutoRetry.cancelSession,
       refreshProviderUsage,
       checkProviderReadiness,
       recordProviderHealthOutput,
@@ -11208,6 +11266,20 @@ export function App() {
 
   const handleProviderStatusAction = useCallback(
     (action: string, event: SessionEvent) => {
+      if (action === "cancel-retry") {
+        chatAutoRetry.cancelSession(event.sessionId);
+        retryDispatchRef.current.cancelSession(event.sessionId);
+        stoppedChatSessionsRef.current.add(event.sessionId);
+        void invoke("stop_provider_chat", { sessionId: event.sessionId }).catch((error) => {
+          stoppedChatSessionsRef.current.delete(event.sessionId);
+          setQueueRetryTick((current) => current + 1);
+          notify("command-failed", "Could not cancel retry", String(error));
+        });
+        return;
+      }
+      if (action === "retry-send" || action === "reconnect-provider") {
+        chatAutoRetry.cancel(event.id);
+      }
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
@@ -11387,7 +11459,8 @@ export function App() {
 
       const replayFailedTurn = () => {
         if (!userMessage) return;
-        if (turnId) {
+        const removeQueuedReplay = () => {
+          if (!turnId) return;
           setChatMessageQueues((current) => {
             const queued = current[event.sessionId] ?? [];
             const remaining = queued.filter(
@@ -11401,7 +11474,7 @@ export function App() {
             else delete next[event.sessionId];
             return next;
           });
-        }
+        };
         const userPayload = recordFromUnknown(userEvent?.payload);
         const attachments = Array.isArray(userPayload?.attachments)
           ? (userPayload.attachments as ChatAttachment[])
@@ -11410,7 +11483,7 @@ export function App() {
             : [];
         const goalRecord = recordFromUnknown(payload?.goal);
         const planRecord = recordFromUnknown(payload?.plan);
-        void sendDraft(userMessage, {
+        const retryContext: ChatTurnContextSnapshot = {
           sessionId: event.sessionId,
           preserveDraft: true,
           retryTurnId: turnId,
@@ -11433,7 +11506,22 @@ export function App() {
             planRecord && Array.isArray(planRecord.items)
               ? (planRecord as unknown as SessionPlan)
               : undefined,
-        });
+        };
+        void retryDispatchRef.current.dispatch(event.sessionId, turnId, {
+          isBusy: () => sendingSessionIdsRef.current.has(event.sessionId) ||
+            queuedChatDispatchesRef.current.has(event.sessionId),
+          isCurrent: () => isChatRetryCurrent(
+            sessionEventsByIdRef.current[event.sessionId] ?? [], event,
+          ),
+          send: (retryDispatchGuard) => {
+            // A finishing queued delivery can reinsert its failed item. Drop
+            // that replay only after its dispatch cleanup has also settled.
+            removeQueuedReplay();
+            return sendDraftRef.current(userMessage, {
+              ...retryContext, retryDispatchGuard,
+            });
+          },
+        }).catch((error) => notify("command-failed", "Could not retry", String(error)));
       };
 
       if (action === "reconnect-provider" && isProviderId(providerId)) {
@@ -11462,6 +11550,8 @@ export function App() {
     },
     [
       subagentController,
+      chatAutoRetry.cancel,
+      chatAutoRetry.cancelSession,
       displayedChatLayout,
       browserResourcesBySessionId,
       capabilityResourceDataByCallId,
@@ -11474,6 +11564,8 @@ export function App() {
       sessions,
     ],
   );
+
+  retryProviderStatusRef.current = (event) => handleProviderStatusAction("retry-send", event);
 
   const projectImport = useProjectImport({
     enabled: activeDestination === "settings" && workbench.preferences.lastSettingsSection === "import-projects",
@@ -11650,6 +11742,8 @@ export function App() {
       if (options?.pauseQueue !== false) {
         stoppedChatSessionsRef.current.add(sessionId);
       }
+      chatAutoRetry.cancelSession(sessionId);
+      retryDispatchRef.current.cancelSession(sessionId);
       void invoke("stop_provider_chat", { sessionId }).catch((error) => {
         if (options?.pauseQueue !== false) {
           stoppedChatSessionsRef.current.delete(sessionId);
@@ -11658,7 +11752,7 @@ export function App() {
         notify("command-failed", "Stop failed", String(error));
       });
     },
-    [notify],
+    [chatAutoRetry.cancelSession, notify],
   );
 
   const stopActiveChat = useCallback(() => {
@@ -11878,7 +11972,7 @@ export function App() {
       const closesLastReference = !groupId || groupsWithPath.length <= 1;
       if (
         closesLastReference &&
-        workbench.ide.buffers[path]?.status === "dirty" &&
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]) &&
         !window.confirm(`Discard unsaved changes in ${workspaceName(path)}?`)
       ) {
         return;
@@ -11933,7 +12027,7 @@ export function App() {
         .filter(
           (path) =>
             !pathsStillOpen.has(path) &&
-            workbench.ide.buffers[path]?.status === "dirty",
+            editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         );
       if (
         dirtyPaths.length > 0 &&
@@ -11967,16 +12061,25 @@ export function App() {
   }, []);
 
   const updateEditorBuffer = useCallback((path: string, content: string) => {
+    const current = editorBuffersRef.current[path];
+    if (current) {
+      const next = { ...editorBuffersRef.current, [path]: { ...current, content, status: content === current.savedContent ? "ready" as const : "dirty" as const } };
+      editorBuffersRef.current = next;
+      if (hasEditRecovery()) {
+        try { writeEditRecovery(next); }
+        catch (failure) { notify("command-failed", "Could not update edit recovery", String(failure)); }
+      }
+    }
     dispatchWorkbench({ type: "ide-update-buffer", path, content });
-  }, []);
+  }, [notify]);
 
   const saveEditorBuffer = useCallback(
     async (path: string) => {
-      const buffer = workbench.ide.buffers[path];
+      const buffer = editorBuffersRef.current[path];
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
-        return;
+        return false;
       }
       if (buffer.truncated) {
         notify(
@@ -11984,7 +12087,7 @@ export function App() {
           "Save blocked",
           "This is a truncated preview. The complete file must be loaded before saving.",
         );
-        return;
+        return false;
       }
       if (!isTauriRuntime()) {
         dispatchWorkbench({
@@ -12005,7 +12108,7 @@ export function App() {
           path,
           preview: true,
         });
-        return;
+        return true;
       }
       try {
         const saved = await invoke<WorkspaceFileContent>(
@@ -12019,6 +12122,14 @@ export function App() {
             } satisfies WorkspaceFileWriteRequest,
           },
         );
+        const live = editorBuffersRef.current[path] ?? buffer;
+        const next = { ...editorBuffersRef.current, [path]: { ...live, savedContent: saved.content, contentHash: saved.contentHash,
+          status: live.content === saved.content ? "saved" as const : "dirty" as const } };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try { writeEditRecovery(next); }
+          catch (failure) { notify("command-failed", "Could not update edit recovery", String(failure)); }
+        }
         dispatchWorkbench({
           type: "ide-mark-buffer-saved",
           path,
@@ -12026,12 +12137,13 @@ export function App() {
           contentHash: saved.contentHash,
           sizeBytes: saved.sizeBytes,
         });
-        setSelectedFileContent(saved);
+        if (selectedFileRef.current === path) setSelectedFileContent({ ...saved, content: live.content });
         notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
           contentHash: saved.contentHash,
         });
+        return true;
       } catch (error) {
         const detail = String(error);
         dispatchWorkbench({
@@ -12048,10 +12160,92 @@ export function App() {
             error: detail,
           },
         );
+        return false;
       }
     },
     [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
   );
+
+  const languageSessions = useLanguageSessions({
+    roots: workspaceRoots, buffers: workbench.ide.buffers, languageOverrides,
+    trust: workbench.preferences.workspaceTrust,
+    onState: server => dispatchWorkbench({ type: "ide-set-language-server", server }),
+    onMessages: (messages, root) => {
+      const diagnostics = diagnosticsFromLspMessages(messages, root);
+      if (!diagnostics) return;
+      const publishedPaths = new Set((messages ?? []).flatMap(message =>
+        isRecord(message) && message.method === "textDocument/publishDiagnostics" && isRecord(message.params) && typeof message.params.uri === "string"
+          ? [lspRelativePath(message.params.uri, root)] : []));
+      dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics: [
+        ...workbench.ide.diagnostics.filter(diagnostic => !publishedPaths.has(diagnostic.path)), ...diagnostics,
+      ] });
+    },
+  });
+  const requestLanguageFeature = languageSessions.request;
+  const workspaceRename = useWorkspaceRename({
+    roots: workspaceRoots, buffers: workbench.ide.buffers, trust: workbench.preferences.workspaceTrust,
+    request: requestLanguageFeature, version: languageSessions.version,
+    synchronize: languageSessions.synchronize,
+    isOpen: path => workbench.ide.tabs.some(tab => tab.path === path),
+    capabilities: path => languageSessions.ready(path)?.capabilities,
+    read: async (path, root) => isTauriRuntime()
+      ? invoke<WorkspaceFileContent>("read_workspace_file_full", { path, workspacePath: root })
+      : createPreviewWorkspaceFileContent(path),
+    dispatch: dispatchWorkbench, save: saveEditorBuffer,
+    notify: message => notify("command-failed", "Could not rename symbol", message),
+  });
+  const openWorkspaceLocation = useCallback(async (path: string, lineNumber: number, column: number, source?: WorkspaceNavigationSource, record = true) => {
+    const token = ++navigationRequestRef.current;
+    try {
+      const normalized = filePathFromUri(canonicalFileUri(path));
+      const root = normalized ? workspaceRootForPath(workspaceRoots, normalized) : undefined;
+      if (!normalized || !root) throw new Error("The target is outside the workspace folders.");
+      if (!editorBuffersRef.current[normalized]) {
+        const file = isTauriRuntime()
+          ? await invoke<WorkspaceFileContent>("read_workspace_file_full", { path: normalized, workspacePath: root })
+          : createPreviewWorkspaceFileContent(normalized);
+        if (file.truncated) throw new Error("The target exceeds the editable file limit.");
+        if (navigationRequestRef.current !== token) return false;
+        const buffer = editorBuffersRef.current[normalized] ?? editorBufferFromFile(file);
+        if (!editorBuffersRef.current[normalized]) {
+          editorBuffersRef.current = { ...editorBuffersRef.current, [normalized]: buffer };
+          dispatchWorkbench({ type: "ide-apply-buffer-batch", updates: [{ path: normalized, buffer }] });
+        }
+      }
+      if (navigationRequestRef.current !== token) return false;
+      if (source && selectedFileRef.current && selectedFileRef.current !== source.path) return false;
+      if (record) setNavigationHistory(history => {
+        const entries = history.entries.slice(0, history.index + 1);
+        if (source) {
+          if (entries.length) entries[entries.length - 1] = source;
+          else entries.push(source);
+        }
+        entries.push({ path: normalized, lineNumber, column });
+        return { entries: entries.slice(-100), index: Math.min(entries.length - 1, 99) };
+      });
+      openEditorLocation(normalized, lineNumber, column);
+      return true;
+    } catch (failure) { notify("command-failed", "Could not open code location", String(failure)); return false; }
+  }, [notify, openEditorLocation, workspaceRoots]);
+  const navigateEditorHistory = useCallback(async (direction: number) => {
+    const index = navigationHistory.index + direction;
+    const target = navigationHistory.entries[index];
+    if (!target) return;
+    if (await openWorkspaceLocation(target.path, target.lineNumber, target.column, undefined, false))
+      setNavigationHistory(history => ({ ...history, index }));
+  }, [navigationHistory, openWorkspaceLocation]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && !event.metaKey && (event.code === "Minus" || event.key === "-") && !workspaceRename.draft) {
+        event.preventDefault(); void navigateEditorHistory(event.shiftKey ? 1 : -1);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "s" && !workspaceRename.draft) {
+        event.preventDefault(); void workspaceRename.saveAll();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigateEditorHistory, workspaceRename.draft, workspaceRename.saveAll]);
 
   const applyWorkspaceReplace = useCallback(
     async (
@@ -12063,7 +12257,7 @@ export function App() {
       const uniquePaths = [...new Set(paths)];
       if (!searchText || uniquePaths.length === 0) return;
       const dirtyPath = uniquePaths.find(
-        (path) => workbench.ide.buffers[path]?.status === "dirty",
+        (path) => editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
       );
       if (dirtyPath) {
         notify(
@@ -13106,9 +13300,11 @@ export function App() {
     });
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
+    quitConfirmation.requested ||
     isCommandPaletteOpen ||
     Boolean(modelStandardPrompt) ||
     Boolean(branchNameRequest) ||
+    Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
     Boolean(terminalTerminateCandidate) ||
     Boolean(chatCloseCandidate);
@@ -14166,45 +14362,6 @@ export function App() {
     [],
   );
 
-  const requestLanguageFeature = useCallback(
-    async (path: string, method: string, params: Record<string, unknown>) => {
-      const root = workspaceRootForPath(workspaceRoots, path);
-      const descriptor = languageServerDescriptorForPath(
-        path,
-        languageOverrides[path],
-      );
-      if (!root || !descriptor || !isTauriRuntime()) {
-        return undefined;
-      }
-      const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-      const serverId = languageServerIdsRef.current[stateId];
-      if (!serverId) {
-        return undefined;
-      }
-      const response = await invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method,
-          params: {
-            ...params,
-            textDocument: {
-              ...(isRecord(params.textDocument) ? params.textDocument : {}),
-              uri: workspaceFileUri(root, path),
-            },
-          },
-        },
-      });
-      const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-      if (diagnostics) {
-        dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-      }
-      if (response.status === "error") {
-        throw new Error(JSON.stringify(response.error ?? "LSP request failed"));
-      }
-      return response.result;
-    },
-    [workspaceRoots, languageOverrides],
-  );
 
   useEffect(() => {
     safeSetLocalStorage(
@@ -14262,7 +14419,7 @@ export function App() {
         workbench.ide.activePath
       ) {
         event.preventDefault();
-        void saveEditorBuffer(workbench.ide.activePath);
+        if (!event.shiftKey) void saveEditorBuffer(workbench.ide.activePath);
       } else if (event.key.toLowerCase() === "p" && event.shiftKey) {
         event.preventDefault();
         openGlobalSearch("commands");
@@ -14424,7 +14581,7 @@ export function App() {
     }
 
     const existingBuffer = workbench.ide.buffers[selectedFile];
-    if (existingBuffer && existingBuffer.status === "dirty") {
+    if (existingBuffer && editorBufferHasUnsavedChanges(existingBuffer)) {
       setSelectedFileContent({
         path: selectedFile,
         content: existingBuffer.content,
@@ -14595,7 +14752,7 @@ export function App() {
         if (!stat.contentHash || stat.contentHash === buffer.contentHash) {
           return;
         }
-        if (buffer.status === "dirty") {
+        if (editorBufferHasUnsavedChanges(buffer)) {
           dispatchWorkbench({
             type: "ide-mark-buffer-error",
             path: selectedFile,
@@ -14697,251 +14854,6 @@ export function App() {
     workspaceRoots,
     workspaceWatchMode,
   ]);
-
-  useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      !isTauriRuntime() ||
-      !isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const startingState: LanguageServerState = {
-      id: stateId,
-      languageId: descriptor.languageId,
-      command: descriptor.command,
-      status: "starting",
-      activePath: selectedFile,
-      message: `Starting ${descriptor.command}`,
-    };
-    dispatchWorkbench({
-      type: "ide-set-language-server",
-      server: startingState,
-    });
-    void invoke<LspSessionResult>("lsp_start", {
-      request: {
-        workspacePath: root,
-        languageId: descriptor.languageId,
-        command: descriptor.command,
-      },
-    })
-      .then(async (session) => {
-        if (cancelled) {
-          return;
-        }
-        languageServerIdsRef.current[stateId] = session.serverId;
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            serverId: session.serverId,
-            status: "ready",
-            message: session.message,
-          },
-        });
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: `lsp:${descriptor.languageId}`,
-            label: `${descriptor.languageId} language server`,
-            kind: "lsp",
-            lines: [session.message],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-        const content =
-          workbench.ide.buffers[selectedFile]?.content ??
-          (selectedFileContent?.path === selectedFile
-            ? selectedFileContent.content
-            : "");
-        const uri = workspaceFileUri(root, selectedFile);
-        const documentKey = `${session.serverId}:${uri}`;
-        if (languageServerOpenedDocsRef.current.has(documentKey)) {
-          return;
-        }
-        languageServerOpenedDocsRef.current.add(documentKey);
-        const response = await invoke<LspBridgeResponse>("lsp_request", {
-          request: {
-            serverId: session.serverId,
-            method: "textDocument/didOpen",
-            params: {
-              textDocument: {
-                uri,
-                languageId: descriptor.languageId,
-                version: 1,
-                text: content,
-              },
-            },
-          },
-        });
-        const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-        if (diagnostics) {
-          dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-        }
-        window.setTimeout(() => {
-          void invoke<LspBridgeResponse>("lsp_request", {
-            request: {
-              serverId: session.serverId,
-              method: "$/gyro/poll",
-              params: {},
-            },
-          })
-            .then((pollResponse) => {
-              const publishedDiagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (publishedDiagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics: publishedDiagnostics,
-                });
-              }
-            })
-            .catch(() => undefined);
-        }, 350);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        const message = String(error);
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            status: message.toLowerCase().includes("not found")
-              ? "not-installed"
-              : "error",
-            message,
-          },
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFileContent?.contentHash,
-    workbench.preferences.workspaceTrust,
-    workspaceRoots,
-  ]);
-
-  useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const content = selectedFile
-      ? workbench.ide.buffers[selectedFile]?.content
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      content === undefined ||
-      !isTauriRuntime()
-    ) {
-      return;
-    }
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const serverId = languageServerIdsRef.current[stateId];
-    if (!serverId) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const uri = workspaceFileUri(root, selectedFile);
-      void invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method: "textDocument/didChange",
-          params: {
-            textDocument: { uri, version: Date.now() },
-            contentChanges: [{ text: content }],
-          },
-        },
-      })
-        .then((response) => {
-          const immediate = diagnosticsFromLspMessages(response.messages, root);
-          if (immediate) {
-            dispatchWorkbench({
-              type: "ide-set-diagnostics",
-              diagnostics: immediate,
-            });
-          }
-          window.setTimeout(() => {
-            void invoke<LspBridgeResponse>("lsp_request", {
-              request: { serverId, method: "$/gyro/poll", params: {} },
-            }).then((pollResponse) => {
-              const diagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (diagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics,
-                });
-              }
-            });
-          }, 300);
-        })
-        .catch(() => undefined);
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
-    workspaceRoots,
-  ]);
-
-  useEffect(
-    () => () => {
-      if (!isTauriRuntime()) {
-        return;
-      }
-      for (const serverId of Object.values(languageServerIdsRef.current)) {
-        void invoke("lsp_stop", { serverId });
-      }
-    },
-    [],
-  );
 
   useEffect(() => {
     if (!isTauriRuntime() || !terminalPanePollKey) {
@@ -15549,6 +15461,9 @@ export function App() {
   // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
   const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
+  // Snapshot the requested providers; offers and notice dismissal can change in flight.
+  const [cliUpdatingProviderIds, setCliUpdatingProviderIds] = useState<readonly string[]>([]);
+  const cliUpdatingProvidersRef = useRef<readonly string[]>([]);
   // Only an update (or a check) the user pressed can fail the notice; a
   // background check that times out keeps the last known offers silently.
   const [cliUpdateFailure, setCliUpdateFailure] = useState<{
@@ -15556,14 +15471,12 @@ export function App() {
     providerIds: string[];
   }>();
   const cliUpdateCheckingRef = useRef(false);
-  const cliUpdatePhaseRef = useRef(cliUpdatePhase);
-  cliUpdatePhaseRef.current = cliUpdatePhase;
   const checkCliUpdates = useCallback(
     async (userInitiated = false) => {
       if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
         return;
       }
-      if (cliUpdatePhaseRef.current === "updating") {
+      if (cliUpdatingProvidersRef.current.length > 0) {
         return;
       }
       cliUpdateCheckingRef.current = true;
@@ -15603,19 +15516,20 @@ export function App() {
   );
 
   const applyCliUpdates = useCallback(async () => {
-    if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
+    if (!isTauriRuntime() || cliUpdateOffers.length === 0 || cliUpdatingProvidersRef.current.length > 0) {
       return;
     }
+    const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
+    cliUpdatingProvidersRef.current = providerIds;
+    setCliUpdatingProviderIds(providerIds);
     setCliUpdatePhase("updating");
     setCliUpdateFailure(undefined);
     try {
-      const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
       const results = await invoke<CliUpdateApplyResult[]>(
         "apply_cli_updates_command",
         { providerIds },
       );
       const failed = results.filter((result) => !result.ok);
-      setCliUpdatePhase("idle");
       if (failed.length > 0) {
         setCliUpdateFailure({
           message: failed
@@ -15643,15 +15557,18 @@ export function App() {
         setCliUpdateOffers([]);
         localStorage.removeItem("gyro.cli-updates.dismissed.v1");
       }
-      // Re-check so a partial failure still lists remaining updates.
-      void checkCliUpdates(false);
     } catch (error) {
-      setCliUpdatePhase("idle");
       setCliUpdateFailure({
         message: String(error),
-        providerIds: cliUpdateOffers.map((offer) => offer.providerId),
+        providerIds,
       });
       notify("command-failed", "CLI update failed", String(error));
+    } finally {
+      cliUpdatingProvidersRef.current = [];
+      setCliUpdatingProviderIds([]);
+      setCliUpdatePhase("idle");
+      // Re-check after releasing the in-flight guard, including partial failures.
+      void checkCliUpdates(false);
     }
   }, [checkCliUpdates, cliUpdateOffers, notify]);
 
@@ -15661,7 +15578,7 @@ export function App() {
       localStorage.setItem("gyro.cli-updates.dismissed.v1", key);
     }
     setCliUpdateOffers([]);
-    setCliUpdatePhase("idle");
+    setCliUpdatePhase(cliUpdatingProvidersRef.current.length > 0 ? "updating" : "idle");
     setCliUpdateFailure(undefined);
   }, [cliUpdateOffers]);
 
@@ -15722,6 +15639,13 @@ export function App() {
     [updater],
   );
 
+  const activeComposerModel = activeSession
+    ? sessionModelSelectionFromSession(activeSession)
+    : chatDraftModels[activeDraftKey];
+  const activeComposerCliUpdating = isComposerCliUpdating(
+    cliUpdatingProviderIds, activeComposerModel, config.selectedProviderId,
+  );
+
   const renderChatPane = (
     pane: ChatPaneRef,
     options: {
@@ -15729,6 +15653,7 @@ export function App() {
       isTiled: boolean;
       onPaneDragEnd: () => void;
       onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+      onPanePointerDown: (event: ReactPointerEvent<HTMLSpanElement>) => void;
     },
   ) => {
     const paneSession =
@@ -15747,6 +15672,12 @@ export function App() {
         : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
+    const paneComposerModel = pane.kind === "session"
+      ? sessionModelSelectionFromSession(paneSession)
+      : chatDraftModels[paneDraftKey];
+    const paneComposerCliUpdating = isComposerCliUpdating(
+      cliUpdatingProviderIds, paneComposerModel, config.selectedProviderId,
+    );
     const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
       pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
@@ -15944,12 +15875,15 @@ export function App() {
             ? sendingSessionIds.includes(pane.sessionId)
             : isFocused && isStartingFirstTurn
         }
-        isCliUpdating={cliUpdatePhase === "updating"}
+        isCliUpdating={paneComposerCliUpdating}
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isToolPanelAvailable={isBottomDrawerAvailable}
         isTiled={options.isTiled}
+        onPaneDragStart={options.onPaneDragStart}
+        onPaneDragEnd={options.onPaneDragEnd}
+        onPanePointerDown={options.onPanePointerDown}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
         canAttachEditorSnapshot={canAttachEditorSnapshot}
@@ -16096,11 +16030,7 @@ export function App() {
           message: item.message,
         }))}
         savedProjects={savedProjects}
-        sessionModel={
-          pane.kind === "session"
-            ? sessionModelSelectionFromSession(paneSession)
-            : chatDraftModels[paneDraftKey]
-        }
+        sessionModel={paneComposerModel}
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
         sessionSummary={paneSession?.summary}
@@ -16115,27 +16045,119 @@ export function App() {
     );
   };
 
+  // Draft panes and the cold-launch start screen are not sessions. List
+  // them anyway so an unsent chat is visible before the first message.
+  // Abandoned placeholder sessions stay out of this list.
+  const sidebarDraftChats = useMemo(() => {
+    const drafts: Array<{
+      id: string;
+      title: string;
+      workspacePath: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const layout of Object.values(chatGrid.layouts)) {
+      for (const pane of layout.slots) {
+        if (pane?.kind !== "draft" || seen.has(pane.paneId)) continue;
+        seen.add(pane.paneId);
+        drafts.push({
+          id: pane.paneId,
+          title: "New chat",
+          workspacePath: pane.workspacePath,
+        });
+      }
+    }
+    const occupied = activeChatLayout?.slots.some(Boolean) ?? false;
+    if (!occupied && !activeSessionId) {
+      drafts.unshift({
+        id: `start:${currentChatProjectKey}`,
+        title: "New chat",
+        workspacePath: workspacePath ?? "",
+      });
+    }
+    return drafts;
+  }, [
+    activeChatLayout,
+    activeSessionId,
+    chatGrid.layouts,
+    currentChatProjectKey,
+    workspacePath,
+  ]);
+  const activeDraftChatId =
+    activeChatPane?.kind === "draft"
+      ? activeChatPane.paneId
+      : !activeChatLayout?.slots.some(Boolean) && !activeSessionId
+        ? `start:${currentChatProjectKey}`
+        : undefined;
+  const selectSidebarDraft = useCallback(
+    (draftId: string, options: { keepLayout?: boolean } = {}) => {
+      const showThread = () => {
+        dispatchWorkbench({ type: "set-chat-panel" });
+        if (!options.keepLayout) {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "thread",
+          });
+        }
+      };
+      // The cold-launch row is the start screen itself. Focusing it must not
+      // run startNewChat, which resets the unsent composer.
+      if (draftId.startsWith("start:")) {
+        showThread();
+        return;
+      }
+      for (const layout of Object.values(chatGrid.layouts)) {
+        const pane = layout.slots.find(
+          (slot) => slot?.kind === "draft" && slot.paneId === draftId,
+        );
+        if (!pane) continue;
+        focusChatPane(pane);
+        showThread();
+        return;
+      }
+    },
+    [chatGrid.layouts, focusChatPane],
+  );
+
   // The workspace chat lives in the AI sidebar view — the same surface the
   // Sessions destination renders, at sidebar width.
   // Recent chats for the project the workspace is on, newest first, so the AI
   // view can switch chats without the Sessions sidebar.
   const workspaceChatSwitcher = {
-    chats: sessions
-      .filter(
-        (session) =>
-          chatProjectKey(session.workspacePath) ===
-          chatProjectKey(activeSession?.workspacePath ?? workspacePath),
-      )
-      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
-      .slice(0, 8)
-      .map((session) => ({
-        id: session.id,
-        title: session.title || "Untitled chat",
-        meta: session.branch,
-      })),
-    activeChatId: activeSessionId,
-    onSelect: (sessionId: string) =>
-      selectSession(sessionId, { keepLayout: true }),
+    chats: [
+      ...sidebarDraftChats
+        .filter(
+          (draft) =>
+            chatProjectKey(draft.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .map((draft) => ({
+          id: draft.id,
+          title: draft.title || "New chat",
+        })),
+      ...sessions
+        .filter(
+          (session) =>
+            chatProjectKey(session.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .sort((first, second) =>
+          second.updatedAt.localeCompare(first.updatedAt),
+        )
+        .slice(0, 8)
+        .map((session) => ({
+          id: session.id,
+          title: session.title || "Untitled chat",
+          meta: session.branch,
+        })),
+    ],
+    activeChatId: activeDraftChatId ?? activeSessionId,
+    onSelect: (chatId: string) => {
+      if (sidebarDraftChats.some((draft) => draft.id === chatId)) {
+        selectSidebarDraft(chatId, { keepLayout: true });
+        return;
+      }
+      selectSession(chatId, { keepLayout: true });
+    },
     onNewChat: () => startNewChat({ keepLayout: true }),
   };
 
@@ -16214,7 +16236,7 @@ export function App() {
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
       isComposerSending={isActiveSessionSending}
-      isCliUpdating={cliUpdatePhase === "updating"}
+      isCliUpdating={activeComposerCliUpdating}
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16492,6 +16514,9 @@ export function App() {
       openChatSessionIds={(activeChatLayout?.slots ?? []).flatMap((pane) =>
         pane?.kind === "session" ? [pane.sessionId] : [],
       )}
+      draftChats={sidebarDraftChats}
+      activeDraftId={activeDraftChatId}
+      onSelectDraftChat={selectSidebarDraft}
       savedProjects={savedProjects}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
       sessions={visibleSessions}
@@ -16516,51 +16541,70 @@ export function App() {
               <ChatGridSurface
                 layout={displayedChatLayout}
                 maximizedPaneId={chatGrid.maximizedPaneId}
-                onDropSession={(
-                  sessionId,
-                  sourceProjectKey,
-                  slotIndex,
-                  placement,
-                ) => {
-                  const session = sessions.find(
-                    (item) => item.id === sessionId,
-                  );
-                  if (!session) return;
+                onDropSession={(sessionId, sourceProjectKey, slotIndex, placement) => {
+                  const session = sessions.find((item) => item.id === sessionId);
+                  if (!session) return false;
+                  // Resolve the real session's project; a native payload cannot
+                  // choose which saved layout gets edited.
                   const projectKey = chatProjectKey(session.workspacePath);
-                  if (
-                    sourceProjectKey &&
-                    sourceProjectKey !== displayedChatLayout.projectKey
-                  ) {
+                  if (chatProjectKey(sourceProjectKey) !== projectKey) return false;
+                  const switchingProject = projectKey !== displayedChatLayout.projectKey;
+                  const existingPane = chatGridRef.current.layouts[projectKey]?.slots.find(
+                    (pane) => pane?.kind === "session" && pane.sessionId === session.id,
+                  );
+                  const action = {
+                    type: "select-pane" as const,
+                    projectKey,
+                    mode:
+                      switchingProject && existingPane
+                        ? ("replace" as const)
+                        : ("drop" as const),
+                    // The old project's slot/arrangement has no meaning in the
+                    // destination. Focus its existing pane or append safely.
+                    slotIndex: switchingProject ? undefined : slotIndex,
+                    arrangement: switchingProject ? undefined : placement?.arrangement,
+                    insertPosition: switchingProject
+                      ? undefined
+                      : placement?.insertPosition,
+                    splitDirection: switchingProject
+                      ? undefined
+                      : placement?.splitDirection,
+                    pane: chatPaneForSession(session),
+                  };
+                  if (!dispatchChatGrid(action)) {
+                    if (switchingProject && !existingPane) {
+                      notify(
+                        "terminal",
+                        "Chat layout is full",
+                        "Close a chat in that project before adding another.",
+                      );
+                    }
+                    return false;
+                  }
+                  if (switchingProject) {
                     notify(
                       "terminal",
                       "Chat project switched",
                       workspaceName(session.workspacePath),
                     );
                   }
-                  dispatchChatGrid({
-                    type: "select-pane",
-                    projectKey,
-                    mode: "drop",
-                    slotIndex,
-                    arrangement: placement?.arrangement,
-                    insertPosition: placement?.insertPosition,
-                    splitDirection: placement?.splitDirection,
-                    pane: chatPaneForSession(session),
-                  });
                   activeSessionIdRef.current = session.id;
                   setActiveSessionId(session.id);
                   setWorkspacePath(session.workspacePath);
                   void refreshEvents(session.id);
+                  return true;
                 }}
                 onFocusPane={focusChatPane}
-                onMovePane={(paneId, slotIndex) =>
-                  dispatchChatGrid({
-                    type: "move-pane",
+                onMovePane={(paneId, slotIndex, placement) => {
+                  const action = {
+                    type: "move-pane" as const,
                     projectKey: displayedChatLayout.projectKey,
                     paneId,
                     slotIndex,
-                  })
-                }
+                    ...placement,
+                  };
+                  return dispatchChatGrid(action);
+                }}
                 onToggleMaximize={(paneId) =>
                   dispatchChatGrid({
                     type: "toggle-maximize-pane",
@@ -16631,7 +16675,7 @@ export function App() {
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
                     isComposerSending={isActiveSessionSending}
-                    isCliUpdating={cliUpdatePhase === "updating"}
+                    isCliUpdating={activeComposerCliUpdating}
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16721,7 +16765,17 @@ export function App() {
 
           {activeWorkspaceLayout === "code" ? (
             <section className="gyro-workspace-primary" aria-label="Workspace">
+              <WorkspaceEditBar paths={workspaceRename.paths} canUndo={workspaceRename.canUndo}
+                busy={workspaceRename.busy} error={workspaceRename.error}
+                onUndo={workspaceRename.undo} onSaveAll={() => void workspaceRename.saveAll()}
+                onOpenFile={openEditorFile} />
               <IdeSurface
+                editorNavigation={{
+                  canBack: navigationHistory.index > 0,
+                  canForward: navigationHistory.index < navigationHistory.entries.length - 1,
+                  onBack: () => void navigateEditorHistory(-1),
+                  onForward: () => void navigateEditorHistory(1),
+                }}
                 activePaneTab={workbench.activePaneTab}
                 isToolPanelOpen={workbench.isToolPanelOpen}
                 browserPreview={browserPreview}
@@ -16928,13 +16982,9 @@ export function App() {
                         props.path ? languageOverrides[props.path] : undefined
                       }
                       fileError={selectedFileError}
-                      semanticReady={
-                        workbench.ide.languageServers?.find(
-                          (server) =>
-                            server.activePath === props.path &&
-                            server.status === "ready",
-                        )?.serverId
-                      }
+                      semanticReady={languageSessions.ready(props.path)?.serverId}
+                      onOpenLocation={openWorkspaceLocation}
+                      onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
                       theme={resolvedTheme}
                     />
@@ -17041,6 +17091,17 @@ export function App() {
           desktopNotifications={workbench.preferences.desktopNotifications}
           onDesktopNotificationsChange={(notifications) => dispatchWorkbench({ type: "set-desktop-notifications", notifications })}
           onConfigChange={handleConfigChange}
+          onEfficiencyRoute={async (phase, escalate) => {
+            if (!activeSessionId) throw new Error("Select a chat before applying a phase route.");
+            if (!isTauriRuntime()) throw new Error("Phase handoffs require the desktop app.");
+            await invoke("route_efficiency_phase", { sessionId: activeSessionId, phase, escalate });
+            await refreshSessions();
+            await refreshEvents(activeSessionId);
+          }}
+          onEfficiencyChange={async (value) => {
+            const next = isTauriRuntime() ? await invoke<typeof value>("set_efficiency_config", { value }) : value;
+            setConfig(current => ({ ...current, efficiency: next }));
+          }}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onUpdateAction={runUpdateAction}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
@@ -17385,7 +17446,7 @@ export function App() {
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
           isComposerSending={isActiveSessionSending}
-          isCliUpdating={cliUpdatePhase === "updating"}
+          isCliUpdating={activeComposerCliUpdating}
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
@@ -17447,6 +17508,15 @@ export function App() {
           workspacePath={workspacePath}
         />
       ) : null}
+      {workspaceRename.draft ? (
+        <WorkspaceRenameDialog name={workspaceRename.draft.name} files={workspaceRename.draft.plan?.files}
+          busy={workspaceRename.draft.busy} error={workspaceRename.draft.error}
+          onPreview={name => void workspaceRename.preview(name)} onApply={() => void workspaceRename.apply()} onCancel={workspaceRename.cancel}
+          renderDiff={file => <ManagedDiffEditor height="100%" original={file.before} modified={file.after}
+            language={resolveLanguage({ path: file.path }).syntax.type === "monaco" ? (resolveLanguage({ path: file.path }).syntax as { language: string }).language : "plaintext"}
+            theme={resolvedTheme === "light" ? "gyro-light" : "gyro-dark"}
+            options={{ readOnly: true, originalEditable: false, minimap: { enabled: false }, automaticLayout: true, renderSideBySide: false }} />} />
+      ) : null}
       {branchNameRequest ? (
         <BranchNameDialog
           startPoint={branchNameRequest.startPoint}
@@ -17454,6 +17524,9 @@ export function App() {
           mode={branchNameRequest.mode}
           onFinish={finishBranchNameRequest}
         />
+      ) : null}
+      {quitConfirmation.requested ? (
+        <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
       ) : null}
       {modelStandardPrompt ? (
         <ModelStandardPromptOverlay
@@ -17543,6 +17616,7 @@ export function App() {
     </AppChrome>
   );
   return (
+    <ChatRetryContext.Provider value={chatAutoRetry}>
     <ChatFileActionsContext.Provider value={chatFileActions}>
     <TerminalAttachmentActionsContext.Provider
       value={terminalAttachmentActions}
@@ -17569,12 +17643,17 @@ export function App() {
       </ComposerContextCandidates.Provider>
     </TerminalAttachmentActionsContext.Provider>
     </ChatFileActionsContext.Provider>
+    </ChatRetryContext.Provider>
   );
 }
 
 const chatFilePreviewCache = new Map<string, Promise<string>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
+  return recoverWorkspaceBuffers(loadStoredWorkbenchState());
+}
+
+function loadStoredWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState({
     tasks: Object.values(loadChatTaskMetadata()),
   });
@@ -18982,6 +19061,10 @@ function areWorkbenchTurnsEqual(
   );
 }
 
+function editorBufferHasUnsavedChanges(buffer: EditorBuffer | undefined) {
+  return Boolean(buffer && buffer.content !== buffer.savedContent);
+}
+
 function workspaceContentToEditorBuffer(
   content: WorkspaceFileContent,
 ): EditorBuffer {
@@ -19214,592 +19297,6 @@ function disposeEditorModels(paths: string[]) {
       uniquePaths.forEach(disposeMonacoModel);
     })
     .catch(() => undefined);
-}
-
-function MonacoEditorPaneView({
-  buffer,
-  fileContent,
-  loadState,
-  minimapEnabled,
-  onChange,
-  onLspRequest,
-  onSelectionChange,
-  path,
-  revealTarget,
-  theme,
-  languageOverride,
-  semanticReady,
-  fileError,
-}: {
-  languageOverride?: string;
-  semanticReady?: string;
-  fileError?: string;
-  buffer?: EditorBuffer;
-  fileContent?: WorkspaceFileContent;
-  loadState: "idle" | "loading" | "ready" | "error";
-  minimapEnabled: boolean;
-  onChange: (value: string) => void;
-  onLspRequest?: (
-    path: string,
-    method: string,
-    params: Record<string, unknown>,
-  ) => Promise<unknown>;
-  onSelectionChange: (selection?: EditorSelection) => void;
-  path?: string;
-  revealTarget?: EditorRevealTarget;
-  theme: ResolvedTheme;
-}) {
-  const syntax = useSyntax(
-    path ?? "",
-    buffer?.content ?? fileContent?.content ?? "",
-    languageOverride,
-    buffer?.sizeBytes ?? fileContent?.sizeBytes,
-    buffer?.truncated ?? fileContent?.truncated,
-  );
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
-  // The pane is memoised and its callbacks arrive as fresh closures, so read
-  // them through refs; handleMount subscribes once and would otherwise keep
-  // the first render's callback.
-  const onChangeRef = useRef(onChange);
-  const onSelectionChangeRef = useRef(onSelectionChange);
-  onChangeRef.current = onChange;
-  onSelectionChangeRef.current = onSelectionChange;
-  const handleChange = useCallback(
-    (value?: string) => onChangeRef.current(value ?? ""),
-    [],
-  );
-  const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
-  const hasMountedRef = useRef(false);
-  const [mounted, setMounted] = useState(false);
-  const revealEditorTarget = useCallback(
-    (editor: Parameters<OnMount>[0]) => {
-      if (!revealTarget || revealTarget.path !== path) {
-        return;
-      }
-      const position = {
-        lineNumber: revealTarget.lineNumber,
-        column: revealTarget.column,
-      };
-      editor.setPosition(position);
-      editor.revealPositionInCenter(position);
-      editor.focus();
-    },
-    [path, revealTarget],
-  );
-  useEffect(() => {
-    if (editorRef.current) {
-      revealEditorTarget(editorRef.current);
-    }
-  }, [revealEditorTarget, revealTarget?.nonce]);
-  useEffect(
-    () => () => {
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-    },
-    [],
-  );
-
-  // @monaco-editor/react calls editor.updateOptions() whenever this object
-  // changes identity. A literal here re-configures the editor on every render,
-  // which on a keystroke means a full options + layout recompute.
-  const { scale, reduceMotion } = useAppearance();
-  const editorOptions = useMemo(
-    () => workspaceEditorOptions({ scale, reduceMotion, minimapEnabled, limited: syntax.policy.limited, readOnly: syntax.policy.readOnly }),
-    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly, scale, reduceMotion],
-  );
-
-  useEffect(() => {
-    if (!mounted) return;
-    let disposed = false;
-    void import("monaco-editor").then((monaco) => {
-      if (disposed) return;
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-      if (
-        path &&
-        onLspRequest &&
-        !syntax.policy.limited &&
-        syntax.language !== "plaintext"
-      ) {
-        const language = syntax.language;
-        const completionRegistration =
-          monaco.languages.registerCompletionItemProvider(language, {
-            triggerCharacters: [".", '"', "'", "/", "<", ":"],
-            provideCompletionItems: async (model, position, context) => {
-              if (model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return { suggestions: [] };
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/completion",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: {
-                      triggerKind: context.triggerKind,
-                      triggerCharacter: context.triggerCharacter,
-                    },
-                  },
-                );
-                const resultRecord = isRecord(result) ? result : undefined;
-                const items = Array.isArray(result)
-                  ? result
-                  : Array.isArray(resultRecord?.items)
-                    ? resultRecord.items
-                    : [];
-                const word = model.getWordUntilPosition(position);
-                const fallbackRange = new monaco.Range(
-                  position.lineNumber,
-                  word.startColumn,
-                  position.lineNumber,
-                  word.endColumn,
-                );
-                return {
-                  suggestions: items.flatMap((value) => {
-                    if (!isRecord(value)) {
-                      return [];
-                    }
-                    const label = completionLabel(value.label);
-                    if (!label) {
-                      return [];
-                    }
-                    const textEdit = isRecord(value.textEdit)
-                      ? value.textEdit
-                      : undefined;
-                    const rangeValue = textEdit?.range ?? value.range;
-                    const range =
-                      monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
-                    const insertText =
-                      typeof textEdit?.newText === "string"
-                        ? textEdit.newText
-                        : typeof value.insertText === "string"
-                          ? value.insertText
-                          : label;
-                    return [
-                      {
-                        label,
-                        detail:
-                          typeof value.detail === "string"
-                            ? value.detail
-                            : undefined,
-                        documentation: completionDocumentation(
-                          value.documentation,
-                        ),
-                        insertText,
-                        kind: monacoCompletionKind(monaco, value.kind),
-                        range,
-                      },
-                    ];
-                  }),
-                };
-              } catch {
-                return { suggestions: [] };
-              }
-            },
-          });
-        const hoverRegistration = monaco.languages.registerHoverProvider(
-          language,
-          {
-            provideHover: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/hover", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                });
-                if (!isRecord(result)) {
-                  return null;
-                }
-                const markdown = lspMarkdown(result.contents);
-                if (!markdown) {
-                  return null;
-                }
-                return {
-                  contents: [{ value: markdown }],
-                  range: monacoRangeFromLsp(monaco, result.range),
-                };
-              } catch {
-                return null;
-              }
-            },
-          },
-        );
-        const definitionRegistration =
-          monaco.languages.registerDefinitionProvider(language, {
-            provideDefinition: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/definition",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const referencesRegistration =
-          monaco.languages.registerReferenceProvider(language, {
-            provideReferences: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/references",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: { includeDeclaration: true },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const renameRegistration = monaco.languages.registerRenameProvider(
-          language,
-          {
-            provideRenameEdits: async (_model, position, newName) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/rename", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  newName,
-                });
-                return monacoWorkspaceEditFromLsp(monaco, result);
-              } catch (error) {
-                return {
-                  edits: [],
-                  rejectReason: String(error),
-                };
-              }
-            },
-          },
-        );
-        const semanticRegistration =
-          monaco.languages.registerDocumentSemanticTokensProvider(language, {
-            getLegend: () => semanticLegend,
-            provideDocumentSemanticTokens: async (model, _previous, token) => {
-              if (
-                !semanticReady ||
-                model.uri.toString() !== monaco.Uri.parse(path).toString() ||
-                token.isCancellationRequested
-              )
-                return null;
-              const version = model.getVersionId();
-              try {
-                const legend = await onLspRequest(
-                  path,
-                  "$/gyro/semanticTokensLegend",
-                  {},
-                );
-                if (
-                  !legend ||
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                await onLspRequest(path, "textDocument/didChange", {
-                  textDocument: { version: Date.now() },
-                  contentChanges: [{ text: model.getValue() }],
-                });
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const response = await onLspRequest(
-                  path,
-                  "textDocument/semanticTokens/full",
-                  {},
-                );
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const data = decodeSemanticTokens(
-                  response,
-                  legend,
-                  model.getLinesContent().map((line) => line.length),
-                );
-                return data ? { data } : null;
-              } catch {
-                return null;
-              }
-            },
-            releaseDocumentSemanticTokens: () => {},
-          });
-        languageRegistrationsRef.current = [
-          semanticRegistration,
-          completionRegistration,
-          hoverRegistration,
-          definitionRegistration,
-          referencesRegistration,
-          renameRegistration,
-        ];
-      }
-    });
-    return () => {
-      disposed = true;
-      languageRegistrationsRef.current.forEach((item) => item.dispose());
-      languageRegistrationsRef.current = [];
-    };
-  }, [
-    mounted,
-    path,
-    syntax.language,
-    syntax.policy.limited,
-    onLspRequest,
-    semanticReady,
-  ]);
-
-  const handleMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor;
-    hasMountedRef.current = true;
-    setMounted(true);
-    void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
-      remeasureMonacoFonts(),
-    );
-    revealEditorTarget(editor);
-    editor.onDidChangeCursorSelection((event) => {
-      const model = editor.getModel();
-      if (!model) {
-        onSelectionChangeRef.current(undefined);
-        return;
-      }
-      const text = model.getValueInRange(event.selection);
-      if (!text) {
-        onSelectionChangeRef.current(undefined);
-        return;
-      }
-      onSelectionChangeRef.current({
-        path: model.uri.path,
-        startLineNumber: event.selection.startLineNumber,
-        startColumn: event.selection.startColumn,
-        endLineNumber: event.selection.endLineNumber,
-        endColumn: event.selection.endColumn,
-        text,
-      });
-    });
-  };
-
-  if (!path) {
-    return <div className="gyro-code-empty">Select a workspace file.</div>;
-  }
-  // Only swap the placeholder in before the first mount. Doing it on every load
-  // tears the editor down and rebuilds it — including the font measurement —
-  // each time a tab is opened.
-  if (loadState === "loading" && !hasMountedRef.current) {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
-  }
-
-  if (syntax.policy.binary || loadState === "error")
-    return (
-      <div className="gyro-code-empty" role="status">
-        {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
-      </div>
-    );
-  return (
-    <div className="gyro-syntax-editor">
-      {syntax.notice && (
-        <div className="gyro-syntax-notice" role="status">
-          {syntax.notice}
-        </div>
-      )}
-      <Suspense
-        fallback={<div className="gyro-code-empty">Loading editor...</div>}
-      >
-        <MonacoEditor
-          height="100%"
-          keepCurrentModel
-          language={syntax.language}
-          onChange={handleChange}
-          onMount={handleMount}
-          options={editorOptions}
-          path={path}
-          theme={theme === "light" ? "gyro-light" : "gyro-dark"}
-          value={buffer?.content ?? fileContent?.content ?? ""}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-// Chat streaming, terminal output and polling re-render App many times a
-// second. Without this every open editor re-rendered with them, which showed
-// up as scroll jank. Callbacks are read through refs inside the pane.
-const MonacoEditorPane = memo(
-  MonacoEditorPaneView,
-  (previous, next) =>
-    (Object.keys(next) as Array<keyof typeof next>).every(
-      (key) =>
-        key === "onChange" ||
-        key === "onSelectionChange" ||
-        Object.is(previous[key], next[key]),
-    ) && Object.keys(previous).length === Object.keys(next).length,
-);
-
-function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const start = isRecord(value.start) ? value.start : undefined;
-  const end = isRecord(value.end) ? value.end : undefined;
-  if (!start || !end) {
-    return undefined;
-  }
-  return new monaco.Range(
-    numberField(start, "line") + 1,
-    numberField(start, "character") + 1,
-    numberField(end, "line") + 1,
-    numberField(end, "character") + 1,
-  );
-}
-
-function monacoLocationsFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  const locations = Array.isArray(value) ? value : value ? [value] : [];
-  return locations.flatMap((location) => {
-    if (!isRecord(location)) return [];
-    const uri =
-      typeof location.uri === "string"
-        ? location.uri
-        : typeof location.targetUri === "string"
-          ? location.targetUri
-          : undefined;
-    const range = monacoRangeFromLsp(
-      monaco,
-      location.range ?? location.targetSelectionRange ?? location.targetRange,
-    );
-    return uri && range ? [{ uri: monaco.Uri.parse(uri), range }] : [];
-  });
-}
-
-function monacoWorkspaceEditFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  if (!isRecord(value) || !isRecord(value.changes)) return { edits: [] };
-  const edits = Object.entries(value.changes).flatMap(([uri, changes]) =>
-    Array.isArray(changes)
-      ? changes.flatMap((change) => {
-          if (!isRecord(change) || typeof change.newText !== "string")
-            return [];
-          const range = monacoRangeFromLsp(monaco, change.range);
-          return range
-            ? [
-                {
-                  resource: monaco.Uri.parse(uri),
-                  textEdit: { range, text: change.newText },
-                  versionId: undefined,
-                },
-              ]
-            : [];
-        })
-      : [],
-  );
-  return { edits };
-}
-
-function monacoCompletionKind(monaco: Parameters<OnMount>[1], value: unknown) {
-  const kinds = monaco.languages.CompletionItemKind;
-  switch (value) {
-    case 2:
-      return kinds.Method;
-    case 3:
-      return kinds.Function;
-    case 4:
-      return kinds.Constructor;
-    case 5:
-      return kinds.Field;
-    case 6:
-      return kinds.Variable;
-    case 7:
-      return kinds.Class;
-    case 8:
-      return kinds.Interface;
-    case 9:
-      return kinds.Module;
-    case 10:
-      return kinds.Property;
-    case 13:
-      return kinds.Enum;
-    case 14:
-      return kinds.Keyword;
-    case 15:
-      return kinds.Snippet;
-    case 21:
-      return kinds.Constant;
-    default:
-      return kinds.Text;
-  }
-}
-
-function completionLabel(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return isRecord(value) && typeof value.label === "string"
-    ? value.label
-    : undefined;
-}
-
-function completionDocumentation(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (isRecord(value) && typeof value.value === "string") {
-    return { value: value.value };
-  }
-  return undefined;
-}
-
-function lspMarkdown(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(lspMarkdown).filter(Boolean).join("\n\n");
-  }
-  if (!isRecord(value)) {
-    return "";
-  }
-  if (typeof value.language === "string" && typeof value.value === "string") {
-    return `\`\`\`${value.language}\n${value.value}\n\`\`\``;
-  }
-  return typeof value.value === "string" ? value.value : "";
 }
 
 function createTurnId() {
@@ -20090,6 +19587,16 @@ function applyProviderChatStreamEvent(
   }
   // Heartbeats keep a quiet-but-alive run marked running and refresh the status
   // event's timestamp so the idle watchdog does not settle the turn early.
+  if (streamEvent.phase === "retry-wait" || streamEvent.phase === "retry-started") {
+    const update = (items: SessionEvent[]) =>
+      applyNativeProviderRetryStatus(items, streamEvent);
+    optimisticEventsRef.current.set(
+      streamEvent.sessionId,
+      update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+    );
+    setEvents(update);
+    return;
+  }
   if (
     streamEvent.phase === "started" ||
     streamEvent.phase === "completed" ||
@@ -20116,6 +19623,8 @@ function applyProviderChatStreamEvent(
       streamEvent.status ??
         (streamEvent.phase === "cancelled" ? "cancelled" : "failed"),
       streamEvent.error ?? undefined,
+      false,
+      streamEvent.recoveryKind ?? undefined,
     );
     return;
   }
@@ -20152,6 +19661,7 @@ function updateOptimisticProviderStatus(
   error?: string,
   /** Move createdAt forward so idle watches see the run is still alive. */
   touchTimestamp = false,
+  recoveryKind?: string,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -20176,6 +19686,9 @@ function updateOptimisticProviderStatus(
       stringFromRecord(payload, "providerLabel") ?? "Provider";
     const now = new Date().toISOString();
     const previousStatus = stringFromRecord(payload, "status");
+    if (touchTimestamp && payload?.nativeRetry === true) {
+      return { ...event, createdAt: now };
+    }
     const previousStartedAt = stringFromRecord(payload, "startedAt");
     const isActiveStatus = ["queued", "running", "waiting"].includes(status);
     const wasActiveStatus =
@@ -20198,6 +19711,11 @@ function updateOptimisticProviderStatus(
       } as ModelProviderConfig),
       payload: {
         ...payload,
+        nativeRetry: undefined,
+        retryAt: undefined,
+        retryAttempt: undefined,
+        retryMaxAttempts: undefined,
+        recoveryKind: recoveryKind ?? (isActiveStatus || status === "done" ? undefined : payload?.recoveryKind),
         completedAt: isActiveStatus ? undefined : now,
         durationMs:
           !isActiveStatus &&

@@ -5,16 +5,15 @@
 // - an empty grid opens the first chat full size;
 // - a lone chat splits Left / Right, which is the two-pane row every later
 //   drop joins;
-// - a row of two or three chats has only its edges and its seams left, so each
-//   target is a bar on that boundary and the row stays one row of equal
-//   columns;
+// - a row or stack of two or three chats has only its edges and seams left;
+//   each target is a bar on that boundary and preserves the arrangement;
 // - anything else that still has room offers the 2×2 quadrants;
-// - a full row accepts rearrangement of its own chats, but no new chat.
+// - a full row or stack accepts rearrangement of its own chats, but no new chat.
 import type { ChatGridArrangement, ChatPaneRef } from "./types";
 import { CHAT_GRID_MAX_SLOTS } from "./workbench-state.ts";
 
 export type ChatGridDropPlacement = {
-  /** Kept by the drop so an edited row stays a row, never a 2×2 grid. */
+  /** Keep an edited row or stack in the same arrangement. */
   arrangement?: ChatGridArrangement;
   insertPosition: "before" | "after";
   splitDirection?: "horizontal" | "vertical";
@@ -29,7 +28,19 @@ export type ChatGridDropZone = {
 };
 
 /** The overlay template a zone set renders as; each maps to one CSS layout. */
-export type ChatGridDropLayout = "columns" | "full" | "positions" | "row";
+export type ChatGridDropLayout =
+  "columns" | "full" | "positions" | "row" | "stack";
+
+type ChatGridDropBounds = Pick<DOMRect, "left" | "top" | "width" | "height">;
+type DropRectangle = Pick<DOMRect, "left" | "top" | "right" | "bottom">;
+
+// These are the layout dimensions in styles.css / chat-design.css. Before
+// React paints the overlay, its virtual targets need the same edges and gaps
+// as the rendered targets, including the inset at each end of a row.
+const DROP_OVERLAY_PADDING = 10;
+const DROP_OVERLAY_GAP = 8;
+const ROW_PANE_GAP = 1;
+const ROW_DROP_BAR_WIDTH = 8;
 
 const CHAT_GRID_QUADRANT_LABELS = [
   "Top left",
@@ -49,6 +60,7 @@ export function chatGridDropLayout(
   const position = zones[0]?.position;
   if (position === "full") return "full";
   if (position?.startsWith("row-")) return "row";
+  if (position?.startsWith("stack-")) return "stack";
   if (position === "left" || position === "right") return "columns";
   return "positions";
 }
@@ -58,9 +70,9 @@ export function chatGridDropZones(
   arrangement: ChatGridArrangement,
   allowFullRowReorder = false,
 ): ChatGridDropZone[] {
-  const occupied = slots.flatMap((pane, slotIndex) =>
-    pane ? [slotIndex] : [],
-  );
+  const occupied = slots
+    .slice(0, CHAT_GRID_MAX_SLOTS)
+    .flatMap((pane, slotIndex) => (pane ? [slotIndex] : []));
   // First chat into an empty grid: a single full-height/full-width target.
   if (occupied.length === 0) {
     return [{ id: "full", label: "Open here", position: "full", slotIndex: 0 }];
@@ -85,12 +97,12 @@ export function chatGridDropZones(
       },
     ];
   }
-  // A row holds up to four chats. At capacity, its boundaries are available
-  // only to move a chat already in that row.
-  if (arrangement === "columns") {
-    return occupied.length < CHAT_GRID_MAX_SLOTS || allowFullRowReorder
-      ? chatGridRowDropZones(occupied)
-      : [];
+  // At capacity every layout only accepts a chat already in it. Offering a
+  // target to an incoming chat would promise placement the reducer rejects.
+  if (occupied.length >= CHAT_GRID_MAX_SLOTS && !allowFullRowReorder) return [];
+  // A row or stack offers the boundaries that preserve its arrangement.
+  if (arrangement === "columns" || arrangement === "rows") {
+    return chatGridLinearDropZones(occupied, arrangement);
   }
   // Anything else: place into a 2×2 grid position (the quadrants fill in).
   return CHAT_GRID_QUADRANT_LABELS.map((label, index) => ({
@@ -102,32 +114,35 @@ export function chatGridDropZones(
 }
 
 /**
- * Chats that already share the width only leave room on the two edges and the
- * seams between neighbours — one thin bar per boundary, and every one of them
- * keeps the row a single row. Each slot index names the pane the chat lands
- * beside, and the arrangement rides along so the row survives the drop.
+ * Linear layouts offer two edges and the seams between neighbours — one thin
+ * bar per boundary. Each slot index names the pane the chat lands next to, and
+ * the arrangement rides along so the row or stack survives the drop.
  */
-function chatGridRowDropZones(occupied: number[]): ChatGridDropZone[] {
+function chatGridLinearDropZones(
+  occupied: number[],
+  arrangement: "columns" | "rows",
+): ChatGridDropZone[] {
   const zones: ChatGridDropZone[] = [];
+  const prefix = arrangement === "columns" ? "row" : "stack";
   occupied.forEach((slotIndex, index) => {
     const placement = {
-      arrangement: "columns",
+      arrangement,
       insertPosition: "before",
     } as const;
     zones.push(
       index === 0
         ? {
-            id: "row-start",
-            label: "Left edge",
+            id: `${prefix}-start`,
+            label: arrangement === "columns" ? "Left edge" : "Top edge",
             placement,
-            position: "row-start",
+            position: `${prefix}-start`,
             slotIndex,
           }
         : {
-            id: `row-seam-${index}`,
+            id: `${prefix}-seam-${index}`,
             label: `Between chat ${index} and chat ${index + 1}`,
             placement,
-            position: `row-seam-${index}`,
+            position: `${prefix}-seam-${index}`,
             slotIndex,
           },
     );
@@ -135,10 +150,10 @@ function chatGridRowDropZones(occupied: number[]): ChatGridDropZone[] {
   const lastSlot = occupied[occupied.length - 1];
   if (lastSlot !== undefined) {
     zones.push({
-      id: "row-end",
-      label: "Right edge",
-      placement: { arrangement: "columns", insertPosition: "after" },
-      position: "row-end",
+      id: `${prefix}-end`,
+      label: arrangement === "columns" ? "Right edge" : "Bottom edge",
+      placement: { arrangement, insertPosition: "after" },
+      position: `${prefix}-end`,
       slotIndex: lastSlot,
     });
   }
@@ -156,45 +171,181 @@ export function nearestChatGridDropZone(
   zones: ChatGridDropZone[],
   x: number,
   y: number,
+  bounds?: ChatGridDropBounds,
+  sourceSlotIndex?: number,
 ): ChatGridDropZone | undefined {
-  let nearest: ChatGridDropZone | undefined;
-  let distance = Infinity;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  if (bounds && !pointerWithinBounds(bounds, x, y)) return undefined;
+  const positions = new Set(zones.map((zone) => zone.position));
+  if (!zones.length || positions.size !== zones.length) return undefined;
+  const rectangles = new Map<string, DropRectangle>();
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
     if (!target) continue;
-    const bounds = target.getBoundingClientRect();
-    const dx = Math.max(bounds.left - x, 0, x - bounds.right);
-    const dy = Math.max(bounds.top - y, 0, y - bounds.bottom);
-    const candidateDistance = dx * dx + dy * dy;
-    const zone = zones.find(
-      (item) => item.position === target.dataset.position,
-    );
-    if (zone && candidateDistance < distance) {
-      nearest = zone;
-      distance = candidateDistance;
-    }
+    const position = target.dataset.position;
+    if (!position || !positions.has(position)) return undefined;
+    const rectangle = target.getBoundingClientRect();
+    // A hidden, partial, or stale overlay cannot own the drop. Let the caller
+    // use the complete before-paint geometry rather than bias toward whichever
+    // old targets happen to remain in the DOM.
+    if (!validRectangle(rectangle) || rectangles.has(position))
+      return undefined;
+    rectangles.set(position, rectangle);
   }
-  return nearest;
+  if (rectangles.size !== zones.length) return undefined;
+  return nearestZone(zones, rectangles, x, y, bounds, sourceSlotIndex);
 }
 
 /** Resolve a release before React has painted the placement overlay. */
 export function chatGridDropZoneBeforePaint(
   zones: ChatGridDropZone[],
-  bounds: Pick<DOMRect, "left" | "top" | "width" | "height">,
+  bounds: ChatGridDropBounds,
   x: number,
   y: number,
+  sourceSlotIndex?: number,
 ): ChatGridDropZone | undefined {
-  if (!zones.length || bounds.width <= 0 || bounds.height <= 0) return undefined;
+  if (!zones.length || !pointerWithinBounds(bounds, x, y)) return undefined;
   const layout = chatGridDropLayout(zones);
-  const fraction = (x - bounds.left) / bounds.width;
-  if (layout === "full") return zones[0];
-  if (layout === "columns") return zones[fraction <= 0.5 ? 0 : 1];
-  if (layout === "row") {
-    const boundary = Math.max(0, Math.min(zones.length - 1,
-      Math.round(fraction * (zones.length - 1))));
-    return zones[boundary];
+  const rectangles = new Map<string, DropRectangle>();
+  const { left, top, width, height } = bounds;
+  const right = left + width;
+  const bottom = top + height;
+  if (layout === "row" || layout === "stack") {
+    const count = zones.length - 1;
+    if (count < 2 || count > CHAT_GRID_MAX_SLOTS) return undefined;
+    const horizontal = layout === "row";
+    const start = horizontal ? left : top;
+    const end = horizontal ? right : bottom;
+    const track = ((horizontal ? width : height) + ROW_PANE_GAP) / count;
+    zones.forEach((zone, index) => {
+      const barStart =
+        index === 0
+          ? start
+          : index === count
+            ? end - ROW_DROP_BAR_WIDTH
+            : start + index * track - ROW_DROP_BAR_WIDTH / 2;
+      rectangles.set(zone.position, {
+        left: horizontal ? barStart : left,
+        right: horizontal ? barStart + ROW_DROP_BAR_WIDTH : right,
+        top: horizontal ? top : barStart,
+        bottom: horizontal ? bottom : barStart + ROW_DROP_BAR_WIDTH,
+      });
+    });
+  } else {
+    const columns = layout === "full" ? 1 : 2;
+    const rows = layout === "positions" ? 2 : 1;
+    const tileWidth =
+      (width - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (columns - 1)) /
+      columns;
+    const tileHeight =
+      (height - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (rows - 1)) /
+      rows;
+    if (tileWidth <= 0 || tileHeight <= 0) return undefined;
+    zones.forEach((zone, index) => {
+      const tileLeft =
+        left +
+        DROP_OVERLAY_PADDING +
+        (index % columns) * (tileWidth + DROP_OVERLAY_GAP);
+      const tileTop =
+        top +
+        DROP_OVERLAY_PADDING +
+        Math.floor(index / columns) * (tileHeight + DROP_OVERLAY_GAP);
+      rectangles.set(zone.position, {
+        left: tileLeft,
+        right: tileLeft + tileWidth,
+        top: tileTop,
+        bottom: tileTop + tileHeight,
+      });
+    });
   }
-  const slotIndex = (y >= bounds.top + bounds.height / 2 ? 2 : 0) +
-    (fraction >= 0.5 ? 1 : 0);
-  return zones.find(zone => zone.slotIndex === slotIndex);
+  return nearestZone(zones, rectangles, x, y, bounds, sourceSlotIndex);
+}
+
+function validRectangle(rectangle: DropRectangle): boolean {
+  return (
+    [rectangle.left, rectangle.top, rectangle.right, rectangle.bottom].every(
+      Number.isFinite,
+    ) &&
+    rectangle.right > rectangle.left &&
+    rectangle.bottom > rectangle.top
+  );
+}
+
+function pointerWithinBounds(
+  bounds: ChatGridDropBounds,
+  x: number,
+  y: number,
+): boolean {
+  const rectangle = {
+    left: bounds.left,
+    top: bounds.top,
+    right: bounds.left + bounds.width,
+    bottom: bounds.top + bounds.height,
+  };
+  return (
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    validRectangle(rectangle) &&
+    x >= rectangle.left &&
+    x <= rectangle.right &&
+    y >= rectangle.top &&
+    y <= rectangle.bottom
+  );
+}
+
+function nearestZone(
+  zones: ChatGridDropZone[],
+  rectangles: Map<string, DropRectangle>,
+  x: number,
+  y: number,
+  bounds?: ChatGridDropBounds,
+  sourceSlotIndex?: number,
+): ChatGridDropZone | undefined {
+  let nearest: ChatGridDropZone | undefined;
+  let distance = Infinity;
+  // Zone order, rather than DOM query order, breaks exact ties. Hover and a
+  // release before paint therefore choose the same side of a gutter or seam.
+  for (const zone of zones) {
+    const rectangle = rectangles.get(zone.position);
+    if (!rectangle || !validRectangle(rectangle)) return undefined;
+    const dx = Math.max(rectangle.left - x, 0, x - rectangle.right);
+    const dy = Math.max(rectangle.top - y, 0, y - rectangle.bottom);
+    const candidateDistance = Math.hypot(dx, dy);
+    if (candidateDistance < distance) {
+      nearest = zone;
+      distance = candidateDistance;
+    }
+  }
+  const layout = chatGridDropLayout(zones);
+  if (
+    !bounds ||
+    sourceSlotIndex === undefined ||
+    (layout !== "row" && layout !== "stack")
+  ) return nearest;
+  const sourceIndex = zones.slice(0, -1).findIndex(
+    (zone) => zone.slotIndex === sourceSlotIndex,
+  );
+  if (sourceIndex < 0) return nearest;
+  // Explicit insertion bars retain their exact placement, including a return
+  // to either boundary of the source. Pane interiors are reorder targets too:
+  // move before a pane on the left/above, or after one on the right/below.
+  // Nearest-bar geometry alone gives half of a neighbour to a source-adjacent
+  // boundary that the reducer correctly treats as a no-op.
+  if (
+    Array.from(rectangles.values()).some(
+      (rectangle) =>
+        x >= rectangle.left && x <= rectangle.right &&
+        y >= rectangle.top && y <= rectangle.bottom,
+    )
+  ) return nearest;
+  const horizontal = layout === "row";
+  const offset = horizontal ? x - bounds.left : y - bounds.top;
+  const length = horizontal ? bounds.width : bounds.height;
+  const count = zones.length - 1;
+  const targetIndex = Math.min(
+    count - 1,
+    Math.floor(offset / ((length + ROW_PANE_GAP) / count)),
+  );
+  if (targetIndex === sourceIndex) return nearest;
+  return zones[targetIndex < sourceIndex ? targetIndex : targetIndex + 1];
 }

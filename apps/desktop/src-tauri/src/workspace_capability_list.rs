@@ -4,12 +4,12 @@ use serde_json::{json, Value};
 
 const DEFAULT_PAGE_LIMIT: usize = 100;
 const MAX_PAGE_LIMIT: usize = 200;
-const RESULT_HEADROOM_BYTES: usize = 4 * 1024;
 
 pub(super) fn execute(
     workspace: &Path,
     arguments: &Value,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
+    let max_bytes = workspace_result_byte_limit(arguments)?;
     let depth = arguments
         .get("depth")
         .and_then(Value::as_u64)
@@ -55,10 +55,8 @@ pub(super) fn execute(
     let mut page = Vec::new();
     for entry in entries.iter().skip(offset).take(limit) {
         page.push(entry.clone());
-        let candidate = page_result(scope.as_deref(), &page, total, offset);
-        if serde_json::to_vec(&candidate)?.len()
-            > gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES - RESULT_HEADROOM_BYTES
-        {
+        let candidate = redact_json_strings(page_result(scope.as_deref(), &page, total, offset));
+        if serde_json::to_vec(&candidate)?.len() > max_bytes {
             page.pop();
             break;
         }
@@ -67,7 +65,10 @@ pub(super) fn execute(
         anyhow::bail!("A Workspace path is too long to return; list a narrower directory");
     }
     let returned = page.len();
-    let data = page_result(scope.as_deref(), &page, total, offset);
+    let data = redact_json_strings(page_result(scope.as_deref(), &page, total, offset));
+    if serde_json::to_vec(&data)?.len() > max_bytes {
+        anyhow::bail!("Workspace list metadata exceeds maxBytes; increase the byte budget");
+    }
     let summary = format!(
         "Listed {returned} of {total} Workspace entries{}",
         scope
@@ -171,5 +172,44 @@ mod tests {
             serde_json::to_vec(&data).unwrap().len()
                 <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
         );
+    }
+
+    #[test]
+    fn model_list_small_byte_pages_can_be_followed_without_gaps() {
+        let workspace = tempfile::tempdir().unwrap();
+        for index in 0..40 {
+            fs::write(
+                workspace
+                    .path()
+                    .join(format!("file-{index:02}-{}.txt", "x".repeat(100))),
+                "",
+            )
+            .unwrap();
+        }
+        let mut offset = 0;
+        let mut paths = Vec::new();
+        loop {
+            let (_, data, _) = execute(
+                workspace.path(),
+                &json!({"depth":1,"maxBytes":1024,"offset":offset}),
+            )
+            .unwrap();
+            assert!(serde_json::to_vec(&data).unwrap().len() <= 1024);
+            paths.extend(
+                data["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|entry| entry["path"].as_str().unwrap().to_owned()),
+            );
+            if !data["hasMore"].as_bool().unwrap() {
+                break;
+            }
+            offset = data["nextOffset"].as_u64().unwrap();
+        }
+        assert_eq!(paths.len(), 40);
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), 40);
     }
 }

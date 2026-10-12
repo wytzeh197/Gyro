@@ -4,8 +4,8 @@
   "version": "0.1.0-alpha.49.7",
   "identifier": "dev.gyro.desktop",
   "build": {
-    "beforeDevCommand": "pnpm exec vite --host 127.0.0.1",
-    "beforeBuildCommand": "pnpm exec vite build",
+    "beforeDevCommand": "pnpm --filter @gyro-dev/codemode build && pnpm exec vite --host 127.0.0.1",
+    "beforeBuildCommand": "pnpm --filter @gyro-dev/codemode build && pnpm exec vite build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },
@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost;style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
       "dangerousDisableAssetCspModification": ["style-src"],
       "assetProtocol": {
         "enable": true,
@@ -43,7 +43,8 @@
     "category": "DeveloperTool",
     "copyright": "Copyright Gyro contributors",
     "createUpdaterArtifacts": true,
-    "externalBin": [],
+    "externalBin": ["binaries/gyro-codemode"],
+    "resources": ["../../../packages/codemode/THIRD_PARTY_NOTICES.md"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

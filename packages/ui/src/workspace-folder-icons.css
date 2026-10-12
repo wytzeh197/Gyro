@@ -1,5 +1,5 @@
-/* Keep tree labels aligned while retaining a separate disclosure target. */
-:root .gyro-sidebar-row.gyro-sidebar-explorer-row {
+/* Keep tree columns ahead of shared sidebar styles in every stylesheet order. */
+:root .gyro-app-shell .gyro-sidebar-row.gyro-sidebar-explorer-row {
   grid-template-columns: 12px 14px minmax(0, 1fr) auto;
 }
 

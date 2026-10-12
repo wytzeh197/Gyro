@@ -338,6 +338,15 @@
   box-shadow: none;
 }
 
+/* Projects are grouping labels; only chats receive a row highlight. */
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row,
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row:is(:hover, :active),
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle,
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle:is(:hover, :active) {
+  background: transparent;
+  box-shadow: none;
+}
+
 :root[data-theme]
   .gyro-sidebar
   :is(

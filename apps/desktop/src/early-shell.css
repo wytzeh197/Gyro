@@ -1,5 +1,38 @@
 /* First-paint shell only — mirrors chat layout without loading packages/ui. */
 
+/* Match the native navigation material while the full shell is loading. */
+:root[data-native-material="sidebar"]:has(.gyro-early-shell),
+:root[data-native-material="sidebar"]:has(.gyro-early-shell) body,
+:root[data-native-material="sidebar"] .gyro-early-shell {
+  background: transparent;
+}
+
+:root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
+  background: rgb(34 34 34 / 92%);
+}
+
+:root[data-native-material="sidebar"] .gyro-early-shell-main {
+  background: #181818;
+}
+
+:root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
+  background: rgb(255 255 255 / 94%);
+}
+
+:root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-main {
+  background: #f7f7f7;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
+    background: #222222;
+  }
+
+  :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
+    background: #ffffff;
+  }
+}
+
 .gyro-early-shell,
 .gyro-early-shell * {
   box-sizing: border-box;

@@ -1,0 +1,17 @@
+body { margin: 0; background: var(--gyro-app); color: var(--gyro-text); }
+.gyro-motion-upgrade { min-height: 100vh; }
+.motion-qa-header { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--gyro-border); }
+.motion-qa-header h1 { font-size: 20px; margin: 0; }
+.motion-qa-header p, .motion-qa-detail p { color: var(--gyro-muted); font-size: 13px; }
+.motion-qa-header nav, .motion-qa-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.motion-qa-header a { color: var(--gyro-accent); font-size: 13px; }
+.motion-qa-tools { padding: 12px 24px; }
+.motion-qa-tools button, .motion-qa-header button, .motion-qa-detail > button, [data-disclosure-fixture] button { padding: 7px 10px; color: var(--gyro-text); border: 1px solid var(--gyro-border); border-radius: 6px; background: var(--gyro-control); }
+.motion-qa-chat { height: 600px; min-width: 0; overflow: hidden; border-block: 1px solid var(--gyro-border); }
+.motion-qa-chat > .gyro-chat-surface { height: 100%; }
+.motion-qa-detail { padding: 24px; max-width: 760px; margin: auto; }
+.motion-qa-detail h2 { font-size: 17px; }
+.motion-qa-detail output { display: block; color: var(--gyro-muted); font-size: 12px; margin: 12px 0; }
+.motion-qa-disclosure-content { padding: 12px; background: var(--gyro-surface); border-radius: 6px; }
+[data-disclosure-fixture] { margin: 20px 0; }
+@media (max-width: 700px) { .motion-qa-header { align-items: start; flex-direction: column; } }

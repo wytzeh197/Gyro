@@ -25,7 +25,11 @@ export type ModelBrowserRevealContext = Omit<
   "isUserInitiated"
 >;
 
-type SessionBrowserOpened = { sessionId: string; url: string };
+type SessionBrowserOpened = {
+  sessionId: string;
+  url: string;
+  reveal?: boolean;
+};
 
 export function useModelBrowserReveal(options: {
   activeSessionId?: string;
@@ -78,6 +82,7 @@ export function useModelBrowserReveal(options: {
           const decision = resolveBrowserReveal({
             isUserInitiated: false,
             ...contextRef.current,
+            revealRequested: event.payload.reveal === true,
           });
           send({
             type: "browser-navigate",

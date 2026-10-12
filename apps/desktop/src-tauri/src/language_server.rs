@@ -180,6 +180,8 @@ pub(crate) struct LspSessionResult {
     command: String,
     status: String,
     message: String,
+    capabilities: serde_json::Value,
+    position_encoding: String,
 }
 
 /// `(root, language id, command)`: the identity of one managed server.
@@ -229,9 +231,9 @@ impl Drop for LanguageServerStartGate<'_> {
 /// What the server was last told about an open document.
 struct LspDocumentState {
     version: i64,
-    /// Hash of the text the model path last synced; `None` once the editor
-    /// has sent its own (possibly unsaved) text, so the next model request
-    /// resyncs to the on-disk content it reasons about.
+    /// Hash of the complete text last sent to the server. An incremental
+    /// editor change leaves this unknown; disk-only requests must then fail
+    /// rather than replace a snapshot owned by the editor.
     content_hash: Option<u64>,
     /// The editor opened this document itself; the model path must not
     /// close it on eviction.
@@ -338,12 +340,30 @@ impl LanguageServerManager {
             anyhow::bail!("language server command is not allowed for this language");
         }
         let (server_id, message) = self.acquire(&root, &request.language_id, &command_text)?;
+        let process = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
+            .get(&server_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("language server stopped during initialization"))?;
+        let capabilities = {
+            let mut process = process
+                .lock()
+                .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
+            if let Some(status) = process.child.try_wait()? {
+                anyhow::bail!("language server exited with {status}");
+            }
+            process.capabilities.clone()
+        };
         Ok(LspSessionResult {
             server_id,
             language_id: request.language_id,
             command: command_text,
             status: "ready".into(),
             message,
+            capabilities,
+            position_encoding: "utf-16".into(),
         })
     }
 
@@ -614,20 +634,31 @@ impl LanguageServerManager {
         }
 
         if lsp_method_is_notification(&request.method) {
-            observe_editor_document_notification(&mut process, &request.method, &request.params);
-            write_lsp_message(
-                &mut process.stdin,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": request.method,
-                    "params": request.params,
-                }),
-            )?;
+            if let Some((method, params)) =
+                normalize_editor_document_notification(&process, &request.method, &request.params)?
+            {
+                write_lsp_message(
+                    &mut process.stdin,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": params,
+                    }),
+                )?;
+                observe_editor_document_notification(&mut process, &method, &params);
+            }
+            let document_version = request
+                .params
+                .pointer("/textDocument/uri")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|uri| process.documents.get(uri))
+                .map(|document| document.version);
             let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
                 "serverId": request.server_id,
                 "status": "sent",
                 "messages": messages,
+                "documentVersion": document_version,
             }));
         }
 
@@ -677,7 +708,8 @@ impl LanguageServerManager {
             .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
         // Close every document we opened so a long-lived server does not keep
         // analysis state for files this app no longer tracks.
-        let open_documents = process.open_documents.drain(..).collect::<Vec<_>>();
+        let open_documents = process.documents.keys().cloned().collect::<Vec<_>>();
+        process.open_documents.clear();
         process.documents.clear();
         for uri in open_documents {
             let _ = write_lsp_message(
@@ -762,12 +794,17 @@ fn start_language_server_process(
                 "rootUri": root_uri,
                 "workspaceFolders": [{ "uri": root_uri, "name": root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace") }],
                 "capabilities": {
-                    "workspace": { "workspaceFolders": true, "configuration": true },
+                    "general": { "positionEncodings": ["utf-16"] },
+                    "workspace": {
+                        "workspaceFolders": true, "configuration": true,
+                        "workspaceEdit": { "documentChanges": true }
+                    },
                     "textDocument": {
                         "publishDiagnostics": { "relatedInformation": true },
                         "completion": { "completionItem": { "snippetSupport": true } },
                         "hover": { "contentFormat": ["markdown", "plaintext"] },
                         "definition": { "linkSupport": true },
+                        "rename": { "prepareSupport": true },
                         "semanticTokens": {
                             "requests": { "full": true },
                             "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
@@ -800,6 +837,7 @@ fn start_language_server_process(
         .pointer("/result/capabilities")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    assert_utf16_position_encoding(&process.capabilities)?;
     let capability_count = initialize_response
         .pointer("/result/capabilities")
         .and_then(|value| value.as_object())
@@ -830,7 +868,15 @@ fn ensure_document_open(
         if document.content_hash == Some(content_hash) {
             return Ok(());
         }
-        let version = document.version.saturating_add(1);
+        if document.editor_open {
+            anyhow::bail!(
+                "file has unsaved or unsynchronized editor changes; save or close it before disk-based code navigation"
+            );
+        }
+        let version = document
+            .version
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("language server document version exhausted"))?;
         write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
@@ -895,12 +941,105 @@ fn ensure_document_open(
     Ok(())
 }
 
+/// An editor may take ownership of a document the model already opened.
+/// Send a full change in that case instead of a second didOpen, and return
+/// the actual version to the renderer so it can continue the same sequence.
+fn normalize_editor_document_notification(
+    process: &LanguageServerProcess,
+    method: &str,
+    params: &serde_json::Value,
+) -> anyhow::Result<Option<(String, serde_json::Value)>> {
+    if method != "textDocument/didOpen" && method != "textDocument/didChange" {
+        return Ok(Some((method.to_string(), params.clone())));
+    }
+    let uri = params
+        .pointer("/textDocument/uri")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("editor document URI is required"))?;
+    let version = params
+        .pointer("/textDocument/version")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|version| *version >= 0)
+        .ok_or_else(|| anyhow::anyhow!("editor document version must be a nonnegative integer"))?;
+    let existing = process.documents.get(uri);
+    if method == "textDocument/didOpen" {
+        anyhow::ensure!(
+            params
+                .pointer("/textDocument/text")
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
+            "editor document text is required"
+        );
+    }
+    if method == "textDocument/didChange" {
+        anyhow::ensure!(
+            params
+                .get("contentChanges")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|changes| changes.iter().all(|change| change
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some())),
+            "editor document content changes require text"
+        );
+        let document = existing
+            .ok_or_else(|| anyhow::anyhow!("editor document must be opened before changes"))?;
+        if document.editor_open && version <= document.version {
+            let hash = editor_document_content_hash(method, params);
+            if hash.is_some() && hash == document.content_hash {
+                return Ok(None);
+            }
+            anyhow::bail!("editor document change is stale; synchronize the current version first");
+        }
+    }
+    let actual_version = match existing {
+        Some(document) => version.max(
+            document
+                .version
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("language server document version exhausted"))?,
+        ),
+        None => version,
+    };
+    if method == "textDocument/didOpen" && existing.is_some() {
+        let text = params
+            .pointer("/textDocument/text")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("editor document text is required"))?;
+        return Ok(Some((
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": uri, "version": actual_version },
+                "contentChanges": [{ "text": text }],
+            }),
+        )));
+    }
+    let mut params = params.clone();
+    params["textDocument"]["version"] = actual_version.into();
+    Ok(Some((method.to_string(), params)))
+}
+
+fn editor_document_content_hash(method: &str, params: &serde_json::Value) -> Option<u64> {
+    if method == "textDocument/didOpen" {
+        return params
+            .pointer("/textDocument/text")
+            .and_then(serde_json::Value::as_str)
+            .map(lsp_document_hash);
+    }
+    let changes = params.get("contentChanges")?.as_array()?;
+    // Incremental changes cannot prove that the server's complete snapshot
+    // matches disk without retaining another full copy of every document.
+    if changes.iter().any(|change| change.get("range").is_some()) {
+        return None;
+    }
+    changes.last()?.get("text")?.as_str().map(lsp_document_hash)
+}
+
 /// The editor drives its own `didOpen`/`didChange`/`didClose` through
 /// [`LanguageServerManager::request`]. Track them so the model path neither
 /// re-opens a document the server already has, nor closes one under the
-/// editor, nor trusts its last synced text after the editor replaced it
-/// (possibly with an unsaved buffer); its next sync also outnumbers the
-/// editor's version.
+/// editor. Disk-only requests can reuse a matching editor snapshot, but must
+/// never replace the editor's text with disk content.
 fn observe_editor_document_notification(
     process: &mut LanguageServerProcess,
     method: &str,
@@ -924,17 +1063,17 @@ fn observe_editor_document_notification(
                     .entry(uri.to_owned())
                     .or_insert_with(|| LspDocumentState {
                         version,
-                        content_hash: None,
+                        content_hash: editor_document_content_hash(method, params),
                         editor_open: true,
                     });
             document.version = document.version.max(version);
-            document.content_hash = None;
+            document.content_hash = editor_document_content_hash(method, params);
             document.editor_open = true;
         }
         "textDocument/didChange" => {
             if let Some(document) = process.documents.get_mut(uri) {
                 document.version = document.version.max(version);
-                document.content_hash = None;
+                document.content_hash = editor_document_content_hash(method, params);
                 document.editor_open = true;
             }
         }
@@ -958,6 +1097,19 @@ fn lsp_feature_supported(capabilities: &serde_json::Value, feature: &str) -> boo
         Some(serde_json::Value::Object(_)) => true,
         _ => false,
     }
+}
+
+fn assert_utf16_position_encoding(capabilities: &serde_json::Value) -> anyhow::Result<()> {
+    // LSP 3.17 defaults to UTF-16 when a server omits positionEncoding. Gyro
+    // advertises only that encoding because both Monaco and tool conversion
+    // already use UTF-16 units.
+    if let Some(encoding) = capabilities.get("positionEncoding") {
+        anyhow::ensure!(
+            encoding.as_str() == Some("utf-16"),
+            "language server selected unsupported position encoding: {encoding}"
+        );
+    }
+    Ok(())
 }
 
 fn position_params(
@@ -1374,6 +1526,24 @@ mod tests {
     }
 
     #[test]
+    fn position_encoding_accepts_only_explicit_or_default_utf16() {
+        assert_utf16_position_encoding(&serde_json::json!({})).unwrap();
+        assert_utf16_position_encoding(&serde_json::json!({ "positionEncoding": "utf-16" }))
+            .unwrap();
+        for encoding in [
+            serde_json::json!("utf-8"),
+            serde_json::json!("utf-32"),
+            serde_json::Value::Null,
+        ] {
+            let error = assert_utf16_position_encoding(
+                &serde_json::json!({ "positionEncoding": encoding }),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("unsupported position encoding"));
+        }
+    }
+
+    #[test]
     fn language_server_manager_initializes_rust_analyzer_when_available() {
         if command_with_gui_path("rust-analyzer")
             .arg("--version")
@@ -1403,6 +1573,8 @@ mod tests {
 
         assert_eq!(session.status, "ready");
         assert!(session.message.contains("capabilities"));
+        assert_eq!(session.position_encoding, "utf-16");
+        assert!(session.capabilities.is_object());
         assert_eq!(
             manager.stop(&session.server_id).unwrap()["status"],
             "stopped"
@@ -1468,6 +1640,107 @@ mod tests {
         }
     }
 
+    #[test]
+    fn real_rust_server_navigates_and_renames_across_files() {
+        if command_with_gui_path("rust-analyzer")
+            .arg("--version")
+            .output()
+            .map(|output| !output.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"workspace-rename-check\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let source = "mod helper;\npub fn caller() -> u32 { helper::increment(1) }\n";
+        let helper = "pub fn increment(value: u32) -> u32 { value + 1 }\n";
+        std::fs::write(root.join("src/lib.rs"), source).unwrap();
+        std::fs::write(root.join("src/helper.rs"), helper).unwrap();
+        let manager = LanguageServerManager::default();
+        let file = root.join("src/lib.rs");
+        let helper_uri = workspace_file_uri(&root.join("src/helper.rs"));
+        let source_uri = workspace_file_uri(&file);
+        let column = source.lines().nth(1).unwrap().find("increment").unwrap() as u64 + 1;
+        let wait_for_result = |request| {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            loop {
+                match manager
+                    .request_for_file(&root, "src/lib.rs", &file, request)
+                    .unwrap()
+                {
+                    LspFileOutcome::Result(result) => break result,
+                    LspFileOutcome::Indexing { retry_after_ms } => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "rust-analyzer did not finish indexing"
+                        );
+                        std::thread::sleep(Duration::from_millis(retry_after_ms.min(1_000)));
+                    }
+                }
+            }
+        };
+        let definition = wait_for_result(LspFileRequest::Definition { line: 2, column });
+        assert!(definition.to_string().contains(&helper_uri), "{definition}");
+        let references = wait_for_result(LspFileRequest::References {
+            line: 2,
+            column,
+            include_declaration: true,
+        });
+        assert!(references.to_string().contains(&helper_uri), "{references}");
+        assert!(references.to_string().contains(&source_uri), "{references}");
+        let session = manager
+            .start(LspStartRequest {
+                workspace_path: root.to_string_lossy().into_owned(),
+                language_id: "rust".into(),
+                command: "rust-analyzer".into(),
+            })
+            .unwrap();
+        assert!(lsp_feature_supported(
+            &session.capabilities,
+            "renameProvider"
+        ));
+        manager
+            .request(LspRequestPayload {
+                server_id: session.server_id.clone(),
+                method: "textDocument/didOpen".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": helper_uri, "languageId": "rust", "version": 1, "text": helper },
+                }),
+            })
+            .unwrap();
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: session.server_id.clone(),
+                method: "textDocument/rename".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": helper_uri },
+                    "position": { "line": 0, "character": 7 },
+                    "newName": "increase",
+                }),
+            })
+            .unwrap();
+        assert_eq!(response["status"], "ok", "{response}");
+        let edit = &response["result"];
+        assert!(edit.to_string().contains(&helper_uri), "{edit}");
+        assert!(edit.to_string().contains(&source_uri), "{edit}");
+        assert!(edit.to_string().contains("increase"), "{edit}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/helper.rs")).unwrap(),
+            helper
+        );
+        assert_eq!(
+            manager.stop(&session.server_id).unwrap()["status"],
+            "stopped"
+        );
+    }
+
     /// A stand-in server: `cat` echoes whatever Gyro writes to its stdin, and
     /// the incoming message channel is fed by the test.
     fn fake_language_server(
@@ -1479,7 +1752,10 @@ mod tests {
         mpsc::SyncSender<Result<serde_json::Value, String>>,
     ) {
         let mut command = std::process::Command::new("/bin/cat");
-        command.stdin(Stdio::piped()).stdout(stdout).stderr(Stdio::null());
+        command
+            .stdin(Stdio::piped())
+            .stdout(stdout)
+            .stderr(Stdio::null());
         let mut child = gyro_core::process_guard::spawn_service(&mut command).unwrap();
         let stdin = child.stdin.take().unwrap();
         let echoed = child.stdout.take();
@@ -1530,6 +1806,111 @@ mod tests {
     }
 
     #[test]
+    fn reused_server_start_returns_its_initialized_capabilities() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let manager = LanguageServerManager::default();
+        let capabilities = serde_json::json!({
+            "definitionProvider": true,
+            "renameProvider": { "prepareProvider": true },
+            "documentFormattingProvider": false,
+            "positionEncoding": "utf-16",
+        });
+        let (server_id, _) = manager
+            .acquire_with(&root, "rust", "rust-analyzer", || {
+                let (mut process, _, _) = fake_language_server(&root, Stdio::null());
+                process.capabilities = capabilities.clone();
+                Ok((process, "initialized".into()))
+            })
+            .unwrap();
+        let session = manager
+            .start(LspStartRequest {
+                workspace_path: root.to_string_lossy().into_owned(),
+                language_id: "rust".into(),
+                command: "rust-analyzer".into(),
+            })
+            .unwrap();
+
+        assert_eq!(session.server_id, server_id);
+        assert_eq!(session.capabilities, capabilities);
+        assert_eq!(session.position_encoding, "utf-16");
+        let serialized = serde_json::to_value(session).unwrap();
+        assert_eq!(serialized["capabilities"], capabilities);
+        assert_eq!(serialized["positionEncoding"], "utf-16");
+    }
+
+    #[test]
+    fn editor_takeover_uses_a_monotonic_full_change_and_rejects_stale_text() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, echoed, sender) = fake_language_server(workspace.path(), Stdio::piped());
+        let mut echoed = BufReader::new(echoed.unwrap());
+        let uri = "file:///workspace/src/lib.rs";
+        ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap();
+        ensure_document_open(&mut process, uri, "pub fn disk_updated() {}\n").unwrap();
+        let manager = LanguageServerManager::default();
+        manager
+            .processes
+            .lock()
+            .unwrap()
+            .insert("test".into(), Arc::new(Mutex::new(process)));
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: "test".into(),
+                method: "textDocument/didOpen".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": uri, "version": 1, "text": "pub fn editor() {}\n" },
+                }),
+            })
+            .unwrap();
+
+        assert_eq!(response["documentVersion"], 3);
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "textDocument/didOpen"
+        );
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "textDocument/didChange"
+        );
+        let takeover = read_lsp_message(&mut echoed).unwrap();
+        assert_eq!(takeover["method"], "textDocument/didChange");
+        assert_eq!(takeover["params"]["textDocument"]["version"], 3);
+        assert_eq!(
+            takeover["params"]["contentChanges"][0]["text"],
+            "pub fn editor() {}\n"
+        );
+
+        let stale = manager.request(LspRequestPayload {
+            server_id: "test".into(),
+            method: "textDocument/didChange".into(),
+            params: serde_json::json!({
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{ "text": "pub fn stale() {}\n" }],
+            }),
+        });
+        assert!(stale.unwrap_err().to_string().contains("stale"));
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: "test".into(),
+                method: "textDocument/didChange".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": uri, "version": 4 },
+                    "contentChanges": [{ "text": "pub fn current() {}\n" }],
+                }),
+            })
+            .unwrap();
+        assert_eq!(response["documentVersion"], 4);
+        let current = read_lsp_message(&mut echoed).unwrap();
+        // No frame was emitted for the stale change.
+        assert_eq!(current["params"]["textDocument"]["version"], 4);
+        assert_eq!(
+            current["params"]["contentChanges"][0]["text"],
+            "pub fn current() {}\n"
+        );
+        drop(sender);
+    }
+
+    #[test]
     fn model_requests_resync_documents_that_changed_on_disk() {
         let workspace = tempfile::tempdir().unwrap();
         let (mut process, echoed, _sender) = fake_language_server(workspace.path(), Stdio::piped());
@@ -1553,9 +1934,8 @@ mod tests {
             "pub fn after() {}\n"
         );
 
-        // The editor replaces the text with an unsaved buffer at its own
-        // (timestamp) version; the model's next request resyncs to disk with
-        // a version above the editor's.
+        // The editor now owns an unsaved snapshot. A disk-only model query
+        // must not replace it or reason using mismatched disk coordinates.
         observe_editor_document_notification(
             &mut process,
             "textDocument/didChange",
@@ -1564,21 +1944,30 @@ mod tests {
                 "contentChanges": [{ "text": "pub fn unsaved() {}\n" }],
             }),
         );
-        ensure_document_open(&mut process, uri, "pub fn after() {}\n").unwrap();
-        let resynced = read_lsp_message(&mut echoed).unwrap();
-        assert_eq!(resynced["method"], "textDocument/didChange");
+        let error = ensure_document_open(&mut process, uri, "pub fn after() {}\n").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsaved or unsynchronized editor changes"));
+        assert_eq!(process.documents[uri].version, 1_700_000_000_000_i64);
         assert_eq!(
-            resynced["params"]["textDocument"]["version"],
-            1_700_000_000_001_i64
+            process.documents[uri].content_hash,
+            Some(lsp_document_hash("pub fn unsaved() {}\n"))
         );
+        // The matching snapshot is reusable and also emits no change.
+        ensure_document_open(&mut process, uri, "pub fn unsaved() {}\n").unwrap();
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({ "method": "test/sentinel" }),
+        )
+        .unwrap();
         assert_eq!(
-            resynced["params"]["contentChanges"][0]["text"],
-            "pub fn after() {}\n"
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "test/sentinel"
         );
     }
 
     #[test]
-    fn documents_the_editor_opened_are_changed_not_reopened_and_never_evicted() {
+    fn editor_owned_documents_are_preserved_until_close_and_never_evicted() {
         let workspace = tempfile::tempdir().unwrap();
         let (mut process, echoed, _sender) = fake_language_server(workspace.path(), Stdio::piped());
         let mut echoed = BufReader::new(echoed.unwrap());
@@ -1596,10 +1985,8 @@ mod tests {
             }),
         );
 
-        ensure_document_open(&mut process, editor_uri, "pub fn disk() {}\n").unwrap();
-        let synced = read_lsp_message(&mut echoed).unwrap();
-        assert_eq!(synced["method"], "textDocument/didChange");
-        assert_eq!(synced["params"]["textDocument"]["version"], 2);
+        ensure_document_open(&mut process, editor_uri, "pub fn buffer() {}\n").unwrap();
+        assert!(ensure_document_open(&mut process, editor_uri, "pub fn disk() {}\n").is_err());
 
         // A document the model opened and the editor then opened too is
         // skipped by eviction; plain model documents are evicted oldest first.
@@ -1622,6 +2009,48 @@ mod tests {
         assert!(process
             .documents
             .contains_key("file:///workspace/src/model_1.rs"));
+
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didClose",
+            &serde_json::json!({ "textDocument": { "uri": editor_uri } }),
+        );
+        ensure_document_open(&mut process, editor_uri, "pub fn disk() {}\n").unwrap();
+        assert!(!process.documents[editor_uri].editor_open);
+        assert_eq!(
+            process.documents[editor_uri].content_hash,
+            Some(lsp_document_hash("pub fn disk() {}\n"))
+        );
+        // The first actual frame remains the model's shared document open:
+        // reading/rejecting an editor snapshot did not emit any protocol edit.
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["params"]["textDocument"]["uri"],
+            shared_uri
+        );
+    }
+
+    #[test]
+    fn incremental_editor_changes_never_trigger_disk_resynchronization() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, _, _sender) = fake_language_server(workspace.path(), Stdio::null());
+        let uri = "file:///workspace/src/lib.rs";
+        ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap();
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didChange",
+            &serde_json::json!({
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{
+                    "range": { "start": { "line": 0, "character": 7 }, "end": { "line": 0, "character": 11 } },
+                    "text": "edited",
+                }],
+            }),
+        );
+        let error = ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap_err();
+        assert!(error.to_string().contains("unsynchronized editor changes"));
+        assert_eq!(process.documents[uri].version, 2);
+        assert!(process.documents[uri].editor_open);
+        assert!(process.documents[uri].content_hash.is_none());
     }
 
     #[test]

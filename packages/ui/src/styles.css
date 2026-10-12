@@ -5,6 +5,8 @@
 @import "./navigation-design.css";
 @import "./detail-design.css";
 @import "./ui-upgrade.css";
+@import "./cli-view.css";
+@import "./window-material.css";
 
 
 .gyro-surface-row {
@@ -433,6 +435,13 @@
 .gyro-session-row.is-menu-open .gyro-sidebar-thread-main,
 .gyro-session-row.is-pinned .gyro-sidebar-thread-main {
   padding-right: 56px;
+}
+
+.gyro-session-row.is-draft .gyro-sidebar-thread-main,
+.gyro-session-row.is-draft:hover .gyro-sidebar-thread-main,
+.gyro-session-row.is-draft:focus-within .gyro-sidebar-thread-main,
+.gyro-session-row.is-draft.is-active .gyro-sidebar-thread-main {
+  padding-right: calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-session-actions {
@@ -25306,76 +25315,113 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-slash-menu {
-  background: color-mix(
-    in srgb,
-    var(--gyro-surface-raised) 96%,
-    var(--gyro-app) 4%
-  );
+  background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-lg);
+  border-radius: var(--gyro-radius-xl);
   bottom: calc(100% + 8px);
-  box-shadow: 0 14px 36px rgb(0 0 0 / 30%);
+  box-shadow:
+    0 18px 44px var(--gyro-premium-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
   box-sizing: border-box;
   color: var(--gyro-text);
   display: flex;
   flex-direction: column;
   gap: 1px;
   left: 8px;
-  max-height: min(390px, calc(100vh - 40px));
+  max-height: min(448px, calc(100dvh - 180px));
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px;
+  padding: 6px;
   position: absolute;
-  right: 8px;
-  width: min(300px, calc(100% - 16px));
+  width: min(calc(380px * var(--gyro-ui-scale, 1)), calc(100% - 16px));
   z-index: 140;
+}
+
+.gyro-composer-slash-menu.is-commands {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
 .gyro-composer-slash-menu > header {
   align-items: center;
   color: var(--gyro-faint);
   display: flex;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  flex: none;
+  font-size: var(--gyro-font-micro);
+  gap: 12px;
   justify-content: space-between;
-  padding: 4px 6px 6px;
+  padding: 10px 14px;
 }
 
 .gyro-composer-slash-menu > header strong {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+}
+
+.gyro-composer-slash-menu.is-commands > header {
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+}
+
+.gyro-composer-slash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  scrollbar-color: var(--gyro-border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .gyro-composer-slash-menu button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: var(--gyro-radius-sm);
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: grid;
+  flex: none;
   font: inherit;
-  gap: 8px;
-  grid-template-columns: 14px auto minmax(0, 1fr) auto;
-  min-height: 28px;
-  padding: 3px 6px;
+  gap: 10px;
+  grid-template-columns: 16px calc(96px * var(--gyro-ui-scale, 1)) minmax(0, 1fr) 16px;
+  font-size: var(--gyro-font-micro);
+  min-height: calc(34px * var(--gyro-ui-scale, 1));
+  padding: 7px 8px;
   text-align: left;
+  transition:
+    background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
   width: 100%;
 }
 
 .gyro-composer-slash-menu button:hover,
 .gyro-composer-slash-menu button.is-selected {
-  background: color-mix(
-    in srgb,
-    var(--gyro-accent) 12%,
-    var(--gyro-surface-raised) 88%
-  );
+  background: color-mix(in srgb, var(--gyro-accent) 7%, var(--gyro-control-hover));
+  color: var(--gyro-text);
+}
+
+.gyro-composer-slash-menu button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+.gyro-composer-slash-menu button > svg {
+  color: var(--gyro-faint);
+  height: 16px;
+  width: 16px;
+}
+
+.gyro-composer-slash-menu button.is-selected > svg {
   color: var(--gyro-text);
 }
 
 .gyro-composer-slash-menu button > span:not([class]) {
-  color: var(--gyro-faint);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  line-height: 1.2;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.35;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -25384,7 +25430,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-command-copy {
   display: grid;
-  gap: 1px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -25397,13 +25443,15 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-command-copy strong {
   color: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
+  font-size: var(--gyro-font-support);
+  font-weight: 450;
+  line-height: 1.35;
 }
 
 .gyro-composer-slash-command-copy small {
   color: var(--gyro-faint);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
+  line-height: 1.4;
 }
 
 .gyro-composer-slash-hint-mark {
@@ -25412,27 +25460,27 @@ button.gyro-account-menu-row:hover,
   border-radius: 50%;
   color: var(--gyro-faint);
   display: flex;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 700;
-  height: 13px;
+  font-size: 10px;
+  font-weight: 500;
+  height: 14px;
   justify-content: center;
   line-height: 1;
-  width: 13px;
+  width: 14px;
 }
 
 .gyro-composer-slash-menu button:hover .gyro-composer-slash-hint-mark,
 .gyro-composer-slash-menu button.is-selected .gyro-composer-slash-hint-mark {
-  border-color: color-mix(in srgb, var(--gyro-accent) 55%, transparent);
-  color: var(--gyro-accent);
+  border-color: var(--gyro-muted);
+  color: var(--gyro-text);
 }
 
 .gyro-composer-slash-hint-bubble {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 10px 26px rgb(0 0 0 / 26%);
+  box-shadow: 0 10px 26px var(--gyro-premium-shadow-soft);
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.45;
   padding: 8px 10px;
   pointer-events: none;
@@ -25442,31 +25490,51 @@ button.gyro-account-menu-row:hover,
   z-index: 200;
 }
 
-:root[data-theme="light"] .gyro-composer-slash-hint-bubble {
-  background: #ffffff;
-  border-color: #d5d9e0;
-  box-shadow: 0 12px 30px rgb(31 41 55 / 16%);
-}
-
 .gyro-composer-slash-menu button code {
   color: var(--gyro-text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 600;
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
 }
 
-:root[data-theme="light"] .gyro-composer-slash-menu {
-  background: #ffffff;
-  border-color: #d5d9e0;
-  box-shadow: 0 18px 46px rgb(31 41 55 / 18%);
+.gyro-composer-slash-footer {
+  align-items: center;
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-faint);
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  font-size: var(--gyro-font-micro);
+  gap: 12px;
+  padding: 8px 14px;
+}
+
+.gyro-composer-slash-footer > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.gyro-composer-slash-footer kbd {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  font: inherit;
+  line-height: 1.2;
+  padding: 1px 4px;
 }
 
 @media (max-width: 620px) {
   .gyro-composer-slash-menu {
     left: 4px;
-    max-height: min(244px, calc(100vh - 32px));
-    right: 4px;
+    max-height: min(360px, calc(100dvh - 180px));
     width: calc(100% - 8px);
+  }
+
+  .gyro-composer-slash-command-copy strong,
+  .gyro-composer-slash-command-copy small {
+    white-space: normal;
   }
 }
 
@@ -25523,13 +25591,17 @@ button.gyro-account-menu-row:hover,
     color-mix(in srgb, var(--gyro-premium-muted) 30%, transparent)
       var(--context-usage)
   );
-  border-radius: 999px;
+  aspect-ratio: 1;
+  border-radius: 50%;
   box-sizing: border-box;
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 0 18px;
   height: 18px;
+  min-height: 18px;
+  min-width: 18px;
   justify-content: center;
   margin-inline: 1px 0;
+  position: relative;
   width: 18px;
 }
 
@@ -25817,10 +25889,11 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-wheel > span {
+  /* Equal insets keep the cutout concentric at every composer width. */
   background: var(--gyro-premium-panel-strong);
-  border-radius: inherit;
-  height: 12px;
-  width: 12px;
+  border-radius: 50%;
+  inset: 3px;
+  position: absolute;
 }
 
 .gyro-chat-composer-dock .gyro-composer-context-wheel > span,
@@ -33673,6 +33746,19 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
+/* Keep branch totals readable when a large count needs a second line. */
+.gyro-chat-environment-popover-rows > button > strong.is-changed {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.gyro-chat-environment-popover-rows > button > strong.is-changed > span,
+.gyro-chat-environment-popover-rows > button > strong.is-changed > small {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 .gyro-chat-environment-popover-rows > button > strong > .is-added {
   color: var(--gyro-success);
 }
@@ -35422,7 +35508,6 @@ textarea:focus-visible,
 /* Companion workspace: the conversation owns the left header and composer;
    every tool owns a full-height right column, including its own tab strip. */
 .gyro-chat-surface.has-companion {
-  --gyro-chat-content-width: 100%;
   background: var(--gyro-pane);
   gap: 0;
   font-family: var(--gyro-font-sans);
@@ -35953,22 +36038,33 @@ textarea:focus-visible,
   grid-row: auto;
 }
 
+.gyro-browser-preview.is-chat
+  .gyro-browser-preview-toolbar
+  > :is(.gyro-browser-nav-group, .gyro-url-bar, .gyro-browser-menu-trigger) {
+  /* Container rules for workbench toolbars must not reorder chat chrome. */
+  order: 0;
+}
 .gyro-browser-actions.is-overflow-menu {
   display: none;
 }
 .gyro-browser-actions.is-overflow-menu.is-open {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 12%);
+  /* Reserve chrome space instead of covering the native browser page. */
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
+  box-shadow: none;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px;
-  position: absolute;
-  right: 10px;
-  top: calc(100% + 4px);
-  z-index: 10;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  justify-self: stretch;
+  margin-left: 0;
+  min-width: 0;
+  order: 1;
+  padding: 6px 0 0;
+  position: static;
 }
 
 .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-frame,
@@ -37370,14 +37466,18 @@ textarea:focus-visible,
   .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
     > .gyro-chat-thread-canvas {
     box-sizing: border-box;
-    padding-right: var(--gyro-environment-popover-gutter);
+    /* Give both transcript and absolute dock the same containing width. */
+    justify-self: start;
+    margin-inline: 0;
+    padding-right: 0;
+    width: calc(100% - var(--gyro-environment-popover-gutter));
   }
 
   .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
     > .gyro-chat-thread-canvas
     > .gyro-chat-composer-dock {
-    right: var(--gyro-environment-popover-gutter);
-    width: auto;
+    right: 0;
+    width: 100%;
   }
 }
 
@@ -41136,6 +41236,7 @@ textarea:focus-visible,
   grid-column: 1;
   grid-row: 3;
   padding-right: 0;
+  width: 100%;
 }
 
 .gyro-sidebar-ai-chat
@@ -41955,25 +42056,27 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-/* ---- Responsiveness contract (keep last) ------------------------------------
-   A click should land on the next frame. Surfaces that a click or a view
-   switch brings in appear at once instead of fading or sliding in; motion is
-   kept for popovers, measured selections, and tiny action-icon presses. General transitions
-   only tint (background, border, color, opacity) so hover never reflows,
-   re-rasterizes text, or re-lays out the shell. */
+/* ---- Responsive motion contract --------------------------------------------
+   State changes land on the next frame; short, interruptible visual transitions
+   explain where surfaces went. Streaming content and hover keep stable geometry.
+   Native browser bounds and direct drag resizing must follow their real layout. */
 :root .gyro-chat-thread-canvas,
 :root .gyro-chat-composer-dock,
 :root .gyro-chat-turn,
 :root .gyro-chat-run-timeline > .gyro-message.is-assistant,
+:root .gyro-sidebar-explorer-row {
+  animation: none;
+}
+
+/* Only newly mounted route contents enter; token streaming never replays it. */
 :root .gyro-workspace-route.is-thread > .gyro-workspace-primary,
 :root .gyro-workspace-route.is-code > .gyro-workspace-primary,
 :root .gyro-workspace-route.is-terminal-grid > .gyro-workspace-tool-panel,
 :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-actions,
 :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
 :root .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
-:root .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list,
-:root .gyro-sidebar-explorer-row {
-  animation: none;
+:root .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 
 :root :is(
@@ -42023,10 +42126,15 @@ textarea:focus-visible,
   transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 
-/* The shell's columns snap; animating grid-template-columns re-lays out the
-   transcript, editor, and terminal on every frame. */
-:root .gyro-app-shell.is-chat-shell.is-workspace-shell,
+/* Discrete navigation changes share the short layout duration. Direct resize
+   gestures bypass the transition so content stays attached to the pointer. */
+:root .gyro-app-shell.is-chat-shell.is-workspace-shell {
+  transition: grid-template-columns var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+}
 :root .gyro-app-shell.is-workspace-shell .gyro-sidebar-windowbar {
+  transition: padding-left var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+}
+:root .gyro-app-shell:has(.is-resizing) {
   transition: none;
 }
 

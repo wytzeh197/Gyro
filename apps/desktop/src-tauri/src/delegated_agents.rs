@@ -6,6 +6,182 @@ use serde_json::{json, Value};
 const EVENT: &str = "gyro://subagent-event";
 const MAX_TASK_CHARS: usize = 16_000;
 
+/// Delegation spends additional model calls. Reasoning depth alone at High or
+/// XHigh does not opt in; the active user request may explicitly opt in or out.
+pub(super) fn request_allows_delegation(request: &ProviderChatRequest) -> bool {
+    if request.mode == ChatMode::Council {
+        return false;
+    }
+    match delegation_intent(&request.message) {
+        Some(allowed) => allowed,
+        None => efficiency::config().parallel_agents,
+    }
+}
+
+fn delegation_intent(message: &str) -> Option<bool> {
+    let mut requested = false;
+    let mut fenced = false;
+    let instructions = message
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            if line.starts_with("```") || line.starts_with("~~~") {
+                fenced = !fenced;
+                return false;
+            }
+            !fenced && !line.starts_with(['>', '"', '\''])
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    for sentence in instructions.split(['\n', '.', ';', '?']) {
+        let normalized = sentence
+            .chars()
+            .flat_map(char::to_lowercase)
+            .map(|character| {
+                if character.is_alphanumeric() {
+                    character
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>();
+        let words = normalized.split_whitespace().collect::<Vec<_>>();
+        for (noun, word) in words.iter().enumerate() {
+            let agent = matches!(*word, "subagent" | "subagents")
+                || (*word == "sub"
+                    && words
+                        .get(noun + 1)
+                        .is_some_and(|word| matches!(*word, "agent" | "agents")))
+                || (*word == "parallel" && words.get(noun + 1) == Some(&"agents"));
+            if !agent {
+                continue;
+            }
+            // Opt-outs do not require a delegation verb ("No subagents",
+            // "Implement without subagents"). They override expensive effort.
+            let prefix = &words[..noun];
+            if prefix.iter().any(|word| {
+                matches!(
+                    *word,
+                    "no" | "not" | "dont" | "never" | "without" | "cannot"
+                )
+            }) || prefix.windows(2).any(|words| words == ["don", "t"])
+                || words.windows(2).any(|words| words == ["only", "when"])
+                || words.contains(&"unless")
+            {
+                return Some(false);
+            }
+            let noun_end = noun
+                + if matches!(*word, "sub" | "parallel") {
+                    2
+                } else {
+                    1
+                };
+            // An agent must be the object of the request, not an adjective in
+            // "subagent status/events/tests" or a reported tool name.
+            if words
+                .get(noun_end)
+                .is_some_and(|word| !matches!(*word, "to" | "for" | "on" | "and" | "please"))
+            {
+                continue;
+            }
+            let Some(action) = (noun.saturating_sub(8)..noun).rev().find(|index| {
+                matches!(
+                    words[*index],
+                    "use" | "using" | "spawn" | "start" | "launch" | "delegate" | "assign" | "run"
+                )
+            }) else {
+                continue;
+            };
+            let lead = if words.starts_with(&["can", "you", "please"])
+                || words.starts_with(&["could", "you", "please"])
+            {
+                3
+            } else if words.starts_with(&["can", "you"]) || words.starts_with(&["could", "you"]) {
+                2
+            } else if words.starts_with(&["i", "want", "you", "to"]) {
+                4
+            } else if words.starts_with(&["i", "want", "to"]) {
+                3
+            } else if words.starts_with(&["please"]) {
+                1
+            } else {
+                0
+            };
+            let modifiers = |word: &&str| {
+                word.parse::<u16>().is_ok()
+                    || matches!(
+                        *word,
+                        "a" | "an"
+                            | "one"
+                            | "two"
+                            | "three"
+                            | "four"
+                            | "five"
+                            | "six"
+                            | "several"
+                            | "some"
+                            | "multiple"
+                            | "additional"
+                            | "new"
+                            | "parallel"
+                    )
+            };
+            let object = if matches!(words[action], "delegate" | "assign") {
+                // "Delegate the parser review to a sub-agent".
+                (action + 1..noun)
+                    .rev()
+                    .find(|index| words[*index] == "to")
+                    .is_some_and(|to| words[to + 1..noun].iter().all(modifiers))
+            } else {
+                words[action + 1..noun].iter().all(modifiers)
+            };
+            let direct = action == lead
+                || (words[action] == "using"
+                    && words.get(lead).is_some_and(|word| {
+                        matches!(
+                            *word,
+                            "implement"
+                                | "build"
+                                | "fix"
+                                | "review"
+                                | "audit"
+                                | "investigate"
+                                | "research"
+                                | "check"
+                                | "analyze"
+                                | "analyse"
+                                | "test"
+                                | "create"
+                                | "refactor"
+                                | "update"
+                        )
+                    }));
+            requested |= object && direct;
+        }
+    }
+    requested.then_some(true)
+}
+
+pub(super) fn prompt_guidance(request: &ProviderChatRequest, resumed: bool) -> &'static str {
+    let child = delegation_session(&request.session_id)
+        .is_some_and(|session| session.parent_session_id.is_some());
+    prompt_guidance_for_role(request, resumed, child)
+}
+
+fn prompt_guidance_for_role(
+    request: &ProviderChatRequest,
+    resumed: bool,
+    child: bool,
+) -> &'static str {
+    if child || !request_allows_delegation(request) {
+        "This turn runs with one agent. Do not launch or message sub-agents, call gyro_research_run for new research, or use provider-native delegation. Complete the task yourself with the available tools. You may wait for or stop existing children and read their results."
+    } else if resumed {
+        "Delegate only when task complexity warrants another model call, through Gyro's gyro_agent_spawn/wait/send/stop tools. Give self-contained tasks and file ownership; children share the workspace, inherit this model and permissions, cannot delegate, and are read-only in Plan mode. Wait for all children and incorporate their reports before replying."
+    } else {
+        "Parallel delegation: delegate only when task complexity warrants another model call, using Gyro's gyro_agent_spawn/wait/send/stop tools, not provider-native delegation. Give each child a self-contained task and clear file ownership in the shared workspace. Children inherit this model and this chat's permissions, cannot delegate, and Plan-mode children are read-only. Wait for all children and incorporate their reports before your final response."
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct AgentSnapshot {
@@ -68,6 +244,9 @@ pub(super) fn validate_caller(
         if session.parent_session_id.is_some() {
             anyhow::bail!("sub-agents cannot delegate or launch other agents");
         }
+        if !bound.allow_delegation {
+            anyhow::bail!("this turn runs with one agent; choose Max or Ultra effort, or explicitly request sub-agents in your message");
+        }
     }
     Ok(())
 }
@@ -116,6 +295,16 @@ pub(super) fn spawn(
     bound: &BoundProviderCapabilityContext,
     name: &str,
     task: &str,
+) -> anyhow::Result<AgentSnapshot> {
+    spawn_with_runtime(app, bound, name, task, None)
+}
+
+pub(super) fn spawn_with_runtime(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    name: &str,
+    task: &str,
+    runtime: Option<Duration>,
 ) -> anyhow::Result<AgentSnapshot> {
     let store = open_store().map_err(anyhow::Error::msg)?;
     validate_caller(&store, bound, CapabilityId::AgentSpawn)?;
@@ -183,7 +372,12 @@ pub(super) fn spawn(
         return Err(error);
     }
     let id = child.id.to_string();
-    let control = match subagent_capability::ChildRunControl::claim(app, &id, &bound.session_id) {
+    let control = match subagent_capability::ChildRunControl::claim_with_runtime(
+        app,
+        &id,
+        &bound.session_id,
+        runtime,
+    ) {
         Ok(control) => control,
         Err(error) => {
             let _ = store.delete_session(child.id);
@@ -217,32 +411,34 @@ pub(super) fn spawn(
         summary: None,
         error: None,
     };
-    app.state::<AgentManager>()
-        .entries
-        .lock()
-        .map_err(|_| anyhow::anyhow!("agent state unavailable"))?
-        .insert(
-            id.clone(),
-            AgentEntry {
-                snapshot: snapshot.clone(),
-                request,
-                ceiling: bound.policy.clone(),
-                previous_tokens: None,
-                pending: Vec::new(),
-                delivered: false,
-            },
-        );
+    let manager = app.state::<AgentManager>();
+    let mut entries = match manager.entries.lock() {
+        Ok(entries) => entries,
+        Err(_) => {
+            drop(control);
+            let _ = store.delete_session(child.id);
+            anyhow::bail!("agent state unavailable");
+        }
+    };
+    entries.insert(
+        id.clone(),
+        AgentEntry {
+            snapshot: snapshot.clone(),
+            request,
+            ceiling: bound.policy.clone(),
+            previous_tokens: None,
+            pending: Vec::new(),
+            delivered: false,
+        },
+    );
     if let Err(error) = publish(app, &snapshot, true) {
-        app.state::<AgentManager>()
-            .entries
-            .lock()
-            .ok()
-            .map(|mut entries| entries.remove(&id));
+        entries.remove(&id);
         drop(control);
         let _ = store.delete_session(child.id);
         return Err(error);
     }
-    start_worker(app.clone(), id, control);
+    drop(entries);
+    start_worker(app.clone(), id, control)?;
     Ok(snapshot)
 }
 
@@ -283,89 +479,166 @@ fn child_prompt(task: &str, read_only: bool) -> String {
         if read_only { "You cannot write files or run commands. " } else { "" })
 }
 
-fn start_worker(app: tauri::AppHandle, id: String, initial: subagent_capability::ChildRunControl) {
-    std::thread::spawn(move || {
-        let mut control = Some(initial);
-        loop {
-            let request = match app
-                .state::<AgentManager>()
-                .entries
-                .lock()
-                .ok()
-                .and_then(|entries| entries.get(&id).map(|entry| entry.request.clone()))
-            {
-                Some(request) => request,
-                None => return,
-            };
-            if let Some((parent, parent_turn)) = app.state::<AgentManager>().entries.lock().ok()
-                .and_then(|entries| entries.get(&id).map(|entry| (
-                    entry.snapshot.parent_session_id.clone(), entry.snapshot.parent_turn_id.clone())))
-            {
-                if let (Ok(store), Ok(child), Some(child_turn), Ok(parent), Some(parent_turn)) = (
-                    open_store(), Uuid::parse_str(&request.session_id),
-                    request.turn_id.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
-                    Uuid::parse_str(&parent),
-                    parent_turn.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
-                ) {
-                    if let Err(error) = store.link_usage_turn(child, child_turn, parent, parent_turn) {
-                        eprintln!("could not attribute child usage: {error}");
-                    }
+fn start_worker(
+    app: tauri::AppHandle,
+    id: String,
+    initial: subagent_capability::ChildRunControl,
+) -> anyhow::Result<()> {
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let launched = std::thread::Builder::new()
+        .name("gyro-subagent".into())
+        .spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                worker_loop(worker_app.clone(), &worker_id, initial)
+            }));
+            if outcome.is_err() {
+                fail_worker(
+                    &worker_app,
+                    &worker_id,
+                    "the sub-agent worker exited unexpectedly",
+                );
+            }
+        });
+    if let Err(error) = launched {
+        let message = format!("could not start the sub-agent worker: {error}");
+        // The failed spawn drops its closure and run control. Keep a terminal
+        // durable snapshot instead of a running agent with no worker.
+        fail_worker(&app, &id, &message);
+        anyhow::bail!(message);
+    }
+    Ok(())
+}
+
+fn recover_worker_entries(
+    manager: &AgentManager,
+) -> std::sync::MutexGuard<'_, HashMap<String, AgentEntry>> {
+    let entries = manager
+        .entries
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // The failed worker is closed under this lock; other intact agents remain
+    // available rather than inheriting one worker's poisoned lifecycle lock.
+    manager.entries.clear_poison();
+    entries
+}
+
+fn fail_worker(app: &tauri::AppHandle, id: &str, error: &str) {
+    let manager = app.state::<AgentManager>();
+    let mut entries = recover_worker_entries(&manager);
+    if let Some(entry) = entries.get_mut(id) {
+        if is_live(&entry.snapshot.status) || !entry.pending.is_empty() {
+            settle(entry, Err(error.into()), false);
+            let _ = publish(app, &entry.snapshot, true);
+        }
+    }
+}
+
+fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability::ChildRunControl) {
+    loop {
+        let request = match app
+            .state::<AgentManager>()
+            .entries
+            .lock()
+            .ok()
+            .and_then(|entries| entries.get(id).map(|entry| entry.request.clone()))
+        {
+            Some(request) => request,
+            None => {
+                drop(control);
+                fail_worker(&app, id, "the sub-agent request state is unavailable");
+                return;
+            }
+        };
+        if let Some((parent, parent_turn)) = app
+            .state::<AgentManager>()
+            .entries
+            .lock()
+            .ok()
+            .and_then(|entries| {
+                entries.get(id).map(|entry| {
+                    (
+                        entry.snapshot.parent_session_id.clone(),
+                        entry.snapshot.parent_turn_id.clone(),
+                    )
+                })
+            })
+        {
+            if let (Ok(store), Ok(child), Some(child_turn), Ok(parent), Some(parent_turn)) = (
+                open_store(),
+                Uuid::parse_str(&request.session_id),
+                request
+                    .turn_id
+                    .as_deref()
+                    .and_then(|value| Uuid::parse_str(value).ok()),
+                Uuid::parse_str(&parent),
+                parent_turn
+                    .as_deref()
+                    .and_then(|value| Uuid::parse_str(value).ok()),
+            ) {
+                if let Err(error) = store.link_usage_turn(child, child_turn, parent, parent_turn) {
+                    eprintln!("could not attribute child usage: {error}");
                 }
             }
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_provider_chat_blocking(app.clone(), request.clone(), UsageOrigin::SubAgent)
-            }))
-            .unwrap_or_else(|_| Err("the sub-agent worker exited unexpectedly".into()));
-            let stopped = provider_chat_cancelled(&app, &id);
-            drop(control.take());
-            let manager = app.state::<AgentManager>();
-            let mut entries = match manager.entries.lock() {
-                Ok(entries) => entries,
-                Err(_) => return,
-            };
-            let Some(entry) = entries.get_mut(&id) else {
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_provider_chat_blocking(app.clone(), request, UsageOrigin::SubAgent)
+        }))
+        .unwrap_or_else(|_| Err("the sub-agent worker exited unexpectedly".into()));
+        let manager = app.state::<AgentManager>();
+        let mut entries = match manager.entries.lock() {
+            Ok(entries) => entries,
+            Err(_) => {
+                drop(control);
+                fail_worker(&app, id, "the sub-agent lifecycle state is unavailable");
                 return;
-            };
-            settle(entry, outcome, stopped);
-            if let Ok(store) = open_store() {
-                if let Ok(Some(tokens)) = store.session_usage_tokens(Uuid::parse_str(&id).unwrap()) {
+            }
+        };
+        let Some(entry) = entries.get_mut(id) else {
+            return;
+        };
+        let stopped = control.is_cancelled() || entry.snapshot.status == "stopping";
+        settle(entry, outcome, stopped);
+        if let Ok(store) = open_store() {
+            if let Ok(child_id) = Uuid::parse_str(id) {
+                if let Ok(Some(tokens)) = store.session_usage_tokens(child_id) {
                     entry.snapshot.tokens = Some(tokens);
                 }
             }
-            // Decide the queue while holding the same lock as send; no task can
-            // land in the gap between settling and releasing the worker.
-            if !stopped && !entry.pending.is_empty() {
-                let task = entry.pending.remove(0);
-                match subagent_capability::ChildRunControl::claim(
-                    &app,
-                    &id,
-                    &entry.snapshot.parent_session_id,
-                ) {
-                    Ok(next) => {
-                        let finished = entry.snapshot.clone();
-                        if let Err(error) = publish(&app, &finished, true) {
-                            eprintln!("could not persist agent state: {error}");
-                        }
-                        begin_followup(entry, task);
-                        control = Some(next);
-                        let snapshot = entry.snapshot.clone();
+        }
+        // Hand off the existing slot atomically; another chat cannot steal it
+        // between the completed turn and an explicitly queued next task.
+        if !stopped && entry.snapshot.status == "completed" && !entry.pending.is_empty() {
+            match control.renew(&entry.snapshot.parent_session_id) {
+                Ok(()) => {
+                    let finished = entry.snapshot.clone();
+                    if let Err(error) = publish(&app, &finished, true) {
+                        eprintln!("could not persist agent state: {error}");
+                    }
+                    let task = entry.pending.remove(0);
+                    begin_followup(entry, task);
+                    if let Err(error) = publish(&app, &entry.snapshot, true) {
+                        settle(entry, Err(error.to_string()), false);
+                        let _ = publish(&app, &entry.snapshot, true);
+                        drop(control);
                         drop(entries);
-                        let _ = publish(&app, &snapshot, true);
-                        continue;
+                        return;
                     }
-                    Err(error) => {
-                        entry.snapshot.error = Some(error.to_string());
-                        entry.pending.clear();
-                        entry.snapshot.status = "failed".into();
-                    }
+                    drop(entries);
+                    continue;
+                }
+                Err(error) => {
+                    settle(entry, Err(error.to_string()), control.is_cancelled());
                 }
             }
-            let snapshot = entry.snapshot.clone();
-            drop(entries);
-            let _ = publish(&app, &snapshot, true);
-            return;
         }
-    });
+        let _ = publish(&app, &entry.snapshot, true);
+        // Keep settlement, durable publication, and release serialized with
+        // send. A completed entry is never visible with its old run booked.
+        drop(control);
+        drop(entries);
+        return;
+    }
 }
 
 fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>, stopped: bool) {
@@ -394,12 +667,35 @@ fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>,
             entry.snapshot.summary = Some(
                 subagent_capability::truncate_chars(&response.assistant_event.message, 8_000).0,
             );
-            entry.snapshot.status = "completed".into();
+            let notice = response
+                .status_event
+                .payload
+                .get("error")
+                .and_then(Value::as_str)
+                .filter(|notice| {
+                    provider_reliability::is_tool_budget_notice(notice)
+                        || notice.contains("may be cut off")
+                });
+            entry.snapshot.status = if notice.is_some() {
+                "interrupted"
+            } else {
+                "completed"
+            }
+            .into();
+            entry.snapshot.error = notice.map(gyro_core::security::redact_secrets);
         }
         Err(error) => {
             entry.snapshot.error = Some(gyro_core::security::redact_secrets(&error));
             entry.snapshot.status = if stopped { "cancelled" } else { "failed" }.into();
         }
+    }
+    if entry.snapshot.status != "completed" && !entry.pending.is_empty() {
+        entry.pending.clear();
+        let error = entry
+            .snapshot
+            .error
+            .get_or_insert_with(|| "the sub-agent did not finish".into());
+        error.push_str(" Queued follow-ups were not started because this run did not finish.");
     }
 }
 
@@ -504,15 +800,16 @@ pub(super) fn permission_access(
     }
 }
 
+fn delegation_session(session: &str) -> Option<Session> {
+    open_store().ok().and_then(|store| {
+        Uuid::parse_str(session)
+            .ok()
+            .and_then(|id| store.get_session(id).ok().flatten())
+    })
+}
+
 pub(super) fn can_delegate(session: &str) -> bool {
-    open_store()
-        .ok()
-        .and_then(|store| {
-            Uuid::parse_str(session)
-                .ok()
-                .and_then(|id| store.get_session(id).ok().flatten())
-        })
-        .is_some_and(|session| session.parent_session_id.is_none())
+    delegation_session(session).is_some_and(|session| session.parent_session_id.is_none())
 }
 
 pub(super) fn full_access_ceiling(app: &tauri::AppHandle, session: &str) -> bool {
@@ -555,19 +852,16 @@ pub(super) fn wait(
         }
         let snapshots = {
             let manager = app.state::<AgentManager>();
-            let mut entries = manager
+            let entries = manager
                 .entries
                 .lock()
                 .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
             ids.iter()
                 .map(|id| {
                     let entry = entries
-                        .get_mut(id)
+                        .get(id)
                         .ok_or_else(|| anyhow::anyhow!("agent not found: {id}"))?;
                     owned(&entry.snapshot, &bound.session_id)?;
-                    if !is_live(&entry.snapshot.status) {
-                        entry.delivered = true;
-                    }
                     Ok(entry.snapshot.clone())
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?
@@ -576,6 +870,38 @@ pub(super) fn wait(
             return Ok(snapshots);
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub(super) fn acknowledge_reports(
+    app: &tauri::AppHandle,
+    parent: &str,
+    snapshots: &[AgentSnapshot],
+) -> anyhow::Result<()> {
+    let manager = app.state::<AgentManager>();
+    let mut entries = manager
+        .entries
+        .lock()
+        .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
+    mark_delivered(&mut entries, parent, snapshots);
+    Ok(())
+}
+
+fn mark_delivered(
+    entries: &mut HashMap<String, AgentEntry>,
+    parent: &str,
+    snapshots: &[AgentSnapshot],
+) {
+    for snapshot in snapshots {
+        if let Some(entry) = entries.get_mut(&snapshot.agent_id) {
+            if entry.snapshot.parent_session_id == parent
+                && entry.snapshot.run_id == snapshot.run_id
+                && entry.snapshot.updated_at == snapshot.updated_at
+                && !is_live(&entry.snapshot.status)
+            {
+                entry.delivered = true;
+            }
+        }
     }
 }
 
@@ -630,17 +956,15 @@ fn send(
     let control = subagent_capability::ChildRunControl::claim(app, id, &bound.session_id)?;
     begin_followup(entry, task);
     let snapshot = entry.snapshot.clone();
-    drop(entries);
     if let Err(error) = publish(app, &snapshot, true) {
-        if let Ok(mut entries) = manager.entries.lock() {
-            if let Some(entry) = entries.get_mut(id) {
-                settle(entry, Err(error.to_string()), false);
-            }
-        }
+        settle(entry, Err(error.to_string()), false);
+        let _ = publish(app, &entry.snapshot, true);
         drop(control);
+        drop(entries);
         return Err(error);
     }
-    start_worker(app.clone(), id.to_string(), control);
+    drop(entries);
+    start_worker(app.clone(), id.to_string(), control)?;
     Ok(snapshot)
 }
 
@@ -811,11 +1135,17 @@ pub(super) fn collect_for_parent(
         return Ok(None);
     }
     let bound = active_provider_capability_context(app, &request.session_id)?;
-    let results = wait(app, &bound, &ids, Duration::from_secs(14 * 60))?;
-    if results.iter().any(|agent| is_live(&agent.status)) {
-        anyhow::bail!("sub-agents did not settle before the parent wait timeout");
-    }
-    Ok(Some(serde_json::to_string(&bounded_reports(&results))?))
+    // Async coding agents use their provider's watchdog and the parent's
+    // cancellation, not the synchronous research bridge's 14-minute deadline.
+    let results = loop {
+        let results = wait(app, &bound, &ids, Duration::from_secs(60))?;
+        if results.iter().all(|agent| !is_live(&agent.status)) {
+            break results;
+        }
+    };
+    let report = serde_json::to_string(&bounded_reports(&results)?)?;
+    acknowledge_reports(app, &bound.session_id, &results)?;
+    Ok(Some(report))
 }
 
 #[tauri::command]
@@ -827,10 +1157,76 @@ pub(super) async fn list_subagents(
         .await
         .map_err(to_string)?
 }
+fn reconcile_saved_snapshot(snapshot: &mut AgentSnapshot, events: &[SessionEvent]) {
+    let run = Uuid::parse_str(&snapshot.run_id).ok();
+    let relevant = events
+        .iter()
+        .filter(|event| run.is_some() && event.turn_id == run)
+        .collect::<Vec<_>>();
+    let response = relevant
+        .iter()
+        .rev()
+        .find(|event| event.kind == SessionEventKind::AssistantMessage);
+    let status = relevant
+        .iter()
+        .rev()
+        .find(|event| event.payload.get("kind").and_then(Value::as_str) == Some("provider-status"));
+    let notice = status.and_then(|event| event.payload.get("error").and_then(Value::as_str));
+    snapshot.status = "interrupted".into();
+    snapshot.summary = None;
+    snapshot.error = Some(PROVIDER_INTERRUPTED_MARKER.into());
+    if let Some(response) = response {
+        snapshot.summary = Some(subagent_capability::truncate_chars(&response.message, 8_000).0);
+        let partial = notice.filter(|notice| {
+            provider_reliability::is_tool_budget_notice(notice) || notice.contains("may be cut off")
+        });
+        snapshot.status = if partial.is_some() {
+            "interrupted"
+        } else {
+            "completed"
+        }
+        .into();
+        snapshot.error = partial.map(gyro_core::security::redact_secrets);
+    } else if let Some(status) = status {
+        match status.payload.get("status").and_then(Value::as_str) {
+            Some("failed") if notice != Some(PROVIDER_INTERRUPTED_MARKER) => {
+                snapshot.status = "failed".into()
+            }
+            Some("cancelled") => snapshot.status = "cancelled".into(),
+            _ => {}
+        }
+        snapshot.error = notice
+            .map(gyro_core::security::redact_secrets)
+            .or(snapshot.error.take());
+    }
+    if let Some(start) = snapshot
+        .started_at
+        .take()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+    {
+        let end = relevant
+            .iter()
+            .rev()
+            .find(|event| {
+                event.payload.get("error").and_then(Value::as_str)
+                    != Some(PROVIDER_INTERRUPTED_MARKER)
+            })
+            .map(|event| event.created_at)
+            .unwrap_or_else(|| start.with_timezone(&Utc));
+        snapshot.elapsed_ms = snapshot
+            .elapsed_ms
+            .saturating_add(end.signed_duration_since(start).num_milliseconds().max(0) as u64);
+    }
+    if let Some(last) = relevant.last() {
+        snapshot.updated_at = last.created_at.to_rfc3339();
+    }
+}
+
 fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapshot>> {
     let store = open_store().map_err(anyhow::Error::msg)?;
     let mut snapshots = HashMap::new();
-    for event in store.read_events(Uuid::parse_str(parent)?)? {
+    let parent_events = store.read_events(Uuid::parse_str(parent)?)?;
+    for event in &parent_events {
         if event.payload.get("kind").and_then(Value::as_str) == Some("subagent-state") {
             if let Ok(snapshot) =
                 serde_json::from_value::<AgentSnapshot>(event.payload["agent"].clone())
@@ -851,13 +1247,12 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
             continue;
         }
         let events = store.read_events(child.id)?;
-        let response = events
+        let latest_turn = events.iter().rev().find_map(|event| event.turn_id);
+        let response = events.iter().rev().find(|event| {
+            event.kind == SessionEventKind::AssistantMessage && event.turn_id == latest_turn
+        });
+        let parent_turn = parent_events
             .iter()
-            .rev()
-            .find(|event| event.kind == SessionEventKind::AssistantMessage);
-        let parent_turn = store
-            .read_events(Uuid::parse_str(parent)?)?
-            .into_iter()
             .find(|event| {
                 event
                     .payload
@@ -883,12 +1278,7 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
                 provider_id: child.provider_id.unwrap_or_default(),
                 model_id: child.model_id,
                 read_only: true,
-                status: if response.is_some() {
-                    "completed"
-                } else {
-                    "interrupted"
-                }
-                .into(),
+                status: "running".into(),
                 created_at: child.created_at.to_rfc3339(),
                 updated_at: child.updated_at.to_rfc3339(),
                 started_at: None,
@@ -900,10 +1290,7 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
                 tokens: totals
                     .filter(|totals| totals.calls > 0)
                     .and_then(|_| store.session_usage_tokens(child.id).ok().flatten()),
-                run_id: response
-                    .and_then(|event| event.turn_id)
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
+                run_id: latest_turn.map(|id| id.to_string()).unwrap_or_default(),
                 summary: response
                     .map(|event| subagent_capability::truncate_chars(&event.message, 8_000).0),
                 error: None,
@@ -917,31 +1304,15 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
         .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
     for snapshot in snapshots.values_mut() {
         if !live.contains_key(&snapshot.agent_id) && is_live(&snapshot.status) {
-            snapshot.status = "interrupted".into();
-            snapshot.error = Some(PROVIDER_INTERRUPTED_MARKER.into());
-            if let Some(start) = snapshot
-                .started_at
-                .take()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-            {
-                let events = store.read_recent_events(Uuid::parse_str(&snapshot.agent_id)?, 256)?;
-                let end = events
-                    .iter()
-                    .rev()
-                    .find(|event| {
-                        event.payload.get("error").and_then(Value::as_str)
-                            != Some(PROVIDER_INTERRUPTED_MARKER)
-                    })
-                    .map(|e| e.created_at)
-                    .unwrap_or_else(|| start.with_timezone(&Utc));
-                snapshot.elapsed_ms = snapshot.elapsed_ms.saturating_add(
-                    end.signed_duration_since(start).num_milliseconds().max(0) as u64,
-                );
-            }
+            let events = store.read_events(Uuid::parse_str(&snapshot.agent_id)?)?;
+            reconcile_saved_snapshot(snapshot, &events);
             // Ledger counts survive even if the last lifecycle write was lost.
             if let Ok(totals) = store.session_usage_totals(Uuid::parse_str(&snapshot.agent_id)?) {
                 if totals.calls > 0 {
-                    snapshot.tokens = store.session_usage_tokens(Uuid::parse_str(&snapshot.agent_id)?).ok().flatten();
+                    snapshot.tokens = store
+                        .session_usage_tokens(Uuid::parse_str(&snapshot.agent_id)?)
+                        .ok()
+                        .flatten();
                 }
             }
         }
@@ -971,6 +1342,7 @@ pub(super) fn execute(
     bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
+    let report_options = agent_reports::Options::parse(&request.arguments)?;
     let args = &request.arguments;
     let snapshots = match request.capability_id {
         CapabilityId::AgentSpawn => vec![spawn(
@@ -1024,27 +1396,21 @@ pub(super) fn execute(
         kind: "chat".into(),
         label: agent.name.clone(),
     });
+    let report = agent_reports::render(&snapshots, &report_options)?;
+    acknowledge_reports(app, &bound.session_id, &snapshots)?;
     Ok((
         format!("Updated {} sub-agent(s)", snapshots.len()),
-        json!({"schema": "gyro.agents.v1", "agents": bounded_reports(&snapshots)}),
+        report,
         resource,
     ))
 }
 
 // Tool reports omit the already-known task and share a conservative escaped-JSON
 // budget. The complete transcript remains available in the companion panel.
-fn bounded_reports(snapshots: &[AgentSnapshot]) -> Vec<Value> {
-    let limit = (96 * 1024 / snapshots.len().max(1) / 6).min(8_000);
-    snapshots.iter().map(|agent| {
-        let (summary, truncated) = subagent_capability::truncate_chars(agent.summary.as_deref().unwrap_or(""), limit);
-        json!({
-            "agentId": agent.agent_id, "name": agent.name, "status": agent.status,
-            "readOnly": agent.read_only, "providerId": agent.provider_id, "modelId": agent.model_id,
-            "tokens": agent.tokens, "elapsedMs": agent.elapsed_ms, "runId": agent.run_id,
-            "summary": summary, "summaryTruncated": truncated || agent.summary.as_ref().is_some_and(|text| text.chars().count() >= 8_000),
-            "error": agent.error.as_ref().map(|text| subagent_capability::truncate_chars(text, 120).0),
-        })
-    }).collect()
+fn bounded_reports(snapshots: &[AgentSnapshot]) -> anyhow::Result<Vec<Value>> {
+    let options = agent_reports::Options::parse(&json!({}))?;
+    let data = agent_reports::render(snapshots, &options)?;
+    Ok(data["agents"].as_array().cloned().unwrap_or_default())
 }
 
 pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
@@ -1054,7 +1420,9 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             vec!["name", "task"],
         ),
         CapabilityId::AgentWait => (
-            json!({"agentIds":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},"timeoutMs":{"type":"integer","minimum":0,"maximum":60000}}),
+            json!({"agentIds":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},"timeoutMs":{"type":"integer","minimum":0,"maximum":60000},
+                "knownRevisions":{"type":"object","additionalProperties":{"type":"string"},"description":"Map agentId to its last returned revision to omit unchanged reports. Omit an ID to retrieve its summary again."},
+                "maxBytes":workspace_result_bytes_schema()}),
             vec!["agentIds"],
         ),
         CapabilityId::AgentSend => (
@@ -1069,6 +1437,126 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_effort_does_not_authorize_delegation() {
+        let mut request = entry().request;
+        request.message = "Implement the requested workspace change".into();
+        for effort in [
+            None,
+            Some("low"),
+            Some("medium"),
+            Some("high"),
+            Some("xhigh"),
+            Some("invalid"),
+        ] {
+            request.reasoning_effort = effort.map(str::to_owned);
+            assert!(!request_allows_delegation(&request), "{effort:?}");
+        }
+        for effort in ["max", "ultra", " MAX "] {
+            request.reasoning_effort = Some(effort.into());
+            assert!(!request_allows_delegation(&request), "{effort}");
+            request.mode = ChatMode::Plan;
+            assert!(!request_allows_delegation(&request));
+            request.mode = ChatMode::Council;
+            assert!(!request_allows_delegation(&request));
+            request.mode = ChatMode::Normal;
+        }
+    }
+
+    #[test]
+    fn explicit_requests_allow_delegation_but_mentions_and_quoted_instructions_do_not() {
+        let mut request = entry().request;
+        request.reasoning_effort = Some("high".into());
+        for message in [
+            "Use subagents to review the parser",
+            "Please start 2 sub-agents for this change",
+            "Can you use sub agents to inspect the UI?",
+            "Delegate the parser review to a sub-agent",
+            "Build the dashboard using subagents",
+            "Can you please use subagents to review this?",
+        ] {
+            request.message = message.into();
+            assert!(request_allows_delegation(&request), "{message}");
+        }
+        for message in [
+            "HOW THE HELL IS THE MODEL STARTING SUB AGENTS ON HIGH EFFORT MODE?",
+            "Why did you start subagents?",
+            "How can I use subagents?",
+            "Why is the model using subagents?",
+            "Please explain how models use subagents",
+            "The docs say: use subagents",
+            "The model started two subagents",
+            "> Use subagents for this task",
+            "\"Use subagents for this task\"",
+            "Attached instructions:\n```text\nUse subagents for this task\n```\nExplain these instructions",
+            "Do not use subagents",
+            "Don't start sub-agents",
+            "Use subagents only when I ask",
+            "Can you run tests for subagents?",
+            "Use subagent status in the sidebar",
+            "Use the word subagents in the description",
+            "Create a demo using subagent events",
+            "Use the existing tests to verify subagent behavior",
+            "Build the UI using the current subagent status",
+        ] {
+            request.message = message.into();
+            assert!(!request_allows_delegation(&request), "{message}");
+        }
+        request.reasoning_effort = Some("max".into());
+        for message in [
+            "Do not use subagents",
+            "Don't launch sub-agents",
+            "Work without using subagents",
+            "No subagents",
+            "Implement without subagents",
+            "Please work without sub-agents",
+        ] {
+            request.message = message.into();
+            assert!(!request_allows_delegation(&request), "{message}");
+        }
+        assert!(prompt_guidance_for_role(&request, false, true).contains("one agent"));
+        request.message = "Use subagents to investigate".into();
+        assert!(request_allows_delegation(&request));
+        assert!(prompt_guidance_for_role(&request, true, true).contains("one agent"));
+        request.message = child_prompt("Inspect parser", false);
+        assert!(!request_allows_delegation(&request));
+    }
+
+    #[test]
+    fn single_agent_guidance_replaces_delegation_on_fresh_and_resumed_turns() {
+        let mut request = entry().request;
+        request.reasoning_effort = Some("high".into());
+        for resumed in [false, true] {
+            let prompt = provider_context_message_for_turn(
+                &request,
+                None,
+                PromptTurn {
+                    resumed,
+                    approvals_sent_separately: false,
+                },
+            );
+            assert!(prompt.contains("This turn runs with one agent"));
+            assert!(!prompt.contains("gyro_agent_spawn/wait/send/stop"));
+            assert!(!prompt.contains("task complexity warrants another model call"));
+            request.reasoning_effort = Some("max".into());
+            let prompt = provider_context_message_for_turn(
+                &request,
+                None,
+                PromptTurn {
+                    resumed,
+                    approvals_sent_separately: false,
+                },
+            );
+            assert!(!prompt.contains("gyro_agent_spawn/wait/send/stop"));
+            let original_message = request.message.clone();
+            request.message = "Use subagents to implement the requested change".into();
+            let prompt = provider_context_message_for_turn(&request,None,PromptTurn {resumed,approvals_sent_separately:false});
+            assert!(prompt.contains("gyro_agent_spawn/wait/send/stop"));
+            request.message = original_message;
+            request.reasoning_effort = Some("high".into());
+        }
+    }
 
     fn entry() -> AgentEntry {
         let request: ProviderChatRequest = serde_json::from_value(
@@ -1106,6 +1594,187 @@ mod tests {
         }
     }
 
+    fn child_response(message: &str, notice: Option<&str>) -> ProviderChatResponse {
+        let child = Uuid::new_v4();
+        ProviderChatResponse {
+            activity_events: Vec::new(),
+            assistant_event: SessionEvent::new(
+                child,
+                SessionEventKind::AssistantMessage,
+                message,
+                json!({}),
+            ),
+            session: None,
+            session_title: None,
+            resume_cursor: None,
+            status_event: SessionEvent::new(
+                child,
+                SessionEventKind::SystemEvent,
+                "done",
+                json!({"kind":"provider-status","status":"done","error":notice}),
+            ),
+        }
+    }
+
+    #[test]
+    fn partial_child_reports_remain_available_and_do_not_start_queued_work() {
+        for notice in [PROVIDER_TOOL_BUDGET_NOTICE, PROVIDER_CUT_OFF_NOTICE] {
+            let mut entry = entry();
+            entry.pending.push("Continue the implementation".into());
+            settle(
+                &mut entry,
+                Ok(child_response(
+                    "Applied the first change; validation remains",
+                    Some(notice),
+                )),
+                false,
+            );
+            assert_eq!(entry.snapshot.status, "interrupted");
+            assert_eq!(
+                entry.snapshot.summary.as_deref(),
+                Some("Applied the first change; validation remains")
+            );
+            assert!(entry.snapshot.error.as_deref().unwrap().contains(notice));
+            assert!(entry.pending.is_empty());
+            assert!(entry.snapshot.started_at.is_none());
+        }
+        let mut entry = entry();
+        entry.pending.push("A separately queued task".into());
+        settle(
+            &mut entry,
+            Err("provider authentication failed".into()),
+            false,
+        );
+        assert_eq!(entry.snapshot.status, "failed");
+        assert!(entry.pending.is_empty());
+        assert!(entry
+            .snapshot
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Queued follow-ups were not started"));
+    }
+
+    #[test]
+    fn completed_child_keeps_authorized_followups_ready_for_handoff() {
+        let mut entry = entry();
+        entry.pending.push("Implement the next part".into());
+        settle(
+            &mut entry,
+            Ok(child_response("Verified the first part", None)),
+            false,
+        );
+        assert_eq!(entry.snapshot.status, "completed");
+        assert_eq!(entry.pending.len(), 1);
+        assert!(entry.snapshot.error.is_none());
+    }
+
+    #[test]
+    fn failed_report_rendering_does_not_acknowledge_children_or_hide_later_runs() {
+        let mut entries = HashMap::new();
+        for index in 0..8 {
+            let mut entry = entry();
+            entry.snapshot.agent_id = format!("child-{index}");
+            entry.snapshot.status = "completed".into();
+            entries.insert(entry.snapshot.agent_id.clone(), entry);
+        }
+        let snapshots = entries
+            .values()
+            .map(|entry| entry.snapshot.clone())
+            .collect::<Vec<_>>();
+        assert!(agent_reports::render(
+            &snapshots,
+            &agent_reports::Options::parse(&json!({"maxBytes":1024})).unwrap()
+        )
+        .is_err());
+        assert!(entries.values().all(|entry| !entry.delivered));
+        agent_reports::render(
+            &snapshots,
+            &agent_reports::Options::parse(&json!({})).unwrap(),
+        )
+        .unwrap();
+        mark_delivered(&mut entries, "parent", &snapshots);
+        assert!(entries.values().all(|entry| entry.delivered));
+        let first = &snapshots[0];
+        begin_followup(entries.get_mut(&first.agent_id).unwrap(), "New work".into());
+        mark_delivered(&mut entries, "parent", std::slice::from_ref(first));
+        assert!(!entries[&first.agent_id].delivered);
+    }
+
+    #[test]
+    fn one_worker_panic_does_not_poison_other_agents() {
+        let manager = AgentManager::default();
+        {
+            let mut entries = manager.entries.lock().unwrap();
+            entries.insert("failed-worker".into(), entry());
+            entries.insert("other-worker".into(), entry());
+        }
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _entries = manager.entries.lock().unwrap();
+            panic!("simulated lifecycle panic");
+        }));
+        assert!(panic.is_err());
+        let mut entries = recover_worker_entries(&manager);
+        settle(
+            entries.get_mut("failed-worker").unwrap(),
+            Err("worker stopped unexpectedly".into()),
+            false,
+        );
+        drop(entries);
+        let entries = manager.entries.lock().unwrap();
+        assert_eq!(entries["failed-worker"].snapshot.status, "failed");
+        assert_eq!(entries["other-worker"].snapshot.status, "running");
+    }
+
+    #[test]
+    fn restart_recovers_durable_child_response_for_the_correct_run() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let child = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "recovery")
+            .unwrap();
+        let completed = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                child.id,
+                SessionEventKind::AssistantMessage,
+                "Verified changes and tests",
+                json!({}),
+                Some(completed),
+            )
+            .unwrap();
+        store
+            .append_event_with_turn_id(
+                child.id,
+                SessionEventKind::SystemEvent,
+                "done",
+                json!({"kind":"provider-status","status":"done"}),
+                Some(completed),
+            )
+            .unwrap();
+        let mut snapshot = entry().snapshot;
+        snapshot.run_id = completed.to_string();
+        reconcile_saved_snapshot(&mut snapshot, &store.read_events(child.id).unwrap());
+        assert_eq!(snapshot.status, "completed");
+        assert_eq!(
+            snapshot.summary.as_deref(),
+            Some("Verified changes and tests")
+        );
+        assert!(snapshot.error.is_none());
+        assert!(snapshot.started_at.is_none());
+
+        let failed = Uuid::new_v4();
+        store.append_event_with_turn_id(child.id, SessionEventKind::SystemEvent, "failed", json!({"kind":"provider-status","status":"failed","error":"provider refused new turn"}), Some(failed)).unwrap();
+        let mut latest = entry().snapshot;
+        latest.run_id = failed.to_string();
+        reconcile_saved_snapshot(&mut latest, &store.read_events(child.id).unwrap());
+        assert_eq!(latest.status, "failed");
+        assert!(
+            latest.summary.is_none(),
+            "an older successful turn must not hide a new failure"
+        );
+        assert_eq!(latest.error.as_deref(), Some("provider refused new turn"));
+    }
     #[test]
     fn auto_approval_allows_delegation_without_crossing_denials_or_council() {
         let mut config = GyroConfig::default();
@@ -1271,7 +1940,7 @@ mod tests {
         snapshot.summary = Some("😀\n\"".repeat(8_000));
         snapshot.error = Some("failure".repeat(16_000));
         let agents = vec![snapshot; 32];
-        let reports = bounded_reports(&agents);
+        let reports = bounded_reports(&agents).unwrap();
         assert!(
             serde_json::to_vec(&reports).unwrap().len()
                 < gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
@@ -1367,6 +2036,7 @@ mod tests {
             workspace: temp.path().into(),
             workspace_key: policy.workspace_key.clone(),
             workspace_identity_revision: 1,
+            allow_delegation: true,
             policy: CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Normal),
             workspace_context: WorkspaceContextSnapshot::empty(policy.workspace_key.clone()),
             workspace_check: gyro_core::check_workspace(temp.path()),
@@ -1380,6 +2050,22 @@ mod tests {
         }
         bound.session_id = parent.id.to_string();
         assert!(validate_caller(&store, &bound, CapabilityId::AgentSpawn).is_ok());
+        // Old/resumed provider sessions can retain earlier tool schemas. The
+        // current host-owned turn still blocks additional paid model calls.
+        bound.allow_delegation = false;
+        for id in [
+            CapabilityId::AgentSpawn,
+            CapabilityId::AgentSend,
+            CapabilityId::ResearchRun,
+        ] {
+            assert!(validate_caller(&store, &bound, id)
+                .unwrap_err()
+                .to_string()
+                .contains("one agent"));
+        }
+        for id in [CapabilityId::AgentWait, CapabilityId::AgentStop] {
+            assert!(validate_caller(&store, &bound, id).is_ok());
+        }
         // The narrow Plan delegation exception does not enable the whole class.
         let ceiling = CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Plan);
         assert_eq!(
@@ -1391,7 +2077,6 @@ mod tests {
             CapabilityAccess::Deny
         );
     }
-
     #[test]
     fn tool_schemas_cover_every_adapter_transport() {
         for id in [

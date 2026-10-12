@@ -19,7 +19,7 @@ try {
   assert.equal(config.build.devUrl, `http://127.0.0.1:${port}`);
   assert.equal(
     config.build.beforeDevCommand,
-    `pnpm exec vite --host 127.0.0.1 --port ${port}`,
+    `pnpm --filter @gyro-dev/codemode build && pnpm exec vite --host 127.0.0.1 --port ${port}`,
   );
   assert.equal(args.at(-1), "--no-watch");
   assert.equal(
