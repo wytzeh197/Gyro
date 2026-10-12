@@ -1,5 +1,6 @@
 [package]
 name = "gyro-desktop"
+default-run = "gyro-desktop"
 description = "Gyro macOS desktop application."
 build = "build.rs"
 edition.workspace = true
@@ -12,6 +13,22 @@ version.workspace = true
 [lib]
 name = "gyro_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Explicit debug-only WebKit acceptance harness. It embeds the smoke-mode Vite
+# output and never calls the normal app entrypoint.
+[features]
+native-syntax-smoke = ["tauri/custom-protocol"]
+native-chat-drag-smoke = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "gyro-workspace-syntax-smoke"
+path = "src/bin/workspace-syntax-smoke.rs"
+required-features = ["native-syntax-smoke"]
+
+[[bin]]
+name = "gyro-chat-drag-smoke"
+path = "src/bin/chat-drag-smoke.rs"
+required-features = ["native-chat-drag-smoke"]
 
 [build-dependencies]
 tauri-build = { version = "2.2", features = [] }

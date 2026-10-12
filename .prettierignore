@@ -2,3 +2,7 @@ apps/desktop/src-tauri/gen/
 target/
 node_modules/
 dist/
+# Vendored grammar/source/license bytes are verified against pinned hashes.
+apps/desktop/src/editor/textmate/grammars/
+apps/desktop/src/editor/textmate/sources/
+apps/desktop/src/editor/textmate/licenses/
