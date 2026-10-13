@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
 import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
+import { readStoredAppearance } from "./ui-storage";
 import "./early-shell.css";
 import "./theme.css";
 
@@ -28,7 +29,8 @@ const systemTheme = () =>
 
 const initialTheme = (() => {
   try {
-    const preference = localStorage.getItem("gyro.theme");
+    const preference =
+      readStoredAppearance().theme ?? localStorage.getItem("gyro.theme");
     return preference === "light" || preference === "dark"
       ? preference
       : systemTheme();

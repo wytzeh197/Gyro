@@ -20,7 +20,12 @@ import {
   providerLoginCommandText,
 } from "./provider-login-profile";
 import { useSubagents } from "./use-subagents";
-import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
+import {
+  readBoundedLocalStorage,
+  readStoredAppearance,
+  safeSetLocalStorage,
+  saveAppearancePreferences,
+} from "./ui-storage";
 import {
   parseSystemAccessSnapshot,
   SYSTEM_ACCESS_STATUS_STORAGE_KEY,
@@ -18204,7 +18209,11 @@ export function App() {
 const chatFilePreviewCache = new Map<string, Promise<string>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
-  return recoverWorkspaceBuffers(loadStoredWorkbenchState());
+  const stored = loadStoredWorkbenchState();
+  return recoverWorkspaceBuffers({
+    ...stored,
+    preferences: { ...stored.preferences, ...readStoredAppearance() },
+  });
 }
 
 function loadStoredWorkbenchState(): WorkbenchState {
@@ -18787,8 +18796,9 @@ function flushPersistedWorkbenchState(
     return;
   }
   ref.current = undefined;
-  const saved = safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
+  const saved = saveAppearancePreferences(pending.preferences);
   onPersisted?.(pending.preferences, saved);
+  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
 }
 
 function schedulePersistedWorkbenchStateFlush(

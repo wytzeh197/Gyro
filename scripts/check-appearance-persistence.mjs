@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import { createAppearanceSaveTracker } from "../apps/desktop/src/use-appearance-save-feedback.ts";
-import { safeSetLocalStorage } from "../apps/desktop/src/ui-storage.ts";
+import {
+  APPEARANCE_STORAGE_KEY,
+  readStoredAppearance,
+  safeSetLocalStorage,
+  saveAppearancePreferences,
+} from "../apps/desktop/src/ui-storage.ts";
 
 const initial = {
   theme: "system",
@@ -52,7 +57,10 @@ assert.equal(
 
 const writes = new Map();
 globalThis.window = {
-  localStorage: { setItem: (key, value) => writes.set(key, value) },
+  localStorage: {
+    getItem: (key) => writes.get(key) ?? null,
+    setItem: (key, value) => writes.set(key, value),
+  },
 };
 assert.equal(safeSetLocalStorage("appearance", JSON.stringify(larger)), true);
 assert.deepEqual(
@@ -98,6 +106,7 @@ window.requestIdleCallback = (callback) => {
 const context = {
   window,
   safeSetLocalStorage,
+  saveAppearancePreferences,
   WORKBENCH_STORAGE_KEY: "workbench",
   WORKBENCH_PERSIST_IDLE_TIMEOUT_MS: 100,
 };
@@ -143,5 +152,112 @@ fallbackCallback();
 assert.equal(idle.current, undefined);
 assert.deepEqual(receipts.at(-1), { preferences: initial, saved: true });
 assert.deepEqual(JSON.parse(writes.get("workbench")).preferences, initial);
+
+// Reproduce the real failure: small writes work, but the workspace snapshot
+// exceeds storage capacity. Appearance must still save and restore all fields.
+const changed = {
+  theme: "dark",
+  interfaceSize: "large",
+  density: "compact",
+  motionSpeed: "faster",
+  mainColor: "#123456",
+  secondaryColor: "#abcdef",
+};
+window.localStorage.setItem = (key, value) => {
+  if (value.length > 1_024) throw new Error("Quota exceeded");
+  writes.set(key, value);
+};
+pending.current = {
+  preferences: changed,
+  diffReview: { diff: "x".repeat(10_000) },
+};
+context.flushPersistedWorkbenchState(pending, acknowledge);
+assert.deepEqual(receipts.at(-1), { preferences: changed, saved: true });
+assert.deepEqual(JSON.parse(writes.get("workbench")).preferences, initial);
+assert.deepEqual(readStoredAppearance(), changed);
+assert.ok(writes.get(APPEARANCE_STORAGE_KEY).length < 1_024);
+
+const loader = ast.statements.find(
+  (node) =>
+    ts.isFunctionDeclaration(node) &&
+    node.name?.text === "loadInitialWorkbenchState",
+);
+const restartContext = {
+  loadStoredWorkbenchState: () => ({
+    preferences: { ...initial, modelFollow: "peek" },
+  }),
+  recoverWorkspaceBuffers: (state) => state,
+  readStoredAppearance,
+};
+vm.runInNewContext(
+  ts.transpileModule(loader.getText(ast), {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.None,
+    },
+  }).outputText,
+  restartContext,
+);
+assert.deepEqual(
+  { ...restartContext.loadInitialWorkbenchState().preferences },
+  { ...changed, modelFollow: "peek" },
+  "Restart restores the new appearance over the last successful workspace snapshot",
+);
+
+window.localStorage.setItem = () => {
+  throw new Error("Storage unavailable");
+};
+pending.current = { preferences: dark };
+context.flushPersistedWorkbenchState(pending, acknowledge);
+assert.deepEqual(receipts.at(-1), { preferences: dark, saved: false });
+assert.deepEqual(
+  readStoredAppearance(),
+  changed,
+  "Failure preserves the last saved appearance",
+);
+window.localStorage.setItem = (key, value) => writes.set(key, value);
+pending.current = { preferences: dark };
+context.flushPersistedWorkbenchState(pending, acknowledge);
+assert.deepEqual(receipts.at(-1), { preferences: dark, saved: true });
+assert.deepEqual(
+  readStoredAppearance(),
+  dark,
+  "Retry stores the requested appearance",
+);
+saveAppearancePreferences({
+  ...changed,
+  largeWorkspaceField: "x".repeat(10_000),
+});
+assert.deepEqual(
+  JSON.parse(writes.get(APPEARANCE_STORAGE_KEY)),
+  changed,
+  "Only appearance fields are written",
+);
+for (const invalid of [
+  "{",
+  "null",
+  "[]",
+  JSON.stringify({
+    theme: "invalid",
+    density: "invalid",
+    motionSpeed: "invalid",
+    mainColor: "red",
+    unexpected: true,
+  }),
+  "x".repeat(1_025),
+]) {
+  writes.set(APPEARANCE_STORAGE_KEY, invalid);
+  assert.deepEqual(readStoredAppearance(), {});
+  assert.deepEqual(
+    { ...restartContext.loadInitialWorkbenchState().preferences },
+    { ...initial, modelFollow: "peek" },
+  );
+}
+writes.delete(APPEARANCE_STORAGE_KEY);
+assert.deepEqual(
+  { ...restartContext.loadInitialWorkbenchState().preferences },
+  { ...initial, modelFollow: "peek" },
+  "Existing installations retain their previous preferences",
+);
 delete globalThis.window;
 console.log("Appearance persistence checks passed.");
