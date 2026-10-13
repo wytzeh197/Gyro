@@ -1,7 +1,7 @@
 /* Keep navigation ink fully opaque. Only the backdrop receives a tint.
    This is enabled by the macOS main window, or explicitly by a labeled fixture. */
 :root[data-native-material="sidebar"] {
-  --gyro-window-tint: 92%;
+  --gyro-window-tint: 82%;
   --gyro-window-blur: blur(24px) saturate(1.04);
   --gyro-sidebar-material: color-mix(
     in srgb, var(--gyro-sidebar) var(--gyro-window-tint), transparent
@@ -9,7 +9,7 @@
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] {
-  --gyro-window-tint: 94%;
+  --gyro-window-tint: 85%;
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */

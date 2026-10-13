@@ -8,7 +8,7 @@
 }
 
 :root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
-  background: rgb(34 34 34 / 92%);
+  background: rgb(34 34 34 / 82%);
 }
 
 :root[data-native-material="sidebar"] .gyro-early-shell-main {
@@ -16,7 +16,7 @@
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
-  background: rgb(255 255 255 / 94%);
+  background: rgb(255 255 255 / 85%);
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-main {
