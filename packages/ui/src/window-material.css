@@ -200,7 +200,6 @@
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs {
   background: transparent;
-  border-bottom-color: transparent;
   isolation: isolate;
   position: relative;
 }
