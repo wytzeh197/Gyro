@@ -40,14 +40,12 @@
 /* Workspace tone is defined on the shell, so resolve its material there. */
 :root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
   --gyro-chrome-material: color-mix(
-    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-window-tint), transparent
+    in srgb, var(--gyro-topbar-tint-color) var(--gyro-topbar-tint), transparent
   );
   --gyro-workspace-panel-material: color-mix(
     in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-workspace-panel-tint), transparent
   );
-  --gyro-topbar-material: color-mix(
-    in srgb, var(--gyro-topbar-tint-color) var(--gyro-topbar-tint), transparent
-  );
+  --gyro-topbar-material: var(--gyro-chrome-material);
 }
 
 /* Clear every ancestor between the chrome and the native material.
@@ -117,8 +115,8 @@
   background: transparent;
 }
 
-/* The workspace title band has its own frosted tone and continuous hairline.
-   Tool lists use a denser tint; the editor canvas remains opaque. */
+/* The title band and activity rail share one frosted tone. Tool lists use a
+   denser tint; the editor canvas remains opaque. */
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar {
   background: transparent;
@@ -166,10 +164,7 @@
   background:
     linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
       left 47px / 100% 1px no-repeat,
-    linear-gradient(to bottom,
-      var(--gyro-topbar-material) 0 48px,
-      var(--gyro-chrome-material) 48px
-    );
+    var(--gyro-chrome-material);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -184,7 +179,7 @@
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active
   :is(.gyro-workspace-route.is-code, .gyro-ide-surface, .gyro-ide-editor-stack,
-      .gyro-editor-pane) {
+      .gyro-editor-groups, .gyro-editor-pane) {
   background: transparent;
 }
 
