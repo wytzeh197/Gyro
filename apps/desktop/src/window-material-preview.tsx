@@ -72,11 +72,15 @@ function Preview() {
             onSelectSessions={() => setLayout("thread")} onOpenWorkspace={() => setLayout("code")}
           >
             {layout === "code" ? (
-              <IdeSurface
-                workspacePath="/fixture/Gyro" files={[]} editorTabs={[]}
-                activePaneTab="terminal" terminalOutput="" showEmbeddedPanel={false}
-                onSelectFile={() => undefined} onPaneTabChange={() => undefined}
-              />
+              <div className="gyro-workspace-route is-code" style={{ gridTemplateRows: "minmax(0,1fr)" }}>
+                <section className="gyro-workspace-primary" aria-label="Workspace">
+                  <IdeSurface
+                    workspacePath="/fixture/Gyro" files={[]} editorTabs={[]}
+                    activePaneTab="terminal" terminalOutput="" showEmbeddedPanel={false}
+                    onSelectFile={() => undefined} onPaneTabChange={() => undefined}
+                  />
+                </section>
+              </div>
             ) : (
               <ChatSurface
                 config={config} events={[]} sessionTitle="Subtle window material"
@@ -87,7 +91,7 @@ function Preview() {
           </AppChrome>
         </div>
       </div>
-      <p className="material-preview-caption">Simulated desktop backdrop. In the native app, macOS supplies the frosted material. Workspace content panels remain opaque.</p>
+      <p className="material-preview-caption">Simulated desktop backdrop. In the native app, macOS supplies the frosted material. Editor canvases remain opaque.</p>
     </div>
   );
 }

@@ -118,7 +118,40 @@
 /* The title band and activity rail share one frosted tone. Tool lists use a
    denser tint; the editor canvas remains opaque. */
 :root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar {
+  .gyro-app-shell.is-workspace-chrome-active {
+  isolation: isolate;
+  position: relative;
+}
+
+/* Sample the backdrop once across the entire L-shaped chrome. Separate blur
+   layers can pick up different neighboring surfaces at the editor seam. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background:
+    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
+      left 47px / 100% 1px no-repeat,
+    var(--gyro-chrome-material);
+  content: "";
+  inset: 0;
+  -webkit-mask:
+    linear-gradient(#000, #000) top / 100% 48px no-repeat,
+    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
+      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
+  mask:
+    linear-gradient(#000, #000) top / 100% 48px no-repeat,
+    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
+      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-shell.is-workspace-chrome-active > .gyro-sidebar {
   background: transparent;
   isolation: isolate;
 }
@@ -127,15 +160,11 @@
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background:
-    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
-      left 47px / 100% 1px no-repeat,
-    linear-gradient(to bottom,
-      var(--gyro-topbar-material) 0 48px,
-      var(--gyro-workspace-panel-material) 48px
-    );
+  background: var(--gyro-workspace-panel-material);
   height: auto;
   inset: 0;
+  top: 48px;
+  border-top-left-radius: var(--gyro-workspace-panel-radius);
   z-index: -1;
 }
 
@@ -146,7 +175,7 @@
     transparent calc(var(--gyro-workspace-panel-radius) - 0.5px),
     var(--gyro-border-soft) calc(var(--gyro-workspace-panel-radius) - 0.5px)
       calc(var(--gyro-workspace-panel-radius) + 0.5px),
-    var(--gyro-chrome-material) calc(var(--gyro-workspace-panel-radius) + 0.5px)
+    transparent calc(var(--gyro-workspace-panel-radius) + 0.5px)
   );
 }
 
@@ -159,17 +188,7 @@
 
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail::before {
-  -webkit-backdrop-filter: var(--gyro-window-blur);
-  backdrop-filter: var(--gyro-window-blur);
-  background:
-    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
-      left 47px / 100% 1px no-repeat,
-    var(--gyro-chrome-material);
-  content: "";
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
-  z-index: -1;
+  content: none;
 }
 
 /* Clear only the editor's enclosing layers so its top tabs can share native
@@ -201,6 +220,19 @@
   pointer-events: none;
   position: absolute;
   z-index: -1;
+}
+
+/* Top-level tabs reveal the shared window layer. Lower split headers and
+   headers beneath Restricted Mode keep their local material. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-ide-editor-stack:not(:has(> .gyro-workspace-trust-banner))
+  .gyro-editor-groups:not(.is-split-down) > .gyro-editor-pane .gyro-editor-tabs::before,
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-ide-editor-stack:not(:has(> .gyro-workspace-trust-banner))
+  .gyro-editor-groups.is-split-down > .gyro-editor-pane:first-child .gyro-editor-tabs::before {
+  content: none;
 }
 
 /* Only the top row aligns with the native 48px title band; internal split
