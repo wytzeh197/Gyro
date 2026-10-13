@@ -1,11 +1,67 @@
 import type { SessionEvent } from "@gyro-dev/ui";
 
-/** A refresh replaces matching durable records while retaining earlier pages
- * the user already loaded. Session logs are append-only. */
-export function mergeSessionHistoryPages(current: SessionEvent[], page: SessionEvent[]) {
-  const byId = new Map(current.map((event) => [event.id, event]));
-  for (const event of page) byId.set(event.id, event);
-  return Array.from(byId.values()).sort(compareSessionEventsForHistory);
+// Weak keys retain no closed transcript and never copy event payloads.
+const historyIndexes = new WeakMap<
+  SessionEvent[],
+  { byId: Map<string, SessionEvent>; sorted: boolean }
+>();
+function indexHistory(events: SessionEvent[]) {
+  const cached = historyIndexes.get(events);
+  if (cached) return cached;
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const sorted =
+    byId.size === events.length &&
+    events.every(
+      (event, index) =>
+        index === 0 ||
+        compareSessionEventsForHistory(events[index - 1]!, event) <= 0,
+    );
+  const entry = { byId, sorted };
+  historyIndexes.set(events, entry);
+  return entry;
+}
+
+/** Replace durable records and retain every older event. Sort the small incoming
+ * page and merge it with ordered history, instead of sorting the entire chat. */
+export function mergeSessionHistoryPages(
+  current: SessionEvent[],
+  page: SessionEvent[],
+) {
+  if (page.length === 0) return current;
+  const index = indexHistory(current);
+  const updates = new Map<string, SessionEvent>();
+  let changed = !index.sorted;
+  for (const event of page) {
+    const existing = index.byId.get(event.id);
+    const same =
+      existing === event ||
+      (existing && JSON.stringify(existing) === JSON.stringify(event));
+    updates.set(event.id, same ? existing! : event);
+    if (!same) changed = true;
+  }
+  if (!changed) return current;
+  const retained = Array.from(index.byId.values()).filter(
+    (event) => !updates.has(event.id),
+  );
+  if (!index.sorted) retained.sort(compareSessionEventsForHistory);
+  const incoming = Array.from(updates.values()).sort(
+    compareSessionEventsForHistory,
+  );
+  const merged: SessionEvent[] = [];
+  let a = 0,
+    b = 0;
+  while (a < retained.length && b < incoming.length) {
+    if (compareSessionEventsForHistory(retained[a]!, incoming[b]!) <= 0)
+      merged.push(retained[a++]!);
+    else merged.push(incoming[b++]!);
+  }
+  for (; a < retained.length; a++) merged.push(retained[a]!);
+  for (; b < incoming.length; b++) merged.push(incoming[b]!);
+  historyIndexes.set(merged, {
+    byId: new Map(merged.map((event) => [event.id, event])),
+    sorted: true,
+  });
+  return merged;
 }
 
 function importSequence(event: SessionEvent): number | undefined {

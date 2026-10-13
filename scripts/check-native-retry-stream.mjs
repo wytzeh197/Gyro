@@ -4,7 +4,10 @@ import vm from "node:vm";
 import ts from "typescript";
 import { applyNativeProviderRetryStatus } from "../apps/desktop/src/provider-retry-stream.ts";
 import { createChatAutoRetryController } from "../apps/desktop/src/chat-auto-retry.ts";
-import { orderProviderChatStreamEvent } from "../apps/desktop/src/provider-stream-events.ts";
+import {
+  orderProviderChatStreamEvent,
+  limitOptimisticSessionEvents,
+} from "../apps/desktop/src/provider-stream-events.ts";
 
 const deadline = "2026-10-12T08:00:30Z";
 const event = {
@@ -152,6 +155,7 @@ const update = vm.runInNewContext(js, {
   isProviderStatusEvent: (item) =>
     item.kind === "system-event" && item.payload?.kind === "provider-status",
   limitSessionEventsForUi: (items) => items,
+  limitOptimisticSessionEvents,
 });
 const optimistic = { current: new Map([["chat", waiting]]) };
 let rendered = waiting;

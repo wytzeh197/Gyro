@@ -1,0 +1,27 @@
+{
+  "fixtureOnly": true,
+  "counts": [
+    {
+      "title": "Fixture: long history (1200 turns)",
+      "events": 3601,
+      "toolsOrApprovals": 0
+    },
+    {
+      "title": "Fixture: alternate history (300 turns)",
+      "events": 901,
+      "toolsOrApprovals": 0
+    },
+    {
+      "title": "Fixture: small history (10 turns)",
+      "events": 31,
+      "toolsOrApprovals": 0
+    },
+    {
+      "title": "Fixture: empty history",
+      "events": 1,
+      "toolsOrApprovals": 0
+    }
+  ],
+  "total": 4534,
+  "scope": "restart plus manual re-selection on receiver-fix build; focused restore/new scroll behavior still pending"
+}

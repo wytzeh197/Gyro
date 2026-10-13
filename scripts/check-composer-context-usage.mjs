@@ -75,6 +75,29 @@ for (const providerId of ["cursor", "opencode", "custom:unknown"]) {
   assert.match(unknown.label, /context window unknown/);
 }
 
+// Malformed or contradictory token readings must never be labeled measured.
+for (const invalid of [
+  { inputTokens: -1 }, { inputTokens: 1.5 }, { inputTokens: NaN },
+  { inputTokens: Number.MAX_SAFE_INTEGER + 1 },
+  { inputTokens: 10, outputTokens: -1 },
+  { inputTokens: 10, outputTokens: 5, totalTokens: 999 },
+  { inputTokens: 10, outputTokens: 5, totalTokens: 0 },
+  { inputTokens: 10, modelContextWindow: Infinity },
+]) {
+  const reading = estimateComposerContextUsage([
+    event("invalid", "assistant-message", "", { providerId: "openai", modelId: "fixture", contextUsage: invalid }),
+  ], "", { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 });
+  assert.equal(reading.source, "estimated");
+  assert.equal(reading.usedTokens, 0);
+  assert.equal(reading.contextWindowTokens, 1000);
+}
+const pureProvider = estimateComposerContextUsage([
+  event("pure", "assistant-message", "", { providerId: "openai", modelId: "fixture",
+    contextUsage: { inputTokens: 120, outputTokens: 20, totalTokens: 140 } }),
+], "", { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 });
+assert.equal(pureProvider.source, "reported");
+assert.equal(pureProvider.usedTokens, 140);
+
 const events = [
   event("1", "assistant-message", "old model", {
     providerId: "openai",
@@ -105,13 +128,13 @@ const reported = estimateComposerContextUsage(events, "z".repeat(400), {
   modelLabel: "GPT-5.6 Sol",
   contextWindowTokens: 1_050_000,
 });
-assert.equal(reported.source, "reported");
-assert.equal(reported.usedLabel, "12K");
+assert.equal(reported.source, "estimated", "Provider usage plus a newer draft has estimated coverage");
+assert.equal(reported.usedLabel, "12.2K");
 // A matching runtime window wins over the API/catalog maximum.
 assert.equal(reported.windowLabel, "100K");
 assert.equal(reported.percentLabel, "12%");
 assert.equal(reported.remainingPercentLabel, "88%");
-assert.match(reported.label, /12K of 100K tokens used \(12% used\)/);
+assert.match(reported.label, /12\.2K of 100K tokens used \(12% used\)/);
 assert.match(reported.detail, /newer thread content and this draft/);
 assert.equal(
   composerContextUsageForModel(reported, {
@@ -193,8 +216,8 @@ const switchedModel = estimateComposerContextUsage(events, "", {
   modelLabel: "GPT-5.4 mini",
   contextWindowTokens: 400_000,
 });
-assert.equal(switchedModel.source, "reported");
-assert.equal(switchedModel.usedLabel, "12K");
+assert.equal(switchedModel.source, "estimated");
+assert.equal(switchedModel.usedLabel, "12.1K");
 assert.equal(switchedModel.windowLabel, "400K");
 assert.match(switchedModel.detail, /ran on gpt-5\.6-sol/);
 

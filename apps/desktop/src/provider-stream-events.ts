@@ -3,12 +3,9 @@ import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
 export const MAX_CHAT_RESPONSE_CHARS = 64_000;
 export const CHAT_RESPONSE_TRUNCATION_SUFFIX = "...";
-/** Default open window — keeps the first paint cheap. */
+/** Bounded refresh/optimistic transport; never a limit on display history. */
 export const MAX_CHAT_EVENT_RENDER_COUNT = 400;
-/**
- * After the user loads earlier history, keep a larger in-memory window so the
- * 400-cap does not immediately drop the older page they just requested.
- */
+/** Legacy explicit buffer cap; display history is never pruned to this size. */
 export const MAX_CHAT_EVENT_HOLD_COUNT = 2_500;
 /**
  * How many out-of-order events a turn may hold before the missing sequence is
@@ -177,9 +174,10 @@ type PendingStreamDeltaEvent = {
   turnId: string;
 };
 
+/** Display history is complete unless an explicit transient-buffer cap is supplied. */
 export function limitSessionEventsForUi(
   events: SessionEvent[],
-  maxEvents: number = MAX_CHAT_EVENT_RENDER_COUNT,
+  maxEvents: number = Number.POSITIVE_INFINITY,
 ) {
   if (events.length <= maxEvents) {
     return events;
@@ -197,10 +195,14 @@ export function limitSessionEventsForUi(
   return recentEvents;
 }
 
+export function limitOptimisticSessionEvents(events: SessionEvent[]) {
+  return limitSessionEventsForUi(events, MAX_CHAT_EVENT_RENDER_COUNT);
+}
+
 export function mergePersistedAndOptimisticEvents(
   persistedEvents: SessionEvent[],
   optimisticEvents?: SessionEvent[],
-  maxEvents: number = MAX_CHAT_EVENT_RENDER_COUNT,
+  maxEvents: number = Number.POSITIVE_INFINITY,
 ) {
   if (!optimisticEvents || optimisticEvents.length === 0) {
     return persistedEvents;
@@ -868,7 +870,7 @@ export function settleOpenProviderActivitiesForTurn(
     if (nextOptimistic !== currentOptimistic) {
       optimisticEventsRef.current.set(
         sessionId,
-        limitSessionEventsForUi(nextOptimistic),
+        limitOptimisticSessionEvents(nextOptimistic),
       );
     }
   }
@@ -1004,7 +1006,7 @@ export function applyProviderChatStreamActivity(
   };
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       updateEvents(
         optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
       ),
@@ -1066,7 +1068,7 @@ export function applyProviderChatStreamDeltas(
     updatedSessionIds.add(streamEvent.sessionId);
     optimisticEventsRef.current.set(
       streamEvent.sessionId,
-      limitSessionEventsForUi(
+      limitOptimisticSessionEvents(
         upsertStreamingAssistantEvent(
           optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
           streamEvent,
@@ -1331,7 +1333,7 @@ export function applyProviderChatStreamContextUsage(
   ];
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );
@@ -1372,7 +1374,7 @@ export function applyProviderChatStreamTurnTokens(
   ];
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );

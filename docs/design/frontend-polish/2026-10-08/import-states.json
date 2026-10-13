@@ -1,0 +1,142 @@
+[
+  {
+    "state": "loading",
+    "theme": "dark",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nFinding local data folders…\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "scanning",
+    "theme": "dark",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScanning…\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "error",
+    "theme": "dark",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nCould not read the selected transcript folder.\nRetry",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "running",
+    "theme": "dark",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nRescan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nImporting 1 of 2 chats\nYou can leave this page while your chats import.\nCancel import\nCompleted chats (1)\nProjects\n2 projects\naurora\n/Users/dev/Projects/aurora\n2 chats\nOct 7, 2026\nOpen project\nlong-project-name\n/Users/dev/Archive/long-project-name\n1 chat\nOct 3, 2026\nSelect projects or individual chats to import.\nImport 0 chats",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "completed",
+    "theme": "dark",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nRescan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nImport complete\n2 imported\nView imported chats and details (2)\nImported\nBound the sync queue retries\nOpen chat\nImported\nReview the parser boundaries\nOpen chat\nProjects\n2 projects\naurora\n/Users/dev/Projects/aurora\n2 chats\nOct 7, 2026\nOpen project\nlong-project-name\n/Users/dev/Archive/long-project-name\n1 chat\nOct 3, 2026\nSelect projects or individual chats to import.\nImport 0 chats",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "loading",
+    "theme": "light",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nFinding local data folders…\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "scanning",
+    "theme": "light",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScanning…\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "error",
+    "theme": "light",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nScan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nCould not read the selected transcript folder.\nRetry",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "running",
+    "theme": "light",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nRescan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nImporting 1 of 2 chats\nYou can leave this page while your chats import.\nCancel import\nCompleted chats (1)\nProjects\n2 projects\naurora\n/Users/dev/Projects/aurora\n2 chats\nOct 7, 2026\nOpen project\nlong-project-name\n/Users/dev/Archive/long-project-name\n1 chat\nOct 3, 2026\nSelect projects or individual chats to import.\nImport 0 chats",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "completed",
+    "theme": "light",
+    "text": "Import projects\nBring your Claude Code and Codex chats into Gyro.\nImport from\nClaude Code\n/Users/dev/.claude\nAvailable\nChoose data folder\nCodex\n/Users/dev/.codex\nAvailable\nChoose data folder\nInclude archived chats\nInclude archived Codex chats when you scan.\nRescan projects\n\nYour projects stay in their current folders. Choose the chats you want to bring into Gyro.\n\nImport complete\n2 imported\nView imported chats and details (2)\nImported\nBound the sync queue retries\nOpen chat\nImported\nReview the parser boundaries\nOpen chat\nProjects\n2 projects\naurora\n/Users/dev/Projects/aurora\n2 chats\nOct 7, 2026\nOpen project\nlong-project-name\n/Users/dev/Archive/long-project-name\n1 chat\nOct 3, 2026\nSelect projects or individual chats to import.\nImport 0 chats",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "viewport": [
+      860,
+      620
+    ]
+  }
+]

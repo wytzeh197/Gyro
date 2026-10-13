@@ -1,0 +1,31 @@
+{
+  "schema": "gyro.provider-access-probe.v1",
+  "date": "2026-10-08",
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "benchmarkRoot": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-benchmark-VcX9rK",
+  "configuredDeadlineSeconds": 60,
+  "settledWithinDeadline": false,
+  "manualTermination": "Own isolated benchmark app terminated after expired deadline and a process sample proved it was blocked in Keychain reading before generation.",
+  "sampledCallPath": [
+    "run_provider_chat_blocking",
+    "run_openai_compatible_chat",
+    "provider_api_key_value",
+    "stored_provider_api_key",
+    "keychain::get_api_key",
+    "keyring::Entry::get_password",
+    "SecKeychainFindGenericPassword",
+    "Security::KeychainCore::decodeDataBlob"
+  ],
+  "perQueryNoAuthenticationUI": {
+    "deadlineSeconds": 10,
+    "completed": false,
+    "processTerminated": true
+  },
+  "isolatedProcessNoKeychainUI": {
+    "status": -25293,
+    "elapsedMs": 85.97993850708008,
+    "returnedData": false
+  },
+  "containsCredentialMaterial": false
+}

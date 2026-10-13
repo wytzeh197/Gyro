@@ -1,5 +1,7 @@
 mod automation_scheduler;
 mod canvas_preview;
+mod chat_media_upload;
+use chat_media_upload::prepare_chat_media_upload;
 mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod git_read;
@@ -46,8 +48,11 @@ mod performance_benchmark;
 #[cfg(debug_assertions)]
 mod efficiency_benchmark;
 mod session_goal;
+mod goal_runner;
 mod session_model;
 use session_model::set_session_model;
+mod session_history;
+use session_history::{read_session_events_blocking, SessionEventsReadResult};
 mod project_import;
 mod project_import_continuation;
 mod turn_timing;
@@ -171,6 +176,7 @@ use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod provider_context;
 mod provider_identity;
 mod session_browser;
+mod browser_viewport;
 use provider_context::*;
 use provider_identity::provider_model_identity;
 mod source_control_review;
@@ -637,6 +643,7 @@ struct ProviderRunControl {
     request: Mutex<Option<ProviderChatRequest>>,
     usage_offset: Mutex<Option<UsageTokens>>,
     spend_guard: Mutex<Option<provider_spend_guard::TurnSpendGuard>>,
+    goal_token_budget: Mutex<Option<(u64, u64)>>,
     efficiency_progress: Mutex<gyro_core::efficiency::progress::Detector>,
     efficiency_checkpoint: Mutex<Option<gyro_core::efficiency::checkpoint::TaskCheckpoint>>,
 }
@@ -657,6 +664,7 @@ impl Default for ProviderRunControl {
             request: Mutex::new(None),
             usage_offset: Mutex::new(None),
             spend_guard: Mutex::new(None),
+            goal_token_budget: Mutex::new(None),
             efficiency_progress: Mutex::new(Default::default()),
             efficiency_checkpoint: Mutex::new(None),
         }
@@ -705,6 +713,8 @@ enum ProviderStopReason {
         ceiling: u64,
     },
     ProviderTokenBudget { used: u64, limit: u64 },
+    GoalDeadline,
+    GoalTokenBudget { used: u64, limit: u64 },
     /// Gyro ended a run that went silent with no tool or approval pending.
     Stalled {
         silent_minutes: u64,
@@ -720,6 +730,8 @@ impl ProviderStopReason {
                 "{PROVIDER_STOP_MARKER} Gyro: this turn spent {spent} tokens of new input and output, \
                  past the {ceiling} token per-call ceiling."
             ),
+            Self::GoalDeadline => format!("{PROVIDER_STOP_MARKER} Gyro: the goal reached its time limit; review the checkpoint before resuming."),
+            Self::GoalTokenBudget { used, limit } => format!("{PROVIDER_STOP_MARKER} Gyro: the goal reached its new-token limit ({used} of {limit}); review the checkpoint before resuming."),
             Self::ProviderTokenBudget { used, limit } => format!(
                 "{PROVIDER_STOP_MARKER} Gyro: this provider's rolling token budget is spent ({used} of {limit} tokens)."
             ),
@@ -1560,7 +1572,7 @@ struct TerminalPaneSnapshot {
     governed_provider_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderChatRequest {
     session_id: String,
@@ -1592,7 +1604,7 @@ struct ProviderChatRequest {
     workspace_check: Option<WorkspaceCheckReport>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 enum ChatMode {
     #[default]
@@ -1740,7 +1752,7 @@ fn normal_chat_requests_plan(message: &str) -> bool {
     false
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionGoalContext {
     text: String,
@@ -3008,106 +3020,21 @@ fn bounded_automation_summary(value: &str) -> String {
     truncate_chars(value.trim(), 600)
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionEventsReadResult {
-    events: Vec<SessionEvent>,
-    /// Durable goal, plan, and submitted-mode events outside the recent window.
-    context_events: Vec<SessionEvent>,
-    /// True when older events exist before the returned window.
-    has_more_before: bool,
-}
-
 #[tauri::command]
 async fn read_session_events(
     session_id: String,
     before_event_id: Option<String>,
     limit: Option<usize>,
+    full_history: Option<bool>,
+    known_revision: Option<String>,
 ) -> Result<SessionEventsReadResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        read_session_events_blocking(session_id, before_event_id, limit)
+        read_session_events_blocking(session_id, before_event_id, limit, full_history.unwrap_or(false), known_revision)
     })
     .await
     .map_err(|error| format!("session event read worker failed: {error}"))?
 }
 
-fn read_session_events_blocking(
-    session_id: String,
-    before_event_id: Option<String>,
-    limit: Option<usize>,
-) -> Result<SessionEventsReadResult, String> {
-    let store = open_store()?;
-    let session_id = parse_uuid(&session_id)?;
-    let page_limit = limit
-        .unwrap_or(MAX_DESKTOP_SESSION_EVENTS_READ)
-        .clamp(1, MAX_DESKTOP_SESSION_EVENTS_READ);
-    if let Some(before_event_id) = before_event_id {
-        let before = parse_uuid(&before_event_id)?;
-        let page = store
-            .read_events_before(session_id, before, page_limit)
-            .map_err(to_string)?;
-        return Ok(SessionEventsReadResult {
-            events: page.events,
-            context_events: Vec::new(),
-            has_more_before: page.has_more_before,
-        });
-    }
-    read_session_events_from_store(&store, session_id, page_limit).map_err(to_string)
-}
-
-fn read_session_events_from_store(
-    store: &SessionStore,
-    session_id: Uuid,
-    max_recent_events: usize,
-) -> anyhow::Result<SessionEventsReadResult> {
-    // Read context first so a concurrent append can only land in the newer
-    // transcript snapshot; context events then always precede its tail.
-    let context_events = store.read_context_events(session_id)?;
-    let mut events = store.read_recent_events(session_id, max_recent_events)?;
-    // The tail path re-inserts session-created, so a full page of "content"
-    // events still means older history may exist even when the returned length
-    // equals the limit after that insert.
-    let content_events = events
-        .iter()
-        .filter(|event| event.kind != SessionEventKind::SessionCreated)
-        .count();
-    let has_more_before = content_events >= max_recent_events;
-    let represented_proposals = events
-        .iter()
-        .filter_map(event_mutation_proposal_id)
-        .collect::<HashSet<_>>();
-    // Only surface proposals that have never been written into the event log.
-    // Long sessions can age approval events out of the recent window; without
-    // this gate every reopen would re-append the same pending approvals.
-    for proposal in store.list_unsurfaced_pending_mutation_proposals(session_id)? {
-        if represented_proposals.contains(&proposal.id) {
-            let _ = store.mark_mutation_proposal_surfaced(proposal.id);
-            continue;
-        }
-        let recovered = store.append_event_with_turn_id(
-            session_id,
-            SessionEventKind::ApprovalRequested,
-            format!("Review changes to {}", proposal.path),
-            mutation_approval_payload(&proposal, None),
-            proposal.turn_id,
-        )?;
-        let _ = store.mark_mutation_proposal_surfaced(proposal.id);
-        events.push(recovered);
-    }
-    Ok(SessionEventsReadResult {
-        events,
-        context_events,
-        has_more_before,
-    })
-}
-
-fn event_mutation_proposal_id(event: &SessionEvent) -> Option<Uuid> {
-    let payload = event.payload.as_object()?;
-    if payload.get("kind")?.as_str()? != "mutation-approval" {
-        return None;
-    }
-    Uuid::parse_str(payload.get("proposalId")?.as_str()?).ok()
-}
 
 #[tauri::command]
 async fn append_user_message(
@@ -3159,7 +3086,15 @@ fn append_user_message_blocking(
 #[tauri::command]
 async fn run_provider_chat(
     app: tauri::AppHandle,
+    request: ProviderChatRequest,
+) -> Result<ProviderChatResponse, String> {
+    run_goal_chat(app, request, None).await
+}
+
+async fn run_goal_chat(
+    app: tauri::AppHandle,
     mut request: ProviderChatRequest,
+    expected_run: Option<Uuid>,
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
     let session_id = request.session_id.clone();
@@ -3179,9 +3114,12 @@ async fn run_provider_chat(
         }
         flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
     }
+    let owner = app.state::<ProviderCancellationManager>().flags.lock()
+        .map_err(|_| "provider cancellation state is unavailable".to_string())?
+        .get(&session_id).unwrap().approval_nonce.clone();
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        turn_timing::run_timed_provider_chat(worker_app, request, UsageOrigin::Chat)
+        goal_runner::run(worker_app, request, expected_run)
     })
     .await
     .map_err(|error| format!("provider chat worker failed: {error}"));
@@ -3190,6 +3128,7 @@ async fn run_provider_chat(
         .lock()
         .ok()
         .map(|mut flags| flags.remove(&session_id));
+    goal_runner::finished(&app, &session_id, &owner);
     result?
 }
 
@@ -4557,12 +4496,28 @@ async fn record_file_review_decision(
 /// quietly outspend the person at the keyboard.
 fn run_provider_chat_blocking(
     app: tauri::AppHandle,
+    request: ProviderChatRequest,
+    origin: UsageOrigin,
+) -> Result<ProviderChatResponse, String> {
+    run_provider_chat_blocking_in_lease(app, request, origin, None)
+}
+
+fn run_provider_chat_blocking_in_lease(
+    app: tauri::AppHandle,
     mut request: ProviderChatRequest,
     origin: UsageOrigin,
+    lease: Option<&ProviderSessionLease>,
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&request.session_id)?;
-    let _session_lease = ProviderSessionLease::for_run(&store, session_id).map_err(to_string)?;
+    let acquired_lease;
+    let _session_lease = match lease {
+        Some(lease) => lease,
+        None => {
+            acquired_lease = ProviderSessionLease::for_run(&store, session_id).map_err(to_string)?;
+            &acquired_lease
+        }
+    };
     if let Some(control) = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -4600,7 +4555,7 @@ fn run_provider_chat_blocking(
     }
     request.message = validate_chat_message(&request.message)?;
     let automatically_entered_plan =
-        request.mode == ChatMode::Normal && normal_chat_requests_plan(&request.message);
+        request.mode == ChatMode::Normal && lease.is_none() && normal_chat_requests_plan(&request.message);
     if automatically_entered_plan {
         // An explicit request for a plan should receive the same read-only
         // capability policy, prompt contract, document, and approval handoff
@@ -4906,6 +4861,12 @@ fn run_provider_chat_blocking(
         if let Some(questions) = questions {
             object.insert("questions".into(), questions);
         }
+        if let Some(update) = control_markers.agent_update.as_ref() {
+            object.insert("agentUpdate".into(), update.clone());
+        }
+        if let Some(update) = control_markers.goal_update.as_ref().and_then(goal_runner::normalize_update) {
+            object.insert("goalUpdate".into(), update);
+        }
         object.insert(
             "turnTokens".into(),
             serde_json::to_value(provider_turn_tokens(&request, Some(&runner_output)))
@@ -5040,7 +5001,10 @@ fn run_provider_chat_blocking(
             update.get("status").and_then(serde_json::Value::as_str) == Some("complete")
         })
         .and(request.goal.as_ref())
-        .filter(|goal| goal.status == "active" && !goal.text.trim().is_empty())
+        .filter(|goal| goal.status == "active" && !goal.text.trim().is_empty()
+            && !provider_chat_cancelled(&app, &request.session_id)
+            && session_goal::stored_session_goal(&store.read_context_events(session_id).unwrap_or_default())
+                .is_some_and(|current| current.status == "active" && current.text == goal.text))
         .and_then(|goal| {
             let text = goal.text.trim();
             store
@@ -5053,6 +5017,7 @@ fn run_provider_chat_blocking(
                         "text": text,
                         "status": "complete",
                         "source": "model",
+                        "goalVersion": session_goal::goal_revision(&events),
                     }),
                     Some(run_id),
                 )
@@ -5866,7 +5831,7 @@ fn provider_context_message_with_capabilities_for_turn(
     let mut context = Vec::new();
     // The full guide and contract cost ~3K tokens, so they travel with an
     // actual browse request or captured page, not every mention of "browser".
-    let browser_task = user_requests_gyro_browser(&request.message)
+    let browser_task = user_requests_gyro_browser(delegated_agents::browser_task_message(&request.message))
         || request
             .attachments
             .iter()
@@ -5882,6 +5847,8 @@ fn provider_context_message_with_capabilities_for_turn(
             },
             browser_task,
         ));
+    } else {
+        context.push(browser_knowledge::RESUMED_REVEAL_GUIDANCE.into());
     }
     context.push(format!(
         "Gyro chat mode: {}.",
@@ -6162,6 +6129,7 @@ fn append_plan_event_blocking(
 
 #[tauri::command]
 async fn append_chat_context_event(
+    app: tauri::AppHandle,
     session_id: String,
     event_kind: String,
     message: String,
@@ -6172,6 +6140,10 @@ async fn append_chat_context_event(
         let session_id = parse_uuid(&session_id)?;
         let (kind, message, payload) = match event_kind.as_str() {
             "goal-updated" => {
+                if payload.get("action").and_then(serde_json::Value::as_str) == Some("pause") {
+                    stop_provider_run(&app, &session_id.to_string(), ProviderStopReason::User);
+                    return goal_runner::pause(&store, session_id);
+                }
                 let current = session_goal::stored_session_goal(
                     &store.read_context_events(session_id).map_err(to_string)?,
                 );
@@ -6282,59 +6254,6 @@ async fn prepare_chat_attachment(
     request: PrepareChatAttachmentRequest,
 ) -> Result<PreparedChatAttachment, String> {
     tauri::async_runtime::spawn_blocking(move || prepare_chat_attachment_blocking(request))
-        .await
-        .map_err(|error| format!("attachment worker failed: {error}"))?
-}
-
-/// Dropped and pasted media arrive as a raw IPC body. Encoding a video as a
-/// JSON number array inflates it several times over and stalls the webview.
-#[tauri::command]
-async fn prepare_chat_media_upload(
-    request: tauri::ipc::Request<'_>,
-) -> Result<PreparedChatAttachment, String> {
-    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
-        return Err("media uploads must be sent as raw bytes".into());
-    };
-    if body.len() as u64 > MAX_CHAT_VIDEO_BYTES {
-        return Err(format!(
-            "videos must be {} MB or smaller",
-            MAX_CHAT_VIDEO_BYTES / (1024 * 1024)
-        ));
-    }
-    let header = |name: &str| {
-        request
-            .headers()
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string)
-    };
-    let decode = |value: String| {
-        base64::engine::general_purpose::STANDARD
-            .decode(value)
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .ok_or_else(|| "media upload header is invalid".to_string())
-    };
-    let kind = header("x-gyro-kind").unwrap_or_default();
-    if kind != "image" && kind != "video" {
-        return Err("only image and video uploads are supported".into());
-    }
-    let upload = PrepareChatAttachmentRequest {
-        session_id: header("x-gyro-session-id")
-            .ok_or_else(|| "media upload has no session".to_string())?,
-        path: String::new(),
-        workspace_path: header("x-gyro-workspace").map(decode).transpose()?,
-        kind,
-        bytes: Some(body.clone()),
-        name: Some(
-            header("x-gyro-name")
-                .map(decode)
-                .transpose()?
-                .ok_or_else(|| "media upload has no name".to_string())?,
-        ),
-        relative_path: None,
-    };
-    tauri::async_runtime::spawn_blocking(move || prepare_chat_attachment_blocking(upload))
         .await
         .map_err(|error| format!("attachment worker failed: {error}"))?
 }
@@ -16622,6 +16541,7 @@ struct StrippedControlMarkers {
     session_title: Option<String>,
     plan_updates: Vec<serde_json::Value>,
     goal_update: Option<serde_json::Value>,
+    agent_update: Option<serde_json::Value>,
     questions: Option<serde_json::Value>,
     artifacts: Vec<serde_json::Value>,
 }
@@ -16629,6 +16549,7 @@ struct StrippedControlMarkers {
 const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
 const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
 const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
+const GYRO_AGENT_UPDATE_MARKER: &str = "GYRO_AGENT_UPDATE:";
 const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
 const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";
 const MAX_CHAT_ARTIFACTS: usize = 8;
@@ -16642,6 +16563,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     let mut session_title = None;
     let mut plan_updates = Vec::new();
     let mut goal_update = None;
+    let mut agent_update = None;
     let mut questions = None;
     let mut artifacts = Vec::new();
     let mut kept_lines = Vec::new();
@@ -16652,6 +16574,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
             &mut session_title,
             &mut plan_updates,
             &mut goal_update,
+            &mut agent_update,
             &mut questions,
             &mut artifacts,
         );
@@ -16678,6 +16601,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
         session_title,
         plan_updates,
         goal_update,
+        agent_update,
         questions,
         artifacts,
     }
@@ -16705,6 +16629,7 @@ fn strip_control_markers_from_line(
     session_title: &mut Option<String>,
     plan_updates: &mut Vec<serde_json::Value>,
     goal_update: &mut Option<serde_json::Value>,
+    agent_update: &mut Option<serde_json::Value>,
     questions: &mut Option<serde_json::Value>,
     artifacts: &mut Vec<serde_json::Value>,
 ) -> String {
@@ -16738,14 +16663,24 @@ fn strip_control_markers_from_line(
             }
             GYRO_GOAL_UPDATE_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) if value.is_object() => {
-                    if goal_update.is_none() {
-                        *goal_update = Some(value);
+                    if let Some(update) = goal_runner::normalize_update(&value) {
+                        // The final checkpoint supersedes earlier narration.
+                        *goal_update = Some(update);
                     }
                     rest = remainder;
                 }
                 _ => {
                     rest = "";
                 }
+            },
+            GYRO_AGENT_UPDATE_MARKER => match take_leading_json_value(after_marker.trim_start()) {
+                Some((value, remainder)) => {
+                    if agent_update.is_none() {
+                        *agent_update = delegated_agents::completion_update(&value);
+                    }
+                    rest = remainder;
+                }
+                None => rest = "",
             },
             GYRO_QUESTIONS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) if value.is_object() => {
@@ -16785,6 +16720,7 @@ fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
         GYRO_SESSION_TITLE_MARKER,
         GYRO_PLAN_UPDATE_MARKER,
         GYRO_GOAL_UPDATE_MARKER,
+        GYRO_AGENT_UPDATE_MARKER,
         GYRO_QUESTIONS_MARKER,
         GYRO_ARTIFACTS_MARKER,
     ];
@@ -19892,6 +19828,21 @@ fn wait_for_capability_approval(
         .ok()
         .map(|mut pending| pending.remove(&approval_id.to_string()));
     code_mode::finish_approval(app, &store, session_id, turn_id, approval_id, &decision);
+    if !code_mode::in_group() {
+        let status = match &decision {
+            Ok(CapabilityApprovalDecision::Deny) => "rejected",
+            Ok(_) => "approved",
+            Err(message) if message.contains("cancelled") => "cancelled",
+            Err(_) => "failed",
+        };
+        if let Err(error) = record_provider_approval_terminal_event(
+            app, &store, session_id, turn_id,
+            serde_json::json!({"kind":"capability-approval","approvalId":approval_id,"callId":call_id}),
+            status, &format!("Capability approval {status}"),
+        ) {
+            eprintln!("could not save capability approval outcome: {}", gyro_core::security::redact_secrets(&error.to_string()));
+        }
+    }
     decision
         .map(|decision| {
             if capability_id == CapabilityId::WorkspaceReadEditor
@@ -20171,15 +20122,9 @@ fn execute_provider_capability(
             )
         }
         CapabilityId::WorkspaceGitStatus => {
-            let status = git_status_impl(&workspace)?;
-            let mut data = serde_json::to_value(status)?;
-            if let Some(object) = data.as_object_mut() { object.remove("history"); object.remove("historyError"); }
-            let files = data["files"].as_array().cloned().unwrap_or_default();
-            let offset = capability_output_budget::offset(arguments, "offset")?.unwrap_or(0);
-            let limit = capability_output_budget::page_limit(arguments, 50, 500)?;
-            data["total"] = serde_json::json!(files.len()); data["offset"] = serde_json::json!(offset);
-            data["files"] = serde_json::json!(files.into_iter().skip(offset).take(limit).collect::<Vec<_>>());
-            ("Inspected workspace Git status".into(), capability_output_budget::array_result(data, "files", workspace_result_byte_limit(arguments)?)?, None)
+            let status = git_status_cache::git_status_for_model(&workspace)?;
+            let data = capability_output_budget::git_status_result(serde_json::to_value(status)?, arguments)?;
+            ("Inspected workspace Git status".into(), data, None)
         }
         CapabilityId::WorkspaceDiff => {
             let path = capability_git_diff_path(arguments)?;
@@ -20533,6 +20478,7 @@ fn execute_provider_capability(
                 Some(resource),
             )
         }
+        CapabilityId::BrowserViewport => browser_viewport::execute_capability(app, bound, request)?,
         CapabilityId::BrowserInspect => {
             let owned = require_model_browser_resource(app, bound)?;
             let status = session_browser::call_agent(
@@ -20565,6 +20511,12 @@ fn execute_provider_capability(
         }
         CapabilityId::BrowserScreenshot => {
             let owned = require_model_browser_resource(app, bound)?;
+            if let Some(device) = request.arguments.get("device").and_then(serde_json::Value::as_str) {
+                let mode = serde_json::from_value(serde_json::json!(device))?;
+                session_browser::set_session_browser_viewport(app, &bound.session_id,
+                    browser_viewport::BrowserViewportRequest { mode, width:None, height:None })
+                    .map_err(anyhow::Error::msg)?;
+            }
             let status = session_browser::call_agent(
                 app,
                 &bound.session_id,
@@ -21286,6 +21238,7 @@ fn handle_desktop_provider_capability_request_inner(
             | CapabilityId::BrowserScroll
             | CapabilityId::BrowserFormInput
             | CapabilityId::BrowserScreenshot
+            | CapabilityId::BrowserViewport
             | CapabilityId::BrowserInspect
             | CapabilityId::BrowserReadPage
             | CapabilityId::BrowserFind
@@ -21755,6 +21708,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         .or_else(|| workspace_path_capability::schema(id))
         .or_else(|| git_history_capability::schema(id))
         .or_else(|| web_fetch_capability::schema(id))
+        .or_else(|| browser_viewport::schema(id))
         .or_else(|| memory_capability::schema(id))
         .or_else(|| subagent_capability::schema(id))
         .or_else(|| delegated_agents::schema(id))
@@ -21786,6 +21740,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         }),
         CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => serde_json::json!({
             "path": { "type": "string" },
+            "knownContentHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Omit unchanged text when rechecking evidence already read at this hash. Omit this argument to read new content or a new range." },
             "line": { "type": "integer", "minimum": 1 },
             "endLine": { "type": "integer", "minimum": 1 },
             "column": { "type": "integer", "minimum": 1 },
@@ -21819,7 +21774,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
             "reveal": {
                 "type": "boolean",
                 "default": false,
-                "description": "Show the Browser panel for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Omit for background reading, research, or rendering fallback."
+                "description": "Show the Browser panel only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Omit or set false for reading, research, implementation checks, interactions, screenshots, or rendering fallback; these work while hidden."
             }
         }),
         CapabilityId::BrowserScreenshot => serde_json::json!({
@@ -22195,6 +22150,7 @@ pub fn run() {
             }
             start_cli_ipc_listener(app.handle().clone());
             start_automation_scheduler(app.handle().clone());
+            goal_runner::recover(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -22263,6 +22219,7 @@ pub fn run() {
             capture_session_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
+            session_browser::session_browser_set_viewport,
             session_browser::session_browser_set_visible,
             session_browser::session_browser_navigate,
             session_browser::session_browser_reload,
@@ -24172,6 +24129,30 @@ mod tests {
     }
 
     #[test]
+    fn the_last_valid_goal_checkpoint_wins_without_leaking_control_text() {
+        let stripped = strip_hidden_control_markers(
+            "Draft.GYRO_GOAL_UPDATE: {\"status\":\"continue\",\"progress\":\"Code ready\",\"nextAction\":\"Run checks\"}\nGYRO_GOAL_UPDATE: {\"status\":\"complete\",\"progress\":\"Checks passed\"}\nGYRO_GOAL_UPDATE: {\"status\":\"invalid\"}\nFinished."
+        );
+        assert_eq!(stripped.goal_update.as_ref().unwrap()["status"], "complete");
+        assert_eq!(stripped.goal_update.as_ref().unwrap()["progress"], "Checks passed");
+        assert!(!stripped.message.contains(GYRO_GOAL_UPDATE_MARKER));
+    }
+
+    #[test]
+    fn agent_completion_markers_are_hidden_validated_and_kept_separate_from_goals() {
+        let stripped = strip_hidden_control_markers(
+            "Progress.GYRO_AGENT_UPDATE: {\"status\":\"continue\",\"reason\":\"Tests remain\"}\n\nParser updated."
+        );
+        assert_eq!(stripped.agent_update.as_ref().unwrap()["status"], "continue");
+        assert_eq!(stripped.agent_update.as_ref().unwrap()["reason"], "Tests remain");
+        assert!(!stripped.message.contains(GYRO_AGENT_UPDATE_MARKER));
+        assert!(stripped.goal_update.is_none());
+        let invalid = strip_hidden_control_markers("GYRO_AGENT_UPDATE: {\"status\":\"approved\"}\nRead the report.");
+        assert!(invalid.agent_update.is_none());
+        assert_eq!(invalid.message, "Read the report.");
+    }
+
+    #[test]
     fn gated_provider_context_requires_a_question_for_each_action() {
         let mut request = anthropic_provider_request();
         request.provider_id = "openai".into();
@@ -26040,6 +26021,7 @@ while True:
         assert!(opening.len() > resumed.len());
         assert!(opening.contains("Gyro Browser is chat-owned"));
         assert!(!resumed.contains("Gyro Browser is chat-owned"));
+        assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
         assert!(!resumed.contains("For long-running builds"));
         assert!(resumed.contains("configured approval policy"));
         assert!(resumed.ends_with("User message:\nRename the browser module"));
@@ -28480,50 +28462,6 @@ while True:
             workspace_check: None,
         }
     }
-
-    #[test]
-    fn pending_approval_is_restored_into_the_timeline_once() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
-        let session = store
-            .create_session(temp.path(), SessionOrigin::Desktop, "approval restore")
-            .unwrap();
-        let proposal = store
-            .create_mutation_proposal(
-                session.id,
-                Some(Uuid::new_v4()),
-                "restored.txt",
-                "pending\n",
-                None,
-                false,
-            )
-            .unwrap();
-
-        let first =
-            read_session_events_from_store(&store, session.id, MAX_DESKTOP_SESSION_EVENTS_READ)
-                .unwrap();
-        let second =
-            read_session_events_from_store(&store, session.id, MAX_DESKTOP_SESSION_EVENTS_READ)
-                .unwrap();
-        let matching = |events: &[SessionEvent]| {
-            events
-                .iter()
-                .filter(|event| event_mutation_proposal_id(event) == Some(proposal.id))
-                .count()
-        };
-        assert_eq!(matching(&first.events), 1);
-        assert_eq!(matching(&second.events), 1);
-        assert_eq!(
-            second
-                .events
-                .iter()
-                .find(|event| event_mutation_proposal_id(event) == Some(proposal.id))
-                .unwrap()
-                .kind,
-            SessionEventKind::ApprovalRequested
-        );
-    }
-
     #[test]
     fn streamed_session_title_waits_for_complete_line() {
         assert_eq!(completed_stream_title("GYRO_SESSION_TI", false), None);

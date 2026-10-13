@@ -15,7 +15,7 @@ export type BrowserRevealRequest = {
    * "show" on a tool call. Their own action always wins.
    */
   isUserInitiated: boolean;
-  /** The model explicitly requested a visible preview or user handoff. */
+  /** The model is honoring a user request to see the page or a manual handoff. */
   revealRequested?: boolean;
   /** Two or more chat panes are tiled, so any panel covers a live transcript. */
   isSplitView: boolean;
@@ -37,7 +37,7 @@ export type BrowserRevealDecision = {
 
 /**
  * Model browsing stays behind the chat in every layout unless a visible
- * preview or user handoff was explicitly requested.
+ * page was explicitly requested by the user or a manual handoff needs it.
  */
 export function resolveBrowserReveal(
   request: BrowserRevealRequest,

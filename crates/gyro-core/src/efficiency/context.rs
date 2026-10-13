@@ -115,9 +115,123 @@ pub fn stable_tools(tools: &mut [Value]) {
             .to_owned()
     });
 }
+
+/// Replace earlier copies of large, identical disk-read evidence with a
+/// reference to the newest copy still present in this request. Every read
+/// really ran; tool-call order, results with changed hashes, and side effects
+/// remain intact. Persisted history is untouched.
+pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
+    use sha2::{Digest, Sha256};
+    use std::collections::HashMap;
+    let mut latest = HashMap::<[u8; 32], String>::new();
+    let mut saved = 0;
+    for message in messages.iter_mut().rev() {
+        if message["role"] != "tool" {
+            continue;
+        }
+        let Some(text) = message["content"]
+            .as_str()
+            .filter(|text| text.len() >= 2048)
+        else {
+            continue;
+        };
+        let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
+            continue;
+        };
+        if payload["status"] != "completed" {
+            continue;
+        }
+        let result = &payload["result"];
+        if !matches!(
+            result["capabilityId"].as_str(),
+            Some("workspace-read" | "workspace-read-range")
+        ) {
+            continue;
+        }
+        let data = &result["data"];
+        if data["contentHash"].as_str().is_none() || data["content"].as_str().is_none() {
+            continue;
+        }
+        let Some(call_id) = payload["callId"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        // Compare the whole evidence, including range, root resource, revision,
+        // and truncation metadata. A hash alone cannot identify a read range.
+        let fingerprint: [u8; 32] =
+            Sha256::digest(serde_json::to_vec(result).unwrap_or_default()).into();
+        if let Some(newest) = latest.get(&fingerprint) {
+            payload["result"]["data"] = serde_json::json!({
+                "evidenceOmitted": true,
+                "sameEvidenceAsCallId": newest,
+                "note": "Identical read evidence is retained in the later tool result in this request."
+            });
+            if let Ok(compact) = serde_json::to_string(&payload) {
+                saved += text.len().saturating_sub(compact.len());
+                message["content"] = Value::String(compact);
+            }
+        } else {
+            latest.insert(fingerprint, call_id);
+        }
+    }
+    saved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn read_message(call: &str, hash: &str, line: u64, content: &str) -> Value {
+        serde_json::json!({"role":"tool","tool_call_id":call,"content":serde_json::json!({
+            "status":"completed","callId":call,"result":{"capabilityId":"workspace-read-range",
+            "summary":"Read src/a.rs","resource":{"id":"workspace:chat:src/a.rs"},
+            "data":{"path":"src/a.rs","contentHash":hash,"line":line,"content":content}}
+        }).to_string()})
+    }
+    #[test]
+    fn duplicate_reads_keep_newest_evidence_and_protocol_ids() {
+        let text = "source evidence ".repeat(1000);
+        let first = read_message("first", "hash", 1, &text);
+        let newest = read_message("last", "hash", 1, &text);
+        let mut messages = vec![
+            first,
+            serde_json::json!({"role":"assistant","content":"continue"}),
+            newest.clone(),
+        ];
+        let saved = compact_duplicate_reads(&mut messages);
+        assert!(saved > 14_000);
+        assert_eq!(messages[2], newest);
+        assert_eq!(messages[0]["tool_call_id"], "first");
+        let reference: Value =
+            serde_json::from_str(messages[0]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(reference["callId"], "first");
+        assert_eq!(reference["result"]["data"]["sameEvidenceAsCallId"], "last");
+        assert_eq!(compact_duplicate_reads(&mut messages), 0);
+    }
+    #[test]
+    fn changed_reads_ranges_failures_and_actions_are_never_compacted() {
+        let text = "source evidence ".repeat(1000);
+        let mut messages = vec![
+            read_message("a", "before", 1, &text),
+            read_message("b", "after", 1, &text),
+            read_message("c", "after", 2, &text),
+            serde_json::json!({"role":"user","content":text}),
+        ];
+        for capability in [
+            "workspace-edit",
+            "browser-read-page",
+            "workspace-read-editor",
+        ] {
+            let mut message = read_message(capability, "after", 1, &text);
+            let mut payload: Value =
+                serde_json::from_str(message["content"].as_str().unwrap()).unwrap();
+            payload["result"]["capabilityId"] = Value::String(capability.into());
+            message["content"] = Value::String(payload.to_string());
+            messages.extend([message.clone(), message]);
+        }
+        let before = messages.clone();
+        assert_eq!(compact_duplicate_reads(&mut messages), 0);
+        assert_eq!(messages, before);
+    }
+
     #[test]
     fn excludes_encoded_images() {
         let a = Attribution::from_request(

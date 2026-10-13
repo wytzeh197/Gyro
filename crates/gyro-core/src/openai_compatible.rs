@@ -1944,7 +1944,8 @@ mod tests {
         assert_eq!(tokens.cached_input_tokens, 80);
         assert_eq!(tokens.reasoning_output_tokens, 5);
         assert_eq!(tokens.total_tokens, 150);
-        assert!(tokens.measured);
+        assert!(!tokens.measured, "100 input plus 20 output does not reconcile with a 150 total");
+        assert_eq!(tokens.effective_accounting().reason, Some(UsageReason::InconsistentCounts));
     }
 
     fn accounting_fixture(body: &str) -> Result<OpenAiCompatChatResponse> {

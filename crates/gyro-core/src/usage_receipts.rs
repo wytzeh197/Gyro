@@ -249,6 +249,27 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_numeric_receipts_cannot_become_session_or_task_consumption() {
+        let conn = Connection::open_in_memory().unwrap(); ensure_usage_schema(&conn).unwrap();
+        let session = Uuid::new_v4(); let turn = Uuid::new_v4();
+        let mut unknown = count(9000);
+        unknown.measured = false;
+        unknown.accounting.as_mut().unwrap().coverage = UsageCoverage::Unavailable;
+        unknown.accounting.as_mut().unwrap().reason = Some(UsageReason::UnverifiedRuntime);
+        insert_usage_entry(&conn, &entry(session, turn, unknown)).unwrap();
+        assert_eq!(task_tokens(&conn, session, turn).unwrap().unwrap().total_tokens, 0);
+        let totals = crate::usage::session_usage_totals(&conn, session).unwrap();
+        assert_eq!((totals.total_tokens, totals.input_tokens, totals.output_tokens), (0, 0, 0));
+        assert_eq!(totals.unavailable_calls, 1);
+        insert_usage_entry(&conn, &entry(session, turn, count(100))).unwrap();
+        assert_eq!(task_tokens(&conn, session, turn).unwrap().unwrap().total_tokens, 100);
+        let totals = crate::usage::session_usage_totals(&conn, session).unwrap();
+        assert_eq!(totals.total_tokens, 100);
+        assert_eq!(totals.measured_calls, 1);
+        assert_eq!(totals.unavailable_calls, 1);
+    }
+
+    #[test]
     fn unavailable_child_downgrades_whole_task_without_fabricating_zero() {
         let conn = Connection::open_in_memory().unwrap(); ensure_usage_schema(&conn).unwrap();
         let parent = Uuid::new_v4(); let turn = Uuid::new_v4();

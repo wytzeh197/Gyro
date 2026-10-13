@@ -125,6 +125,25 @@ pub(super) fn array_result(mut data: Value, key: &str, max_bytes: usize) -> anyh
     Ok(data)
 }
 
+/// Git decorations can contain a second, unpaged file list larger than the
+/// entire tool budget. Keep its totals, and page only the requested changes.
+pub(super) fn git_status_result(mut data: Value, arguments: &Value) -> anyhow::Result<Value> {
+    if let Some(object) = data.as_object_mut() {
+        object.remove("history");
+        object.remove("historyError");
+    }
+    if let Some(comparison) = data["comparedToMain"].as_object_mut() {
+        if let Some(files) = comparison.remove("files") {
+            comparison.insert(
+                "fileCount".into(),
+                json!(files.as_array().map_or(0, Vec::len)),
+            );
+            comparison.insert("filesOmitted".into(), json!(true));
+        }
+    }
+    array_page(data, "files", arguments, 50, 500)
+}
+
 /// Page a retained array before applying the serialized byte budget. Entries
 /// are kept whole, and nextOffset points into the same complete source array.
 pub(super) fn array_page(
@@ -344,6 +363,36 @@ mod tests {
         }
         let (_, required) = schema(CapabilityId::WorkspaceReadOutput).unwrap();
         assert!(required.is_empty());
+    }
+
+    #[test]
+    fn git_status_pages_changes_without_unbounded_comparison_or_history() {
+        let files = (0..120)
+            .map(|index| json!({"path":format!("file-{index}.rs")}))
+            .collect::<Vec<_>>();
+        let source = json!({"files":files,"history":["large history".repeat(10_000)],"historyError":null,
+            "comparedToMain":{"additions":42,"deletions":7,"partial":false,"files":vec![json!({"path":"long-path".repeat(100)}); 1000]}});
+        let mut offset = 0;
+        let mut collected = Vec::new();
+        loop {
+            let page = git_status_result(
+                source.clone(),
+                &json!({"offset":offset,"limit":75,"maxBytes":1024}),
+            )
+            .unwrap();
+            assert!(serde_json::to_vec(&page).unwrap().len() <= 1024);
+            assert!(page.get("history").is_none());
+            assert_eq!(page["comparedToMain"]["fileCount"], 1000);
+            assert_eq!(page["comparedToMain"]["additions"], 42);
+            assert!(page["comparedToMain"].get("files").is_none());
+            collected.extend(page["files"].as_array().unwrap().iter().cloned());
+            let Some(next) = page["nextOffset"].as_u64() else {
+                break;
+            };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(collected, files);
     }
 
     #[test]

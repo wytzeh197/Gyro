@@ -8,7 +8,7 @@ Delegated sub-agents each own an independent browser page, navigation history, a
 
 For reading, summarizing, or researching a supplied URL, prefer `gyro_web_fetch` without opening the Browser panel. Use Gyro Browser when fetching fails, relevant content needs rendering, interaction is required, or visual evidence matters. Rendering fallback stays in the background by default; it does not require showing the panel. Reuse sufficient fetched or observed content instead of fetching and browsing the same unchanged page.
 
-Browser open and navigation default to background operation. Set `reveal: true` when the user explicitly asks to open or show a page, when presenting a visual preview, or when the user needs to take over for sign-in or another supported manual action. Reading a link alone is not a request to show it. A visible Browser remains visible during navigation; background work must not take focus from the chat or another panel.
+Browser open and navigation stay in the background by default. Set `reveal: true` only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. A request to fix, build, test, inspect, or visually check something does not ask to show the Browser panel. Implementation checks, interactions, and screenshots work while hidden. A visible Browser remains visible during navigation; background work must not take focus from the chat or another panel.
 
 ## Observe, act, verify
 
@@ -20,17 +20,23 @@ Take a screenshot when layout, colour, spacing, or visual state matters. Only de
 
 For a visual target without a useful element ref, capture the page and call `gyro_browser_mouse` with that screenshot's filename as `captureId` and CSS-pixel coordinates from its top-left. Use `hover`, `click`, `secondary-click`, or `drag` with `toX` and `toY`. A changed URL, viewport, scroll position, or expired capture requires a new screenshot. Re-observe after a mouse action before claiming its result.
 
+## Viewport and Desktop fit
+
+Local loopback previews automatically keep a 1280×800 desktop layout and fit it inside the Browser panel. Ordinary websites follow the panel width. Use `gyro_browser_set_viewport` to select `responsive`, `desktop`, `tablet`, or `mobile` without reloading the page or resizing the panel. A manual choice persists across navigation; `auto` restores the defaults. Optional width and height customize fixed layouts.
+
+The person and model use the same live page. Screenshots retain full viewport resolution while the visible page is scaled down. Pointer coordinates remain page CSS pixels; use the observed viewport dimensions when interpreting Retina screenshots. Fixed dimensions are layout targets: WebKit can round fitted edges by one display pixel. The viewport tool returns `observedViewport`, and screenshots report the actual CSS dimensions. Re-observe after changing the viewport.
+
 ## Keep browsing economical
 
 Reuse the current page and observations while they remain valid. Prefer a targeted `gyro_browser_find` to locate a known control or verify a specific result; use `gyro_browser_read_page` when broader context is needed. Start with the default depth and increase it only if the relevant content is missing. Avoid repeating inspect, full-page reads, and screenshots for the same unchanged state. Capture images for visual checks, not as a routine step after every action. Verify the outcome once with the smallest observation that proves it.
 
 ## Local apps and dev servers
 
-When the user asks to open, view, or check a web app they are building, show it in Gyro Browser rather than launching a separate window. If this chat's page already points at a loopback origin (`localhost`, `127.0.0.1`), reuse it; if hidden, navigate to its current URL with `reveal: true` to show the preview. Otherwise find the dev server URL from the project's scripts, config, or a running terminal; start the server only when none is running, then open that URL with `reveal: true` and name it in your reply. A native desktop shell such as a Tauri or Electron window is a different surface: Gyro Browser shows its web frontend, not the native window, so say so when that difference matters.
+Use Gyro Browser to check a web app in the background. If this chat's page already points at a loopback origin (`localhost`, `127.0.0.1`), reuse it without revealing a hidden panel. Otherwise find the dev server URL from the project's scripts, config, or a running terminal; start the server only when none is running, then open that URL without `reveal: true`. Reveal it only when the user explicitly asks to see or show the app or a required manual handoff needs it. A native desktop shell such as a Tauri or Electron window is a different surface: Gyro Browser shows its web frontend, not the native window, so say so when that difference matters.
 
 Keep the chat's Browser on the page or component you are actively checking. After changing its files, let hot reload settle or reload, then verify a task-specific heading or control before saying the preview is ready. A successful open or navigation only confirms the request; it does not prove the intended page rendered. If the page is blank, stale, an error, or says “This address opens Gyro”, inspect console/network output and correct the URL or preview entry instead of leaving that page as the result.
 
-When working on Gyro itself, its main app entry deliberately cannot run inside its own Browser. The full `capture.html` harness also replaces native IPC globals and is not compatible with the native Browser. Use a standalone component preview that imports the actual UI being edited and supplies explicit fixture data without booting the desktop app or replacing native globals. Reuse an existing suitable preview before creating one. Label fixture data accurately; it is rendered UI evidence, not live repository or provider state. Keep the working preview open when finishing a visual task.
+When working on Gyro itself, its main app entry deliberately cannot run inside its own Browser. The full `capture.html` harness also replaces native IPC globals and is not compatible with the native Browser. Use a standalone component preview that imports the actual UI being edited and supplies explicit fixture data without booting the desktop app or replacing native globals. Reuse an existing suitable preview before creating one. Label fixture data accurately; it is rendered UI evidence, not live repository or provider state. Keep the working page available in the background; finishing a visual task does not require revealing the panel.
 
 ## Permissions and failures
 

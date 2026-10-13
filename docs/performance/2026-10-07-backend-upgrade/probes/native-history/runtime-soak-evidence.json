@@ -1,0 +1,47 @@
+{
+  "scope": "Standalone shared core runner; 2000 mock commands across four workers; no providers, accounts or UI",
+  "commands": 2000,
+  "workers": 4,
+  "elapsedMs": 4040,
+  "outcomes": {
+    "spawnFailures": 40,
+    "cancelled": 40,
+    "timedOut": 40,
+    "outputLimit": 40,
+    "succeeded": 1840
+  },
+  "rootBefore": {
+    "fds": 3,
+    "pid": 75755,
+    "rssBytes": 6225920,
+    "threads": 1
+  },
+  "rootAfterScopeDrop": {
+    "fds": 3,
+    "pid": 75755,
+    "rssBytes": 7454720,
+    "threads": 1
+  },
+  "peakSampledRootFds": 16,
+  "peakSampledRootThreads": 13,
+  "helperSampledFdRange": [
+    5,
+    5
+  ],
+  "rssIncreaseBytes": 1228800,
+  "remainingChildren": [],
+  "testedProcessGuardHashes": {
+    "crates/gyro-core/src/process_guard.rs": "291413cec404145c45951de0e63f089e331c9705bb8cb3d1efdbea5986e2f614",
+    "crates/gyro-core/src/process_guard/macos.rs": "12a469c67572ae1b24e21b91de5086bc5eaa660bee78cb49e1012959f567b778"
+  },
+  "hashes": {
+    "runtime-soak.rs": "36a5cfba61ec9cb1ce601dfb40d9b7c0736f8fc1aec5044b209a3cb71a77c94f",
+    "runtime-soak.json": "f83f88a0277987ae99e16faab4feed8ce95963c5ef058a78b8d74d7e84a3e53c"
+  },
+  "limits": [
+    "Owned standalone command-runner cohort; no provider, account or UI use",
+    "RSS increased by about 1.17 MiB; no zero-growth or whole-app memory-leak claim",
+    "This run predates the auxiliary-service wrapper change; those changes have separate regressions",
+    "Native workspace, browser, LSP and terminal resource acceptance remains open"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "recordedAt": "2026-10-08T14:03:01.150184+00:00",
+  "snapshot": {
+    "recordedAt": "2026-10-08T13:52:13.230724+00:00",
+    "hashes": {
+      "apps/desktop/src/App.tsx": "9c8c40a8e6f0122de5b73e8ee4586d1460d8566fac15c43a9ebb6b3ba91ce42f",
+      "apps/desktop/src/surface-timing.ts": "c5700d5fd2bde09320bb211db888776ad4265f9bb1ab038b34576fb65559dd0f",
+      "apps/desktop/src/use-measured-workbench.ts": "3cb0abcb8de82b04c349dca34fda75c9c5b088ba3257fbae8f690117420880f1",
+      "apps/desktop/src-tauri/src/turn_timing.rs": "3fb02b6b40d626c9a0a0a1a3d80f1aea0e3fcd8fa9ccb2967566c87506bccdef",
+      "crates/gyro-core/src/timing.rs": "eb774fdfac0e9749331f458d45bfc3b01fceb19bdb5de9e051670d3161716100",
+      "crates/gyro-core/examples/backend_acceptance_fixture.rs": "6f0517a6543f344cca7347759e88c5ff048c86e3f73a1e722b59e8d7e64b99d0",
+      "scripts/check-surface-timing.mjs": "bf3149ccc189f8b24c05564c668aedf9d3d1c38ef49120a48937b796b23fd784",
+      "target/debug/gyro-desktop": "9393c7c0f5cfc025c14a124cb7c664785a3bcd98f8ff6d3de89e1e681c15acdc",
+      "apps/desktop/dist/index.html": "07ff83aa13bcc564f9f9af99a294038b258b93d53ded8fb1a32e1da2d2939a66"
+    },
+    "fixtureOnly": true,
+    "nativeVerification": "pending",
+    "nativeBuildPassed": true,
+    "bundleExecutableHash": "57788c9152e14b7bf76d6dd90ffa9a8ee778668828985af20d5b5845e02bea13",
+    "bundleIdentifier": "dev.gyro.history-verification",
+    "frontendURL": "tauri://localhost",
+    "updatedAt": "2026-10-08T13:52:45.363749+00:00"
+  },
+  "observations": [
+    "Initial UI filtered all fixture chats because their selected workspace was temporary.",
+    "First Workspace selection reached the Gyro render-error boundary.",
+    "No surface timing records were written."
+  ],
+  "followup": "Window-bound frame/cancel wrappers and receiver-sensitive regression implemented; regenerated standalone history sessions in v3; current builds/native recheck pending.",
+  "limits": [
+    "Computer Use launch call took 75 seconds; it is not an app latency measurement.",
+    "No provider requests or tool executions performed."
+  ]
+}

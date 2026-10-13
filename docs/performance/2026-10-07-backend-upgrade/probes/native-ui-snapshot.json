@@ -1,0 +1,31 @@
+{
+  "recordedAt": "2026-10-08T11:10:51.725681+00:00",
+  "build": "cargo build --offline -p gyro-desktop --features tauri/custom-protocol",
+  "frontendURL": "tauri://localhost",
+  "fixtureRoot": "/private/tmp/gyro-backend-ui-2026-10-08",
+  "persistentUIOptIn": "GYRO_TEST_PERSIST_UI=1",
+  "hashes": {
+    "target/debug/gyro-desktop": "ab625b5440d9fbcb8d1dc45e949a09b7da763c414b7f0571879475790cf201c2",
+    "apps/desktop/dist/index.html": "91eca964f19a7a6efab989a4b1e3ecf43ae6217dfbd95a6bf7640963caf07e27",
+    "apps/desktop/src/App.tsx": "3064892a705cdfc932b0a07b6153174c2b4d9ece610a3d2ac45b7fe15d6b9416",
+    "apps/desktop/src-tauri/src/lib.rs": "108b102e72bf18ab10ca098a8752ba1273038d9886ae028effa1e2716cc3a6de",
+    "apps/desktop/src/ui-storage.ts": "08b72992d71b4deb53a18f406c8e9545f6f052b2e05821a73567da02a01d0cbd",
+    "apps/desktop/src/turn-timing.ts": "16fcb4532637650615cc1828582abf003b514be20d14162eb36776157d3ce0a2",
+    "apps/desktop/src/source-control-scope.ts": "f7ee78c500a9c034d8ef1926ad97987eddef8ef153b6f4da66d2416605fee0c6",
+    "apps/desktop/src-tauri/src/git_status_cache.rs": "c190865c035f25f8bedb8b489b44683f4936e51676fef2c38bd25f23e195c917",
+    "packages/ui/src/types.ts": "af1499c8944c1c53a4918dadbc9a313c182a2c9005a0748093bd58d82907fa56",
+    "packages/ui/src/source-control-stats.ts": "b9370ef4c5186e85f851f1dce4730bf7a11fd6f8a6c4081f99a12dbdd47f91bf",
+    "packages/ui/src/surfaces.tsx": "825108de36b78b11ea7b865f13adb55d3a3b2c78ce236ce06e0eac62748ca8b2",
+    "apps/desktop/src-tauri/src/turn_timing.rs": "d57845e2aebac3fe1af55b0738fcb5b9bfa6071430c53745696baed68c6ccf04",
+    "scripts/check-command-blocking.mjs": "4fa1ec3e2a15eba05512c7538918cd52953e03be68cdbeb810d2f1ceca67f1bd"
+  },
+  "bundleExecutableHash": "9948f78489c2274a35915d5f0774c0cc3fb7f7d9e0800f70a270c429dd10938b",
+  "bundleNote": "Copied the compiled executable into a temporary app with unique bundle identity, then ad-hoc signed; signing changes executable bytes.",
+  "updatedAt": "2026-10-08T13:12:23.403226+00:00",
+  "workspaceRestartTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store-root-check",
+  "resumeTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store",
+  "includesTerminalResponsePriorityFix": true,
+  "includesWorkspaceGitOwnerAndChatGridSelectionFix": true,
+  "includesGitPreparationDetailsAndTimingWorker": true,
+  "includesSelectionSettlesBeforePreparation": true
+}

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
+import { formatTokenCount as ledgerTokenCount } from "../packages/ui/src/usage-ledger.ts";
+import { estimateComposerContextUsage } from "../packages/ui/src/context-usage.ts";
 import { formatTokenCount, turnTokenReadingForResponse, turnTokensDetail, turnTokensFromValue, turnTokensLabel } from "../packages/ui/src/turn-tokens.ts";
 
 const metadata = (coverage = "complete", overrides = {}) => ({
@@ -90,6 +93,14 @@ assert.equal(turnTokensLabel(conflict), "~120 tokens");
 assert.match(turnTokensDetail(conflict), /inconsistent/);
 assert.equal(turnTokensFromValue({ inputTokens: 100, outputTokens: 25 }).totalTokens, 125);
 assert.equal(turnTokensFromValue({ inputTokens: 10, outputTokens: 10, totalTokens: 999 }).totalTokens, 999);
+const inflated = turnTokensFromValue({ inputTokens: 10, outputTokens: 10, totalTokens: 999,
+  measured: true, accounting: metadata() });
+assert.equal(inflated.measured, false);
+assert.equal(turnTokensLabel(inflated), "~999 tokens");
+assert.match(turnTokensDetail(inflated), /inconsistent/);
+const absentKnownInput = turnTokensFromValue({ outputTokens: 10, totalTokens: 120,
+  measured: true, accounting: metadata() });
+assert.equal(absentKnownInput.accounting.coverage, "estimated");
 for (const value of [undefined, null, "1540", [], {}, { inputTokens: 100 },
   { totalTokens: -5 }, { totalTokens: NaN }, { totalTokens: Infinity }, { totalTokens: 1.5 },
   { totalTokens: Number.MAX_SAFE_INTEGER + 1 }, { totalTokens: 5, outputTokens: "5" },
@@ -122,12 +133,26 @@ assert.equal(turnTokensLabel(unavailableConflict), "Usage unavailable");
 assert.equal(unavailableConflict.accounting.coverage, "unavailable");
 assert.equal(formatTokenCount(0), "0");
 assert.equal(formatTokenCount(9999), (9999).toLocaleString());
-assert.equal(formatTokenCount(12400), "12.4k");
-assert.equal(formatTokenCount(128000), "128k");
-assert.equal(formatTokenCount(999999), "1.0M");
+assert.equal(formatTokenCount(12400), "12.4K");
+assert.equal(formatTokenCount(128000), "128K");
+assert.equal(formatTokenCount(999999), "1M");
 assert.equal(formatTokenCount(2400000), "2.4M");
 assert.equal(formatTokenCount(1837177), "1.84M");
+assert.equal(formatTokenCount(9_910_000), "9.91M");
+assert.equal(formatTokenCount(13_980_000), "13.98M");
+assert.equal(formatTokenCount(5_020_000), "5.02M");
 assert.equal(formatTokenCount(1786368), "1.79M");
 assert.equal(formatTokenCount(NaN), "—");
 assert.equal(formatTokenCount(-1), "—");
+// Identical large counts have identical units and precision in every surface.
+for (const count of [10_000, 12_400, 999_499, 999_500, 5_020_000, 9_910_000, 13_980_000]) {
+  const context = estimateComposerContextUsage([{ id: "usage", sessionId: "fixture", kind: "assistant-message",
+    createdAt: "2026-10-13T00:00:00Z", message: "", payload: { providerId: "openai", modelId: "fixture",
+      contextUsage: { inputTokens: count, outputTokens: 0, totalTokens: count } } }], "",
+    { providerId: "openai", modelId: "fixture", contextWindowTokens: 20_000_000 });
+  assert.equal(context.source, "reported");
+  assert.equal(context.usedLabel, ledgerTokenCount(count));
+  assert.equal(formatTokenCount(count), formatCompactTokenCount(count));
+  assert.equal(context.usedLabel, formatTokenCount(count));
+}
 console.log("turn token checks passed: complete, partial, estimated, unavailable, legacy, scope, subsets and persistence");

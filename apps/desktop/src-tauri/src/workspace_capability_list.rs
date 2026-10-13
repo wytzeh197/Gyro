@@ -31,9 +31,18 @@ pub(super) fn execute(
             value
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Workspace list path must be a string"))
-                .and_then(gyro_core::normalize_capability_relative_path)
+                .and_then(|path| {
+                    // Root aliases are valid for a directory listing, while file
+                    // capabilities still require a concrete relative path.
+                    if matches!(path.trim(), "" | "." | "./" | ".\\") {
+                        Ok(None)
+                    } else {
+                        gyro_core::normalize_capability_relative_path(path).map(Some)
+                    }
+                })
         })
-        .transpose()?;
+        .transpose()?
+        .flatten();
     let directory = scope
         .as_deref()
         .map(|path| assert_workspace_path(workspace, path))
@@ -136,6 +145,23 @@ mod tests {
         assert_eq!(last["returned"], 15);
         assert_eq!(last["hasMore"], false);
         assert!(last["nextOffset"].is_null());
+    }
+
+    #[test]
+    fn model_list_accepts_root_aliases() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("file.rs"), "").unwrap();
+        for arguments in [
+            json!({}),
+            json!({"path":""}),
+            json!({"path":"."}),
+            json!({"path":"./"}),
+            json!({"path":".\\"}),
+        ] {
+            let (_, data, _) = execute(workspace.path(), &arguments).unwrap();
+            assert_eq!(data["entries"][0]["path"], "file.rs");
+            assert!(data["path"].is_null());
+        }
     }
 
     #[test]

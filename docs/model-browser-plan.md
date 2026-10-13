@@ -94,7 +94,9 @@ layout that put one chat's page over the transcript of the pane beside it, for
 work the user had not asked to watch. Revealing is now a decision
 (`packages/ui/src/browser-reveal.ts`): the user's own action always reveals;
 model browsing stays in the background in both solo and tiled chats unless
-`reveal: true` requests a visible preview or user handoff.
+`reveal: true` honors an explicit user request to see the page or a required
+manual handoff. Implementation checks, interactions, and screenshots stay
+hidden, including component previews used to verify UI changes.
 `browser-navigate` takes a `background` flag so recording the page no longer
 implies taking a surface.
 

@@ -67,6 +67,10 @@
         border: 1px dashed currentColor;
       }
 
+      @media (min-width: 1000px) {
+        #change-state { float: right; }
+      }
+
       @media (max-width: 600px) {
         body {
           padding: 16px;
@@ -135,6 +139,7 @@
 
     <script>
       let clicks = 0;
+      document.addEventListener("pointerdown", event => console.log("fixture-pointer", event.clientX, event.clientY, event.target.id));
       for (const id of ["project-kind", "project-enabled"]) {
         document.getElementById(id).addEventListener("change", () => {
           document.getElementById("options-state").textContent =

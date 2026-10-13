@@ -1,0 +1,12 @@
+{
+  "schema": "gyro.keychain-live-probe.v1",
+  "date": "2026-10-08",
+  "accountKind": "configured-provider",
+  "provider": "deepseek",
+  "exitCode": 0,
+  "elapsedMs": 952.346,
+  "denied": true,
+  "returnedData": false,
+  "settledWithinFiveSeconds": true,
+  "containsCredentialMaterial": false
+}

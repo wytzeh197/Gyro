@@ -589,3 +589,123 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* Appearance groups share one control column and keep their own reset scope. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-eyebrow {
+  display: none;
+}
+.gyro-appearance-settings {
+  display: grid;
+  gap: 24px;
+}
+.gyro-appearance-scope,
+.gyro-settings-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gyro-appearance-scope {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 28px;
+  padding-block: 6px;
+  background: var(--gyro-app);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+}
+.gyro-appearance-save-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 30px;
+}
+.gyro-appearance-save-status.is-error {
+  color: var(--gyro-danger);
+}
+.gyro-appearance-save-status > button,
+.gyro-settings-group-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  padding: 4px 6px;
+}
+.gyro-appearance-save-status > button:hover,
+.gyro-settings-group-reset:not(:disabled):hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+}
+.gyro-settings-group-reset:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-group-header > h2,
+:root[data-theme] .gyro-settings-surface .gyro-workspace-scope-heading {
+  margin: 0;
+  padding: 0;
+  color: var(--gyro-text);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-segmented button {
+  min-height: max(30px, calc(30px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-appearance-settings
+  .gyro-theme-picker {
+  gap: 12px;
+}
+.gyro-appearance-settings .gyro-theme-preview {
+  aspect-ratio: 2.8;
+}
+.gyro-appearance-settings .gyro-settings-group-description {
+  margin-top: 0;
+}
+.gyro-settings-group-reset:focus-visible,
+.gyro-appearance-save-status > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-settings-group.is-search-target {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 6px;
+  border-radius: var(--gyro-radius-md);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-editor
+  > .gyro-settings-group {
+  margin-bottom: 16px;
+}
+:root[data-theme] .gyro-settings-surface .gyro-workspace-scope-description {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+}
+@container gyro-settings (max-width: 440px) {
+  .gyro-appearance-scope {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .gyro-appearance-save-status {
+    justify-content: flex-start;
+  }
+  .gyro-settings-group-header {
+    align-items: flex-start;
+  }
+}

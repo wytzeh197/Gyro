@@ -6,8 +6,17 @@ pub(super) fn run_timed_provider_chat(
     request: ProviderChatRequest,
     origin: UsageOrigin,
 ) -> Result<ProviderChatResponse, String> {
+    run_timed_provider_chat_in_lease(app, request, origin, None)
+}
+
+pub(super) fn run_timed_provider_chat_in_lease(
+    app: tauri::AppHandle,
+    request: ProviderChatRequest,
+    origin: UsageOrigin,
+    lease: Option<&ProviderSessionLease>,
+) -> Result<ProviderChatResponse, String> {
     if !timing::enabled() {
-        return run_provider_chat_blocking(app, request, origin);
+        return run_provider_chat_blocking_in_lease(app, request, origin, lease);
     }
     let session_id = parse_uuid(&request.session_id)?;
     // Legacy callers without a turn ID cannot be correlated with UI events.
@@ -17,7 +26,7 @@ pub(super) fn run_timed_provider_chat(
         .map(parse_uuid)
         .transpose()?
         .map(|turn_id| timing::Scope::start(session_id, turn_id));
-    let result = run_provider_chat_blocking(app, request, origin);
+    let result = run_provider_chat_blocking_in_lease(app, request, origin, lease);
     if let Some(scope) = &scope {
         scope.finish(match &result {
             Ok(_) => timing::Outcome::Completed,

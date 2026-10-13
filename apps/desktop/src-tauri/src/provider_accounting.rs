@@ -201,7 +201,9 @@ fn parse_counts(value: &serde_json::Value) -> Option<UsageTokens> {
     }
     let cached = field("cachedInputTokens", "cached_input_tokens");
     let reasoning = field("reasoningOutputTokens", "reasoning_output_tokens");
+    let write = field("cacheWriteInputTokens", "cache_write_input_tokens");
     let mut tokens = UsageTokens::measured(input, cached, output, reasoning, total)
+        .with_cache_write(write)
         .with_scope(gyro_core::usage::UsageScope::Session);
     if cached.zip(input).is_some_and(|(cache, input)| cache > input)
         || reasoning.zip(output).is_some_and(|(reasoning, output)| reasoning > output)
@@ -827,6 +829,33 @@ mod tests {
             assert_eq!(tokens.cached_input_tokens,80);
             assert_eq!(tokens.accounting.unwrap().coverage,gyro_core::usage::UsageCoverage::Partial);
         }
+    }
+
+    #[test]
+    fn codex_cache_writes_are_differenced_once_and_remain_input_subsets() {
+        let mut usage = CodexTurnUsage::new(true);
+        usage.set_baseline(parse_counts(&serde_json::json!({
+            "input_tokens":1000, "cached_input_tokens":700, "cache_write_input_tokens":100,
+            "output_tokens":100, "total_tokens":1100
+        })));
+        let reading = serde_json::json!({"tokenUsage":{"total":{
+            "inputTokens":1400, "cachedInputTokens":950, "cacheWriteInputTokens":160,
+            "outputTokens":140, "totalTokens":1540
+        }}});
+        for _ in 0..3 {
+            let tokens = usage.observe(&reading).unwrap();
+            assert_eq!(tokens.total_tokens, 440);
+            assert_eq!(tokens.input_tokens, 400);
+            assert_eq!(tokens.cached_input_tokens, 250);
+            assert_eq!(tokens.cache_write_tokens, 60);
+            assert!(tokens.measured && tokens.effective_accounting().known.cache_write);
+        }
+        let invalid = parse_counts(&serde_json::json!({
+            "inputTokens":100, "cachedInputTokens":80, "cacheWriteInputTokens":30,
+            "outputTokens":10, "totalTokens":110
+        })).unwrap();
+        assert!(!invalid.measured);
+        assert_eq!(invalid.effective_accounting().reason, Some(gyro_core::usage::UsageReason::InconsistentCounts));
     }
 
     #[test]

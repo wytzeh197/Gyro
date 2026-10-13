@@ -803,7 +803,7 @@
   width: 16px;
 }
 
-.gyro-composer-chip.is-plan:hover .gyro-composer-chip-remove {
+.gyro-composer-chip:is(.is-plan, .is-goal):hover .gyro-composer-chip-remove {
   opacity: 1;
 }
 
@@ -814,13 +814,9 @@
   white-space: nowrap;
 }
 
+/* Selecting a goal uses the same quiet treatment as Plan mode. */
 .gyro-composer-chip.is-goal[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-accent) 78%, var(--gyro-text));
-}
-
-.gyro-composer-chip.is-goal[aria-pressed="true"]:hover {
-  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
+  color: var(--gyro-muted);
 }
 
 .gyro-plan-item-actions,

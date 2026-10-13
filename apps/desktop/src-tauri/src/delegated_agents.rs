@@ -5,6 +5,9 @@ use serde_json::{json, Value};
 
 const EVENT: &str = "gyro://subagent-event";
 const MAX_TASK_CHARS: usize = 16_000;
+const MAX_AUTOMATIC_CONTINUATIONS: u8 = 2;
+const INCOMPLETE_TASK_NOTICE: &str = "The sub-agent reports unfinished work.";
+const UNCONFIRMED_TASK_NOTICE: &str = "The sub-agent did not confirm task completion.";
 
 /// Delegation spends additional model calls. Reasoning depth alone at High or
 /// XHigh does not opt in; the active user request may explicitly opt in or out.
@@ -210,12 +213,14 @@ struct AgentEntry {
     ceiling: CapabilityPolicySnapshot,
     previous_tokens: Option<UsageTokens>,
     pending: Vec<String>,
+    continuations: u8,
     delivered: bool,
 }
 
 #[derive(Default)]
 pub(super) struct AgentManager {
     entries: Mutex<HashMap<String, AgentEntry>>,
+    changed: std::sync::Condvar,
 }
 
 fn is_live(status: &str) -> bool {
@@ -245,7 +250,7 @@ pub(super) fn validate_caller(
             anyhow::bail!("sub-agents cannot delegate or launch other agents");
         }
         if !bound.allow_delegation {
-            anyhow::bail!("this turn runs with one agent; choose Max or Ultra effort, or explicitly request sub-agents in your message");
+            anyhow::bail!("this turn runs with one agent; enable parallel agents in Efficiency settings, or explicitly request sub-agents in your message");
         }
     }
     Ok(())
@@ -285,6 +290,9 @@ fn publish(app: &tauri::AppHandle, snapshot: &AgentSnapshot, persist: bool) -> a
                 }
             }
         }
+    }
+    if persist {
+        app.state::<AgentManager>().changed.notify_all();
     }
     let _ = app.emit(EVENT, snapshot);
     Ok(())
@@ -387,11 +395,7 @@ pub(super) fn spawn_with_runtime(
     let now = Utc::now().to_rfc3339();
     request.session_id = id.clone();
     request.turn_id = Some(Uuid::new_v4().to_string());
-    request.suggest_title = false;
-    request.goal = None;
-    request.plan = None;
-    request.attachments.clear();
-    request.message = child_prompt(&task, read_only);
+    prepare_child_request(&mut request, &task, read_only);
     let snapshot = AgentSnapshot {
         agent_id: id.clone(),
         parent_session_id: bound.session_id.clone(),
@@ -428,6 +432,7 @@ pub(super) fn spawn_with_runtime(
             ceiling: bound.policy.clone(),
             previous_tokens: None,
             pending: Vec::new(),
+            continuations: 0,
             delivered: false,
         },
     );
@@ -473,8 +478,71 @@ fn inherit_entry_permissions(
     entry.ceiling = policy.clone();
 }
 
+fn prepare_child_request(request: &mut ProviderChatRequest, task: &str, read_only: bool) {
+    request.suggest_title = false;
+    request.goal = None;
+    request.plan = None;
+    request.attachments.clear();
+    // The child's broker obtains its own current workspace evidence. Parent
+    // editor/diagnostic snapshots are expensive and may describe another pane.
+    request.workspace_context = None;
+    request.workspace_check = None;
+    request.message = child_prompt(task, read_only);
+}
+
+pub(super) fn completion_update(value: &Value) -> Option<Value> {
+    let status = value.get("status").and_then(Value::as_str)?;
+    if !matches!(status, "complete" | "continue" | "blocked") {
+        return None;
+    }
+    let mut update = json!({"status": status});
+    if let Some(reason) = value.get("reason").and_then(Value::as_str) {
+        update["reason"] = json!(gyro_core::security::redact_secrets(
+            &subagent_capability::truncate_chars(reason, 800).0
+        ));
+    }
+    Some(update)
+}
+
+fn completion_error(payload: &Value, requires_completion: bool) -> Option<String> {
+    let update = completion_update(&payload["agentUpdate"]);
+    match update.as_ref().and_then(|value| value["status"].as_str()) {
+        Some("continue") => Some(INCOMPLETE_TASK_NOTICE.into()),
+        Some("blocked") => Some(format!(
+            "Sub-agent blocked: {}",
+            update.as_ref().and_then(|value| value["reason"].as_str())
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or("read the retained report for the missing input or capability")
+        )),
+        Some("complete") => None,
+        _ if requires_completion => Some(UNCONFIRMED_TASK_NOTICE.into()),
+        _ => None, // Older saved tasks predate the completion contract.
+    }
+}
+
+/// Choose optional browser guidance from the assigned task, not the wrapper
+/// that tells every child it owns a browser. This never changes tool authority.
+pub(super) fn browser_task_message(message: &str) -> &str {
+    if message.starts_with("You are a ")
+        && message.contains("sub-agent delegated by another Gyro chat.")
+        && message.contains(GYRO_AGENT_UPDATE_MARKER)
+    {
+        if let Some((_, task)) = message.split_once("\n\nTask:\n") {
+            return task;
+        }
+    }
+    if message.starts_with("Continue the same delegated task ")
+        && message.contains(GYRO_AGENT_UPDATE_MARKER)
+    {
+        if let Some((_, task)) = message.split_once("\n\nAssigned task:\n") {
+            return task.split_once("\n\nLast checkpoint:\n").map_or(task, |(task, _)| task);
+        }
+    }
+    message
+}
+
 fn child_prompt(task: &str, read_only: bool) -> String {
-    format!("You are a {}sub-agent delegated by another Gyro chat. Work on the self-contained task below. You inherit the parent's permissions and approval setting. You share the parent's workspace: respect assigned file ownership and do not overwrite others' edits. You have your own independent Gyro Browser session: open and use it through the browser tools when needed. It runs in the background and does not appear in the parent's frontend. You cannot launch sub-agents. {}When done, return a report of results, changes, validation, and unresolved issues. Do not produce a plan or ask for duplicate approval; use the broker's approval flow.\n\nTask:\n{task}",
+    format!("You are a {}sub-agent delegated by another Gyro chat. Work on the self-contained task below. You inherit the parent's permissions and approval setting. You share the parent's workspace: respect assigned file ownership and do not overwrite others' edits. You have your own independent Gyro Browser session: open and use it through the browser tools when needed. It runs in the background and does not appear in the parent's frontend. You cannot launch sub-agents. {}Finish the assigned work with the available tools and relevant verification before replying; do not stop at a plan or a promise. Reuse current evidence, prefer targeted reads and web fetches, and do not repeat passing checks without a reason. Browser screenshots and page events can be used privately; re-observe after acting, and report any need for trusted native input as a blocker. When done, return a concise report of results, changes, validation, and unresolved issues. End with one hidden line GYRO_AGENT_UPDATE: {{\"status\":\"complete\"}} only when the assigned task is verified finished. Use status \"continue\" for remaining authorized work, or \"blocked\" with a short reason when user input or an unavailable capability is required. Continued work is bounded; report remaining work truthfully. Do not ask for duplicate approval; use the broker's approval flow.\n\nTask:\n{task}",
         if read_only { "read-only research " } else { "working " },
         if read_only { "You cannot write files or run commands. " } else { "" })
 }
@@ -532,9 +600,30 @@ fn fail_worker(app: &tauri::AppHandle, id: &str, error: &str) {
             let _ = publish(app, &entry.snapshot, true);
         }
     }
+    drop(entries);
+    release_private_browser(app, id);
+}
+
+fn release_private_browser(app: &tauri::AppHandle, id: &str) {
+    if session_browser::is_background_browser(app, id) {
+        if let Err(error) = session_browser::close_session_browser(app, id) {
+            eprintln!("could not release the sub-agent browser: {error}");
+        }
+    }
+}
+
+struct PrivateBrowserScope<'a> {
+    app: &'a tauri::AppHandle,
+    id: &'a str,
+}
+impl Drop for PrivateBrowserScope<'_> {
+    fn drop(&mut self) {
+        release_private_browser(self.app, self.id);
+    }
 }
 
 fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability::ChildRunControl) {
+    let _browser_scope = PrivateBrowserScope { app: &app, id };
     loop {
         let request = match app
             .state::<AgentManager>()
@@ -604,6 +693,23 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
                 if let Ok(Some(tokens)) = store.session_usage_tokens(child_id) {
                     entry.snapshot.tokens = Some(tokens);
                 }
+            }
+        }
+        if !stopped && can_continue(entry) {
+            match control.renew(&entry.snapshot.parent_session_id) {
+                Ok(()) => {
+                    begin_continuation(entry);
+                    if let Err(error) = publish(&app, &entry.snapshot, true) {
+                        settle(entry, Err(error.to_string()), false);
+                        let _ = publish(&app, &entry.snapshot, true);
+                        drop(control);
+                        drop(entries);
+                        return;
+                    }
+                    drop(entries);
+                    continue;
+                }
+                Err(error) => settle(entry, Err(error.to_string()), control.is_cancelled()),
             }
         }
         // Hand off the existing slot atomically; another chat cannot steal it
@@ -676,20 +782,36 @@ fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>,
                     provider_reliability::is_tool_budget_notice(notice)
                         || notice.contains("may be cut off")
                 });
-            entry.snapshot.status = if notice.is_some() {
+            let requires_completion = entry.request.message.contains(GYRO_AGENT_UPDATE_MARKER);
+            let error = if stopped {
+                Some("The sub-agent was stopped before task completion.".into())
+            } else if let Some(notice) = notice {
+                Some(gyro_core::security::redact_secrets(notice))
+            } else {
+                completion_error(&response.assistant_event.payload, requires_completion)
+            };
+            entry.snapshot.status = if stopped {
+                "cancelled"
+            } else if error.is_some() {
                 "interrupted"
             } else {
                 "completed"
-            }
-            .into();
-            entry.snapshot.error = notice.map(gyro_core::security::redact_secrets);
+            }.into();
+            entry.snapshot.error = error;
         }
         Err(error) => {
             entry.snapshot.error = Some(gyro_core::security::redact_secrets(&error));
             entry.snapshot.status = if stopped { "cancelled" } else { "failed" }.into();
         }
     }
-    if entry.snapshot.status != "completed" && !entry.pending.is_empty() {
+    if entry.snapshot.error.as_deref() == Some(INCOMPLETE_TASK_NOTICE)
+        && entry.continuations >= MAX_AUTOMATIC_CONTINUATIONS
+    {
+        entry.snapshot.error = Some(format!(
+            "{INCOMPLETE_TASK_NOTICE} Automatic continuation limit reached; the report is retained."
+        ));
+    }
+    if entry.snapshot.status != "completed" && !can_continue(entry) && !entry.pending.is_empty() {
         entry.pending.clear();
         let error = entry
             .snapshot
@@ -709,6 +831,24 @@ pub(super) fn add_tokens(
     }
 }
 
+fn can_continue(entry: &AgentEntry) -> bool {
+    entry.snapshot.status == "interrupted"
+        && entry.snapshot.error.as_deref() == Some(INCOMPLETE_TASK_NOTICE)
+        && entry.continuations < MAX_AUTOMATIC_CONTINUATIONS
+}
+
+fn begin_continuation(entry: &mut AgentEntry) {
+    let round = entry.continuations + 1;
+    let checkpoint = entry.snapshot.summary.clone().unwrap_or_default();
+    let task = entry.snapshot.task.clone();
+    begin_followup(entry, task);
+    entry.continuations = round;
+    entry.request.message = format!(
+        "Continue the same delegated task from the durable conversation and current files. Do not replay completed edits or repeat passing checks without a reason. Finish remaining authorized work and verification. If blocked, report the missing input or capability. End with GYRO_AGENT_UPDATE: {{\"status\":\"complete\"}}, {{\"status\":\"continue\"}}, or {{\"status\":\"blocked\",\"reason\":\"...\"}} as appropriate.\n\nAssigned task:\n{}\n\nLast checkpoint:\n{}",
+        entry.snapshot.task, subagent_capability::truncate_chars(&checkpoint, 2_000).0
+    );
+}
+
 fn begin_followup(entry: &mut AgentEntry, task: String) {
     entry.previous_tokens = entry.snapshot.tokens;
     entry.snapshot.task = task.clone();
@@ -718,7 +858,8 @@ fn begin_followup(entry: &mut AgentEntry, task: String) {
     entry.snapshot.status = "running".into();
     entry.snapshot.summary = None;
     entry.snapshot.error = None;
-    entry.request.message = child_prompt(&task, entry.snapshot.read_only);
+    prepare_child_request(&mut entry.request, &task, entry.snapshot.read_only);
+    entry.continuations = 0;
     entry.request.turn_id = Some(entry.snapshot.run_id.clone());
     entry.delivered = false;
 }
@@ -846,30 +987,27 @@ pub(super) fn wait(
         restore_entry(app, bound, id)?;
     }
     let deadline = Instant::now() + timeout;
+    let manager = app.state::<AgentManager>();
     loop {
         if provider_chat_cancelled(app, &bound.session_id) {
             anyhow::bail!(provider_stop_message(app, &bound.session_id));
         }
-        let snapshots = {
-            let manager = app.state::<AgentManager>();
-            let entries = manager
-                .entries
-                .lock()
-                .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
-            ids.iter()
-                .map(|id| {
-                    let entry = entries
-                        .get(id)
-                        .ok_or_else(|| anyhow::anyhow!("agent not found: {id}"))?;
-                    owned(&entry.snapshot, &bound.session_id)?;
-                    Ok(entry.snapshot.clone())
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?
-        };
-        if snapshots.iter().all(|agent| !is_live(&agent.status)) || Instant::now() >= deadline {
+        let entries = manager.entries.lock()
+            .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
+        let snapshots = ids.iter().map(|id| {
+            let entry = entries.get(id)
+                .ok_or_else(|| anyhow::anyhow!("agent not found: {id}"))?;
+            owned(&entry.snapshot, &bound.session_id)?;
+            Ok(entry.snapshot.clone())
+        }).collect::<anyhow::Result<Vec<_>>>()?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if snapshots.iter().all(|agent| !is_live(&agent.status)) || remaining.is_zero() {
             return Ok(snapshots);
         }
-        std::thread::sleep(Duration::from_millis(50));
+        // Lifecycle publication wakes this immediately; the bounded timeout
+        // still observes parent cancellation without a 20Hz polling loop.
+        let _ = manager.changed.wait_timeout(entries, remaining.min(Duration::from_millis(250)))
+            .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
     }
 }
 
@@ -1041,6 +1179,7 @@ fn restore_entry(
             request,
             ceiling,
             pending: Vec::new(),
+            continuations: 0,
             delivered: true,
         });
     Ok(())
@@ -1180,13 +1319,24 @@ fn reconcile_saved_snapshot(snapshot: &mut AgentSnapshot, events: &[SessionEvent
         let partial = notice.filter(|notice| {
             provider_reliability::is_tool_budget_notice(notice) || notice.contains("may be cut off")
         });
-        snapshot.status = if partial.is_some() {
+        let stopped = status.is_some_and(|event| event.payload["status"] == "cancelled");
+        let requires_completion = relevant.iter().any(|event| {
+            event.kind == SessionEventKind::UserMessage
+                && event.message.contains(GYRO_AGENT_UPDATE_MARKER)
+        });
+        snapshot.error = if stopped {
+            Some("The sub-agent was stopped before task completion.".into())
+        } else {
+            partial.map(gyro_core::security::redact_secrets)
+                .or_else(|| completion_error(&response.payload, requires_completion))
+        };
+        snapshot.status = if stopped {
+            "cancelled"
+        } else if snapshot.error.is_some() {
             "interrupted"
         } else {
             "completed"
-        }
-        .into();
-        snapshot.error = partial.map(gyro_core::security::redact_secrets);
+        }.into();
     } else if let Some(status) = status {
         match status.payload.get("status").and_then(Value::as_str) {
             Some("failed") if notice != Some(PROVIDER_INTERRUPTED_MARKER) => {
@@ -1590,6 +1740,7 @@ mod tests {
             ),
             previous_tokens: None,
             pending: Vec::new(),
+            continuations: 0,
             delivered: false,
         }
     }
@@ -1614,6 +1765,149 @@ mod tests {
                 json!({"kind":"provider-status","status":"done","error":notice}),
             ),
         }
+    }
+
+    #[test]
+    fn browser_boilerplate_does_not_charge_unrelated_tasks_for_the_full_guide() {
+        let unrelated = child_prompt("Fix and test the parser in crates/parser.rs", false);
+        assert!(user_requests_gyro_browser(&unrelated));
+        let task = browser_task_message(&unrelated);
+        assert_eq!(task, "Fix and test the parser in crates/parser.rs");
+        assert!(!user_requests_gyro_browser(task));
+        let browsing = child_prompt("Use Browser to verify the signup button at https://example.test", false);
+        assert!(user_requests_gyro_browser(browser_task_message(&browsing)));
+        let mut entry = entry();
+        entry.snapshot.task = task.into();
+        entry.snapshot.summary = Some("I used Browser for unrelated documentation.".into());
+        begin_continuation(&mut entry);
+        assert_eq!(browser_task_message(&entry.request.message), task);
+        assert!(!user_requests_gyro_browser(browser_task_message(&entry.request.message)));
+        let mut request = entry.request;
+        request.message = unrelated;
+        let before = browser_knowledge::context(true, true, "normal", true).chars().count();
+        let after = browser_knowledge::context(true, true, "normal", false).chars().count();
+        assert!(after < before);
+        println!("Unrelated child browser guidance: {before} -> {after} characters");
+        let root_message = "Open https://example.test in Browser";
+        assert_eq!(browser_task_message(root_message), root_message);
+    }
+
+    #[test]
+    fn new_tasks_require_completion_and_preserve_the_parents_choices() {
+        let mut entry = entry();
+        entry.request.model_id = Some("selected-model".into());
+        entry.request.reasoning_effort = Some("xhigh".into());
+        entry.request.goal = Some(SessionGoalContext { text: "Parent goal".into(), status: "active".into() });
+        entry.request.plan = Some(json!({"items":[{"title":"unrelated parent step"}]}));
+        entry.request.workspace_context = Some(WorkspaceContextSnapshot::empty("parent-pane"));
+        let policy = entry.ceiling.clone();
+        prepare_child_request(&mut entry.request, "Implement and verify parser", true);
+        assert_eq!(entry.request.model_id.as_deref(), Some("selected-model"));
+        assert_eq!(entry.request.reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(entry.ceiling, policy);
+        assert!(entry.request.goal.is_none());
+        assert!(entry.request.plan.is_none());
+        assert!(entry.request.workspace_context.is_none());
+        assert!(entry.request.workspace_check.is_none());
+        assert!(entry.request.message.contains("do not stop at a plan"));
+        settle(&mut entry, Ok(child_response("I will inspect the parser next.", None)), false);
+        assert_eq!(entry.snapshot.status, "interrupted");
+        assert_eq!(entry.snapshot.error.as_deref(), Some(UNCONFIRMED_TASK_NOTICE));
+        assert!(!can_continue(&entry));
+    }
+
+    fn reported_response(status: &str, notice: Option<&str>) -> ProviderChatResponse {
+        let mut response = child_response("Verified changes; remaining work is recorded.", notice);
+        response.assistant_event.payload["agentUpdate"] = json!({"status":status,"reason":"Missing test service"});
+        response
+    }
+
+    #[test]
+    fn restored_completion_keeps_unfinished_and_blocked_reports_interrupted() {
+        for reported in ["continue", "blocked", "complete"] {
+            let run = Uuid::new_v4();
+            let child = Uuid::new_v4();
+            let mut snapshot = entry().snapshot;
+            snapshot.run_id = run.to_string();
+            let mut response = reported_response(reported, None).assistant_event;
+            response.turn_id = Some(run);
+            let mut user = SessionEvent::new(
+                child, SessionEventKind::UserMessage,
+                child_prompt("Implement and verify parser", false), json!({})
+            );
+            user.turn_id = Some(run);
+            reconcile_saved_snapshot(&mut snapshot, &[user, response]);
+            assert_eq!(snapshot.status, if reported == "complete" { "completed" } else { "interrupted" });
+        }
+        let run = Uuid::new_v4();
+        let mut snapshot = entry().snapshot;
+        snapshot.run_id = run.to_string();
+        let mut response = child_response("Here is the implementation plan.", None).assistant_event;
+        response.turn_id = Some(run);
+        let mut user = SessionEvent::new(
+            Uuid::new_v4(), SessionEventKind::UserMessage,
+            child_prompt("Implement parser", false), json!({})
+        );
+        user.turn_id = Some(run);
+        reconcile_saved_snapshot(&mut snapshot, &[user, response]);
+        assert_eq!(snapshot.status, "interrupted");
+        assert_eq!(snapshot.error.as_deref(), Some(UNCONFIRMED_TASK_NOTICE));
+    }
+
+    #[test]
+    fn unfinished_work_continues_twice_without_starting_a_separate_queued_task() {
+        let mut entry = entry();
+        entry.request.message = child_prompt("Implement parser", false);
+        entry.snapshot.task = "Implement parser".into();
+        entry.pending.push("A separately assigned task".into());
+        for round in 0..=MAX_AUTOMATIC_CONTINUATIONS {
+            settle(&mut entry, Ok(reported_response("continue", None)), false);
+            assert_eq!(entry.snapshot.status, "interrupted");
+            if round < MAX_AUTOMATIC_CONTINUATIONS {
+                assert!(can_continue(&entry));
+                assert_eq!(entry.pending.len(), 1);
+                let prior_run = entry.snapshot.run_id.clone();
+                begin_continuation(&mut entry);
+                assert_ne!(entry.snapshot.run_id, prior_run);
+                assert_eq!(entry.continuations, round + 1);
+                assert_eq!(entry.snapshot.task, "Implement parser");
+                assert!(entry.request.message.contains("Do not replay completed edits"));
+                assert!(entry.request.message.contains("Last checkpoint"));
+                assert!(!entry.delivered);
+            } else {
+                assert!(!can_continue(&entry));
+                assert!(entry.pending.is_empty());
+                assert!(entry.snapshot.error.as_deref().unwrap().contains("continuation limit"));
+                assert!(entry.snapshot.summary.is_some());
+            }
+        }
+        begin_followup(&mut entry, "New authorized task".into());
+        assert_eq!(entry.continuations, 0);
+    }
+
+    #[test]
+    fn explicit_completion_blockers_and_cancellation_are_distinct() {
+        let mut entry = entry();
+        entry.request.message = child_prompt("Implement parser", false);
+        settle(&mut entry, Ok(reported_response("blocked", None)), false);
+        assert_eq!(entry.snapshot.status, "interrupted");
+        assert!(entry.snapshot.error.as_deref().unwrap().contains("Missing test service"));
+        assert!(!can_continue(&entry));
+        settle(&mut entry, Ok(reported_response("complete", None)), false);
+        assert_eq!(entry.snapshot.status, "completed");
+        assert!(entry.snapshot.error.is_none());
+        settle(&mut entry, Ok(reported_response("complete", None)), true);
+        assert_eq!(entry.snapshot.status, "cancelled");
+        assert!(!can_continue(&entry));
+        for notice in [PROVIDER_TOOL_BUDGET_NOTICE, PROVIDER_CUT_OFF_NOTICE] {
+            settle(&mut entry, Ok(reported_response("complete", Some(notice))), false);
+            assert_eq!(entry.snapshot.status, "interrupted");
+            assert!(!can_continue(&entry));
+        }
+        assert!(completion_update(&json!({"status":"complete","policy":"allow"})).unwrap().get("policy").is_none());
+        assert!(completion_update(&json!({"status":"unknown"})).is_none());
+        let bounded = completion_update(&json!({"status":"blocked","reason":"x".repeat(2000)})).unwrap();
+        assert_eq!(bounded["reason"].as_str().unwrap().len(), 800);
     }
 
     #[test]

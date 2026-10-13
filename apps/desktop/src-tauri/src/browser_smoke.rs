@@ -2,6 +2,8 @@
 //! GYRO_BROWSER_SMOKE_URL must point to scripts/fixtures/browser-observation.html
 //! served on loopback; GYRO_TEST_DATA_DIR receives the report and native PNG.
 use crate::browser_pointer;
+#[path = "browser_viewport_smoke.rs"]
+mod viewport;
 use crate::session_browser::*;
 use serde_json::{json, Value};
 use std::{
@@ -140,6 +142,8 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
             .ok_or_else(|| format!("missing {selector} height"))?;
         Ok((x + width / 2.0, y + height / 2.0))
     };
+    let mouse_enabled = std::env::var("GYRO_BROWSER_SMOKE_SKIP_MOUSE").as_deref() != Ok("1");
+    steps.extend(viewport::run(app, session, url, output, mouse_enabled)?);
     wait_page("Browser observation ready")?;
     steps.push("open/read".into());
     // A second read used to clear the map but retain invalid refs on elements.
@@ -168,6 +172,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("click fired twice".into());
     }
     steps.push("repeat read/find/click exactly once/read changed state".into());
+    if mouse_enabled {
     let _pointer_capture = capture_session_browser_png(app, session)?;
     let pointer_status = call("status", json!({}))?;
     let pointer_url = pointer_status["url"]
@@ -238,6 +243,9 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
     wait_page("Drag: completed")?;
     steps.push("native hover/secondary-click/canvas click/drag".into());
+    } else {
+        steps.push("SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1 (macOS Accessibility permission unavailable)".into());
+    }
     let input = find("#project-name")?;
     let typed = call(
         "type",

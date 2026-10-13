@@ -1,0 +1,1424 @@
+[
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "12674ac0-bde4-483b-842f-3487b778467c",
+    "turnId": "a6c0e690-baef-4da6-87a9-7724d38bf01b",
+    "sessionId": "fe9a65e9-9e3c-4354-9491-f30ca842da0c",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.020583,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.1638329999999995,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 66.838625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 82.62991699999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 151.438625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 169.603417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 2406.285833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 2407.452,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6895.209792000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11926.502375,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 11987.975875,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 11996.845875,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12013.985958,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16239.686166999998,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 16277.679042,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 16297.107875000002,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16329.888749999998,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18890.305542000002,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 18925.945333,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 18934.127792,
+        "attempt": 1,
+        "toolIndex": 5,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18955.965583,
+        "attempt": 1,
+        "toolIndex": 4,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34371.25975,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34434.837208,
+        "attempt": 1,
+        "toolIndex": 6,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34438.297833,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34478.870667,
+        "attempt": 1,
+        "toolIndex": 7,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38047.497542000005,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 38084.996458,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 38162.834500000004,
+        "attempt": 1,
+        "toolIndex": 9,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38177.862542,
+        "attempt": 1,
+        "toolIndex": 8,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42917.017708,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 42954.34025,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 42961.33075,
+        "attempt": 1,
+        "toolIndex": 11,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 42972.427791999995,
+        "attempt": 1,
+        "toolIndex": 10,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47579.178583,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 47617.049,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 47622.66275,
+        "attempt": 1,
+        "toolIndex": 13,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47632.779583,
+        "attempt": 1,
+        "toolIndex": 12,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47635.890167,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 47642.275167,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 47683.175333,
+        "attempt": 1,
+        "toolIndex": 15,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47693.5835,
+        "attempt": 1,
+        "toolIndex": 14,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 53900.56325,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 53949.674332999995,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 53954.823958,
+        "attempt": 1,
+        "toolIndex": 17,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 53963.057917,
+        "attempt": 1,
+        "toolIndex": 16,
+        "outcome": "completed"
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 56181.605833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 56203.230417,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 494490,
+        "cachedInputTokens": 463744,
+        "outputTokens": 2366,
+        "reasoningOutputTokens": 1139,
+        "totalTokens": 496856,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "a631a9ef-80a6-4d7b-8a00-e698430cf6c6",
+    "turnId": "cb7711e1-f918-411f-ab45-8ca701d28154",
+    "sessionId": "74264db7-2e9a-40e0-85bc-249c79875c1a",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.015917,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.973417,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 33.317167000000005,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 44.083042000000006,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 73.921833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 82.171125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1329.500542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1334.226167,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 7833.714208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9016.693292,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9018.643542,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17090.268874999998,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17136.174333,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 20053.438875,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 20102.080375,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24877.196708,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24879.973208,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24880.418167,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24883.534916999997,
+        "attempt": 1,
+        "toolIndex": 4,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24909.000207999998,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24917.55625,
+        "attempt": 1,
+        "toolIndex": 5,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24946.935208,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 25201.105833,
+        "attempt": 1,
+        "toolIndex": 6,
+        "outcome": "completed"
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 27024.871208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 27059.024333,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 192421,
+        "cachedInputTokens": 184960,
+        "outputTokens": 1645,
+        "reasoningOutputTokens": 782,
+        "totalTokens": 194066,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "0d9026d8-db40-480e-ab86-2a2269887433",
+    "turnId": "5123e179-5e30-47c6-a5b6-5e06f0ac4156",
+    "sessionId": "5985158c-3d10-4d63-aeb7-f0f3978993ae",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.016583,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.483958,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 30.495,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 41.185417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 72.325292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 78.836458,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1249.09375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1253.5945,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6905.647292000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7911.159833,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7911.848208,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14497.787958,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14579.308333,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17754.198458000003,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17756.137208,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17808.649458,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18054.160125,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 20197.725458,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 20227.204917000003,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 116129,
+        "cachedInputTokens": 98048,
+        "outputTokens": 984,
+        "reasoningOutputTokens": 242,
+        "totalTokens": 117113,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "01960cdf-b4a7-4cee-8ddc-84932dd21325",
+    "turnId": "c0bce014-d928-417d-a6d9-89c86f8f9d58",
+    "sessionId": "31c24304-bdc7-4780-9afd-d561c1c06c37",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.019625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.7500419999999997,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 4.104125,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 15.914874999999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 45.752250000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 52.015875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 657.457083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 663.054083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 4095.529542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6452.118125,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 6493.1415,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 6498.569042,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6508.278583,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6510.390542,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 6516.255458,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 6520.659667,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6530.264,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10006.849042,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 10047.331167,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 10067.771125,
+        "attempt": 1,
+        "toolIndex": 5,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10076.838583,
+        "attempt": 1,
+        "toolIndex": 4,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10080.048166999999,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 10086.262792,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 10103.885708,
+        "attempt": 1,
+        "toolIndex": 7,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10112.761666999999,
+        "attempt": 1,
+        "toolIndex": 6,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14855.451917,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 14900.322125,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 14905.646125000001,
+        "attempt": 1,
+        "toolIndex": 9,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14916.530458000001,
+        "attempt": 1,
+        "toolIndex": 8,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14919.069042000001,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 14925.141167,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 14931.003917,
+        "attempt": 1,
+        "toolIndex": 11,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14939.270167,
+        "attempt": 1,
+        "toolIndex": 10,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14941.887167,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "approval-start",
+        "elapsedMs": 14948.417292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60201.446833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60214.081667,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 179048,
+        "cachedInputTokens": 169984,
+        "outputTokens": 839,
+        "reasoningOutputTokens": 239,
+        "totalTokens": 179887,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "93f7b056-a64f-4a04-8538-f707de007ba9",
+    "turnId": "e0164eaf-394e-4a64-bb51-dbea9796bcca",
+    "sessionId": "60a7625c-7cc6-4820-9842-4b44e61c5bb6",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.021208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.53475,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 25.999541,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 35.716125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 77.552083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 83.679833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1274.7584160000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1277.748125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6246.30675,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 8620.890083,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 8665.762958,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 8674.593291000001,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 8689.411166,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17344.627916,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 17389.873208,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 17401.604625,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17415.873083000002,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17420.608291,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 17428.361583,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 17449.402332999998,
+        "attempt": 1,
+        "toolIndex": 5,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17461.349916,
+        "attempt": 1,
+        "toolIndex": 4,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19184.358541,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 19191.512541,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 19201.442041,
+        "attempt": 1,
+        "toolIndex": 7,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19209.845083,
+        "attempt": 1,
+        "toolIndex": 6,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21653.287249999998,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 21690.182,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 21699.204041,
+        "attempt": 1,
+        "toolIndex": 9,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21714.897416,
+        "attempt": 1,
+        "toolIndex": 8,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38060.103124999994,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 38097.405457999994,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 38169.095958,
+        "attempt": 1,
+        "toolIndex": 11,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38178.883125,
+        "attempt": 1,
+        "toolIndex": 10,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39805.499666,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 39812.766875,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 39817.829832999996,
+        "attempt": 1,
+        "toolIndex": 13,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39829.08475,
+        "attempt": 1,
+        "toolIndex": 12,
+        "outcome": "completed"
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 42146.617333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 42171.591208000005,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 303655,
+        "cachedInputTokens": 277248,
+        "outputTokens": 2439,
+        "reasoningOutputTokens": 1629,
+        "totalTokens": 306094,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "252aaaed-c7f9-4024-af09-f77a1aeca411",
+    "turnId": "ff812efc-7264-44ae-8442-0e048085ca4b",
+    "sessionId": "bde24830-4342-49ed-9e92-59736aa4006c",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.017124999999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.311916,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 43.127582999999994,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 54.200582999999995,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 81.88325,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 86.855375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 994.301083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 998.089,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 5658.459416000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7905.506375,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 7958.223666,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 7966.755,
+        "attempt": 1,
+        "toolIndex": 1,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7978.706125000001,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19933.82,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19934.848291000002,
+        "attempt": 1,
+        "toolIndex": 2,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31465.157583,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 31504.582374999998,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 31515.985041,
+        "attempt": 1,
+        "toolIndex": 4,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31539.9185,
+        "attempt": 1,
+        "toolIndex": 3,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31543.1195,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 31551.059791,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 31572.26825,
+        "attempt": 1,
+        "toolIndex": 6,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31583.046333,
+        "attempt": 1,
+        "toolIndex": 5,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38427.704625,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 38462.9035,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 38469.724583,
+        "attempt": 1,
+        "toolIndex": 8,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38478.596000000005,
+        "attempt": 1,
+        "toolIndex": 7,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38481.082458000004,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 38486.877541,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 38519.719791,
+        "attempt": 1,
+        "toolIndex": 10,
+        "outcome": "completed"
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38527.236666,
+        "attempt": 1,
+        "toolIndex": 9,
+        "outcome": "completed"
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 40890.562791000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 40913.774708,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 350865,
+        "cachedInputTokens": 337792,
+        "outputTokens": 2351,
+        "reasoningOutputTokens": 1562,
+        "totalTokens": 353216,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  }
+]

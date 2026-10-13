@@ -1,8 +1,10 @@
 export { EfficiencyDetails } from "./efficiency-details";
 export { CodeModeActivityCard } from "./code-mode-card";
+export { ChatArtifacts } from "./chat-artifacts";
 export { groupWorkflowEvents } from "./code-mode";
 export type { TurnTokens, UsageAccounting } from "./turn-tokens";
 export { SizingMotionFixture } from "./sizing-motion-fixture";
+export { ComposerEffortSelector } from "./composer-effort-selector";
 export { MotionDisclosure } from "./motion-disclosure";
 export { UsageCard } from "./settings-presentation";
 export { useDialogDismiss } from "./use-dialog-dismiss";
@@ -44,6 +46,8 @@ export type {
   BrowserFeedback,
   BrowserPreviewDiagnostic,
   BrowserPreviewDevice,
+  BrowserViewportMode,
+  BrowserViewportState,
   BrowserPreviewStatus,
   CapabilityAccess,
   CapabilityActivity,

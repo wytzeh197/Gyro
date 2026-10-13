@@ -1,0 +1,2498 @@
+[
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "General",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "General"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Appearance",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Appearance"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Keyboard",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Keyboard"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Usage Limits",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Usage Limits"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Providers",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Providers"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "CLI Profiles",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "CLI Profiles"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Permissions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Permissions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Editor & Search",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Editor & Search"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Tools & Contributions",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Tools & Contributions"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Import projects",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Import projects"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Updates",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Updates"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Advanced",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Advanced"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Help",
+    "motion": "reduced",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Help"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  }
+]

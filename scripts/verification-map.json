@@ -1,4 +1,28 @@
 {
+  "check-browser-viewport.mjs": { "kind": "behavioral" },
+  "check-goal-runner.mjs": { "kind": "behavioral" },
+  "check-system-access.mjs": { "kind": "behavioral" },
+  "check-appearance-persistence.mjs": { "kind": "behavioral" },
+  "check-chat-history-efficiency.mjs": { "kind": "behavioral" },
+  "check-chat-history-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Actual ChatSurface with generated complete history, wheel scrolling, refresh growth and remount. Native log reads have Rust coverage."
+  },
+  "check-media-reliability-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Actual chat components in Chromium with simulated media storage. Finder and native IPC acceptance are separate."
+  },
+  "check-chat-auto-retry-hook.mjs": { "kind": "behavioral" },
+  "check-chat-auto-retry.mjs": { "kind": "behavioral" },
+  "check-chat-pointer-drag.mjs": { "kind": "behavioral" },
+  "check-chat-retry-browser.mjs": { "kind": "behavioral" },
+  "check-chat-retry-dispatch.mjs": { "kind": "behavioral" },
+  "check-cli-update-scope.mjs": { "kind": "behavioral" },
+  "check-code-mode.mjs": { "kind": "behavioral" },
+  "check-efficiency-browser.mjs": { "kind": "behavioral" },
+  "check-efficiency-pilot.mjs": { "kind": "behavioral" },
+  "check-motion-browser.mjs": { "kind": "behavioral" },
+  "check-native-retry-stream.mjs": { "kind": "behavioral" },
   "check-architecture-boundaries.mjs": {
     "kind": "source-text",
     "reason": "Repository shape (line ceilings, no provider SDK imports in UI modules) can only be read from files; there is no runtime behaviour to execute."

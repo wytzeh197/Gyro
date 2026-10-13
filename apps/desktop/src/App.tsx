@@ -1,27 +1,67 @@
-import { MonacoEditorPane, type WorkspaceNavigationSource } from "./editor/workspace-code-editor";
+import {
+  MonacoEditorPane,
+  type WorkspaceNavigationSource,
+} from "./editor/workspace-code-editor";
 import { canonicalFileUri, filePathFromUri } from "./editor/document-uri";
 import { useLanguageSessions } from "./editor/use-language-sessions";
-import { useWorkspaceRename, editorBufferFromFile } from "./editor/use-workspace-rename";
-import { recoverWorkspaceBuffers, hasEditRecovery, writeEditRecovery } from "./editor/edit-recovery";
+import {
+  useWorkspaceRename,
+  editorBufferFromFile,
+} from "./editor/use-workspace-rename";
+import {
+  recoverWorkspaceBuffers,
+  hasEditRecovery,
+  writeEditRecovery,
+} from "./editor/edit-recovery";
 import { WorkspaceRenameDialog, WorkspaceEditBar } from "@gyro-dev/ui";
 import { ManagedDiffEditor } from "./managed-diff-editor";
-import { providerLoginProfile, providerLoginCommandText } from "./provider-login-profile";
+import {
+  providerLoginProfile,
+  providerLoginCommandText,
+} from "./provider-login-profile";
 import { useSubagents } from "./use-subagents";
 import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
-import { sourceControlForWorkspace, useScopedIdeState } from "./source-control-scope";
+import {
+  parseSystemAccessSnapshot,
+  SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+} from "./system-access-state";
+import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
+import { useSessionBrowserEvents, changeSessionBrowserViewport } from "./use-session-browser-events";
+import type { BrowserViewportMode } from "@gyro-dev/ui";
+import {
+  sourceControlForWorkspace,
+  useScopedIdeState,
+} from "./source-control-scope";
 import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
 import { fastModeConfigFromAction } from "@gyro-dev/ui";
 import { useProjectImport } from "./use-project-import";
 import { useChatAutoRetry } from "./use-chat-auto-retry";
 import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
-import { createChatRetryDispatcher, isChatRetryCurrent } from "./chat-retry-dispatch";
+import {
+  createChatRetryDispatcher,
+  isChatRetryCurrent,
+} from "./chat-retry-dispatch";
 import { ChatRetryContext } from "@gyro-dev/ui";
 import {
   compareSessionEventsForHistory,
   mergeSessionHistoryPages,
 } from "./session-event-order";
-import { createPreviewSession, createPreviewWorkspaceFileContent, createTauriThreadSession, newSessionModelFromConfig, normalizeSessionTitleInput, previewFiles, selectedSessionModelFromConfig, sessionModelSelectionFromSession, workspaceRunMetadata } from "./session-creation";
-import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
+import {
+  createPreviewSession,
+  createPreviewWorkspaceFileContent,
+  createTauriThreadSession,
+  newSessionModelFromConfig,
+  normalizeSessionTitleInput,
+  previewFiles,
+  selectedSessionModelFromConfig,
+  sessionModelSelectionFromSession,
+  workspaceRunMetadata,
+} from "./session-creation";
+import {
+  useWorkbenchAppearance,
+  storedThemeMode,
+  THEME_STORAGE_KEY,
+} from "./use-workbench-appearance";
 import {
   turnIdFromSessionEvent,
   chatModeEventMessage,
@@ -42,7 +82,10 @@ import {
   useDerivedSessionContext,
   useSessionContextEvents,
 } from "./use-session-context-events";
-import { ChatFileActionsContext, ComposerContextCandidates } from "@gyro-dev/ui";
+import {
+  ChatFileActionsContext,
+  ComposerContextCandidates,
+} from "@gyro-dev/ui";
 import {
   isSplitChatLayout,
   restoreCompanionPanes,
@@ -94,6 +137,8 @@ import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
   pendingMediaAttachment,
   settlePendingMedia,
+  withMediaUploadTimeout,
+  queueMediaUpload,
   trackPendingMedia,
   withoutPendingMedia,
 } from "./pending-media-attachments";
@@ -336,7 +381,7 @@ import {
   settleOpenProviderActivitiesForTurn,
   isProviderStatusEvent,
   limitSessionEventsForUi,
-  MAX_CHAT_EVENT_HOLD_COUNT,
+  limitOptimisticSessionEvents,
   MAX_CHAT_EVENT_RENDER_COUNT,
   mergePersistedAndOptimisticEvents,
   mergeLiveCapabilityEvent,
@@ -582,7 +627,7 @@ const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
-/** Set once the first launch has asked macOS for its folder grants. */
+/** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
 const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
 const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
@@ -655,7 +700,6 @@ const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
 function modelUsageKey(providerId: ProviderId, modelId: string) {
   return `${providerId}:${modelId}`;
 }
-
 
 /**
  * Propose a branch name from the pending commit message, so the common case is
@@ -759,8 +803,14 @@ type BrowserOwner = {
 
 export function App() {
   const quitConfirmation = useQuitConfirmation();
-  const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(loadInitialWorkbenchState);
-  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
+  const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
+    loadInitialWorkbenchState,
+  );
+  const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
+    useAppearanceSaveFeedback(workbench.preferences);
+  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
+    workbench.preferences,
+  );
   const [sessions, setSessions] = useState<Session[]>([]);
   // Session persistence and title updates must not interrupt live tool events.
   const sessionsRef = useRef(sessions);
@@ -817,13 +867,7 @@ export function App() {
     ? (sessionEventsById[activeSessionId] ?? [])
     : [];
   const limitEventsForSession = useCallback(
-    (sessionId: string, events: SessionEvent[]) =>
-      limitSessionEventsForUi(
-        events,
-        expandedHistorySessionsRef.current.has(sessionId)
-          ? MAX_CHAT_EVENT_HOLD_COUNT
-          : MAX_CHAT_EVENT_RENDER_COUNT,
-      ),
+    (_sessionId: string, events: SessionEvent[]) => events,
     [],
   );
   const setEventsForSession = useCallback(
@@ -865,7 +909,10 @@ export function App() {
   const editorBuffersRef = useRef(workbench.ide.buffers);
   editorBuffersRef.current = workbench.ide.buffers;
   const navigationRequestRef = useRef(0);
-  const [navigationHistory, setNavigationHistory] = useState<{ entries: WorkspaceNavigationSource[]; index: number }>({ entries: [], index: -1 });
+  const [navigationHistory, setNavigationHistory] = useState<{
+    entries: WorkspaceNavigationSource[];
+    index: number;
+  }>({ entries: [], index: -1 });
   const [languageOverrides, setLanguageOverrides] = useState<
     Record<string, string>
   >({});
@@ -901,6 +948,8 @@ export function App() {
   const [chatAttachments, setChatAttachments] = useState<
     Record<string, ChatAttachment[]>
   >(() => loadChatAttachments());
+  const chatAttachmentsRef = useRef(chatAttachments);
+  chatAttachmentsRef.current = chatAttachments;
   const [chatMessageQueues, setChatMessageQueues] = useState<
     Record<string, QueuedChatMessage[]>
   >({});
@@ -924,9 +973,14 @@ export function App() {
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
-  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
+  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>(() =>
+    parseSystemAccessSnapshot(
+      readBoundedLocalStorage(SYSTEM_ACCESS_STATUS_STORAGE_KEY, 16_000),
+    ),
+  );
   const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
   const systemAccessBootstrapRef = useRef(false);
+  const systemAccessCheckRef = useRef<Promise<SystemAccessScope[]> | null>(null);
   // What each chat has spent, read from Gyro's usage ledger. Unlike the
   // provider quota windows above, this covers every provider, including the
   // ones whose CLIs report no token counts at all.
@@ -1007,16 +1061,23 @@ export function App() {
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
-  const retryProviderStatusRef = useRef<(event: SessionEvent) => void>(() => {});
+  const retryProviderStatusRef = useRef<(event: SessionEvent) => void>(
+    () => {},
+  );
   const retryDispatchRef = useRef(createChatRetryDispatcher());
   useEffect(() => () => retryDispatchRef.current.cancelAll(), []);
   const chatAutoRetry = useChatAutoRetry({
-    enabled: isTauriRuntime(), eventsBySessionId: sessionEventsById,
-    sendingSessionIds, queueVersion: chatMessageQueues, pauseVersion: queueRetryTick,
-    blockedSessionIds: () => new Set([
-      ...sendingSessionIdsRef.current, ...stoppedChatSessionsRef.current,
-      ...queuedChatDispatchesRef.current,
-    ]),
+    enabled: isTauriRuntime(),
+    eventsBySessionId: sessionEventsById,
+    sendingSessionIds,
+    queueVersion: chatMessageQueues,
+    pauseVersion: queueRetryTick,
+    blockedSessionIds: () =>
+      new Set([
+        ...sendingSessionIdsRef.current,
+        ...stoppedChatSessionsRef.current,
+        ...queuedChatDispatchesRef.current,
+      ]),
     onRetry: (event) => retryProviderStatusRef.current(event),
   });
   const pendingPaneSendRef = useRef<{
@@ -1125,7 +1186,8 @@ export function App() {
   const [loadingEarlierSessionIds, setLoadingEarlierSessionIds] = useState<
     string[]
   >([]);
-  const expandedHistorySessionsRef = useRef(new Set<string>());
+  const completeHistorySessionsRef = useRef(new Set<string>());
+  const historyRevisionsRef = useRef<Record<string, string | undefined>>({});
   const toolPanelHeight = workbench.preferences.workspacePanelHeight;
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   // Chat UI paints immediately; non-essential actions stay gated until the
@@ -1685,7 +1747,9 @@ export function App() {
     [openCompanionTab, soloEnvironment],
   );
   const sessionForPane = (paneId: string) => {
-    const pane = displayedChatLayout.slots.find((slot) => slot?.paneId === paneId);
+    const pane = displayedChatLayout.slots.find(
+      (slot) => slot?.paneId === paneId,
+    );
     return pane?.kind === "session" ? pane.sessionId : undefined;
   };
   const companionSurfaceProps = (paneId: string) => ({
@@ -2243,23 +2307,33 @@ export function App() {
     }
   }, [isTestingNotification, notify]);
   /**
-   * Resolves Gyro's macOS folder grants. On an undetermined scope the read
-   * inside `check_system_access` is what makes macOS show its permission sheet,
-   * so the first call of the app's life is also the one that asks.
+   * Reading an undetermined scope can open a native permission sheet.
+   * Only first launch or an explicit recheck requests access; Settings
+   * restores the saved display snapshot without touching protected folders.
    */
-  const checkSystemAccess = useCallback(async () => {
-    if (!isTauriRuntime()) return [] as SystemAccessScope[];
+  const checkSystemAccess = useCallback(() => {
+    if (!isTauriRuntime()) return Promise.resolve([] as SystemAccessScope[]);
+    if (systemAccessCheckRef.current) return systemAccessCheckRef.current;
     setIsCheckingSystemAccess(true);
-    try {
-      const scopes = await invoke<SystemAccessScope[]>("check_system_access");
-      setSystemAccess(scopes);
-      return scopes;
-    } catch (error) {
-      notify("command-failed", "Could not check macOS access", String(error));
-      return [] as SystemAccessScope[];
-    } finally {
-      setIsCheckingSystemAccess(false);
-    }
+    const pending = invoke<SystemAccessScope[]>("check_system_access")
+      .then((scopes) => {
+        safeSetLocalStorage(
+          SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+          JSON.stringify(scopes),
+        );
+        setSystemAccess(scopes);
+        return scopes;
+      })
+      .catch((error) => {
+        notify("command-failed", "Could not check macOS access", String(error));
+        return [] as SystemAccessScope[];
+      })
+      .finally(() => {
+        systemAccessCheckRef.current = null;
+        setIsCheckingSystemAccess(false);
+      });
+    systemAccessCheckRef.current = pending;
+    return pending;
   }, [notify]);
   const openSystemAccessSettings = useCallback(
     async (scope: SystemAccessScopeId) => {
@@ -2290,8 +2364,10 @@ export function App() {
       });
       return undefined;
     }
+    // Record the attempt before opening a native sheet, including denial,
+    // interruption, or a reload while the decision is still pending.
+    safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
     void checkSystemAccess().then((scopes) => {
-      safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "system-access",
@@ -2308,21 +2384,6 @@ export function App() {
     });
     return undefined;
   }, [checkSystemAccess, notify]);
-  useEffect(() => {
-    if (
-      activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
-      !isTauriRuntime()
-    ) {
-      return undefined;
-    }
-    void checkSystemAccess();
-    return undefined;
-  }, [
-    activeDestination,
-    checkSystemAccess,
-    workbench.preferences.lastSettingsSection,
-  ]);
   const { providerUsageByProvider, refreshProviderUsage } = useProviderUsage({
     notify,
     backgroundUsageProviderIds,
@@ -2690,86 +2751,141 @@ export function App() {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
       if (!isTauriRuntime()) {
-        setEventsForSession(
-          sessionId,
-          limitEventsForSession(
-            sessionId,
-            optimisticEventsRef.current.get(sessionId) ?? [],
+        setEventsForSession(sessionId, (current) =>
+          mergePersistedAndOptimisticEvents(
+            current,
+            optimisticEventsRef.current.get(sessionId),
           ),
         );
         return;
       }
+      let fullHistory = !completeHistorySessionsRef.current.has(sessionId) ||
+        !sessionEventsByIdRef.current[sessionId]?.length;
       try {
-        const page = await invoke<{
+        type HistoryPage = {
           events: SessionEvent[];
           contextEvents: SessionEvent[];
           hasMoreBefore: boolean;
-        }>("read_session_events", {
+          revision?: string | null;
+          unchanged?: boolean;
+        };
+        let page = await invoke<HistoryPage>("read_session_events", {
           sessionId,
+          fullHistory,
+          knownRevision: fullHistory
+            ? undefined
+            : historyRevisionsRef.current[sessionId],
         });
+        if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+        // A sleeping/backgrounded chat may have advanced beyond the refresh
+        // window. Recover the entire gap instead of silently losing its middle.
+        const knownIds = new Set(
+          !fullHistory && page.hasMoreBefore
+            ? (sessionEventsByIdRef.current[sessionId] ?? []).map(
+                (event) => event.id,
+              )
+            : [],
+        );
+        if (
+          !fullHistory &&
+          page.hasMoreBefore &&
+          !page.events.some(
+            (event) => event.kind !== "session-created" && knownIds.has(event.id),
+          )
+        ) {
+          fullHistory = true;
+          page = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            fullHistory: true,
+          });
+        }
+        // Older desktop runtimes may ignore fullHistory while the frontend
+        // updates. Walk their bounded pages automatically until nothing remains.
+        let cursor = page.events.find(
+          (event) => event.kind !== "session-created",
+        );
+        while (fullHistory && page.hasMoreBefore) {
+          if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+          if (!cursor) throw new Error("Chat history returned no earlier cursor");
+          const earlier = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            beforeEventId: cursor.id,
+            limit: MAX_CHAT_EVENT_RENDER_COUNT,
+          });
+          const nextCursor = earlier.events.find(
+            (event) => event.kind !== "session-created",
+          );
+          if (
+            earlier.hasMoreBefore &&
+            (!nextCursor || nextCursor.id === cursor.id)
+          )
+            throw new Error("Chat history pagination made no progress");
+          page = {
+            ...page,
+            events: mergeSessionHistoryPages(earlier.events, page.events),
+            hasMoreBefore: earlier.hasMoreBefore,
+          };
+          cursor = nextCursor;
+        }
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
-          // Streaming can continue while the persisted transcript is loading.
-          // Read the buffer after the await so late chunks are never overwritten
-          // by the older transcript snapshot.
+          historyRevisionsRef.current[sessionId] = page.revision ?? undefined;
+          if (!page.hasMoreBefore)
+            completeHistorySessionsRef.current.add(sessionId);
+          // Streaming can continue during the read; use the latest buffer.
           const latestOptimisticEvents =
             optimisticEventsRef.current.get(sessionId);
-          replaceSessionContextEvents(sessionId, page.contextEvents);
+          if (!page.unchanged)
+            replaceSessionContextEvents(sessionId, page.contextEvents);
+          const hasMoreBefore =
+            !completeHistorySessionsRef.current.has(sessionId) &&
+            page.hasMoreBefore;
           setHasMoreBeforeBySession((current) =>
-            current[sessionId] === page.hasMoreBefore
+            current[sessionId] === hasMoreBefore
               ? current
-              : { ...current, [sessionId]: page.hasMoreBefore },
+              : { ...current, [sessionId]: hasMoreBefore },
           );
           setEventsForSession(sessionId, (current) => {
-            const expanded = expandedHistorySessionsRef.current.has(sessionId);
-            const next = limitEventsForSession(
-              sessionId,
-              preserveDeliveredResponses(
-                markInactiveCapabilityResources(
-                  mergePersistedAndOptimisticEvents(
-                    expanded
-                      ? mergeSessionHistoryPages(current, page.events)
-                      : page.events,
-                    latestOptimisticEvents,
-                    expanded
-                      ? MAX_CHAT_EVENT_HOLD_COUNT
-                      : MAX_CHAT_EVENT_RENDER_COUNT,
-                  ),
-                  liveCapabilityResourceIdsRef.current,
+            const next = preserveDeliveredResponses(
+              markInactiveCapabilityResources(
+                mergePersistedAndOptimisticEvents(
+                  mergeSessionHistoryPages(current, page.events),
+                  latestOptimisticEvents,
                 ),
-                current,
+                liveCapabilityResourceIdsRef.current,
               ),
+              current,
             );
-            // Re-reading an unchanged transcript keeps the same array so the
-            // chat does not re-render every turn.
+            // Unchanged reads retain the array and avoid another chat render.
             return sameSessionEvents(current, next) ? current : next;
           });
         }
-      } catch {
+      } catch (error) {
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
           const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-          if (optimisticEvents && optimisticEvents.length > 0) {
-            setEventsForSession(
-              sessionId,
-              (current) =>
-                mergePersistedAndOptimisticEvents(
-                  current,
-                  optimisticEvents,
-                  expandedHistorySessionsRef.current.has(sessionId)
-                    ? MAX_CHAT_EVENT_HOLD_COUNT
-                    : MAX_CHAT_EVENT_RENDER_COUNT,
-                ),
+          if (optimisticEvents?.length) {
+            setEventsForSession(sessionId, (current) =>
+              mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
+          if (fullHistory)
+            notify(
+              "command-failed",
+              "Could not load chat history",
+              String(error),
+            );
         }
       }
     },
-    [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
+    [notify, replaceSessionContextEvents, setEventsForSession],
   );
   const refreshEvents = useCoalescedByKey(readSessionEvents);
   const openAgentPanel = useCallback(
     (paneId: string) => {
       closeLegacyRail();
-      setPaneLegacyPanelByPaneId((current) => ({ ...current, [paneId]: undefined }));
+      setPaneLegacyPanelByPaneId((current) => ({
+        ...current,
+        [paneId]: undefined,
+      }));
       openCompanionTab("agents", paneId);
     },
     [closeLegacyRail, openCompanionTab],
@@ -2803,7 +2919,6 @@ export function App() {
           beforeEventId: cursor.id,
           limit: MAX_CHAT_EVENT_RENDER_COUNT,
         });
-        expandedHistorySessionsRef.current.add(sessionId);
         setHasMoreBeforeBySession((current) => ({
           ...current,
           [sessionId]: page.hasMoreBefore,
@@ -2818,7 +2933,9 @@ export function App() {
               byId.set(event.id, event);
             }
           }
-          const merged = Array.from(byId.values()).sort(compareSessionEventsForHistory);
+          const merged = Array.from(byId.values()).sort(
+            compareSessionEventsForHistory,
+          );
           return limitEventsForSession(sessionId, merged);
         });
       } catch (error) {
@@ -2845,12 +2962,15 @@ export function App() {
   const subagentController = useSubagents({
     parentIds: [
       activeSessionId,
-      ...displayedChatLayout.slots.flatMap((pane) => pane?.kind === "session" ? [pane.sessionId] : []),
+      ...displayedChatLayout.slots.flatMap((pane) =>
+        pane?.kind === "session" ? [pane.sessionId] : [],
+      ),
     ].filter((id): id is string => Boolean(id)),
     eventsBySessionId: sessionEventsById,
     readEvents: readSessionEvents,
     openPanel: openAgentPanel,
-    closePanel: (paneId) => dispatchCompanion({ type: "close-tab", tab: "agents", paneId }),
+    closePanel: (paneId) =>
+      dispatchCompanion({ type: "close-tab", tab: "agents", paneId }),
     hasMoreBeforeBySession,
     loadingEarlierSessionIds,
     loadEarlier: loadEarlierEvents,
@@ -2910,8 +3030,10 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         capabilityEvent.sessionId,
-        mergeEvent(
-          optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+        limitOptimisticSessionEvents(
+          mergeEvent(
+            optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+          ),
         ),
       );
       setEventsForSession(capabilityEvent.sessionId, (current) =>
@@ -3382,7 +3504,9 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         sessionId,
-        mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        limitOptimisticSessionEvents(
+          mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        ),
       );
       setEventsForSession(sessionId, (current) => mergeEvent(current));
     }).then((unlisten) => {
@@ -3444,9 +3568,11 @@ export function App() {
       }
       optimisticEventsRef.current.set(
         sessionId,
-        mergeProviderResponseEvents(
-          optimisticEventsRef.current.get(sessionId) ?? [],
-          responseEvents,
+        limitOptimisticSessionEvents(
+          mergeProviderResponseEvents(
+            optimisticEventsRef.current.get(sessionId) ?? [],
+            responseEvents,
+          ),
         ),
       );
       // Commit the terminal response before the sending flag clears. Deferring
@@ -3457,6 +3583,82 @@ export function App() {
     },
     [setEventsForSession],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const owners = new Map<string, { owner: string; ownsSending: boolean }>();
+    void listen<{
+      sessionId: string;
+      owner?: string;
+      event?: SessionEvent;
+      userEvent?: SessionEvent;
+      response?: ProviderChatResponse;
+      finished?: boolean;
+    }>("gyro://goal-run-event", ({ payload }) => {
+      if (disposed) return;
+      const { sessionId, owner, event, userEvent, response, finished } = payload;
+      if (finished) {
+        const current = owners.get(sessionId);
+        if (owner && current?.owner === owner) {
+          owners.delete(sessionId);
+          // Composer invokes clear their own flag after applying the final
+          // response. Only recovered background runs are owned by this listener.
+          if (current.ownsSending) setSessionSending(sessionId, false);
+        }
+        return;
+      }
+      const run = recordFromUnknown(recordFromUnknown(event?.payload)?.run);
+      if (owner && (run?.status === "running" || run?.status === "queued")) {
+        const current = owners.get(sessionId);
+        owners.set(sessionId, {
+          owner,
+          ownsSending:
+            current?.owner === owner
+              ? current.ownsSending
+              : !sendingSessionIdsRef.current.has(sessionId),
+        });
+        setSessionSending(sessionId, true);
+      } else if (
+        owner &&
+        owners.has(sessionId) &&
+        owners.get(sessionId)?.owner !== owner
+      ) {
+        return;
+      }
+      flushProviderStreamBatches();
+      if (response) applyProviderChatResponse(sessionId, response);
+      const additions = [userEvent, event].filter((item): item is SessionEvent =>
+        Boolean(item),
+      );
+      if (additions.length) {
+        const merge = (items: SessionEvent[]) =>
+          limitSessionEventsForUi(
+            mergePersistedAndOptimisticEvents(items, additions),
+          );
+        optimisticEventsRef.current.set(
+          sessionId,
+          limitOptimisticSessionEvents(
+            merge(optimisticEventsRef.current.get(sessionId) ?? []),
+          ),
+        );
+        setEventsForSession(sessionId, merge);
+      }
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [
+    applyProviderChatResponse,
+    flushProviderStreamBatches,
+    setEventsForSession,
+    setSessionSending,
+  ]);
 
   const applyCouncilChatResponse = useCallback(
     (sessionId: string, response?: CouncilChatInvokeResponse) => {
@@ -5386,8 +5588,8 @@ export function App() {
         .map((tab) => tab.path)
         .filter((path) => editorPathMatches(path, fromPath));
       if (
-        affectedEditorPaths.some(
-          (path) => editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         )
       ) {
         notify(
@@ -5465,8 +5667,8 @@ export function App() {
         .filter((tabPath) => editorPathMatches(tabPath, path));
       const buffer = workbench.ide.buffers[path];
       if (
-        affectedEditorPaths.some(
-          (editorPath) => editorBufferHasUnsavedChanges(workbench.ide.buffers[editorPath]),
+        affectedEditorPaths.some((editorPath) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[editorPath]),
         )
       ) {
         notify(
@@ -5760,12 +5962,21 @@ export function App() {
       dispatchWorkbench({ type: "ide-select-view", view: "source-control" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
       // Status paths are relative to the folder it was read for, not the repo.
-      const root = selectedTerminalPane?.workingDirectory ?? activeSession?.workspacePath ?? workspacePath;
+      const root =
+        selectedTerminalPane?.workingDirectory ??
+        activeSession?.workspacePath ??
+        workspacePath;
       if (file && root) {
         void openSourceControlDiffForRoot(root, file.path, file.staged);
       }
     },
-    [activeSession?.workspacePath, openSourceControlDiffForRoot, selectedTerminalPane?.workingDirectory, selectedTerminalSourceControl, workspacePath],
+    [
+      activeSession?.workspacePath,
+      openSourceControlDiffForRoot,
+      selectedTerminalPane?.workingDirectory,
+      selectedTerminalSourceControl,
+      workspacePath,
+    ],
   );
 
   const commitSourceControl = useCallback(
@@ -6380,7 +6591,10 @@ export function App() {
       suppressSessionAutoSelectRef.current = true;
       activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
-      dispatchChatGrid({ type: "activate-project", projectKey: chatProjectKey(selected) });
+      dispatchChatGrid({
+        type: "activate-project",
+        projectKey: chatProjectKey(selected),
+      });
       setSelectedWorkspaceRoot(selected);
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
@@ -7375,6 +7589,8 @@ export function App() {
         delete next[sessionId];
         return next;
       });
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
       forgetSessionContextEvents(sessionId);
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
@@ -7475,6 +7691,10 @@ export function App() {
         ),
       ),
     );
+    for (const sessionId of projectSessionIds) {
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
+    }
     forgetManySessionContextEvents(projectSessionIds);
 
     if (
@@ -8871,7 +9091,7 @@ export function App() {
       const attachmentWorkspacePath = target
         ? target.workspacePath
         : workspacePath;
-      const existing = chatAttachments[attachmentDraftKey] ?? [];
+      const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
       const remaining = {
         image: Math.max(
           0,
@@ -8905,8 +9125,15 @@ export function App() {
         const placeholder = pendingMediaAttachment(dropped, kind);
         queued.push({ dropped, kind, placeholder });
       }
-      // The chip lands with the drop; the upload fills it in behind it.
+      // Reserve synchronously so overlapping drops share the same limits.
       if (queued.length) {
+        chatAttachmentsRef.current = {
+          ...chatAttachmentsRef.current,
+          [attachmentDraftKey]: [
+            ...existing,
+            ...queued.map((item) => item.placeholder),
+          ],
+        };
         setChatAttachments((current) => ({
           ...current,
           [attachmentDraftKey]: [
@@ -8916,36 +9143,45 @@ export function App() {
         }));
       }
       const upload = async (dropped: File, kind: "image" | "video") => {
+        const cancellation = new AbortController();
         try {
-          const file =
-            kind === "image"
-              ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
-              : dropped;
-          const name =
-            file.name ||
-            `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
-          const byteLimit =
-            kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
-          if (file.size > byteLimit) {
-            rejected.push(
-              `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
-            );
-            return undefined;
-          }
-          const headers: Record<string, string> = {
-            "x-gyro-kind": kind,
-            "x-gyro-name": base64Utf8(name),
-            "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
-          };
-          if (attachmentWorkspacePath) {
-            headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
-          }
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_media_upload",
-            new Uint8Array(await file.arrayBuffer()),
-            { headers },
+          return await withMediaUploadTimeout(
+            queueMediaUpload(async () => {
+              const file =
+                kind === "image"
+                  ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+                  : dropped;
+              const name =
+                file.name ||
+                `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+              const byteLimit =
+                kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+              if (file.size > byteLimit) {
+                rejected.push(
+                  `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
+                );
+                return undefined;
+              }
+              const headers: Record<string, string> = {
+                "x-gyro-kind": kind,
+                "x-gyro-name": base64Utf8(name),
+                "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
+              };
+              if (attachmentWorkspacePath) {
+                headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
+              }
+              const attachment = await invoke<ChatAttachment>(
+                "prepare_chat_media_upload",
+                new Uint8Array(await file.arrayBuffer()),
+                { headers },
+              );
+              return {
+                ...attachment,
+                previewUrl: convertFileSrc(attachment.path),
+              };
+            }, cancellation.signal),
+            () => cancellation.abort(),
           );
-          return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
           rejected.push(`${dropped.name || kind}: ${String(error)}`);
           return undefined;
@@ -9119,10 +9355,14 @@ export function App() {
       if (action.startsWith("connect-provider:")) {
         const providerId = action.replace("connect-provider:", "");
         if (isProviderId(providerId)) {
-          const session = sessionsRef.current.find((session) => session.id === draftKey);
+          const session = sessionsRef.current.find(
+            (session) => session.id === draftKey,
+          );
           connectProvider(
             providerId,
-            session?.importSource ? { importedSessionId: session.id } : undefined,
+            session?.importSource
+              ? { importedSessionId: session.id }
+              : undefined,
           );
         }
         return;
@@ -9533,9 +9773,11 @@ export function App() {
           );
           optimisticEventsRef.current.set(
             activeSessionId,
-            mergePersistedAndOptimisticEvents(
-              optimisticEventsRef.current.get(activeSessionId) ?? [],
-              compactEvents,
+            limitOptimisticSessionEvents(
+              mergePersistedAndOptimisticEvents(
+                optimisticEventsRef.current.get(activeSessionId) ?? [],
+                compactEvents,
+              ),
             ),
           );
           setEventsForSession(activeSessionId, (current) =>
@@ -9858,18 +10100,30 @@ export function App() {
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
       const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
-      if (requestedSessionId && message.length <= MAX_CHAT_MESSAGE_CHARS &&
-          (message || draftAttachments.length > 0)) {
+      if (
+        requestedSessionId &&
+        message.length <= MAX_CHAT_MESSAGE_CHARS &&
+        (message || draftAttachments.length > 0)
+      ) {
         chatAutoRetry.cancelSession(requestedSessionId);
-        if (!overrideContext?.retryTurnId && !overrideContext?.retryDispatchGuard) {
+        if (
+          !overrideContext?.retryTurnId &&
+          !overrideContext?.retryDispatchGuard
+        ) {
           retryDispatchRef.current.cancelSession(requestedSessionId);
         }
       }
       if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // An image dropped a moment ago may still be uploading.
-      const turnAttachments = draftAttachments.some((item) => item.pending)
-        ? await settlePendingMedia(draftAttachments)
-        : draftAttachments;
+      let turnAttachments = draftAttachments;
+      try {
+        if (draftAttachments.some((item) => item.pending)) {
+          turnAttachments = await settlePendingMedia(draftAttachments);
+        }
+      } catch (error) {
+        notify("command-failed", "Attachment upload failed", String(error));
+        return false;
+      }
       if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
@@ -9877,9 +10131,10 @@ export function App() {
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
           : activeSessionGoal;
-      const turnPlan = overrideContext && "plan" in overrideContext
-        ? (overrideContext.plan ?? { title: "Plan", items: [] })
-        : activeSessionPlan;
+      const turnPlan =
+        overrideContext && "plan" in overrideContext
+          ? (overrideContext.plan ?? { title: "Plan", items: [] })
+          : activeSessionPlan;
       const previewSessionId =
         isTauriRuntime() && requestedSessionId?.startsWith("preview-")
           ? requestedSessionId
@@ -9986,7 +10241,8 @@ export function App() {
       ) {
         // Recovery keeps the original turn. The dispatch controller waits for
         // a finishing invoke; it must never fall into the normal send queue.
-        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard) return false;
+        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard)
+          return false;
         if (
           (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
@@ -10077,14 +10333,23 @@ export function App() {
       }
       if (!isCouncilTurn) {
         if (targetSession?.importSource && isTauriRuntime()) {
-          const check = await invoke<ProviderHealthCheck>("check_provider_health", {
-            importedSessionId: targetSession.id,
-            request: providerHealthRequest(selectedProvider, sessionModel.providerId),
-          }).catch(() => undefined);
+          const check = await invoke<ProviderHealthCheck>(
+            "check_provider_health",
+            {
+              importedSessionId: targetSession.id,
+              request: providerHealthRequest(
+                selectedProvider,
+                sessionModel.providerId,
+              ),
+            },
+          ).catch(() => undefined);
           if (
             !check ||
-            recordProviderHealthOutput(sessionModel.providerId!, check.output, check)
-              .connectionStatus !== "connected"
+            recordProviderHealthOutput(
+              sessionModel.providerId!,
+              check.output,
+              check,
+            ).connectionStatus !== "connected"
           ) {
             notify(
               "provider",
@@ -10093,7 +10358,8 @@ export function App() {
             );
             return false;
           }
-        } else if (!checkProviderReadiness("chat", sessionModel.providerId)) return false;
+        } else if (!checkProviderReadiness("chat", sessionModel.providerId))
+          return false;
       }
       if (isCouncilTurn && COUNCIL_COMING_SOON) {
         notify(
@@ -10130,7 +10396,8 @@ export function App() {
         if (
           scopedIde.sourceControl.detailsLoaded === false ||
           scopedIde.sourceControl.statsPartial
-        ) return current;
+        )
+          return current;
         if (current[turnId]) {
           return current;
         }
@@ -10197,7 +10464,10 @@ export function App() {
           );
         }
         let sendingSessionId = session.id;
-        optimisticEventsRef.current.set(session.id, optimisticEvents);
+        optimisticEventsRef.current.set(
+          session.id,
+          limitOptimisticSessionEvents(optimisticEvents),
+        );
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         if (consumeSelectedMode) {
@@ -10282,7 +10552,10 @@ export function App() {
             persistedSession.id,
           );
           optimisticEventsRef.current.delete(session.id);
-          optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
+          optimisticEventsRef.current.set(
+            persistedSession.id,
+            limitOptimisticSessionEvents(migratedEvents),
+          );
           setSessionEventsById((current) => {
             const next = { ...current };
             delete next[session.id];
@@ -10610,14 +10883,19 @@ export function App() {
       await configSaveQueueRef.current;
       // Preparation can await media, provider health and model saves. A new
       // send or Stop may win meanwhile, or another sender may have started.
-      if (overrideContext?.retryDispatchGuard?.() === false ||
-          (isRetry && sendingSessionIdsRef.current.has(targetSessionId))) return false;
+      if (
+        overrideContext?.retryDispatchGuard?.() === false ||
+        (isRetry && sendingSessionIdsRef.current.has(targetSessionId))
+      )
+        return false;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
         optimisticEventsRef.current.set(
           targetSessionId,
-          resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          limitOptimisticSessionEvents(
+            resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          ),
         );
         setEventsForSession(targetSessionId, (current) => resetEvents(current));
         updateOptimisticProviderStatus(
@@ -10630,9 +10908,11 @@ export function App() {
       } else {
         optimisticEventsRef.current.set(
           targetSessionId,
-          mergePersistedAndOptimisticEvents(
-            optimisticEventsRef.current.get(targetSessionId) ?? [],
-            optimisticEvents,
+          limitOptimisticSessionEvents(
+            mergePersistedAndOptimisticEvents(
+              optimisticEventsRef.current.get(targetSessionId) ?? [],
+              optimisticEvents,
+            ),
           ),
         );
       }
@@ -11270,11 +11550,13 @@ export function App() {
         chatAutoRetry.cancelSession(event.sessionId);
         retryDispatchRef.current.cancelSession(event.sessionId);
         stoppedChatSessionsRef.current.add(event.sessionId);
-        void invoke("stop_provider_chat", { sessionId: event.sessionId }).catch((error) => {
-          stoppedChatSessionsRef.current.delete(event.sessionId);
-          setQueueRetryTick((current) => current + 1);
-          notify("command-failed", "Could not cancel retry", String(error));
-        });
+        void invoke("stop_provider_chat", { sessionId: event.sessionId }).catch(
+          (error) => {
+            stoppedChatSessionsRef.current.delete(event.sessionId);
+            setQueueRetryTick((current) => current + 1);
+            notify("command-failed", "Could not cancel retry", String(error));
+          },
+        );
         return;
       }
       if (action === "retry-send" || action === "reconnect-provider") {
@@ -11283,7 +11565,8 @@ export function App() {
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
-      const eventSessionEvents = sessionEventsById[event.sessionId] ?? eventsRef.current;
+      const eventSessionEvents =
+        sessionEventsById[event.sessionId] ?? eventsRef.current;
       const userEvent = turnId
         ? eventSessionEvents.find(
             (item) =>
@@ -11301,7 +11584,11 @@ export function App() {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
         if (activity.resource.kind === "chat") {
-          const paneId = displayedChatLayout.slots.find((pane) => pane?.kind === "session" && pane.sessionId === event.sessionId)?.paneId ?? SOLO_CHAT_PANE_ID;
+          const paneId =
+            displayedChatLayout.slots.find(
+              (pane) =>
+                pane?.kind === "session" && pane.sessionId === event.sessionId,
+            )?.paneId ?? SOLO_CHAT_PANE_ID;
           subagentController.select(paneId, activity.resource.id);
           return;
         }
@@ -11507,21 +11794,29 @@ export function App() {
               ? (planRecord as unknown as SessionPlan)
               : undefined,
         };
-        void retryDispatchRef.current.dispatch(event.sessionId, turnId, {
-          isBusy: () => sendingSessionIdsRef.current.has(event.sessionId) ||
-            queuedChatDispatchesRef.current.has(event.sessionId),
-          isCurrent: () => isChatRetryCurrent(
-            sessionEventsByIdRef.current[event.sessionId] ?? [], event,
-          ),
-          send: (retryDispatchGuard) => {
-            // A finishing queued delivery can reinsert its failed item. Drop
-            // that replay only after its dispatch cleanup has also settled.
-            removeQueuedReplay();
-            return sendDraftRef.current(userMessage, {
-              ...retryContext, retryDispatchGuard,
-            });
-          },
-        }).catch((error) => notify("command-failed", "Could not retry", String(error)));
+        void retryDispatchRef.current
+          .dispatch(event.sessionId, turnId, {
+            isBusy: () =>
+              sendingSessionIdsRef.current.has(event.sessionId) ||
+              queuedChatDispatchesRef.current.has(event.sessionId),
+            isCurrent: () =>
+              isChatRetryCurrent(
+                sessionEventsByIdRef.current[event.sessionId] ?? [],
+                event,
+              ),
+            send: (retryDispatchGuard) => {
+              // A finishing queued delivery can reinsert its failed item. Drop
+              // that replay only after its dispatch cleanup has also settled.
+              removeQueuedReplay();
+              return sendDraftRef.current(userMessage, {
+                ...retryContext,
+                retryDispatchGuard,
+              });
+            },
+          })
+          .catch((error) =>
+            notify("command-failed", "Could not retry", String(error)),
+          );
       };
 
       if (action === "reconnect-provider" && isProviderId(providerId)) {
@@ -11536,11 +11831,9 @@ export function App() {
         void connectProvider(providerId, {
           forceLogin: needsSignIn,
           importedSessionId: event.sessionId,
-        }).then(
-          (connected) => {
-            if (connected && needsSignIn) replayFailedTurn();
-          },
-        );
+        }).then((connected) => {
+          if (connected && needsSignIn) replayFailedTurn();
+        });
         return;
       }
 
@@ -11565,32 +11858,77 @@ export function App() {
     ],
   );
 
-  retryProviderStatusRef.current = (event) => handleProviderStatusAction("retry-send", event);
+  retryProviderStatusRef.current = (event) =>
+    handleProviderStatusAction("retry-send", event);
 
   const projectImport = useProjectImport({
-    enabled: activeDestination === "settings" && workbench.preferences.lastSettingsSection === "import-projects",
-    visibleSessions: sessions.filter((session) => session.id === activeSessionId || displayedChatLayout.slots.some((pane) => pane?.kind === "session" && pane.sessionId === session.id)), events, refreshEvents,
+    enabled:
+      activeDestination === "settings" &&
+      workbench.preferences.lastSettingsSection === "import-projects",
+    visibleSessions: sessions.filter(
+      (session) =>
+        session.id === activeSessionId ||
+        displayedChatLayout.slots.some(
+          (pane) => pane?.kind === "session" && pane.sessionId === session.id,
+        ),
+    ),
+    events,
+    refreshEvents,
     onOpenSettings: () => openSettingsSection("import-projects"),
     onImported: (paths) => {
-      setRemovedProjectPaths((current) => current.filter((path) => !paths.some((imported) => normalizeProjectPath(imported) === normalizeProjectPath(path))));
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (path) =>
+            !paths.some(
+              (imported) =>
+                normalizeProjectPath(imported) === normalizeProjectPath(path),
+            ),
+        ),
+      );
       setRecentProjectPaths((current) => [...new Set([...paths, ...current])]);
       void refreshSessions();
     },
     onOpenSession: (id, path) => {
-      path = sessions.find((session) => session.id === id)?.workspacePath ?? path;
-      setRemovedProjectPaths((current) => current.filter((removed) => normalizeProjectPath(removed) !== normalizeProjectPath(path)));
+      path =
+        sessions.find((session) => session.id === id)?.workspacePath ?? path;
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (removed) =>
+            normalizeProjectPath(removed) !== normalizeProjectPath(path),
+        ),
+      );
       setRecentProjectPaths((current) => [...new Set([path, ...current])]);
-      selectSession(id); setWorkspacePath(path);
-      dispatchWorkbench({ type: "select-destination", destination: "workspace" });
+      selectSession(id);
+      setWorkspacePath(path);
+      dispatchWorkbench({
+        type: "select-destination",
+        destination: "workspace",
+      });
     },
     onSessionUpdated: (updated) => {
-      setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
-      if (updated.id === activeSessionId) setWorkspacePath(updated.workspacePath);
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      );
+      if (updated.id === activeSessionId)
+        setWorkspacePath(updated.workspacePath);
     },
     onRetrySession: (id) => {
-      const failure = [...(sessionEventsById[id] ?? [])].reverse().find((event) => stringFromRecord(recordFromUnknown(event.payload), "status") === "failed" && turnIdFromSessionEvent(event));
+      const failure = [...(sessionEventsById[id] ?? [])]
+        .reverse()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "status") ===
+              "failed" && turnIdFromSessionEvent(event),
+        );
       if (failure) handleProviderStatusAction("retry-send", failure);
-      else notify("terminal", "Ready to retry", "Send your message again to retry the original session.");
+      else
+        notify(
+          "terminal",
+          "Ready to retry",
+          "Send your message again to retry the original session.",
+        );
     },
   });
 
@@ -11599,7 +11937,13 @@ export function App() {
       if (!activeSessionId || !isTauriRuntime()) {
         return;
       }
-      const approvalEvent = Object.values(sessionEventsById).flat().find((event) => stringFromRecord(recordFromUnknown(event.payload), "proposalId") === proposalId);
+      const approvalEvent = Object.values(sessionEventsById)
+        .flat()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "proposalId") ===
+            proposalId,
+        );
       const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
       try {
         const result = await invoke<{
@@ -12060,18 +12404,38 @@ export function App() {
     dispatchWorkbench({ type: "ide-pin-tab", path });
   }, []);
 
-  const updateEditorBuffer = useCallback((path: string, content: string) => {
-    const current = editorBuffersRef.current[path];
-    if (current) {
-      const next = { ...editorBuffersRef.current, [path]: { ...current, content, status: content === current.savedContent ? "ready" as const : "dirty" as const } };
-      editorBuffersRef.current = next;
-      if (hasEditRecovery()) {
-        try { writeEditRecovery(next); }
-        catch (failure) { notify("command-failed", "Could not update edit recovery", String(failure)); }
+  const updateEditorBuffer = useCallback(
+    (path: string, content: string) => {
+      const current = editorBuffersRef.current[path];
+      if (current) {
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...current,
+            content,
+            status:
+              content === current.savedContent
+                ? ("ready" as const)
+                : ("dirty" as const),
+          },
+        };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
+        }
       }
-    }
-    dispatchWorkbench({ type: "ide-update-buffer", path, content });
-  }, [notify]);
+      dispatchWorkbench({ type: "ide-update-buffer", path, content });
+    },
+    [notify],
+  );
 
   const saveEditorBuffer = useCallback(
     async (path: string) => {
@@ -12123,12 +12487,29 @@ export function App() {
           },
         );
         const live = editorBuffersRef.current[path] ?? buffer;
-        const next = { ...editorBuffersRef.current, [path]: { ...live, savedContent: saved.content, contentHash: saved.contentHash,
-          status: live.content === saved.content ? "saved" as const : "dirty" as const } };
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...live,
+            savedContent: saved.content,
+            contentHash: saved.contentHash,
+            status:
+              live.content === saved.content
+                ? ("saved" as const)
+                : ("dirty" as const),
+          },
+        };
         editorBuffersRef.current = next;
         if (hasEditRecovery()) {
-          try { writeEditRecovery(next); }
-          catch (failure) { notify("command-failed", "Could not update edit recovery", String(failure)); }
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
         }
         dispatchWorkbench({
           type: "ide-mark-buffer-saved",
@@ -12137,7 +12518,8 @@ export function App() {
           contentHash: saved.contentHash,
           sizeBytes: saved.sizeBytes,
         });
-        if (selectedFileRef.current === path) setSelectedFileContent({ ...saved, content: live.content });
+        if (selectedFileRef.current === path)
+          setSelectedFileContent({ ...saved, content: live.content });
         notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
@@ -12167,80 +12549,167 @@ export function App() {
   );
 
   const languageSessions = useLanguageSessions({
-    roots: workspaceRoots, buffers: workbench.ide.buffers, languageOverrides,
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    languageOverrides,
     trust: workbench.preferences.workspaceTrust,
-    onState: server => dispatchWorkbench({ type: "ide-set-language-server", server }),
+    onState: (server) =>
+      dispatchWorkbench({ type: "ide-set-language-server", server }),
     onMessages: (messages, root) => {
       const diagnostics = diagnosticsFromLspMessages(messages, root);
       if (!diagnostics) return;
-      const publishedPaths = new Set((messages ?? []).flatMap(message =>
-        isRecord(message) && message.method === "textDocument/publishDiagnostics" && isRecord(message.params) && typeof message.params.uri === "string"
-          ? [lspRelativePath(message.params.uri, root)] : []));
-      dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics: [
-        ...workbench.ide.diagnostics.filter(diagnostic => !publishedPaths.has(diagnostic.path)), ...diagnostics,
-      ] });
+      const publishedPaths = new Set(
+        (messages ?? []).flatMap((message) =>
+          isRecord(message) &&
+          message.method === "textDocument/publishDiagnostics" &&
+          isRecord(message.params) &&
+          typeof message.params.uri === "string"
+            ? [lspRelativePath(message.params.uri, root)]
+            : [],
+        ),
+      );
+      dispatchWorkbench({
+        type: "ide-set-diagnostics",
+        diagnostics: [
+          ...workbench.ide.diagnostics.filter(
+            (diagnostic) => !publishedPaths.has(diagnostic.path),
+          ),
+          ...diagnostics,
+        ],
+      });
     },
   });
   const requestLanguageFeature = languageSessions.request;
   const workspaceRename = useWorkspaceRename({
-    roots: workspaceRoots, buffers: workbench.ide.buffers, trust: workbench.preferences.workspaceTrust,
-    request: requestLanguageFeature, version: languageSessions.version,
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    trust: workbench.preferences.workspaceTrust,
+    request: requestLanguageFeature,
+    version: languageSessions.version,
     synchronize: languageSessions.synchronize,
-    isOpen: path => workbench.ide.tabs.some(tab => tab.path === path),
-    capabilities: path => languageSessions.ready(path)?.capabilities,
-    read: async (path, root) => isTauriRuntime()
-      ? invoke<WorkspaceFileContent>("read_workspace_file_full", { path, workspacePath: root })
-      : createPreviewWorkspaceFileContent(path),
-    dispatch: dispatchWorkbench, save: saveEditorBuffer,
-    notify: message => notify("command-failed", "Could not rename symbol", message),
+    isOpen: (path) => workbench.ide.tabs.some((tab) => tab.path === path),
+    capabilities: (path) => languageSessions.ready(path)?.capabilities,
+    read: async (path, root) =>
+      isTauriRuntime()
+        ? invoke<WorkspaceFileContent>("read_workspace_file_full", {
+            path,
+            workspacePath: root,
+          })
+        : createPreviewWorkspaceFileContent(path),
+    dispatch: dispatchWorkbench,
+    save: saveEditorBuffer,
+    notify: (message) =>
+      notify("command-failed", "Could not rename symbol", message),
   });
-  const openWorkspaceLocation = useCallback(async (path: string, lineNumber: number, column: number, source?: WorkspaceNavigationSource, record = true) => {
-    const token = ++navigationRequestRef.current;
-    try {
-      const normalized = filePathFromUri(canonicalFileUri(path));
-      const root = normalized ? workspaceRootForPath(workspaceRoots, normalized) : undefined;
-      if (!normalized || !root) throw new Error("The target is outside the workspace folders.");
-      if (!editorBuffersRef.current[normalized]) {
-        const file = isTauriRuntime()
-          ? await invoke<WorkspaceFileContent>("read_workspace_file_full", { path: normalized, workspacePath: root })
-          : createPreviewWorkspaceFileContent(normalized);
-        if (file.truncated) throw new Error("The target exceeds the editable file limit.");
-        if (navigationRequestRef.current !== token) return false;
-        const buffer = editorBuffersRef.current[normalized] ?? editorBufferFromFile(file);
+  const openWorkspaceLocation = useCallback(
+    async (
+      path: string,
+      lineNumber: number,
+      column: number,
+      source?: WorkspaceNavigationSource,
+      record = true,
+    ) => {
+      const token = ++navigationRequestRef.current;
+      try {
+        const normalized = filePathFromUri(canonicalFileUri(path));
+        const root = normalized
+          ? workspaceRootForPath(workspaceRoots, normalized)
+          : undefined;
+        if (!normalized || !root)
+          throw new Error("The target is outside the workspace folders.");
         if (!editorBuffersRef.current[normalized]) {
-          editorBuffersRef.current = { ...editorBuffersRef.current, [normalized]: buffer };
-          dispatchWorkbench({ type: "ide-apply-buffer-batch", updates: [{ path: normalized, buffer }] });
+          const file = isTauriRuntime()
+            ? await invoke<WorkspaceFileContent>("read_workspace_file_full", {
+                path: normalized,
+                workspacePath: root,
+              })
+            : createPreviewWorkspaceFileContent(normalized);
+          if (file.truncated)
+            throw new Error("The target exceeds the editable file limit.");
+          if (navigationRequestRef.current !== token) return false;
+          const buffer =
+            editorBuffersRef.current[normalized] ?? editorBufferFromFile(file);
+          if (!editorBuffersRef.current[normalized]) {
+            editorBuffersRef.current = {
+              ...editorBuffersRef.current,
+              [normalized]: buffer,
+            };
+            dispatchWorkbench({
+              type: "ide-apply-buffer-batch",
+              updates: [{ path: normalized, buffer }],
+            });
+          }
         }
+        if (navigationRequestRef.current !== token) return false;
+        if (
+          source &&
+          selectedFileRef.current &&
+          selectedFileRef.current !== source.path
+        )
+          return false;
+        if (record)
+          setNavigationHistory((history) => {
+            const entries = history.entries.slice(0, history.index + 1);
+            if (source) {
+              if (entries.length) entries[entries.length - 1] = source;
+              else entries.push(source);
+            }
+            entries.push({ path: normalized, lineNumber, column });
+            return {
+              entries: entries.slice(-100),
+              index: Math.min(entries.length - 1, 99),
+            };
+          });
+        openEditorLocation(normalized, lineNumber, column);
+        return true;
+      } catch (failure) {
+        notify(
+          "command-failed",
+          "Could not open code location",
+          String(failure),
+        );
+        return false;
       }
-      if (navigationRequestRef.current !== token) return false;
-      if (source && selectedFileRef.current && selectedFileRef.current !== source.path) return false;
-      if (record) setNavigationHistory(history => {
-        const entries = history.entries.slice(0, history.index + 1);
-        if (source) {
-          if (entries.length) entries[entries.length - 1] = source;
-          else entries.push(source);
-        }
-        entries.push({ path: normalized, lineNumber, column });
-        return { entries: entries.slice(-100), index: Math.min(entries.length - 1, 99) };
-      });
-      openEditorLocation(normalized, lineNumber, column);
-      return true;
-    } catch (failure) { notify("command-failed", "Could not open code location", String(failure)); return false; }
-  }, [notify, openEditorLocation, workspaceRoots]);
-  const navigateEditorHistory = useCallback(async (direction: number) => {
-    const index = navigationHistory.index + direction;
-    const target = navigationHistory.entries[index];
-    if (!target) return;
-    if (await openWorkspaceLocation(target.path, target.lineNumber, target.column, undefined, false))
-      setNavigationHistory(history => ({ ...history, index }));
-  }, [navigationHistory, openWorkspaceLocation]);
+    },
+    [notify, openEditorLocation, workspaceRoots],
+  );
+  const navigateEditorHistory = useCallback(
+    async (direction: number) => {
+      const index = navigationHistory.index + direction;
+      const target = navigationHistory.entries[index];
+      if (!target) return;
+      if (
+        await openWorkspaceLocation(
+          target.path,
+          target.lineNumber,
+          target.column,
+          undefined,
+          false,
+        )
+      )
+        setNavigationHistory((history) => ({ ...history, index }));
+    },
+    [navigationHistory, openWorkspaceLocation],
+  );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey && !event.metaKey && (event.code === "Minus" || event.key === "-") && !workspaceRename.draft) {
-        event.preventDefault(); void navigateEditorHistory(event.shiftKey ? 1 : -1);
+      if (
+        event.ctrlKey &&
+        !event.metaKey &&
+        (event.code === "Minus" || event.key === "-") &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void navigateEditorHistory(event.shiftKey ? 1 : -1);
       }
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "s" && !workspaceRename.draft) {
-        event.preventDefault(); void workspaceRename.saveAll();
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "s" &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void workspaceRename.saveAll();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -12256,8 +12725,8 @@ export function App() {
       const searchText = query.query;
       const uniquePaths = [...new Set(paths)];
       if (!searchText || uniquePaths.length === 0) return;
-      const dirtyPath = uniquePaths.find(
-        (path) => editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
+      const dirtyPath = uniquePaths.find((path) =>
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
       );
       if (dirtyPath) {
         notify(
@@ -12565,10 +13034,28 @@ export function App() {
 
   const changeGoal = useCallback(
     async (
-      action: "set" | "edit" | "complete" | "reopen" | "clear",
+      action:
+        "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume",
       value?: string,
     ) => {
       if (action !== "set" && !activeSessionGoal) return false;
+      if (action === "resume") {
+        return sendDraftRef.current(
+          "Continue the goal from its saved checkpoint.",
+        );
+      }
+      if (action === "pause") {
+        if (activeSessionId) stoppedChatSessionsRef.current.add(activeSessionId);
+        if (
+          activeSessionId &&
+          sendingSessionIdsRef.current.has(activeSessionId) &&
+          isTauriRuntime()
+        ) {
+          stopChatSession(activeSessionId);
+          return true;
+        }
+        return appendGoalEvent({ action: "pause" }, "Goal paused");
+      }
       const text =
         action === "set" || action === "edit"
           ? value?.trim()
@@ -12599,6 +13086,7 @@ export function App() {
               action: "set",
               text,
               status,
+              runLimits: activeSessionGoal?.runLimits,
             };
       const message =
         action === "clear"
@@ -12614,7 +13102,7 @@ export function App() {
       // longer cancels the other — the composer shows both.
       return appendGoalEvent(payload, message);
     },
-    [activeSessionGoal, activeSessionId, appendGoalEvent],
+    [activeSessionGoal, activeSessionId, appendGoalEvent, stopChatSession],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -13298,6 +13786,9 @@ export function App() {
       sessionId: owner.sessionId,
       action,
     });
+  const handleBrowserDeviceChange = (mode: BrowserViewportMode, owner = activeBrowserOwner) =>
+    void changeSessionBrowserViewport(owner.sessionId, mode, Boolean(previewForBrowser(owner).url),
+      dispatchWorkbench, (error) => notify("command-failed", "Viewport change failed", String(error)));
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
     quitConfirmation.requested ||
@@ -13330,7 +13821,7 @@ export function App() {
           message: "Loading…",
           nativeHost: true,
         });
-        await invoke("session_browser_open", {
+        const opened = await invoke<{ viewport: { mode: BrowserViewportMode } }>("session_browser_open", {
           request: {
             sessionId: owner.sessionId,
             workspaceKey: owner.workspaceKey,
@@ -13339,6 +13830,15 @@ export function App() {
             visible: bounds != null,
           },
         });
+        const preview = previewForBrowser(owner);
+        if (preview.deviceOverride && opened.viewport.mode === "auto") {
+          await invoke("session_browser_set_viewport", {
+            sessionId: owner.sessionId,
+            request: { mode: preview.viewport?.mode ?? preview.device,
+              width: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.width,
+              height: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.height },
+          });
+        }
         return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
@@ -13352,7 +13852,7 @@ export function App() {
         return false;
       }
     },
-    [activeBrowserOwner, notify],
+    [activeBrowserOwner, notify, workbench.browserPreviewsBySession],
   );
 
   const [updateBrowserHostVisibility] = useState(() =>
@@ -13453,44 +13953,7 @@ export function App() {
     });
   }, []);
 
-  // The native child webview reports its document title asynchronously. Keep
-  // that small piece of browser state in the React shell so its selected tab
-  // identifies the actual page, just like an in-app browser should.
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> =
-      Promise.resolve(undefined);
-    try {
-      unlisten = listen<{
-        kind?: string;
-        sessionId: string;
-        title?: string;
-        url?: string;
-      }>("session-browser-event", (event) => {
-        if (event.payload.kind === "loaded" && event.payload.url) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-loaded", url: event.payload.url },
-          });
-        } else if (
-          event.payload.kind === "title" &&
-          event.payload.title !== undefined
-        ) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-title", title: event.payload.title },
-          });
-        }
-      });
-    } catch {
-      unlisten = Promise.resolve(undefined);
-    }
-    return () => {
-      void unlisten.then((dispose) => dispose?.());
-    };
-  }, []);
+  useSessionBrowserEvents(dispatchWorkbench);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -14346,9 +14809,10 @@ export function App() {
       schedulePersistedWorkbenchStateFlush(
         pendingWorkbenchPersistRef,
         workbenchPersistIdleRef,
+        onAppearancePersisted,
       );
     }, WORKBENCH_PERSIST_DEBOUNCE_MS);
-  }, [persistableWorkbench]);
+  }, [persistableWorkbench, onAppearancePersisted]);
 
   useEffect(
     () => () => {
@@ -14357,11 +14821,10 @@ export function App() {
         workbenchPersistTimerRef.current = undefined;
       }
       cancelPersistedWorkbenchStateFlush(workbenchPersistIdleRef);
-      flushPersistedWorkbenchState(pendingWorkbenchPersistRef);
+      flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
     },
-    [],
+    [onAppearancePersisted],
   );
-
 
   useEffect(() => {
     safeSetLocalStorage(
@@ -14508,7 +14971,8 @@ export function App() {
       workspaceTreeRequestRef.current += 1;
       if (
         workspacePath &&
-        workspacePreparationPathRef.current !== normalizeProjectPath(workspacePath)
+        workspacePreparationPathRef.current !==
+          normalizeProjectPath(workspacePath)
       ) {
         void prepareWorkspace(workspacePath);
       }
@@ -15205,7 +15669,7 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -15462,7 +15926,9 @@ export function App() {
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
   const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
   // Snapshot the requested providers; offers and notice dismissal can change in flight.
-  const [cliUpdatingProviderIds, setCliUpdatingProviderIds] = useState<readonly string[]>([]);
+  const [cliUpdatingProviderIds, setCliUpdatingProviderIds] = useState<
+    readonly string[]
+  >([]);
   const cliUpdatingProvidersRef = useRef<readonly string[]>([]);
   // Only an update (or a check) the user pressed can fail the notice; a
   // background check that times out keeps the last known offers silently.
@@ -15516,7 +15982,11 @@ export function App() {
   );
 
   const applyCliUpdates = useCallback(async () => {
-    if (!isTauriRuntime() || cliUpdateOffers.length === 0 || cliUpdatingProvidersRef.current.length > 0) {
+    if (
+      !isTauriRuntime() ||
+      cliUpdateOffers.length === 0 ||
+      cliUpdatingProvidersRef.current.length > 0
+    ) {
       return;
     }
     const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
@@ -15578,7 +16048,9 @@ export function App() {
       localStorage.setItem("gyro.cli-updates.dismissed.v1", key);
     }
     setCliUpdateOffers([]);
-    setCliUpdatePhase(cliUpdatingProvidersRef.current.length > 0 ? "updating" : "idle");
+    setCliUpdatePhase(
+      cliUpdatingProvidersRef.current.length > 0 ? "updating" : "idle",
+    );
     setCliUpdateFailure(undefined);
   }, [cliUpdateOffers]);
 
@@ -15643,7 +16115,9 @@ export function App() {
     ? sessionModelSelectionFromSession(activeSession)
     : chatDraftModels[activeDraftKey];
   const activeComposerCliUpdating = isComposerCliUpdating(
-    cliUpdatingProviderIds, activeComposerModel, config.selectedProviderId,
+    cliUpdatingProviderIds,
+    activeComposerModel,
+    config.selectedProviderId,
   );
 
   const renderChatPane = (
@@ -15672,11 +16146,14 @@ export function App() {
         : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
-    const paneComposerModel = pane.kind === "session"
-      ? sessionModelSelectionFromSession(paneSession)
-      : chatDraftModels[paneDraftKey];
+    const paneComposerModel =
+      pane.kind === "session"
+        ? sessionModelSelectionFromSession(paneSession)
+        : chatDraftModels[paneDraftKey];
     const paneComposerCliUpdating = isComposerCliUpdating(
-      cliUpdatingProviderIds, paneComposerModel, config.selectedProviderId,
+      cliUpdatingProviderIds,
+      paneComposerModel,
+      config.selectedProviderId,
     );
     const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
@@ -15803,10 +16280,7 @@ export function App() {
         browserOverlayOccluded={browserOverlayOccluded || !isFocused}
         onBrowserBack={() => handleBrowserBack(paneBrowserOwner)}
         onBrowserDeviceChange={(device) =>
-          sendBrowserAction(paneBrowserOwner, {
-            type: "browser-device",
-            device,
-          })
+          handleBrowserDeviceChange(device, paneBrowserOwner)
         }
         onBrowserForward={() => handleBrowserForward(paneBrowserOwner)}
         onBrowserHostBoundsChange={(bounds) =>
@@ -16035,7 +16509,10 @@ export function App() {
         sessionGoal={paneGoal}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
-        sourceControl={sourceControlForWorkspace(workbench.ide.sourceControl, pane.workspacePath)}
+        sourceControl={sourceControlForWorkspace(
+          workbench.ide.sourceControl,
+          pane.workspacePath,
+        )}
         terminalPanes={workbench.terminalPanes}
         turnSourceControlBaselines={turnSourceControlBaselines}
         worktreeName={paneSession?.worktreeName}
@@ -16176,7 +16653,7 @@ export function App() {
       browserOverlayOccluded={browserOverlayOccluded}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -16541,16 +17018,28 @@ export function App() {
               <ChatGridSurface
                 layout={displayedChatLayout}
                 maximizedPaneId={chatGrid.maximizedPaneId}
-                onDropSession={(sessionId, sourceProjectKey, slotIndex, placement) => {
-                  const session = sessions.find((item) => item.id === sessionId);
+                onDropSession={(
+                  sessionId,
+                  sourceProjectKey,
+                  slotIndex,
+                  placement,
+                ) => {
+                  const session = sessions.find(
+                    (item) => item.id === sessionId,
+                  );
                   if (!session) return false;
                   // Resolve the real session's project; a native payload cannot
                   // choose which saved layout gets edited.
                   const projectKey = chatProjectKey(session.workspacePath);
-                  if (chatProjectKey(sourceProjectKey) !== projectKey) return false;
-                  const switchingProject = projectKey !== displayedChatLayout.projectKey;
-                  const existingPane = chatGridRef.current.layouts[projectKey]?.slots.find(
-                    (pane) => pane?.kind === "session" && pane.sessionId === session.id,
+                  if (chatProjectKey(sourceProjectKey) !== projectKey)
+                    return false;
+                  const switchingProject =
+                    projectKey !== displayedChatLayout.projectKey;
+                  const existingPane = chatGridRef.current.layouts[
+                    projectKey
+                  ]?.slots.find(
+                    (pane) =>
+                      pane?.kind === "session" && pane.sessionId === session.id,
                   );
                   const action = {
                     type: "select-pane" as const,
@@ -16562,7 +17051,9 @@ export function App() {
                     // The old project's slot/arrangement has no meaning in the
                     // destination. Focus its existing pane or append safely.
                     slotIndex: switchingProject ? undefined : slotIndex,
-                    arrangement: switchingProject ? undefined : placement?.arrangement,
+                    arrangement: switchingProject
+                      ? undefined
+                      : placement?.arrangement,
                     insertPosition: switchingProject
                       ? undefined
                       : placement?.insertPosition,
@@ -16765,14 +17256,21 @@ export function App() {
 
           {activeWorkspaceLayout === "code" ? (
             <section className="gyro-workspace-primary" aria-label="Workspace">
-              <WorkspaceEditBar paths={workspaceRename.paths} canUndo={workspaceRename.canUndo}
-                busy={workspaceRename.busy} error={workspaceRename.error}
-                onUndo={workspaceRename.undo} onSaveAll={() => void workspaceRename.saveAll()}
-                onOpenFile={openEditorFile} />
+              <WorkspaceEditBar
+                paths={workspaceRename.paths}
+                canUndo={workspaceRename.canUndo}
+                busy={workspaceRename.busy}
+                error={workspaceRename.error}
+                onUndo={workspaceRename.undo}
+                onSaveAll={() => void workspaceRename.saveAll()}
+                onOpenFile={openEditorFile}
+              />
               <IdeSurface
                 editorNavigation={{
                   canBack: navigationHistory.index > 0,
-                  canForward: navigationHistory.index < navigationHistory.entries.length - 1,
+                  canForward:
+                    navigationHistory.index <
+                    navigationHistory.entries.length - 1,
                   onBack: () => void navigateEditorHistory(-1),
                   onForward: () => void navigateEditorHistory(1),
                 }}
@@ -16827,7 +17325,7 @@ export function App() {
                 onAddTerminalPane={addTerminalPane}
                 onBrowserBack={() => handleBrowserBack()}
                 onBrowserDeviceChange={(device) =>
-                  dispatchActiveBrowser({ type: "browser-device", device })
+                  handleBrowserDeviceChange(device)
                 }
                 onBrowserForward={() => handleBrowserForward()}
                 onBrowserNavigate={handleBrowserNavigate}
@@ -16982,7 +17480,9 @@ export function App() {
                         props.path ? languageOverrides[props.path] : undefined
                       }
                       fileError={selectedFileError}
-                      semanticReady={languageSessions.ready(props.path)?.serverId}
+                      semanticReady={
+                        languageSessions.ready(props.path)?.serverId
+                      }
                       onOpenLocation={openWorkspaceLocation}
                       onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
@@ -16998,12 +17498,12 @@ export function App() {
               never draws it: terminals, review and the browser live on the
               chat's own rail there. */}
           {activeWorkspaceLayout === "code" &&
-          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
-            // Closed, the panel costs no row: its toggle sits in the status bar.
-            workbench.isToolPanelOpen ? (
-              renderWorkspaceToolPanel(false)
-            ) : null
-          ) : null}
+          Boolean(activeSession?.workspacePath ?? workspacePath)
+            ? // Closed, the panel costs no row: its toggle sits in the status bar.
+              workbench.isToolPanelOpen
+              ? renderWorkspaceToolPanel(false)
+              : null
+            : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
@@ -17054,7 +17554,10 @@ export function App() {
                   dispatchWorkbench({ type: "close-tool-panel" });
                   return;
                 }
-                dispatchWorkbench({ type: "set-workspace-panel-height", height });
+                dispatchWorkbench({
+                  type: "set-workspace-panel-height",
+                  height,
+                });
                 dispatchWorkbench({ type: "open-tool-panel" });
               }}
               onCreateBranch={() =>
@@ -17083,24 +17586,47 @@ export function App() {
           interfaceSize={workbench.preferences.interfaceSize}
           motionSpeed={workbench.preferences.motionSpeed}
           reduceMotion={reduceMotion}
-          onInterfaceSizeChange={(interfaceSize) => dispatchWorkbench({ type: "set-interface-size", interfaceSize })}
-          onMotionSpeedChange={(motionSpeed) => dispatchWorkbench({ type: "set-motion-speed", motionSpeed })}
+          appearanceSaveStatus={appearanceSaveStatus}
+          onRetryAppearanceSave={() => {
+            retryAppearanceSave();
+            pendingWorkbenchPersistRef.current = persistableWorkbench;
+            flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
+          }}
+          onInterfaceSizeChange={(interfaceSize) =>
+            dispatchWorkbench({ type: "set-interface-size", interfaceSize })
+          }
+          onMotionSpeedChange={(motionSpeed) =>
+            dispatchWorkbench({ type: "set-motion-speed", motionSpeed })
+          }
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           desktopNotifications={workbench.preferences.desktopNotifications}
-          onDesktopNotificationsChange={(notifications) => dispatchWorkbench({ type: "set-desktop-notifications", notifications })}
+          onDesktopNotificationsChange={(notifications) =>
+            dispatchWorkbench({
+              type: "set-desktop-notifications",
+              notifications,
+            })
+          }
           onConfigChange={handleConfigChange}
           onEfficiencyRoute={async (phase, escalate) => {
-            if (!activeSessionId) throw new Error("Select a chat before applying a phase route.");
-            if (!isTauriRuntime()) throw new Error("Phase handoffs require the desktop app.");
-            await invoke("route_efficiency_phase", { sessionId: activeSessionId, phase, escalate });
+            if (!activeSessionId)
+              throw new Error("Select a chat before applying a phase route.");
+            if (!isTauriRuntime())
+              throw new Error("Phase handoffs require the desktop app.");
+            await invoke("route_efficiency_phase", {
+              sessionId: activeSessionId,
+              phase,
+              escalate,
+            });
             await refreshSessions();
             await refreshEvents(activeSessionId);
           }}
           onEfficiencyChange={async (value) => {
-            const next = isTauriRuntime() ? await invoke<typeof value>("set_efficiency_config", { value }) : value;
-            setConfig(current => ({ ...current, efficiency: next }));
+            const next = isTauriRuntime()
+              ? await invoke<typeof value>("set_efficiency_config", { value })
+              : value;
+            setConfig((current) => ({ ...current, efficiency: next }));
           }}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onUpdateAction={runUpdateAction}
@@ -17509,13 +18035,39 @@ export function App() {
         />
       ) : null}
       {workspaceRename.draft ? (
-        <WorkspaceRenameDialog name={workspaceRename.draft.name} files={workspaceRename.draft.plan?.files}
-          busy={workspaceRename.draft.busy} error={workspaceRename.draft.error}
-          onPreview={name => void workspaceRename.preview(name)} onApply={() => void workspaceRename.apply()} onCancel={workspaceRename.cancel}
-          renderDiff={file => <ManagedDiffEditor height="100%" original={file.before} modified={file.after}
-            language={resolveLanguage({ path: file.path }).syntax.type === "monaco" ? (resolveLanguage({ path: file.path }).syntax as { language: string }).language : "plaintext"}
-            theme={resolvedTheme === "light" ? "gyro-light" : "gyro-dark"}
-            options={{ readOnly: true, originalEditable: false, minimap: { enabled: false }, automaticLayout: true, renderSideBySide: false }} />} />
+        <WorkspaceRenameDialog
+          name={workspaceRename.draft.name}
+          files={workspaceRename.draft.plan?.files}
+          busy={workspaceRename.draft.busy}
+          error={workspaceRename.draft.error}
+          onPreview={(name) => void workspaceRename.preview(name)}
+          onApply={() => void workspaceRename.apply()}
+          onCancel={workspaceRename.cancel}
+          renderDiff={(file) => (
+            <ManagedDiffEditor
+              height="100%"
+              original={file.before}
+              modified={file.after}
+              language={
+                resolveLanguage({ path: file.path }).syntax.type === "monaco"
+                  ? (
+                      resolveLanguage({ path: file.path }).syntax as {
+                        language: string;
+                      }
+                    ).language
+                  : "plaintext"
+              }
+              theme={resolvedTheme === "light" ? "gyro-light" : "gyro-dark"}
+              options={{
+                readOnly: true,
+                originalEditable: false,
+                minimap: { enabled: false },
+                automaticLayout: true,
+                renderSideBySide: false,
+              }}
+            />
+          )}
+        />
       ) : null}
       {branchNameRequest ? (
         <BranchNameDialog
@@ -17617,32 +18169,34 @@ export function App() {
   );
   return (
     <ChatRetryContext.Provider value={chatAutoRetry}>
-    <ChatFileActionsContext.Provider value={chatFileActions}>
-    <TerminalAttachmentActionsContext.Provider
-      value={terminalAttachmentActions}
-    >
-      <ComposerContextCandidates.Provider
-        value={[
-          ...visibleWorkspaceFiles
-            .filter((file) => file.kind === "file")
-            .map((file) => ({
-              path: file.path,
-              label: file.relativePath ?? file.path,
-              workspacePath: file.workspacePath,
-              kind: "file" as const,
-            })),
-          ...workbench.ide.tabs.map((tab) => ({
-            path: tab.path,
-            label: tab.path,
-            workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
-            kind: "open-tab" as const,
-          })),
-        ]}
-      >
-        <AppearanceContext.Provider value={appearance}>{appChrome}</AppearanceContext.Provider>
-      </ComposerContextCandidates.Provider>
-    </TerminalAttachmentActionsContext.Provider>
-    </ChatFileActionsContext.Provider>
+      <ChatFileActionsContext.Provider value={chatFileActions}>
+        <TerminalAttachmentActionsContext.Provider
+          value={terminalAttachmentActions}
+        >
+          <ComposerContextCandidates.Provider
+            value={[
+              ...visibleWorkspaceFiles
+                .filter((file) => file.kind === "file")
+                .map((file) => ({
+                  path: file.path,
+                  label: file.relativePath ?? file.path,
+                  workspacePath: file.workspacePath,
+                  kind: "file" as const,
+                })),
+              ...workbench.ide.tabs.map((tab) => ({
+                path: tab.path,
+                label: tab.path,
+                workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
+                kind: "open-tab" as const,
+              })),
+            ]}
+          >
+            <AppearanceContext.Provider value={appearance}>
+              {appChrome}
+            </AppearanceContext.Provider>
+          </ComposerContextCandidates.Provider>
+        </TerminalAttachmentActionsContext.Provider>
+      </ChatFileActionsContext.Provider>
     </ChatRetryContext.Provider>
   );
 }
@@ -18224,18 +18778,23 @@ function persistChatDrafts(drafts: Record<string, string>) {
   safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
 }
 
-function flushPersistedWorkbenchState(ref: { current?: WorkbenchState }) {
+function flushPersistedWorkbenchState(
+  ref: { current?: WorkbenchState },
+  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
+) {
   const pending = ref.current;
   if (!pending) {
     return;
   }
   ref.current = undefined;
-  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
+  const saved = safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
+  onPersisted?.(pending.preferences, saved);
 }
 
 function schedulePersistedWorkbenchStateFlush(
   pendingRef: { current?: WorkbenchState },
   idleRef: { current?: number },
+  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
 ) {
   if (idleRef.current !== undefined) {
     return;
@@ -18251,7 +18810,7 @@ function schedulePersistedWorkbenchStateFlush(
     idleRef.current = idleWindow.requestIdleCallback(
       () => {
         idleRef.current = undefined;
-        flushPersistedWorkbenchState(pendingRef);
+        flushPersistedWorkbenchState(pendingRef, onPersisted);
       },
       { timeout: WORKBENCH_PERSIST_IDLE_TIMEOUT_MS },
     );
@@ -18259,7 +18818,7 @@ function schedulePersistedWorkbenchStateFlush(
   }
   idleRef.current = window.setTimeout(() => {
     idleRef.current = undefined;
-    flushPersistedWorkbenchState(pendingRef);
+    flushPersistedWorkbenchState(pendingRef, onPersisted);
   }, 0);
 }
 
@@ -19587,12 +20146,17 @@ function applyProviderChatStreamEvent(
   }
   // Heartbeats keep a quiet-but-alive run marked running and refresh the status
   // event's timestamp so the idle watchdog does not settle the turn early.
-  if (streamEvent.phase === "retry-wait" || streamEvent.phase === "retry-started") {
+  if (
+    streamEvent.phase === "retry-wait" ||
+    streamEvent.phase === "retry-started"
+  ) {
     const update = (items: SessionEvent[]) =>
       applyNativeProviderRetryStatus(items, streamEvent);
     optimisticEventsRef.current.set(
       streamEvent.sessionId,
-      update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+      limitOptimisticSessionEvents(
+        update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+      ),
     );
     setEvents(update);
     return;
@@ -19636,10 +20200,8 @@ function applyProviderChatStreamEvent(
     upsertStreamingAssistantEvent(items, streamEvent, turnId, textDelta);
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
-      updateEvents(
-        optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
-      ),
+    limitOptimisticSessionEvents(
+      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );
   setEvents((current) => {
@@ -19715,7 +20277,11 @@ function updateOptimisticProviderStatus(
         retryAt: undefined,
         retryAttempt: undefined,
         retryMaxAttempts: undefined,
-        recoveryKind: recoveryKind ?? (isActiveStatus || status === "done" ? undefined : payload?.recoveryKind),
+        recoveryKind:
+          recoveryKind ??
+          (isActiveStatus || status === "done"
+            ? undefined
+            : payload?.recoveryKind),
         completedAt: isActiveStatus ? undefined : now,
         durationMs:
           !isActiveStatus &&
@@ -19733,7 +20299,7 @@ function updateOptimisticProviderStatus(
   if (optimisticEvents) {
     optimisticEventsRef.current.set(
       sessionId,
-      limitSessionEventsForUi(updateEvents(optimisticEvents)),
+      limitOptimisticSessionEvents(updateEvents(optimisticEvents)),
     );
   }
   setEvents((current) => {

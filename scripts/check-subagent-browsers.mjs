@@ -135,6 +135,218 @@ assert.equal(
 );
 assert.equal(sensitive.events.length, 0);
 
+// Captured drags must work without a native active pointer, release exactly
+// once, and leave the page's pointer-capture methods unchanged.
+{
+  const observed = [];
+  class Capturable {
+    closest() {
+      return null;
+    }
+    focus() {}
+    setPointerCapture() {
+      throw new Error("No native active pointer");
+    }
+    releasePointerCapture() {
+      throw new Error("No native active pointer");
+    }
+    hasPointerCapture() {
+      return false;
+    }
+    dispatchEvent(event) {
+      observed.push(event);
+      if (event.type === "pointerdown") this.setPointerCapture(event.pointerId);
+      if (event.type === "pointermove" && event.buttons) {
+        assert.equal(this.hasPointerCapture(event.pointerId), true);
+      }
+      if (event.type === "pointerup")
+        this.releasePointerCapture(event.pointerId);
+      return true;
+    }
+  }
+  class InputEvent {
+    constructor(type, options) {
+      this.type = type;
+      Object.assign(this, options);
+    }
+  }
+  const original = Object.getOwnPropertyDescriptors(Capturable.prototype);
+  const origin = new Capturable();
+  const destination = new Capturable();
+  const privateWindow = {
+    Element: Capturable,
+    PointerEvent: InputEvent,
+    MouseEvent: InputEvent,
+    innerWidth: 1280,
+    innerHeight: 800,
+  };
+  const run = createPointer(
+    { pointerTarget: () => ({ ok: true }) },
+    privateWindow,
+    { elementFromPoint: (x) => (x > 100 ? destination : origin) },
+  );
+  assert.equal(
+    run({ action: "drag", x: 10, y: 20, toX: 200, toY: 30 }).ok,
+    true,
+  );
+  assert.equal(
+    observed.filter((event) => event.type === "pointerup").length,
+    1,
+  );
+  assert.equal(
+    observed.filter((event) => event.type === "gotpointercapture").length,
+    1,
+  );
+  assert.equal(
+    observed.filter((event) => event.type === "lostpointercapture").length,
+    1,
+  );
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptors(Capturable.prototype),
+    original,
+  );
+  const rejected = createPointer(
+    { pointerTarget: ({ x }) => ({ ok: true, sensitive: x > 80 && x < 120 }) },
+    privateWindow,
+    { elementFromPoint: () => origin },
+  );
+  const before = observed.length;
+  assert.equal(
+    rejected({ action: "drag", x: 10, y: 20, toX: 200, toY: 30 }).ok,
+    false,
+  );
+  assert.equal(
+    observed.length,
+    before,
+    "protected intermediate targets block before dispatch",
+  );
+}
+
+// HTML drop handlers receive the same page-local transfer created at dragstart.
+{
+  const observed = [];
+  class Transfer {
+    constructor() {
+      this.values = new Map();
+    }
+    setData(type, value) {
+      this.values.set(type, value);
+    }
+    getData(type) {
+      return this.values.get(type) ?? "";
+    }
+  }
+  class DragEvent {
+    constructor(type, options) {
+      this.type = type;
+      Object.assign(this, options);
+    }
+  }
+  const sourceElement = {
+    closest: (selector) =>
+      selector === '[draggable="true"]' ? sourceElement : null,
+    focus() {},
+    dispatchEvent(event) {
+      observed.push(event.type);
+      if (event.type === "dragstart")
+        event.dataTransfer.setData("text/plain", "assigned-item");
+      return true;
+    },
+  };
+  let received;
+  const destination = {
+    dispatchEvent(event) {
+      observed.push(event.type);
+      if (event.type === "drop")
+        received = event.dataTransfer.getData("text/plain");
+      return true;
+    },
+  };
+  const run = createPointer(
+    { pointerTarget: () => ({ ok: true }) },
+    {
+      innerWidth: 1280,
+      innerHeight: 800,
+      DragEvent,
+      DataTransfer: Transfer,
+      PointerEvent: DragEvent,
+      MouseEvent: DragEvent,
+    },
+    { elementFromPoint: (x) => (x > 100 ? destination : sourceElement) },
+  );
+  const result = run({ action: "drag", x: 10, y: 20, toX: 200, toY: 30 });
+  assert.equal(result.ok, true);
+  assert.equal(result.dragMode, "html-drag-events");
+  assert.equal(received, "assigned-item");
+  assert.equal(observed.filter((type) => type === "drop").length, 1);
+  assert.equal(observed.at(-1), "dragend");
+}
+
+// Native range controls need a value/input/change default in private pages;
+// secondary clicks must not alter the control.
+{
+  const events = [];
+  class RangeInput {
+    constructor() {
+      this.tagName = "INPUT";
+      this.type = "range";
+      this.min = "0";
+      this.max = "5";
+      this.step = "1";
+      this.current = "1";
+    }
+    get value() {
+      return this.current;
+    }
+    set value(value) {
+      this.current = value;
+    }
+    closest() {
+      return null;
+    }
+    focus() {}
+    getBoundingClientRect() {
+      return { left: 0, width: 100, height: 20 };
+    }
+    dispatchEvent(event) {
+      events.push(event.type);
+      return true;
+    }
+  }
+  class InputEvent {
+    constructor(type, options) {
+      this.type = type;
+      Object.assign(this, options);
+    }
+  }
+  const input = new RangeInput();
+  const run = createPointer(
+    { pointerTarget: () => ({ ok: true }) },
+    {
+      innerWidth: 1280,
+      innerHeight: 800,
+      HTMLInputElement: RangeInput,
+      Event: InputEvent,
+      PointerEvent: InputEvent,
+      MouseEvent: InputEvent,
+    },
+    { elementFromPoint: () => input },
+  );
+  assert.equal(
+    run({ action: "drag", x: 25, y: 10, toX: 90, toY: 10 }).ok,
+    true,
+  );
+  assert.equal(input.value, "5");
+  assert.equal(events.filter((type) => type === "change").length, 1);
+  events.length = 0;
+  assert.equal(run({ action: "secondary-click", x: 10, y: 10 }).ok, true);
+  assert.equal(input.value, "5");
+  assert.equal(
+    events.filter((type) => type === "input" || type === "change").length,
+    0,
+  );
+}
+
 // Native presentation wiring must keep all three frontend event paths private,
 // while the child still receives its normal capability-call process events.
 const browser = readFileSync(
@@ -230,7 +442,7 @@ assert.match(
 assert.equal(
   (
     browser.match(
-      /if !background_only \{\s*let _ = app_for_(load|title).emit\(/g,
+      /if !background_only \{\s*let _ = (?:app_for_title|app).emit\(/g,
     ) ?? []
   ).length,
   2,

@@ -187,13 +187,21 @@ impl ParentStopWatcher {
         Self::start_until(parent, child, Some(RESEARCH_MAX_RUNTIME)).unwrap()
     }
 
-    /// Also stops the child once `runtime` has passed.
+    /// Test convenience; real child turns share one absolute deadline.
+    #[cfg(test)]
     fn start_until(
         parent: &CancellationToken,
         child: &CancellationToken,
         runtime: Option<Duration>,
     ) -> anyhow::Result<Self> {
-        let deadline = runtime.map(|runtime| Instant::now() + runtime);
+        Self::start_until_deadline(parent, child, runtime.map(|runtime| Instant::now() + runtime))
+    }
+
+    fn start_until_deadline(
+        parent: &CancellationToken,
+        child: &CancellationToken,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<Self> {
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let parent = parent.clone();
@@ -245,6 +253,7 @@ pub(super) struct ChildRunControl {
     control: Arc<ProviderRunControl>,
     /// Held until teardown; each new task gets a fresh watcher and control.
     watcher: Option<ParentStopWatcher>,
+    deadline: Option<Instant>,
 }
 
 impl ChildRunControl {
@@ -269,7 +278,8 @@ impl ChildRunControl {
             .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?;
         let control = claim_child_run_control(&mut flags, session_id, parent_session_id)?;
         let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
-        let watcher = match ParentStopWatcher::start_until(&parent, &control.cancellation, runtime)
+        let deadline = runtime.map(|runtime| Instant::now() + runtime);
+        let watcher = match ParentStopWatcher::start_until_deadline(&parent, &control.cancellation, deadline)
         {
             Ok(watcher) => watcher,
             Err(error) => {
@@ -282,6 +292,7 @@ impl ChildRunControl {
             app: app.clone(),
             session_id: session_id.to_string(),
             watcher: Some(watcher),
+            deadline,
             control,
         })
     }
@@ -291,6 +302,10 @@ impl ChildRunControl {
     }
 
     pub(super) fn renew(&mut self, parent_session_id: &str) -> anyhow::Result<()> {
+        if let Err(error) = remaining_child_runtime(self.deadline, Instant::now()) {
+            self.control.cancellation.cancel();
+            return Err(error);
+        }
         let manager = self.app.state::<ProviderCancellationManager>();
         let mut flags = manager
             .flags
@@ -303,7 +318,7 @@ impl ChildRunControl {
             &self.control,
         )?;
         let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
-        let watcher = match ParentStopWatcher::start_until(&parent, &next.cancellation, None) {
+        let watcher = match ParentStopWatcher::start_until_deadline(&parent, &next.cancellation, self.deadline) {
             Ok(watcher) => watcher,
             Err(error) => {
                 flags.insert(self.session_id.clone(), Arc::clone(&self.control));
@@ -315,6 +330,13 @@ impl ChildRunControl {
         self.watcher = Some(watcher);
         Ok(())
     }
+}
+
+fn remaining_child_runtime(deadline: Option<Instant>, now: Instant) -> anyhow::Result<Option<Duration>> {
+    deadline.map(|deadline| {
+        deadline.checked_duration_since(now).filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| anyhow::anyhow!("the sub-agent reached its runtime limit"))
+    }).transpose()
 }
 
 impl Drop for ChildRunControl {
@@ -385,6 +407,17 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_continuations_keep_the_original_runtime_deadline() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(10);
+        assert_eq!(remaining_child_runtime(Some(deadline), now).unwrap(), Some(Duration::from_secs(10)));
+        assert_eq!(remaining_child_runtime(Some(deadline), now + Duration::from_secs(7)).unwrap(), Some(Duration::from_secs(3)));
+        assert!(remaining_child_runtime(Some(deadline), deadline).is_err());
+        assert!(remaining_child_runtime(Some(deadline), deadline + Duration::from_secs(1)).is_err());
+        assert_eq!(remaining_child_runtime(None, now + Duration::from_secs(1000)).unwrap(), None);
+    }
 
     #[test]
     fn reading_existing_research_does_not_admit_a_new_paid_run() {

@@ -52,7 +52,7 @@ assert.equal(
     ...agent,
     tokens: { totalTokens: 123456, measured: true, accounting: accounting() },
   }),
-  "123k tokens",
+  "123K tokens",
 );
 assert.equal(
   subagentTokensLabel({

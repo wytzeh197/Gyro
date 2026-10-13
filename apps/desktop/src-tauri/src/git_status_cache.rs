@@ -161,6 +161,15 @@ pub(super) fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceCont
     inspect_git_status(workspace_path, true)
 }
 
+/// Models need fresh paths and branch state, not history or line statistics
+/// for every changed file. Enumerate all untracked files without those passes.
+pub(super) fn git_status_for_model(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+    let deadline = Instant::now() + GIT_STATUS_PREPARATION_TIMEOUT;
+    let mut status = inspect_git_status_before_inner(workspace_path, false, true, deadline)?;
+    status.workspace_path = Some(workspace_path.to_string());
+    Ok(status)
+}
+
 pub(super) fn git_status_for_preparation(
     workspace_path: &str,
 ) -> anyhow::Result<SourceControlStatus> {
@@ -185,7 +194,7 @@ pub(super) fn inspect_git_status_before(
     detailed: bool,
     deadline: Instant,
 ) -> anyhow::Result<SourceControlStatus> {
-    let mut status = inspect_git_status_before_inner(workspace_path, detailed, deadline)?;
+    let mut status = inspect_git_status_before_inner(workspace_path, detailed, detailed, deadline)?;
     // Rebind cached/fallback snapshots to this request, including path aliases.
     status.workspace_path = Some(workspace_path.to_string());
     Ok(status)
@@ -194,6 +203,7 @@ pub(super) fn inspect_git_status_before(
 fn inspect_git_status_before_inner(
     workspace_path: &str,
     detailed: bool,
+    untracked_all: bool,
     deadline: Instant,
 ) -> anyhow::Result<SourceControlStatus> {
     let root = workspace_root(workspace_path)?;
@@ -219,7 +229,7 @@ fn inspect_git_status_before_inner(
         .arg("--porcelain=v2")
         .arg("-z")
         .arg("--branch")
-        .arg(if detailed {
+        .arg(if untracked_all {
             "--untracked-files=all"
         } else {
             "--untracked-files=normal"
@@ -754,6 +764,30 @@ mod tests {
             .iter()
             .find(|file| file.path == path)
             .unwrap_or_else(|| panic!("{path} missing from {:?}", status.files))
+    }
+
+    #[test]
+    fn model_status_enumerates_paths_without_decorating_or_replacing_ui_details() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        init_git_repo(root);
+        fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "base"]);
+        fs::write(root.join("tracked.txt"), "one\ntwo\n").unwrap();
+        fs::create_dir(root.join("new")).unwrap();
+        for index in 0..150 { fs::write(root.join(format!("new/file-{index}.txt")), "text\n").unwrap(); }
+        let detailed = git_status_impl(root.to_str().unwrap()).unwrap();
+        assert!(detailed.details_loaded);
+        let started = Instant::now();
+        let model = git_status_for_model(root.to_str().unwrap()).unwrap();
+        assert_eq!(model.files.len(), 151);
+        assert_eq!(file(&model, "new/file-149.txt").state, "untracked");
+        assert!(model.history.is_empty());
+        assert!(model.compared_to_main.is_none());
+        assert!(model.stats_partial && !model.details_loaded);
+        assert!(last_git_status(&root.canonicalize().unwrap()).unwrap().details_loaded);
+        eprintln!("model Git fixture: {} files, {} ms, no statistics/history passes", model.files.len(), started.elapsed().as_millis());
     }
 
     #[test]

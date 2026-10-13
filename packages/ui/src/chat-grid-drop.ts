@@ -3,25 +3,25 @@
 // The grid tiles panes by `ChatGridArrangement`, so the targets a drop can
 // choose have to match what is on screen:
 // - an empty grid opens the first chat full size;
-// - a lone chat splits Left / Right, which is the two-pane row every later
-//   drop joins;
-// - a row or stack of two or three chats has only its edges and seams left;
-//   each target is a bar on that boundary and preserves the arrangement;
+// - a lone chat splits Left / Right;
+// - rows and stacks offer broad insertion tiles, with corners offering a 2×2
+//   grid instead; moving a chat already in the layout keeps a cancellation tile;
 // - anything else that still has room offers the 2×2 quadrants;
 // - a full row or stack accepts rearrangement of its own chats, but no new chat.
 import type { ChatGridArrangement, ChatPaneRef } from "./types";
 import { CHAT_GRID_MAX_SLOTS } from "./workbench-state.ts";
 
 export type ChatGridDropPlacement = {
-  /** Keep an edited row or stack in the same arrangement. */
   arrangement?: ChatGridArrangement;
-  insertPosition: "before" | "after";
+  insertPosition?: "before" | "after";
   splitDirection?: "horizontal" | "vertical";
 };
 
 export type ChatGridDropZone = {
   id: string;
   label: string;
+  /** A broad reorder tile that leaves its source pane where it is. */
+  isSource?: boolean;
   placement?: ChatGridDropPlacement;
   position: string;
   slotIndex: number;
@@ -33,14 +33,20 @@ export type ChatGridDropLayout =
 
 type ChatGridDropBounds = Pick<DOMRect, "left" | "top" | "width" | "height">;
 type DropRectangle = Pick<DOMRect, "left" | "top" | "right" | "bottom">;
+type ChatGridDropPointer = {
+  bounds: ChatGridDropBounds;
+  x: number;
+  y: number;
+  sourceSlotIndex?: number;
+};
 
 // These are the layout dimensions in styles.css / chat-design.css. Before
 // React paints the overlay, its virtual targets need the same edges and gaps
-// as the rendered targets, including the inset at each end of a row.
+// as the rendered tiles.
 const DROP_OVERLAY_PADDING = 10;
 const DROP_OVERLAY_GAP = 8;
 const ROW_PANE_GAP = 1;
-const ROW_DROP_BAR_WIDTH = 8;
+const REORDER_CANCEL_HALF_WIDTH = 4;
 
 const CHAT_GRID_QUADRANT_LABELS = [
   "Top left",
@@ -69,6 +75,7 @@ export function chatGridDropZones(
   slots: Array<ChatPaneRef | null>,
   arrangement: ChatGridArrangement,
   allowFullRowReorder = false,
+  pointer?: ChatGridDropPointer,
 ): ChatGridDropZone[] {
   const occupied = slots
     .slice(0, CHAT_GRID_MAX_SLOTS)
@@ -100,23 +107,40 @@ export function chatGridDropZones(
   // At capacity every layout only accepts a chat already in it. Offering a
   // target to an incoming chat would promise placement the reducer rejects.
   if (occupied.length >= CHAT_GRID_MAX_SLOTS && !allowFullRowReorder) return [];
-  // A row or stack offers the boundaries that preserve its arrangement.
   if (arrangement === "columns" || arrangement === "rows") {
-    return chatGridLinearDropZones(occupied, arrangement);
+    if (pointer && pointerWithinBounds(pointer.bounds, pointer.x, pointer.y)) {
+      const x = (pointer.x - pointer.bounds.left) / pointer.bounds.width;
+      const y = (pointer.y - pointer.bounds.top) / pointer.bounds.height;
+      if ((x <= 0.35 || x >= 0.65) && (y <= 0.25 || y >= 0.75)) {
+        return chatGridQuadrantDropZones();
+      }
+    }
+    const zones = chatGridLinearDropZones(occupied, arrangement);
+    const source = occupied.indexOf(pointer?.sourceSlotIndex ?? -1);
+    if (allowFullRowReorder && source >= 0) {
+      // Before and after the source are the same no-op. One source tile and
+      // one tile per neighbour make the whole neighbouring pane reachable.
+      zones.splice(source + 1, 1);
+      zones[source] = { ...zones[source]!, label: "Keep here", isSource: true };
+    }
+    return zones;
   }
-  // Anything else: place into a 2×2 grid position (the quadrants fill in).
+  return chatGridQuadrantDropZones();
+}
+
+function chatGridQuadrantDropZones(): ChatGridDropZone[] {
   return CHAT_GRID_QUADRANT_LABELS.map((label, index) => ({
     id: `slot-${index}`,
     label,
+    placement: { arrangement: "grid" },
     position: `position-${index + 1}`,
     slotIndex: index,
   }));
 }
 
 /**
- * Linear layouts offer two edges and the seams between neighbours — one thin
- * bar per boundary. Each slot index names the pane the chat lands next to, and
- * the arrangement rides along so the row or stack survives the drop.
+ * Linear layouts offer broad tiles for the edges and seams between neighbours.
+ * Each slot names the pane the chat lands next to, preserving the arrangement.
  */
 function chatGridLinearDropZones(
   occupied: number[],
@@ -208,56 +232,31 @@ export function chatGridDropZoneBeforePaint(
   const layout = chatGridDropLayout(zones);
   const rectangles = new Map<string, DropRectangle>();
   const { left, top, width, height } = bounds;
-  const right = left + width;
-  const bottom = top + height;
-  if (layout === "row" || layout === "stack") {
-    const count = zones.length - 1;
-    if (count < 2 || count > CHAT_GRID_MAX_SLOTS) return undefined;
-    const horizontal = layout === "row";
-    const start = horizontal ? left : top;
-    const end = horizontal ? right : bottom;
-    const track = ((horizontal ? width : height) + ROW_PANE_GAP) / count;
-    zones.forEach((zone, index) => {
-      const barStart =
-        index === 0
-          ? start
-          : index === count
-            ? end - ROW_DROP_BAR_WIDTH
-            : start + index * track - ROW_DROP_BAR_WIDTH / 2;
-      rectangles.set(zone.position, {
-        left: horizontal ? barStart : left,
-        right: horizontal ? barStart + ROW_DROP_BAR_WIDTH : right,
-        top: horizontal ? top : barStart,
-        bottom: horizontal ? bottom : barStart + ROW_DROP_BAR_WIDTH,
-      });
+  const columns =
+    layout === "row" ? zones.length : layout === "full" || layout === "stack" ? 1 : 2;
+  const rows =
+    layout === "stack" ? zones.length : layout === "positions" ? 2 : 1;
+  const tileWidth =
+    (width - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (columns - 1)) /
+    columns;
+  const tileHeight =
+    (height - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (rows - 1)) /
+    rows;
+  if (tileWidth <= 0 || tileHeight <= 0) return undefined;
+  zones.forEach((zone, index) => {
+    const tileLeft =
+      left + DROP_OVERLAY_PADDING +
+      (index % columns) * (tileWidth + DROP_OVERLAY_GAP);
+    const tileTop =
+      top + DROP_OVERLAY_PADDING +
+      Math.floor(index / columns) * (tileHeight + DROP_OVERLAY_GAP);
+    rectangles.set(zone.position, {
+      left: tileLeft,
+      right: tileLeft + tileWidth,
+      top: tileTop,
+      bottom: tileTop + tileHeight,
     });
-  } else {
-    const columns = layout === "full" ? 1 : 2;
-    const rows = layout === "positions" ? 2 : 1;
-    const tileWidth =
-      (width - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (columns - 1)) /
-      columns;
-    const tileHeight =
-      (height - DROP_OVERLAY_PADDING * 2 - DROP_OVERLAY_GAP * (rows - 1)) /
-      rows;
-    if (tileWidth <= 0 || tileHeight <= 0) return undefined;
-    zones.forEach((zone, index) => {
-      const tileLeft =
-        left +
-        DROP_OVERLAY_PADDING +
-        (index % columns) * (tileWidth + DROP_OVERLAY_GAP);
-      const tileTop =
-        top +
-        DROP_OVERLAY_PADDING +
-        Math.floor(index / columns) * (tileHeight + DROP_OVERLAY_GAP);
-      rectangles.set(zone.position, {
-        left: tileLeft,
-        right: tileLeft + tileWidth,
-        top: tileTop,
-        bottom: tileTop + tileHeight,
-      });
-    });
-  }
+  });
   return nearestZone(zones, rectangles, x, y, bounds, sourceSlotIndex);
 }
 
@@ -322,30 +321,18 @@ function nearestZone(
     sourceSlotIndex === undefined ||
     (layout !== "row" && layout !== "stack")
   ) return nearest;
-  const sourceIndex = zones.slice(0, -1).findIndex(
-    (zone) => zone.slotIndex === sourceSlotIndex,
+  const sourceIndex = zones.findIndex(
+    (zone) => zone.isSource && zone.slotIndex === sourceSlotIndex,
   );
   if (sourceIndex < 0) return nearest;
-  // Explicit insertion bars retain their exact placement, including a return
-  // to either boundary of the source. Pane interiors are reorder targets too:
-  // move before a pane on the left/above, or after one on the right/below.
-  // Nearest-bar geometry alone gives half of a neighbour to a source-adjacent
-  // boundary that the reducer correctly treats as a no-op.
-  if (
-    Array.from(rectangles.values()).some(
-      (rectangle) =>
-        x >= rectangle.left && x <= rectangle.right &&
-        y >= rectangle.top && y <= rectangle.bottom,
-    )
-  ) return nearest;
+  // Keep a release on either original source boundary a cancellation. Away
+  // from those seams, the broad tiles own their full visible areas.
   const horizontal = layout === "row";
   const offset = horizontal ? x - bounds.left : y - bounds.top;
   const length = horizontal ? bounds.width : bounds.height;
-  const count = zones.length - 1;
-  const targetIndex = Math.min(
-    count - 1,
-    Math.floor(offset / ((length + ROW_PANE_GAP) / count)),
-  );
-  if (targetIndex === sourceIndex) return nearest;
-  return zones[targetIndex < sourceIndex ? targetIndex : targetIndex + 1];
+  const track = (length + ROW_PANE_GAP) / zones.length;
+  if ([sourceIndex, sourceIndex + 1].some(
+    (boundary) => Math.abs(offset - boundary * track) <= REORDER_CANCEL_HALF_WIDTH,
+  )) return zones[sourceIndex];
+  return nearest;
 }

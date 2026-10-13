@@ -1,0 +1,198 @@
+[
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "0d538522-da70-40f2-89c0-f5da58ba63bf",
+    "turnId": "80e58472-c984-4b37-911b-d96b36ad5fc5",
+    "sessionId": "1a13bfe7-6f2b-4573-b0bb-d312edf1def0",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.019458,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 5.879541000000001,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 84.220333,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 119.59,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 125.53866599999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 131.544666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 131.546958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 5401.32425,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6325.49975,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 6325.502375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 7344.5235410000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 7364.701249999999,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 0,
+        "cachedInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "f7cdccd0-54d6-40c3-83e5-e5b0de07989d",
+    "turnId": "ab849dec-3bec-4e7c-b172-f0a8300139b1",
+    "sessionId": "7ed0a35b-e742-4170-b96e-d596f53a0c7f",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.020458999999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.047917,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 38.889709,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 48.860875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 50.831792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 58.095583999999995,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 58.099667000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1215.787667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 1507.548792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 1507.551584,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 2330.953042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 2353.2972499999996,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 0,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 0,
+        "cachedInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  }
+]

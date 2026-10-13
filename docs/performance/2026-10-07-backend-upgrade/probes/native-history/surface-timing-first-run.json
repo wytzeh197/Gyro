@@ -1,0 +1,41 @@
+{
+  "scope": "current build; frontend commit/frame opportunity, not before/after or hardware paint",
+  "history": "long fixture; bounded initial tail then older-page expansion",
+  "traces": [
+    {
+      "kind": "startup",
+      "from": null,
+      "surface": "chat",
+      "startedToCommitMs": 2348.0,
+      "startedToFrameOpportunityMs": 2434.0
+    },
+    {
+      "kind": "navigation",
+      "from": "chat",
+      "surface": "explorer",
+      "startedToCommitMs": 56.0,
+      "startedToFrameOpportunityMs": 82.0
+    },
+    {
+      "kind": "navigation",
+      "from": "explorer",
+      "surface": "chat",
+      "startedToCommitMs": 137.0,
+      "startedToFrameOpportunityMs": 243.0
+    },
+    {
+      "kind": "navigation",
+      "from": "chat",
+      "surface": "explorer",
+      "startedToCommitMs": 187.0,
+      "startedToFrameOpportunityMs": 223.0
+    },
+    {
+      "kind": "navigation",
+      "from": "explorer",
+      "surface": "chat",
+      "startedToCommitMs": 236.0,
+      "startedToFrameOpportunityMs": 507.0
+    }
+  ]
+}

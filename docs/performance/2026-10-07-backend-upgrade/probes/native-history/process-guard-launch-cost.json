@@ -1,0 +1,129 @@
+{
+  "recordedAt": "2026-10-08T16:46:10.654038+00:00",
+  "scope": "same standalone probe executable and shared core runner; /usr/bin/true; two alternating block orders; not native desktop or model latency",
+  "rows": [
+    {
+      "mode": "benchmark-plain",
+      "samplesUs": [
+        1988,
+        1132,
+        1073,
+        1014,
+        1004,
+        1024,
+        1015,
+        1148,
+        1120,
+        1017,
+        981,
+        957,
+        938,
+        984,
+        988,
+        1000,
+        987,
+        1007,
+        988,
+        1023
+      ],
+      "medianUs": 1010.5,
+      "meanUs": 1069.4
+    },
+    {
+      "mode": "benchmark-guarded",
+      "samplesUs": [
+        15686,
+        30777,
+        34478,
+        30152,
+        35799,
+        19108,
+        26691,
+        20389,
+        25491,
+        29010,
+        20622,
+        16453,
+        33699,
+        34996,
+        39619,
+        27359,
+        39666,
+        38552,
+        37916,
+        40968
+      ],
+      "medianUs": 30464.5,
+      "meanUs": 29871.55
+    },
+    {
+      "mode": "benchmark-guarded",
+      "samplesUs": [
+        28627,
+        34711,
+        40871,
+        40951,
+        30531,
+        20672,
+        39740,
+        41503,
+        35019,
+        24588,
+        39914,
+        44705,
+        41989,
+        18539,
+        15671,
+        32117,
+        20800,
+        25879,
+        32460,
+        28105
+      ],
+      "medianUs": 32288.5,
+      "meanUs": 31869.6
+    },
+    {
+      "mode": "benchmark-plain",
+      "samplesUs": [
+        1160,
+        1056,
+        1002,
+        1035,
+        991,
+        991,
+        989,
+        971,
+        1011,
+        974,
+        978,
+        1002,
+        1084,
+        1096,
+        1326,
+        1182,
+        1031,
+        985,
+        1013,
+        976
+      ],
+      "medianUs": 1006.5,
+      "meanUs": 1042.65
+    }
+  ],
+  "summary": {
+    "benchmark-plain": {
+      "count": 40,
+      "medianMs": 1.009,
+      "meanMs": 1.056025,
+      "maxMs": 1.988
+    },
+    "benchmark-guarded": {
+      "count": 40,
+      "medianMs": 31.447,
+      "meanMs": 30.870575000000002,
+      "maxMs": 44.705
+    }
+  },
+  "medianExtraMs": 30.438
+}

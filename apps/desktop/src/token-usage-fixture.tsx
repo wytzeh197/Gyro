@@ -26,6 +26,12 @@ const cases: Record<string, { title: string; message: string; tokens: TurnTokens
   cached: { title: "Cache and reasoning", message: "Cache reads and writes are included in input. Reasoning is included in output.",
     tokens: { inputTokens: 1200, cachedInputTokens: 800, cacheWriteTokens: 100, outputTokens: 340, reasoningOutputTokens: 40, totalTokens: 1540, measured: true,
       accounting: accounting("complete", { known: { input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true } }) } },
+  large: { title: "Large turn fixture", message: "Synthetic long-turn fixture: repeated requests can accumulate millions of input tokens. This total includes its cached input.",
+    tokens: { inputTokens: 13_950_000, cachedInputTokens: 13_000_000, outputTokens: 30_000,
+      totalTokens: 13_980_000, measured: true, accounting: accounting("complete", {
+        known: { input: true, output: true, cacheRead: true, cacheWrite: false, reasoning: false } }) } },
+  inconsistent: { title: "Contradictory total", message: "The reported total disagrees with input plus output. Gyro retains the value with an uncertainty marker.",
+    tokens: { inputTokens: 100, outputTokens: 20, totalTokens: 999, measured: true, accounting: accounting("complete") } },
   screenshot: { title: "Screenshot receipt", message: "This turn used 1,837,177 tokens: 1,834,057 input plus 3,120 output. The total includes 1,786,368 cached input tokens.",
     tokens: { inputTokens: 1834057, cachedInputTokens: 1786368, outputTokens: 3120, totalTokens: 1837177, measured: true,
       accounting: accounting("complete", { known: { input: true, output: true, cacheRead: true, cacheWrite: false, reasoning: false } }) } },
@@ -65,12 +71,12 @@ function Fixture() {
       {corrected && <output aria-live="polite">Corrected total: 2,000</output>}
     </aside>
     <ChatSurface key={selected} events={events} config={config} draft={draft} onDraftChange={setDraft}
-      sessionUsage={{ calls: 1, measuredCalls: corrected || current.tokens.measured ? 1 : 0,
-        estimatedCalls: !corrected && selected === "estimated" ? 1 : 0,
+      sessionUsage={{ calls: 1, measuredCalls: corrected || (current.tokens.measured && selected !== "inconsistent") ? 1 : 0,
+        estimatedCalls: !corrected && ["estimated", "inconsistent"].includes(selected) ? 1 : 0,
         partialCalls: !corrected && ["partial", "failed"].includes(selected) ? 1 : 0,
         unavailableCalls: !corrected && selected === "unavailable" ? 1 : 0,
         inputTokens: corrected ? 1600 : current.tokens.inputTokens ?? 0,
-        cachedInputTokens: current.tokens.cachedInputTokens ?? 0,
+        cachedInputTokens: corrected ? 0 : current.tokens.cachedInputTokens ?? 0,
         outputTokens: corrected ? 400 : current.tokens.outputTokens ?? 0,
         totalTokens: corrected ? 2000 : current.tokens.totalTokens, byOrigin: [] }}
       shellReady onSend={() => {}} onBrowserNavigate={() => {}} />

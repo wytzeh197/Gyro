@@ -1,0 +1,421 @@
+{
+  "schema": "gyro.benchmark.summary.v1",
+  "generatedAt": "2026-10-07T22:17:04.054Z",
+  "fixture": "meridian-v1",
+  "build": "debug",
+  "frontendMeasured": false,
+  "expectedSlots": 6,
+  "recordedSlots": 6,
+  "excludedRateGuardRecords": 0,
+  "groups": [
+    {
+      "provider": "ollama",
+      "task": "readme",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "ollama",
+      "task": "readme",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "ollama",
+      "task": "code",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "ollama",
+      "task": "code",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "ollama",
+      "task": "follow-up",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 1,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 0,
+      "incorrect": 1,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 1,
+      "medianMs": 30585.18,
+      "p95Ms": 30585.18,
+      "slowestMs": 30585.18
+    },
+    {
+      "provider": "ollama",
+      "task": "follow-up",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    }
+  ],
+  "stageSummary": {
+    "ollama": {
+      "workspaceMs": {
+        "n": 1,
+        "medianMs": 35.96,
+        "p95Ms": 35.96,
+        "slowestMs": 35.96
+      },
+      "processSpawnMs": {
+        "n": 1,
+        "medianMs": 12.36,
+        "p95Ms": 12.36,
+        "slowestMs": 12.36
+      },
+      "protocolReadinessMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "firstActivityMs": {
+        "n": 1,
+        "medianMs": 28692.99,
+        "p95Ms": 28692.99,
+        "slowestMs": 28692.99
+      },
+      "firstTokenMs": {
+        "n": 1,
+        "medianMs": 28692.99,
+        "p95Ms": 28692.99,
+        "slowestMs": 28692.99
+      },
+      "providerPhaseMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "finalizationMs": {
+        "n": 1,
+        "medianMs": 20.79,
+        "p95Ms": 20.79,
+        "slowestMs": 20.79
+      },
+      "toolBusyMs": {
+        "n": 1,
+        "medianMs": 0,
+        "p95Ms": 0,
+        "slowestMs": 0
+      },
+      "tools": {
+        "median": 0,
+        "max": 0,
+        "open": 0
+      }
+    }
+  },
+  "records": [
+    {
+      "correct": false,
+      "effort": "",
+      "failureClass": "timeout-or-cancelled",
+      "model": "qwen3:0.6b",
+      "outcome": "failed",
+      "provider": "ollama",
+      "resumedRequested": false,
+      "sessionId": "87c8fbfd-8ebf-4e01-850e-dc07bee88a02",
+      "task": "readme",
+      "trial": 1,
+      "wallMs": 60274.132958,
+      "turnId": "4e640d88-49db-4c3d-972e-e49884dcde4c",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 68.387167,
+        "processSpawnMs": null,
+        "protocolReadinessMs": null,
+        "requestCount": 1,
+        "observedUsage": {
+          "inputTokens": 11832,
+          "cachedInputTokens": 0,
+          "outputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 11832,
+          "measured": false
+        },
+        "unmeasuredContent": false,
+        "toolDurationsMs": [],
+        "brokerToolDurationsMs": [],
+        "providerPhaseMs": null,
+        "finalizationMs": 37.64941700000054,
+        "toolCount": 0,
+        "brokerToolCount": 0,
+        "toolBusyMs": 0,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol"
+      }
+    },
+    {
+      "effort": "",
+      "failureClass": "timeout-or-cancelled",
+      "model": "qwen3:0.6b",
+      "outcome": "setup-failed",
+      "provider": "ollama",
+      "resumedRequested": true,
+      "task": "readme",
+      "trial": 1
+    },
+    {
+      "correct": false,
+      "effort": "",
+      "failureClass": "timeout-or-cancelled",
+      "model": "qwen3:0.6b",
+      "outcome": "failed",
+      "provider": "ollama",
+      "resumedRequested": false,
+      "sessionId": "9dbf3b07-2414-4f29-bde4-f8f70fe0f007",
+      "task": "code",
+      "trial": 1,
+      "wallMs": 60342.028458,
+      "turnId": "d29d7845-862d-41e1-83c7-bdceb0bd1202",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 36.674917,
+        "processSpawnMs": 11.561000000001513,
+        "protocolReadinessMs": null,
+        "firstActivityMs": 59105.682375000004,
+        "firstTokenMs": 59103.990291,
+        "requestCount": 2,
+        "observedUsage": {
+          "inputTokens": 26496,
+          "cachedInputTokens": 0,
+          "outputTokens": 628,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 27124,
+          "measured": false
+        },
+        "unmeasuredContent": false,
+        "toolDurationsMs": [
+          10.434125000003405
+        ],
+        "brokerToolDurationsMs": [
+          10.434125000003405
+        ],
+        "providerPhaseMs": null,
+        "finalizationMs": 20.695125000005646,
+        "toolCount": 1,
+        "brokerToolCount": 1,
+        "toolBusyMs": 10.434125000003405,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "effort": "",
+      "failureClass": "timeout-or-cancelled",
+      "model": "qwen3:0.6b",
+      "outcome": "setup-failed",
+      "provider": "ollama",
+      "resumedRequested": true,
+      "task": "code",
+      "trial": 1
+    },
+    {
+      "correct": false,
+      "effort": "",
+      "model": "qwen3:0.6b",
+      "outcome": "completed",
+      "provider": "ollama",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "a7b5fd25-ef93-49f4-8110-d87ede3ae27a",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "eb939aa9-5b27-42f6-ac22-ef1afba24c33",
+      "wallMs": 30585.181375,
+      "correctAsInitiallyRecorded": false,
+      "correctnessCheck": "exact-append-rechecked",
+      "nativeStatus": "done",
+      "nativeRecoveryKind": null,
+      "durableResponsePresent": true,
+      "resumeMetadataSource": "provider-response",
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "correctnessFailure": "verification-failed",
+      "timing": {
+        "workspaceMs": 35.960708000000004,
+        "processSpawnMs": 12.364207999999053,
+        "protocolReadinessMs": null,
+        "firstActivityMs": 28692.993417,
+        "firstTokenMs": 28692.986125,
+        "requestCount": 2,
+        "observedUsage": {
+          "inputTokens": 18073,
+          "cachedInputTokens": 0,
+          "outputTokens": 546,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 18619,
+          "measured": true
+        },
+        "unmeasuredContent": false,
+        "toolDurationsMs": [],
+        "brokerToolDurationsMs": [],
+        "providerPhaseMs": null,
+        "finalizationMs": 20.79191599999831,
+        "toolCount": 0,
+        "brokerToolCount": 0,
+        "toolBusyMs": 0,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "",
+      "failureClass": "timeout-or-cancelled",
+      "model": "qwen3:0.6b",
+      "outcome": "failed",
+      "provider": "ollama",
+      "resumedRequested": true,
+      "sessionId": "19ac7cb2-9986-44a2-aafe-3791622fad9e",
+      "task": "follow-up",
+      "trial": 1,
+      "wallMs": 60270.258624999995,
+      "correctAsInitiallyRecorded": false,
+      "correctnessCheck": "exact-append-rechecked",
+      "turnId": "3f8d0536-4297-4dca-adc4-181a7fbb5471",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 31.179916,
+        "processSpawnMs": null,
+        "protocolReadinessMs": null,
+        "requestCount": 7,
+        "observedUsage": {
+          "inputTokens": 67897,
+          "cachedInputTokens": 0,
+          "outputTokens": 1442,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 69339,
+          "measured": false
+        },
+        "unmeasuredContent": false,
+        "toolDurationsMs": [],
+        "brokerToolDurationsMs": [],
+        "providerPhaseMs": null,
+        "finalizationMs": 16.621957999996084,
+        "toolCount": 0,
+        "brokerToolCount": 0,
+        "toolBusyMs": 0,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol"
+      }
+    }
+  ]
+}

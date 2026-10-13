@@ -79,6 +79,7 @@ for (const framed of [false, true]) {
       if (name === "react-dom/client")
         return { createRoot: () => ({ render: (node) => renders.push(node) }) };
       if (name === "./surface-boundary") return { resolveBootSurface };
+      if (name === "@tauri-apps/api/core") return { isTauri: () => false };
       // Both are small boot-only components, with no workbench subscriptions.
       if (
         name === "./early-shell" ||

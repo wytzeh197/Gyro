@@ -71,8 +71,7 @@
   display: flex;
   gap: calc(12px * var(--gyro-ui-scale, 1));
   min-width: 0;
-  padding: var(--gyro-space-card)
-    calc(16px * var(--gyro-ui-scale, 1));
+  padding: var(--gyro-space-card) calc(16px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-import-source + .gyro-import-source,
@@ -413,7 +412,9 @@
 .gyro-chat-surface.is-empty > .gyro-project-import-callout {
   left: 50%;
   margin: 0;
-  max-width: min(calc(580px * var(--gyro-ui-scale, 1)), calc(100% - 48px));
+  /* An explicit width avoids shrink-to-fit measuring only the half of the
+     canvas after left: 50%, which squeezes the copy into a vertical strip. */
+  width: min(calc(580px * var(--gyro-ui-scale, 1)), calc(100% - 48px));
   position: absolute;
   top: clamp(48px, 8vh, 88px);
   transform: translateX(-50%);
@@ -470,6 +471,7 @@
   color: var(--gyro-text);
   cursor: pointer;
   display: flex;
+  flex: 1 1 auto;
   gap: calc(14px * var(--gyro-ui-scale, 1));
   min-width: 0;
   padding: 10px;
@@ -524,6 +526,7 @@
 }
 .gyro-import-callout-copy {
   display: grid;
+  flex: 1 1 auto;
   gap: 4px;
   min-width: 0;
 }
@@ -555,6 +558,37 @@
   background: var(--gyro-control-hover);
   color: var(--gyro-text);
 }
+
+/* Match the resizable IDE pane rather than the desktop window width. */
+@container workspace-chat (max-width: 620px) {
+  .gyro-sidebar-ai-chat
+    .gyro-chat-surface.is-empty
+    > .gyro-project-import-callout {
+    width: calc(100% - 24px);
+  }
+
+  .gyro-sidebar-ai-chat .gyro-import-callout-open {
+    gap: 10px;
+    padding: 8px;
+  }
+
+  .gyro-sidebar-ai-chat .gyro-import-callout-marks {
+    gap: 6px;
+  }
+
+  .gyro-sidebar-ai-chat
+    .gyro-import-callout-providers
+    > .gyro-import-provider-mark,
+  .gyro-sidebar-ai-chat .gyro-import-callout-gyro {
+    height: 28px;
+    width: 28px;
+  }
+
+  .gyro-sidebar-ai-chat .gyro-import-callout-chevron {
+    display: none;
+  }
+}
+
 .gyro-import-recovery {
   align-items: center;
   background: var(--gyro-surface-soft);

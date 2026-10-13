@@ -185,7 +185,10 @@ impl UsageTokens {
         let output = output_tokens.unwrap_or(reasoning_output_tokens.unwrap_or_default());
         let sum = input.checked_add(output);
         let inconsistent = sum.is_none()
-            || total_tokens.is_some_and(|total| total < sum.unwrap_or(u64::MAX))
+            || total_tokens.is_some_and(|total| {
+                total < sum.unwrap_or(u64::MAX)
+                    || (input_tokens.is_some() && output_tokens.is_some() && Some(total) != sum)
+            })
             || input_tokens.zip(cached_input_tokens).is_some_and(|(all, subset)| subset > all)
             || output_tokens.zip(reasoning_output_tokens).is_some_and(|(all, subset)| subset > all);
         let complete = !inconsistent && (total_tokens.is_some()
@@ -1076,14 +1079,19 @@ fn totals_from_rows(
             output_tokens = tokens.output_tokens.min(i64::MAX as u64) as i64;
             total_tokens = tokens.total_tokens.min(i64::MAX as u64) as i64;
             let accounting = tokens.effective_accounting();
-            if matches!(accounting.scope, UsageScope::Context | UsageScope::Session) {
+            let unknown_consumption = matches!(accounting.scope, UsageScope::Context | UsageScope::Session)
+                || (accounting.coverage == UsageCoverage::Unavailable && accounting.source != UsageSource::Legacy);
+            if unknown_consumption {
                 input_tokens = 0;
                 cached_input_tokens = 0;
                 output_tokens = 0;
                 total_tokens = 0;
             }
-            coverage = if matches!(accounting.scope, UsageScope::Context | UsageScope::Session) {
+            coverage = if unknown_consumption {
                 UsageCoverage::Unavailable
+            } else if accounting.source == UsageSource::Legacy && accounting.coverage == UsageCoverage::Unavailable {
+                // Historical numerical budgets stay conservative, with uncertainty explicit.
+                UsageCoverage::Estimated
             } else { accounting.coverage };
         } else {
             // Retain old numerical budgets conservatively; their accuracy is unverified.
@@ -1405,6 +1413,8 @@ mod tests {
 
         let trusted_total = UsageTokens::measured(Some(10), None, Some(10), None, Some(9_000));
         assert_eq!(trusted_total.total_tokens, 9_000);
+        assert!(!trusted_total.measured, "an inflated total contradicts known inclusive input and output");
+        assert_eq!(trusted_total.effective_accounting().reason, Some(UsageReason::InconsistentCounts));
     }
 
     #[test]

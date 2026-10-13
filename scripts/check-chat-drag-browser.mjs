@@ -278,6 +278,60 @@ try {
     "boundary after source preserves maximization",
   );
 
+  // One-to-two always stays a left/right split, even at every corner.
+  for (const [x,y] of [[.1,.1],[.9,.1],[.1,.9],[.9,.9]]) {
+    await setLayout(["alpha"]);
+    await evaluate(`__dragTest.start('beta');__dragTest.event('dragover',${x},${y},true)`);
+    await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='columns'"),"single-chat split preview");
+    assert.equal(await evaluate("document.querySelectorAll('.gyro-chat-grid-drop-zone').length"),2);
+    await evaluate(`__dragTest.event('drop',${x},${y},true);__dragTest.end()`);
+    await assertOrder(x<.5 ? ["beta","alpha"]:["alpha","beta"]);
+    await noFeedback();
+  }
+
+  // Two-to-three offers wide insertion tiles, then changes to full quadrants
+  // as the same gesture enters a corner, and back when it returns to the row.
+  await setLayout(["alpha","beta"]);
+  await evaluate("__dragTest.start('gamma');__dragTest.event('dragover',.5,.5,true)");
+  await until(()=>evaluate("document.querySelector('[data-position=row-seam-1]')?.classList.contains('is-drop-target')"),"broad row preview");
+  const rowTiles=await evaluate("Array.from(document.querySelectorAll('.gyro-chat-grid-drop-zone')).map(z=>({width:z.getBoundingClientRect().width,height:z.getBoundingClientRect().height}))");
+  assert.equal(rowTiles.length,3);
+  assert.ok(rowTiles.every(r=>r.width>250 && r.height>500),"insertion targets cover broad chat sections");
+  await screenshot("wide-row-drop-targets.png");
+  await evaluate("__dragTest.event('dragover',.85,.85,true)");
+  await until(()=>evaluate("document.querySelector('[data-position=position-4]')?.classList.contains('is-drop-target')"),"bottom-right quadrant preview");
+  assert.equal(await evaluate("document.querySelector('.gyro-chat-grid-drop-overlay').dataset.layout"),"positions");
+  await screenshot("corner-grid-drop-targets.png");
+  await evaluate("__dragTest.event('dragover',.5,.5,true)");
+  await until(()=>evaluate("document.querySelector('[data-position=row-seam-1]')?.classList.contains('is-drop-target')"),"return to row preview");
+  // Release into a different layout before React has painted the new overlay.
+  await evaluate("__dragTest.event('drop',.85,.85,true);__dragTest.end()");
+  await assertOrder(["alpha","beta","gamma"]);
+  const cornerState=(await state()).grid.layouts["/fixture/Gyro"];
+  assert.equal(cornerState.arrangement,"grid");
+  assert.equal(cornerState.slots[3].sessionId,"gamma");
+  assert.equal(cornerState.slots[2],null);
+  assert.equal((await state()).drafts.alpha,"retain this draft");
+  await noFeedback();
+  await screenshot("corner-three-chat-layout.png");
+  await quickDrop("delta",.15,.85,false,true);
+  await assertOrder(["alpha","beta","delta","gamma"]);
+  assert.equal((await state()).grid.layouts["/fixture/Gyro"].arrangement,"grid");
+
+  // A pane can choose grid placement without changing its existing quadrant.
+  await setLayout(["alpha","beta","gamma"]);
+  await quickDrop("beta",.85,.15,true,true);
+  await assertOrder(["alpha","beta","gamma"]);
+  assert.equal((await state()).grid.layouts["/fixture/Gyro"].arrangement,"grid");
+
+  // The same corner operation fits a narrower window.
+  await call("Emulation.setDeviceMetricsOverride",{width:860,height:620,deviceScaleFactor:1,mobile:false});
+  await setLayout(["alpha","beta"]);
+  await quickDrop("gamma",.85,.85,false,true);
+  assert.equal((await state()).grid.layouts["/fixture/Gyro"].slots[3].sessionId,"gamma");
+  await noFeedback();
+  await call("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+
   await setLayout(["alpha", "beta"], "rows");
   await evaluate(
     "__dragTest.start('gamma');__dragTest.event('dragover',.5,.5,true)",
@@ -307,7 +361,7 @@ try {
     true,
   );
   assert.ok(
-    stackGeometry.every((zone) => zone.height === 8 && zone.width > 500),
+    stackGeometry.every((zone) => zone.height > 150 && zone.width > 500),
   );
   assert.equal(
     stackGeometry.find((zone) => zone.active)?.position,
@@ -320,6 +374,17 @@ try {
     (await state()).grid.layouts["/fixture/Gyro"].arrangement,
     "rows",
   );
+
+  // Resizing under a stationary pointer can change row intent into a corner.
+  await setLayout(["alpha", "beta"]);
+  await evaluate("__dragTest.start('gamma');__dragTest.event('dragover',.6,.85,true)");
+  await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent before resize");
+  await evaluate("document.querySelector('.gyro-chat-grid').style.width='70%'");
+  await until(()=>evaluate("document.querySelector('[data-position=position-4]')?.classList.contains('is-drop-target')"),"corner intent after resize");
+  await evaluate("document.querySelector('.gyro-chat-grid').style.width=''");
+  await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent after restoring size");
+  await evaluate("__dragTest.end()");
+  await noFeedback();
 
   // The preview under a stationary pointer survives layout changes/resizes.
   await setLayout(["alpha", "beta"]);
@@ -516,6 +581,23 @@ try {
     evaluate(
       `(()=>{const r=document.querySelector('.gyro-chat-grid').getBoundingClientRect();return {x:r.left+r.width*${x},y:r.top+r.height*${y}}})()`,
     );
+  // Real mouse input uses the same wide sections and adaptive grid intent.
+  await setLayout(["alpha","beta"]);
+  await mouseStart(row("Gamma"));
+  await mouseMove(await gridPoint(.5,.5));
+  await until(()=>evaluate("document.querySelector('[data-position=row-seam-1]')?.classList.contains('is-drop-target')"),"mouse enters a wide insertion tile");
+  await evaluate("document.documentElement.dataset.theme='light'");
+  await screenshot("wide-row-light.png");
+  await mouseMove(await gridPoint(.85,.85));
+  await until(()=>evaluate("document.querySelector('[data-position=position-4]')?.classList.contains('is-drop-target')"),"mouse enters bottom-right quadrant");
+  await screenshot("corner-grid-light.png");
+  await mouseRelease(await gridPoint(.85,.85));
+  await assertOrder(["alpha","beta","gamma"]);
+  assert.equal((await state()).grid.layouts["/fixture/Gyro"].slots[3].sessionId,"gamma");
+  assert.equal((await state()).drafts.alpha,"retain this draft");
+  await noFeedback();
+  await evaluate("document.documentElement.dataset.theme='dark'");
+
   await setLayout(["alpha"]);
   const plainClick = await pointOf(row("Alpha"));
   await mouseMove(plainClick, false);

@@ -97,8 +97,13 @@ pub(super) fn execute(
         }
         data
     };
-    let data = bound_read_result(data, max_bytes)?;
-    let summary = if editor_read {
+    let mut data = bound_read_result(data, max_bytes)?;
+    if !editor_read {
+        apply_known_content_hash(&mut data, arguments)?;
+    }
+    let summary = if data["unchanged"] == true {
+        format!("Verified {path} is unchanged; reused previously read evidence")
+    } else if editor_read {
         format!("Read live editor text for {path}")
     } else if ranged {
         format!("Read {path}:{}-{}", data["line"], data["endLine"])
@@ -111,6 +116,30 @@ pub(super) fn execute(
         label: path,
     };
     Ok((summary, data, Some(resource)))
+}
+
+/// Conditional reads still inspect disk. The caller explicitly asks to reuse
+/// a file it already read; a changed or unavailable hash always returns text.
+fn apply_known_content_hash(data: &mut Value, arguments: &Value) -> anyhow::Result<()> {
+    let Some(known) = arguments.get("knownContentHash") else {
+        return Ok(());
+    };
+    let known = known
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            anyhow::anyhow!("knownContentHash must be a SHA-256 hash from a previous read")
+        })?;
+    if data["contentHash"].as_str() == Some(known) {
+        if let Some(object) = data.as_object_mut() {
+            object.remove("content");
+            object.remove("nextLine");
+            object.remove("nextColumn");
+        }
+        data["unchanged"] = json!(true);
+        data["contentOmitted"] = json!(true);
+    }
+    Ok(())
 }
 
 fn read_disk_file_data(workspace: &str, path: &str) -> anyhow::Result<Value> {
@@ -306,6 +335,28 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_reads_use_a_fresh_full_file_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("file.rs"), "old source").unwrap();
+        let mut first = read_disk_file_data(temp.path().to_str().unwrap(), "file.rs").unwrap();
+        let known = first["contentHash"].clone();
+        apply_known_content_hash(&mut first, &json!({"knownContentHash":known})).unwrap();
+        assert!(first.get("content").is_none());
+        assert_eq!(first["unchanged"], true);
+        fs::write(temp.path().join("file.rs"), "changed source").unwrap();
+        let mut changed = read_disk_file_data(temp.path().to_str().unwrap(), "file.rs").unwrap();
+        apply_known_content_hash(&mut changed, &json!({"knownContentHash":known})).unwrap();
+        assert_eq!(changed["content"], "changed source");
+        assert!(changed.get("unchanged").is_none());
+        assert!(
+            apply_known_content_hash(&mut changed, &json!({"knownContentHash":"invalid"})).is_err()
+        );
+        let mut unknown = json!({"content":"partial source","contentHash":null});
+        apply_known_content_hash(&mut unknown, &json!({"knownContentHash":known})).unwrap();
+        assert_eq!(unknown["content"], "partial source");
+    }
 
     #[test]
     fn workspace_read_honors_range_beyond_preview() {

@@ -1,0 +1,17 @@
+{
+  "recordedAt": "2026-10-08T11:10:51.725681+00:00",
+  "build": "cargo build --offline -p gyro-desktop --features tauri/custom-protocol",
+  "frontendURL": "tauri://localhost",
+  "fixtureRoot": "/private/tmp/gyro-backend-ui-2026-10-08",
+  "persistentUIOptIn": "GYRO_TEST_PERSIST_UI=1",
+  "hashes": {
+    "target/debug/gyro-desktop": "45c405e721f05c6b88e0b709087a786548d08f3432f4f09c503d5118227699e0",
+    "apps/desktop/dist/index.html": "69bc3f08a5ffba6a92300c2848f524c7356100a8df1dcd18fa5d9d4fb04f8348",
+    "apps/desktop/src/App.tsx": "e173979e18fd17065c731c91a8d7ab914b05230b433c23aa51e543b0df2bbb21",
+    "apps/desktop/src-tauri/src/lib.rs": "361b8db508e867fee0cf26f69d327e1f3d9ab30dd7acdd069406cf94b6cfe3ef"
+  },
+  "bundleExecutableHash": "a7d381f8a38f244be2fcb90d27828c975ac62ddbd4229c352ccbfb6fa2e36155",
+  "bundleNote": "Copied the compiled executable into a temporary app with unique bundle identity, then ad-hoc signed; signing changes executable bytes.",
+  "updatedAt": "2026-10-08T11:21:55.296020+00:00",
+  "workspaceRestartTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store-root-check"
+}

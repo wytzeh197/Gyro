@@ -1,0 +1,14 @@
+{
+  "schema": "gyro.ollama-live-probe.v1",
+  "probe": "large-text-prompt-full-allocation",
+  "model": "qwen3:0.6b",
+  "requestedContextTokens": 40960,
+  "runtimePromptTokens": 18039,
+  "runtimeAllocationBytes": 5575235008,
+  "runtimeVramBytes": 4616869642,
+  "hostPhysicalMemoryBytes": 8589934592,
+  "deadlineSeconds": 90,
+  "completedWithinDeadline": false,
+  "source": "live probe output, /api/ps, hw.memsize, and content-free runtime log",
+  "cancellationRequestedAtDeadline": true
+}

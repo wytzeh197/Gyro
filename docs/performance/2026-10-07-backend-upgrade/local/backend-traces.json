@@ -1,0 +1,548 @@
+[
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "c4db2cb6-fd12-4e0e-877b-59a419ed96a4",
+    "turnId": "e617c283-2671-486a-bfc2-010019f72b15",
+    "sessionId": "b5b2b881-0a8d-433f-8ba4-1c7ba4f57c76",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.009082999999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.9003329999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 29.857208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 41.946125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 92.774708,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 29156.497958,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 29158.204291000002,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 35087.024625,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 35090.484500000006,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 3
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 44850.065,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 44850.089416,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 45525.172458,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 3
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 45672.925624999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 45701.487625,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 3,
+      "completed": 3,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 6150,
+        "cachedInputTokens": 0,
+        "outputTokens": 1332,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 7482,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "a8cffd28-2c82-4783-81ab-0a3978fa18dd",
+    "turnId": "d36bd0a8-1fd7-407b-9c28-c806fac40de9",
+    "sessionId": "3935f326-472f-47c0-8b89-abd0bea1ccac",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.023416,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.9610829999999995,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 23.529083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 34.016625000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 54.291958,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 6205.0166659999995,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 6208.8155,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 11442.137833,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 11594.131166000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 11613.682208,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 2,
+      "completed": 1,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 4100,
+        "cachedInputTokens": 0,
+        "outputTokens": 715,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 4815,
+        "measured": false
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "47cbc4b9-4163-4a98-a2d8-34697c612da6",
+    "turnId": "832a3534-1c5d-46d0-bdf1-692093ee0186",
+    "sessionId": "ef25df98-76ed-44fe-bc70-e888a633b0a5",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.043167000000000004,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.59475,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 19.973292,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 34.213125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 58.192292,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 5589.947999999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 5589.954917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 6501.893208,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 6575.714,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 6604.214833,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 1,
+      "completed": 1,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 2050,
+        "cachedInputTokens": 0,
+        "outputTokens": 361,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 2411,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "024f8ca5-92c5-4f51-a4ca-9dbadbd02366",
+    "turnId": "f724cb74-90a2-4ebf-96f7-3595ebbacd8b",
+    "sessionId": "509b41df-800f-45c1-a3bc-493695bf81e5",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.03375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.812625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 20.657667,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 33.145042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 52.980875,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 4592.25625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 4592.262625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 5419.792917,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 5569.354459,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 5595.798375,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 1,
+      "completed": 1,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 2050,
+        "cachedInputTokens": 0,
+        "outputTokens": 278,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 2328,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "d1618219-5b91-45d1-add6-8396d2732721",
+    "turnId": "695b745b-90db-4def-a1de-19ffc9607216",
+    "sessionId": "facffbbd-9ff9-4a91-8a1d-12f1df852368",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.018334,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.6822090000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 19.813541999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 33.568374999999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 58.124959,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 8013.405959,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 8091.924583999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 8112.653709,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 1,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 2050,
+        "cachedInputTokens": 0,
+        "outputTokens": 471,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 2521,
+        "measured": false
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "8fc6103e-4b92-42a9-b882-73ec379ee820",
+    "turnId": "0fe7b2e3-31fc-4a3e-8a1a-3d0856301da6",
+    "sessionId": "86b5dd3e-edb9-4f8b-92c9-6ff7c9b44e09",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.034041999999999996,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.261917,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 21.325,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 31.822625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 51.589459,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 3529.4542500000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3529.4604999999997,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 3625.299834,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 3810.776459,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 3846.112667,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 1,
+      "completed": 1,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 2050,
+        "cachedInputTokens": 0,
+        "outputTokens": 145,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 2195,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  }
+]

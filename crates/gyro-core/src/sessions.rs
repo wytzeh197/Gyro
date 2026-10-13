@@ -1669,6 +1669,58 @@ impl SessionStore {
         self.read_recent_events(session_id, MAX_SESSION_EVENTS_READ)
     }
 
+    /// Metadata-only display revision. Identity and modification time also
+    /// invalidate a same-size replacement; no event text is read or retained.
+    pub fn transcript_revision(&self, session_id: Uuid) -> Result<String> {
+        let session = self.get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let path = self.session_events_path(session.id)?;
+        if !path.exists() {
+            return Ok(format!("{session_id}:missing"));
+        }
+        let file = open_session_event_log_for_read(&path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)?;
+        let metadata = file.metadata()?;
+        let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_nanos()).unwrap_or(0);
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            format!("{}:{}", metadata.dev(), metadata.ino())
+        };
+        #[cfg(not(unix))]
+        let identity = metadata.created().ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_nanos()).unwrap_or(0).to_string();
+        Ok(format!("{session_id}:{identity}:{}:{modified}", metadata.len()))
+    }
+
+    /// Complete display history. Provider context continues to use bounded reads.
+    pub fn read_transcript_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(Vec::new());
+        }
+        let file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for transcript read", events_path.display()))?;
+        let mut reader = BufReader::new(file);
+        let mut events = Vec::new();
+        let mut line_index = 0;
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            if !line.trim().is_empty() {
+                if let Some(event) = parse_session_event_line_or_skip(&events_path, line_index, &line) {
+                    events.push(event);
+                }
+            }
+            line_index += 1;
+        }
+        Ok(events)
+    }
+
     pub fn read_recent_events(
         &self,
         session_id: Uuid,

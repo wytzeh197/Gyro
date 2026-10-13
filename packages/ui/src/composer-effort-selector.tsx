@@ -8,6 +8,38 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+let clientRectsIncludeZoom: boolean | undefined;
+
+/** Older WebKit reports unzoomed rectangles, while pointer clientX stays in viewport pixels. */
+function effortViewportRect(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  if (clientRectsIncludeZoom === undefined) {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "all:initial;position:fixed;left:0;top:0;width:20px;height:20px;zoom:2;visibility:hidden;pointer-events:none";
+    document.body.append(probe);
+    clientRectsIncludeZoom = probe.getBoundingClientRect().width > 30;
+    probe.remove();
+  }
+  let zoom = 1;
+  for (
+    let node: HTMLElement | null = element;
+    node;
+    node = node.parentElement
+  ) {
+    const factor = Number.parseFloat(getComputedStyle(node).zoom);
+    if (Number.isFinite(factor) && factor > 0) zoom *= factor;
+  }
+  const scale = clientRectsIncludeZoom ? 1 : zoom;
+  return {
+    left: rect.left * scale,
+    right: rect.right * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
+    zoom,
+  };
+}
+
 /** Continuous pointer feedback, with native stepped keys and one saved choice on release. */
 export function ComposerEffortSelector({
   id,
@@ -53,12 +85,12 @@ export function ComposerEffortSelector({
     if (!panel) return;
     const position = () => {
       panel.style.translate = "";
-      const rect = panel.getBoundingClientRect();
+      const rect = effortViewportRect(panel);
       const shift = Math.max(
         12 - rect.left,
         Math.min(0, window.innerWidth - 12 - rect.right),
       );
-      panel.style.translate = `${shift}px 0`;
+      panel.style.translate = `${shift / rect.zoom}px 0`;
     };
     position();
     const observer = new ResizeObserver(position);
@@ -77,7 +109,7 @@ export function ComposerEffortSelector({
   };
   const progressAtPointer = (event: ReactPointerEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
-    const rect = input.getBoundingClientRect();
+    const rect = effortViewportRect(input);
     const thumbSize = Math.min(rect.height, rect.width);
     const travel = rect.width - thumbSize;
     if (travel <= 0) return 0;
@@ -184,7 +216,7 @@ export function ComposerEffortSelector({
             event.preventDefault();
             const input = event.currentTarget;
             input.focus();
-            const rect = input.getBoundingClientRect();
+            const rect = effortViewportRect(input);
             const thumbSize = Math.min(rect.height, rect.width);
             const center =
               rect.left +

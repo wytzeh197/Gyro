@@ -229,14 +229,23 @@ function totals(overrides = {}) {
 assert.equal(formatTokenCount(0), "0");
 assert.equal(formatTokenCount(940), "940");
 assert.equal(formatTokenCount(1_200), "1.2K");
-assert.equal(formatTokenCount(12_400), "12K");
+assert.equal(formatTokenCount(12_400), "12.4K");
 assert.equal(formatTokenCount(1_240_000), "1.24M");
-assert.equal(formatTokenCount(12_400_000), "12M");
+assert.equal(formatTokenCount(12_400_000), "12.4M");
+assert.equal(formatTokenCount(13_980_000), "13.98M");
+assert.equal(formatTokenCount(NaN), "—");
+assert.equal(formatTokenCount(-1), "—");
+assert.equal(formatTokenCount(Number.MAX_SAFE_INTEGER + 1), "—");
 
 // A chat that has spent nothing says so rather than rendering a zero.
 const empty = summarizeSessionCost(undefined);
 assert.equal(empty.isEmpty, true);
 assert.equal(summarizeSessionCost(totals()).isEmpty, true);
+for (const invalid of [-1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+  const summary = summarizeSessionCost(totals({ calls: 1, measuredCalls: 1, totalTokens: invalid }));
+  assert.equal(summary.label, "Usage unavailable · 1 call");
+  assert.doesNotMatch(summary.title, /NaN|Infinity|0 tokens/);
+}
 
 // An ordinary chat needs no breakdown: the call count already says it.
 const plainChat = summarizeSessionCost(
@@ -281,7 +290,7 @@ assert.equal(
   council.breakdown,
   "council seats 4 · council synthesis 1 · chat 2",
 );
-assert.match(council.title, /1\.24M tokens across 7 provider calls/);
+assert.match(council.title, /1,240,000 tokens across 7 provider calls/);
 
 // Estimates are labelled, never blended into a confident number.
 const mixed = summarizeSessionCost(
@@ -355,8 +364,8 @@ const toolHeavy = summarizeSessionCost(
   }),
 );
 assert.equal(toolHeavy.label, "600K tokens · 9 calls");
-assert.equal(toolHeavy.cachedNote, "565K re-read");
-assert.match(toolHeavy.title, /context re-read on each call/);
+assert.equal(toolHeavy.cachedNote, "565K cached input");
+assert.match(toolHeavy.title, /565,389 cached input tokens, already part of the total/);
 
 // Below the threshold the split is noise, and an unmeasured provider reports no
 // cache reading at all, so neither claims one.
@@ -574,7 +583,7 @@ const windows = ledgerWindows({
 assert.equal(windows.length, 1);
 assert.equal(windows[0].id, "week");
 // The week scales the daily reference (2M × 7).
-assert.equal(windows[0].detail, "13M of 14M tokens left");
+assert.equal(windows[0].detail, "12.6M of 14M tokens left");
 assert.equal(windows[0].percentLabel, "10%");
 assert.equal(windows[0].hasBudget, false);
 assert.equal(windows[0].isEstimated, false);
@@ -604,7 +613,7 @@ assert.equal(budgeted[0].id, "five-hour");
 assert.equal(budgeted[0].hasBudget, true);
 // 1M daily budget × 5/24 ≈ 208K; 187.5K is ~90%.
 assert.equal(budgeted[0].percentLabel, "90%");
-assert.equal(budgeted[0].detail, "21K of 208K tokens left");
+assert.equal(budgeted[0].detail, "20.8K of 208K tokens left");
 assert.equal(budgeted[1].id, "week");
 assert.equal(budgeted[1].hasBudget, true);
 assert.equal(budgeted[1].detail, "5M of 7M tokens left");

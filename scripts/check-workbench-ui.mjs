@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { providerLoginProfile, providerLoginCommandText } from "../apps/desktop/src/provider-login-profile.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
@@ -791,9 +792,7 @@ expect(
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
     chatGridDropSource.includes("function chatGridLinearDropZones") &&
-    chatDesignSource.includes(
-      '.gyro-chat-grid-drop-zone[data-position="row-seam-1"]',
-    ) &&
+    chatDesignSource.includes("--gyro-chat-drop-zone-count") &&
     chatDesignSource.includes('[data-layout="row"]') &&
     chatGridDropSource.includes('label: "Open here"') &&
     chatGridDropSource.includes('label: "Left"') &&
@@ -802,9 +801,8 @@ expect(
     chatGridDropSource.includes('"Top right"') &&
     chatGridDropSource.includes('"Bottom left"') &&
     chatGridDropSource.includes('"Bottom right"') &&
-    surfaceSource.includes(
-      "chatGridDropZones(slots, arrangement, reorderingSession)",
-    ) &&
+    surfaceSource.includes("const dropZones = zonesForDrag(dragIdentity)") &&
+    surfaceSource.includes("point && bounds ? { ...point, bounds, sourceSlotIndex }") &&
     surfaceSource.includes(
       "const dropLayout = chatGridDropLayout(dropZones)",
     ) &&
@@ -1345,15 +1343,14 @@ expect(
     (rule) =>
       rule.includes("height: 48px") &&
       rule.includes("min-height: 48px") &&
-      rule.includes("padding-inline: max(") &&
-      rule.includes("var(--gyro-chat-content-width)"),
+      rule.includes("padding-inline: 12px"),
   ) &&
     cssRules(
       styleSource,
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
     !styleSource.includes("padding-right: 96px;"),
-  "Grid chat headers should share the 48px title row, align to the conversation column, and meet at one clean seam.",
+  "Grid chat headers should share the 48px title row, keep compact edge insets, and meet at one clean seam.",
 );
 
 const emittedComposerActions = new Set([
@@ -1763,13 +1760,14 @@ expect(
   streamRegressionSetCalls === 1,
   "Provider stream deltas should be applied in one state update per flushed batch.",
 );
-// Stream helpers leave windowing to the app store so load-earlier history is
-// not snapped back to 400 on every delta. Bound the list the same way the
-// session store does for a default open window.
 streamRegressionState = limitSessionEventsForUi(streamRegressionState);
 expect(
-  streamRegressionState.length === MAX_CHAT_EVENT_RENDER_COUNT,
-  "Provider stream delta batches should keep the rendered event list bounded.",
+  streamRegressionState.length === streamRegressionEvents.length + 1,
+  "Provider stream delta batches must retain the entire displayed history.",
+);
+expect(
+  limitSessionEventsForUi(streamRegressionState, MAX_CHAT_EVENT_RENDER_COUNT).length === MAX_CHAT_EVENT_RENDER_COUNT,
+  "Explicit transient buffers remain bounded.",
 );
 expect(
   streamRegressionState[0]?.kind === "session-created",
@@ -4194,7 +4192,7 @@ expect(
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
     appSource.includes(
-      "limitSessionEventsForUi(updateEvents(optimisticEvents))",
+      "limitOptimisticSessionEvents(updateEvents(optimisticEvents))",
     ) &&
     appSource.includes("items.findLastIndex(") &&
     appSource.includes("updateOptimisticProviderStatus") &&
@@ -4602,12 +4600,12 @@ expect(
     tauriSource.includes("async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
-    /spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
-      tauriSource,
-    ) &&
-    turnTimingRustSource.includes(
-      "run_provider_chat_blocking(app, request, origin)",
-    ) &&
+    (/spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(tauriSource) ||
+      (tauriSource.includes("goal_runner::run(worker_app, request, expected_run)") &&
+        /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
+          readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
+        ))) &&
+    /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(turnTimingRustSource) &&
     tauriSource.includes("async fn save_config") &&
     tauriSource.includes("config save worker failed") &&
     tauriSource.includes("async fn create_desktop_session") &&
@@ -4979,7 +4977,7 @@ expect(
     appSource.includes(
       "sessionEventsRequestRef.current[sessionId] === requestId",
     ) &&
-    appSource.includes("optimisticEvents && optimisticEvents.length > 0") &&
+    /optimisticEvents\?\.length|optimisticEvents && optimisticEvents.length > 0/.test(appSource) &&
     appSource.includes("workspaceSearchRequestRef") &&
     appSource.includes("workspaceTreeRequestRef") &&
     appSource.includes("ideSourceControlRootRef.current === root") &&
@@ -5355,7 +5353,7 @@ expect(
     styleSource.includes(
       "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
     ) &&
-    styleSource.includes("right: var(--gyro-environment-popover-gutter)") &&
+    styleSource.includes("width: calc(100% - var(--gyro-environment-popover-gutter))") &&
     styleSource.includes("width: auto;"),
   "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
 );
@@ -5640,10 +5638,10 @@ expect(
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
     surfaceSource.includes("Appearance") &&
-    surfaceSource.includes("Editor & Search") &&
-    surfaceSource.includes("Tools & Contributions") &&
-    surfaceSource.includes("Usage Limits") &&
-    surfaceSource.includes("Providers") &&
+    surfaceSource.includes('label: "Workspace"') &&
+    surfaceSource.includes('label: "Tools"') &&
+    surfaceSource.includes('label: "Usage & Limits"') &&
+    surfaceSource.includes('label: "Models & Accounts"') &&
     surfaceSource.includes("CLI Profiles") &&
     surfaceSource.includes("Permissions") &&
     surfaceSource.includes("Updates") &&
@@ -5837,15 +5835,15 @@ const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
   surfaceSource.includes('aria-label="Chat companion"') &&
     surfaceSource.includes(
-      'const isCompanionPanel = Boolean(activeCompanionTab) || railPanel === "tools"',
+      'const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools"',
     ) &&
     surfaceSource.includes(
-      'activePanel={railPanel === "review" ? "changes" : railPanel}',
+      'activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}',
     ) &&
-    surfaceSource.includes("chromeless={isCompanionPanel}") &&
-    surfaceSource.includes('railPanel === "files" ? (') &&
+    surfaceSource.includes("chromeless={hasCompanion}") &&
+    surfaceSource.includes('displayedRailPanel === "files" ? (') &&
     surfaceSource.includes("<CompanionFiles") &&
-    surfaceSource.includes('railPanel === "side-chat" ? (') &&
+    surfaceSource.includes('displayedRailPanel === "side-chat" ? (') &&
     surfaceSource.includes("<SideChatPanel") &&
     surfaceSource.includes("onOpenFile={onOpenCompanionFile}") &&
     surfaceSource.includes('className="gyro-chat-companion-tab-list"') &&
@@ -6492,7 +6490,7 @@ expect(
     subagentRustSource.includes("ParentStopWatcher::start_until(") &&
     subagentRustSource.includes("ProviderCancellationManager") &&
     subagentRustSource.includes("MAX_CONCURRENT_PROVIDER_RUNS") &&
-    delegatedAgentRustSource.includes("drop(control.take());"),
+    delegatedAgentRustSource.includes("drop(control);"),
   "A research sub-agent should claim its own provider run control, watch its parent chat's stop, and release the control when the child turn ends.",
 );
 // A sub-agent run belongs to the chat that started it. The child session
@@ -6565,7 +6563,9 @@ expect(
       "providerSignInLabel(providerStatus.recoveryKind)",
     ) &&
     /connectProvider\(providerId,\s*\{\s*forceLogin:\s*needsSignIn,\s*importedSessionId:\s*event\.sessionId,\s*\}\)/.test(appSource) &&
-    /sendDraft\(userMessage,\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(appSource) &&
+    /const retryContext:\s*ChatTurnContextSnapshot\s*=\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(appSource) &&
+    appSource.includes("retryDispatchRef.current") &&
+    /sendDraftRef\.current\(userMessage,\s*\{\s*\.\.\.retryContext,\s*retryDispatchGuard/.test(appSource) &&
     appSource.includes("sessionEventsById[event.sessionId] ?? eventsRef.current") &&
     appSource.includes("item.sessionId === event.sessionId &&") &&
     appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
@@ -7150,9 +7150,11 @@ expect(
     /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(
+    /\.gyro-composer-context-wheel\s*>\s*svg\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
-    ),
+    ) &&
+    surfaceSource.includes('r="7.5"') &&
+    surfaceSource.includes('pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
@@ -7778,8 +7780,8 @@ expect(
     styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
-    surfaceSource.includes('label="Main color"') &&
-    surfaceSource.includes('label="Secondary color"') &&
+    surfaceSource.includes('label="Primary accent"') &&
+    surfaceSource.includes('label="Secondary accent"') &&
     surfaceSource.includes(
       'detail="Supporting icons, badges, and quiet highlights."',
     ) &&
@@ -8376,7 +8378,9 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("contextUsage.remainingLabel") &&
+    surfaceSource.includes("contextUsage.usedLabel") &&
+    surfaceSource.includes("contextUsage.windowLabel") &&
+    surfaceSource.includes("contextUsage.percentLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
     // Hovering a model in the picker must not open the context card over it.
     !surfaceSource.includes("previewComposerContextModel") &&
@@ -8428,9 +8432,8 @@ expect(
     // the meter measures Grok's 131K against a default it never had.
     desktopRustSource.includes("fn provider_model_context_window") &&
     desktopRustSource.includes("fn provider_context_usage_with_window") &&
-    readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "COMPACT_MILLIONS_THRESHOLD",
-    ) &&
+    formatCompactTokenCount(999_500) === "1M" &&
+    formatCompactTokenCount(13_980_000) === "13.98M" &&
     providerCatalog.every((provider) =>
       provider.models.every((model) =>
         // CLI default aliases resolve the actual model at runtime. They must

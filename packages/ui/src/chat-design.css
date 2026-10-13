@@ -654,64 +654,14 @@
   }
 }
 
-/* Row drop bars. When two or three chats already share the width, the only
-   places left are the two edges and the seams between them, so each target is
-   a thin full-height bar on that boundary instead of a tile lying over a pane.
-   The overlay itself keeps no padding and no gap, so a bar lands on the pane
-   boundary it names, and the row stays visible underneath while choosing. */
+/* Broad insertion tiles use the same inset, gutters and blue hover as a
+   one-to-two split. Their count includes both row edges and interior seams. */
 :root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="row"] {
-  /* One pane column plus the grid's gap: where that column ends. */
-  --gyro-chat-grid-drop-track: calc(
-    (100% - (var(--gyro-grid-count, 1) - 1) * 1px) / var(--gyro-grid-count, 1) +
-      1px
+  grid-template-columns: repeat(
+    var(--gyro-chat-drop-zone-count, 3),
+    minmax(0, 1fr)
   );
-  background: none;
-  display: block;
-  padding: 0;
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone {
-  bottom: 0;
-  padding: 0;
-  position: absolute;
-  top: 0;
-  width: var(--gyro-chat-grid-drop-bar-width, 8px);
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone[data-position="row-start"] {
-  left: 0;
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone[data-position="row-seam-1"] {
-  left: var(--gyro-chat-grid-drop-track);
-  transform: translateX(-50%);
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone[data-position="row-seam-2"] {
-  left: calc(var(--gyro-chat-grid-drop-track) * 2);
-  transform: translateX(-50%);
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone[data-position="row-seam-3"] {
-  left: calc(var(--gyro-chat-grid-drop-track) * 3);
-  transform: translateX(-50%);
-}
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-zone[data-position="row-end"] {
-  right: 0;
-}
-/* Eight pixels of bar cannot hold the label; it stays for assistive tech. */
-:root[data-theme]
-  .gyro-chat-grid-drop-overlay[data-layout="row"]
-  .gyro-chat-grid-drop-tile {
-  font-size: 0;
-  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 /* Chat typography shares a compact scale across messages and live work. */
@@ -758,16 +708,25 @@
 
 /* Keep the hero card capped to the shared column, including when a companion
    adds is-constrained. Narrow panes may shrink below the hero width floor. */
-:root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-composer-dock > .gyro-composer-shell.is-hero {
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero {
   max-width: calc(var(--gyro-chat-content-width) / var(--gyro-composer-zoom));
   min-width: 0;
-  width: min(100%, calc(var(--gyro-chat-content-width) / var(--gyro-composer-zoom)));
+  width: min(
+    100%,
+    calc(var(--gyro-chat-content-width) / var(--gyro-composer-zoom))
+  );
 }
 
 /* Turns, standalone events and composer cards share the exact same edges.
    The floating jump button keeps its own compact dimensions. */
 :root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-transcript > *,
-:root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-composer-dock > :where(:not(.gyro-chat-jump-to-bottom)) {
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-composer-dock
+  > :where(:not(.gyro-chat-jump-to-bottom)) {
   box-sizing: border-box;
   margin-inline: auto;
   max-width: var(--gyro-chat-content-width);
@@ -939,10 +898,18 @@
   .gyro-composer-bar
   .gyro-send-button {
   border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
   height: calc(28px * var(--gyro-ui-scale, 1));
   min-height: calc(28px * var(--gyro-ui-scale, 1));
   min-width: 28px;
   width: 28px;
+}
+
+.gyro-send-button > svg {
+  display: block;
+  flex: none;
 }
 
 /* A ready send shares the primary action palette across both chat layouts. */
@@ -1109,42 +1076,13 @@
   }
 }
 
-/* Stacked chats use the same insertion boundaries along their height. */
+/* Stacked chats offer full-width placement sections along their height. */
 :root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] {
-  --gyro-chat-grid-drop-track: calc(
-    (100% - (var(--gyro-grid-count, 1) - 1) * 1px) / var(--gyro-grid-count, 1) + 1px
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(
+    var(--gyro-chat-drop-zone-count, 3),
+    minmax(0, 1fr)
   );
-  background: none;
-  display: block;
-  padding: 0;
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone {
-  height: 8px;
-  left: 0;
-  position: absolute;
-  right: 0;
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-start"] {
-  top: 0;
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-1"] {
-  top: var(--gyro-chat-grid-drop-track);
-  transform: translateY(-50%);
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-2"] {
-  top: calc(var(--gyro-chat-grid-drop-track) * 2);
-  transform: translateY(-50%);
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-seam-3"] {
-  top: calc(var(--gyro-chat-grid-drop-track) * 3);
-  transform: translateY(-50%);
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-zone[data-position="stack-end"] {
-  bottom: 0;
-}
-:root[data-theme] .gyro-chat-grid-drop-overlay[data-layout="stack"] .gyro-chat-grid-drop-tile {
-  font-size: 0;
-  overflow: hidden;
 }
 
 :root[data-theme] [data-chat-pane-drag][draggable="true"] {

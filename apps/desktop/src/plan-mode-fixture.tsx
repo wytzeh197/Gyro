@@ -209,23 +209,36 @@ function Fixture() {
       "questions",
   );
   const [draft, setDraft] = useState("");
+  const [environmentOpen, setEnvironmentOpen] = useState(false);
+  const isTiled = new URLSearchParams(location.search).has("tiled");
   const [panel, setPanel] = useState<ChatSidePanelId | undefined>(
     (new URLSearchParams(location.search).get("panel") as ChatSidePanelId) ??
       (stage === "panel" ? "plan" : undefined),
   );
   const events = stage === "questions" ? askTurn : [...askTurn, ...planTurn];
   return (
-    <div className="gyro-workspace-route is-thread">
+    <div
+      className="gyro-workspace-route is-thread plan-mode-fixture"
+      style={{ gridTemplateRows: "auto minmax(0, 1fr)" }}
+    >
+      <style>{`
+        .plan-mode-fixture *, .plan-mode-fixture *::before, .plan-mode-fixture *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      `}</style>
       <nav
+        aria-label="Plan mode fixture controls"
         style={{
+          alignItems: "center",
           display: "flex",
+          fontSize: 12,
           gap: 6,
-          left: 12,
-          position: "fixed",
-          top: 8,
-          zIndex: 50,
+          minHeight: 44,
+          padding: "8px 12px",
         }}
       >
+        <span>Plan mode fixture · actual components</span>
         {(["questions", "plan", "panel"] as const).map((value) => (
           <button
             key={value}
@@ -252,6 +265,9 @@ function Fixture() {
       <section className="gyro-workspace-primary" aria-label="Plan mode">
         <ChatSurface
           activeChatPanel={panel}
+          isTiled={isTiled}
+          isEnvironmentRailOpen={environmentOpen}
+          onToggleEnvironmentRail={() => setEnvironmentOpen((open) => !open)}
           chatMode="plan"
           config={config}
           events={events}

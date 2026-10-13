@@ -124,7 +124,10 @@ assert.ok(
 assert.match(parent, /<ChatTurn\s+isOnline=\{isOnline\}/);
 assert.match(parent, /\[\s*subagents,\s*isOnline,/);
 assert.match(turn, /isOnline: boolean/);
-assert.match(turn, /retry: !isOnline/);
+assert.match(
+  turn,
+  /retry: nativeRetry[\s\S]*: !isOnline\s*\? \{ reason: "Waiting for the network" \}/,
+);
 console.log(
   "Chat network: actual hook drops 400-turn DOM listeners 800 → 2; online/offline, mount race and cleanup preserved.",
 );

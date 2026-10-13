@@ -1,0 +1,15 @@
+{
+  "schema": "gyro.verification-host.v1",
+  "hostPhysicalMemoryBytes": 8589934592,
+  "swapUsedMiB": 7556.25,
+  "observedHighCpuProcesses": {
+    "codexRenderer": 4,
+    "codexService": 2,
+    "braveRenderer": 1
+  },
+  "observedCpuPercentEachApproximateRange": [
+    88.8,
+    101.3
+  ],
+  "action": "No unrelated processes stopped. Final Rust tests run serially; recorded latency is not a controlled before/after comparison."
+}

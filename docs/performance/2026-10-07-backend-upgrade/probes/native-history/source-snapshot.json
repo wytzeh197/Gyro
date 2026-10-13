@@ -1,0 +1,22 @@
+{
+  "recordedAt": "2026-10-08T13:52:13.230724+00:00",
+  "hashes": {
+    "apps/desktop/src/App.tsx": "9c8c40a8e6f0122de5b73e8ee4586d1460d8566fac15c43a9ebb6b3ba91ce42f",
+    "apps/desktop/src/surface-timing.ts": "c5700d5fd2bde09320bb211db888776ad4265f9bb1ab038b34576fb65559dd0f",
+    "apps/desktop/src/use-measured-workbench.ts": "f10482190b10cc96af12dc090df53af6747c8ddf4a70bfe66dabc54a378d73d7",
+    "apps/desktop/src-tauri/src/turn_timing.rs": "3fb02b6b40d626c9a0a0a1a3d80f1aea0e3fcd8fa9ccb2967566c87506bccdef",
+    "crates/gyro-core/src/timing.rs": "eb774fdfac0e9749331f458d45bfc3b01fceb19bdb5de9e051670d3161716100",
+    "crates/gyro-core/examples/backend_acceptance_fixture.rs": "82f24fe052a7dd6ec5706460988e60727d6ea62bf26d1010cfe4d27bcc9bc534",
+    "scripts/check-surface-timing.mjs": "4f878d63be8a79066cae8274370982b61923c9daffb2385562bb2955c94c1bc2",
+    "target/debug/gyro-desktop": "973665ae3d8d5f624186f68cb2b8a07426bb976a6cb85028479cb36777ac6cad",
+    "apps/desktop/dist/index.html": "d0220ffad56f7faf61d52b60dca679e748d197614e9cd51326b1171dc219219a"
+  },
+  "fixtureOnly": true,
+  "nativeVerification": "pending",
+  "nativeBuildPassed": true,
+  "bundleExecutableHash": "be6944909cc7c3ecafab288316be166bee070c402e3190999fa7756b35b04ebe",
+  "bundleIdentifier": "dev.gyro.history-verification-standalone",
+  "frontendURL": "tauri://localhost",
+  "updatedAt": "2026-10-08T14:09:24.027533+00:00",
+  "fixtureRoot": "/private/tmp/gyro-history-acceptance-2026-10-08-v3"
+}

@@ -318,6 +318,7 @@ pub(super) fn run_openai_compatible_chat(
                     context_window,
                 );
             }
+            gyro_core::efficiency::context::compact_duplicate_reads(&mut messages);
             let round_tools = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
                     messages.push(serde_json::json!({

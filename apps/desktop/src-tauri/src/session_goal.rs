@@ -14,11 +14,29 @@ pub(crate) const MAX_GOAL_CHARS: usize = 1_000;
 /// The goal the latest goal event leaves in place, if any.
 pub(crate) fn stored_session_goal(events: &[SessionEvent]) -> Option<SessionGoalContext> {
     let mut goal: Option<SessionGoalContext> = None;
+    let mut revision: Option<uuid::Uuid> = None;
     for event in events
         .iter()
         .filter(|event| event.kind == SessionEventKind::GoalUpdated)
     {
         let payload = &event.payload;
+        if payload["source"] == "goal-runner" {
+            if goal.is_none() || payload["goalVersion"].as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) != revision {
+                continue;
+            }
+            // Runner status never reopens a completed outcome.
+            if goal.as_ref().is_some_and(|goal| goal.status == "complete") && payload["status"] != "complete" {
+                continue;
+            }
+        } else if payload["source"] == "model" {
+            if !goal.as_ref().is_some_and(|goal| payload["text"].as_str() == Some(goal.text.as_str()))
+                || payload.get("goalVersion").is_some_and(|value|
+                    value.as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) != revision) {
+                continue;
+            }
+        } else {
+            revision = Some(event.id);
+        }
         if payload.get("action").and_then(serde_json::Value::as_str) == Some("clear") {
             goal = None;
             continue;
@@ -43,6 +61,11 @@ pub(crate) fn stored_session_goal(events: &[SessionEvent]) -> Option<SessionGoal
         });
     }
     goal
+}
+
+pub(crate) fn goal_revision(events: &[SessionEvent]) -> Option<uuid::Uuid> {
+    events.iter().rev().find(|event| event.kind == SessionEventKind::GoalUpdated
+        && event.payload["source"] != "goal-runner" && event.payload["source"] != "model").map(|event| event.id)
 }
 
 pub(crate) fn stored_or_unsaved_goal(
@@ -100,12 +123,17 @@ pub(crate) fn goal_change(
         Some(goal) if goal.status == "complete" && status == "active" && goal.text == text => {
             format!("Goal reopened: {text}")
         }
-        Some(goal) if goal.text == text && goal.status == status => {
+        Some(goal) if goal.text == text && goal.status == status && payload.get("runLimits").is_none() => {
             return Err("the goal is already set to that".into())
         }
         Some(_) => format!("Goal updated: {text}"),
     };
     let mut stored = serde_json::json!({ "action": "set", "text": text, "status": status });
+    if let Some(value) = payload.get("runLimits") {
+        let limits: crate::goal_runner::Limits = serde_json::from_value(value.clone()).map_err(|_| "invalid goal run limits".to_string())?;
+        limits.validate()?;
+        stored["runLimits"] = serde_json::to_value(limits).map_err(|error| error.to_string())?;
+    }
     if let Some(turn) = payload.get("sourceTurnId").filter(|turn| turn.is_string()) {
         stored["sourceTurnId"] = turn.clone();
     }
@@ -121,7 +149,7 @@ pub(crate) fn goal_context_lines(goal: &SessionGoalContext) -> Vec<String> {
     if goal.status == "active" {
         vec![
             format!("Active Gyro session goal: {text}"),
-            "Work toward that goal across turns. If this turn fully achieves it, include one hidden line before the answer in this exact form: GYRO_GOAL_UPDATE: {\"status\":\"complete\"}. Only send it when the goal is actually met — Gyro marks the goal complete for the user, it does not ask again.".into(),
+            "Work toward this goal within the latest user request and existing permissions. Before the final answer, report a checkpoint on one hidden line: GYRO_GOAL_UPDATE: {\"status\":\"continue\",\"progress\":\"Verified work completed this turn\",\"nextAction\":\"Concrete remaining action\"}. Gyro automatically schedules the next turn for actionable unfinished work. Use status complete only when the goal is fully achieved. Use blocked with a reason when user input, approval, prohibited work, unavailable capabilities, or external acceptance is required. Use paused with a reason when the user asks to stop, only discuss ideas, avoid coding, or defer implementation. Preserve all restrictions; an active goal never broadens authorization. Include progress evidence and avoid repeating completed work.".into(),
         ]
     } else {
         // A met goal used to vanish from context entirely, so follow-up turns
@@ -218,6 +246,29 @@ mod tests {
         assert_eq!(message, "Goal reopened: Fix the build");
     }
 
+    #[test]
+    fn late_runner_and_model_events_cannot_revive_or_reopen_a_changed_goal() {
+        let initial = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
+        let stale_run = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active",
+            "source":"goal-runner","goalVersion":initial.id}));
+        let stale_done = goal_event(serde_json::json!({"action":"set","text":"Original","status":"complete",
+            "source":"model","goalVersion":initial.id}));
+        let cleared = goal_event(serde_json::json!({"action":"clear"}));
+        assert!(stored_session_goal(&[initial.clone(), cleared, stale_run.clone(), stale_done.clone()]).is_none());
+        let reopened = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
+        assert_eq!(stored_session_goal(&[initial.clone(), reopened, stale_done]).unwrap().status, "active");
+        let done = goal_event(serde_json::json!({"action":"set","text":"Original","status":"complete"}));
+        assert_eq!(stored_session_goal(&[initial, done, stale_run]).unwrap().status, "complete");
+    }
+    #[test]
+    fn goal_limits_are_configurable_and_validated() {
+        let active = goal("Finish", "active");
+        let (_, stored) = goal_change(&serde_json::json!({"action":"set","runLimits":{
+            "maxAutomaticTurns":4,"maxMinutes":30,"maxNewTokens":50_000
+        }}), Some(&active)).unwrap();
+        assert_eq!(stored["runLimits"]["maxAutomaticTurns"], 4);
+        assert!(goal_change(&serde_json::json!({"action":"set","runLimits":{"maxMinutes":0}}), Some(&active)).is_err());
+    }
     #[test]
     fn empty_oversized_repeated_and_orphan_changes_are_refused() {
         assert!(goal_change(&serde_json::json!({"action": "set", "text": "  "}), None).is_err());

@@ -25,6 +25,8 @@ type AppearanceSettingsProps = {
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
   onMotionSpeedChange?: (speed: MotionSpeed) => void;
   onAppearanceColorsChange?: (main: string, secondary: string) => void;
+  saveStatus?: "saving" | "saved" | "error";
+  onRetrySave?: () => void;
 };
 
 export function AppearanceSettings({
@@ -40,12 +42,44 @@ export function AppearanceSettings({
   onInterfaceSizeChange,
   onMotionSpeedChange,
   onAppearanceColorsChange,
+  saveStatus,
+  onRetrySave,
 }: AppearanceSettingsProps) {
   return (
-    <>
+    <div className="gyro-appearance-settings">
+      <div className="gyro-appearance-scope">
+        <span>Applies across Gyro</span>
+        <span
+          aria-live="polite"
+          aria-atomic="true"
+          className={`gyro-appearance-save-status${saveStatus === "error" ? " is-error" : ""}`}
+          role="status"
+        >
+          {saveStatus === "saving"
+            ? "Saving…"
+            : saveStatus === "saved"
+              ? "Saved"
+              : saveStatus === "error"
+                ? "Couldn’t save changes."
+                : "Changes apply immediately"}
+          {saveStatus === "error" && onRetrySave ? (
+            <button onClick={onRetrySave} type="button">
+              Retry save
+            </button>
+          ) : null}
+        </span>
+      </div>
       <SettingsGroup
         label="Theme"
-        description="Choose a look for your workspace."
+        description="Follow your Mac’s appearance or choose your own."
+        actions={
+          <AppearanceReset
+            label="Reset theme"
+            detail="Follow your Mac’s appearance."
+            disabled={themeMode === "system"}
+            onClick={() => onThemeChange("system")}
+          />
+        }
       >
         <div
           className="gyro-theme-picker"
@@ -83,13 +117,31 @@ export function AppearanceSettings({
           ))}
         </div>
       </SettingsGroup>
-      <SettingsGroup label="Interface">
+      <SettingsGroup
+        label="Text & layout"
+        actions={
+          <AppearanceReset
+            label="Reset text & layout"
+            detail="Restore default interface size and comfortable spacing."
+            disabled={
+              !onInterfaceSizeChange ||
+              !onDensityChange ||
+              (interfaceSize === "default" && density === "comfortable")
+            }
+            onClick={() => {
+              onInterfaceSizeChange?.("default");
+              onDensityChange?.("comfortable");
+            }}
+          />
+        }
+      >
         <SettingsRow
           label="Interface size"
           detail="Scale text and controls, including the editor and terminal."
         >
           <SettingsSegmented
             label="Interface size"
+            disabled={!onInterfaceSizeChange}
             value={interfaceSize}
             options={[
               { label: "Small", value: "small" },
@@ -100,11 +152,12 @@ export function AppearanceSettings({
           />
         </SettingsRow>
         <SettingsRow
-          label="Density"
+          label="Spacing"
           detail="Choose tighter rows or more room between controls."
         >
           <SettingsSegmented
-            label="Interface density"
+            label="Interface spacing"
+            disabled={!onDensityChange}
             value={density}
             options={[
               { label: "Compact", value: "compact" },
@@ -113,6 +166,18 @@ export function AppearanceSettings({
             onChange={(value) => onDensityChange?.(value)}
           />
         </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup
+        label="Motion"
+        actions={
+          <AppearanceReset
+            label="Reset motion"
+            detail="Restore the default animation speed."
+            disabled={!onMotionSpeedChange || motionSpeed === "default"}
+            onClick={() => onMotionSpeedChange?.("default")}
+          />
+        }
+      >
         <SettingsRow
           label="Animation speed"
           detail={
@@ -123,6 +188,7 @@ export function AppearanceSettings({
         >
           <SettingsSegmented
             label="Animation speed"
+            disabled={!onMotionSpeedChange}
             value={motionSpeed}
             options={[
               { label: "Slower", value: "slower" },
@@ -135,49 +201,70 @@ export function AppearanceSettings({
       </SettingsGroup>
       <SettingsGroup
         label="Colors"
-        description="Personalize accents across Gyro. Changes appear immediately."
+        description="Choose colors for selection, actions, and supporting highlights."
+        actions={
+          <AppearanceReset
+            label="Reset colors"
+            detail="Restore Gyro blue and violet. Theme, size, spacing, and motion stay as you chose them."
+            disabled={
+              !onAppearanceColorsChange ||
+              (mainColor.toLowerCase() === "#0874df" &&
+                secondaryColor.toLowerCase() === "#8b6fcb")
+            }
+            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
+          />
+        }
       >
         <SettingsRow
-          label="Main color"
+          label="Primary accent"
           detail="Selection, focus, and primary action color."
         >
           <AppearanceColorControl
             color={mainColor}
-            label="Main color"
+            label="Primary accent"
             onChange={(color) =>
               onAppearanceColorsChange?.(color, secondaryColor)
             }
           />
         </SettingsRow>
         <SettingsRow
-          label="Secondary color"
+          label="Secondary accent"
           detail="Supporting icons, badges, and quiet highlights."
         >
           <AppearanceColorControl
             color={secondaryColor}
-            label="Secondary color"
+            label="Secondary accent"
             onChange={(color) => onAppearanceColorsChange?.(mainColor, color)}
           />
         </SettingsRow>
-        <SettingsRow
-          label="Default palette"
-          detail="Restore Gyro blue and violet."
-        >
-          <button
-            className="gyro-color-reset"
-            disabled={
-              mainColor.toLowerCase() === "#0874df" &&
-              secondaryColor.toLowerCase() === "#8b6fcb"
-            }
-            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
-            type="button"
-          >
-            <RotateCcw aria-hidden="true" size={13} />
-            Reset colors
-          </button>
-        </SettingsRow>
       </SettingsGroup>
-    </>
+    </div>
+  );
+}
+
+function AppearanceReset({
+  label,
+  detail,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  detail: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="gyro-settings-group-reset"
+      disabled={disabled}
+      onClick={onClick}
+      title={detail}
+      type="button"
+    >
+      <RotateCcw aria-hidden="true" size={12} />
+      {label}
+    </button>
   );
 }
 

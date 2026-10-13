@@ -1044,25 +1044,41 @@ assert.deepEqual(
 
 // Delegation records the launch in place, without pinning live children above
 // the parent's work or replaying each later lifecycle update.
-const launch = event("system-event", "Updated 1 sub-agent(s)", {
-  schema: "gyro.capability.v1",
-  kind: "capability-call",
-  capabilityId: "agent-spawn",
-  status: "completed",
-  resource: { id: "child", kind: "chat", label: "Parser implementation" },
-}, 1);
-const delegationRun = buildRunModel([
-  activity("commentary", "I’ll inspect the parser first.", {}, 0),
-  launch,
-  ...["running", "waiting", "completed"].map((status, index) =>
-    event("system-event", `Parser: ${status}`, {
-      kind: "subagent-state",
-      agent: { agentId: "child", name: "Parser implementation", status },
-    }, index + 2),
-  ),
-  activity("commentary", "I’m checking the result.", {}, 5),
-], { isRunning: true });
-assert.deepEqual(delegationRun.steps.map((step) => step.kind), ["say", "work", "say"]);
+const launch = event(
+  "system-event",
+  "Updated 1 sub-agent(s)",
+  {
+    schema: "gyro.capability.v1",
+    kind: "capability-call",
+    capabilityId: "agent-spawn",
+    status: "completed",
+    resource: { id: "child", kind: "chat", label: "Parser implementation" },
+  },
+  1,
+);
+const delegationRun = buildRunModel(
+  [
+    activity("commentary", "I’ll inspect the parser first.", {}, 0),
+    launch,
+    ...["running", "waiting", "completed"].map((status, index) =>
+      event(
+        "system-event",
+        `Parser: ${status}`,
+        {
+          kind: "subagent-state",
+          agent: { agentId: "child", name: "Parser implementation", status },
+        },
+        index + 2,
+      ),
+    ),
+    activity("commentary", "I’m checking the result.", {}, 5),
+  ],
+  { isRunning: true },
+);
+assert.deepEqual(
+  delegationRun.steps.map((step) => step.kind),
+  ["say", "work", "say"],
+);
 assert.deepEqual(runRowText(delegationRun.steps[1]), {
   label: "Started sub-agent",
   description: "Parser implementation",
@@ -1072,7 +1088,10 @@ for (const [status, label] of [
   ["denied", "Could not start sub-agent"],
   ["failed", "Could not start sub-agent"],
 ]) {
-  const item = workItemFromEvent({ ...launch, payload: { ...launch.payload, status } });
+  const item = workItemFromEvent({
+    ...launch,
+    payload: { ...launch.payload, status },
+  });
   assert.equal(runRowText({ kind: "work", item }).label, label);
 }
 
@@ -1132,6 +1151,15 @@ assert.equal(
   ]).steps.length,
   1,
   "the session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_AGENT_UPDATE: {"status":"continue"}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "sub-agent completion metadata must stay out of the work timeline",
 );
 
 // Live streamed text still carries the marker until the turn settles; a block
@@ -1218,7 +1246,8 @@ const clicked = workItemFromEvent(
   capabilityCall("browser-click", { target: "Save", resource: page }),
 );
 assert.deepEqual(
-  clicked && runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
+  clicked &&
+    runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
   { label: "Clicked", description: "Save" },
   "a browser click should name the element it touched",
 );
@@ -1244,7 +1273,9 @@ assert.deepEqual(
       capabilityCall("browser-screenshot", { resource: page }, 1),
     ]).steps,
   ).map((step) =>
-    step.kind === "work-group" ? [step.groupKind, step.steps.length] : step.kind,
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
   ),
   [["browser", 2]],
   "browser reads and captures should group as browser work, not workspace review",
@@ -1469,10 +1500,10 @@ assert.deepEqual(
   { label: "Running", description: "git remote -v" },
   "a call row should show the command as typed, without shell wrapper or cd",
 );
-assert.deepEqual(
-  runCallText(call("a", { kind: "search", query: "useNow" })),
-  { label: "Searched for", description: "useNow" },
-);
+assert.deepEqual(runCallText(call("a", { kind: "search", query: "useNow" })), {
+  label: "Searched for",
+  description: "useNow",
+});
 
 // Reasoning headlines are a live status, never a tool row or a reply.
 const reasoningEvents = [
@@ -1556,7 +1587,13 @@ assert.deepEqual(
 );
 
 assert.equal(
-  buildRunModel([], { status: { status: "failed", message: "DeepSeek send needs attention", error: "DeepSeek exceeded Gyro's tool-call limit for one turn" } }).phase.message,
+  buildRunModel([], {
+    status: {
+      status: "failed",
+      message: "DeepSeek send needs attention",
+      error: "DeepSeek exceeded Gyro's tool-call limit for one turn",
+    },
+  }).phase.message,
   "DeepSeek exceeded Gyro's tool-call limit for one turn",
   "failure banners expose the actual cause instead of a generic heading",
 );

@@ -1,9 +1,18 @@
-// Development-only preview of real settings components with in-memory preferences.
-import React, { useEffect, useState } from "react";
+// Standalone production components. Preferences persist in fixture-only storage;
+// accounts, updater state, and workspace data are simulated.
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AppChrome,
   SettingsSurface,
   applyAppearancePreferences,
+  type WorkbenchPreferences,
   type InterfaceSize,
   type MotionSpeed,
   type ThemeMode,
@@ -16,6 +25,53 @@ import {
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 import { projectImportPreview } from "./project-import-preview";
+import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
+import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
+
+const params = new URLSearchParams(location.search);
+const appearanceStorageKey = `gyro.settings-preview.appearance.${params.get("theme") ?? "light"}`;
+type PreviewAppearance = Pick<
+  WorkbenchPreferences,
+  | "theme"
+  | "density"
+  | "interfaceSize"
+  | "motionSpeed"
+  | "mainColor"
+  | "secondaryColor"
+>;
+function loadPreviewAppearance(): PreviewAppearance {
+  const initial: PreviewAppearance = {
+    theme: params.get("theme") === "dark" ? "dark" : "light",
+    density: "comfortable",
+    interfaceSize: "default",
+    motionSpeed: "default",
+    mainColor: params.get("accent") ?? "#0874df",
+    secondaryColor: params.get("secondary") ?? "#8b6fcb",
+  };
+  try {
+    const stored = JSON.parse(
+      readBoundedLocalStorage(appearanceStorageKey, 4096) ?? "{}",
+    );
+    if (["system", "light", "dark"].includes(stored.theme))
+      initial.theme = stored.theme;
+    if (["compact", "comfortable"].includes(stored.density))
+      initial.density = stored.density;
+    if (["small", "default", "large"].includes(stored.interfaceSize))
+      initial.interfaceSize = stored.interfaceSize;
+    if (["slower", "default", "faster"].includes(stored.motionSpeed))
+      initial.motionSpeed = stored.motionSpeed;
+    for (const key of ["mainColor", "secondaryColor"] as const) {
+      if (
+        typeof stored[key] === "string" &&
+        /^#[0-9a-f]{6}$/i.test(stored[key])
+      )
+        initial[key] = stored[key];
+    }
+  } catch {
+    /* Malformed fixture storage restores the defaults. */
+  }
+  return initial;
+}
 
 /** Representative updater states, so the Updates section can be reviewed whole.
     "unavailable" carries no state at all, which is the shape the surface gets
@@ -118,11 +174,15 @@ const UPDATE_SCENES: Array<{
 ];
 
 function Preview() {
-  const [theme, setTheme] = useState<ThemeMode>(() =>
-    new URLSearchParams(location.search).get("theme") === "dark"
-      ? "dark"
-      : "light",
-  );
+  const [initial] = useState(loadPreviewAppearance);
+  const [theme, setTheme] = useState<ThemeMode>(initial.theme);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [defaultWorkspaceMode, setDefaultWorkspaceMode] = useState<
+    "local" | "worktree"
+  >("local");
+  const [failSave, setFailSave] = useState(params.has("failSave"));
+  const failSaveRef = useRef(failSave);
+  failSaveRef.current = failSave;
   const [scene] = useState(() =>
     new URLSearchParams(location.search).get("scene"),
   );
@@ -138,9 +198,15 @@ function Preview() {
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
-  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
-  const [interfaceSize, setInterfaceSize] = useState<InterfaceSize>("default");
-  const [motionSpeed, setMotionSpeed] = useState<MotionSpeed>("default");
+  const [density, setDensity] = useState<"compact" | "comfortable">(
+    initial.density,
+  );
+  const [interfaceSize, setInterfaceSize] = useState<InterfaceSize>(
+    initial.interfaceSize,
+  );
+  const [motionSpeed, setMotionSpeed] = useState<MotionSpeed>(
+    initial.motionSpeed,
+  );
   const [reduceMotion, setReduceMotion] = useState(false);
   const [systemDark, setSystemDark] = useState(false);
   useEffect(() => {
@@ -186,13 +252,36 @@ function Preview() {
   });
   const [connecting, setConnecting] = useState<ProviderId[]>([]);
   const [result, setResult] = useState("");
-  const [colors, setColors] = useState(() => {
-    const params = new URLSearchParams(location.search);
-    return [
-      params.get("accent") ?? "#0874df",
-      params.get("secondary") ?? "#8b6fcb",
-    ];
-  });
+  const [colors, setColors] = useState([
+    initial.mainColor,
+    initial.secondaryColor,
+  ]);
+  const previewAppearance = useMemo(
+    () => ({
+      theme,
+      density,
+      interfaceSize,
+      motionSpeed,
+      mainColor: colors[0]!,
+      secondaryColor: colors[1]!,
+    }),
+    [theme, density, interfaceSize, motionSpeed, colors],
+  );
+  const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
+    useAppearanceSaveFeedback(previewAppearance);
+  const savePreview = useCallback(() => {
+    const succeeded =
+      !failSaveRef.current &&
+      safeSetLocalStorage(
+        appearanceStorageKey,
+        JSON.stringify(previewAppearance),
+      );
+    onAppearancePersisted(previewAppearance, succeeded);
+  }, [previewAppearance, onAppearancePersisted]);
+  useEffect(() => {
+    const timer = window.setTimeout(savePreview, 250);
+    return () => window.clearTimeout(timer);
+  }, [savePreview]);
   const updateState = UPDATE_SCENES.find(
     (entry) => entry.id === updateScene,
   )?.state;
@@ -219,118 +308,155 @@ function Preview() {
     colors[1]!,
   );
   return (
-    <div
-      style={{
-        height: "100vh",
-        overflow: "auto",
-        background: "var(--gyro-pane)",
-        color: "var(--gyro-text)",
-      }}
-    >
+    <div className="gyro-settings-preview">
+      <style>{`
+        html, body, #root { height: 100%; margin: 0; }
+        .gyro-settings-preview { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--gyro-pane); color: var(--gyro-text); }
+        .gyro-settings-preview *, .gyro-settings-preview *::before, .gyro-settings-preview *::after { animation: none !important; transition: none !important; }
+        .gyro-settings-preview > .gyro-app-shell { height: 100%; min-height: 0; }
+        .gyro-settings-preview-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--gyro-border-soft); font: 12px var(--gyro-font-sans); }
+        .gyro-settings-preview-toolbar > span:first-child { margin-right: auto; }
+        .gyro-settings-preview-toolbar button { font: inherit; }
+        .gyro-settings-preview-toolbar label { display: inline-flex; align-items: center; gap: 5px; }
+      `}</style>
       <nav
-        aria-label="Preview sections"
-        style={{ display: "flex", gap: 16, padding: 16 }}
+        className="gyro-settings-preview-toolbar"
+        aria-label="Settings fixture controls"
       >
-        {(
-          [
-            "general",
-            "appearance",
-            "advanced",
-            "providers",
-            "updates",
-            "import-projects",
-          ] as const
-        ).map((id) => (
-          <button key={id} onClick={() => setSection(id)}>
-            {id}
+        <span>
+          Settings fixture · actual components · accounts and workspace
+          simulated
+        </span>
+        <label>
+          <input
+            aria-label="Simulate save failure"
+            type="checkbox"
+            checked={failSave}
+            onChange={(event) => setFailSave(event.target.checked)}
+          />
+          Simulate save failure
+        </label>
+        <label>
+          <input
+            aria-label="Simulate Reduce Motion"
+            type="checkbox"
+            checked={reduceMotion}
+            onChange={(event) => setReduceMotion(event.target.checked)}
+          />
+          Reduce Motion
+        </label>
+        {section === "updates"
+          ? UPDATE_SCENES.map((entry) => (
+              <button key={entry.id} onClick={() => setUpdateScene(entry.id)}>
+                {entry.label}
+              </button>
+            ))
+          : null}
+        {connecting.length > 0 ? (
+          <button
+            onClick={() => {
+              setConfig((current) => ({
+                ...current,
+                modelProviders: current.modelProviders.map((provider) =>
+                  connecting.includes(provider.id)
+                    ? { ...provider, enabled: true, authStatus: "connected" }
+                    : provider,
+                ),
+              }));
+              setConnecting([]);
+            }}
+          >
+            Complete simulated sign-in
           </button>
-        ))}
+        ) : null}
+        {result ? <output>{result}</output> : null}
       </nav>
-      {section === "updates" ? (
-        <nav
-          aria-label="Update states"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            padding: "0 16px 8px",
+      <AppChrome
+        sessions={[]}
+        commandProfiles={config.commandProfiles}
+        savedProjects={[]}
+        activeDestination="settings"
+        activeWorkspaceLayout="thread"
+        activeSettingsSection={section}
+        workspacePath="/fixture/Gyro"
+        workspaceSidebarHidden={sidebarHidden}
+        onWorkspaceSidebarHiddenChange={setSidebarHidden}
+        onSettingsSectionChange={setSection}
+        onOpenSettingsSection={setSection}
+        onSelectSession={() => {}}
+        onSelectWorkspaceLayout={() => {}}
+        onSelectDestination={() =>
+          setResult("Navigation outside Settings is simulated.")
+        }
+        onOpenToolPanel={() => {}}
+        onOpenSettings={() => setSection("general")}
+        onOpenCommandPalette={() => {}}
+        onCreateSession={() => {}}
+        onCreateCliSession={() => {}}
+        onSelectSessions={() => {}}
+        onOpenWorkspace={() => {}}
+        onSettingsBack={() => setResult("Back to app is simulated.")}
+        settingsBackLabel="fixture"
+      >
+        <SettingsSurface
+          projectImport={projectImportPreview(updateScene, setResult)}
+          config={config}
+          workspacePath="/fixture/Gyro"
+          workspaceRoots={["/fixture/Gyro"]}
+          onConfigChange={setConfig}
+          onSectionChange={setSection}
+          defaultWorkspaceMode={defaultWorkspaceMode}
+          onDefaultWorkspaceModeChange={setDefaultWorkspaceMode}
+          appearanceSaveStatus={appearanceSaveStatus}
+          onRetryAppearanceSave={() => {
+            retryAppearanceSave();
+            savePreview();
           }}
-        >
-          {UPDATE_SCENES.map((entry) => (
-            <button key={entry.id} onClick={() => setUpdateScene(entry.id)}>
-              {entry.label}
-            </button>
-          ))}
-        </nav>
-      ) : null}
-      <p role="status">
-        {scene === "import"
-          ? "Development fixture. All import data and actions are simulated. "
-          : ""}
-        {result}
-      </p>
-      {connecting.length > 0 ? (
-        <button
-          onClick={() => {
+          connectingProviderIds={connecting}
+          onToggleProvider={(id) => setConnecting([id as ProviderId])}
+          onSelectProviderDefaultModel={(id, modelId) =>
             setConfig((current) => ({
               ...current,
               modelProviders: current.modelProviders.map((provider) =>
-                connecting.includes(provider.id)
-                  ? { ...provider, enabled: true, authStatus: "connected" }
+                provider.id === id
+                  ? { ...provider, defaultModelId: modelId }
                   : provider,
               ),
-            }));
-            setConnecting([]);
-          }}
-        >
-          Complete simulated sign-in
-        </button>
-      ) : null}
-      <SettingsSurface
-        projectImport={projectImportPreview(updateScene, setResult)}
-        config={config}
-        connectingProviderIds={connecting}
-        onToggleProvider={(id) => setConnecting([id as ProviderId])}
-        onSelectProviderDefaultModel={(id, modelId) =>
-          setConfig((current) => ({
-            ...current,
-            modelProviders: current.modelProviders.map((provider) =>
-              provider.id === id
-                ? { ...provider, defaultModelId: modelId }
-                : provider,
-            ),
-          }))
-        }
-        onUseProvider={(id, modelId) =>
-          setResult(`Selected ${id}: ${modelId} for chat`)
-        }
-        activeSection={section}
-        themeMode={theme}
-        onThemeChange={setTheme}
-        density={density}
-        interfaceSize={interfaceSize}
-        onInterfaceSizeChange={setInterfaceSize}
-        motionSpeed={motionSpeed}
-        onMotionSpeedChange={setMotionSpeed}
-        reduceMotion={reduceMotion}
-        onDensityChange={setDensity}
-        showMenuBarIcon={menu}
-        onMenuBarVisibilityChange={setMenu}
-        desktopNotifications={notifications}
-        onDesktopNotificationsChange={(next) =>
-          setNotifications((current) => ({ ...current, ...next }))
-        }
-        modelFollow={follow}
-        onModelFollowChange={setFollow}
-        mainColor={colors[0]}
-        secondaryColor={colors[1]}
-        updateState={updateState}
-        onCheckForUpdates={() => setResult("Checked for updates (preview)")}
-        onUpdateAction={(state) => setResult(`Update action: ${state.status}`)}
-        onAppearanceColorsChange={(main, secondary) =>
-          setColors([main, secondary])
-        }
-      />
+            }))
+          }
+          onUseProvider={(id, modelId) =>
+            setResult(`Selected ${id}: ${modelId} for chat`)
+          }
+          activeSection={section}
+          themeMode={theme}
+          onThemeChange={setTheme}
+          density={density}
+          interfaceSize={interfaceSize}
+          onInterfaceSizeChange={setInterfaceSize}
+          motionSpeed={motionSpeed}
+          onMotionSpeedChange={setMotionSpeed}
+          reduceMotion={reduceMotion}
+          onDensityChange={setDensity}
+          showMenuBarIcon={menu}
+          onMenuBarVisibilityChange={setMenu}
+          desktopNotifications={notifications}
+          onDesktopNotificationsChange={(next) =>
+            setNotifications((current) => ({ ...current, ...next }))
+          }
+          modelFollow={follow}
+          onModelFollowChange={setFollow}
+          mainColor={colors[0]}
+          secondaryColor={colors[1]}
+          updateState={updateState}
+          onCheckForUpdates={() => setResult("Checked for updates (preview)")}
+          onUpdateAction={(state) =>
+            setResult(`Update action: ${state.status}`)
+          }
+          onAppearanceColorsChange={(main, secondary) =>
+            setColors([main, secondary])
+          }
+        />
+      </AppChrome>
     </div>
   );
 }

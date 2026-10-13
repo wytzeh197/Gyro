@@ -132,6 +132,16 @@ pub(super) fn observe(
     if control.cancellation.is_cancelled() {
         return;
     }
+    let goal_stop = control.goal_token_budget.lock().ok().and_then(|budget| {
+        let (before, limit) = (*budget)?;
+        let used = before.saturating_add(gyro_core::call_ceiling_tokens(
+            Some(tokens.input_tokens), Some(tokens.cached_input_tokens), Some(tokens.output_tokens)));
+        (used >= limit).then_some(ProviderStopReason::GoalTokenBudget { used, limit })
+    });
+    if let Some(reason) = goal_stop {
+        stop_provider_run(app, &request.session_id, reason);
+        return;
+    }
     let reason = control.spend_guard.lock().ok().and_then(|mut state| {
         let guard = state.as_mut()?;
         if guard.provider_budget.is_some()

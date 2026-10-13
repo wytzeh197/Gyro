@@ -1,32 +1,59 @@
 // Isolated rendering fixture: no providers, native commands or saved chat data.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChatSurface, type ChatSidePanelId, type SessionGoal, type SessionPlan } from "@gyro-dev/ui";
+import {
+  ChatSurface,
+  type ChatSidePanelId,
+  type SessionGoal,
+  type SessionPlan,
+} from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 import { deriveSessionPlan } from "./session-context-events";
 
-function completionPlan(status: "in-progress" | "complete" | "blocked"): SessionPlan {
+function completionPlan(
+  status: "in-progress" | "complete" | "blocked",
+): SessionPlan {
   const event = (id: string, payload: object) => ({
-    id, sessionId: "goal-plan-fixture", turnId: "fixture-turn",
-    kind: "plan-updated" as const, createdAt: new Date().toISOString(),
-    message: "", payload,
+    id,
+    sessionId: "goal-plan-fixture",
+    turnId: "fixture-turn",
+    kind: "plan-updated" as const,
+    createdAt: new Date().toISOString(),
+    message: "",
+    payload,
   });
-  return deriveSessionPlan([
-    event("fixture-plan", {
-      action: "replace", title: "Completion regression fixture",
-      content: "# Completion regression fixture\n\nEight steps with a final verification report.",
-      items: Array.from({ length: 8 }, (_, index) => ({
-        id: `step-${index}`,
-        title: index === 7 ? "Verify themes and accessibility" : `Implementation step ${index + 1}`,
-        status: index === 7 ? "in-progress" : "complete",
-      })),
-    }),
-    event("fixture-final-report", {
-      action: "update-items",
-      items: [{ id: "step-7", status,
-        detail: status === "blocked" ? "Requires native packaged-app acceptance" : undefined }],
-    }),
-  ], "goal-plan-fixture");
+  return deriveSessionPlan(
+    [
+      event("fixture-plan", {
+        action: "replace",
+        title: "Completion regression fixture",
+        content:
+          "# Completion regression fixture\n\nEight steps with a final verification report.",
+        items: Array.from({ length: 8 }, (_, index) => ({
+          id: `step-${index}`,
+          title:
+            index === 7
+              ? "Verify themes and accessibility"
+              : `Implementation step ${index + 1}`,
+          status: index === 7 ? "in-progress" : "complete",
+        })),
+      }),
+      event("fixture-final-report", {
+        action: "update-items",
+        items: [
+          {
+            id: "step-7",
+            status,
+            detail:
+              status === "blocked"
+                ? "Requires native packaged-app acceptance"
+                : undefined,
+          },
+        ],
+      }),
+    ],
+    "goal-plan-fixture",
+  );
 }
 
 const stamp = "2026-09-16T09:00:00Z";
@@ -50,9 +77,15 @@ function goalFor(status: SessionGoal["status"]): SessionGoal {
 
 function Fixture() {
   const [panel, setPanel] = useState<ChatSidePanelId | undefined>(
-    new URLSearchParams(location.search).get("panel") === "browser" ? "browser" : "plan",
+    new URLSearchParams(location.search).get("panel") === "browser"
+      ? "browser"
+      : new URLSearchParams(location.search).get("panel") === "none"
+        ? undefined
+        : "plan",
   );
-  const [goal, setGoal] = useState<SessionGoal | undefined>(() => goalFor("active"));
+  const [goal, setGoal] = useState<SessionGoal | undefined>(() =>
+    goalFor("active"),
+  );
   // The mark rotates only while a turn is running, so the fixture has to be
   // able to run one.
   const [running, setRunning] = useState(true);
@@ -61,55 +94,221 @@ function Fixture() {
    * the fixture has to reach that state: the chip must open and close without
    * firing a native hover tooltip.
    */
-  const [goalEditorOpen, setGoalEditorOpen] = useState(false);
+  const [goalEditorOpen, setGoalEditorOpen] = useState(
+    new URLSearchParams(location.search).get("editor") === "goal",
+  );
+  const [mode, setMode] = useState<"normal" | "plan">(
+    new URLSearchParams(location.search).get("mode") === "plan"
+      ? "plan"
+      : "normal",
+  );
   const [plan, setPlan] = useState<SessionPlan>({
     title: "Unify goal and plan",
-    content: "# Unify goal and plan\n\nKeep the outcome visible in both views.\n\n## Verification\n\nCheck both themes, blocked steps and goal controls.",
+    content:
+      "# Unify goal and plan\n\nKeep the outcome visible in both views.\n\n## Verification\n\nCheck both themes, blocked steps and goal controls.",
     items: [
-      {id:"spec", title:"Define the status ramp", status:"complete", createdAt:stamp, updatedAt:stamp},
-      {id:"build", title:"Unify goal controls", status:"in-progress", createdAt:stamp, updatedAt:stamp},
-      {id:"verify", title:"Check both themes", status:"blocked", createdAt:stamp, updatedAt:stamp},
-      {id:"notes", title:"Record the evidence", status:"todo", createdAt:stamp, updatedAt:stamp},
+      {
+        id: "spec",
+        title: "Define the status ramp",
+        status: "complete",
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
+      {
+        id: "build",
+        title: "Unify goal controls",
+        status: "in-progress",
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
+      {
+        id: "verify",
+        title: "Check both themes",
+        status: "blocked",
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
+      {
+        id: "notes",
+        title: "Record the evidence",
+        status: "todo",
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
     ],
   });
-  return <div style={{height:"100vh", display:"flex", flexDirection:"column"}}>
-    <nav aria-label="Fixture controls" style={{display:"flex", gap:12, padding:8}}>
-      <button onClick={() => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === "light" ? "dark" : "light"; }}>Toggle theme</button>
-      <button onClick={() => setPanel(panel ? undefined : "plan")}>Toggle rail</button>
-      <button onClick={() => setRunning(value => !value)}>Toggle running</button>
-      <button onClick={() => setGoalEditorOpen(value => !value)}>Toggle goal editor</button>
-      <button onClick={() => setGoal(goalFor("active"))}>Restore goal</button>
-      {(["in-progress", "complete", "blocked"] as const).map(status => (
-        <button key={status} onClick={() => {
-          setPlan(completionPlan(status));
-          setRunning(status === "in-progress");
-          setGoal(undefined);
-          setPanel("plan");
-        }}>Fixture: {status === "complete" ? "8/8 completed" : status === "blocked" ? "7/8 blocked" : "7/8 working"}</button>
-      ))}
-    </nav>
-    <div style={{flex:1,minHeight:0}}>
-      <ChatSurface
-        events={[{id:"user", sessionId:"goal-plan-fixture", turnId:"turn", kind:"user-message", message:"Keep the goal and plan together.", createdAt:recentStamp, payload:{}}]}
-        config={{commandProfiles:[],modelProviders:[],requireCommandApproval:true,requireFileEditApproval:true,telemetryEnabled:false}}
-        sessionGoal={goal} sessionPlan={plan}
-        isComposerSending={running}
-        isGoalComposerActive={goalEditorOpen}
-        onCancelGoalComposer={() => setGoalEditorOpen(false)}
-        onComposerAction={(action) => { if (action === "add-goal") setGoalEditorOpen(true); }}
-        activeChatPanel={panel} companionWidth={600}
-        onSelectChatPanel={setPanel} onOpenCompanionTab={setPanel} onCloseCompanionDock={() => setPanel(undefined)}
-        onGoalAction={(action, text) => setGoal(current => action === "clear" ? undefined : {
-          text: text ?? current?.text ?? "",
-          status: action === "complete" ? "complete" : "active",
-          createdAt: current?.createdAt ?? goalFor("active").createdAt,
-          updatedAt: new Date().toISOString(),
-        })}
-        onPlanItemStatusChange={(id,status) => setPlan(current => ({...current,items:current.items.map(item => item.id === id ? {...item,status} : item)}))}
-        onSend={() => {}} shellReady
-      />
+  return (
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      <nav
+        aria-label="Fixture controls"
+        style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: 8 }}
+      >
+        <button
+          onClick={() => {
+            document.documentElement.dataset.theme =
+              document.documentElement.dataset.theme === "light"
+                ? "dark"
+                : "light";
+          }}
+        >
+          Toggle theme
+        </button>
+        <button onClick={() => setPanel(panel ? undefined : "plan")}>
+          Toggle rail
+        </button>
+        <button onClick={() => setRunning((value) => !value)}>
+          Toggle running
+        </button>
+        <button onClick={() => setGoalEditorOpen((value) => !value)}>
+          Toggle goal editor
+        </button>
+        <button
+          onClick={() =>
+            setMode((value) => (value === "plan" ? "normal" : "plan"))
+          }
+        >
+          Toggle Plan mode
+        </button>
+        <button onClick={() => setGoal(goalFor("active"))}>Restore goal</button>
+        {(
+          [
+            "queued",
+            "running",
+            "waiting-approval",
+            "blocked",
+            "paused",
+            "complete",
+          ] as const
+        ).map((status) => (
+          <button
+            key={status}
+            onClick={() => {
+              setGoal({
+                ...goalFor(status === "complete" ? "complete" : "active"),
+                run: {
+                  id: "goal-run-fixture",
+                  status,
+                  startedAt: new Date(Date.now() - 30_000).toISOString(),
+                  reason:
+                    status === "blocked"
+                      ? "Single-agent restriction prevents live multi-agent validation."
+                      : status === "paused"
+                        ? "Goal reached its automatic turn limit. Resume after reviewing the checkpoint."
+                        : undefined,
+                },
+              });
+              setRunning(
+                ["queued", "running", "waiting-approval"].includes(status),
+              );
+            }}
+          >
+            Goal fixture: {status}
+          </button>
+        ))}
+        {(["in-progress", "complete", "blocked"] as const).map((status) => (
+          <button
+            key={status}
+            onClick={() => {
+              setPlan(completionPlan(status));
+              setRunning(status === "in-progress");
+              setGoal(undefined);
+              setPanel("plan");
+            }}
+          >
+            Fixture:{" "}
+            {status === "complete"
+              ? "8/8 completed"
+              : status === "blocked"
+                ? "7/8 blocked"
+                : "7/8 working"}
+          </button>
+        ))}
+      </nav>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ChatSurface
+          events={[
+            {
+              id: "user",
+              sessionId: "goal-plan-fixture",
+              turnId: "turn",
+              kind: "user-message",
+              message: "Keep the goal and plan together.",
+              createdAt: recentStamp,
+              payload: {},
+            },
+          ]}
+          config={{
+            commandProfiles: [],
+            modelProviders: [],
+            requireCommandApproval: true,
+            requireFileEditApproval: true,
+            telemetryEnabled: false,
+          }}
+          sessionGoal={goal}
+          sessionPlan={plan}
+          isComposerSending={running}
+          isGoalComposerActive={goalEditorOpen}
+          chatMode={mode}
+          onCancelGoalComposer={() => setGoalEditorOpen(false)}
+          onComposerAction={(action) => {
+            if (action === "add-goal") setGoalEditorOpen(true);
+            if (action === "set-chat-mode-normal") setMode("normal");
+          }}
+          activeChatPanel={panel}
+          companionWidth={600}
+          onSelectChatPanel={setPanel}
+          onOpenCompanionTab={setPanel}
+          onCloseCompanionDock={() => setPanel(undefined)}
+          onGoalAction={(action, text) => {
+            if (action === "pause" || action === "resume") {
+              setRunning(action === "resume");
+              setGoal((current) =>
+                current
+                  ? {
+                      ...current,
+                      updatedAt: new Date().toISOString(),
+                      run: {
+                        ...current.run,
+                        id: "goal-run-fixture",
+                        status: action === "pause" ? "paused" : "running",
+                        reason:
+                          action === "pause"
+                            ? "You paused this goal."
+                            : undefined,
+                      },
+                    }
+                  : current,
+              );
+            } else
+              setGoal((current) =>
+                action === "clear"
+                  ? undefined
+                  : {
+                      text: text ?? current?.text ?? "",
+                      status: action === "complete" ? "complete" : "active",
+                      createdAt:
+                        current?.createdAt ?? goalFor("active").createdAt,
+                      updatedAt: new Date().toISOString(),
+                    },
+              );
+          }}
+          onPlanItemStatusChange={(id, status) =>
+            setPlan((current) => ({
+              ...current,
+              items: current.items.map((item) =>
+                item.id === id ? { ...item, status } : item,
+              ),
+            }))
+          }
+          onSend={() => {}}
+          shellReady
+        />
+      </div>
     </div>
-  </div>;
+  );
 }
-document.documentElement.dataset.theme = "dark";
+document.documentElement.dataset.theme =
+  new URLSearchParams(location.search).get("theme") === "light"
+    ? "light"
+    : "dark";
 createRoot(document.getElementById("root")!).render(<Fixture />);

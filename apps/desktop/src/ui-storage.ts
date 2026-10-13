@@ -12,7 +12,9 @@ export function readBoundedLocalStorage(key: string, maxChars: number) {
 export function safeSetLocalStorage(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value);
+    return true;
   } catch {
     // Local storage can be unavailable or quota-limited in preview contexts.
+    return false;
   }
 }

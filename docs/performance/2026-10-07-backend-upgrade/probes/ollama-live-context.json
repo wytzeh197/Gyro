@@ -1,0 +1,15 @@
+{
+  "elapsedMs": 44385,
+  "inputTokens": 18039,
+  "model": "qwen3:0.6b",
+  "modelContextTokens": 40960,
+  "outputTokens": 110,
+  "probe": "large-text-prompt",
+  "requestedContextTokens": 20480,
+  "responsePresent": true,
+  "schema": "gyro.ollama-live-probe.v1",
+  "toolCalls": 0,
+  "runtimeAllocationBytes": 3002041630,
+  "runtimeVramBytes": 3002041630,
+  "hostPhysicalMemoryBytes": 8589934592
+}

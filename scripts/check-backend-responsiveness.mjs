@@ -12,6 +12,7 @@ import {
 } from "../apps/desktop/src/session-event-order.ts";
 import {
   limitSessionEventsForUi,
+  limitOptimisticSessionEvents,
   mergePersistedAndOptimisticEvents,
   preserveDeliveredResponses,
   mergeProviderResponseEvents,
@@ -146,81 +147,176 @@ const event = (number) => ({
   payload: {},
   createdAt: new Date(number * 1000).toISOString(),
 });
-const expandedHistorySessionsRef = { current: new Set([sessionId]) };
-const optimisticEventsRef = { current: new Map([[sessionId, [event(651)]]]) };
-let rendered = Array.from({ length: 650 }, (_, i) => event(i));
-let rpc = [];
+const completeHistorySessionsRef = { current: new Set() };
+const historyRevisionsRef = { current: {} };
+const optimisticEventsRef = { current: new Map() };
+const sessionEventsByIdRef = { current: {} };
+let rendered = [];
+const rpc = [];
+let hasMoreBefore;
+let contextUpdates = 0;
 const callback = runInNewContext(callbackSource, {
   useCallback: (fn) => fn,
   isTauriRuntime: () => true,
   sessionEventsRequestRef: { current: {} },
-  expandedHistorySessionsRef,
+  completeHistorySessionsRef,
+  historyRevisionsRef,
+  sessionEventsByIdRef,
   optimisticEventsRef,
   liveCapabilityResourceIdsRef: { current: new Set() },
-  limitEventsForSession: (id, events) =>
-    limitSessionEventsForUi(
-      events,
-      expandedHistorySessionsRef.current.has(id)
-        ? MAX_CHAT_EVENT_HOLD_COUNT
-        : MAX_CHAT_EVENT_RENDER_COUNT,
-    ),
-  replaceSessionContextEvents: () => {},
-  setHasMoreBeforeBySession: () => {},
+  replaceSessionContextEvents: () => { contextUpdates++; },
+  setHasMoreBeforeBySession: (update) => {
+    hasMoreBefore = update({})[sessionId];
+  },
   setEventsForSession: (_id, update) => {
     rendered = typeof update === "function" ? update(rendered) : update;
+    sessionEventsByIdRef.current[sessionId] = rendered;
   },
   mergePersistedAndOptimisticEvents,
   mergeSessionHistoryPages,
-  compareSessionEventsForHistory,
   preserveDeliveredResponses,
   markInactiveCapabilityResources: (events) => events,
   sameSessionEvents,
-  MAX_CHAT_EVENT_HOLD_COUNT,
+  notify: () => {},
   MAX_CHAT_EVENT_RENDER_COUNT,
-  invoke: () => new Promise((resolve, reject) => rpc.push({ resolve, reject })),
+  invoke: (_command, args) =>
+    new Promise((resolve, reject) => rpc.push({ resolve, reject, args })),
 });
-const refresh = callback(sessionId);
+const reopen = callback(sessionId);
+assert.equal(rpc[0].args.fullHistory, true, "opening requests every event");
 rpc.shift().resolve({
-  events: rendered.slice(-400),
+  events: Array.from({ length: 3101 }, (_, i) => event(i)),
+  contextEvents: [],
+  hasMoreBefore: false,
+  revision: "revision-1",
+});
+// A stream frame arriving during disk IO must survive the initial load.
+optimisticEventsRef.current.set(sessionId, [event(3101)]);
+await reopen;
+assert.equal(rendered.length, 3102);
+assert.equal(rendered[1].id, "event-1");
+assert.equal(rendered.at(-1).id, "event-3101");
+assert.equal(hasMoreBefore, false);
+assert.ok(completeHistorySessionsRef.current.has(sessionId));
+
+const unchangedRead = callback(sessionId);
+assert.equal(rpc[0].args.knownRevision, "revision-1");
+rpc
+  .shift()
+  .resolve({
+    events: [],
+    contextEvents: [],
+    hasMoreBefore: false,
+    revision: "revision-1",
+    unchanged: true,
+  });
+await unchangedRead;
+assert.equal(contextUpdates, 1, "metadata-only reads cannot erase goal and plan context");
+assert.equal(
+  rendered.length,
+  3102,
+  "metadata-only refresh preserves the complete transcript",
+);
+
+const refresh = callback(sessionId);
+assert.equal(rpc[0].args.fullHistory, false, "ordinary refresh stays cheap");
+rpc.shift().resolve({
+  events: Array.from({ length: 400 }, (_, i) => event(i + 2703)),
   contextEvents: [],
   hasMoreBefore: true,
 });
 await refresh;
 assert.equal(
   rendered.length,
-  651,
-  "refresh must keep loaded earlier pages and live activity",
+  3103,
+  "refresh keeps history beyond both old caps",
 );
-assert.ok(expandedHistorySessionsRef.current.has(sessionId));
 assert.equal(rendered[1].id, "event-1");
+assert.equal(
+  hasMoreBefore,
+  false,
+  "the tail cannot make complete history partial",
+);
+
 const failedRefresh = callback(sessionId);
 rpc.shift().reject(new Error("temporary read failure"));
 await failedRefresh;
-assert.equal(
-  rendered.length,
-  651,
-  "a failed refresh must not replace durable history with the optimistic tail",
-);
+assert.equal(rendered.length, 3103, "failure preserves the transcript");
+
+// Hundreds of events can accumulate while the computer sleeps. A disjoint
+// tail must trigger a full recovery so the middle of the chat remains visible.
+const sleepRecovery = callback(sessionId);
+rpc.shift().resolve({
+  events: [event(0), ...Array.from({ length: 400 }, (_, i) => event(i + 4000))],
+  contextEvents: [],
+  hasMoreBefore: true,
+});
+await flush();
+assert.equal(rpc[0].args.fullHistory, true, "session-created is not overlap");
+rpc.shift().resolve({
+  events: Array.from({ length: 4400 }, (_, i) => event(i)),
+  contextEvents: [],
+  hasMoreBefore: false,
+});
+await sleepRecovery;
+assert.equal(rendered.length, 4400);
+assert.equal(rendered[3500].id, "event-3500", "background gap recovered");
 
 const stale = callback(sessionId);
 const latest = callback(sessionId);
 rpc[1].resolve({
-  events: [event(652)],
+  events: [event(4399), event(4400)],
   contextEvents: [],
   hasMoreBefore: true,
 });
 await latest;
 rpc[0].resolve({
-  events: [event(999)],
+  events: [event(9999)],
   contextEvents: [],
   hasMoreBefore: false,
 });
 await stale;
-assert.ok(rendered.some((item) => item.id === "event-652"));
+rpc.length = 0;
+assert.ok(rendered.some((item) => item.id === "event-4400"));
 assert.ok(
-  !rendered.some((item) => item.id === "event-999"),
+  !rendered.some((item) => item.id === "event-9999"),
   "superseded reads cannot overwrite current history",
 );
+
+// A frontend hot reload can precede the native upgrade. An older runtime's
+// bounded response must still automatically produce the entire conversation.
+completeHistorySessionsRef.current.delete(sessionId);
+optimisticEventsRef.current.clear();
+rendered = [];
+sessionEventsByIdRef.current[sessionId] = [];
+const legacyOpen = callback(sessionId);
+rpc.shift().resolve({
+  events: Array.from({ length: 400 }, (_, i) => event(401 + i)),
+  contextEvents: [],
+  hasMoreBefore: true,
+});
+await flush();
+assert.equal(rpc[0].args.beforeEventId, "event-401");
+rpc.shift().resolve({
+  events: Array.from({ length: 401 }, (_, i) => event(i)),
+  hasMoreBefore: false,
+});
+await legacyOpen;
+assert.equal(rendered.length, 801, "old runtimes automatically load all pages");
+assert.equal(rendered[1].id, "event-1");
+assert.equal(hasMoreBefore, false);
+
+// A metadata revision is useful only while its corresponding full transcript
+// is still in memory; an evicted/reopened chat must fetch all data again.
+rendered = [];
+sessionEventsByIdRef.current[sessionId] = [];
+historyRevisionsRef.current[sessionId] = "cached-revision";
+const evictedOpen = callback(sessionId);
+assert.equal(rpc[0].args.fullHistory, true);
+assert.equal(rpc[0].args.knownRevision, undefined);
+rpc.shift().resolve({events:Array.from({length:801},(_,i)=>event(i)),contextEvents:[],hasMoreBefore:false,revision:"fresh-revision"});
+await evictedOpen;
+assert.equal(rendered.length,801);
 
 // The real RPC completion must commit at the same priority as clearing the
 // sending flag. A delayed transition otherwise exposes a stale running status
@@ -254,19 +350,17 @@ const responseCallback = runInNewContext(
     optimisticEventsRef,
     setSessions: () => {},
     setEventsForSession: (_id, update) => {
-      rendered = limitSessionEventsForUi(
-        update(rendered),
-        MAX_CHAT_EVENT_HOLD_COUNT,
-      );
+      rendered = update(rendered);
     },
     mergeProviderResponseEvents,
     limitSessionEventsForUi,
+    limitOptimisticSessionEvents,
   },
 );
 const historyBeforeCompletion = rendered.length;
 responseCallback(sessionId, {
   assistantEvent: {
-    ...event(653),
+    ...event(4401),
     kind: "assistant-message",
     turnId: "completed",
     payload: { kind: "provider-response", status: "done" },
@@ -419,7 +513,7 @@ assert.equal(
   "completed history must not evict duplicate protection on a live background turn",
 );
 console.log(
-  "Backend responsiveness passed: bounded/coalesced RPCs, independent chats, trailing recovery, retained history, failed and superseded reads, bounded expanded window.",
+  "Backend responsiveness passed: bounded/coalesced RPCs, independent chats, trailing recovery, retained history, failed and superseded reads, complete reopening and background gap recovery.",
 );
 console.log(
   "Stream gap recovery passed: sparse timed recovery, reordering grace, no replay after gaps or completion, one timer, cleanup.",

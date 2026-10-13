@@ -13520,42 +13520,50 @@ body {
   white-space: nowrap;
 }
 
+.gyro-chat-artifact.is-preview {
+  background: transparent;
+  border-color: var(--gyro-premium-hairline-soft);
+}
+
 .gyro-chat-artifact-preview {
-  display: grid;
-  gap: 10px;
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
 }
 
 .gyro-chat-artifact-preview-card {
-  align-items: stretch;
-  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: var(--gyro-radius-lg);
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
   color: inherit;
   cursor: pointer;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 88px minmax(0, 1fr);
-  overflow: hidden;
-  padding: 0;
+  display: flex;
+  flex: 1;
+  gap: 9px;
+  min-width: 0;
+  padding: 2px;
   text-align: left;
-  width: 100%;
 }
 
-.gyro-chat-artifact-preview-card:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-accent) 45%,
-    var(--gyro-premium-hairline-soft)
-  );
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+.gyro-chat-artifact-preview-card:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+}
+
+.gyro-chat-artifact-preview-card:disabled {
+  cursor: default;
 }
 
 .gyro-chat-artifact-preview-media {
-  background: var(--gyro-app, #111214);
-  display: block;
-  min-height: 72px;
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
   overflow: hidden;
-  position: relative;
+  border-radius: var(--gyro-radius-sm);
 }
 
 .gyro-chat-artifact-preview-media > img {
@@ -13565,43 +13573,77 @@ body {
   width: 100%;
 }
 
-.gyro-chat-artifact-preview-fallback {
-  align-items: center;
-  color: var(--gyro-muted);
-  display: grid;
-  height: 100%;
-  min-height: 72px;
-  place-items: center;
-}
-
 .gyro-chat-artifact-preview-meta {
   display: grid;
-  gap: 4px;
+  flex: 1;
+  gap: 1px;
   min-width: 0;
-  padding: 10px 10px 10px 0;
 }
 
-.gyro-chat-artifact-preview-meta > strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 620;
+.gyro-chat-artifact-preview-meta > strong,
+.gyro-chat-artifact-preview-meta > small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.gyro-chat-artifact-preview-meta > strong {
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 620;
+  line-height: 1.45;
+}
+
 .gyro-chat-artifact-preview-meta > small {
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
   line-height: 1.4;
 }
 
-.gyro-chat-artifact-preview-meta > em {
-  color: var(--gyro-accent, #7aa2ff);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
-  font-style: normal;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+.gyro-chat-artifact-preview-status.is-failed {
+  color: var(--gyro-danger);
+}
+
+.gyro-chat-artifact-preview-status.is-stale {
+  color: var(--gyro-warn);
+}
+
+.gyro-chat-artifact-preview-open {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  gap: 3px;
+  padding: 0 6px;
+}
+
+.gyro-chat-artifact-preview-card:hover .gyro-chat-artifact-preview-open {
+  color: var(--gyro-text);
+}
+
+.gyro-chat-artifact-preview-external {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  display: flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+}
+
+.gyro-chat-artifact-preview-external:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-chat-artifact-preview-card:focus-visible,
+.gyro-chat-artifact-preview-external:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
 }
 
 .gyro-chat-artifact-table-wrap {
@@ -25584,13 +25626,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-wheel {
-  --context-usage: 0deg;
   align-items: center;
-  background: conic-gradient(
-    var(--gyro-premium-text) var(--context-usage),
-    color-mix(in srgb, var(--gyro-premium-muted) 30%, transparent)
-      var(--context-usage)
-  );
   aspect-ratio: 1;
   border-radius: 50%;
   box-sizing: border-box;
@@ -25888,17 +25924,22 @@ button.gyro-account-menu-row:hover,
   margin: 8px 11px 0;
 }
 
-.gyro-composer-context-wheel > span {
-  /* Equal insets keep the cutout concentric at every composer width. */
-  background: var(--gyro-premium-panel-strong);
-  border-radius: 50%;
-  inset: 3px;
-  position: absolute;
+.gyro-composer-context-wheel > svg {
+  /* One vector centre and stroke keep both edges circular and concentric. */
+  display: block;
+  fill: none;
+  flex: none;
+  height: 18px;
+  stroke-width: 3;
+  width: 18px;
 }
 
-.gyro-chat-composer-dock .gyro-composer-context-wheel > span,
-.gyro-chat-start .gyro-composer-context-wheel > span {
-  background: var(--gyro-hero-composer);
+.gyro-composer-context-track {
+  stroke: color-mix(in srgb, var(--gyro-premium-muted) 30%, transparent);
+}
+
+.gyro-composer-context-progress {
+  stroke: var(--gyro-premium-text);
 }
 
 /* Conversation text shares the body scale across full, split, and side chats. */
@@ -25947,11 +25988,12 @@ button.gyro-account-menu-row:hover,
   line-height: calc(16px * var(--gyro-ui-scale, 1));
 }
 
-:root[data-theme="light"] .gyro-composer-context-wheel {
-  background: conic-gradient(
-    #5f6672 var(--context-usage),
-    #d8dce3 var(--context-usage)
-  );
+:root[data-theme="light"] .gyro-composer-context-track {
+  stroke: #d8dce3;
+}
+
+:root[data-theme="light"] .gyro-composer-context-progress {
+  stroke: #5f6672;
 }
 
 /* Persistent drag ordering for project groups in the chat sidebar. */
@@ -26024,18 +26066,22 @@ button.gyro-account-menu-row:hover,
   position: relative;
 }
 
+.gyro-sidebar-new-session > .gyro-sidebar-action[aria-expanded="true"] {
+  background: var(--gyro-premium-control-hover);
+}
+
 .gyro-sidebar-new-session-menu {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-soft);
   border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft);
+  box-shadow: 0 12px 28px var(--gyro-premium-shadow-soft);
   display: grid;
-  gap: 12px;
+  gap: 6px;
   left: 0;
-  padding: 8px;
+  padding: 6px;
   position: absolute;
   right: 0;
-  top: calc(100% + 40px);
+  top: calc(100% + 6px);
   z-index: 120;
 }
 
@@ -26049,23 +26095,22 @@ button.gyro-account-menu-row:hover,
   display: grid;
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  min-height: 35px;
-  padding: 5px 8px;
+  min-height: max(32px, calc(32px * var(--gyro-ui-scale, 1)));
+  padding: 6px 10px;
   text-align: left;
   width: 100%;
 }
 
 .gyro-sidebar-new-session-menu.is-root {
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 6px;
 }
 
-.gyro-sidebar-session-group > button:hover,
-.gyro-sidebar-session-group > button:focus-visible,
-.gyro-sidebar-cli-profiles button:hover,
-.gyro-sidebar-cli-profiles button:focus-visible {
+.gyro-sidebar-session-group > button:not(:disabled):hover,
+.gyro-sidebar-session-group > button:not(:disabled):focus-visible,
+.gyro-sidebar-cli-profiles button:not(:disabled):hover,
+.gyro-sidebar-cli-profiles button:not(:disabled):focus-visible {
   background: var(--gyro-premium-control-hover);
-  outline: 0;
 }
 
 .gyro-sidebar-new-session-menu button:disabled {
@@ -26075,17 +26120,15 @@ button.gyro-account-menu-row:hover,
 
 .gyro-sidebar-new-session-menu button span {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
-/* The popover is only as wide as the sidebar column, so a label that wraps
-   grows the row past its min-height and the second line lands on the row below
-   it. Keep every launcher row one line and truncate instead. */
+/* Launcher names stay on one line at narrow sidebar widths. */
 .gyro-sidebar-new-session-menu button strong {
   display: block;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
   line-height: 1.4;
   min-width: 0;
   overflow: hidden;
@@ -26094,7 +26137,9 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-new-session-menu button small {
+  color: var(--gyro-premium-muted);
   display: block;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
   line-height: 1.4;
   min-width: 0;
   overflow: hidden;
@@ -26102,65 +26147,71 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
-.gyro-sidebar-session-group-label {
-  color: var(--gyro-premium-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
-  letter-spacing: normal;
-  text-transform: none;
-}
-
-.gyro-sidebar-new-session-menu > button.is-back {
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 0;
-  margin-bottom: 2px;
-  min-height: 34px;
-}
-
 .gyro-sidebar-session-group {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .gyro-sidebar-session-group-label {
-  padding: 0 8px;
+  color: var(--gyro-premium-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 10px 4px;
 }
 
 .gyro-sidebar-session-group.is-chat > button {
-  min-height: 38px;
+  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  min-height: max(38px, calc(38px * var(--gyro-ui-scale, 1)));
+}
+
+.gyro-sidebar-session-group.is-chat > button strong {
+  font-weight: 600;
+}
+
+.gyro-sidebar-session-group.is-chat > button > svg {
+  color: var(--gyro-accent);
+}
+
+.gyro-sidebar-session-group.is-chat > button:not(:disabled):is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--gyro-accent) 15%, transparent);
 }
 
 .gyro-sidebar-new-session-menu
   .gyro-sidebar-session-group
   + .gyro-sidebar-session-group {
   border-top: 1px solid var(--gyro-premium-hairline-soft);
-  padding-top: 8px;
-}
-
-.gyro-sidebar-new-session-menu .gyro-sidebar-session-group-label {
-  padding-bottom: 4px;
-}
-
-.gyro-sidebar-new-session-menu button strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-sidebar-new-session-menu .gyro-sidebar-cli-profiles button {
-  min-height: 32px;
+  padding-top: 6px;
 }
 
 .gyro-sidebar-new-session-menu button:focus-visible {
-  outline: 2px solid var(--gyro-premium-muted);
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
+}
+
+.gyro-sidebar-session-group > button.is-terminal-navigation {
+  color: var(--gyro-premium-muted);
+}
+
+.gyro-sidebar-session-group > button.is-terminal-navigation strong {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-sidebar-session-group.is-more > button {
+  grid-template-columns: 16px minmax(0, 1fr) auto 12px;
+  gap: 6px;
 }
 
 .gyro-sidebar-session-group.is-more > button > svg {
   color: var(--gyro-premium-muted);
 }
 
-.gyro-sidebar-session-group.is-chat > button > svg {
-  color: var(--gyro-text);
+.gyro-sidebar-session-group.is-more > button > small {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border-radius: var(--gyro-radius-xs);
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  padding: 2px 5px;
 }
 
 .gyro-sidebar-cli-profiles {
@@ -26172,6 +26223,7 @@ button.gyro-account-menu-row:hover,
   height: 16px;
   width: 16px;
 }
+
 
 .gyro-sidebar-thread.has-icon {
   grid-template-columns: 16px minmax(0, 1fr) auto;
@@ -29059,13 +29111,13 @@ button.gyro-account-menu-row:hover,
 
 /* -- Topbar --------------------------------------------------------------- */
 
-/* Tiled and single chats share the same compact title row and divider. */
+/* Split headers keep compact edge insets independent of the conversation width. */
 .gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
+  padding-inline: 12px;
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-thread-identity > strong {
@@ -29836,11 +29888,26 @@ button.gyro-account-menu-row:hover,
   place-items: stretch;
 }
 
-.gyro-browser-preview.is-device-tablet .gyro-browser-frame,
-.gyro-browser-preview.is-device-mobile .gyro-browser-frame {
-  overflow: auto;
-  padding: 12px;
-  place-items: center;
+/* The full host stays measurable; the page fits inside it without overflow. */
+.gyro-browser-preview .gyro-browser-frame {
+  overflow: hidden;
+  padding: 0;
+  place-items: stretch;
+}
+.gyro-browser-preview .gyro-browser-page {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  max-width: none;
+  width: 100%;
+}
+.gyro-browser-fitted-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--gyro-pane);
 }
 
 .gyro-browser-page.is-desktop {
@@ -40062,7 +40129,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 28px;
+  height: calc(26px * var(--gyro-ui-scale, 1));
   padding: 2px;
 }
 
@@ -40075,7 +40142,7 @@ textarea:focus-visible,
   color: var(--gyro-faint);
   display: inline-flex;
   flex: 0 0 auto;
-  height: 24px;
+  height: calc(26px * var(--gyro-ui-scale, 1) - 4px);
   justify-content: center;
   padding: 0;
   transition:
@@ -40104,11 +40171,8 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 
-/* The switch runs out to the sidebar's content column — the same 214px right
-   edge New Session, Search and every row below it use — so the title bar reads
-   as part of the sidebar rather than stopping short of it. The cap keeps two
-   icons from stretching into a banner when the Workspace sidebar is dragged
-   wider than its default 224px. */
+/* Keep the surface selector compact beside the sidebar toggle, even when the
+   Workspace sidebar is dragged wider than its default 224px. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   /* Center both control heights on the native traffic lights' visible line. */
   align-items: center;
@@ -40119,7 +40183,7 @@ textarea:focus-visible,
 
 .gyro-titlebar-switch {
   flex: 1 1 auto;
-  max-width: 88px;
+  max-width: calc(80px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-titlebar-switch-option {

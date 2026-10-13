@@ -409,6 +409,27 @@ function Fixture() {
         <button onClick={restoreDuplicates}>
           Restore duplicate stored chats
         </button>
+        <button
+          onClick={() =>
+            setDrafts((current) => ({
+              ...current,
+              [layout.focusedPaneId ?? "empty"]:
+                "Check the composer after opening Browser beside this chat. ".repeat(4),
+            }))
+          }
+        >
+          Wrapped draft
+        </button>
+        <button
+          onClick={() =>
+            setDrafts((current) => ({
+              ...current,
+              [layout.focusedPaneId ?? "empty"]: "",
+            }))
+          }
+        >
+          Clear draft
+        </button>
         <button aria-pressed={long} onClick={() => setLong(!long)}>
           Long transcript
         </button>

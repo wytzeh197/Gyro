@@ -1,0 +1,196 @@
+{
+  "recordedAt": "2026-10-08T17:31:33.186724+00:00",
+  "scope": "Two immutable standalone probe executables, same 20 true commands, alternating block order, owned-child PID sampling every 1ms, helper argv checked after exec; desktop/model latency is not measured",
+  "binaryHashes": {
+    "/private/tmp/gyro-process-lifecycle-guarded-probe": "f0a68f175a723f3a5ee0f7c28e5643439b1555a7d7876562828cd98761254053",
+    "/private/tmp/gyro-process-lifecycle-pooled-probe": "ea55b78d1f5a0234ee5ae5e36755f0d8ca560ee4d49baa95b5afb2def1f8c8f0"
+  },
+  "rows": [
+    {
+      "condition": "before",
+      "samplesUs": [
+        17603,
+        17585,
+        27810,
+        20729,
+        26500,
+        16432,
+        31053,
+        27516,
+        31212,
+        33602,
+        27157,
+        25457,
+        20303,
+        28624,
+        31145,
+        27264,
+        27105,
+        26721,
+        18506,
+        35596
+      ],
+      "runWallMs": 528.490834,
+      "observedWatchdogPids": [
+        69854,
+        69856,
+        69858,
+        69860,
+        69862,
+        69864,
+        69866,
+        69868,
+        69870,
+        69872,
+        69874,
+        69876,
+        69878,
+        69880,
+        69882,
+        69884,
+        69886,
+        69888,
+        69890,
+        69892
+      ],
+      "observedWatchdogCount": 20
+    },
+    {
+      "condition": "after",
+      "samplesUs": [
+        5806,
+        1373,
+        1349,
+        1395,
+        2830,
+        1372,
+        2479,
+        1455,
+        3063,
+        2437,
+        1417,
+        2941,
+        3045,
+        3093,
+        2615,
+        2952,
+        2926,
+        2926,
+        2978,
+        1428
+      ],
+      "runWallMs": 64.08308399999996,
+      "observedWatchdogPids": [
+        69895
+      ],
+      "observedWatchdogCount": 1
+    },
+    {
+      "condition": "after",
+      "samplesUs": [
+        4833,
+        2535,
+        2522,
+        2998,
+        3021,
+        2381,
+        2487,
+        2507,
+        2520,
+        1355,
+        2849,
+        2763,
+        2498,
+        1423,
+        1525,
+        1430,
+        2818,
+        1357,
+        2845,
+        2497
+      ],
+      "runWallMs": 55.769499999999915,
+      "observedWatchdogPids": [
+        69917
+      ],
+      "observedWatchdogCount": 1
+    },
+    {
+      "condition": "before",
+      "samplesUs": [
+        32413,
+        30533,
+        38653,
+        22172,
+        23714,
+        25597,
+        33056,
+        40031,
+        26462,
+        37524,
+        31909,
+        23929,
+        34476,
+        33713,
+        34420,
+        25873,
+        28655,
+        29714,
+        42178,
+        42684
+      ],
+      "runWallMs": 643.494209,
+      "observedWatchdogPids": [
+        69939,
+        69941,
+        69943,
+        69945,
+        69947,
+        69949,
+        69951,
+        69953,
+        69955,
+        69957,
+        69959,
+        69961,
+        69963,
+        69965,
+        69967,
+        69969,
+        69971,
+        69973,
+        69975,
+        69977
+      ],
+      "observedWatchdogCount": 20
+    }
+  ],
+  "summary": {
+    "before": {
+      "samples": 40,
+      "medianCommandMs": 28.217,
+      "meanCommandMs": 28.89065,
+      "runWallMs": [
+        528.490834,
+        643.494209
+      ],
+      "observedWatchdogCounts": [
+        20,
+        20
+      ]
+    },
+    "after": {
+      "samples": 40,
+      "medianCommandMs": 2.521,
+      "meanCommandMs": 2.4760999999999997,
+      "runWallMs": [
+        64.08308399999996,
+        55.769499999999915
+      ],
+      "observedWatchdogCounts": [
+        1,
+        1
+      ]
+    }
+  }
+}

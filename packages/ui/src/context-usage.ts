@@ -1,6 +1,7 @@
 import type { ProviderId, ProviderUsageWindow, SessionEvent } from "./types";
 import { providerCatalog } from "./provider-catalog.ts";
 import { remainingUsage } from "./usage-remaining.ts";
+import { formatCompactTokenCount, isTokenCount } from "./token-count.ts";
 
 export type ContextModelSelection = {
   providerId?: ProviderId;
@@ -98,30 +99,9 @@ function estimateTokens(characters: number) {
   return Math.ceil(Math.max(0, characters) / 4);
 }
 
-function trimTrailingZeros(value: string) {
-  return value.includes(".") ? value.replace(/\.?0+$/, "") : value;
-}
-
-/**
- * Tokens above which rounding to the nearest thousand reaches four digits.
- *
- * The unit is chosen from the rounded value, not the raw one. Picking it from
- * the raw value let 999,666 remaining tokens round up inside the thousands
- * branch and print "1000K remaining" against a 1M window — more headroom than
- * the window holds, written in a unit the meter never otherwise uses.
- */
-const COMPACT_MILLIONS_THRESHOLD = 999_500;
-
-function formatCompactTokenCount(tokens: number) {
-  if (tokens >= COMPACT_MILLIONS_THRESHOLD) {
-    const millions = (tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 2);
-    return `${trimTrailingZeros(millions)}M`;
-  }
-  if (tokens >= 1_000) {
-    const thousands = (tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1);
-    return `${trimTrailingZeros(thousands)}K`;
-  }
-  return String(tokens);
+function tokenCount(record: Record<string, unknown> | undefined, key: string) {
+  const value = record?.[key];
+  return isTokenCount(value) ? value : undefined;
 }
 
 /**
@@ -154,16 +134,20 @@ function resolveContextWindow(
 /**
  * The tokens a usage record says the conversation occupies.
  *
- * `totalTokens` and the input/output pair disagree often enough that the
- * larger of the two is the honest reading.
+ * Reject malformed or contradictory counts rather than label them measured.
+ * Repeated request consumption is kept separate from this occupancy reading.
  */
 function occupiedTokens(usage: Record<string, unknown>) {
-  const inputTokens = finiteNumber(usage, "inputTokens") ?? 0;
-  const outputTokens = finiteNumber(usage, "outputTokens") ?? 0;
-  return Math.max(
-    inputTokens + outputTokens,
-    finiteNumber(usage, "totalTokens") ?? 0,
-  );
+  for (const key of ["inputTokens", "outputTokens", "totalTokens", "modelContextWindow"]) {
+    if (usage[key] != null && !isTokenCount(usage[key])) return undefined;
+  }
+  const input = tokenCount(usage, "inputTokens");
+  const output = tokenCount(usage, "outputTokens");
+  const total = tokenCount(usage, "totalTokens");
+  if (input === undefined) return undefined;
+  const sum = input + (output ?? 0);
+  if (!isTokenCount(sum) || (total !== undefined && (total < sum || (output !== undefined && total !== sum)))) return undefined;
+  return total ?? sum;
 }
 
 /**
@@ -199,6 +183,7 @@ export function estimateComposerContextUsage(
   let reportedEventIndex = -1;
   let reportedUsage: Record<string, unknown> | undefined;
   let reportedModelId: string | undefined;
+  let reportedProviderId: string | undefined;
   // The window and the token counts come from different places. Every provider
   // reports the window Gyro resolved for its model, but only some report what
   // the turn spent, so a run that carries a window and no counts still has to
@@ -241,17 +226,18 @@ export function estimateComposerContextUsage(
       (!model.modelId || eventModelId === model.modelId);
     // The window is only meaningful for the model that reported it.
     if (matchesModel && reportedContextWindow === undefined) {
-      reportedContextWindow = finiteNumber(usage, "modelContextWindow");
+      reportedContextWindow = tokenCount(usage, "modelContextWindow");
     }
     if (reportedUsage) continue;
-    if (finiteNumber(usage, "inputTokens") === undefined) continue;
+    const occupancy = occupiedTokens(usage);
+    if (occupancy === undefined) continue;
     // A run that used tools bills the re-sent conversation once per request, so
     // some CLIs report a turn total several times the window. Nothing can
     // occupy more of the window than it holds, so a reading that large is
     // ignored and the thread estimate stands in — including for turns recorded
     // before Gyro stopped storing those totals.
     if (
-      occupiedTokens(usage) >
+      occupancy >
       (resolveContextWindow(reportedContextWindow, model) ?? Infinity)
     ) {
       continue;
@@ -265,12 +251,13 @@ export function estimateComposerContextUsage(
     reportedEventIndex = index;
     reportedUsage = usage;
     reportedModelId = eventModelId;
+    reportedProviderId = stringValue(payload, "providerId");
     if (matchesModel) break;
   }
 
-  const reportedInputTokens = finiteNumber(reportedUsage, "inputTokens");
-  const reportedOutputTokens = finiteNumber(reportedUsage, "outputTokens") ?? 0;
-  const reportedTotalTokens = finiteNumber(reportedUsage, "totalTokens");
+  const reportedInputTokens = tokenCount(reportedUsage, "inputTokens");
+  const reportedOutputTokens = tokenCount(reportedUsage, "outputTokens") ?? 0;
+  const reportedTotalTokens = tokenCount(reportedUsage, "totalTokens");
   const contextWindowTokens =
     resolveContextWindow(reportedContextWindow, model) ?? 0;
 
@@ -293,7 +280,7 @@ export function estimateComposerContextUsage(
     const event = events[index];
     if (event) {
       const previous = checkpoint
-        ? (finiteNumber(checkpoint, event.id) ?? 0)
+        ? (tokenCount(checkpoint, event.id) ?? 0)
         : 0;
       estimatedCharacters += Math.max(
         0,
@@ -314,13 +301,12 @@ export function estimateComposerContextUsage(
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
   const isOtherModelReading = Boolean(
     isReported &&
-    reportedModelId &&
-    model.modelId &&
-    reportedModelId !== model.modelId,
+    ((reportedModelId && model.modelId && reportedModelId !== model.modelId) ||
+      (reportedProviderId && model.providerId && reportedProviderId !== model.providerId)),
   );
   const detail = isReported
     ? isOtherModelReading
-      ? `Measured on the last turn, which ran on ${reportedModelId}; the thread carries the same content into this model.`
+      ? `The last turn ran on ${reportedModelId ?? reportedProviderId}; its token count is an estimate for this model. Newer thread content and this draft are estimated too.`
       : liveEstimatedTokens > 0
         ? "Provider-reported usage plus an estimate for newer thread content and this draft."
         : "Latest context usage reported by the provider."
@@ -333,7 +319,7 @@ export function estimateComposerContextUsage(
     contextWindowTokens,
     detail,
     modelLabel,
-    source: isReported ? "reported" : "estimated",
+    source: isReported && liveEstimatedTokens === 0 && !isOtherModelReading ? "reported" : "estimated",
     usedTokens,
   });
 }
@@ -377,7 +363,7 @@ export function composerContextUsageForModel(
     contextWindowTokens,
     detail: `Thread occupancy shown against ${modelLabel}'s context window.`,
     modelLabel,
-    source: usage.source,
+    source: matchesModel ? usage.source : "estimated",
     usedTokens: usage.usedTokens,
   });
 }

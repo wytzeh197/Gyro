@@ -1,0 +1,8 @@
+{
+  "cancelled": true,
+  "model": "qwen3:0.6b",
+  "probe": "cancel-after-first-text",
+  "schema": "gyro.ollama-live-probe.v1",
+  "stopMs": 0.07966699999999999,
+  "visibleOutputObserved": true
+}

@@ -110,12 +110,14 @@ export function SettingsGroup({
   label,
   badge,
   description,
+  actions,
   children,
 }: {
   label: string;
   /** Marks a group whose controls are visible but not yet usable. */
   badge?: string;
   description?: string;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const headingId = useId();
@@ -123,8 +125,20 @@ export function SettingsGroup({
     <section
       aria-labelledby={headingId}
       className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}
+      data-setting-key={settingsSearchKey(label)}
+      tabIndex={-1}
     >
-      {badge ? (
+      {actions ? (
+        <div className="gyro-settings-group-header">
+          <h2 id={headingId}>
+            {label}
+            {badge ? (
+              <span className="gyro-settings-group-badge">{badge}</span>
+            ) : null}
+          </h2>
+          {actions}
+        </div>
+      ) : badge ? (
         <h2 id={headingId}>
           {label}
           <span className="gyro-settings-group-badge">{badge}</span>
@@ -145,10 +159,12 @@ export function SettingsSegmented<T extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string;
   options: Array<{ label: string; value: T }>;
   value: T;
+  disabled?: boolean;
   onChange: (value: T) => void;
 }) {
   const descriptionId = useContext(SettingsRowDescription);
@@ -163,6 +179,7 @@ export function SettingsSegmented<T extends string>({
           aria-describedby={descriptionId}
           aria-pressed={value === option.value}
           className={value === option.value ? "is-active" : ""}
+          disabled={disabled}
           key={option.value}
           onClick={() => onChange(option.value)}
           type="button"

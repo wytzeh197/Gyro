@@ -1,0 +1,50 @@
+{
+  "recordedAt": "2026-10-08T13:11:18.870883+00:00",
+  "snapshot": {
+    "recordedAt": "2026-10-08T11:10:51.725681+00:00",
+    "build": "cargo build --offline -p gyro-desktop --features tauri/custom-protocol",
+    "frontendURL": "tauri://localhost",
+    "fixtureRoot": "/private/tmp/gyro-backend-ui-2026-10-08",
+    "persistentUIOptIn": "GYRO_TEST_PERSIST_UI=1",
+    "hashes": {
+      "target/debug/gyro-desktop": "c12ca52ac62171e4738fe326860b58983cf271dc1d2e79bc69786e3d5be6649e",
+      "apps/desktop/dist/index.html": "d17b13d8dda583ab46a5a93833575e1a1984de230d4506ed8b50696977ffbaff",
+      "apps/desktop/src/App.tsx": "5a6328ba918ca2551c45ab759e27d661ae179887e1f5958464de056dcfef3232",
+      "apps/desktop/src-tauri/src/lib.rs": "108b102e72bf18ab10ca098a8752ba1273038d9886ae028effa1e2716cc3a6de",
+      "apps/desktop/src/ui-storage.ts": "08b72992d71b4deb53a18f406c8e9545f6f052b2e05821a73567da02a01d0cbd",
+      "apps/desktop/src/turn-timing.ts": "16fcb4532637650615cc1828582abf003b514be20d14162eb36776157d3ce0a2",
+      "apps/desktop/src/source-control-scope.ts": "f7ee78c500a9c034d8ef1926ad97987eddef8ef153b6f4da66d2416605fee0c6",
+      "apps/desktop/src-tauri/src/git_status_cache.rs": "c190865c035f25f8bedb8b489b44683f4936e51676fef2c38bd25f23e195c917",
+      "packages/ui/src/types.ts": "af1499c8944c1c53a4918dadbc9a313c182a2c9005a0748093bd58d82907fa56",
+      "packages/ui/src/source-control-stats.ts": "8aa6dc76cb6776190cb95ade8c7ba8e11f00ef3db0bb7b731fed5a925d6fa86d",
+      "packages/ui/src/surfaces.tsx": "f6e4324f2baeef4eeeb115e7cafdef8321472aebb09f8dacc8f2e0f1d2930fa3",
+      "apps/desktop/src-tauri/src/turn_timing.rs": "d57845e2aebac3fe1af55b0738fcb5b9bfa6071430c53745696baed68c6ccf04",
+      "scripts/check-command-blocking.mjs": "4fa1ec3e2a15eba05512c7538918cd52953e03be68cdbeb810d2f1ceca67f1bd"
+    },
+    "bundleExecutableHash": "822c4a19d9c945ff83a508112dc7c4e1d2f2de6d1b091fba6d746eeb1b554588",
+    "bundleNote": "Copied the compiled executable into a temporary app with unique bundle identity, then ad-hoc signed; signing changes executable bytes.",
+    "updatedAt": "2026-10-08T13:04:30.134556+00:00",
+    "workspaceRestartTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store-root-check",
+    "resumeTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store",
+    "includesTerminalResponsePriorityFix": true,
+    "includesWorkspaceGitOwnerAndChatGridSelectionFix": true,
+    "includesGitPreparationDetailsAndTimingWorker": true
+  },
+  "fixture": "/private/tmp/gyro-backend-ui-2026-10-08/large-project",
+  "changes": 1000,
+  "deliberateFault": "core.fsmonitor returns failure; hook calls after second sleep four seconds before fallback scan",
+  "observations": [
+    "Opening the folder kept the exact large-project root.",
+    "Workspace before first result displayed Git not ready and misleading No commits yet.",
+    "Pending selectChatWorkspace returned after preparation and started a new chat, taking the app back to Sessions after user selected Workspace.",
+    "Later Source Control correctly displayed +1,000/-0 uncommitted and 1,000 changed files.",
+    "Scrolling reached file-0059.txt and 940 more files not shown, confirming bounded 60-row presentation.",
+    "History displayed one Large disposable verification fixture commit."
+  ],
+  "followup": "Initial-history and deferred-navigation source fixes implemented; rebuilt native follow-through pending.",
+  "limits": [
+    "No native frame/latency comparison.",
+    "No authenticated model send performed."
+  ],
+  "cleanup": "Removed fixture-only fsmonitor setting and closed owned verification executable; lsof found no remaining process."
+}

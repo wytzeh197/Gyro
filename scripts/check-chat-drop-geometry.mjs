@@ -19,36 +19,17 @@ const target = (position, left, top, right, bottom) => ({
   getBoundingClientRect: () => ({ left, top, right, bottom }),
 });
 
-// Independent rectangles for the CSS overlay: padding 10, gutter 8; linear
-// insertion bars 8 wide and pane tracks separated by 1 pixel. This exercises
-// a release before the targets exist against the visible overlay geometry.
+// Independent CSS rectangles: every layout uses padding 10 and gutter 8.
+// Compare early releases with the broad tiles the user can actually see.
 function renderedTargets(zones, rectangle = bounds) {
   const { left, top, width, height } = rectangle;
   const layout = chatGridDropLayout(zones);
-  if (layout === "row" || layout === "stack") {
-    const horizontal = layout === "row";
-    const length = horizontal ? width : height;
-    const offset = horizontal ? left : top;
-    const panes = zones.length - 1;
-    const paneSize = (length - (panes - 1)) / panes;
-    return zones.map((zone, index) => {
-      const start =
-        index === 0
-          ? offset
-          : index === panes
-            ? offset + length - 8
-            : offset + (paneSize + 1) * index - 4;
-      return horizontal
-        ? target(zone.position, start, top, start + 8, top + height)
-        : target(zone.position, left, start, left + width, start + 8);
-    });
-  }
-  const columns = layout === "full" ? 1 : 2;
-  const rows = layout === "positions" ? 2 : 1;
-  const innerWidth = width - 20;
-  const innerHeight = height - 20;
-  const tileWidth = (innerWidth - (columns - 1) * 8) / columns;
-  const tileHeight = (innerHeight - (rows - 1) * 8) / rows;
+  const columns = layout === "row" ? zones.length
+    : layout === "full" || layout === "stack" ? 1 : 2;
+  const rows = layout === "stack" ? zones.length
+    : layout === "positions" ? 2 : 1;
+  const tileWidth = (width - 20 - (columns - 1) * 8) / columns;
+  const tileHeight = (height - 20 - (rows - 1) * 8) / rows;
   return zones.map((zone, index) => {
     const x = left + 10 + (index % columns) * (tileWidth + 8);
     const y = top + 10 + Math.floor(index / columns) * (tileHeight + 8);
@@ -122,6 +103,36 @@ assert.deepEqual(
   chatGridDropZones([], "columns"),
 );
 
+// Corners become quadrants only after two chats are already open. This
+// applies to every sparse layout, both linear orientations, and fast drops.
+for (const arrangement of ["columns", "rows", "grid"]) {
+  for (const [x, y, slotIndex] of [[0.1,0.1,0],[0.9,0.1,1],[0.1,0.9,2],[0.9,0.9,3]]) {
+    const pointer = { bounds, x: bounds.left + bounds.width*x, y: bounds.top + bounds.height*y };
+    const single = chatGridDropZones([pane("a")], arrangement, false, pointer);
+    assert.equal(chatGridDropLayout(single), "columns");
+    assert.ok(single.every(z=>z.placement?.arrangement !== "grid"));
+    assert.equal(chatGridDropZoneBeforePaint(single,bounds,pointer.x,pointer.y)?.id, x<0.5 ? "left":"right");
+    for (const slots of [fullSlots.slice(0,2), fullSlots.slice(0,3), [null,pane("a"),null,pane("b")]]) {
+      const zones = chatGridDropZones(slots, arrangement, false, pointer);
+      assert.equal(chatGridDropLayout(zones), "positions");
+      const landing = chatGridDropZoneBeforePaint(zones,bounds,pointer.x,pointer.y);
+      assert.equal(landing?.slotIndex,slotIndex);
+      assert.equal(landing?.placement.arrangement,"grid");
+      assert.equal(nearestChatGridDropZone(renderedTargets(zones),zones,pointer.x,pointer.y,bounds)?.id,landing.id);
+      if(arrangement !== "grid") {
+        assert.equal(nearestChatGridDropZone(renderedTargets(chatGridDropZones(slots,arrangement)),zones,pointer.x,pointer.y,bounds),undefined,
+          "a stale row overlay cannot own a new corner release");
+      }
+    }
+    assert.deepEqual(chatGridDropZones(fullSlots,arrangement,false,pointer),[]);
+  }
+}
+const middle = chatGridDropZones(fullSlots.slice(0,2),"columns",false,{
+  bounds,x:720,y:350,
+});
+assert.equal(chatGridDropLayout(middle),"row");
+assert.equal(chatGridDropZoneBeforePaint(middle,bounds,720,350)?.id,"row-seam-1");
+
 const fixtures = [
   chatGridDropZones([], "columns"),
   chatGridDropZones([pane("a")], "columns"),
@@ -167,8 +178,8 @@ for (const rectangle of [
   }
 }
 
-// Reordering treats the whole neighbouring pane as a destination, in either
-// direction, while exact insertion bars and the source itself keep their zone.
+// Every neighbouring pane is a broad reorder destination. The source and
+// either original source boundary cancel, preserving drafts and maximization.
 for (const rectangle of [bounds,
   { left: -713.25, top: -80.5, width: 517.5, height: 301.25 },
 ]) {
@@ -177,72 +188,53 @@ for (const rectangle of [bounds,
       fullSlots.slice(0, 2), fullSlots.slice(0, 3), fullSlots,
       [null, pane("sparse-a"), null, pane("sparse-b")],
     ]) {
-      const zones = chatGridDropZones(slots, arrangement, true);
-      const targets = renderedTargets(zones, rectangle);
-      const count = zones.length - 1;
+      const occupied = slots.flatMap((p, index) => p ? [index] : []);
+      const count = occupied.length;
       const horizontal = arrangement === "columns";
       const track = ((horizontal ? rectangle.width : rectangle.height) + 1) / count;
       for (let source = 0; source < count; source++) {
-        const sourceSlot = zones[source].slotIndex;
+        const sourceSlot = occupied[source];
+        const zones = chatGridDropZones(slots, arrangement, true, {
+          bounds: rectangle, x: rectangle.left + rectangle.width / 2,
+          y: rectangle.top + rectangle.height / 2, sourceSlotIndex: sourceSlot,
+        });
+        const targets = renderedTargets(zones, rectangle);
+        assert.equal(zones.length, count);
+        assert.equal(zones[source].isSource, true);
         for (let destination = 0; destination < count; destination++) {
           for (const fraction of [0.2, 0.4, 0.6, 0.8]) {
             const x = rectangle.left + (horizontal
               ? track * (destination + fraction) : rectangle.width / 2);
             const y = rectangle.top + (horizontal
               ? rectangle.height / 2 : track * (destination + fraction));
-            const expected = destination === source
-              ? chatGridDropZoneBeforePaint(zones, rectangle, x, y)
-              : zones[destination < source ? destination : destination + 1];
             assert.equal(chatGridDropZoneBeforePaint(
               zones, rectangle, x, y, sourceSlot,
-            )?.id, expected?.id);
+            )?.id, zones[destination].id);
             assert.equal(nearestChatGridDropZone(
               targets, zones, x, y, rectangle, sourceSlot,
-            )?.id, expected?.id);
+            )?.id, zones[destination].id);
           }
         }
-        // Exact bars still support precise placement and cancellation.
-        for (let index = 0; index < targets.length; index++) {
-          const r = targets[index].getBoundingClientRect();
-          const x = (r.left + r.right) / 2;
-          const y = (r.top + r.bottom) / 2;
-          assert.equal(chatGridDropZoneBeforePaint(
-            zones, rectangle, x, y, sourceSlot,
-          )?.id, zones[index].id);
-          assert.equal(nearestChatGridDropZone(
-            targets, zones, x, y, rectangle, sourceSlot,
-          )?.id, zones[index].id);
+        for (const boundary of [source, source + 1]) {
+          const offset = Math.min(track * boundary, horizontal ? rectangle.width : rectangle.height);
+          const x = rectangle.left + (horizontal ? offset : rectangle.width / 2);
+          const y = rectangle.top + (horizontal ? rectangle.height / 2 : offset);
+          assert.equal(chatGridDropZoneBeforePaint(zones, rectangle, x, y, sourceSlot)?.id, zones[source].id);
+          assert.equal(nearestChatGridDropZone(targets, zones, x, y, rectangle, sourceSlot)?.id, zones[source].id);
         }
       }
     }
   }
 }
 
-// Explicit regressions: a seam bar straddles a pane boundary while edge bars
-// are inset. Equal-width rounding picks the wrong edge near these midpoints.
+// Broad tile gutters have deterministic ownership on either side of a tie.
 const row = chatGridDropZones(fullSlots.slice(0, 2), "columns");
-assert.equal(
-  chatGridDropZoneBeforePaint(row, bounds, 482, 350)?.id,
-  "row-start",
-);
-assert.equal(
-  chatGridDropZoneBeforePaint(row, bounds, 483, 350)?.id,
-  "row-seam-1",
-);
-assert.equal(chatGridDropZoneBeforePaint(row, bounds, 959, 350)?.id, "row-end");
+assert.equal(chatGridDropZoneBeforePaint(row, bounds, 562, 350)?.id, "row-start");
+assert.equal(chatGridDropZoneBeforePaint(row, bounds, 562.01, 350)?.id, "row-seam-1");
 const stack = chatGridDropZones(fullSlots.slice(0, 2), "rows");
-assert.equal(
-  chatGridDropZoneBeforePaint(stack, bounds, 720, 202)?.id,
-  "stack-start",
-);
-assert.equal(
-  chatGridDropZoneBeforePaint(stack, bounds, 720, 203)?.id,
-  "stack-seam-1",
-);
-assert.equal(
-  chatGridDropZoneBeforePaint(stack, bounds, 720, 499)?.id,
-  "stack-end",
-);
+assert.equal(chatGridDropZoneBeforePaint(stack, bounds, 720, 252)?.id, "stack-start");
+assert.equal(chatGridDropZoneBeforePaint(stack, bounds, 720, 252.01)?.id, "stack-seam-1");
+
 const quadrants = fixtures[2];
 assert.equal(
   chatGridDropZoneBeforePaint(quadrants, bounds, 720, 350)?.id,

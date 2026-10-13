@@ -55,6 +55,7 @@ pub enum CapabilityId {
     BrowserInspect,
     BrowserReload,
     BrowserScreenshot,
+    BrowserViewport,
     BrowserNavigate,
     BrowserBack,
     BrowserForward,
@@ -126,6 +127,7 @@ impl CapabilityId {
             Self::BrowserInspect => "browser.inspect",
             Self::BrowserReload => "browser.reload",
             Self::BrowserScreenshot => "browser.screenshot",
+            Self::BrowserViewport => "browser.viewport",
             Self::BrowserNavigate => "browser.navigate",
             Self::BrowserBack => "browser.back",
             Self::BrowserForward => "browser.forward",
@@ -197,6 +199,7 @@ impl CapabilityId {
             Self::BrowserInspect => "gyro_browser_inspect",
             Self::BrowserReload => "gyro_browser_reload",
             Self::BrowserScreenshot => "gyro_browser_screenshot",
+            Self::BrowserViewport => "gyro_browser_set_viewport",
             Self::BrowserNavigate => "gyro_browser_navigate",
             Self::BrowserBack => "gyro_browser_back",
             Self::BrowserForward => "gyro_browser_forward",
@@ -851,7 +854,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
         class: CapabilityClass::BrowserNavigate,
-        description: "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+        description: "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Keep implementation checks, interactions, and screenshots in the background. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserInspect,
@@ -866,12 +869,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserScreenshot,
         class: CapabilityClass::BrowserInspect,
-        description: "Capture a screenshot of this chat's open browser page.",
+        description: "Capture the full-resolution viewport of this chat's open browser page. Optional device selects responsive, desktop, tablet, or mobile layout before capture; omit it to preserve the current viewport.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserViewport,
+        class: CapabilityClass::BrowserInspect,
+        description: "Set this chat's Browser layout viewport without navigating. Auto uses Desktop fit for local app previews and responsive layout for ordinary sites. Desktop, tablet and mobile retain fixed CSS dimensions while the page scales to fit a narrow panel; responsive follows the panel. Optional width and height customize a fixed viewport. Re-observe after changing it; mouse coordinates remain CSS pixels and screenshots retain full viewport resolution.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserNavigate,
         class: CapabilityClass::BrowserNavigate,
-        description: "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff. Same origin gate as browser.open.",
+        description: "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. Keep implementation checks, interactions, and screenshots in the background. Same origin gate as browser.open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserBack,

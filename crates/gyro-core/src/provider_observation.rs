@@ -409,7 +409,10 @@ mod tests {
             }
             let tokens = snapshot().unwrap().tokens.unwrap();
             assert_eq!(tokens.total_tokens, 150);
-            assert!(tokens.measured);
+            assert_eq!(tokens.measured, input.is_none() || output.is_none());
+            if !tokens.measured {
+                assert_eq!(tokens.effective_accounting().reason, Some(crate::usage::UsageReason::InconsistentCounts));
+            }
         }
     }
 

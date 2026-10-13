@@ -1,0 +1,368 @@
+{
+  "longTitles": [
+    {
+      "buttons": [
+        {
+          "h": 29.890625,
+          "label": "Show sidebar",
+          "w": 29.890625,
+          "x": 90,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "New session",
+          "w": 29.890625,
+          "x": 123.890625,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "More chat surfaces",
+          "w": 29.890625,
+          "x": 744.328125,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Environment",
+          "w": 29.890625,
+          "x": 782.21875,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Show companion",
+          "w": 29.890625,
+          "x": 815.109375,
+          "y": 9.546875
+        }
+      ],
+      "headerWidth": 858,
+      "headerX": 1,
+      "height": 620,
+      "inset": "177.8px",
+      "rootOverflow": false,
+      "titleEnd": 736.328125,
+      "titleTooltip": "Do a full backend reliability upgrade for chat and workspace and cover the edge cases",
+      "titleTruncated": true,
+      "titleWidth": 533.53125,
+      "width": 860
+    },
+    {
+      "buttons": [
+        {
+          "h": 29.890625,
+          "label": "Open navigation",
+          "w": 29.890625,
+          "x": 90,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "New session",
+          "w": 29.890625,
+          "x": 123.890625,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "More chat surfaces",
+          "w": 29.890625,
+          "x": 564.328125,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Environment",
+          "w": 29.890625,
+          "x": 602.21875,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Show companion",
+          "w": 29.890625,
+          "x": 635.109375,
+          "y": 9.546875
+        }
+      ],
+      "headerWidth": 678,
+      "headerX": 1,
+      "height": 620,
+      "inset": "177.8px",
+      "rootOverflow": false,
+      "titleEnd": 556.328125,
+      "titleTooltip": "Do a full backend reliability upgrade for chat and workspace and cover the edge cases",
+      "titleTruncated": true,
+      "titleWidth": 353.53125,
+      "width": 680
+    },
+    {
+      "buttons": [
+        {
+          "h": 29.890625,
+          "label": "Open navigation",
+          "w": 29.890625,
+          "x": 90,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "New session",
+          "w": 29.890625,
+          "x": 123.890625,
+          "y": 9.046875
+        },
+        {
+          "h": 29.890625,
+          "label": "More chat surfaces",
+          "w": 29.890625,
+          "x": 424.328125,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Environment",
+          "w": 29.890625,
+          "x": 462.21875,
+          "y": 9.546875
+        },
+        {
+          "h": 29.890625,
+          "label": "Show companion",
+          "w": 29.890625,
+          "x": 495.109375,
+          "y": 9.546875
+        }
+      ],
+      "headerWidth": 538,
+      "headerX": 1,
+      "height": 620,
+      "inset": "177.8px",
+      "rootOverflow": false,
+      "titleEnd": 416.328125,
+      "titleTooltip": "Do a full backend reliability upgrade for chat and workspace and cover the edge cases",
+      "titleTruncated": true,
+      "titleWidth": 213.53125,
+      "width": 540
+    }
+  ],
+  "splitBeforeCompaction": [
+    {
+      "headers": [
+        {
+          "buttons": [
+            {
+              "label": "More chat surfaces",
+              "outside": false,
+              "w": 29.890625,
+              "x": 371.9375
+            },
+            {
+              "label": "Environment",
+              "outside": false,
+              "w": 29.890625,
+              "x": 409.828125
+            },
+            {
+              "label": "Show companion",
+              "outside": false,
+              "w": 29.890625,
+              "x": 442.71875
+            },
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 475.609375
+            }
+          ],
+          "inset": "177.8px",
+          "titleW": 162.140625,
+          "w": 519.5,
+          "x": 0
+        },
+        {
+          "buttons": [
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 996.109375
+            }
+          ],
+          "inset": "14px",
+          "titleW": 157.71875,
+          "w": 519.5,
+          "x": 520.5
+        }
+      ],
+      "overflow": false,
+      "width": 1040
+    },
+    {
+      "headers": [
+        {
+          "buttons": [
+            {
+              "label": "More chat surfaces",
+              "outside": false,
+              "w": 29.890625,
+              "x": 281.9375
+            },
+            {
+              "label": "Environment",
+              "outside": false,
+              "w": 29.890625,
+              "x": 319.828125
+            },
+            {
+              "label": "Show companion",
+              "outside": false,
+              "w": 29.890625,
+              "x": 352.71875
+            },
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 385.609375
+            }
+          ],
+          "inset": "177.8px",
+          "titleW": 72.140625,
+          "w": 429.5,
+          "x": 0
+        },
+        {
+          "buttons": [
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 816.109375
+            }
+          ],
+          "inset": "14px",
+          "titleW": 157.71875,
+          "w": 429.5,
+          "x": 430.5
+        }
+      ],
+      "overflow": false,
+      "width": 860
+    },
+    {
+      "headers": [
+        {
+          "buttons": [
+            {
+              "label": "More chat surfaces",
+              "outside": false,
+              "w": 29.890625,
+              "x": 249.796875
+            },
+            {
+              "label": "Environment",
+              "outside": false,
+              "w": 29.890625,
+              "x": 229.828125
+            },
+            {
+              "label": "Show companion",
+              "outside": false,
+              "w": 29.890625,
+              "x": 262.71875
+            },
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 295.609375
+            }
+          ],
+          "inset": "177.8px",
+          "titleW": 40,
+          "w": 339.5,
+          "x": 0
+        },
+        {
+          "buttons": [
+            {
+              "label": "Close chat",
+              "outside": false,
+              "w": 29.890625,
+              "x": 636.109375
+            }
+          ],
+          "inset": "14px",
+          "titleW": 157.71875,
+          "w": 339.5,
+          "x": 340.5
+        }
+      ],
+      "overflow": false,
+      "width": 680
+    }
+  ],
+  "splitAfterCompaction": {
+    "headers": [
+      {
+        "buttons": [
+          {
+            "label": "More chat surfaces",
+            "outside": false,
+            "w": 29.890625,
+            "x": 227.71875
+          },
+          {
+            "label": "Environment",
+            "outside": false,
+            "w": 0,
+            "x": 0
+          },
+          {
+            "label": "Show companion",
+            "outside": false,
+            "w": 0,
+            "x": 0
+          },
+          {
+            "label": "Close chat",
+            "outside": false,
+            "w": 29.890625,
+            "x": 265.609375
+          }
+        ],
+        "inset": "177.8px",
+        "titleW": 41.921875,
+        "w": 309.5,
+        "x": 0
+      },
+      {
+        "buttons": [
+          {
+            "label": "Close chat",
+            "outside": false,
+            "w": 29.890625,
+            "x": 576.109375
+          }
+        ],
+        "inset": "14px",
+        "titleW": 157.71875,
+        "w": 309.5,
+        "x": 310.5
+      }
+    ],
+    "overflow": false,
+    "width": 620
+  },
+  "verifiedInteractions": [
+    "Compact New session opens new chat",
+    "Open navigation and show sidebar restore navigation",
+    "Environment opens from compact More menu",
+    "Show companion opens from compact More menu",
+    "Hide companion closes it"
+  ]
+}

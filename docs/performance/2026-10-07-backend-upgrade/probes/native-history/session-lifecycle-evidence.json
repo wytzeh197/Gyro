@@ -1,0 +1,44 @@
+{
+  "recordedAt": "2026-10-08T16:22:17.895572+00:00",
+  "hashes": {
+    "apps/desktop/src-tauri/src/provider_session_lifecycle.rs": "c77f10c97cb7deae3055468e00d2399fb624d0f61a702623dc7c3e831dfbc43f",
+    "apps/desktop/src-tauri/src/lib.rs": "3c82271df003663053cc04d1f8ec009836bf5b3829c4768863e6df07b932e2af",
+    "crates/gyro-core/src/sessions.rs": "6ab7cef4666bbfa7a794960a6d5561656e13845220cb49714a1254115e3e1ddf",
+    "target/debug/gyro-desktop": "785fa65da94ec93f7737861a8f00f46e06bc8119e0d5c79b3d1ce02253aca89d",
+    "apps/desktop/dist/index.html": "f8095acd46c50096999e1a8aa9e5e65ddad8fdf58391a3e25b2350b19655ad1b"
+  },
+  "desktopSuite": {
+    "passed": 516,
+    "ignored": 5,
+    "log": "desktop-session-lifecycle-final.log"
+  },
+  "coreSessionSuite": {
+    "passed": 51,
+    "log": "core-session-lifecycle.log"
+  },
+  "nativeStaticBuild": "passed; build target only, existing native verification bundle not replaced",
+  "regressions": [
+    "live run in another process is preserved",
+    "force-quit releases lease and abandoned turn closes exactly once",
+    "stale running scan never overwrites completed turn",
+    "different session remains available",
+    "legacy live listener defers recovery and dispatch; stale socket does not",
+    "symlink and hard-link lease paths are refused"
+  ],
+  "platformScope": "macOS exercised; Windows exclusive-handle branch follows std OpenOptionsExt docs but was not compiled or run here",
+  "initialSandboxAttempt": "6 tests passed; local Unix socket bind was denied. Escalated scoped and final suites passed.",
+  "crashCleanupGap": {
+    "ownerForceQuit": true,
+    "childAliveAfterOwnerExit": true,
+    "childWroteFixtureAfterOwnerExit": true,
+    "providerAccountsUsed": false,
+    "groupCleanupOwned": true
+  },
+  "crashCleanupProbe": "real gyro_core::execution::run_command; mock /bin/sh only; no provider account; only owned temporary file and process group",
+  "remaining": "force-quit cleanup of provider descendants, native restart and scroll acceptance, provider access gates",
+  "crashCleanupProbeGroupGone": true,
+  "nativeAcceptanceAvailability": {
+    "checkedAt": "2026-10-08T16:23:11.313293+00:00",
+    "state": "Mac remains locked; pending manual unlock request unanswered"
+  }
+}

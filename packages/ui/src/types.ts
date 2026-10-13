@@ -340,6 +340,28 @@ export type SessionGoal = {
   sessionId?: string;
   text: string;
   status: SessionGoalStatus;
+  run?: {
+    id: string;
+    status:
+      | "queued"
+      | "running"
+      | "waiting-approval"
+      | "blocked"
+      | "paused"
+      | "complete";
+    reason?: string;
+    checkpoint?: string;
+    nextAction?: string;
+    startedAt?: string;
+    deadline?: string;
+    automaticTurns?: number;
+    newTokens?: number;
+  };
+  runLimits?: {
+    maxAutomaticTurns: number;
+    maxMinutes: number;
+    maxNewTokens: number;
+  };
   sourceTurnId?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -679,7 +701,15 @@ export type DiffReview = {
   lastAction?: string;
 };
 
-export type BrowserPreviewDevice = "desktop" | "tablet" | "mobile";
+export type BrowserPreviewDevice = "responsive" | "desktop" | "tablet" | "mobile";
+export type BrowserViewportMode = "auto" | BrowserPreviewDevice;
+export type BrowserViewportState = {
+  mode: BrowserViewportMode;
+  device: BrowserPreviewDevice;
+  width: number;
+  height: number;
+  displayScale: number;
+};
 
 export type BrowserPreviewStatus =
   | "idle"
@@ -732,6 +762,8 @@ export type BrowserPreview = {
   history: string[];
   historyIndex: number;
   device: BrowserPreviewDevice;
+  deviceOverride?: boolean;
+  viewport?: BrowserViewportState;
   consoleErrors: number;
   diagnostics: BrowserPreviewDiagnostic[];
   diagnosticsSupported: boolean;

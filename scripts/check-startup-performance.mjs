@@ -240,8 +240,8 @@ assert.ok(
   "action and baseline inputs consume scoped data",
 );
 assert.ok(
-  source.includes(
-    "sourceControlForWorkspace(workbench.ide.sourceControl, pane.workspacePath)",
+  /sourceControlForWorkspace\(\s*workbench\.ide\.sourceControl,\s*pane\.workspacePath,?\s*\)/.test(
+    source,
   ),
   "each tiled pane validates its own workspace rather than the focused pane",
 );

@@ -2,6 +2,7 @@ import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu } fro
 import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import { CodeModeActivityCard } from "./code-mode-card";
 import { groupWorkflowEvents, workflowDetails } from "./code-mode";
+import { createTranscriptTurnCache } from "./chat-history-efficiency";
 import { EfficiencySettings } from "./efficiency-settings";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
 import {
@@ -54,6 +55,7 @@ import {
 } from "./composer-context.ts";
 import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
+import { BrowserViewportControls, FittedBrowserFrame } from "./browser-viewport-controls";
 import { CompanionMotionContext, useCompanionMotion, useCompanionPresence } from "./use-companion-motion";
 import "./companion-motion.css";
 import {
@@ -100,6 +102,7 @@ import {
   settingsSearchKey,
 } from "./settings-controls";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
+import { WorkspaceDefaultSettings } from "./settings-workspace-defaults";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -179,6 +182,7 @@ import {
   PauseCircle,
   Pin,
   Pause as PauseIcon,
+  Pause,
   Play,
   PlugZap,
   Plus,
@@ -352,6 +356,7 @@ import type {
   BrowserFeedback,
   BrowserPreview,
   BrowserPreviewDevice,
+  BrowserViewportMode,
   CapabilityActivity,
   CapabilityCallEvent,
   ChatAttachment,
@@ -870,19 +875,19 @@ const settingsSidebarItems: Array<{
   },
   {
     id: "keyboard",
-    label: "Keyboard",
+    label: "Keyboard Shortcuts",
     icon: CommandIcon,
     group: "Preferences",
   },
   {
     id: "usage-limits",
-    label: "Usage Limits",
+    label: "Usage & Limits",
     icon: Gauge,
     group: "AI & Agents",
   },
   {
     id: "providers",
-    label: "Providers",
+    label: "Models & Accounts",
     icon: KeyRound,
     group: "AI & Agents",
   },
@@ -900,13 +905,13 @@ const settingsSidebarItems: Array<{
   },
   {
     id: "editor-workspace",
-    label: "Editor & Search",
+    label: "Workspace",
     icon: FileText,
     group: "Workspace",
   },
   {
     id: "tools-contributions",
-    label: "Tools & Contributions",
+    label: "Tools",
     icon: Blocks,
     group: "Workspace",
   },
@@ -950,28 +955,28 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     keywords: "stop resume",
   },
   {
-    section: "permissions",
+    section: "editor-workspace",
     label: "New chats start in",
     detail: "Choose Project folder or Agent workspace",
     keywords: "default worktree branch local isolation",
   },
   {
-    section: "permissions",
+    section: "general",
     label: "Post-edit summaries",
     detail: "Generate summaries of changed files",
     keywords: "review extra provider call",
   },
   {
     section: "editor-workspace",
-    label: "Editor & Search",
-    detail: "Editor, Explorer, and search behavior by workspace scope",
-    keywords: "workspace folder minimap exclude maximum results",
+    label: "Workspace",
+    detail: "New chat defaults, editor, Explorer, and search behavior",
+    keywords: "editor search workspace folder minimap exclude maximum results default worktree",
   },
   {
     section: "tools-contributions",
-    label: "Tools & Contributions",
+    label: "Tools",
     detail: "Language servers, workspace commands, and local contributions",
-    keywords: "extensions manifests lsp",
+    keywords: "tools contributions extensions manifests lsp",
   },
   {
     section: "general",
@@ -991,15 +996,15 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "appearance",
-    label: "Main color",
-    detail: "Customize Gyro's main and secondary accents",
-    keywords: "main secondary accent brand palette color",
+    label: "Primary accent",
+    detail: "Selection, focus, and primary action color",
+    keywords: "main color primary accent brand palette color",
   },
   {
     section: "appearance",
-    label: "Density",
+    label: "Spacing",
     detail: "Use Compact or Comfortable interface spacing",
-    keywords: "layout spacing",
+    keywords: "density layout spacing",
   },
   {
     section: "appearance",
@@ -1015,21 +1020,21 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "appearance",
-    label: "Secondary color",
+    label: "Secondary accent",
     detail: "Supporting icons, badges, and quiet highlights",
-    keywords: "accent palette color",
+    keywords: "secondary color accent palette color",
   },
   {
     section: "appearance",
-    label: "Default palette",
-    detail: "Restore Gyro blue and violet",
-    keywords: "reset colors",
+    label: "Colors",
+    detail: "Choose accent colors or restore Gyro blue and violet",
+    keywords: "default palette reset colors",
   },
   {
     section: "usage-limits",
-    label: "Usage Limits",
+    label: "Usage & Limits",
     detail: "Provider allowance, spend, and local guardrails",
-    keywords: "daily budget cap tokens",
+    keywords: "usage limits daily budget cap tokens",
   },
   {
     section: "usage-limits",
@@ -1069,9 +1074,9 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "providers",
-    label: "Providers",
-    detail: "Connect OpenAI, Anthropic, Gemini, and xAI",
-    keywords: "model api key authentication credentials",
+    label: "Models & Accounts",
+    detail: "Connect accounts and choose models",
+    keywords: "providers model api key authentication credentials openai anthropic gemini xai",
   },
   {
     section: "cli-profiles",
@@ -1140,7 +1145,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "keyboard",
-    label: "Keyboard",
+    label: "Keyboard Shortcuts",
     detail: "Shortcuts for navigation, sessions, terminal, and search",
     keywords:
       "hotkeys keybindings cmd command palette reassign workspace shortcuts",
@@ -6025,6 +6030,7 @@ function WorkspaceSidebarContent({
                     </span>
                     {terminalPanes.length > 0 ? (
                       <button
+                        className="is-terminal-navigation"
                         onClick={() => {
                           setNewSessionMenuView("closed");
                           onSelectWorkspaceLayout("terminal-grid");
@@ -6055,8 +6061,14 @@ function WorkspaceSidebarContent({
                     <div className="gyro-sidebar-cli-profiles">
                       {readyCommandProfiles.map((profile) => (
                         <button
+                          aria-label={profile.displayName}
                           disabled={!newCliWorkspacePath}
                           key={profile.id}
+                          title={
+                            newCliWorkspacePath
+                              ? profile.displayName
+                              : "Open a project to start a CLI session"
+                          }
                           onClick={() => {
                             if (!newCliWorkspacePath) return;
                             onCreateCliSession(profile.id, newCliWorkspacePath);
@@ -6083,6 +6095,7 @@ function WorkspaceSidebarContent({
                     <div className="gyro-sidebar-session-group is-more">
                       <button
                         aria-expanded={newSessionMenuView === "more"}
+                        aria-label={`More tools, ${blockedCommandProfiles.length} ${blockedCommandProfiles.length === 1 ? "needs" : "need"} setup`}
                         onClick={() =>
                           setNewSessionMenuView((current) =>
                             current === "more" ? "root" : "more",
@@ -6092,16 +6105,10 @@ function WorkspaceSidebarContent({
                         type="button"
                       >
                         <Box size={16} />
-                        <span>
-                          <strong>More tools</strong>
-                          <small>
-                            {blockedCommandProfiles.length}{" "}
-                            {blockedCommandProfiles.length === 1
-                              ? "needs"
-                              : "need"}{" "}
-                            setup
-                          </small>
-                        </span>
+                        <strong>More tools</strong>
+                        <small aria-hidden="true" title={`${blockedCommandProfiles.length} tools need setup`}>
+                          {blockedCommandProfiles.length}
+                        </small>
                         {newSessionMenuView === "more" ? (
                           <ChevronDown size={15} />
                         ) : (
@@ -6886,7 +6893,7 @@ type SidebarProjectGroupData = {
 
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
 const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY = "gyro.sidebar-project-collapse-v1";
-const SIDEBAR_INITIAL_PROJECT_SESSION_COUNT = 3;
+const SIDEBAR_INITIAL_PROJECT_SESSION_COUNT = 5;
 const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
 
 function sidebarProjectGroups(
@@ -7567,23 +7574,26 @@ export function ChatGridSurface({
           pane.kind === "session" &&
           pane.sessionId === dragIdentity.sessionId),
   );
-  const zonesForDrag = (identity: ReturnType<typeof readChatDrag>) => {
-    // A chat belongs to its own project. Switching projects has one target;
-    // coordinates from this layout cannot address another project's panes.
+  const gridRef = useRef<HTMLDivElement>(null);
+  // Hover and release choose their layout from the same current pointer.
+  const dragPointer = useRef<{ x: number; y: number }>();
+  const zonesForDrag = (
+    identity: ReturnType<typeof readChatDrag>,
+    point = dragPointer.current,
+  ): ChatGridDropZone[] => {
+    // Project switches cannot address this project's panes.
     if (
       identity?.kind === "session" &&
       chatProjectKey(identity.projectKey) !== chatProjectKey(layout.projectKey)
     ) {
-      return [
-        {
-          id: "project",
-          label: "Open in its project",
-          position: "full",
-          slotIndex: 0,
-        },
-      ];
+      return [{
+        id: "project",
+        label: "Open in its project",
+        position: "full",
+        slotIndex: 0,
+      }];
     }
-    const reordering = slots.some(
+    const sourceSlotIndex = slots.findIndex(
       (pane) =>
         pane &&
         (identity?.kind === "pane"
@@ -7592,21 +7602,16 @@ export function ChatGridSurface({
             pane.kind === "session" &&
             pane.sessionId === identity.sessionId),
     );
-    return chatGridDropZones(slots, arrangement, reordering);
+    const bounds = gridRef.current?.getBoundingClientRect();
+    return chatGridDropZones(
+      slots,
+      arrangement,
+      sourceSlotIndex >= 0,
+      point && bounds ? { ...point, bounds, sourceSlotIndex } : undefined,
+    );
   };
-  const dropZones =
-    dragIdentity?.kind === "session" &&
-    chatProjectKey(dragIdentity.projectKey) !==
-      chatProjectKey(layout.projectKey)
-      ? zonesForDrag(dragIdentity)
-      : chatGridDropZones(slots, arrangement, reorderingSession);
+  const dropZones = zonesForDrag(dragIdentity);
   const dropLayout = chatGridDropLayout(dropZones);
-  const gridRef = useRef<HTMLDivElement>(null);
-  // The pointer position of the last grid-level drag event. macOS only
-  // hit-tests drop targets on mouse movement, so a pointer that arrives over
-  // the grid and then holds still never fires another zone event; this is the
-  // position that lights the tile the overlay mounts under.
-  const dragPointer = useRef<{ x: number; y: number }>();
   // Drag feedback is local state here: mounting the overlay, lighting a tile,
   // or clearing both never changes what a pane renders. `renderPane` is a
   // fresh closure on every app render, so an unchanged identity means no pane
@@ -7632,7 +7637,7 @@ export function ChatGridSurface({
     const hovered = dropZones.find((zone) => zone.id === dropTargetId);
     if (
       !hovered ||
-      hovered.placement ||
+      hovered.placement?.insertPosition ||
       hovered.position === "full" ||
       reorderingSession
     )
@@ -7670,17 +7675,18 @@ export function ChatGridSurface({
     const pointer = dragPointer.current;
     if (!grid || !pointer) return;
     const bounds = grid.getBoundingClientRect();
+    const zones = zonesForDrag(dragIdentity, pointer);
     const zone =
       nearestChatGridDropZone(
         grid.querySelectorAll<HTMLElement>(".gyro-chat-grid-drop-zone"),
-        dropZones,
+        zones,
         pointer.x,
         pointer.y,
         bounds,
         sourceSlotForDrag(dragIdentity),
       ) ??
       chatGridDropZoneBeforePaint(
-        dropZones, bounds, pointer.x, pointer.y, sourceSlotForDrag(dragIdentity),
+        zones, bounds, pointer.x, pointer.y, sourceSlotForDrag(dragIdentity),
       );
     setDropTargetId((current) => (current === zone?.id ? current : zone?.id));
   }, [dropZones, dragIdentity, layout.projectKey, layout.slots]);
@@ -7798,7 +7804,7 @@ export function ChatGridSurface({
   ) => {
     const grid = gridRef.current;
     if (!grid) return;
-    const zones = zonesForDrag(identity);
+    const zones = zonesForDrag(identity, point);
     const bounds = grid.getBoundingClientRect();
     return (
       nearestChatGridDropZone(
@@ -7947,7 +7953,7 @@ export function ChatGridSurface({
           event.dataTransfer.dropEffect = "none";
           return;
         }
-        const zones = zonesForDrag(identity);
+        const zones = zonesForDrag(identity, { x: event.clientX, y: event.clientY });
         const validPane =
           source !== "pane" ||
           (identity?.kind === "pane" &&
@@ -7993,7 +7999,7 @@ export function ChatGridSurface({
         event.stopPropagation();
         const identity = readChatDrag(event.dataTransfer);
         if (!identity && currentChatDrag()) return;
-        const zones = zonesForDrag(identity);
+        const zones = zonesForDrag(identity, { x: event.clientX, y: event.clientY });
         const bounds = event.currentTarget.getBoundingClientRect();
         const zone =
           nearestChatGridDropZone(
@@ -8075,6 +8081,7 @@ export function ChatGridSurface({
             data-drag-source={dragSource}
             data-layout={dropLayout}
             data-zone-count={dropZones.length}
+            style={{ "--gyro-chat-drop-zone-count": dropZones.length } as CSSProperties}
           >
             {dropZones.map((zone) => (
               <div
@@ -8096,9 +8103,9 @@ export function ChatGridSurface({
           </div>
           <span aria-live="polite" className="gyro-sr-only">
             {dropLayout === "row"
-              ? "Choose where the chat joins the row: left edge, between chats, or right edge."
+              ? "Choose where the chat joins the row. Move to a corner for a 2 by 2 grid."
               : dropLayout === "stack"
-                ? "Choose where the chat joins the stack: top, between chats, or bottom."
+                ? "Choose where the chat joins the stack. Move to a corner for a 2 by 2 grid."
                 : "Choose where to place the chat."}
           </span>
         </>
@@ -8343,7 +8350,7 @@ type ChatSurfaceProps = {
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -9123,9 +9130,13 @@ export function ChatSurface({
       }),
     [transcriptEvents],
   );
+  const transcriptTurnCache = useMemo(
+    () => createTranscriptTurnCache<ChatTranscriptTurn>(),
+    [transcriptSessionId],
+  );
   const transcriptState = useMemo(
-    () => deriveTranscriptState(transcriptEvents),
-    [transcriptEvents],
+    () => deriveTranscriptState(transcriptEvents, transcriptTurnCache),
+    [transcriptEvents, transcriptTurnCache],
   );
   const { looseEvents, turns } = transcriptState;
   const standaloneEvents = useMemo(
@@ -9822,6 +9833,10 @@ export function ChatSurface({
             onToggleToolPanel={
               isToolPanelAvailable ? onToggleToolPanel : undefined
             }
+            planCompletedCount={
+              sessionPlan?.items.filter((item) => item.status === "complete")
+                .length ?? 0
+            }
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={false}
             showEnvironmentInOverflow={false}
@@ -10251,6 +10266,7 @@ function ChatSurfaceControls({
   onToggleEnvironmentRail,
   onTogglePlanPanel,
   onToggleToolPanel,
+  planCompletedCount = 0,
   planItemCount,
   showClose = true,
   showEnvironment = false,
@@ -10271,6 +10287,7 @@ function ChatSurfaceControls({
   onToggleEnvironmentRail?: () => void;
   onTogglePlanPanel?: () => void;
   onToggleToolPanel?: () => void;
+  planCompletedCount?: number;
   planItemCount: number;
   showClose?: boolean;
   showEnvironment?: boolean;
@@ -10290,6 +10307,19 @@ function ChatSurfaceControls({
   const drawerHasModelActivity = Boolean(
     modelFocus?.paneTab && !isToolPanelOpen,
   );
+  const showPlanInOverflow = planItemCount > 0 && Boolean(onTogglePlanPanel);
+  const hasOverflowActions = Boolean(
+    showPlanInOverflow ||
+      (compactOverflowActions &&
+        (onToggleEnvironmentRail ||
+          (!isDockOpen && (onToggleToolPanel || onToggleDock)))) ||
+      (showToolPanelInOverflow && onToggleToolPanel) ||
+      (showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail),
+  );
+
+  useEffect(() => {
+    if (!showOverflow || !hasOverflowActions) setOpenMenu(undefined);
+  }, [showOverflow, hasOverflowActions]);
 
   return (
     <div
@@ -10345,7 +10375,7 @@ function ChatSurfaceControls({
           <PanelRight size={16} />
         </button>
       ) : null}
-      {showOverflow ? (
+      {showOverflow && hasOverflowActions ? (
         <div className="gyro-chat-surface-menu-anchor">
           <button
             aria-expanded={openMenu === "overflow"}
@@ -10372,19 +10402,24 @@ function ChatSurfaceControls({
           </button>
           {openMenu === "overflow" ? (
             <div className="gyro-chat-companion-menu is-header" role="menu">
-              <button
-                aria-pressed={isPlanOpen}
-                onClick={() => {
-                  setOpenMenu(undefined);
-                  onTogglePlanPanel?.();
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <ListChecks size={14} />
-                <span>Plan checklist</span>
-                {planItemCount > 0 ? <small>{planItemCount}</small> : null}
-              </button>
+              {showPlanInOverflow ? (
+                <button
+                  aria-label={`Plan checklist, ${planCompletedCount} of ${planItemCount} steps complete`}
+                  aria-pressed={isPlanOpen}
+                  onClick={() => {
+                    setOpenMenu(undefined);
+                    onTogglePlanPanel?.();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <ListChecks size={14} />
+                  <span>Plan</span>
+                  <small>
+                    {planCompletedCount}/{planItemCount}
+                  </small>
+                </button>
+              ) : null}
               {compactOverflowActions ? (
                 <>
                   {onToggleEnvironmentRail ? (
@@ -10433,7 +10468,7 @@ function ChatSurfaceControls({
                   ) : null}
                 </>
               ) : null}
-              {showToolPanelInOverflow ? (
+              {showToolPanelInOverflow && onToggleToolPanel ? (
                 <button
                   aria-pressed={isToolPanelOpen}
                   onClick={() => {
@@ -10591,7 +10626,7 @@ function ChatSidePanel({
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -12687,7 +12722,7 @@ type CliWorkspaceSurfaceProps = {
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -13049,6 +13084,7 @@ function WorkspaceSettingsEditor({
   onToggleContribution,
   onRemoveContribution,
   view,
+  intro,
 }: {
   activeWorkspaceRoot?: string;
   folderSettings?: Record<string, WorkspaceScopedSettings>;
@@ -13072,6 +13108,7 @@ function WorkspaceSettingsEditor({
   onToggleContribution?: (id: string, enabled: boolean) => void;
   onRemoveContribution?: (id: string) => void;
   view: "editor" | "tools";
+  intro?: ReactNode;
 }) {
   const [scope, setScope] = useState<WorkspaceSettingScope>(
     workspacePath ? "workspace" : "user",
@@ -13117,22 +13154,29 @@ function WorkspaceSettingsEditor({
     <section
       aria-labelledby="gyro-workspace-settings-title"
       className="gyro-workspace-settings-editor"
+      data-setting-key={settingsSearchKey(view === "editor" ? "Workspace" : "Tools")}
+      tabIndex={-1}
     >
       <header>
         <span className="gyro-workspace-settings-eyebrow">
           <Settings size={13} /> Workspace
         </span>
         <h1 id="gyro-workspace-settings-title">
-          {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
+          {view === "editor" ? "Workspace" : "Tools"}
         </h1>
         <p>
           {view === "editor"
-            ? "Tune editor and search behavior at user, workspace, or folder scope. Narrower scopes override broader ones."
+            ? "Choose defaults for new chats and tune editor and search behavior."
             : "Manage workspace commands, language services, and trusted local contributions."}
         </p>
       </header>
+      {intro}
       {view === "editor" ? (
         <>
+          <h2 className="gyro-workspace-scope-heading">Editor & search</h2>
+          <p className="gyro-workspace-scope-description">
+            Choose where these settings apply. Project and folder settings override your app-wide defaults.
+          </p>
           <div
             aria-label="Settings scope"
             className="gyro-workspace-settings-scopes"
@@ -13152,8 +13196,7 @@ function WorkspaceSettingsEditor({
                   }
                   type="button"
                 >
-                  {item[0]?.toUpperCase()}
-                  {item.slice(1)}
+                  {item === "user" ? "Across Gyro" : item === "workspace" ? "This project" : "This folder"}
                 </button>
               ),
             )}
@@ -13622,7 +13665,7 @@ type IdeSurfaceProps = {
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -15959,7 +16002,7 @@ function WorkbenchPaneContent({
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -16338,7 +16381,7 @@ type WorkspaceToolPanelProps = {
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -18888,7 +18931,7 @@ function ResizableBrowserRail({
   onBrowserReload?: () => void;
   onBrowserUrlChange?: (url: string) => void;
   onBrowserNavigate?: (url: string) => void;
-  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserDeviceChange?: (device: BrowserViewportMode) => void;
   onBrowserScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -19153,7 +19196,7 @@ export function BrowserPreviewSurface({
   onReload?: () => void;
   onUrlChange?: (url: string) => void;
   onNavigate?: (url: string) => void;
-  onDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onDeviceChange?: (device: BrowserViewportMode) => void;
   onScreenshot?: (
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
@@ -19456,36 +19499,7 @@ export function BrowserPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <div
-              className="gyro-browser-device-group"
-              role="group"
-              aria-label="Device size"
-            >
-              {(
-                [
-                  { id: "desktop", label: "Desktop", icon: Monitor },
-                  { id: "tablet", label: "Tablet", icon: Tablet },
-                  { id: "mobile", label: "Mobile", icon: Smartphone },
-                ] as const
-              ).map((device) => {
-                const Icon = device.icon;
-                return (
-                  <button
-                    aria-label={device.label}
-                    aria-pressed={preview.device === device.id}
-                    className={
-                      preview.device === device.id ? "is-active" : undefined
-                    }
-                    key={device.id}
-                    onClick={() => onDeviceChange?.(device.id)}
-                    title={device.label}
-                    type="button"
-                  >
-                    <Icon size={14} />
-                  </button>
-                );
-              })}
-            </div>
+            <BrowserViewportControls preview={preview} onChange={onDeviceChange} />
             <button
               aria-label="Capture browser screenshot"
               className={`gyro-browser-capture-button${
@@ -19605,12 +19619,7 @@ export function BrowserPreviewSurface({
                 suggestedUrl={frameUrl}
               />
             ) : (
-              <iframe
-                key={`${frameUrl}:${frameRevision}`}
-                referrerPolicy="no-referrer"
-                src={frameUrl}
-                title="Browser preview"
-              />
+              <FittedBrowserFrame key={`${frameUrl}:${frameRevision}`} preview={preview} url={frameUrl} />
             )
           ) : null}
           {!isChat && (isLoading || isCapturing) ? (
@@ -21100,6 +21109,8 @@ export type SettingsSurfaceProps = {
   interfaceSize?: InterfaceSize;
   motionSpeed?: MotionSpeed;
   reduceMotion?: boolean;
+  appearanceSaveStatus?: "saving" | "saved" | "error";
+  onRetryAppearanceSave?: () => void;
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
   onMotionSpeedChange?: (speed: MotionSpeed) => void;
   showMenuBarIcon?: boolean;
@@ -21351,6 +21362,8 @@ export function SettingsSurface({
   interfaceSize = "default",
   motionSpeed = "default",
   reduceMotion = false,
+  appearanceSaveStatus,
+  onRetryAppearanceSave,
   onInterfaceSizeChange,
   onMotionSpeedChange,
   showMenuBarIcon = true,
@@ -21427,6 +21440,10 @@ export function SettingsSurface({
 }: SettingsSurfaceProps) {
   const [apiKeyProviderId, setApiKeyProviderId] =
     useState<ProviderId>("openai");
+  const settingsScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (settingsScrollRef.current) settingsScrollRef.current.scrollTop = 0;
+  }, [activeSection]);
   const providerConfigs = providersForConfig(config);
   const enabledProviders = providerConfigs.filter(
     (provider) => provider.authStatus === "connected",
@@ -21521,7 +21538,7 @@ export function SettingsSurface({
       updateState?.status === "failed");
 
   return (
-    <div className="gyro-settings-surface">
+    <div className="gyro-settings-surface" ref={settingsScrollRef}>
       <section
         className="gyro-settings-content"
         aria-label="Settings"
@@ -21577,6 +21594,19 @@ export function SettingsSurface({
                   onChange={(value) => onModelFollowChange?.(value)}
                 />
               </SettingsRow>
+              <SettingsRow
+                label="Post-edit summaries"
+                detail="Use one extra provider call after an edited turn to describe each changed file."
+              >
+                <SettingsSwitch
+                  label="Generate post-edit summaries"
+                  disabled={!onConfigChange}
+                  checked={Boolean(config.changeSummariesEnabled)}
+                  onChange={(checked) =>
+                    onConfigChange?.({ ...config, changeSummariesEnabled: checked })
+                  }
+                />
+              </SettingsRow>
             </SettingsGroup>
           </SettingsSection>
         ) : null}
@@ -21588,6 +21618,8 @@ export function SettingsSurface({
             description="Make Gyro comfortable to read and use."
           >
             <AppearanceSettings
+              saveStatus={appearanceSaveStatus}
+              onRetrySave={onRetryAppearanceSave}
               themeMode={themeMode}
               onThemeChange={onThemeChange}
               density={density}
@@ -21606,6 +21638,12 @@ export function SettingsSurface({
 
         {activeSection === "editor-workspace" ? (
           <WorkspaceSettingsEditor
+            intro={
+              <WorkspaceDefaultSettings
+                mode={defaultWorkspaceMode}
+                onChange={onDefaultWorkspaceModeChange}
+              />
+            }
             activeWorkspaceRoot={activeWorkspaceRoot}
             folderSettings={workspaceSettingsByFolder}
             keybindings={workspaceKeybindings}
@@ -21640,7 +21678,7 @@ export function SettingsSurface({
         {activeSection === "usage-limits" ? (
           <SettingsSection
             icon={Gauge}
-            title="Usage Limits"
+            title="Usage & Limits"
             description="Local guardrails for agent runs, command output, and provider spend."
           >
             {usageProvider ? (
@@ -21933,8 +21971,8 @@ export function SettingsSurface({
         {activeSection === "providers" ? (
           <SettingsSection
             icon={KeyRound}
-            title="Providers"
-            description="Manage accounts and models."
+            title="Models & Accounts"
+            description="Connect accounts, check their status, and choose your models."
           >
             <ConnectedProviderAllowances
               providers={enabledProviders.filter(
@@ -22443,41 +22481,7 @@ export function SettingsSurface({
                 />
               </SettingsRow>
             </SettingsGroup>
-            <SettingsGroup label="Review details">
-              <SettingsRow
-                label="Post-edit summaries"
-                detail="Uses one extra provider call after an edited turn to describe each changed file."
-              >
-                <SettingsSwitch
-                  label="Generate post-edit summaries"
-                  checked={Boolean(config.changeSummariesEnabled)}
-                  onChange={(checked) =>
-                    onConfigChange?.({
-                      ...config,
-                      changeSummariesEnabled: checked,
-                    })
-                  }
-                />
-              </SettingsRow>
-            </SettingsGroup>
             <SettingsGroup label="Workspace protection">
-              <SettingsRow
-                label="New chats start in"
-                detail="Project folder edits the project you opened. Agent workspace gives the agent a private branch under Gyro so main stays untouched."
-              >
-                <SettingsSelect
-                  aria-label="Default workspace mode for new chats"
-                  onChange={(event) => {
-                    const mode =
-                      event.target.value === "worktree" ? "worktree" : "local";
-                    onDefaultWorkspaceModeChange?.(mode);
-                  }}
-                  value={defaultWorkspaceMode}
-                >
-                  <option value="local">Project folder</option>
-                  <option value="worktree">Agent workspace</option>
-                </SettingsSelect>
-              </SettingsRow>
               <SettingsRow
                 label="Workspace boundary"
                 value="Provider-dependent"
@@ -22494,9 +22498,9 @@ export function SettingsSurface({
                 detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
               />
             </SettingsGroup>
-            {systemAccess && systemAccess.length > 0 ? (
+            {systemAccess || onRecheckSystemAccess ? (
               <SettingsGroup label="macOS system access">
-                {systemAccess.map((scope) => (
+                {(systemAccess ?? []).map((scope) => (
                   <SettingsRow
                     key={scope.id}
                     label={scope.label}
@@ -22522,7 +22526,7 @@ export function SettingsSurface({
                 ))}
                 <SettingsRow
                   label="Re-check access"
-                  detail="Run after changing Gyro's entries in System Settings."
+                  detail="Results are from the last check. Check again after changing access in System Settings; macOS may ask about unchecked folders."
                 >
                   <button
                     className="gyro-secondary-button"
@@ -22671,7 +22675,7 @@ export function SettingsSurface({
         {activeSection === "keyboard" ? (
           <SettingsSection
             icon={CommandIcon}
-            title="Keyboard"
+            title="Keyboard Shortcuts"
             description="View app shortcuts and customize workspace shortcuts."
           >
             <WorkspaceKeyboardSettings
@@ -24232,7 +24236,8 @@ function composerModelPickerItem(
  * plan rail all speak this one set, so a control added to any of them is a
  * control the others already handle.
  */
-type SessionGoalAction = "set" | "edit" | "complete" | "reopen" | "clear";
+type SessionGoalAction =
+  "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume";
 
 function Composer({
   attachments = [],
@@ -24456,21 +24461,49 @@ function Composer({
       composerTextareaRef.current?.focus();
     }
   }, [isGoalComposerActive]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
 
-    textarea.style.height = "auto";
-    const hasEmptyDraft = draft.trim().length === 0 && attachments.length === 0;
-    // Webview font/layout timing can make two otherwise identical empty
-    // textareas report scroll heights a few pixels apart. In a split this is
-    // conspicuous because their composer bottoms align, but their tops do not.
-    const nextHeight =
-      stabilizeEmptyHeight && hasEmptyDraft
-        ? 64
-        : Math.min(Math.max(textarea.scrollHeight, 52), 148);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > 148 ? "auto" : "hidden";
+    const updateHeight = () => {
+      // Collapse the previous height before measuring wrapped text. Empty
+      // drafts use a fixed floor, even while pane layout or fonts are settling.
+      textarea.style.height = "0px";
+      const contentHeight = textarea.scrollHeight;
+      const nextHeight =
+        draft.length === 0
+          ? (stabilizeEmptyHeight ? 64 : 52)
+          : Math.min(Math.max(contentHeight, 52), 148);
+      textarea.style.height = `${nextHeight}px`;
+      textarea.style.overflowY =
+        draft.length > 0 && contentHeight > 148 ? "auto" : "hidden";
+    };
+    updateHeight();
+
+    let frame = 0;
+    let disposed = false;
+    let width = textarea.clientWidth;
+    const scheduleHeightUpdate = () => {
+      if (disposed) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateHeight);
+    };
+    const observer = new ResizeObserver(() => {
+      const nextWidth = textarea.clientWidth;
+      // Height changes from autosizing must not feed back into this observer.
+      if (nextWidth > 0 && nextWidth !== width) {
+        width = nextWidth;
+        scheduleHeightUpdate();
+      }
+    });
+    observer.observe(textarea);
+    void document.fonts.ready.then(scheduleHeightUpdate);
+
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [attachments.length, draft, stabilizeEmptyHeight]);
   const providerConfigs = providersForConfig(config);
   // Each chat pane may bind its own provider/model. Prefer that over the
@@ -25303,6 +25336,8 @@ function Composer({
               : undefined
           }
           onEdit={() => onComposerAction?.("add-goal")}
+          onPause={onGoalAction ? () => void onGoalAction("pause") : undefined}
+          onResume={onGoalAction ? () => void onGoalAction("resume") : undefined}
         />
       ) : null}
       {attachments.length > 0 ? (
@@ -25955,14 +25990,25 @@ function Composer({
               }
               className="gyro-composer-context-wheel"
               role="progressbar"
-              style={
-                {
-                  "--context-usage": `${(contextUsage.percent ?? 0) * 3.6}deg`,
-                } as CSSProperties
-              }
               tabIndex={0}
             >
-              <span />
+              <svg aria-hidden="true" height="18" viewBox="0 0 18 18" width="18">
+                <circle
+                  className="gyro-composer-context-track"
+                  cx="9"
+                  cy="9"
+                  r="7.5"
+                />
+                <circle
+                  className="gyro-composer-context-progress"
+                  cx="9"
+                  cy="9"
+                  pathLength="100"
+                  r="7.5"
+                  strokeDasharray={`${contextUsage.percent ?? 0} 100`}
+                  transform="rotate(-90 9 9)"
+                />
+              </svg>
             </div>
             <div
               className="gyro-composer-context-tooltip"
@@ -26861,7 +26907,7 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
   return <TranscriptAttachmentsView payload={eventPayloadRecord(event) ?? {}} formatSize={formatAttachmentSize} />;
 }
 
-function deriveTranscriptState(events: SessionEvent[]) {
+function deriveTranscriptState(events: SessionEvent[], turnCache?: ReturnType<typeof createTranscriptTurnCache<ChatTranscriptTurn>>) {
   const mutationDecisions = new Map<string, Record<string, unknown>>();
   const providerApprovalDecisions = new Map<string, Record<string, unknown>>();
   /*
@@ -27087,16 +27133,23 @@ function deriveTranscriptState(events: SessionEvent[]) {
       looseEvents.push(event);
     }
   }
-  for (const turn of turns) {
-    turn.timelineEvents = groupWorkflowEvents(orderedChatTimelineEvents(turn.timelineEvents), turn.runStatus);
-  }
+  const prepare = (turn: ChatTranscriptTurn) => ({
+    ...turn,
+    timelineEvents: groupWorkflowEvents(
+      orderedChatTimelineEvents(turn.timelineEvents),
+      turn.runStatus,
+    ),
+  });
+  const preparedTurns = turnCache
+    ? turnCache.reconcile(turns, prepare)
+    : turns.map(prepare);
   // First-seen provider sequences survive streaming updates and persistence,
   // so completion timing cannot move an early item below later activity.
-  turns.sort((first, second) =>
+  preparedTurns.sort((first, second) =>
     compareIsoTimestamps(first.startedAt, second.startedAt),
   );
   looseEvents.sort(compareTranscriptEvents);
-  return { looseEvents, turns };
+  return { looseEvents, turns: preparedTurns };
 }
 
 function compareTranscriptEvents(first: SessionEvent, second: SessionEvent) {
@@ -27225,9 +27278,11 @@ function ChatTurn({
     .flatMap((agent) =>
       pendingSubagentApprovals(subagents?.eventsByAgentId[agent.agentId] ?? []),
     );
-  const providerStatus = turn.statusEvent
-    ? providerStatusFromEvent(turn.statusEvent)
-    : undefined;
+  const providerStatus = useMemo(
+    () =>
+      turn.statusEvent ? providerStatusFromEvent(turn.statusEvent) : undefined,
+    [turn.statusEvent],
+  );
   const isRunning = isActive;
   const nativeRetry = isRunning ? providerStatus?.nativeRetry : undefined;
   const startedAt = turn.runStartedAt ?? turn.startedAt;
@@ -27243,29 +27298,43 @@ function ChatTurn({
   );
   // Counts belong to this turn's events. Shared Git totals (or differences
   // between their totals) cannot measure an individual turn's edits.
-  const runModel = buildRunModel(turn.timelineEvents, {
-    isRunning,
-    startedAt,
-    durationMs: turn.durationMs ?? elapsedMsBetween(startedAt, completedAt),
-    status: providerStatus
-      ? {
-          status: providerStatus.status,
-          message: turn.statusEvent?.message,
-          error: providerStatus.error,
-          recoveryKind: providerStatus.recoveryKind,
-          recoveryMessage: providerStatus.recoveryMessage,
-        }
-      : undefined,
-    // Native capacity recovery owns its wait while this invoke stays alive;
-    // otherwise transport loss uses the existing reconnect beat.
-    retry: nativeRetry
-      ? { reason: "Model is temporarily busy", attempt: nativeRetry.attempt }
-      : !isOnline
-        ? { reason: "Waiting for the network" }
-        : providerIsUnreachable(providerStatus)
-          ? { reason: "Reconnecting to the provider" }
+  const runModel = useMemo(
+    () =>
+      buildRunModel(turn.timelineEvents, {
+        isRunning,
+        startedAt,
+        durationMs: turn.durationMs ?? elapsedMsBetween(startedAt, completedAt),
+        status: providerStatus
+          ? {
+              status: providerStatus.status,
+              message: turn.statusEvent?.message,
+              error: providerStatus.error,
+              recoveryKind: providerStatus.recoveryKind,
+              recoveryMessage: providerStatus.recoveryMessage,
+            }
           : undefined,
-  });
+        // Native capacity recovery owns its wait while this invoke stays alive;
+        // otherwise transport loss uses the existing reconnect beat.
+        retry: nativeRetry
+          ? { reason: "Model is temporarily busy", attempt: nativeRetry.attempt }
+          : !isOnline
+            ? { reason: "Waiting for the network" }
+            : providerIsUnreachable(providerStatus)
+              ? { reason: "Reconnecting to the provider" }
+              : undefined,
+      }),
+    [
+      turn.timelineEvents,
+      turn.durationMs,
+      turn.statusEvent?.message,
+      isRunning,
+      startedAt,
+      completedAt,
+      providerStatus,
+      nativeRetry,
+      isOnline,
+    ],
+  );
   // File summaries must be backed by paths reported by the provider. The Git
   // working tree is shared by all chats, so using it to fill a pathless
   // “Updated files” event falsely shows the same edit summary in every pane.
@@ -27878,6 +27947,8 @@ function SessionGoalStrip({
   onClear,
   onComplete,
   onEdit,
+  onPause,
+  onResume,
 }: {
   goal: SessionGoal;
   /**
@@ -27889,44 +27960,93 @@ function SessionGoalStrip({
   onClear?: () => void;
   onComplete?: () => void;
   onEdit?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const isActive = goal.status === "active";
+  const runStatus = goal.run?.status;
+  const isWorking =
+    isActive &&
+    isRunning &&
+    (!runStatus ||
+      ["running", "queued", "waiting-approval"].includes(runStatus));
   useEffect(() => {
-    if (!isActive) return;
+    if (!isWorking) return;
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
-  }, [isActive]);
+  }, [isWorking]);
 
-  const startedAt = Date.parse(goal.createdAt ?? goal.updatedAt ?? "");
+  const startedAt = Date.parse(
+    goal.run?.startedAt ?? goal.createdAt ?? goal.updatedAt ?? "",
+  );
   const finishedAt = Date.parse(goal.updatedAt ?? "");
   const durationEnd =
-    isActive || !Number.isFinite(finishedAt) ? now : finishedAt;
+    isWorking || !Number.isFinite(finishedAt) ? now : finishedAt;
   const duration = Number.isFinite(startedAt)
     ? formatRunDuration(
         Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
       )
     : undefined;
-  const label = isActive ? "Pursuing goal" : "Goal completed";
+  const label = !isActive
+    ? "Goal completed"
+    : runStatus === "blocked"
+      ? "Goal blocked"
+      : runStatus === "paused"
+        ? "Goal paused"
+        : runStatus === "waiting-approval"
+          ? "Waiting for approval"
+          : runStatus === "queued"
+            ? "Goal queued"
+            : isRunning
+              ? "Pursuing goal"
+              : "Goal active";
+  const detail = isActive && goal.run?.reason ? goal.run.reason : goal.text;
 
   return (
     <section
-      aria-label={`${label}: ${goal.text}`}
+      aria-label={`${label}: ${goal.text}${goal.run?.reason ? ` — ${goal.run.reason}` : ""}`}
       className="gyro-goal-strip"
-      data-running={isActive && isRunning ? "true" : undefined}
+      data-running={isWorking ? "true" : undefined}
       data-status={goal.status}
+      data-run-status={runStatus}
     >
       <span aria-hidden="true" className="gyro-goal-strip-mark">
         {isActive ? <CircleDashed size={14} /> : <Check size={14} />}
       </span>
-      <strong className="gyro-goal-strip-label">{label}</strong>
-      <span className="gyro-goal-strip-text" title={goal.text}>
-        {goal.text}
+      <strong className="gyro-goal-strip-label" title={goal.text}>
+        {label}
+      </strong>
+      <span
+        className="gyro-goal-strip-text"
+        title={`${goal.text}${goal.run?.reason ? ` — ${goal.run.reason}` : ""}`}
+      >
+        {detail}
       </span>
       {duration ? (
         <time className="gyro-goal-strip-time">{duration}</time>
       ) : null}
       <span className="gyro-goal-strip-actions">
+        {isActive && isRunning && onPause ? (
+          <button
+            aria-label="Pause goal"
+            onClick={onPause}
+            title="Pause goal"
+            type="button"
+          >
+            <Pause aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+        {isActive && !isRunning && onResume ? (
+          <button
+            aria-label="Resume goal"
+            onClick={onResume}
+            title="Resume goal from its checkpoint"
+            type="button"
+          >
+            <Play aria-hidden="true" size={13} />
+          </button>
+        ) : null}
         {onEdit ? (
           <button
             aria-label="Edit goal"
@@ -29660,6 +29780,8 @@ function workspaceAncestorPaths(path: string, workspacePath?: string) {
 
 function deviceLabel(device: BrowserPreviewDevice) {
   switch (device) {
+    case "responsive":
+      return "Responsive";
     case "desktop":
       return "Desktop";
     case "tablet":

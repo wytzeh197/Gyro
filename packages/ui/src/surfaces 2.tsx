@@ -29805,6 +29805,8 @@ function workspaceAncestorPaths(path: string, workspacePath?: string) {
 
 function deviceLabel(device: BrowserPreviewDevice) {
   switch (device) {
+    case "responsive":
+      return "Responsive";
     case "desktop":
       return "Desktop";
     case "tablet":

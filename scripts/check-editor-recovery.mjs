@@ -26,7 +26,7 @@ try {
     ],
     outfile: output,
     bundle: true,
-    loader: { ".png": "dataurl" },
+    loader: { ".png": "dataurl", ".svg": "dataurl" },
     platform: "node",
     format: "esm",
     logLevel: "silent",

@@ -1,0 +1,76 @@
+{
+  "recordedAt": "2026-10-08T18:26:02.621372+00:00",
+  "hashes": {
+    "apps/desktop/src/App.tsx": "f5c6b62c57ea721b1b260a538e799b6cbb901144d714c18b17baa440923b6d0c",
+    "apps/desktop/src/use-measured-workbench.ts": "b076950fa7ba70cd72608606af420e4fbd82c4811d30ebc8b6f1e8ccec3e36ba",
+    "apps/desktop/src/surface-timing.ts": "c5700d5fd2bde09320bb211db888776ad4265f9bb1ab038b34576fb65559dd0f",
+    "packages/ui/src/chat-scroll-memory.ts": "65a51e60c09ad8113f5506f640a4594741a25649f3a94d5704b933b8df1b3869",
+    "packages/ui/src/use-chat-transcript-scroll.ts": "6d6afe54a408e02de8576a6403fef00b7010333a29e2787b3166bab2903755a7",
+    "scripts/check-chat-scroll.mjs": "946b43dd1bef104a85519022ab3e167394014c869c49564bb781b2acf8acd64e",
+    "scripts/check-chat-persistence.mjs": "432063069f7da18696503e7098b8c692b7a4468d4eb90f048cf1d41f1f15a834",
+    "scripts/check-surface-timing.mjs": "f99f37c663d6f837cdbc03548de84d7d732f33a6062ade1f5736ae2540967f8b",
+    "target/debug/gyro-desktop": "d409543bc7e5c46b16fd91d5ed91b12cd7eaeaad5b878fd408b15bad614dc7bd",
+    "apps/desktop/dist/index.html": "f8095acd46c50096999e1a8aa9e5e65ddad8fdf58391a3e25b2350b19655ad1b",
+    "packages/ui/src/surfaces.tsx": "3b2ae3314a1e5cac1f27475da33f6a79224bda727056606469ca6365a351b790",
+    "packages/ui/src/use-network-online.ts": "50a66a0694d11bfbd0a84389599c2f728d72df02079c90b1fef953fc6a6ff5e9",
+    "scripts/check-chat-network.mjs": "f503f5df04df8cb94d0ba86e6a0d832672ff2dbb2eda913ada9fce2511a8daed",
+    "apps/desktop/src-tauri/src/provider_session_lifecycle.rs": "a6315f840f70100914cacc80fae1b60a42f7a16138e02eeaa8408092b3a19ca3",
+    "apps/desktop/src-tauri/src/lib.rs": "763d81c0727da032ea0d52e5698ceed4b8d00820200d6caf0ff05ad990bb1c7c",
+    "crates/gyro-core/src/sessions.rs": "6ab7cef4666bbfa7a794960a6d5561656e13845220cb49714a1254115e3e1ddf",
+    "crates/gyro-core/src/process_guard.rs": "cb7bfeea820024ac51ae92de0f6993d6b0216d68532cad5718120fd7bcf8da75",
+    "crates/gyro-core/src/process_guard/macos.rs": "5312168b0cce39db1c827fe1bcbaea2d357ebbd0c3a172c71fe9a06cd930d606",
+    "crates/gyro-core/src/execution.rs": "cc7253fcd0813d622157bde76313e07a5e7ef1003ef14065bf15ca4dc7a5ebc2",
+    "crates/gyro-core/src/kimi_acp.rs": "d51e3224f072af811f542b1d855ace1ee056a7c85351428548f8ac3807967e6c",
+    "crates/gyro-core/src/lib.rs": "40cedbbe8766e0fb64263ee4edb808e3cffe0e334f3a6135312aad1a150fa94c",
+    "crates/gyro-cli/src/main.rs": "e1805661cb3e622389ca6b1237885ae587ed83fb38bbe143ea3c3a551636836c",
+    "crates/gyro-cli/src/codex_app_server.rs": "ce3951901896696e5703628722e982df66797626e0c896216326171b5d9df919",
+    "apps/desktop/src-tauri/src/main.rs": "254ac2268ac839615ba007bff630714dab8f63b5ae0d8afdea9b043fea84ff36",
+    "apps/desktop/src-tauri/src/language_server.rs": "7c6c9804a139d13300d3762ea61fef0b10000919dffabce2e81e5839df6efe22"
+  },
+  "typecheck": "passed",
+  "reliability": {
+    "passed": true,
+    "guards": 81,
+    "behavioral": 74,
+    "sourceText": 7
+  },
+  "frontendBuild": "passed",
+  "nativeBuild": "passed",
+  "nativeAcceptance": "blocked: Mac remains locked; running verification bundle remains unchanged",
+  "includes": [
+    "session-list hydration guard",
+    "preserved sessions on refresh failure",
+    "bounded per-session scroll memory",
+    "single connectivity subscription per chat surface",
+    "provider session lease and ownership-aware startup reconciliation",
+    "macOS provider process watchdog with lease retention through crash cleanup",
+    "watchdog reuse across model and authenticated capability workers",
+    "generation-checked command cleanup",
+    "kernel peer identification avoids current-host legacy false positives",
+    "independent auxiliary-service crash ownership without retaining model leases"
+  ],
+  "remaining": [
+    "native focused-chat restart verification",
+    "transcript scroll restoration verification",
+    "comparable native before/after timings",
+    "active/imported history restart",
+    "live blocked provider acceptance"
+  ],
+  "rustVerification": {
+    "workspacePassed": 1081,
+    "workspaceIgnored": 7,
+    "corePassed": 500,
+    "cliPassed": 62,
+    "fixtureIntegrationPassed": 1,
+    "workspaceDesktopPassed": 518,
+    "finalDesktopPassed": 518,
+    "finalDesktopIgnored": 5
+  },
+  "previousRecordedAt": "2026-10-08T18:04:03.331225+00:00",
+  "sourceChecksThisTurn": [
+    "architecture",
+    "164 command boundaries",
+    "language-server registry"
+  ],
+  "priorFrontendVerification": "Retained from prior snapshot; this turn changed Rust lifecycle code only"
+}

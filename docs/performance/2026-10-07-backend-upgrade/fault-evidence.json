@@ -1,0 +1,31 @@
+{
+  "schema": "gyro.backend-fault-evidence.v1",
+  "boundary": "transcript refresh under slow IO",
+  "method": "Actual baseline/current scheduling code; controlled unresolved RPCs; 101 requests at 10 ms intervals. This is deterministic fault evidence, not native latency.",
+  "baselineCommit": "734648ecd774c4e1199baf29d6181c5b4fdfccdf",
+  "before": {
+    "requests": 101,
+    "rpcs": 21,
+    "peakConcurrentRpcs": 21
+  },
+  "after": {
+    "requests": 101,
+    "rpcs": 2,
+    "peakConcurrentRpcs": 1
+  },
+  "streamGap": {
+    "graceMs": 500,
+    "proof": "check-backend-responsiveness.mjs uses the actual dispatcher with a controlled clock"
+  },
+  "sourceSha256": {
+    "apps/desktop/src/responsiveness.ts": "6de3f2406a44a688637c1c80f3cfff73f402081912ca294b6c243b2c7c01139e",
+    "apps/desktop/src/provider-stream-events.ts": "d5f599dcdb0023f27dd7a21e798dda7d49ab5f74dd867cdba97baef24132a288",
+    "apps/desktop/src/provider-stream-dispatcher.ts": "0381dcae46e876a91f737fab1d63f617137caea6165fb22445b30fc6aa64fe10",
+    "crates/gyro-core/src/config.rs": "ca978ddfdc4411fec30d6d2a9be0b31437e025cc506f3517c94ac4924b5ed9f7",
+    "crates/gyro-core/src/sessions.rs": "29daaf7c05f5111fa442c7ded6e332873d58663dbbc2dd10309cbae1e47f3458",
+    "apps/desktop/src-tauri/src/lib.rs": "24237b97d85ed808b044d9579516bc43eb98c275a1da3ee07214e5f978d71068",
+    "apps/desktop/src-tauri/src/system_access.rs": "6f8de4294cb2d2792d16a8ebdae889788229878c3821c0e6a296169566c44941",
+    "apps/desktop/src-tauri/src/terminal_process.rs": "c11e89d368617b1f6bd0f5bcd06b7738132d61a0465080cffce6c192e8d367f4"
+  },
+  "verificationSnapshotAt": "2026-10-07T20:59:47.480494+00:00"
+}

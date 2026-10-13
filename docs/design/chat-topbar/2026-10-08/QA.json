@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-08",
+  "surface": "Gyro chat top bar",
+  "reference": "User-provided Codex narrow-window photo",
+  "evidence": "Production React components rendered through the development capture harness with invented sessions; native traffic lights and installed bundle were not checked.",
+  "steps": [
+    {
+      "number": 1,
+      "name": "Hidden sidebar, 860px dark",
+      "before": "Oversized 212px title reservation; controls ended at x150px",
+      "after": "170px title reservation, matched 26px controls, quiet divider",
+      "health": "Verified",
+      "beforeScreenshot": "01-before-hidden-sidebar-dark.jpg",
+      "afterScreenshot": "08-after-hidden-sidebar-dark.jpg"
+    },
+    {
+      "number": 2,
+      "name": "Compact navigation and long title",
+      "before": "New session shortcut disappears below 780px",
+      "after": "Both navigation shortcuts stay available; title ellipsizes with full-title tooltip",
+      "health": "Verified at 540px, 680px, and 860px; Large text in Light",
+      "screenshots": [
+        "03-after-compact-dark.jpg",
+        "04-after-hidden-sidebar-light-large.jpg",
+        "05-after-compact-light-large.jpg"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "Window-origin split chat",
+      "before": "Navigation and pane actions crowd the title; existing narrow menu labels are hidden",
+      "after": "Optional actions move into More at 440px pane width; menu labels stay visible and menu fits inside the pane",
+      "health": "Verified at 620px total width with Large text",
+      "screenshots": [
+        "06-after-split-light-large.jpg",
+        "07-split-menu-light-large.jpg"
+      ]
+    }
+  ],
+  "finalMeasurements": {
+    "buttons": [
+      {
+        "h": 26,
+        "label": "Show sidebar",
+        "w": 26,
+        "x": 90,
+        "y": 11
+      },
+      {
+        "h": 26,
+        "label": "New session",
+        "w": 26,
+        "x": 120,
+        "y": 11
+      },
+      {
+        "h": 26,
+        "label": "More chat surfaces",
+        "w": 26,
+        "x": 384.984375,
+        "y": 11.5
+      },
+      {
+        "h": 26,
+        "label": "Environment",
+        "w": 26,
+        "x": 790,
+        "y": 11.5
+      },
+      {
+        "h": 26,
+        "label": "Show companion",
+        "w": 26,
+        "x": 819,
+        "y": 11.5
+      }
+    ],
+    "headerWidth": 858,
+    "headerX": 1,
+    "height": 620,
+    "inset": "170px",
+    "rootOverflow": false,
+    "titleEnd": 376.984375,
+    "titleTooltip": "Bound the sync queue retries",
+    "titleTruncated": false,
+    "titleWidth": 181.984375,
+    "width": 860
+  },
+  "interactions": [
+    "Compact New session opens a new chat",
+    "Open navigation restores the session list",
+    "Environment opens from compact More",
+    "Show companion opens from compact More",
+    "Hide companion closes it"
+  ],
+  "checks": {
+    "typecheck": "passed: UI and desktop",
+    "workbenchSmoke": "passed: workbench guards and UI tokens",
+    "desktopBuild": "passed; existing large-chunk warning remains",
+    "diffWhitespace": "passed"
+  },
+  "changePatch": "change.patch",
+  "status": "complete: local source and frontend preview"
+}

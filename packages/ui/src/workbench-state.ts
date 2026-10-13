@@ -1,4 +1,5 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
+import { automaticBrowserDevice } from "./browser-viewport.ts";
 import type {
   DesktopNotificationPreferences,
   AppDestination,
@@ -6,7 +7,8 @@ import type {
   AutomationStatus,
   AutomationTriageState,
   BrowserPreview,
-  BrowserPreviewDevice,
+  BrowserViewportMode,
+  BrowserViewportState,
   BrowserPreviewStatus,
   ChatSidePanelId,
   ChatGridArrangement,
@@ -752,7 +754,14 @@ function chatLayoutWithMovedPane(
     arrangement?: ChatGridArrangement;
   },
 ): ChatProjectLayout {
-  if (fromIndex === toIndex) return layout;
+  if (fromIndex === toIndex) {
+    if (
+      placement.insertPosition ||
+      !placement.arrangement ||
+      placement.arrangement === layout.arrangement
+    ) return layout;
+    return { ...layout, arrangement: placement.arrangement };
+  }
   const moving = layout.slots[fromIndex];
   if (!moving) return layout;
   let slots: Array<ChatPaneRef | null>;
@@ -1892,7 +1901,8 @@ export type WorkbenchAction =
   | { type: "browser-forward" }
   | { type: "browser-reload" }
   | { type: "browser-loaded"; url: string }
-  | { type: "browser-device"; device: BrowserPreviewDevice }
+  | { type: "browser-device"; device: BrowserViewportMode }
+  | { type: "browser-viewport"; viewport: BrowserViewportState }
   | { type: "browser-capture-start" }
   | {
       type: "browser-capture-success";
@@ -4251,6 +4261,9 @@ export function workbenchReducer(
         browserPreview: {
           ...state.browserPreview,
           url: "",
+          device: "responsive",
+          deviceOverride: false,
+          viewport: undefined,
           nativeHost: false,
           title: undefined,
           status: "idle",
@@ -4287,6 +4300,8 @@ export function workbenchReducer(
           historyIndex: nextHistory.length - 1,
           status: action.status ?? "loading",
           url: action.url,
+          device: state.browserPreview.deviceOverride ? state.browserPreview.device : automaticBrowserDevice(action.url),
+          viewport: undefined,
           title: undefined,
           consoleErrors: 0,
           diagnostics: [],
@@ -4317,6 +4332,7 @@ export function workbenchReducer(
         browserPreview: {
           ...preview,
           url: action.url,
+          device: preview.deviceOverride ? preview.device : automaticBrowserDevice(action.url),
           history,
           historyIndex,
           status: "ready",
@@ -4363,12 +4379,28 @@ export function workbenchReducer(
         ...state,
         browserPreview: {
           ...state.browserPreview,
-          device: action.device,
+          device: action.device === "auto" ? automaticBrowserDevice(state.browserPreview.url) : action.device,
+          deviceOverride: action.device !== "auto",
+          viewport: undefined,
           captureStatus: "idle",
           captureError: undefined,
           latestCapture: undefined,
         },
       };
+    case "browser-viewport": {
+      const preview = state.browserPreview;
+      if (JSON.stringify(preview.viewport) === JSON.stringify(action.viewport)) return state;
+      const resized = preview.viewport?.width !== action.viewport.width ||
+        preview.viewport?.height !== action.viewport.height;
+      return {
+        ...state,
+        browserPreview: {
+          ...preview, viewport: action.viewport, device: action.viewport.device,
+          deviceOverride: action.viewport.mode !== "auto",
+          ...(resized ? { captureStatus: "idle", captureError: undefined, latestCapture: undefined } : {}),
+        },
+      };
+    }
     case "browser-capture-start":
       return {
         ...state,
@@ -5541,7 +5573,8 @@ function defaultBrowserPreview() {
     url: "",
     history: [] as string[],
     historyIndex: -1,
-    device: "desktop" as const,
+    device: "responsive" as const,
+    deviceOverride: false,
     consoleErrors: 0,
     diagnostics: [],
     diagnosticsSupported: false,
@@ -5702,6 +5735,8 @@ function browserHistoryState(
       historyIndex,
       status: "loading",
       url,
+      device: state.browserPreview.deviceOverride ? state.browserPreview.device : automaticBrowserDevice(url),
+      viewport: undefined,
       consoleErrors: 0,
       diagnostics: [],
       diagnosticsSupported: false,

@@ -6,13 +6,13 @@
   },
   "commands": [
     {
-      "description": "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+      "description": "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Keep implementation checks, interactions, and screenshots in the background. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "reveal": {
             "default": false,
-            "description": "Show the Browser panel for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Omit for background reading, research, or rendering fallback.",
+            "description": "Show the Browser panel only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Omit or set false for reading, research, implementation checks, interactions, screenshots, or rendering fallback; these work while hidden.",
             "type": "boolean"
           },
           "url": {
@@ -47,7 +47,7 @@
       "name": "gyro_browser_reload"
     },
     {
-      "description": "Capture a screenshot of this chat's open browser page.",
+      "description": "Capture the current Browser viewport at full resolution, including when Desktop fit is scaled inside a narrow panel. Optional device changes layout before capture; omit it to preserve the current viewport.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -67,13 +67,48 @@
       "name": "gyro_browser_screenshot"
     },
     {
-      "description": "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true for an explicit open/show request, a visual preview, or a user handoff. Same origin gate as browser.open.",
+      "name": "gyro_browser_set_viewport",
+      "description": "Set this chat's existing Browser layout without changing panel width or reloading the page. Auto uses Desktop fit for loopback previews and Responsive for ordinary websites. Desktop (1280×800), Tablet (768×1024), and Mobile (390×844) fit inside the panel. Manual choices persist across navigation; Auto restores automatic behavior. Optional width/height customize a fixed layout in CSS pixels. Screenshots stay full resolution and mouse coordinates stay CSS pixels. Re-observe after changing the viewport.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "responsive",
+              "desktop",
+              "tablet",
+              "mobile"
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 240,
+            "maximum": 2560,
+            "description": "Fixed layout width in CSS pixels."
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 240,
+            "maximum": 1600,
+            "description": "Fixed layout height in CSS pixels."
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      }
+    },
+    {
+      "description": "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. Keep implementation checks, interactions, and screenshots in the background. Same origin gate as browser.open.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "reveal": {
             "default": false,
-            "description": "Show the Browser panel for an explicit open/show request, a visual preview, or a user handoff such as sign-in. Omit for background reading, research, or rendering fallback.",
+            "description": "Show the Browser panel only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Omit or set false for reading, research, implementation checks, interactions, screenshots, or rendering fallback; these work while hidden.",
             "type": "boolean"
           },
           "url": {
@@ -392,5 +427,5 @@
       "tool": "gyro_browser_read_page"
     }
   ],
-  "workflowNote": "Illustrative browser interaction fixture, not the default for reading links. Prefer gyro_web_fetch for text-only research; reveal the browser only for an explicit open/show request, visual preview, or user handoff. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy."
+  "workflowNote": "Illustrative browser interaction fixture, not the default for reading links. Prefer gyro_web_fetch for text-only research; reveal the browser only when the user explicitly asks to see the page or a required manual handoff needs it. Implementation checks, interactions, and screenshots stay hidden. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy."
 }

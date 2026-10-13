@@ -1,0 +1,41 @@
+{
+  "recordedAt": "2026-10-08T18:26:02.621372+00:00",
+  "hashes": {
+    "crates/gyro-core/src/process_guard.rs": "cb7bfeea820024ac51ae92de0f6993d6b0216d68532cad5718120fd7bcf8da75",
+    "crates/gyro-core/src/process_guard/macos.rs": "5312168b0cce39db1c827fe1bcbaea2d357ebbd0c3a172c71fe9a06cd930d606",
+    "apps/desktop/src-tauri/src/language_server.rs": "7c6c9804a139d13300d3762ea61fef0b10000919dffabce2e81e5839df6efe22",
+    "apps/desktop/src-tauri/src/lib.rs": "763d81c0727da032ea0d52e5698ceed4b8d00820200d6caf0ff05ad990bb1c7c",
+    "target/debug/gyro-desktop": "d409543bc7e5c46b16fd91d5ed91b12cd7eaeaad5b878fd408b15bad614dc7bd"
+  },
+  "changes": [
+    "Independent crash owner for persistent services",
+    "Language servers, debug adapters, Codex usage and Grok usage use service ownership"
+  ],
+  "verification": {
+    "focusedProcessGuardTests": 10,
+    "workspacePassed": 1081,
+    "workspaceIgnored": 7,
+    "corePassed": 500,
+    "desktopPassed": 518,
+    "cliPassed": 62,
+    "fixtureIntegrationPassed": 1,
+    "architecture": "passed",
+    "commandBoundaryCount": 164,
+    "commandBoundaries": "passed",
+    "languageServerRegistry": "passed",
+    "nativeBuild": "passed",
+    "nativeBuildSeconds": 34.29
+  },
+  "regression": "Service remains alive after model scope drops; model lease becomes available; service child and helper are reaped on service drop",
+  "nativeAvailability": "Computer Use returned no native apps and Mac locked error on this turn",
+  "limits": [
+    "macOS owned process-group coverage; deliberately detached and independently attached targets retain their own lifetime",
+    "Running verification bundle and installed app were not replaced",
+    "Native UI/resource/transition acceptance and two provider families remain blocked"
+  ],
+  "logs": [
+    "service-scope-regressions.log",
+    "service-final-workspace.log",
+    "service-final-native-build.log"
+  ]
+}

@@ -6,13 +6,14 @@
 //! best-effort console/network events; tool results do not depend on page fetch.
 
 use gyro_core::security::redact_secrets;
+use crate::browser_viewport::{self, BrowserViewportRequest, BrowserViewportState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Runtime, WebviewUrl};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl};
 use uuid::Uuid;
 
 const MAX_CONSOLE_ENTRIES: usize = 100;
@@ -75,6 +76,7 @@ pub struct SessionBrowserSnapshot {
     pub visible: bool,
     pub background_only: bool,
     pub label: String,
+    pub viewport: BrowserViewportState,
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +130,9 @@ struct SessionBrowserSlot {
     title: String,
     visible: bool,
     background_only: bool,
+    host_bounds: SessionBrowserBounds,
+    viewport_request: BrowserViewportRequest,
+    viewport: BrowserViewportState,
     approved_origins: HashSet<String>,
     pointer_reference: Option<BrowserPointerReference>,
     console: VecDeque<BrowserConsoleEntry>,
@@ -137,6 +142,7 @@ struct SessionBrowserSlot {
 #[derive(Default)]
 pub struct SessionBrowserManager {
     inner: Mutex<HashMap<String, SessionBrowserSlot>>,
+    layout: Mutex<()>,
 }
 
 impl SessionBrowserManager {
@@ -165,6 +171,7 @@ impl SessionBrowserManager {
             visible: slot.visible,
             background_only: slot.background_only,
             label: slot.webview_label.clone(),
+            viewport: slot.viewport,
         }
     }
 
@@ -1040,21 +1047,47 @@ fn get_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::Window<R>, S
         .ok_or_else(|| "main window is not available".to_string())
 }
 
-fn apply_bounds<R: Runtime>(
-    webview: &tauri::Webview<R>,
-    bounds: &SessionBrowserBounds,
-) -> Result<(), String> {
-    if bounds.width < 1.0 || bounds.height < 1.0 {
-        let _ = webview.hide();
-        return Ok(());
+fn apply_session_browser_layout<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    host: Option<SessionBrowserBounds>,
+    request: Option<BrowserViewportRequest>,
+) -> Result<SessionBrowserSnapshot, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    // Serialize load events, model choices, and UI resize reports so an older
+    // layout cannot overwrite a newer request after its native apply completes.
+    let _layout = manager.layout.lock().map_err(|_| "browser layout is unavailable")?;
+    let (label, host, request, url, previous) = manager.with_slot_mut(session_id, |slot| (
+        slot.webview_label.clone(), host.unwrap_or_else(|| slot.host_bounds.clone()),
+        request.unwrap_or(slot.viewport_request), slot.url.clone(), slot.viewport,
+    ))?;
+    let geometry = browser_viewport::geometry(request, &url, &host)?;
+    let webview = app.get_webview(&label).ok_or("browser webview is not available")?;
+    browser_viewport::apply(&webview, &geometry, Some(previous))?;
+    let changed = manager.with_slot_mut(session_id, |slot| {
+        let changed = slot.viewport != geometry.state;
+        if slot.viewport.width != geometry.state.width || slot.viewport.height != geometry.state.height {
+            slot.pointer_reference = None;
+        }
+        slot.host_bounds = host;
+        slot.viewport_request = request;
+        slot.viewport = geometry.state;
+        changed
+    })?;
+    let snapshot = manager.get_snapshot(session_id)?.ok_or("browser disappeared during resize")?;
+    if changed && !snapshot.background_only {
+        let _ = app.emit("session-browser-event", serde_json::json!({
+            "sessionId":session_id,"kind":"viewport","viewport":snapshot.viewport,
+        }));
     }
-    webview
-        .set_bounds(Rect {
-            position: LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)).into(),
-            size: LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
-        })
-        .map_err(|error| format!("could not position browser webview: {error}"))?;
-    Ok(())
+    Ok(snapshot)
+}
+
+pub fn set_session_browser_viewport<R: Runtime>(
+    app: &AppHandle<R>, session_id: &str, request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    request.validate()?;
+    apply_session_browser_layout(app, session_id, None, Some(request))
 }
 
 pub fn open_session_browser<R: Runtime>(
@@ -1083,9 +1116,8 @@ pub fn open_session_browser<R: Runtime>(
             webview
                 .navigate(url.clone())
                 .map_err(|error| format!("could not navigate browser: {error}"))?;
-            if let Some(bounds) = request.bounds.as_ref() {
-                apply_bounds(&webview, bounds)?;
-            }
+            manager.set_url(&request.session_id, url.as_str())?;
+            apply_session_browser_layout(app, &request.session_id, request.bounds.clone(), None)?;
             let visible =
                 browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
             if visible {
@@ -1136,6 +1168,8 @@ pub fn open_session_browser<R: Runtime>(
     let visible = request.visible.unwrap_or(
         requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
     );
+    let viewport_request = BrowserViewportRequest::default();
+    let geometry = browser_viewport::geometry(viewport_request, url.as_str(), &bounds)?;
 
     let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)
@@ -1144,19 +1178,21 @@ pub fn open_session_browser<R: Runtime>(
         .on_navigation(browser_url_is_navigable)
         .on_page_load(move |_webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                let url = payload.url().as_str();
-                let manager = app_for_load.state::<SessionBrowserManager>();
-                let _ = manager.set_url(&session_for_load, url);
-                if !background_only {
-                    let _ = app_for_load.emit(
-                        "session-browser-event",
-                        serde_json::json!({
-                            "sessionId": session_for_load,
-                            "kind": "loaded",
-                            "url": url,
-                        }),
-                    );
-                }
+                let app = app_for_load.clone();
+                let session_id = session_for_load.clone();
+                let url = payload.url().as_str().to_string();
+                let _ = app.state::<SessionBrowserManager>().set_url(&session_id, &url);
+                // Native layout work waits for the main thread; never block the
+                // WebKit load callback itself. Redirects re-resolve Auto mode.
+                std::thread::spawn(move || {
+                    let snapshot = apply_session_browser_layout(&app, &session_id, None, None);
+                    if !background_only {
+                        let _ = app.emit("session-browser-event", serde_json::json!({
+                            "sessionId": session_id, "kind": "loaded", "url": url,
+                            "viewport": snapshot.ok().map(|snapshot| snapshot.viewport),
+                        }));
+                    }
+                });
             }
         })
         .on_document_title_changed(move |_webview, title| {
@@ -1182,17 +1218,12 @@ pub fn open_session_browser<R: Runtime>(
     let webview = window
         .add_child(
             builder,
-            LogicalPosition::new(
-                if background_only {
-                    bounds.x
-                } else {
-                    bounds.x.max(0.0)
-                },
-                bounds.y.max(0.0),
-            ),
-            LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
+            LogicalPosition::new(geometry.frame.x, geometry.frame.y),
+            LogicalSize::new(geometry.frame.width, geometry.frame.height),
         )
         .map_err(|error| format!("could not create session browser webview: {error}"))?;
+
+    browser_viewport::apply(&webview, &geometry, None)?;
 
     // Child webviews are the unstable-path trigger that leaves native window
     // controls at (0, 0). Re-apply the overlay inset on the parent window.
@@ -1226,6 +1257,9 @@ pub fn open_session_browser<R: Runtime>(
             title: String::new(),
             visible,
             background_only,
+            host_bounds: bounds,
+            viewport_request,
+            viewport: geometry.state,
             approved_origins: approved,
             pointer_reference: None,
             console: VecDeque::new(),
@@ -1249,11 +1283,7 @@ pub fn set_session_browser_bounds<R: Runtime>(
         // No frontend host can resize or move an agent's independent viewport.
         return Ok(());
     }
-    let label = manager.webview_label_for(session_id)?;
-    let webview = app
-        .get_webview(&label)
-        .ok_or_else(|| "browser webview is not available".to_string())?;
-    apply_bounds(&webview, &bounds)?;
+    apply_session_browser_layout(app, session_id, Some(bounds), None)?;
     // Positioning is independent of visibility: only the mounted UI host may
     // reveal the child, after confirming its bounds report is still current.
     Ok(())
@@ -1298,6 +1328,7 @@ pub fn navigate_session_browser<R: Runtime>(
         .navigate(url.clone())
         .map_err(|error| format!("could not navigate browser: {error}"))?;
     manager.set_url(session_id, url.as_str())?;
+    apply_session_browser_layout(app, session_id, None, None)?;
     let _ = manager.approve_origin(session_id, &url.origin().ascii_serialization());
     manager
         .get_snapshot(session_id)?
@@ -1492,6 +1523,8 @@ pub fn mouse_session_browser<R: Runtime>(
                     let width = bounds.size.width;
                     let height = bounds.size.height;
                     let point = |px: f64, py: f64| -> Result<NSPoint, String> {
+                        let px = px * webview.pageZoom();
+                        let py = py * webview.pageZoom();
                         if px < 0.0 || py < 0.0 || px >= width || py >= height {
                             return Err(
                                 "pointer coordinates are outside the browser viewport".into()
@@ -1507,6 +1540,9 @@ pub fn mouse_session_browser<R: Runtime>(
                     };
                     let start = point(x, y)?;
                     let end = point(to_x, to_y)?;
+                    if !objc2_core_graphics::CGPreflightPostEventAccess() {
+                        return Err("Gyro needs macOS Accessibility permission to send browser mouse input".into());
+                    }
                     let mtm = objc2::MainThreadMarker::new()
                         .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
                     let main_screen = NSScreen::mainScreen(mtm)
@@ -1615,8 +1651,8 @@ pub fn capture_session_browser_png<R: Runtime>(
                 use objc2_app_kit::{
                     NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
                 };
-                use objc2_foundation::{NSDictionary, NSError};
-                use objc2_web_kit::WKWebView;
+                use objc2_foundation::{NSDictionary, NSError, NSNumber};
+                use objc2_web_kit::{WKWebView, WKSnapshotConfiguration};
 
                 let view: &WKWebView = &*platform.inner().cast();
                 let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
@@ -1649,7 +1685,12 @@ pub fn capture_session_browser_png<R: Runtime>(
                     })();
                     let _ = sender.send(snapshot);
                 });
-                view.takeSnapshotWithConfiguration_completionHandler(None, &completion);
+                // Request the unscaled CSS width, preserving desktop evidence
+                // even while the person sees a fitted page in a narrow panel.
+                let configuration = WKSnapshotConfiguration::new(objc2::MainThreadMarker::new().expect("snapshot runs on the main thread"));
+                let width = view.bounds().size.width / view.pageZoom();
+                configuration.setSnapshotWidth(Some(&NSNumber::new_f64(width)));
+                view.takeSnapshotWithConfiguration_completionHandler(Some(&configuration), &completion);
             })
             .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
 
@@ -1703,6 +1744,13 @@ pub async fn session_browser_set_bounds(
     bounds: SessionBrowserBounds,
 ) -> Result<(), String> {
     set_session_browser_bounds(&app, &session_id, bounds)
+}
+
+#[tauri::command]
+pub async fn session_browser_set_viewport(
+    app: AppHandle, session_id: String, request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    set_session_browser_viewport(&app, &session_id, request)
 }
 
 #[tauri::command]
@@ -1790,6 +1838,9 @@ mod tests {
             title: String::new(),
             visible: false,
             background_only,
+            host_bounds: BACKGROUND_BROWSER_BOUNDS.clone(),
+            viewport_request: BrowserViewportRequest::default(),
+            viewport: browser_viewport::geometry(BrowserViewportRequest::default(), "https://example.com/", &BACKGROUND_BROWSER_BOUNDS).unwrap().state,
             approved_origins: HashSet::new(),
             pointer_reference: None,
             console: VecDeque::new(),

@@ -1,3 +1,6 @@
+import { formatDetailedTokenCount as formatTokenCount, isTokenCount as validCount } from "./token-count.ts";
+export { formatTokenCount };
+
 /** Provider observations for a turn. Input/output are inclusive of cache/reasoning. */
 export type UsageAccounting = {
   source: "provider" | "character-estimate" | "mixed" | "legacy";
@@ -23,10 +26,6 @@ const countKeys = ["inputTokens", "cachedInputTokens", "cacheWriteTokens", "outp
 const sources = ["provider", "character-estimate", "mixed", "legacy"];
 const scopes = ["request", "turn", "session", "context", "task"];
 const coverages = ["complete", "partial", "estimated", "unavailable"];
-
-function validCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
 
 function readAccounting(value: unknown): UsageAccounting | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -62,8 +61,18 @@ export function turnTokensFromValue(value: unknown): TurnTokens | undefined {
   const invalidCacheWrite = written !== undefined && inputTokens !== undefined &&
     (written > inputTokens || written > inputTokens - (cached ?? 0));
   const invalidReasoning = reasoning !== undefined && outputTokens !== undefined && reasoning > outputTokens;
-  const inconsistent = (reported !== undefined && sum !== undefined && reported < sum) ||
-    invalidCacheRead || invalidCacheWrite || invalidReasoning;
+  // Known inclusive input and output must reconcile exactly with a reported total.
+  // Numeric zero placeholders for unknown breakdowns are not contradictory.
+  const knownPair = !accounting || (accounting.known.input && accounting.known.output);
+  const missingKnownCount = accounting && (
+    (accounting.known.input && inputTokens === undefined) ||
+    (accounting.known.output && outputTokens === undefined) ||
+    (accounting.known.cacheRead && cached === undefined) ||
+    (accounting.known.cacheWrite && written === undefined) ||
+    (accounting.known.reasoning && reasoning === undefined));
+  const inconsistent = (reported !== undefined && sum !== undefined &&
+    (reported < sum || (knownPair && reported !== sum))) ||
+    missingKnownCount || invalidCacheRead || invalidCacheWrite || invalidReasoning;
   if (accounting && inconsistent) {
     if (accounting.coverage !== "unavailable") accounting.coverage = "estimated";
     accounting.reason = "inconsistent-counts";
@@ -94,13 +103,6 @@ function unavailable(tokens: TurnTokens): boolean {
     tokens.accounting?.scope === "context" || tokens.accounting?.scope === "session";
 }
 
-export function formatTokenCount(tokens: number): string {
-  if (!validCount(tokens)) return "—";
-  if (tokens < 10_000) return tokens.toLocaleString();
-  if (tokens < 999_500) return `${(tokens / 1_000).toFixed(tokens < 100_000 ? 1 : 0)}k`;
-  return `${(tokens / 1_000_000).toFixed(2).replace(/0$/, "")}M`;
-}
-
 export function turnTokensLabel(tokens: TurnTokens): string {
   if (unavailable(tokens)) return "Usage unavailable";
   const state = coverage(tokens);
@@ -129,7 +131,8 @@ export function turnTokensDetail(tokens: TurnTokens): string {
     parts.push(`${tokens.inputTokens.toLocaleString()} input`);
   if (tokens.outputTokens !== undefined && (known ? known.output : tokens.outputTokens > 0))
     parts.push(`${tokens.outputTokens.toLocaleString()} output`);
-  const scope = tokens.accounting?.scope === "request" ? "last request" : "turn";
+  const scope = tokens.accounting?.scope === "request" ? "last request" :
+    tokens.accounting?.scope === "task" ? "task" : "turn";
   const status = state === "complete" ? "reported" : state === "partial" ? "reported with incomplete coverage" : tokens.accounting?.reason === "inconsistent-counts" ? "uncertain" : tokens.accounting?.source === "character-estimate" ? "estimated from observed text" : "estimated or partially estimated";
   let detail = [`${tokens.totalTokens.toLocaleString()} tokens ${status} for this ${scope}`, ...parts].join(" · ") + ".";
   if (tokens.cachedInputTokens && (known ? known.cacheRead : true))

@@ -84,6 +84,7 @@ pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
             | CapabilityId::BrowserInspect
             | CapabilityId::BrowserReload
             | CapabilityId::BrowserScreenshot
+            | CapabilityId::BrowserViewport
             | CapabilityId::BrowserNavigate
             | CapabilityId::BrowserBack
             | CapabilityId::BrowserForward

@@ -1,0 +1,228 @@
+{
+  "recordedAt": "2026-10-08T17:25:32.170449+00:00",
+  "scope": "Two immutable standalone probe executables, same 20 true commands, alternating block order, owned-child PID sampling every 1ms; desktop/model latency is not measured",
+  "binaryHashes": {
+    "/private/tmp/gyro-process-lifecycle-guarded-probe": "f0a68f175a723f3a5ee0f7c28e5643439b1555a7d7876562828cd98761254053",
+    "/private/tmp/gyro-process-lifecycle-pooled-probe": "ea55b78d1f5a0234ee5ae5e36755f0d8ca560ee4d49baa95b5afb2def1f8c8f0"
+  },
+  "rows": [
+    {
+      "condition": "before",
+      "samplesUs": [
+        30625,
+        19654,
+        16843,
+        26616,
+        27274,
+        17348,
+        20201,
+        26428,
+        20663,
+        30545,
+        26931,
+        28363,
+        19508,
+        15653,
+        26785,
+        33460,
+        22986,
+        36071,
+        36378,
+        31621
+      ],
+      "runWallMs": 523.4579590000001,
+      "observedWatchdogPids": [
+        68883,
+        68884,
+        68885,
+        68887,
+        68889,
+        68890,
+        68891,
+        68892,
+        68893,
+        68895,
+        68897,
+        68899,
+        68900,
+        68901,
+        68902,
+        68903,
+        68905,
+        68906,
+        68907,
+        68909,
+        68911,
+        68912,
+        68913,
+        68915,
+        68917,
+        68918,
+        68919,
+        68920,
+        68921,
+        68922
+      ],
+      "observedWatchdogCount": 30
+    },
+    {
+      "condition": "after",
+      "samplesUs": [
+        5394,
+        2391,
+        2557,
+        2871,
+        3018,
+        1370,
+        1429,
+        2879,
+        2502,
+        1551,
+        2596,
+        3064,
+        2901,
+        2834,
+        2923,
+        1458,
+        2923,
+        2940,
+        2909,
+        2713
+      ],
+      "runWallMs": 66.26070800000005,
+      "observedWatchdogPids": [
+        68924,
+        68928,
+        68934,
+        68936,
+        68941
+      ],
+      "observedWatchdogCount": 5
+    },
+    {
+      "condition": "after",
+      "samplesUs": [
+        5962,
+        1545,
+        2932,
+        2561,
+        1330,
+        1464,
+        1308,
+        2570,
+        2834,
+        2427,
+        2893,
+        2973,
+        2868,
+        2483,
+        2979,
+        1449,
+        1328,
+        2715,
+        2896,
+        2446
+      ],
+      "runWallMs": 55.99404099999994,
+      "observedWatchdogPids": [
+        68946,
+        68957,
+        68958,
+        68961,
+        68962,
+        68963,
+        68964,
+        68965,
+        68966
+      ],
+      "observedWatchdogCount": 9
+    },
+    {
+      "condition": "before",
+      "samplesUs": [
+        17831,
+        32122,
+        31879,
+        22911,
+        33428,
+        33651,
+        36139,
+        38469,
+        37233,
+        26779,
+        23725,
+        32861,
+        26722,
+        19854,
+        16942,
+        27582,
+        20690,
+        25863,
+        34913,
+        41449
+      ],
+      "runWallMs": 586.9850000000001,
+      "observedWatchdogPids": [
+        68968,
+        68970,
+        68972,
+        68975,
+        68976,
+        68977,
+        68978,
+        68979,
+        68980,
+        68981,
+        68983,
+        68985,
+        68986,
+        68987,
+        68989,
+        68991,
+        68992,
+        68993,
+        68995,
+        68997,
+        68999,
+        69000,
+        69001,
+        69003,
+        69004,
+        69005,
+        69006,
+        69007,
+        69008
+      ],
+      "observedWatchdogCount": 29
+    }
+  ],
+  "summary": {
+    "before": {
+      "samples": 40,
+      "medianCommandMs": 26.858,
+      "meanCommandMs": 27.3749,
+      "runWallMs": [
+        523.4579590000001,
+        586.9850000000001
+      ],
+      "observedWatchdogCounts": [
+        30,
+        29
+      ]
+    },
+    "after": {
+      "samples": 40,
+      "medianCommandMs": 2.714,
+      "meanCommandMs": 2.57965,
+      "runWallMs": [
+        66.26070800000005,
+        55.99404099999994
+      ],
+      "observedWatchdogCounts": [
+        5,
+        9
+      ]
+    }
+  },
+  "validity": "Helper counts are invalid: pre-exec command children still had the probe executable path. Final evidence uses argv identification."
+}

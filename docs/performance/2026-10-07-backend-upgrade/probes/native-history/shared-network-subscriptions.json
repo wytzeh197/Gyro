@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-10-08T15:52:57.446471+00:00",
+  "scope": "actual hook execution plus source wiring; not native latency",
+  "cohort": {
+    "chatSurfaces": 1,
+    "historyTurns": 400
+  },
+  "before": {
+    "hookSubscriptions": 400,
+    "browserListeners": 800
+  },
+  "after": {
+    "hookSubscriptions": 1,
+    "browserListeners": 2
+  },
+  "preserved": [
+    "online/offline updates",
+    "transition between initial read and subscription",
+    "cleanup to zero listeners",
+    "turn retry input and memo invalidation"
+  ],
+  "sourceHashes": {
+    "packages/ui/src/surfaces.tsx": "3b2ae3314a1e5cac1f27475da33f6a79224bda727056606469ca6365a351b790",
+    "packages/ui/src/use-network-online.ts": "50a66a0694d11bfbd0a84389599c2f728d72df02079c90b1fef953fc6a6ff5e9",
+    "scripts/check-chat-network.mjs": "f503f5df04df8cb94d0ba86e6a0d832672ff2dbb2eda913ada9fce2511a8daed"
+  },
+  "nativeAcceptance": "pending manual Mac unlock"
+}

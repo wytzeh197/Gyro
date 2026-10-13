@@ -46,6 +46,7 @@ async function runBoot(surface, failure) {
     },
     require: (id) => {
       if (id === "react") return { default: react };
+      if (id === "@tauri-apps/api/core") return { isTauri: () => false };
       if (id === "react-dom/client")
         return {
           default: {

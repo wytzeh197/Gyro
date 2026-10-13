@@ -1290,11 +1290,20 @@ function workItemFromCapabilityCall(
   const summary = text(payload, "summary");
   const resource = record(payload?.resource);
   const resourceLabel = text(resource, "label");
-  if (capabilityId === "code-mode-execute" || capabilityId === "code-mode-discover") {
+  if (
+    capabilityId === "code-mode-execute" ||
+    capabilityId === "code-mode-discover"
+  ) {
     const workflow = record(payload?.codeMode);
     return {
-      kind: "tool", id, status,
-      tool: text(workflow, "label") ?? (capabilityId === "code-mode-discover" ? "Finding available workspace actions" : "Inspecting workspace"),
+      kind: "tool",
+      id,
+      status,
+      tool:
+        text(workflow, "label") ??
+        (capabilityId === "code-mode-discover"
+          ? "Finding available workspace actions"
+          : "Inspecting workspace"),
       note: summary,
     };
   }
@@ -2110,7 +2119,8 @@ function isHiddenRunEvent(event: SessionEvent) {
   return (
     (label.includes("GYRO_SESSION_TITLE:") ||
       label.includes("GYRO_ARTIFACTS:") ||
-      label.includes("GYRO_QUESTIONS:")) &&
+      label.includes("GYRO_QUESTIONS:") ||
+      label.includes("GYRO_AGENT_UPDATE:")) &&
     !stripHiddenControlMarkers(label).trim()
   );
 }

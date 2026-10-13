@@ -43,13 +43,16 @@ export function useSubagents({
   const inFlight = useRef(new Set<string>());
   const loadedParents = useRef(new Set<string>());
   const loadedAgents = useRef(new Set<string>());
+  const observedHistory = useRef(new Map<string, SessionEvent[]>());
   const native =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const merge = useCallback((agent: SubagentSnapshot) => {
-    setById((current) => ({
-      ...current,
-      [agent.agentId]: mergeSubagentSnapshot(current[agent.agentId], agent),
-    }));
+    setById((current) => {
+      const next = mergeSubagentSnapshot(current[agent.agentId], agent);
+      return next === current[agent.agentId]
+        ? current
+        : { ...current, [agent.agentId]: next };
+    });
   }, []);
   const parentKey = nativeSubagentParents(parentIds).join("\n");
   const refresh = useCallback(
@@ -111,20 +114,32 @@ export function useSubagents({
   // Persisted lifecycle events also feed browser fixtures and refreshes. They
   // never override a newer live snapshot from the dedicated event channel.
   useEffect(() => {
-    for (const events of Object.values(eventsBySessionId))
+    const updates: SubagentSnapshot[] = [];
+    for (const id of observedHistory.current.keys())
+      if (!(id in eventsBySessionId)) observedHistory.current.delete(id);
+    for (const [id, events] of Object.entries(eventsBySessionId)) {
+      if (observedHistory.current.get(id) === events) continue;
+      observedHistory.current.set(id, events);
       for (const event of events) {
         const payload = event.payload as
           { kind?: string; agent?: SubagentSnapshot } | undefined;
-        if (payload?.kind === "subagent-state" && payload.agent) {
-          const agent = payload.agent;
-          setById((current) => {
-            const next = mergeSubagentSnapshot(current[agent.agentId], agent);
-            return next === current[agent.agentId]
-              ? current
-              : { ...current, [agent.agentId]: next };
-          });
-        }
+        if (payload?.kind === "subagent-state" && payload.agent)
+          updates.push(payload.agent);
       }
+    }
+    if (!updates.length) return;
+    // One state update for changed histories. Unrelated streaming chats no
+    // longer replay every saved sub-agent event through React's update queue.
+    setById((current) => {
+      let result = current;
+      for (const agent of updates) {
+        const next = mergeSubagentSnapshot(result[agent.agentId], agent);
+        if (next === result[agent.agentId]) continue;
+        if (result === current) result = { ...current };
+        result[agent.agentId] = next;
+      }
+      return result;
+    });
   }, [eventsBySessionId]);
   useEffect(() => {
     for (const agent of Object.values(byId)) {

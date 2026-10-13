@@ -352,6 +352,8 @@ const stoppedChatSessionsRef = { current: new Set() };
 let resolveStop;
 const stopChat = callback("stopChatSession", {
   stoppedChatSessionsRef,
+  chatAutoRetry: { cancelSession: () => {} },
+  retryDispatchRef: { current: { cancelSession: () => {} } },
   invoke: () =>
     new Promise((resolve) => {
       resolveStop = resolve;

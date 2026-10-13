@@ -142,7 +142,7 @@ function Fixture() {
           nativeHost={nativeDemo}
           overlayOccluded={occluded}
           onHostBoundsChange={nativeDemo ? reportHostBounds : undefined}
-          onDeviceChange={setDevice}
+          onDeviceChange={(mode) => setDevice(mode === "auto" ? "desktop" : mode)}
           onScreenshot={(action, note) => {
             if (action === "feedback" && note) setFeedback(note);
           }}
