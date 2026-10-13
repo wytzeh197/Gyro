@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-appearance",
+  "description": "Let the main window apply Gyro's selected native appearance.",
+  "windows": ["main"],
+  "permissions": ["core:app:allow-set-app-theme"]
+}

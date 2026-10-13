@@ -20,12 +20,13 @@
     14px 100%, 0 100%, -100vw -100vh
   );
   --gyro-sidebar-material: color-mix(
-    in srgb, var(--gyro-sidebar) var(--gyro-window-tint), transparent
+    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-window-tint), transparent
   );
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] {
-  --gyro-window-tint: 60%;
+  --gyro-window-tint: 65%;
+  --gyro-window-tint-color: #f5faff;
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */

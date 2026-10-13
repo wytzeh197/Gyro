@@ -1,5 +1,6 @@
 import React from "react";
 import { isTauri } from "@tauri-apps/api/core";
+import { syncNativeAppearance } from "./native-appearance";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
 import { AppFailure } from "./app-failure";
@@ -37,6 +38,7 @@ const initialTheme = (() => {
 })();
 
 document.documentElement.dataset.theme = initialTheme;
+syncNativeAppearance(initialTheme);
 document
   .querySelector('meta[name="theme-color"]')
   ?.setAttribute("content", initialTheme === "light" ? "#f7f7f7" : "#181818");

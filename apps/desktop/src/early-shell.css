@@ -19,7 +19,7 @@
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
-  background: rgb(255 255 255 / 60%);
+  background: rgb(245 250 255 / 65%);
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-main {
