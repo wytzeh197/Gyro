@@ -23,6 +23,7 @@
    Error and auxiliary surfaces retain their opaque canvas. */
 :root[data-native-material="sidebar"]:has(.gyro-app-shell),
 :root[data-native-material="sidebar"]:has(.gyro-app-shell) body,
+:root[data-native-material="sidebar"]:has(.gyro-app-shell) #root,
 :root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
   background: transparent;
 }

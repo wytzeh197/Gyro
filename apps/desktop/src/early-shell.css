@@ -3,6 +3,7 @@
 /* Match the native navigation material while the full shell is loading. */
 :root[data-native-material="sidebar"]:has(.gyro-early-shell),
 :root[data-native-material="sidebar"]:has(.gyro-early-shell) body,
+:root[data-native-material="sidebar"]:has(.gyro-early-shell) #root,
 :root[data-native-material="sidebar"] .gyro-early-shell {
   background: transparent;
 }
