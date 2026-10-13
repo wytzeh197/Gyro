@@ -47,7 +47,7 @@
       "name": "gyro_browser_reload"
     },
     {
-      "description": "Capture the current Browser viewport at full resolution, including when Desktop fit is scaled inside a narrow panel. Optional device changes layout before capture; omit it to preserve the current viewport.",
+      "description": "Capture the full-resolution viewport of this chat's open browser page. Optional device selects responsive, desktop, tablet, or mobile layout before capture; omit it to preserve the current viewport.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -67,39 +67,39 @@
       "name": "gyro_browser_screenshot"
     },
     {
-      "name": "gyro_browser_set_viewport",
-      "description": "Set this chat's existing Browser layout without changing panel width or reloading the page. Auto uses Desktop fit for loopback previews and Responsive for ordinary websites. Desktop (1280×800), Tablet (768×1024), and Mobile (390×844) fit inside the panel. Manual choices persist across navigation; Auto restores automatic behavior. Optional width/height customize a fixed layout in CSS pixels. Screenshots stay full resolution and mouse coordinates stay CSS pixels. Re-observe after changing the viewport.",
+      "description": "Set this chat's Browser layout viewport without navigating. Auto uses Desktop fit for local app previews and responsive layout for ordinary sites. Desktop, tablet and mobile retain fixed CSS dimensions while the page scales to fit a narrow panel; responsive follows the panel. Optional width and height customize a fixed viewport. Re-observe after changing it; mouse coordinates remain CSS pixels and screenshots retain full viewport resolution.",
       "inputSchema": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
+          "height": {
+            "description": "Fixed layout height in CSS pixels.",
+            "maximum": 1600,
+            "minimum": 240,
+            "type": "integer"
+          },
           "mode": {
-            "type": "string",
             "enum": [
               "auto",
               "responsive",
               "desktop",
               "tablet",
               "mobile"
-            ]
+            ],
+            "type": "string"
           },
           "width": {
-            "type": "integer",
-            "minimum": 240,
+            "description": "Fixed layout width in CSS pixels.",
             "maximum": 2560,
-            "description": "Fixed layout width in CSS pixels."
-          },
-          "height": {
-            "type": "integer",
             "minimum": 240,
-            "maximum": 1600,
-            "description": "Fixed layout height in CSS pixels."
+            "type": "integer"
           }
         },
         "required": [
           "mode"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "name": "gyro_browser_set_viewport"
     },
     {
       "description": "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. Keep implementation checks, interactions, and screenshots in the background. Same origin gate as browser.open.",
