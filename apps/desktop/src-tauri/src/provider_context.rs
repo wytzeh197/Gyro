@@ -468,6 +468,17 @@ pub(super) fn provider_model_context_window(
     provider_id: &str,
     model_id: Option<&str>,
 ) -> Option<u64> {
+    if let Some(window) = model_id.and_then(|model|
+        crate::live_model_context::known_window(provider_id, model)) {
+        return Some(window);
+    }
+    catalog_context_window(provider_id, model_id)
+}
+
+pub(super) fn catalog_context_window(
+    provider_id: &str,
+    model_id: Option<&str>,
+) -> Option<u64> {
     if let Some(window) = crate::model_catalog::catalog_model_profile(provider_id, model_id)
         .and_then(|profile| profile.context_window_tokens)
     {
@@ -479,19 +490,26 @@ pub(super) fn provider_model_context_window(
         "openai" => match model_id {
             "gpt-6.1-sol" => 500_000,
             "gpt-5.4-mini" => 400_000,
-            _ => 272_000,
+            "" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna" |
+            "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" |
+            "gpt-5.5" | "gpt-5.4" => 272_000,
+            _ => return None,
         },
         "anthropic" => match model_id {
             "claude-haiku-4-5" => 200_000,
-            _ => 1_000_000,
+            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5" |
+            "claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-5-5" |
+            "claude-sonnet-5" | "claude-haiku-5-5" => 1_000_000,
+            _ => return None,
         },
         // K3's 1M entitlement depends on the plan; retain the Plus baseline
         // until the runtime reports the session's provisioned window.
-        "kimi" => 262_144,
-        "gemini" => 1_048_576,
+        "kimi" if model_id.is_empty() || model_id == "k3" => 262_144,
+        "gemini" if matches!(model_id, "" | "gemini-default" | "gemini-3.8-flash") => 1_048_576,
         "xai" => match model_id {
             "grok-4.3" => 1_000_000,
-            _ => 500_000,
+            "" | "grok-4.7" | "grok-4.6" | "grok-4.5" => 500_000,
+            _ => return None,
         },
         "deepseek" => match model_id {
             "deepseek-flash" | "deepseek-v4-pro" => 1_000_000,

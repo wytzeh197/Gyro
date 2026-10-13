@@ -106,7 +106,7 @@ function initialAutomation(): Automation {
     execution: {
       workspacePath: project,
       providerId: "deepseek",
-      modelId: "deepseek-chat",
+      modelId: "deepseek-flash",
       modelLabel: "DeepSeek V4.1 Flash",
       calendar: { weekday: 4, time: "09:00", timezone: "Europe/Amsterdam" },
     },
@@ -178,7 +178,7 @@ function Preview() {
               id: "deepseek",
               label: "DeepSeek",
               ready: true,
-              models: [{ id: "deepseek-chat", label: "DeepSeek V4.1 Flash" }],
+              models: [{ id: "deepseek-flash", label: "DeepSeek V4.1 Flash" }],
             },
           ]}
           onSelectAutomation={noAction}

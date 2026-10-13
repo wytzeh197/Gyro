@@ -44,6 +44,8 @@ function Preview() {
         .material-preview-desktop { flex:1;min-height:0;position:relative;padding:20px;background:linear-gradient(140deg,#37556d 0%,#617d8e 25%,#aa9f94 45%,#93627b 67%,#313747 100%);background-size:160% 160%; }
         .material-preview-desktop.is-shifted { background-position:100% 100%; }
         .material-preview-window { height:100%;overflow:hidden;border:1px solid var(--gyro-premium-hairline-strong);border-radius:14px;box-shadow:0 14px 40px rgb(0 0 0 / 25%); }
+        /* Keep background captures deterministic while preserving production paint. */
+        .material-preview-window *, .material-preview-window *::before, .material-preview-window *::after { animation:none !important;transition:none !important; }
         .material-preview-window .gyro-app-shell { height:100%;min-height:0;grid-template-rows:minmax(0,1fr); }
         .material-preview-window .gyro-main { height:100%;max-height:100%;min-height:0; }
         .material-preview-window .gyro-sidebar,.material-preview-window .gyro-workspace-activity-rail { height:100%;max-height:100%;min-height:0; }

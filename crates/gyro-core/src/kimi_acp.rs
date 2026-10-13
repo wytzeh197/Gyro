@@ -61,6 +61,8 @@ pub struct KimiAcpActivity {
     /// Lines added and removed, measured from the call's ACP `diff` content.
     pub file_counts: Option<(usize, usize)>,
     pub status: String,
+    /// Live occupancy from ACP usage_update; kept separate from billed usage.
+    pub context_usage: Option<AcpContextUsage>,
 }
 
 #[derive(Clone, Debug)]
@@ -567,8 +569,15 @@ where
             &mut on_approval,
             &mut on_write_file,
         );
-        if model_result.is_err() {
+        if let Err(error) = model_result {
             connection.runtime_info.model_id = previous_model;
+            // An explicit Google model must not silently run the CLI default.
+            if provider_id_from_program(&request.program.to_string_lossy())
+                .is_some_and(|id| matches!(id, "gemini" | "antigravity"))
+                || matches!(request.provider_label.as_str(), "Gemini" | "Google Antigravity")
+            {
+                anyhow::bail!("{} could not select model {}: {error}", request.provider_label, request.model);
+            }
         }
     }
     if !skip_in_session_config && request.reasoning_effort.is_some() {
@@ -902,20 +911,63 @@ where
 /// An agent names its models however its own config does — Kimi calls its
 /// flagship `kimi-code/k3`, not `k3` — so the list is what makes a selection
 /// translatable instead of a guess.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpModel {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpModelDiscovery {
+    pub models: Vec<AcpModel>,
+    pub current_model_id: Option<String>,
+}
+
+/// Read both ACP model inventory shapes; metadata never grants model access.
+fn acp_model_discovery(session: &Value) -> AcpModelDiscovery {
+    let mut models = Vec::<AcpModel>::new();
+    let mut append = |option: &Value| {
+        let Some(id) = option.get("modelId").or_else(|| option.get("value"))
+            .and_then(Value::as_str).map(str::trim)
+            .filter(|id| !id.is_empty() && id.len() <= 200 && !id.chars().any(char::is_control))
+        else { return; };
+        if models.len() >= 500 || models.iter().any(|model| model.id == id) { return; }
+        let label = option.get("name").or_else(|| option.get("label"))
+            .and_then(Value::as_str).filter(|label| !label.trim().is_empty()).unwrap_or(id);
+        models.push(AcpModel {
+            id: id.into(),
+            display_name: redact_secrets(&label.chars().take(160).collect::<String>()),
+            description: option.get("description").and_then(Value::as_str)
+                .map(|text| redact_secrets(&text.chars().take(500).collect::<String>())),
+        });
+    };
+    for option in session.pointer("/models/availableModels")
+        .and_then(Value::as_array).into_iter().flatten() {
+        append(option);
+    }
+    for config in session.get("configOptions").and_then(Value::as_array).into_iter().flatten()
+        .filter(|config| config.get("id").and_then(Value::as_str) == Some("model")
+            || config.get("category").and_then(Value::as_str) == Some("model")) {
+        for option in config.get("options").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(group) = option.get("options").and_then(Value::as_array) {
+                for option in group { append(option); }
+            } else { append(option); }
+        }
+    }
+    let current_model_id = session.pointer("/models/currentModelId").and_then(Value::as_str)
+        .or_else(|| session.get("configOptions").and_then(Value::as_array)
+            .and_then(|options| options.iter().find(|option|
+                option.get("id").and_then(Value::as_str) == Some("model")))
+            .and_then(|option| option.get("currentValue")).and_then(Value::as_str))
+        .filter(|id| models.iter().any(|model| model.id == *id)).map(str::to_string);
+    AcpModelDiscovery { models, current_model_id }
+}
+
 fn acp_offered_model_ids(session: &Value) -> Vec<String> {
-    session
-        .get("configOptions")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
-        .and_then(|option| option.get("options"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|option| option.get("value").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect()
+    acp_model_discovery(session).models.into_iter().map(|model| model.id).collect()
 }
 
 /// Name a selected model the way the agent names it.
@@ -1003,6 +1055,15 @@ where
                 if connection.collecting_usage {
                     if let Some(context) = params.get("update").and_then(acp_usage::context_usage) {
                         connection.context_usage = Some(context);
+                        on_activity(&KimiAcpActivity {
+                            id: "live-context-usage".into(),
+                            kind: "context-usage".into(),
+                            label: "Context usage".into(),
+                            detail: None,
+                            file_counts: None,
+                            status: "running".into(),
+                            context_usage: Some(context),
+                        });
                     }
                     // Reopening/loading a session can replay its old replies and
                     // tool activities. They already belong to native history;
@@ -1060,6 +1121,7 @@ where
                         detail: Some("Cursor's interactive question or plan was cancelled. Continue with instructions in chat.".into()),
                         file_counts: None,
                         status: "failed".into(),
+                        context_usage: None,
                     });
                 }
             }
@@ -1163,6 +1225,7 @@ fn handle_session_update<Delta, Activity>(
                 detail,
                 file_counts: acp_diff_counts(update.get("content")),
                 status,
+                context_usage: None,
             });
         }
         Some("plan") => {
@@ -1173,6 +1236,7 @@ fn handle_session_update<Delta, Activity>(
                 detail: update.get("entries").map(Value::to_string),
                 file_counts: None,
                 status: "done".into(),
+                context_usage: None,
             });
         }
         _ => {}
@@ -1504,6 +1568,60 @@ pub fn check_kimi_acp_health(program: impl Into<OsString>, timeout: Duration) ->
     )
 }
 
+/// Metadata only: authenticate and open a session, never send a model prompt.
+/// The provider retains credential ownership and every tool request is denied.
+pub fn discover_acp_models(
+    provider_label: &str,
+    program: impl Into<OsString>,
+    program_args: Vec<OsString>,
+    auth_method_ids: &[&str],
+    timeout: Duration,
+) -> Result<AcpModelDiscovery> {
+    let request = KimiAcpRequest {
+        provider_label: provider_label.into(),
+        program: program.into(),
+        program_args,
+        auth_method_ids: auth_method_ids.iter().map(ToString::to_string).collect(),
+        workspace: std::env::temp_dir(),
+        prompt: Vec::new(),
+        resumed_prompt: None,
+        conversation_history_text: None,
+        mcp_servers: Vec::new(),
+        model: String::new(),
+        reasoning_effort: None,
+        mode: KimiAcpMode::Normal,
+        resume_session_id: None,
+        timeout,
+        inactivity_timeout: timeout,
+        cancellation: CancellationToken::default(),
+        credentials: CredentialPolicy::Inherit,
+        opened_session: None,
+    };
+    let mut connection = KimiAcpConnection::start(&request)?;
+    let id = connection.send_request("initialize", json!({
+        "protocolVersion": ACP_PROTOCOL_VERSION,
+        "clientInfo": {"name": "Gyro model discovery", "version": env!("CARGO_PKG_VERSION")},
+        "clientCapabilities": {},
+    }))?;
+    let initialize = wait_for_simple_response(&mut connection, id)?;
+    let advertised = initialize.get("authMethods").and_then(Value::as_array)
+        .into_iter().flatten().filter_map(|method| method.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if let Some(method) = request.auth_method_ids.iter()
+        .find(|method| advertised.is_empty() || advertised.contains(&method.as_str())) {
+        let id = connection.send_request("authenticate", json!({"methodId": method}))?;
+        wait_for_simple_response(&mut connection, id)?;
+    } else if !advertised.is_empty() {
+        anyhow::bail!("{provider_label} does not advertise a supported authentication method");
+    }
+    let id = connection.send_request("session/new", json!({
+        "cwd": request.workspace,
+        "mcpServers": [],
+    }))?;
+    let session = wait_for_simple_response(&mut connection, id)?;
+    Ok(acp_model_discovery(&session))
+}
+
 pub fn check_acp_health(
     provider_label: &str,
     program: impl Into<OsString>,
@@ -1614,6 +1732,12 @@ pub fn check_acp_health(
 fn wait_for_simple_response(connection: &mut KimiAcpConnection, expected_id: u64) -> Result<Value> {
     loop {
         let message = connection.receive()?;
+        if message.get("method").is_some() {
+            if let Some(id) = message.get("id").cloned() {
+                connection.send_error(id, -32601, "Metadata checks cannot execute tools")?;
+            }
+            continue;
+        }
         if message.get("id").and_then(Value::as_u64) != Some(expected_id) {
             continue;
         }
@@ -1639,6 +1763,67 @@ mod tests {
         CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
         KimiAcpMode, KimiAcpRequest,
     };
+
+    #[test]
+    fn google_inventory_accepts_both_acp_shapes_and_rejects_invalid_ids() {
+        let result = super::acp_model_discovery(&serde_json::json!({
+            "models": {"currentModelId": "gemini-3.8-flash", "availableModels": [
+                {"modelId": "gemini-3.8-flash", "name": "Gemini 3.8 Flash"},
+                {"modelId": "", "name": "Invalid"}
+            ]},
+            "configOptions": [{"id": "model", "options": [
+                {"value": "gemini-3.8-flash", "name": "Duplicate"},
+                {"group": "Other", "options": [{"value": "gemini-3.7-flash", "name": "Gemini 3.7 Flash"}]}
+            ]}]
+        }));
+        assert_eq!(result.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+            ["gemini-3.8-flash", "gemini-3.7-flash"]);
+        assert_eq!(result.current_model_id.as_deref(), Some("gemini-3.8-flash"));
+        assert_eq!(result.models[0].display_name, "Gemini 3.8 Flash");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn google_discovery_opens_metadata_without_sending_a_prompt() {
+        let (_temp, program) = acp_fixture(r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"gemini-api-key"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"metadata","models":{"currentModelId":"gemini-3.8-flash","availableModels":[{"modelId":"gemini-3.8-flash","name":"Gemini 3.8 Flash"}]}}}' ;;
+    *'"method":"session/prompt"'*) exit 9 ;;
+  esac
+done
+"#);
+        let result = super::discover_acp_models(
+            "Google Antigravity", program, vec![], &["gemini-api-key"],
+            std::time::Duration::from_secs(2),
+        ).unwrap();
+        assert_eq!(result.models[0].id, "gemini-3.8-flash");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn google_rejected_model_stops_before_any_prompt() {
+        let (temp, program) = acp_fixture(r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"selection"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"Model not available"}}' ;;
+    *'"method":"session/prompt"'*) touch unexpected-prompt; exit 9 ;;
+  esac
+done
+"#);
+        let mut request = fixture_request(program, temp.path().to_path_buf(), super::CancellationToken::default(), None);
+        request.provider_label = "Google Antigravity".into();
+        request.model = "unavailable-model".into();
+        let result = run_kimi_acp(request, |_| {}, |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce), |_, _| Ok(()));
+        assert!(result.unwrap_err().to_string().contains("could not select model"));
+        assert!(!temp.path().join("unexpected-prompt").exists());
+    }
 
     #[cfg(unix)]
     #[test]
@@ -1706,10 +1891,13 @@ mod tests {
             None,
         );
         request.provider_label = "xAI".into();
+        let mut live_context = Vec::new();
         let output = run_kimi_acp(
             request,
             |_| {},
-            |_| {},
+            |activity| {
+                if let Some(context) = activity.context_usage { live_context.push(context); }
+            },
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
             |_, _| Ok(()),
         )
@@ -1721,6 +1909,8 @@ mod tests {
                 size: 100000,
             })
         );
+        assert_eq!(live_context, vec![crate::acp_usage::AcpContextUsage { used: 50000, size: 100000 }]);
+        // Occupancy is published while the turn is running, and never replaces billed consumption.
         assert_eq!(output.usage_observation.tokens.total_tokens, 125);
     }
 

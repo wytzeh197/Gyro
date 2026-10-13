@@ -298,6 +298,16 @@ impl Default for GyroConfig {
                     model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
+                    id: "antigravity".into(),
+                    display_name: "Google Antigravity".into(),
+                    base_url: None,
+                    api_key_ref: "provider-cli:antigravity".into(),
+                    enabled: false,
+                    default_model_id: None,
+                    kind: None,
+                    model_ids: Vec::new(),
+                },
+                ModelProviderConfig {
                     id: "cursor".into(),
                     display_name: "Cursor".into(),
                     base_url: None,
@@ -336,9 +346,9 @@ impl Default for GyroConfig {
                     base_url: Some("https://api.deepseek.com/v1".into()),
                     api_key_ref: "provider:deepseek".into(),
                     enabled: false,
-                    default_model_id: Some("deepseek-chat".into()),
+                    default_model_id: Some("deepseek-flash".into()),
                     kind: None,
-                    model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                    model_ids: vec!["deepseek-flash".into(), "deepseek-v4-pro".into()],
                 },
                 ModelProviderConfig {
                     id: "mistral".into(),
@@ -361,7 +371,7 @@ impl Default for GyroConfig {
                     model_ids: vec![
                         "anthropic/claude-sonnet-4.5".into(),
                         "openai/gpt-5.1".into(),
-                        "google/gemini-3-pro-preview".into(),
+                        "google/gemini-3.8-flash".into(),
                         "deepseek/deepseek-chat".into(),
                         "meta-llama/llama-3.3-70b-instruct".into(),
                     ],
@@ -612,6 +622,16 @@ impl GyroConfig {
                 model_ids: Vec::new(),
             },
             ModelProviderConfig {
+                id: "antigravity".into(),
+                display_name: "Google Antigravity".into(),
+                base_url: None,
+                api_key_ref: "provider-cli:antigravity".into(),
+                enabled: false,
+                default_model_id: None,
+                kind: None,
+                model_ids: Vec::new(),
+            },
+            ModelProviderConfig {
                 id: "cursor".into(),
                 display_name: "Cursor".into(),
                 base_url: None,
@@ -650,9 +670,9 @@ impl GyroConfig {
                 base_url: Some("https://api.deepseek.com/v1".into()),
                 api_key_ref: "provider:deepseek".into(),
                 enabled: false,
-                default_model_id: Some("deepseek-chat".into()),
+                default_model_id: Some("deepseek-flash".into()),
                 kind: None,
-                model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                model_ids: vec!["deepseek-flash".into(), "deepseek-v4-pro".into()],
             },
             ModelProviderConfig {
                 id: "mistral".into(),
@@ -675,7 +695,7 @@ impl GyroConfig {
                 model_ids: vec![
                     "anthropic/claude-sonnet-4.5".into(),
                     "openai/gpt-5.1".into(),
-                    "google/gemini-3-pro-preview".into(),
+                    "google/gemini-3.8-flash".into(),
                     "deepseek/deepseek-chat".into(),
                     "meta-llama/llama-3.3-70b-instruct".into(),
                 ],
@@ -687,6 +707,41 @@ impl GyroConfig {
                 .any(|current| current.id == provider.id)
             {
                 self.model_providers.push(provider);
+            }
+        }
+
+        // Remove stopped API models from saved defaults and custom model lists.
+        // Config does not know the live Codex authentication route, so API-key
+        // exemptions are retained; the picker filters ChatGPT-only retirements.
+        for provider in &mut self.model_providers {
+            let replacement = provider.default_model_id.as_deref().and_then(|model| {
+                crate::model_retirements::retired_model_replacement(&provider.id, model, true)
+            });
+            if let Some(replacement) = replacement {
+                provider.default_model_id = Some(replacement.into());
+            }
+            provider.model_ids.retain(|model| {
+                crate::model_retirements::retired_model_replacement(&provider.id, model, true)
+                    .is_none()
+            });
+            if replacement.is_some() {
+                if let Some(default) = provider.default_model_id.as_ref() {
+                    if !provider.model_ids.contains(default) {
+                        provider.model_ids.push(default.clone());
+                    }
+                }
+            }
+        }
+        for profile in &mut self.command_profiles {
+            if let Some(replacement) = profile
+                .provider_id
+                .as_deref()
+                .zip(profile.default_model.as_deref())
+                .and_then(|(provider, model)| {
+                    crate::model_retirements::retired_model_replacement(provider, model, true)
+                })
+            {
+                profile.default_model = Some(replacement.into());
             }
         }
 
@@ -997,6 +1052,82 @@ mod tests {
         assert!(provider.get("models").is_none());
         let restored: GyroConfig = serde_json::from_value(json).unwrap();
         assert_eq!(restored.model_providers[0].model_ids, ["llama-3.3-70b"]);
+    }
+
+    #[test]
+    fn retired_models_are_removed_from_defaults_and_saved_provider_state() {
+        let mut config = GyroConfig::default();
+        let deepseek = config
+            .model_providers
+            .iter_mut()
+            .find(|p| p.id == "deepseek")
+            .unwrap();
+        assert_eq!(deepseek.default_model_id.as_deref(), Some("deepseek-flash"));
+        assert_eq!(deepseek.model_ids, ["deepseek-flash", "deepseek-v4-pro"]);
+        deepseek.default_model_id = Some("deepseek-reasoner".into());
+        deepseek.model_ids = vec![
+            "deepseek-chat".into(),
+            "deepseek-reasoner".into(),
+            "deepseek-v4-pro".into(),
+        ];
+        let router = config
+            .model_providers
+            .iter_mut()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
+        router.default_model_id = Some("google/gemini-3-pro-preview".into());
+        router.model_ids.push("google/gemini-3-pro-preview".into());
+        config.model_providers.push(ModelProviderConfig {
+            id: "custom:local".into(),
+            display_name: "Local".into(),
+            base_url: Some("http://localhost:8080/v1".into()),
+            api_key_ref: "local".into(),
+            enabled: true,
+            default_model_id: Some("deepseek-chat".into()),
+            kind: None,
+            model_ids: vec!["deepseek-chat".into()],
+        });
+        config.command_profiles[0].provider_id = Some("deepseek".into());
+        config.command_profiles[0].default_model = Some("deepseek-chat".into());
+        config.normalize_legacy_state();
+        let deepseek = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "deepseek")
+            .unwrap();
+        assert_eq!(deepseek.default_model_id.as_deref(), Some("deepseek-flash"));
+        assert_eq!(deepseek.model_ids, ["deepseek-v4-pro", "deepseek-flash"]);
+        let router = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
+        assert_eq!(
+            router.default_model_id.as_deref(),
+            Some("google/gemini-3.8-flash")
+        );
+        assert!(
+            !router
+                .model_ids
+                .iter()
+                .any(|id| id == "google/gemini-3-pro-preview")
+        );
+        assert!(
+            router
+                .model_ids
+                .iter()
+                .any(|id| id == "deepseek/deepseek-chat")
+        );
+        let local = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "custom:local")
+            .unwrap();
+        assert_eq!(local.default_model_id.as_deref(), Some("deepseek-chat"));
+        assert_eq!(
+            config.command_profiles[0].default_model.as_deref(),
+            Some("deepseek-flash")
+        );
     }
 
     #[test]

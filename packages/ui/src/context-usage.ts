@@ -46,14 +46,6 @@ export type ComposerContextUsage = {
   windowLabel: string;
 };
 
-const PROVIDER_CONTEXT_WINDOW_FALLBACKS: Partial<Record<ProviderId, number>> = {
-  anthropic: 200_000,
-  gemini: 1_048_576,
-  kimi: 262_144,
-  openai: 272_000,
-  xai: 500_000,
-};
-
 function recordFromUnknown(value: unknown) {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -126,8 +118,7 @@ function resolveContextWindow(
     providerCatalog
       .find((provider) => provider.id === model.providerId)
       ?.models.find((entry) => entry.id === model.modelId)
-      ?.contextWindowTokens ??
-    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"]
+      ?.contextWindowTokens
   );
 }
 
@@ -225,7 +216,8 @@ export function estimateComposerContextUsage(
         stringValue(payload, "providerId") === model.providerId) &&
       (!model.modelId || eventModelId === model.modelId);
     // The window is only meaningful for the model that reported it.
-    if (matchesModel && reportedContextWindow === undefined) {
+    if (matchesModel && reportedContextWindow === undefined &&
+        payload?.contextWindowSource !== "catalog") {
       reportedContextWindow = tokenCount(usage, "modelContextWindow");
     }
     if (reportedUsage) continue;

@@ -1,4 +1,5 @@
 import { providerCatalog } from "./provider-catalog.ts";
+import { retiredModelReplacement } from "./model-retirements.ts";
 import type { ProviderModel, ReasoningEffort } from "./types";
 
 // Increment when this client gains a new catalog-described model capability.
@@ -154,7 +155,8 @@ export function applyModelCatalog(catalog: ModelCatalog, bucket: number): void {
     for (const entry of catalog.models) {
       if (
         entry.providerId !== provider.id ||
-        entry.minClientRevision > MODEL_CATALOG_CLIENT_REVISION
+        entry.minClientRevision > MODEL_CATALOG_CLIENT_REVISION ||
+        retiredModelReplacement(entry.providerId, entry.id)
       )
         continue;
       const {

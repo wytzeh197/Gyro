@@ -6,6 +6,7 @@ mod conversation_history;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod git_read;
 mod model_catalog;
+mod live_model_context;
 mod provider_accounting;
 mod provider_spend_guard;
 mod efficiency;
@@ -4872,6 +4873,21 @@ fn run_provider_chat_blocking_in_lease(
             serde_json::to_value(provider_turn_tokens(&request, Some(&runner_output)))
                 .map_err(to_string)?,
         );
+        if let Some(raw) = runner_output.context_usage.as_ref() {
+            let base_url = load_config_blocking().ok().and_then(|config| {
+                config
+                    .model_providers
+                    .into_iter()
+                    .find(|provider| provider.id == request.provider_id)
+                    .and_then(|provider| provider.base_url)
+            });
+            live_model_context::observe_runtime(
+                &request.provider_id,
+                request.model_id.as_deref(),
+                base_url.as_deref(),
+                raw.model_context_window,
+            );
+        }
         if let Some(context_usage) = provider_context_usage_with_window(
             runner_output.context_usage.clone(),
             &request.provider_id,
@@ -4881,6 +4897,10 @@ fn run_provider_chat_blocking_in_lease(
                 "contextUsage".into(),
                 serde_json::to_value(&context_usage).map_err(to_string)?,
             );
+            object.insert("contextWindowSource".into(), serde_json::json!(
+                if runner_output.context_usage.as_ref()
+                    .and_then(|usage| usage.model_context_window).is_some() { "runtime" } else { "catalog" }
+            ));
         }
         if !runner_output.rate_limits.is_empty() {
             object.insert(
@@ -10877,6 +10897,31 @@ async fn discover_ollama_models_command(
     .map_err(|error| format!("Ollama discovery worker failed: {error}"))?
 }
 
+/// Read the connected Google agent's model inventory without an inference request.
+#[tauri::command]
+async fn discover_google_models_command(
+    provider_id: String,
+) -> Result<gyro_core::AcpModelDiscovery, String> {
+    if !matches!(provider_id.as_str(), "gemini" | "antigravity") {
+        return Err("Google model discovery requires Gemini CLI or Antigravity".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = acp_provider_runtime(&provider_id)
+            .ok_or_else(|| "Google ACP runtime is unavailable".to_string())?;
+        let methods = acp_auth_methods(runtime);
+        let methods = methods.iter().map(String::as_str).collect::<Vec<_>>();
+        gyro_core::discover_acp_models(
+            runtime.label,
+            runtime.program,
+            runtime.args.iter().map(Into::into).collect(),
+            &methods,
+            Duration::from_secs(20),
+        ).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("Google model discovery worker failed: {error}"))?
+}
+
 /// Scan installed provider CLIs for available updates (npm + native checks).
 #[tauri::command]
 async fn check_cli_updates_command() -> Result<CliUpdateCheckReport, String> {
@@ -12946,6 +12991,10 @@ fn run_provider_chat_once(
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    gyro_core::model_retirements::validate_provider_model(
+        &request.provider_id,
+        request.model_id.as_deref(),
+    )?;
     timing::attempt();
     let expanded = with_browser_attachment_images(
         request,
@@ -13019,6 +13068,15 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             cursor_kind: "gemini-acp-session",
             default_model: "gemini-default",
             runner: "gemini-acp",
+        }),
+        "antigravity" => Some(AcpProviderRuntime {
+            label: "Google Antigravity",
+            program: "agy_acp_server.par",
+            args: &[],
+            auth_methods: &["gemini-api-key"],
+            cursor_kind: "antigravity-acp-session",
+            default_model: "antigravity-default",
+            runner: "antigravity-acp",
         }),
         "cursor" => Some(AcpProviderRuntime {
             label: "Cursor",
@@ -13264,6 +13322,15 @@ fn run_kimi_acp_chat(
             );
         },
         |activity| {
+            if let Some(context) = activity.context_usage {
+                emit_provider_context_usage(app, request, &ProviderContextUsage {
+                    input_tokens: Some(context.used),
+                    total_tokens: Some(context.used),
+                    model_context_window: Some(context.size),
+                    ..ProviderContextUsage::default()
+                });
+                return;
+            }
             let mut activity = ProviderActivity {
                 id: activity.id.clone(),
                 kind: activity.kind.clone(),
@@ -15729,7 +15796,7 @@ fn claude_chat_args(
         args.push("--model".into());
         args.push(model.into());
     }
-    if let Some(effort) = claude_reasoning_effort_arg(reasoning_effort) {
+    if let Some(effort) = claude_reasoning_effort_arg(model_id, reasoning_effort) {
         args.push("--effort".into());
         args.push(effort);
     }
@@ -16879,10 +16946,10 @@ fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
         return None;
     }
     let normalized = model.to_ascii_lowercase();
-    if matches!(
-        normalized.as_str(),
-        "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5"
-    ) {
+    // Preserve the requested model for Codex to validate against its actual
+    // sign-in route. GPT-5.4 is still valid with API keys; GPT-5.5 is active
+    // until October 14. Never silently run the CLI default under those labels.
+    if normalized == "gpt-5" {
         return None;
     }
     Some(model.to_string())
@@ -16900,14 +16967,13 @@ fn codex_reasoning_effort_arg(
         return efforts.contains(&effort).then_some(effort);
     }
     let supported = match model.as_str() {
-        "gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra"
-        | "gpt-5.6-luna" => {
+        "gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra" => {
             matches!(
                 effort.as_str(),
                 "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
             )
         }
-        "gpt-6-luna" => {
+        "gpt-6-luna" | "gpt-5.6-luna" => {
             matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max")
         }
         "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5" => {
@@ -16924,20 +16990,25 @@ fn codex_reasoning_effort_arg(
     supported.then_some(effort)
 }
 
-/// The `claude --effort <level>` value for a requested reasoning effort.
-///
-/// Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`. `ultra` is
-/// a GPT-5.6 level with no Claude equivalent, and passing it through would make
-/// the CLI reject the whole run, so it is dropped here and the model keeps its
-/// own default.
-fn claude_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String> {
+/// The `claude --effort <level>` value supported by the selected model.
+/// Haiku 4.5 has no effort parameter; the CLI accepting a word is insufficient.
+fn claude_reasoning_effort_arg(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Option<String> {
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    if let Some(efforts) = model_catalog::catalog_reasoning_efforts("anthropic", model_id) {
+        return efforts.contains(&effort).then_some(effort);
+    }
+    if model_id.map(str::trim) == Some("claude-haiku-4-5") {
+        return None;
+    }
     matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max").then_some(effort)
 }
 
 /// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
 ///
-/// Earlier Grok models publish `low`, `medium`, and `high`; Grok 4.6 and
+/// Grok 4.5 publishes `low`, `medium`, and `high`; Grok 4.3, 4.6, and
 /// Grok 4.7 also publish `xhigh`. The flag parser accepts still more words,
 /// but the model rejects them once the turn starts, so unsupported levels are
 /// dropped here and Grok keeps its own default.
@@ -16952,7 +17023,7 @@ fn grok_reasoning_effort_arg(
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let supported = matches!(effort.as_str(), "low" | "medium" | "high")
         || (effort == "xhigh"
-            && (model_id.is_empty() || model_id == "grok-4.7" || model_id == "grok-4.6"));
+            && (model_id.is_empty() || matches!(model_id, "grok-4.3" | "grok-4.6" | "grok-4.7")));
     supported.then_some(effort)
 }
 
@@ -18714,6 +18785,20 @@ fn emit_provider_context_usage(
     request: &ProviderChatRequest,
     usage: &ProviderContextUsage,
 ) {
+    let context_window_source = if usage.model_context_window.is_some() { "runtime" } else { "catalog" };
+    let base_url = load_config_blocking().ok().and_then(|config| {
+        config
+            .model_providers
+            .into_iter()
+            .find(|provider| provider.id == request.provider_id)
+            .and_then(|provider| provider.base_url)
+    });
+    live_model_context::observe_runtime(
+        &request.provider_id,
+        request.model_id.as_deref(),
+        base_url.as_deref(),
+        usage.model_context_window,
+    );
     let usage = provider_context_usage_with_window(
         Some(usage.clone()),
         &request.provider_id,
@@ -18730,6 +18815,7 @@ fn emit_provider_context_usage(
             "sequence": next_provider_event_sequence(app, &request.session_id),
             "phase": "context-usage",
             "contextUsage": usage,
+            "contextWindowSource": context_window_source,
         }),
     );
 }
@@ -22239,6 +22325,7 @@ pub fn run() {
             debug_start,
             debug_stop,
             discover_ollama_models_command,
+            discover_google_models_command,
             delete_session,
             delete_workspace_path,
             export_diagnostics,
@@ -22250,6 +22337,7 @@ pub fn run() {
             list_provider_capability_support,
             model_catalog::fetch_model_catalog,
             model_catalog::install_model_catalog,
+            live_model_context::refresh_model_context_windows,
             get_provider_usage,
             get_session_usage_totals,
             get_usage_safety_snapshot,
@@ -25727,10 +25815,47 @@ while True:
     }
 
     #[test]
-    fn codex_chat_omits_seeded_display_models() {
-        assert_eq!(codex_model_arg(Some("gpt-5.5")), None);
-        assert_eq!(codex_model_arg(Some(" gpt-5.4-mini ")), None);
-        assert_eq!(codex_model_arg(Some("o4-mini")), Some("o4-mini".into()));
+    fn codex_chat_preserves_requested_models_for_authentication_specific_validation() {
+        for model in ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "o4-mini"] {
+            assert_eq!(codex_model_arg(Some(model)), Some(model.into()));
+        }
+        assert_eq!(
+            codex_model_arg(Some(" gpt-5.4-mini ")),
+            Some("gpt-5.4-mini".into())
+        );
+        assert_eq!(codex_model_arg(Some("gpt-5")), None);
+    }
+
+    #[test]
+    fn all_catalog_context_windows_and_cli_efforts_match_verified_metadata() {
+        let facts: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../scripts/fixtures/model-metadata.json"
+        ))
+        .unwrap();
+        for row in facts["models"].as_array().unwrap() {
+            let provider = row[0].as_str().unwrap();
+            let model = row[1].as_str().unwrap();
+            assert_eq!(
+                provider_model_context_window(provider, Some(model)),
+                row[2].as_u64(),
+                "{provider}/{model} context"
+            );
+            for effort in ["low", "medium", "high", "xhigh", "max", "ultra", "invalid"] {
+                let actual = match provider {
+                    "openai" => codex_reasoning_effort_arg(Some(model), Some(effort)),
+                    "anthropic" => claude_reasoning_effort_arg(Some(model), Some(effort)),
+                    "xai" => grok_reasoning_effort_arg(Some(model), Some(effort)),
+                    _ => continue,
+                };
+                let expected = row[3]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value.as_str() == Some(effort))
+                    .then(|| effort.to_string());
+                assert_eq!(actual, expected, "{provider}/{model} effort {effort}");
+            }
+        }
     }
 
     #[test]
@@ -25783,7 +25908,7 @@ while True:
 
     #[test]
     fn gpt_6_sol_and_luna_efforts_are_forwarded_to_codex() {
-        for model in ["gpt-6-sol", "gpt-6-luna"] {
+        for model in ["gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna"] {
             assert_eq!(codex_model_arg(Some(model)), Some(model.into()));
             for effort in ["low", "medium", "high", "xhigh", "max"] {
                 assert_eq!(
@@ -25798,6 +25923,10 @@ while True:
         );
         assert_eq!(
             codex_reasoning_effort_arg(Some("gpt-6-luna"), Some("ultra")),
+            None
+        );
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-5.6-luna"), Some("ultra")),
             None
         );
     }
@@ -27254,7 +27383,7 @@ while True:
                 "stdio",
             ]
         );
-        // Grok 4.6 adds xhigh; older models still reject it. Levels no Grok
+        // Grok 4.3, 4.6, and 4.7 expose xhigh; 4.5 stops at high. Levels no Grok
         // model supports are dropped rather than failing the whole turn.
         assert_eq!(
             grok_reasoning_effort_arg(Some("grok-4.6"), Some("Medium")),
@@ -27266,6 +27395,10 @@ while True:
         );
         assert_eq!(
             grok_reasoning_effort_arg(Some("grok-4.7"), Some("xhigh")),
+            Some("xhigh".into())
+        );
+        assert_eq!(
+            grok_reasoning_effort_arg(Some("grok-4.3"), Some("xhigh")),
             Some("xhigh".into())
         );
         assert_eq!(
@@ -27958,14 +28091,35 @@ while True:
     }
 
     #[test]
-    fn claude_effort_arg_drops_levels_claude_code_rejects() {
-        assert_eq!(
-            claude_reasoning_effort_arg(Some("xhigh")),
-            Some("xhigh".into())
-        );
-        assert_eq!(claude_reasoning_effort_arg(Some("max")), Some("max".into()));
-        assert_eq!(claude_reasoning_effort_arg(Some("ultra")), None);
-        assert_eq!(claude_reasoning_effort_arg(None), None);
+    fn claude_effort_arg_drops_levels_the_selected_model_rejects() {
+        for model in [
+            "claude-fable-5-1",
+            "claude-fable-5",
+            "claude-opus-5-5",
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5-5",
+            "claude-sonnet-5",
+            "claude-haiku-5-5",
+        ] {
+            for effort in ["low", "medium", "high", "xhigh", "max"] {
+                assert_eq!(
+                    claude_reasoning_effort_arg(Some(model), Some(effort)),
+                    Some(effort.into())
+                );
+            }
+            assert_eq!(
+                claude_reasoning_effort_arg(Some(model), Some("ultra")),
+                None
+            );
+            assert_eq!(claude_reasoning_effort_arg(Some(model), None), None);
+        }
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert_eq!(
+                claude_reasoning_effort_arg(Some("claude-haiku-4-5"), Some(effort)),
+                None
+            );
+        }
     }
 
     #[test]

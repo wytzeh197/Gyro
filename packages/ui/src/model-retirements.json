@@ -1,0 +1,61 @@
+{
+  "checkedAt": "2026-10-13",
+  "retirements": [
+    {
+      "providerId": "openai",
+      "modelIds": ["gpt-5.4"],
+      "scope": "codex-chatgpt",
+      "retiredAt": "2026-08-31",
+      "replacement": "gpt-6-sol",
+      "source": "https://learn.chatgpt.com/docs/models#deprecated-codex-models"
+    },
+    {
+      "providerId": "openai",
+      "modelIds": ["gpt-5.4-mini"],
+      "scope": "codex-chatgpt",
+      "retiredAt": "2026-08-31",
+      "replacement": "gpt-6-luna",
+      "source": "https://learn.chatgpt.com/docs/models#deprecated-codex-models"
+    },
+    {
+      "providerId": "openai",
+      "modelIds": ["gpt-5.3-codex-spark"],
+      "scope": "codex-chatgpt",
+      "retiredAt": "2026-09-14",
+      "replacement": "gpt-6-sol",
+      "source": "https://learn.chatgpt.com/docs/models#deprecated-codex-models"
+    },
+    {
+      "providerId": "deepseek",
+      "modelIds": ["deepseek-chat", "deepseek-reasoner"],
+      "scope": "provider",
+      "retiredAt": "2026-07-24",
+      "replacement": "deepseek-flash",
+      "source": "https://api-docs.deepseek.com/updates"
+    },
+    {
+      "providerId": "deepseek",
+      "modelIds": ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
+      "scope": "provider",
+      "retiredAt": "2026-09-10",
+      "replacement": "deepseek-flash",
+      "source": "https://api-docs.deepseek.com/updates"
+    },
+    {
+      "providerId": "gemini",
+      "modelIds": ["gemini-3-pro-preview"],
+      "scope": "provider",
+      "retiredAt": "2026-03-09",
+      "replacement": "gemini-default",
+      "source": "https://ai.google.dev/gemini-api/docs/deprecations"
+    },
+    {
+      "providerId": "openrouter",
+      "modelIds": ["google/gemini-3-pro-preview"],
+      "scope": "provider",
+      "retiredAt": "2026-03-09",
+      "replacement": "google/gemini-3.8-flash",
+      "source": "https://openrouter.ai/api/v1/models/google/gemini-3-pro-preview/endpoints"
+    }
+  ]
+}

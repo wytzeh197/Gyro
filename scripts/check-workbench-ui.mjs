@@ -1594,7 +1594,9 @@ expect(
       .every(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
-            "low,medium,high,xhigh,max,ultra" &&
+            (model.id === "gpt-5.6-luna"
+              ? "low,medium,high,xhigh,max"
+              : "low,medium,high,xhigh,max,ultra") &&
           model.contextWindowTokens === (model.id === "gpt-6.1-sol" ? 500_000 : 272_000),
       ),
   "OpenAI should expose GPT-6.1 Sol, GPT-6 Astra, and all GPT-5.6 variants with their supported effort levels.",
@@ -8505,8 +8507,11 @@ expect(
       .find((provider) => provider.id === "anthropic")
       ?.models.every(
         (model) =>
-          model.supportedReasoningEfforts?.join(",") ===
-          CLAUDE_REASONING_EFFORTS.join(","),
+          model.id === "claude-haiku-4-5"
+            ? model.supportedReasoningEfforts === undefined &&
+              model.defaultReasoningEffort === undefined
+            : model.supportedReasoningEfforts?.join(",") ===
+              CLAUDE_REASONING_EFFORTS.join(","),
       ) === true &&
     desktopRustSource.includes("fn claude_reasoning_effort_arg") &&
     desktopRustSource.includes('args.push("--effort".into())'),

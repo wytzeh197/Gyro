@@ -537,6 +537,13 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
             vec!["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
             "gemini",
         ),
+        "antigravity" => (
+            "Google Antigravity",
+            "agy_acp_server.par",
+            vec![],
+            vec!["gemini-api-key"],
+            "Configure a Gemini API key in Gyro Settings",
+        ),
         "cursor" => (
             "Cursor",
             "cursor-agent",
@@ -603,7 +610,11 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         login_command: Some(login_command.into()),
         account_label: None,
         subscription_label: None,
-        provider_mode: Some("local-subscription-cli".into()),
+        provider_mode: Some(if provider_id == "antigravity" {
+            "local-api-key-acp"
+        } else {
+            "local-subscription-cli"
+        }.into()),
         secret_storage: "Provider CLI, OS Keychain, or provider-owned files".into(),
         privacy_note:
             "Gyro checks the local ACP login state without reading provider credential values."

@@ -1,3 +1,7 @@
+export { applyGoogleModelDiscovery } from "./google-models";
+export type { GoogleModelDiscovery } from "./google-models";
+export { applyModelContextWindows, liveModelContextTokens } from "./live-model-context";
+export type { ModelContextWindow, LiveModelContext } from "./live-model-context";
 export { EfficiencyDetails } from "./efficiency-details";
 export { CodeModeActivityCard } from "./code-mode-card";
 export { ChatArtifacts } from "./chat-artifacts";

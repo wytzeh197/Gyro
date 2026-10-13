@@ -20,6 +20,7 @@ pub mod harness;
 pub mod ipc;
 pub mod keychain;
 pub mod kimi_acp;
+pub mod model_retirements;
 pub mod mutations;
 pub mod ollama;
 pub mod openai_compatible;
@@ -124,7 +125,8 @@ pub use ipc::{
     DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
-    check_acp_health, check_kimi_acp_health, run_kimi_acp, KimiAcpActivity,
+    check_acp_health, check_kimi_acp_health, discover_acp_models, run_kimi_acp, AcpModel,
+    AcpModelDiscovery, KimiAcpActivity,
     KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth,
     KimiAcpHealthStatus, KimiAcpMode, KimiAcpOutput, KimiAcpRequest,
 };
@@ -149,6 +151,7 @@ pub use ollama::{
 };
 pub use openai_compatible::{
     openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
+    openai_compat_list_model_metadata,
     openai_compat_tool_chat, openai_compat_tool_chat_with_progress, OpenAiCompatChatRequest,
     OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel, OpenAiCompatToolCall,
     OPENAI_COMPAT_CANCELLED_MESSAGE,

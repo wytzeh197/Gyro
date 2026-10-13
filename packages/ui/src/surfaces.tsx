@@ -9774,7 +9774,6 @@ export function ChatSurface({
             sessionUsage={sessionUsage}
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
-            stabilizeEmptyHeight={isTiled}
           />
         </section>
         {sidePanel}
@@ -10022,7 +10021,6 @@ export function ChatSurface({
             sessionUsage={sessionUsage}
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
-            stabilizeEmptyHeight={isTiled}
             popoverPlacement="up"
             showContextRow={false}
             variant="hero"
@@ -24290,7 +24288,6 @@ function Composer({
   isCliUpdating = false,
   sendDisabledReason,
   showContextRow,
-  stabilizeEmptyHeight = false,
   variant = "thread",
 }: {
   attachments?: ChatAttachment[];
@@ -24371,8 +24368,6 @@ function Composer({
   sendDisabledReason?: string;
   /** Defaults to the hero layout: project, mode, and branch only at the start. */
   showContextRow?: boolean;
-  /** Tiled panes keep an identical empty composer baseline. */
-  stabilizeEmptyHeight?: boolean;
   variant?: "thread" | "hero";
 }) {
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
@@ -24466,14 +24461,16 @@ function Composer({
     if (!textarea) return;
 
     const updateHeight = () => {
-      // Collapse the previous height before measuring wrapped text. Empty
-      // drafts use a fixed floor, even while pane layout or fonts are settling.
+      // Collapse the previous height before measuring wrapped text. An empty
+      // field uses the same height as one line, so the first character does
+      // not shrink the composer.
       textarea.style.height = "0px";
       const contentHeight = textarea.scrollHeight;
+      const lineHeight = 52;
       const nextHeight =
         draft.length === 0
-          ? (stabilizeEmptyHeight ? 64 : 52)
-          : Math.min(Math.max(contentHeight, 52), 148);
+          ? lineHeight
+          : Math.min(Math.max(contentHeight, lineHeight), 148);
       textarea.style.height = `${nextHeight}px`;
       textarea.style.overflowY =
         draft.length > 0 && contentHeight > 148 ? "auto" : "hidden";
@@ -24504,7 +24501,7 @@ function Composer({
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [attachments.length, draft, stabilizeEmptyHeight]);
+  }, [attachments.length, draft]);
   const providerConfigs = providersForConfig(config);
   // Each chat pane may bind its own provider/model. Prefer that over the
   // workbench-wide selection so split-screen composers can diverge.
@@ -26040,7 +26037,7 @@ function Composer({
                   <strong>
                     {contextSource === "empty"
                       ? "—"
-                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.contextWindowTokens > 0 ? contextUsage.usedLabel : "—"}`}
+                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
                   </strong>
                   <span>
                     {contextUsage.contextWindowTokens > 0

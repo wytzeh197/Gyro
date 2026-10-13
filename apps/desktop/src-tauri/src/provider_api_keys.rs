@@ -37,6 +37,7 @@ pub(crate) async fn set_provider_api_key(
         // A cached probe was taken before this key existed, so it must not keep
         // answering "not signed in" now that Gyro holds one.
         gyro_core::invalidate_provider_health_cache();
+        crate::live_model_context::invalidate(&provider_id);
         Ok(ProviderApiKeyStatus {
             supported: true,
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),
@@ -57,6 +58,7 @@ pub(crate) async fn clear_provider_api_key(
         // The opposite of the save path: a cached "signed in" must not outlive
         // the key it was taken from.
         gyro_core::invalidate_provider_health_cache();
+        crate::live_model_context::invalidate(&provider_id);
         Ok(ProviderApiKeyStatus {
             supported: gyro_core::provider_supports_api_key(&provider_id),
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),
@@ -73,6 +75,7 @@ pub(crate) async fn clear_provider_api_key(
 pub(crate) struct CustomProviderModel {
     id: String,
     display_name: String,
+    context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -111,6 +114,7 @@ pub(crate) async fn list_custom_provider_models(
                 .map(|model| CustomProviderModel {
                     id: model.id,
                     display_name: model.display_name,
+                    context_window_tokens: model.context_window_tokens,
                 })
                 .collect(),
         })

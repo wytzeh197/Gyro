@@ -1325,6 +1325,7 @@ export function applyProviderChatStreamContextUsage(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         contextUsage: streamEvent.contextUsage,
+        contextWindowSource: streamEvent.contextWindowSource,
         contextCharacterBaseline: Object.fromEntries(
           items.map((event) => [event.id, estimatedEventCharacters(event)]),
         ),

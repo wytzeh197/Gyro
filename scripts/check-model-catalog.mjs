@@ -364,7 +364,9 @@ for (const { name, valid, raw } of parity.cases) {
 }
 assert.throws(() =>
   parseModelCatalog(
-    document(Array.from({ length: 501 }, (_, i) => ({ ...entry, id: "m" + i }))),
+    document(
+      Array.from({ length: 501 }, (_, i) => ({ ...entry, id: "m" + i })),
+    ),
   ),
 );
 
@@ -411,7 +413,10 @@ assert.throws(() =>
 // anchor is otherwise silent: the document is valid and the model never shows.
 {
   const published = parseModelCatalog(
-    readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+    readFileSync(
+      new URL("../site/model-catalog.json", import.meta.url),
+      "utf8",
+    ),
   );
   const bundledIds = new Map(
     providerCatalog.map((p) => [p.id, p.models.map((m) => m.id)]),
@@ -438,13 +443,14 @@ assert.throws(() =>
       `${label}: insertBefore "${model.insertBefore}" names no model`,
     );
     // An entry replaces bundled metadata whole, so these are never optional.
-    for (const field of [
-      "contextWindowTokens",
-      "supportedReasoningEfforts",
-      "defaultReasoningEffort",
-    ]) {
+    for (const field of ["contextWindowTokens", "supportedReasoningEfforts"]) {
       assert.ok(model[field] !== undefined, `${label}: ${field} is missing`);
     }
+    assert.equal(
+      model.defaultReasoningEffort !== undefined,
+      model.supportedReasoningEfforts.length > 0,
+      `${label}: a default effort must exist exactly when the model offers effort`,
+    );
   }
   // New builds bundle Sol; existing revision-2 installs receive the same
   // runtime facts from the overlay, without a duplicate picker entry.
@@ -464,10 +470,154 @@ assert.throws(() =>
   const solEntry = published.models.find((model) => model.id === "gpt-6.1-sol");
   assert.equal(solEntry?.minClientRevision, 2);
   assert.equal(solEntry?.insertBefore, "gpt-6-astra");
-  assert.equal(sol[0].defaultReasoningEffort, "medium");
+  assert.equal(sol[0].defaultReasoningEffort, "low");
+  reset();
+}
+
+// Retirement is scoped to the integration, not just a model-name prefix.
+{
+  const facts = JSON.parse(
+    readFileSync(
+      new URL("../packages/ui/src/model-retirements.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  for (const retirement of facts.retirements) {
+    const source = providerCatalog.find((p) => p.id === retirement.providerId);
+    for (const id of retirement.modelIds) {
+      const oldModel = { id, displayName: id };
+      const normalized = providersForConfig({
+        modelProviders: [
+          {
+            ...source,
+            models: [oldModel],
+            defaultModelId: id,
+            selectedModelId: id,
+          },
+        ],
+      }).find((p) => p.id === retirement.providerId);
+      assert.ok(!normalized.models.some((m) => m.id === id), id);
+      assert.notEqual(normalized.defaultModelId, id, id);
+      assert.notEqual(normalized.selectedModelId, id, id);
+      applyModelCatalog(
+        parseModelCatalog(
+          document([{ ...entry, providerId: retirement.providerId, id }]),
+        ),
+        0,
+      );
+      assert.ok(
+        !source.models.some((m) => m.id === id),
+        "A stale remote catalog must not resurrect " + id,
+      );
+      reset();
+      if (retirement.scope === "codex-chatgpt") {
+        const api = providersForConfig({
+          modelProviders: [
+            {
+              ...source,
+              authMode: "env",
+              models: [oldModel],
+              defaultModelId: id,
+              selectedModelId: id,
+            },
+          ],
+        }).find((p) => p.id === retirement.providerId);
+        assert.equal(api.selectedModelId, id, "API access is not retired");
+      }
+    }
+  }
+  const router = providerCatalog.find((p) => p.id === "openrouter");
+  assert.equal(
+    providersForConfig({
+      modelProviders: [
+        {
+          ...router,
+          models: [{ id: "deepseek/deepseek-chat", displayName: "Hosted V3" }],
+          selectedModelId: "deepseek/deepseek-chat",
+        },
+      ],
+    }).find((p) => p.id === "openrouter").selectedModelId,
+    "deepseek/deepseek-chat",
+  );
+  assert.ok(
+    provider.models.some((m) => m.id === "gpt-5.5"),
+    "October 14 retirement must not remove October 13 access",
+  );
+  const native = readFileSync(
+    new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    native,
+    /fn run_provider_chat_once[\s\S]*?validate_provider_model/,
+  );
+}
+
+// Pin the sourced integration metadata for every picker model, including the
+// remote additions. Also prove saved configurations cannot restore stale values.
+{
+  const facts = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/model-metadata.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const published = parseModelCatalog(
+    readFileSync(
+      new URL("../site/model-catalog.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const checkMetadata = (providers, expected, label) => {
+    const actual = providers.flatMap((p) =>
+      p.models.map((m) => [
+        p.id,
+        m.id,
+        m.contextWindowTokens ?? null,
+        m.supportedReasoningEfforts ?? [],
+        m.defaultReasoningEffort ?? null,
+      ]),
+    );
+    const byIdentity = (a, b) =>
+      (a[0] + "/" + a[1]).localeCompare(b[0] + "/" + b[1]);
+    assert.deepEqual(
+      actual.sort(byIdentity),
+      structuredClone(expected).sort(byIdentity),
+      label,
+    );
+  };
+  const bundledIds = new Set(
+    providerCatalog.flatMap((p) => p.models.map((m) => p.id + "/" + m.id)),
+  );
+  const bundled = facts.models.filter(([p, id]) =>
+    bundledIds.has(p + "/" + id),
+  );
+  checkMetadata(providerCatalog, bundled, "Bundled model metadata");
+  applyModelCatalog(published, 0);
+  checkMetadata(
+    providerCatalog,
+    facts.models,
+    "Effective picker model metadata",
+  );
+  const saved = {
+    modelProviders: providerCatalog.map((p) => ({
+      ...p,
+      models: p.models.map((m) => ({
+        ...m,
+        contextWindowTokens: 1,
+        supportedReasoningEfforts: ["ultra"],
+        defaultReasoningEffort: "ultra",
+      })),
+    })),
+  };
+  checkMetadata(
+    providersForConfig(saved),
+    facts.models,
+    "Saved model metadata is refreshed",
+  );
   reset();
 }
 
 console.log(
-  "Model catalog validation, picker merge, picker order, rollback, rollout, cache, offline, and addition-announcement checks passed.",
+  "Model catalog parsing, picker merge/order, rollback, rollout, offline, announcements, and all 43 model metadata checks passed.",
 );

@@ -42331,11 +42331,12 @@ textarea:focus-visible,
   min-width: 0;
 }
 
+/* Actions offered by More stay usable at every chat pane width. */
 :root
   .gyro-app-shell
   .gyro-chat-companion-menu
   > .gyro-chat-header-compact-action {
-  display: none;
+  display: flex;
 }
 
 :root
@@ -42353,38 +42354,18 @@ textarea:focus-visible,
   .gyro-chat-surface.is-tiled
   .gyro-chat-thread-identity
   .gyro-chat-companion-menu.is-header {
-  left: auto;
+  left: 0;
   max-width: calc(100cqi - 28px);
   min-width: min(208px, calc(100cqi - 28px));
-  right: 0;
+  right: auto;
 }
 
 .gyro-chat-grid-slot {
   container: gyro-chat-pane / inline-size;
 }
 
-/* The first split pane shares its header with window navigation. At this
-   width, optional actions stay available in More so the title can still read. */
-@container gyro-chat-pane (max-width: 440px) {
-  :root
-    .gyro-chat-grid-slot.is-window-origin
-    > .gyro-chat-surface.is-tiled
-    > .gyro-chat-thread-topbar:has(
-      .gyro-chat-thread-identity .gyro-chat-surface-menu-anchor
-    )
-    .gyro-thread-topbar-actions
-    .gyro-chat-surface-button:not([data-chat-pane-action="close"]) {
-    display: none;
-  }
-
-  :root
-    .gyro-chat-grid-slot.is-window-origin
-    > .gyro-chat-surface.is-tiled
-    .gyro-chat-companion-menu
-    > .gyro-chat-header-compact-action {
-    display: flex;
-  }
-}
+/* Every split pane keeps Environment and the bottom drawer in the header.
+   The title truncates; those actions are not folded away on the first pane. */
 
 @container gyro-chat-pane (max-width: 360px) {
   :root

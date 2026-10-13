@@ -98,6 +98,8 @@ import {
   type PullRequestDraft,
 } from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
+import { useLiveModelContext } from "./use-live-model-context";
+import { useGoogleModels } from "./use-google-models";
 import { persistAutoCompactPercent } from "./auto-compaction";
 import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
@@ -1200,6 +1202,8 @@ export function App() {
   const [isShellOptimizing, setIsShellOptimizing] = useState(() =>
     isTauriRuntime(),
   );
+  const refreshModelContexts = useLiveModelContext(config, setConfig, isShellOptimizing);
+  const refreshGoogleModels = useGoogleModels(config, setConfig, isShellOptimizing);
   const suppressSessionAutoSelectRef = useRef(true);
   // Sessions whose chat pane the user closed.
   //
@@ -9413,18 +9417,29 @@ export function App() {
           const provider = providersForConfig(config).find(
             (item) => item.id === providerId,
           );
-          void persistConfig({
-            ...config,
-            selectedProviderId: providerId,
-            modelProviders: providersForConfig(config),
+          if (providerId === "gemini" || providerId === "antigravity") {
+            void refreshGoogleModels(providerId, true).then((discovery) => {
+              notify(
+                discovery ? "provider" : "command-failed",
+                discovery ? "Google models refreshed" : "Model discovery failed",
+                discovery
+                  ? `${provider?.displayName ?? providerId}: ${discovery.models.length} models reported by the connected agent.`
+                  : "Check the provider installation and credentials, then try again.",
+              );
+            });
+            return;
+          }
+          void refreshModelContexts(providerId, true).then((windows) => {
+            const live = windows.filter((window) =>
+              window.contextWindowTokens && window.source !== "catalog" && window.source !== "unknown",
+            ).length;
+            notify(
+              "provider", "Context limits refreshed",
+              provider
+                ? `${provider.displayName}: ${live} live model limit${live === 1 ? "" : "s"}; catalog limits remain available for other models.`
+                : "Model context limits refreshed.",
+            );
           });
-          notify(
-            "provider",
-            "Models refreshed",
-            provider
-              ? `${provider.displayName} is using the seeded model catalog.`
-              : "Seeded model catalog is current.",
-          );
         }
         return;
       }
@@ -9870,6 +9885,8 @@ export function App() {
       persistConfig,
       refreshEvents,
       refreshIdeServices,
+      refreshModelContexts,
+      refreshGoogleModels,
       refreshProviderUsage,
       refreshSourceControl,
       removeWorkspaceWorktree,

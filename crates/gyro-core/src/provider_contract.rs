@@ -85,6 +85,11 @@ const CONTRACTS: &[ProviderCliContract] = &[
         prompt_delivery: PromptDelivery::Protocol,
     },
     ProviderCliContract {
+        provider_id: "antigravity",
+        program: "agy_acp_server.par",
+        prompt_delivery: PromptDelivery::Protocol,
+    },
+    ProviderCliContract {
         provider_id: "cursor",
         program: "cursor-agent",
         prompt_delivery: PromptDelivery::Protocol,

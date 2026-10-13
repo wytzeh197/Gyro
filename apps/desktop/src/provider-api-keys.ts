@@ -230,7 +230,7 @@ export function useProviderApiKeys(
   const fetchCustomProviderModels = useCallback(
     async (baseUrl: string, apiKey?: string) => {
       const result = await invoke<{
-        models: { id: string; displayName: string }[];
+        models: { id: string; displayName: string; contextWindowTokens?: number }[];
       }>("list_custom_provider_models", {
         baseUrl,
         apiKey: apiKey?.trim() ? apiKey.trim() : undefined,

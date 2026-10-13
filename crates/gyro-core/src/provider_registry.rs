@@ -121,6 +121,19 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
+        id: "antigravity",
+        execution_kind: ProviderExecutionKind::AcpCli,
+        health_kind: ProviderHealthKind::KimiAcp,
+        runner: "antigravity-acp",
+        auth_owner: "google-antigravity",
+        supports_approvals: true,
+        supports_images: true,
+        supports_resume: true,
+        // No verified billed-token or plan-window contract yet.
+        supports_usage: false,
+        support_tier: ProviderSupportTier::Experimental,
+    },
+    ProviderDescriptor {
         id: "ollama",
         execution_kind: ProviderExecutionKind::OllamaApi,
         health_kind: ProviderHealthKind::OllamaApi,
@@ -279,6 +292,12 @@ mod tests {
         assert!(provider_is_executable("kimi"));
         assert!(provider_is_executable("xai"));
         assert!(provider_is_executable("gemini"));
+        assert!(provider_is_executable("antigravity"));
+        let antigravity = provider_descriptor("antigravity").unwrap();
+        assert_eq!(antigravity.execution_kind, ProviderExecutionKind::AcpCli);
+        assert_eq!(antigravity.support_tier, ProviderSupportTier::Experimental);
+        assert!(antigravity.supports_approvals && antigravity.supports_images && antigravity.supports_resume);
+        assert!(!antigravity.supports_usage);
         assert!(provider_is_executable("ollama"));
         assert!(provider_is_executable("cursor"));
         assert!(provider_is_executable("opencode"));

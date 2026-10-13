@@ -9,6 +9,8 @@
 }
 
 :root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
+  -webkit-backdrop-filter: blur(32px) saturate(0);
+  backdrop-filter: blur(32px) saturate(0);
   background: rgb(34 34 34 / 55%);
   border-radius: 0;
 }
@@ -19,6 +21,8 @@
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
+  -webkit-backdrop-filter: blur(32px) saturate(1.08);
+  backdrop-filter: blur(32px) saturate(1.08);
   background: rgb(245 250 255 / 65%);
 }
 
@@ -28,11 +32,13 @@
 
 @media (prefers-reduced-transparency: reduce) {
   :root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     background: #222222;
   }
 
   :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
-    background: #ffffff;
+    background: #f5faff;
   }
 }
 

@@ -2,11 +2,9 @@
    This is enabled by the macOS main window, or explicitly by a labeled fixture. */
 :root[data-native-material="sidebar"] {
   --gyro-window-tint: 55%;
-  --gyro-window-blur: blur(32px) saturate(1.08);
+  --gyro-window-tint-color: var(--gyro-sidebar);
+  --gyro-window-blur: blur(32px) saturate(0);
   --gyro-sidebar-material-radius: 14px;
-  --gyro-workspace-panel-tint: 75%;
-  --gyro-topbar-tint: 75%;
-  --gyro-topbar-tint-color: #17202a;
   /* Remove only the two corner wedges; the large outer boundary preserves
      menus that legitimately extend outside the content pane. */
   --gyro-native-pane-clip: polygon(evenodd,
@@ -30,20 +28,14 @@
 :root[data-native-material="sidebar"][data-theme="light"] {
   --gyro-window-tint: 65%;
   --gyro-window-tint-color: #f5faff;
-  --gyro-workspace-panel-tint: 82%;
-  --gyro-topbar-tint: 78%;
-  --gyro-topbar-tint-color: #e0eaf4;
+  --gyro-window-blur: blur(32px) saturate(1.08);
 }
 
-/* Workspace tone is defined on the shell, so resolve its material there. */
+/* Chat navigation, workspace panels, and title chrome share one neutral material. */
 :root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
-  --gyro-chrome-material: color-mix(
-    in srgb, var(--gyro-topbar-tint-color) var(--gyro-topbar-tint), transparent
-  );
-  --gyro-workspace-panel-material: color-mix(
-    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-workspace-panel-tint), transparent
-  );
-  --gyro-topbar-material: var(--gyro-chrome-material);
+  --gyro-chrome-material: var(--gyro-sidebar-material);
+  --gyro-workspace-panel-material: var(--gyro-sidebar-material);
+  --gyro-topbar-material: var(--gyro-sidebar-material);
 }
 
 /* Clear every ancestor between the chrome and the native material.
@@ -113,8 +105,8 @@
   background: transparent;
 }
 
-/* The title band and activity rail share one frosted tone. Tool lists use a
-   denser tint; the editor canvas remains opaque. */
+/* The title band, activity rail, and tool lists share the navigation frost.
+   The editor canvas remains opaque. */
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active {
   isolation: isolate;
@@ -243,8 +235,6 @@
 @media (prefers-reduced-transparency: reduce) {
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
-    --gyro-workspace-panel-tint: 100%;
-    --gyro-topbar-tint: 100%;
     --gyro-window-blur: none;
   }
 }
@@ -252,8 +242,6 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
-    --gyro-workspace-panel-tint: 100%;
-    --gyro-topbar-tint: 100%;
     --gyro-window-blur: none;
   }
 }

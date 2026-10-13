@@ -841,6 +841,7 @@ export type ProviderId =
   | "xai"
   | "cursor"
   | "gemini"
+  | "antigravity"
   | "opencode"
   | "ollama"
   | "deepseek"
@@ -899,10 +900,14 @@ export type ProviderHealthDetails = {
 export type ProviderModel = {
   /** Derived remote entry; discard saved copies when its catalog entry is withdrawn. */
   catalogManaged?: boolean;
+  /** Models reported by a local agent; replace this inventory when refreshed. */
+  cliDiscovered?: boolean;
   id: string;
   displayName: string;
   description?: string;
   contextWindowTokens?: number;
+  /** Fresh native metadata; discarded when the endpoint or its limit changes. */
+  liveContextWindow?: import("./live-model-context").LiveModelContext;
   defaultReasoningEffort?: ReasoningEffort;
   supportedReasoningEfforts?: ReasoningEffort[];
   /** Runtime-discovered capability; absent for static provider catalogs. */
@@ -1018,6 +1023,8 @@ export type ProviderChatStreamEvent = {
   retryAt?: string | null;
   retryAttempt?: number | null;
   retryMaxAttempts?: number | null;
+  /** A session allocation outranks catalog/published model metadata. */
+  contextWindowSource?: "runtime" | "catalog";
   contextUsage?: {
     inputTokens?: number;
     outputTokens?: number;

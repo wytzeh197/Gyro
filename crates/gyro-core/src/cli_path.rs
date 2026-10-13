@@ -40,8 +40,9 @@ const USER_CLI_PATH_SUFFIXES: &[&str] = &[
     // Cursor Agent
     ".cursor/bin",
     ".local/share/cursor-agent/versions",
-    // Google Gemini CLI
+    // Google Gemini CLI and the official Antigravity ACP distribution.
     ".gemini/bin",
+    ".local/share/gyro/providers/antigravity/1.3.0",
 ];
 
 /// Build the PATH used when Gyro spawns provider CLIs from a GUI context.

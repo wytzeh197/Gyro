@@ -209,6 +209,9 @@ pub struct OpenAiCompatModel {
     pub id: String,
     pub display_name: String,
     pub description: String,
+    /// The model endpoint's published limit, never inferred from its name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u64>,
 }
 
 /// Normalize and validate a user-supplied OpenAI-compatible base URL.
@@ -613,6 +616,16 @@ where
 /// List the models an endpoint advertises, for the health probe and the
 /// Settings "Fetch models" button.
 pub fn openai_compat_list_models(base_url: &str, api_key: &str) -> Result<OpenAiCompatDiscovery> {
+    openai_compat_list_model_metadata(base_url, api_key, &[])
+}
+
+/// Filter before bounding the result, so a selected model beyond the first
+/// page of a large routed catalog still receives its actual metadata.
+pub fn openai_compat_list_model_metadata(
+    base_url: &str,
+    api_key: &str,
+    model_ids: &[String],
+) -> Result<OpenAiCompatDiscovery> {
     let endpoint = openai_compat_endpoint(base_url)?;
     let url = endpoint_child(&endpoint, MODELS_PATH)?;
     let api_key = api_key.trim();
@@ -638,23 +651,31 @@ pub fn openai_compat_list_models(base_url: &str, api_key: &str) -> Result<OpenAi
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for entry in entries {
+        let context_window_tokens = entry.context_window_tokens();
+        let aliases = entry.metadata.get("aliases").and_then(|value| value.as_array())
+            .map(|values| values.iter().filter_map(|value| value.as_str()).map(str::to_string).collect::<Vec<_>>())
+            .unwrap_or_default();
         let id = entry
             .id
             .or(entry.name)
             .unwrap_or_default()
             .trim()
             .to_string();
-        if id.is_empty() || !seen.insert(id.clone()) {
-            continue;
+        if id.is_empty() { continue; }
+        let requested = if model_ids.is_empty() { vec![id] } else {
+            model_ids.iter().filter(|wanted| *wanted == &id || aliases.contains(wanted)).cloned().collect()
+        };
+        for id in requested {
+            if !seen.insert(id.clone()) { continue; }
+            models.push(OpenAiCompatModel {
+                display_name: id.clone(),
+                description: format!("Model served by {host}."),
+                id,
+                context_window_tokens,
+            });
+            if models.len() >= MAX_DISCOVERED_MODELS { break; }
         }
-        models.push(OpenAiCompatModel {
-            display_name: id.clone(),
-            description: format!("Model served by {host}."),
-            id,
-        });
-        if models.len() >= MAX_DISCOVERED_MODELS {
-            break;
-        }
+        if models.len() >= MAX_DISCOVERED_MODELS { break; }
     }
     Ok(OpenAiCompatDiscovery {
         base_url: endpoint.as_str().trim_end_matches('/').to_string(),
@@ -1565,6 +1586,23 @@ struct WireModelEntry {
     id: Option<String>,
     #[serde(default)]
     name: Option<String>,
+    #[serde(flatten)]
+    metadata: serde_json::Map<String, serde_json::Value>,
+}
+
+impl WireModelEntry {
+    fn context_window_tokens(&self) -> Option<u64> {
+        let positive = |value: &serde_json::Value| value.as_u64().filter(|n| (1..=100_000_000).contains(n));
+        let advertised = [
+            "context_length", "max_context_length", "context_window",
+            "contextWindow", "contextWindowTokens", "max_model_len",
+        ].iter().filter_map(|key| self.metadata.get(*key).and_then(positive)).min();
+        let routed = self.metadata.get("top_provider")
+            .and_then(|provider| provider.get("context_length"))
+            .and_then(positive);
+        // Routing may provision less than the model's advertised maximum.
+        advertised.into_iter().chain(routed).min()
+    }
 }
 
 #[cfg(test)]
@@ -3037,6 +3075,39 @@ mod tests {
         .to_string();
         server.join().unwrap();
         assert!(error.contains("redirected"), "{error}");
+    }
+
+    #[test]
+    fn model_metadata_uses_published_route_limits_and_rejects_invalid_counts() {
+        for (raw, expected) in [
+            (r#"{"id":"mistral","max_context_length":256000}"#, Some(256_000)),
+            (r#"{"id":"routed","context_length":1000000,"top_provider":{"context_length":128000}}"#, Some(128_000)),
+            (r#"{"id":"local","context_window":32768}"#, Some(32_768)),
+            (r#"{"id":"unknown"}"#, None),
+            (r#"{"id":"bad","context_length":0}"#, None),
+            (r#"{"id":"bad","context_length":"500000"}"#, None),
+            (r#"{"id":"bad","context_length":-1}"#, None),
+        ] {
+            let entry: WireModelEntry = serde_json::from_str(raw).unwrap();
+            assert_eq!(entry.context_window_tokens(), expected);
+        }
+    }
+
+    #[test]
+    fn selected_model_metadata_is_not_lost_after_a_large_catalog_page() {
+        let mut models = (0..MAX_DISCOVERED_MODELS + 1)
+            .map(|i| serde_json::json!({"id":format!("other-{i}"),"context_length":8000}))
+            .collect::<Vec<_>>();
+        models.push(serde_json::json!({"id":"dated-model","aliases":["wanted"],"max_context_length":256000}));
+        let body = serde_json::json!({"data":models}).to_string();
+        let (address, server) = serve_once("200 OK", "application/json", &body);
+        let discovery = openai_compat_list_model_metadata(
+            &format!("http://{address}/v1"), "", &["wanted".to_string()],
+        ).unwrap();
+        server.join().unwrap();
+        assert_eq!(discovery.models.len(), 1);
+        assert_eq!(discovery.models[0].id, "wanted");
+        assert_eq!(discovery.models[0].context_window_tokens, Some(256_000));
     }
 
     #[test]

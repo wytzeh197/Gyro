@@ -27,7 +27,7 @@ pub fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str
         "anthropic" => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
         "openai" => &["OPENAI_API_KEY"],
         "xai" => &["XAI_API_KEY"],
-        "gemini" => &[
+        "gemini" | "antigravity" => &[
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",
             "GOOGLE_APPLICATION_CREDENTIALS",
@@ -72,6 +72,7 @@ pub fn provider_id_from_program(program: &str) -> Option<&'static str> {
         "claude" => Some("anthropic"),
         "grok" => Some("xai"),
         "gemini" => Some("gemini"),
+        "agy_acp_server.par" | "agy_acp_server.exe" => Some("antigravity"),
         "kimi" => Some("kimi"),
         "cursor-agent" => Some("cursor"),
         _ => None,
