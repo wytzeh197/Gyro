@@ -131,7 +131,8 @@
   backdrop-filter: var(--gyro-window-blur);
   background:
     linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
-      left 47px / 100% 1px no-repeat,
+      var(--gyro-workspace-activity-rail-width) 47px /
+        calc(100% - var(--gyro-workspace-activity-rail-width)) 1px no-repeat,
     var(--gyro-chrome-material);
   content: "";
   inset: 0;
