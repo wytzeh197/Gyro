@@ -9,15 +9,17 @@
 }
 
 :root[data-native-material="sidebar"] .gyro-early-shell-sidebar {
-  background: rgb(34 34 34 / 82%);
+  background: rgb(34 34 34 / 55%);
+  border-radius: 0;
 }
 
 :root[data-native-material="sidebar"] .gyro-early-shell-main {
   background: #181818;
+  border-radius: 14px 0 0 14px;
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-sidebar {
-  background: rgb(255 255 255 / 85%);
+  background: rgb(255 255 255 / 60%);
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] .gyro-early-shell-main {

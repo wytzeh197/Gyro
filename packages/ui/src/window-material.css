@@ -1,15 +1,31 @@
 /* Keep navigation ink fully opaque. Only the backdrop receives a tint.
    This is enabled by the macOS main window, or explicitly by a labeled fixture. */
 :root[data-native-material="sidebar"] {
-  --gyro-window-tint: 82%;
-  --gyro-window-blur: blur(24px) saturate(1.04);
+  --gyro-window-tint: 55%;
+  --gyro-window-blur: blur(32px) saturate(1.08);
+  --gyro-sidebar-material-radius: 14px;
+  /* Remove only the two corner wedges; the large outer boundary preserves
+     menus that legitimately extend outside the content pane. */
+  --gyro-native-pane-clip: polygon(evenodd,
+    -100vw -100vh, calc(100% + 100vw) -100vh,
+    calc(100% + 100vw) calc(100% + 100vh), -100vw calc(100% + 100vh),
+    -100vw -100vh,
+    0 0, 14px 0, 11.27px 0.27px, 8.64px 1.06px, 6.22px 2.36px,
+    4.1px 4.1px, 2.36px 6.22px, 1.06px 8.64px, 0.27px 11.27px,
+    0 14px, 0 0, -100vw -100vh,
+    0 100%, 0 calc(100% - 14px), 0.27px calc(100% - 11.27px),
+    1.06px calc(100% - 8.64px), 2.36px calc(100% - 6.22px),
+    4.1px calc(100% - 4.1px), 6.22px calc(100% - 2.36px),
+    8.64px calc(100% - 1.06px), 11.27px calc(100% - 0.27px),
+    14px 100%, 0 100%, -100vw -100vh
+  );
   --gyro-sidebar-material: color-mix(
     in srgb, var(--gyro-sidebar) var(--gyro-window-tint), transparent
   );
 }
 
 :root[data-native-material="sidebar"][data-theme="light"] {
-  --gyro-window-tint: 85%;
+  --gyro-window-tint: 60%;
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */
@@ -34,6 +50,7 @@
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-sidebar {
   background: transparent;
+  border-radius: 0;
   isolation: isolate;
   position: relative;
 }
@@ -45,6 +62,15 @@
   background: var(--gyro-sidebar-material);
   content: "";
   inset: 0;
+  right: calc(-1 * var(--gyro-sidebar-material-radius));
+  -webkit-mask:
+    linear-gradient(#000, #000) left / calc(100% - 14px) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 14px, #000 14px) right top / 14px 14px no-repeat,
+    radial-gradient(circle at right top, transparent 14px, #000 14px) right bottom / 14px 14px no-repeat;
+  mask:
+    linear-gradient(#000, #000) left / calc(100% - 14px) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 14px, #000 14px) right top / 14px 14px no-repeat,
+    radial-gradient(circle at right top, transparent 14px, #000 14px) right bottom / 14px 14px no-repeat;
   pointer-events: none;
   position: absolute;
   z-index: -1;
@@ -54,6 +80,18 @@
   .gyro-app-shell:not(.is-workspace-chrome-active)
   .gyro-sidebar :is(.gyro-sidebar-windowbar, .gyro-sidebar-footer) {
   background: transparent;
+}
+
+/* The content curves into one continuous material instead of adding an
+   opaque patch at the seam. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active):not(.is-sidebar-hidden) > .gyro-main {
+  clip-path: var(--gyro-native-pane-clip);
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-main > .gyro-seam-corner {
+  display: none;
 }
 
 /* Scrolling section labels share the continuous material. Project titles
