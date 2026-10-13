@@ -5,6 +5,9 @@
   --gyro-window-blur: blur(32px) saturate(1.08);
   --gyro-sidebar-material-radius: 14px;
   --gyro-workspace-panel-tint: 75%;
+  --gyro-topbar-tint: 75%;
+  --gyro-topbar-tint-color: #17202a;
+  --gyro-topbar-divider: color-mix(in srgb, var(--gyro-text) 16%, transparent);
   /* Remove only the two corner wedges; the large outer boundary preserves
      menus that legitimately extend outside the content pane. */
   --gyro-native-pane-clip: polygon(evenodd,
@@ -29,6 +32,9 @@
   --gyro-window-tint: 65%;
   --gyro-window-tint-color: #f5faff;
   --gyro-workspace-panel-tint: 82%;
+  --gyro-topbar-tint: 78%;
+  --gyro-topbar-tint-color: #e0eaf4;
+  --gyro-topbar-divider: rgb(104 129 151 / 24%);
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */
@@ -38,6 +44,9 @@
   );
   --gyro-workspace-panel-material: color-mix(
     in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-workspace-panel-tint), transparent
+  );
+  --gyro-topbar-material: color-mix(
+    in srgb, var(--gyro-topbar-tint-color) var(--gyro-topbar-tint), transparent
   );
 }
 
@@ -108,8 +117,8 @@
   background: transparent;
 }
 
-/* Workspace uses one material across the rail and title band, with a denser
-   tint beneath the tool lists. The editor canvas remains opaque. */
+/* The workspace title band has its own frosted tone and continuous hairline.
+   Tool lists use a denser tint; the editor canvas remains opaque. */
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar {
   background: transparent;
@@ -120,10 +129,13 @@
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background: linear-gradient(to bottom,
-    var(--gyro-chrome-material) 0 48px,
-    var(--gyro-workspace-panel-material) 48px
-  );
+  background:
+    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
+      left 47px / 100% 1px no-repeat,
+    linear-gradient(to bottom,
+      var(--gyro-topbar-material) 0 48px,
+      var(--gyro-workspace-panel-material) 48px
+    );
   height: auto;
   inset: 0;
   z-index: -1;
@@ -151,7 +163,13 @@
   .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background: var(--gyro-chrome-material);
+  background:
+    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
+      left 47px / 100% 1px no-repeat,
+    linear-gradient(to bottom,
+      var(--gyro-topbar-material) 0 48px,
+      var(--gyro-chrome-material) 48px
+    );
   content: "";
   inset: 0;
   pointer-events: none;
@@ -173,6 +191,7 @@
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs {
   background: transparent;
+  border-bottom-color: var(--gyro-topbar-divider);
   isolation: isolate;
   position: relative;
 }
@@ -181,7 +200,7 @@
   .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background: var(--gyro-chrome-material);
+  background: var(--gyro-topbar-material);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -204,6 +223,7 @@
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
     --gyro-workspace-panel-tint: 100%;
+    --gyro-topbar-tint: 100%;
     --gyro-window-blur: none;
   }
 }
@@ -212,6 +232,7 @@
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
     --gyro-workspace-panel-tint: 100%;
+    --gyro-topbar-tint: 100%;
     --gyro-window-blur: none;
   }
 }
