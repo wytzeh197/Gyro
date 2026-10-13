@@ -4,6 +4,7 @@
   --gyro-window-tint: 55%;
   --gyro-window-blur: blur(32px) saturate(1.08);
   --gyro-sidebar-material-radius: 14px;
+  --gyro-workspace-panel-tint: 75%;
   /* Remove only the two corner wedges; the large outer boundary preserves
      menus that legitimately extend outside the content pane. */
   --gyro-native-pane-clip: polygon(evenodd,
@@ -27,12 +28,16 @@
 :root[data-native-material="sidebar"][data-theme="light"] {
   --gyro-window-tint: 65%;
   --gyro-window-tint-color: #f5faff;
+  --gyro-workspace-panel-tint: 82%;
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */
 :root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
   --gyro-chrome-material: color-mix(
-    in srgb, var(--gyro-workspace-chrome) var(--gyro-window-tint), transparent
+    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-window-tint), transparent
+  );
+  --gyro-workspace-panel-material: color-mix(
+    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-workspace-panel-tint), transparent
   );
 }
 
@@ -103,20 +108,36 @@
   background: transparent;
 }
 
-/* Workspace: the outside activity rail and its 48px title band only.
-   Explorer, source control, and sidebar chat remain solid below the band. */
+/* Workspace uses one material across the rail and title band, with a denser
+   tint beneath the tool lists. The editor canvas remains opaque. */
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar {
-  background: linear-gradient(
-    to bottom, transparent 48px, var(--gyro-sidebar) 48px
-  );
+  background: transparent;
+  isolation: isolate;
 }
 
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background: var(--gyro-chrome-material);
+  background: linear-gradient(to bottom,
+    var(--gyro-chrome-material) 0 48px,
+    var(--gyro-workspace-panel-material) 48px
+  );
+  height: auto;
+  inset: 0;
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after {
+  background: radial-gradient(
+    circle at var(--gyro-workspace-panel-radius) var(--gyro-workspace-panel-radius),
+    transparent calc(var(--gyro-workspace-panel-radius) - 0.5px),
+    var(--gyro-border-soft) calc(var(--gyro-workspace-panel-radius) - 0.5px)
+      calc(var(--gyro-workspace-panel-radius) + 0.5px),
+    var(--gyro-chrome-material) calc(var(--gyro-workspace-panel-radius) + 0.5px)
+  );
 }
 
 :root[data-native-material="sidebar"][data-theme]
@@ -138,9 +159,51 @@
   z-index: -1;
 }
 
+/* Clear only the editor's enclosing layers so its top tabs can share native
+   chrome; code, diffs, terminal output, and status bars keep their own canvas. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-main,
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  :is(.gyro-workspace-route.is-code, .gyro-ide-surface, .gyro-ide-editor-stack,
+      .gyro-editor-pane) {
+  background: transparent;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-chrome-material);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+/* Only the top row aligns with the native 48px title band; internal split
+   headers retain the compact editor-tab height. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-editor-groups:not(.is-split-down) > .gyro-editor-pane,
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-editor-groups.is-split-down > .gyro-editor-pane:first-child {
+  --gyro-ide-tab-height: 48px;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
+    --gyro-workspace-panel-tint: 100%;
     --gyro-window-blur: none;
   }
 }
@@ -148,6 +211,7 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root[data-native-material="sidebar"][data-theme] {
     --gyro-window-tint: 100%;
+    --gyro-workspace-panel-tint: 100%;
     --gyro-window-blur: none;
   }
 }
