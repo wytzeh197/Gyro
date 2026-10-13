@@ -7,7 +7,6 @@
   --gyro-workspace-panel-tint: 75%;
   --gyro-topbar-tint: 75%;
   --gyro-topbar-tint-color: #17202a;
-  --gyro-topbar-divider: color-mix(in srgb, var(--gyro-text) 16%, transparent);
   /* Remove only the two corner wedges; the large outer boundary preserves
      menus that legitimately extend outside the content pane. */
   --gyro-native-pane-clip: polygon(evenodd,
@@ -34,7 +33,6 @@
   --gyro-workspace-panel-tint: 82%;
   --gyro-topbar-tint: 78%;
   --gyro-topbar-tint-color: #e0eaf4;
-  --gyro-topbar-divider: rgb(104 129 151 / 24%);
 }
 
 /* Workspace tone is defined on the shell, so resolve its material there. */
@@ -129,11 +127,7 @@
   .gyro-app-shell.is-workspace-chrome-active::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
-  background:
-    linear-gradient(var(--gyro-topbar-divider), var(--gyro-topbar-divider))
-      var(--gyro-workspace-activity-rail-width) 47px /
-        calc(100% - var(--gyro-workspace-activity-rail-width)) 1px no-repeat,
-    var(--gyro-chrome-material);
+  background: var(--gyro-chrome-material);
   content: "";
   inset: 0;
   -webkit-mask:
@@ -206,7 +200,7 @@
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs {
   background: transparent;
-  border-bottom-color: var(--gyro-topbar-divider);
+  border-bottom-color: transparent;
   isolation: isolate;
   position: relative;
 }
