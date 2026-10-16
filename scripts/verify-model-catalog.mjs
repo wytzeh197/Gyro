@@ -6,15 +6,16 @@
  *
  * Deployment is manual, so nothing else catches a document published from a
  * working tree nobody committed. That gap is not cosmetic: the next
- * `pnpm site:deploy` from a clean checkout republishes the committed document
+ * website deploy from gyro-website republishes the committed document
  * and silently withdraws whatever is live, with no self-healing path back.
+ * This app checkout must not deploy that worker. `pnpm site:deploy` refuses.
  *
  * This needs the network, so it stays out of `pnpm release:check` and is run
  * deliberately after a catalog deploy.
  *
- * `--local` is the pre-deploy gate `pnpm site:deploy` runs: no network, and it
- * also refuses uncommitted changes anywhere under site/, because the deploy
- * uploads the working tree. Both modes parse the document with the app's own
+ * `--local` checks the catalog without the network, and it
+ * refuses uncommitted changes anywhere under site/. Publishing is done from
+ * gyro-website, not from this checkout. Both modes parse the document with the app's own
  * parser, so a catalog every client would reject is never published, and warn
  * when origin/main records a different catalog, since the next deploy from a
  * clean main checkout would publish that one instead.
@@ -160,8 +161,8 @@ if (live !== undefined && parses(liveUrl, live)) {
   } else {
     failures.push(
       `${liveUrl} is revision ${revisionOf(live)}, but this tree is revision ` +
-        `${revisionOf(disk)}. Commit the catalog, run \`pnpm site:deploy\`, ` +
-        "then verify again.",
+        `${revisionOf(disk)}. Publish it from gyro-website with ` +
+        "`npm run site:deploy`, then verify again.",
     );
   }
 }

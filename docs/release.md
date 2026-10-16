@@ -45,7 +45,9 @@ still require a normal app release.
    revision it requires.
 2. Run `node --experimental-strip-types scripts/check-model-catalog.mjs`
    and verify an actual chat with the model in a compatible app.
-3. Merge the reviewed catalog change, then publish it with `pnpm site:deploy`.
+3. Merge the reviewed catalog change, then publish it from the private
+   gyro-website repository (`npm run catalog:sync`, commit the import, then
+   `npm run site:deploy`). `pnpm site:deploy` in this checkout refuses to run.
    Confirm `https://usegyro.io/model-catalog.json` serves the expected revision
    and the model appears in a compatible app's picker after refresh.
 4. Run `pnpm catalog:verify`. It fails when the served document is not the one
@@ -264,9 +266,10 @@ do not require a product release by themselves.
    fixed release; never replace the old assets in place.
 
 The download site fetches release metadata from GitHub at runtime, so publishing
-a normal app release does not require a website redeployment. Run
-`pnpm site:deploy` when website content or `site/model-catalog.json` changes,
-and verify the deployed content. Model-only releases follow
+a normal app release does not require a website redeployment. Website content
+and `site/model-catalog.json` are published from the private gyro-website
+repository. `pnpm site:deploy` in this checkout refuses, because it used to
+upload this repo's old site and replace usegyro.io. Model-only releases follow
 [Adding new models](#adding-new-models) above.
 
 ## Homebrew CLI

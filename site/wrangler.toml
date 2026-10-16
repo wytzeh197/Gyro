@@ -1,7 +1,8 @@
-# Cloudflare Worker that serves the public download site at usegyro.io.
-# Deploy: pnpm site:deploy
+# Retired. usegyro.io is published from the private gyro-website repository.
+# pnpm site:deploy refuses. This name is not the production worker, so a
+# direct wrangler deploy from here cannot replace the live site.
 # Auth stays local (wrangler login / CLOUDFLARE_API_TOKEN). Do not commit account IDs or tokens.
-name = "usegyro"
+name = "gyro-retired-app-site"
 compatibility_date = "2026-07-22"
 workers_dev = true
 

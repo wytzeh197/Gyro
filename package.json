@@ -30,7 +30,7 @@
     "release:cli:finalize": "node scripts/finalize-cli-release.mjs",
     "site:build": "node scripts/build-download-site.mjs",
     "site:check": "node scripts/check-download-site.mjs",
-    "site:deploy": "node --experimental-strip-types scripts/verify-model-catalog.mjs --local && node scripts/build-download-site.mjs && npx --yes wrangler@4 deploy --config site/wrangler.toml",
+    "site:deploy": "node scripts/refuse-public-site-deploy.mjs",
     "smoke:native": "node scripts/run-native-smoke.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs",
     "test": "pnpm test:reliability && pnpm -r test",

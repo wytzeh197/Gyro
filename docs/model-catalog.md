@@ -52,12 +52,11 @@ publishing, for example with `claude -p ok --model <id> --output-format json`,
 whose `modelUsage` reports the context window the CLI really gives that ID. Deploying the site is a separate release action; editing this file
 does not publish it.
 
-Commit the change, deploy it with `pnpm site:deploy`, then confirm what is
-actually live. The deploy first runs `verify-model-catalog.mjs --local`, which
-refuses a catalog the app's parser rejects, a catalog that differs from `HEAD`,
-and any uncommitted change under `site/`, since the deploy uploads the working
-tree. Both modes warn when `origin/main` records a different catalog: merge
-promptly, or the next deploy from a clean main checkout withdraws it.
+Commit the change, then publish it from the private gyro-website repository
+with `npm run catalog:sync` and `npm run site:deploy`. `pnpm site:deploy` in
+this checkout refuses to run: it uploads `site/` to the production worker and
+would replace the current website. Confirm what is actually live.
+`pnpm catalog:verify` still compares the served document with this checkout.
 
 ```bash
 pnpm catalog:verify
