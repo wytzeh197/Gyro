@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import {
+  failureDetail,
   formatRunDuration,
   groupRunSteps,
   isCancelledRunPhase,
@@ -1113,7 +1114,7 @@ function RunProblem({
       ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
       : isBusy
         ? "The conversation context is preserved."
-        : [phase.message, phase.recoveryMessage].filter(Boolean).join(" ");
+        : failureDetail(phase.message, phase.recoveryMessage);
   const title = isCapacityExhausted
     ? "Model is still busy"
     : isInterrupted

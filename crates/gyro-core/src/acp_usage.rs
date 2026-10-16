@@ -117,7 +117,11 @@ fn kimi_context_occupancy(line: &str) -> Option<AcpContextUsage> {
     }
     let used = exact_token_count(used)?;
     let size = exact_token_count(size)?;
-    (size > 0 && used <= size).then_some(AcpContextUsage { used, size })
+    (size > 0 && used <= size).then_some(AcpContextUsage {
+        used,
+        size,
+        estimated: false,
+    })
 }
 
 fn exact_token_count(text: &str) -> Option<u64> {
@@ -191,13 +195,25 @@ pub(crate) fn kimi_code_037_usage_delta(
 pub struct AcpContextUsage {
     pub used: u64,
     pub size: u64,
+    /// `used` is a lower bound counted from traffic Gyro saw, not a provider
+    /// measurement. A later wire reading clears it.
+    #[serde(default, skip_serializing_if = "skip_false")]
+    pub estimated: bool,
+}
+
+fn skip_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn context_usage(update: &Value) -> Option<AcpContextUsage> {
     (update.get("sessionUpdate")?.as_str()? == "usage_update").then_some(())?;
     let used = update.get("used")?.as_u64()?;
     let size = update.get("size")?.as_u64()?;
-    (size > 0 && used <= size).then_some(AcpContextUsage { used, size })
+    (size > 0 && used <= size).then_some(AcpContextUsage {
+        used,
+        size,
+        estimated: false,
+    })
 }
 
 /// Occupancy from a live session update.
@@ -224,24 +240,35 @@ pub fn live_context_usage(update: &Value) -> Option<AcpContextUsage> {
                 .get("context_window_size")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            AcpContextUsage { used, size }
+            AcpContextUsage {
+                used,
+                size,
+                estimated: false,
+            }
         }
         "response_started" => AcpContextUsage {
             used: grok_response_prompt_tokens(update)?,
             size: 0,
+            estimated: false,
         },
         "response_completed" => AcpContextUsage {
             used: grok_response_prompt_tokens(update.get("usage")?)?,
             size: 0,
+            estimated: false,
         },
         "auto_compact_started" => {
             let used = update.get("tokens_used")?.as_u64()?;
             let size = update.get("context_window")?.as_u64()?;
-            AcpContextUsage { used, size }
+            AcpContextUsage {
+                used,
+                size,
+                estimated: false,
+            }
         }
         "auto_compact_completed" => AcpContextUsage {
             used: update.get("tokens_after")?.as_u64()?,
             size: 0,
+            estimated: false,
         },
         _ => return None,
     };
@@ -285,7 +312,11 @@ pub fn grok_prompt_context(result: &Value) -> Option<AcpContextUsage> {
             return None;
         }
     }
-    Some(AcpContextUsage { used, size: 0 })
+    Some(AcpContextUsage {
+        used,
+        size: 0,
+        estimated: false,
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -787,7 +818,8 @@ mod tests {
             context_usage(&update),
             Some(AcpContextUsage {
                 used: 50000,
-                size: 100000
+                size: 100000,
+                estimated: false,
             })
         );
         let observed = read(AcpProvider::Grok, json!({"_meta":{"totalTokens":50000}}));
@@ -801,7 +833,8 @@ mod tests {
             grok_prompt_context(&json!({"_meta":{"totalTokens":50000}})),
             Some(AcpContextUsage {
                 used: 50000,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
     }
@@ -817,7 +850,8 @@ mod tests {
             live_context_usage(&status),
             Some(AcpContextUsage {
                 used: 33022,
-                size: 256000
+                size: 256000,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -829,7 +863,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 20800,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -845,7 +880,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 21500,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -863,7 +899,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 40000,
-                size: 256000
+                size: 256000,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -873,7 +910,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 12000,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -904,7 +942,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 33022,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -925,7 +964,8 @@ mod tests {
             })),
             Some(AcpContextUsage {
                 used: 4000,
-                size: 0
+                size: 0,
+                estimated: false,
             })
         );
     }
@@ -939,7 +979,8 @@ mod tests {
             report.context,
             Some(AcpContextUsage {
                 used: 99999,
-                size: 200000
+                size: 200000,
+                estimated: false,
             })
         );
         let fresh =

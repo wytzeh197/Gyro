@@ -285,6 +285,7 @@ export function estimateComposerContextUsage(
   const reportedInputTokens = tokenCount(reportedUsage, "inputTokens");
   const reportedOutputTokens = tokenCount(reportedUsage, "outputTokens") ?? 0;
   const reportedTotalTokens = tokenCount(reportedUsage, "totalTokens");
+  const occupancyEstimated = reportedUsage?.estimated === true;
   const contextWindowTokens =
     resolveContextWindow(reportedContextWindow, model) ?? 0;
 
@@ -331,13 +332,17 @@ export function estimateComposerContextUsage(
         model.providerId &&
         reportedProviderId !== model.providerId)),
   );
-  const detail = isReported
-    ? isOtherModelReading
-      ? `The last turn ran on ${reportedModelId ?? reportedProviderId}; its token count is an estimate for this model. Newer thread content and this draft are estimated too.`
-      : liveEstimatedTokens > 0
-        ? "Provider-reported usage plus an estimate for newer thread content and this draft."
-        : "Latest context usage reported by the provider."
-    : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
+  const detail = occupancyEstimated
+    ? liveEstimatedTokens > 0
+      ? "Estimated from prompt and tool traffic seen so far, plus newer thread content and this draft. The provider has not reported window occupancy."
+      : "Estimated from prompt and tool traffic seen so far. The provider has not reported window occupancy."
+    : isReported
+      ? isOtherModelReading
+        ? `The last turn ran on ${reportedModelId ?? reportedProviderId}; its token count is an estimate for this model. Newer thread content and this draft are estimated too.`
+        : liveEstimatedTokens > 0
+          ? "Provider-reported usage plus an estimate for newer thread content and this draft."
+          : "Latest context usage reported by the provider."
+      : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
   return finishComposerContextUsage({
     providerId: model.providerId,
@@ -347,7 +352,10 @@ export function estimateComposerContextUsage(
     detail,
     modelLabel,
     source:
-      isReported && liveEstimatedTokens === 0 && !isOtherModelReading
+      isReported &&
+      liveEstimatedTokens === 0 &&
+      !isOtherModelReading &&
+      !occupancyEstimated
         ? "reported"
         : "estimated",
     usedTokens,

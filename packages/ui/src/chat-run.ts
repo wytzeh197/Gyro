@@ -963,6 +963,32 @@ function sanitizeResponseEvent(event: SessionEvent): SessionEvent {
   return message === event.message ? event : { ...event, message };
 }
 
+/**
+ * One failed-turn paragraph.
+ *
+ * Recovery is extra advice. Skip it when the error already contains that
+ * sentence, and when both already tell the person to unlock the Mac and send
+ * again. Those two Keychain lines differ by a few words, so a plain inclusion
+ * check still leaves the instruction on screen twice.
+ */
+export function failureDetail(message: string, recovery?: string) {
+  const problem = message.trim();
+  const advice = recovery?.trim() ?? "";
+  if (!advice) return problem;
+  if (!problem) return advice;
+  const problemText = problem.toLowerCase();
+  const adviceText = advice.toLowerCase();
+  if (problemText.includes(adviceText)) return problem;
+  if (asksToUnlockAndResend(problemText) && asksToUnlockAndResend(adviceText)) {
+    return problem;
+  }
+  return `${problem} ${advice}`;
+}
+
+function asksToUnlockAndResend(text: string) {
+  return text.includes("unlock your mac") && text.includes("send again");
+}
+
 function runPhase(
   steps: RunStep[],
   response: SessionEvent | undefined,

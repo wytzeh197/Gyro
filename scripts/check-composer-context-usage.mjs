@@ -158,6 +158,38 @@ assert.equal(
   "Provider usage plus a newer draft has estimated coverage",
 );
 assert.equal(reported.usedLabel, "12.2K");
+
+const trafficEstimate = estimateComposerContextUsage(
+  [
+    event("traffic", "system-event", "", {
+      kind: "provider-context-usage",
+      providerId: "xai",
+      modelId: "grok-4.7",
+      contextWindowSource: "catalog",
+      contextUsage: {
+        inputTokens: 120_000,
+        totalTokens: 120_000,
+        estimated: true,
+        modelContextWindow: 500_000,
+      },
+    }),
+  ],
+  "",
+  {
+    providerId: "xai",
+    modelId: "grok-4.7",
+    modelLabel: "Grok 4.7",
+    contextWindowTokens: 500_000,
+  },
+);
+assert.equal(
+  trafficEstimate.source,
+  "estimated",
+  "A traffic lower bound keeps the estimate mark",
+);
+assert.equal(trafficEstimate.usedTokens, 120_000);
+assert.match(trafficEstimate.detail, /tool traffic/);
+assert.match(trafficEstimate.detail, /has not reported window occupancy/);
 // A matching runtime window wins over the API/catalog maximum.
 assert.equal(reported.windowLabel, "100K");
 assert.equal(reported.percentLabel, "12%");

@@ -441,6 +441,7 @@ export {
   getProviderCatalogEntry,
   getProviderModel,
   isCustomProviderId,
+  isPickerHiddenModel,
   isProviderId,
   isProviderExecutable,
   isProviderRuntimeUsable,
@@ -465,6 +466,8 @@ export {
   supportsFastMode,
   fastModeModelKey,
   fastModeConfigFromAction,
+  pickerModelId,
+  pickerModelLabel,
 } from "./provider-fast-mode";
 export {
   councilPreflightLabel,

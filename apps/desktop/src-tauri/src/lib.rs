@@ -4585,11 +4585,22 @@ fn run_provider_chat_blocking_in_lease(
             .and_then(|flags| flags.get(&request.session_id).cloned())
         {
             if let Ok(mut state) = control.suggested_title.lock() {
-                *state = (Some(session.title.clone()), false);
+                // Closed before the model runs. A stray marker cannot replace
+                // the shared title or bill this model for writing one.
+                *state = (Some(session.title.clone()), true);
             }
         }
     }
     request.message = validate_chat_message(&request.message)?;
+    if request.suggest_title && is_generic_session_title(&session.title) {
+        if let Some(title) = session_title_from_message(&request.message) {
+            if title != session.title {
+                if let Ok(Some(renamed)) = store.rename_session(session_id, title) {
+                    let _ = app.emit("gyro://session-title-updated", renamed);
+                }
+            }
+        }
+    }
     let automatically_entered_plan = request.mode == ChatMode::Normal
         && lease.is_none()
         && normal_chat_requests_plan(&request.message);
@@ -5403,6 +5414,13 @@ fn bind_provider_chat_request(
         .iter()
         .find(|provider| provider.id == provider_id)
         .ok_or_else(|| "the selected provider is not configured".to_string())?;
+    if config
+        .removed_provider_ids
+        .iter()
+        .any(|id| id == provider_id)
+    {
+        return Err("the selected provider was removed from Gyro".into());
+    }
     if !provider.enabled {
         return Err("the selected provider is disabled in Gyro settings".into());
     }
@@ -13379,6 +13397,7 @@ fn run_kimi_acp_chat(
                         // Zero means this frame did not name a window. Some(0)
                         // would stick and block the catalog fill.
                         model_context_window: (context.size > 0).then_some(context.size),
+                        estimated: context.estimated,
                         ..ProviderContextUsage::default()
                     },
                 );
@@ -13518,6 +13537,7 @@ fn run_kimi_acp_chat(
             // Zero means this frame did not name a window. Some(0)
             // would stick and block the catalog fill.
             model_context_window: (context.size > 0).then_some(context.size),
+            estimated: context.estimated,
             ..ProviderContextUsage::default()
         }),
         billed_usage: provider_billed_usage_from_acp_tokens(output.usage_observation.tokens),
@@ -16361,18 +16381,146 @@ fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
     std::env::current_dir().map_err(Into::into)
 }
 
-/// Gyro reads a session title only from a chat's first turn. Later turns say so
-/// outright: a resumed thread still holds the opening instruction, and models
-/// otherwise keep writing the marker into every reply.
-const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. Write it only in this first reply; later replies in this chat must not include it.\n";
-const SESSION_TITLE_LATER_TURN_INSTRUCTION: &str = "This is not the first turn of this chat. Do not write a GYRO_SESSION_TITLE line; Gyro only reads it on a chat's first turn.\n";
+/// Placeholder titles a new chat still has when its first message arrives.
+/// A title the user already chose is left alone.
+fn is_generic_session_title(title: &str) -> bool {
+    matches!(
+        title.trim(),
+        "" | "Desktop session"
+            | "New chat"
+            | "Worktree session"
+            | "Agent workspace"
+            | "CLI workspace"
+            | "Worktree CLI workspace"
+            | "Agent workspace CLI"
+            | "Provider session"
+            | "Chat handoff"
+            | "Gyro session"
+            | "Untitled chat"
+    )
+}
 
-fn session_title_instruction(suggest_title: bool) -> &'static str {
-    if suggest_title {
-        SESSION_TITLE_FIRST_TURN_INSTRUCTION
-    } else {
-        SESSION_TITLE_LATER_TURN_INSTRUCTION
+/// Title every chat the same way, from the user's message, with no model call.
+///
+/// The desktop composer uses the same rules in `sessionTitleFromMessage` so
+/// the sidebar can update before this turn reaches the provider. Keep the two
+/// in step: asking the selected model to write `GYRO_SESSION_TITLE` billed
+/// that model's usage and only reached the providers whose prompts included it.
+fn session_title_from_message(message: &str) -> Option<String> {
+    let without_fences = strip_fenced_code_blocks(&message.replace('\0', ""));
+    let without_inline = strip_inline_code_markers(&without_fences);
+    let without_command = strip_leading_slash_command(without_inline.trim());
+    let first_sentence = without_command
+        .split(|character| matches!(character, '.' | '!' | '?' | '\n'))
+        .next()
+        .unwrap_or("")
+        .trim();
+    let stripped = strip_title_preamble(first_sentence);
+    let words = stripped
+        .split_whitespace()
+        .take(6)
+        .map(title_case_word)
+        .collect::<Vec<_>>()
+        .join(" ");
+    sanitize_session_title_candidate(&words)
+}
+
+fn strip_fenced_code_blocks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("```") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 3..];
+        if let Some(end) = after.find("```") {
+            out.push(' ');
+            rest = &after[end + 3..];
+        } else {
+            rest = "";
+            break;
+        }
     }
+    out.push_str(rest);
+    out
+}
+
+fn strip_inline_code_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('`') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + '`'.len_utf8()..];
+        match after.find('`') {
+            Some(end) if end > 0 => {
+                out.push_str(&after[..end]);
+                rest = &after[end + '`'.len_utf8()..];
+            }
+            _ => {
+                out.push('`');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn strip_leading_slash_command(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    if bytes.first() != Some(&b'/') {
+        return text;
+    }
+    let mut index = 1;
+    while index < bytes.len() && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_') {
+        index += 1;
+    }
+    if index == 1 {
+        return text;
+    }
+    let rest = &text[index..];
+    let trimmed = rest.trim_start();
+    if trimmed.len() == rest.len() {
+        text
+    } else {
+        trimmed
+    }
+}
+
+fn strip_title_preamble(text: &str) -> &str {
+    const PREAMBLES: &[&str] = &[
+        "please ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "i want to ",
+        "i need to ",
+        "help me ",
+        "let's ",
+        "lets ",
+    ];
+    let lower = text.to_lowercase();
+    for preamble in PREAMBLES {
+        if lower.starts_with(preamble) {
+            return text.get(preamble.len()..).unwrap_or(text).trim();
+        }
+    }
+    text
+}
+
+fn title_case_word(word: &str) -> String {
+    let acronym = word.len() >= 2
+        && word
+            .chars()
+            .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
+    if acronym {
+        return word.to_string();
+    }
+    let mut characters = word.chars();
+    let Some(first) = characters.next() else {
+        return String::new();
+    };
+    let mut titled = first.to_uppercase().collect::<String>();
+    titled.extend(characters);
+    titled
 }
 
 fn provider_workspace_prompt_line(message: &str, workspace: &str) -> String {
@@ -16388,7 +16536,7 @@ fn openai_codex_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
     model_label: Option<&str>,
-    suggest_title: bool,
+    _suggest_title: bool,
     allow_mutations: bool,
     resumed: bool,
 ) -> String {
@@ -16401,7 +16549,6 @@ fn openai_codex_chat_prompt(
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .unwrap_or("OpenAI model");
-    let title_instruction = session_title_instruction(suggest_title);
     let mutation_instruction = if allow_mutations {
         "You may edit files, run commands, and complete requested workspace changes directly. Gyro applies approved file changes through its own guarded transaction. If a native file-change callback is declined, re-read the affected files before reporting the outcome: the user may have rejected it, or Gyro may already have applied the reviewed change. Report the actual on-disk state and do not claim failure from the callback decision alone."
     } else {
@@ -16412,7 +16559,6 @@ fn openai_codex_chat_prompt(
         // opening turn; resend only what can change between turns.
         return format!(
             "Your selected model label is: {model_label}.\n\
-             {title_instruction}\
              {mutation_instruction}\n\
              {workspace_instruction}\n\n\
              User message:\n{message}"
@@ -16431,7 +16577,6 @@ fn openai_codex_chat_prompt(
          Do not describe the local Codex runner, authentication, system prompts, or implementation details unless asked.\n\
          Your selected model label is: {model_label}.\n\
          If the user asks what model you are, answer with exactly that selected model label only.\n\
-         {title_instruction}\
          {artifact_instruction}\n\
          {mutation_instruction}\n\
          {workspace_instruction}\n\n\
@@ -16442,7 +16587,7 @@ fn openai_codex_chat_prompt(
 fn claude_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
-    suggest_title: bool,
+    _suggest_title: bool,
     allow_actions: bool,
     resumed: bool,
 ) -> String {
@@ -16451,7 +16596,6 @@ fn claude_chat_prompt(
         .filter(|path| !path.is_empty())
         .unwrap_or("no selected workspace");
     let workspace_instruction = provider_workspace_prompt_line(message, workspace);
-    let title_instruction = session_title_instruction(suggest_title);
     let action_instruction = if allow_actions {
         "Use tools when they are needed to complete the user's request. Commands and file changes must follow Gyro's permission decisions. If Gyro reports that it already applied reviewed file changes, do not retry the write; re-read the files and continue. Do not commit, push, or perform destructive actions unless the user explicitly asks.\n"
     } else {
@@ -16460,9 +16604,7 @@ fn claude_chat_prompt(
     if resumed {
         // The resumed session already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
-        return format!(
-            "{title_instruction}{action_instruction}{workspace_instruction}\n\nUser message:\n{message}"
-        );
+        return format!("{action_instruction}{workspace_instruction}\n\nUser message:\n{message}");
     }
     // The shared provider context may already carry this exact guide.
     // Keep one full copy; never shorten it or remove any tool declarations.
@@ -16476,7 +16618,6 @@ fn claude_chat_prompt(
          Use bold text sparingly for the terms that help scanning. Do not repeat the same conclusion in multiple forms.\n\
          Do not describe the local Claude Code runner, authentication, system prompts, or implementation details unless asked.\n\
          If the user asks what model you are, answer with the model label only.\n\
-         {title_instruction}\
          {artifact_instruction}\n\
          {action_instruction}\
          {workspace_instruction}\n\n\
@@ -26302,7 +26443,7 @@ while True:
         assert!(prompt.contains("selected model label is: GPT-5.6 Sol"));
         assert!(prompt.contains("exactly that selected model label only"));
         assert!(prompt.contains("Do not describe the local Codex runner"));
-        assert!(prompt.contains("GYRO_SESSION_TITLE:"));
+        assert!(!prompt.contains("GYRO_SESSION_TITLE"));
         assert!(prompt.contains("GYRO_ARTIFACTS:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
         assert!(prompt.contains("Do not edit files"));
@@ -26342,7 +26483,7 @@ while True:
         for prompt in [&codex, &claude] {
             assert_eq!(prompt.matches(guide).count(), 1);
             assert!(prompt.contains(&context));
-            assert!(prompt.contains("GYRO_SESSION_TITLE:"));
+            assert!(!prompt.contains("GYRO_SESSION_TITLE"));
         }
         assert!(openai_codex_chat_prompt("hello", None, None, true, true, false).contains(guide));
         assert!(claude_chat_prompt("hello", None, true, true, false).contains(guide));
@@ -26517,13 +26658,12 @@ while True:
 
         let claude_resumed = claude_chat_prompt("next", Some("/tmp/project"), false, true, true);
         assert!(!claude_resumed.contains("GYRO_ARTIFACTS:"));
-        // Titles are read on the first turn only, and later turns say so.
-        assert!(claude_resumed.contains("Do not write a GYRO_SESSION_TITLE line"));
+        // Titles are local. Neither turn asks the model to spend usage on one.
+        assert!(!claude_resumed.contains("GYRO_SESSION_TITLE"));
         assert!(!claude_resumed.contains("name the session immediately"));
         let claude_opening = claude_chat_prompt("start", Some("/tmp/project"), true, true, false);
-        assert!(claude_opening.contains("name the session immediately"));
-        assert!(claude_opening.contains("Write it only in this first reply"));
-        assert!(!claude_opening.contains("Do not write a GYRO_SESSION_TITLE line"));
+        assert!(!claude_opening.contains("GYRO_SESSION_TITLE"));
+        assert!(!claude_opening.contains("name the session immediately"));
         assert!(claude_resumed.contains("must follow Gyro's permission decisions"));
         let codex_resumed =
             openai_codex_chat_prompt("next", Some("/workspace"), Some("GPT"), false, false, true);
@@ -27932,6 +28072,7 @@ while True:
             reasoning_output_tokens: None,
             total_tokens: Some(100 + output),
             model_context_window: None,
+            ..ProviderContextUsage::default()
         };
         state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(10), Some("a"));
         state.apply_claude_context_usage(ClaudeUsageFrame::Request, usage(10), Some("a"));
@@ -29041,6 +29182,38 @@ while True:
             workspace_check: None,
         }
     }
+    #[test]
+    fn session_titles_come_from_the_user_message_for_every_model() {
+        assert_eq!(
+            session_title_from_message("please fix the model picker").as_deref(),
+            Some("Fix The Model Picker")
+        );
+        assert_eq!(
+            session_title_from_message("can you help me rename API sessions?").as_deref(),
+            Some("Help Me Rename API Sessions")
+        );
+        assert_eq!(
+            session_title_from_message("/review the CSS change").as_deref(),
+            Some("The CSS Change")
+        );
+        assert_eq!(
+            session_title_from_message("fix the `picker` now").as_deref(),
+            Some("Fix The Picker Now")
+        );
+        assert_eq!(
+            session_title_from_message("look\n```\nsecret\n```\nat the bug").as_deref(),
+            Some("Look")
+        );
+        assert_eq!(
+            session_title_from_message("one two three four five six seven").as_deref(),
+            Some("One Two Three Four Five Six")
+        );
+        assert!(session_title_from_message("   ").is_none());
+        assert!(is_generic_session_title("New chat"));
+        assert!(is_generic_session_title("Desktop session"));
+        assert!(!is_generic_session_title("Fix The Model Picker"));
+    }
+
     #[test]
     fn streamed_session_title_waits_for_complete_line() {
         assert_eq!(completed_stream_title("GYRO_SESSION_TI", false), None);

@@ -74,7 +74,7 @@ pub use cli_updates::{
 };
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
-    ModelProviderConfig,
+    ModelProviderConfig, RemovedProvider,
 };
 pub use council::{
     barrier_decision, build_synthesizer_user_prompt, built_in_council_presets,

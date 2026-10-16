@@ -12,6 +12,7 @@ import {
   providerNeedsSignInRepair,
   providerApiKeyEnvName,
   isCustomProviderId,
+  getProviderCatalogEntry,
 } from "./provider-catalog";
 import type { ProviderId } from "./types";
 import type { SettingsSurfaceProps } from "./surfaces";
@@ -469,5 +470,129 @@ export function ProviderDetailsMenu({
       </summary>
       {children}
     </details>
+  );
+}
+
+function providerRemoveCopy(provider: {
+  id: string;
+  displayName: string;
+  capabilities?: { executionKind?: string };
+}) {
+  const name = provider.displayName;
+  const kind = provider.capabilities?.executionKind;
+  const cli =
+    kind === "codex-cli" ||
+    kind === "claude-code" ||
+    kind === "kimi-acp" ||
+    kind === "acp-cli";
+  if (provider.id === "ollama" || kind === "ollama-api") {
+    return `Removes ${name} from Gyro. The app on this Mac stays installed.`;
+  }
+  if (cli && providerSupportsApiKey(provider.id)) {
+    return `Removes ${name} from Gyro and deletes a stored API key. The CLI on this Mac stays signed in.`;
+  }
+  if (cli) {
+    return `Removes ${name} from Gyro. The CLI on this Mac stays signed in.`;
+  }
+  if (providerSupportsApiKey(provider.id)) {
+    return `Removes ${name} from Gyro and deletes its stored API key.`;
+  }
+  return `Removes ${name} from Gyro.`;
+}
+
+/** Two-step remove for a shipped or custom provider. */
+export function ProviderRemoveControl({
+  provider,
+  onRemove,
+}: {
+  provider: {
+    id: string;
+    displayName: string;
+    capabilities?: { executionKind?: string };
+  };
+  onRemove?: (providerId: string) => Promise<boolean> | boolean | void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  if (!confirming) {
+    return (
+      <button
+        className="gyro-danger-button"
+        disabled={pending || !onRemove}
+        onClick={() => setConfirming(true)}
+        type="button"
+      >
+        Remove from Gyro
+      </button>
+    );
+  }
+  return (
+    <>
+      <p className="gyro-provider-remove-copy">{providerRemoveCopy(provider)}</p>
+      <button
+        className="gyro-danger-button"
+        disabled={pending || !onRemove}
+        onClick={() => {
+          setPending(true);
+          void Promise.resolve(onRemove?.(provider.id))
+            .then((removed) => {
+              if (removed !== false) setConfirming(false);
+            })
+            .finally(() => setPending(false));
+        }}
+        type="button"
+      >
+        {pending ? "Removing\u2026" : `Remove ${provider.displayName}`}
+      </button>
+      <button
+        className="gyro-secondary-button"
+        disabled={pending}
+        onClick={() => setConfirming(false)}
+        type="button"
+      >
+        Cancel
+      </button>
+    </>
+  );
+}
+
+/** Shipped providers hidden by Remove, with a way back. */
+export function RemovedProvidersSection({
+  config,
+  onRestoreProvider,
+}: Pick<SettingsSurfaceProps, "config" | "onRestoreProvider">) {
+  const removed = config.removedProviderIds ?? [];
+  const [pendingId, setPendingId] = useState<string>();
+  if (removed.length === 0) return null;
+  return (
+    <SettingsGroup label="Removed providers">
+      <ul className="gyro-provider-custom-list">
+        {removed.map((id) => {
+          const name =
+            getProviderCatalogEntry(id as ProviderId)?.displayName ?? id;
+          return (
+            <li key={id}>
+              <div>
+                <strong>{name}</strong>
+                <span>Hidden from Gyro until you restore it.</span>
+              </div>
+              <button
+                className="gyro-secondary-button"
+                disabled={pendingId === id || !onRestoreProvider}
+                onClick={() => {
+                  setPendingId(id);
+                  void Promise.resolve(onRestoreProvider?.(id)).finally(() =>
+                    setPendingId(undefined),
+                  );
+                }}
+                type="button"
+              >
+                {pendingId === id ? "Restoring\u2026" : "Restore"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </SettingsGroup>
   );
 }

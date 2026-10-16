@@ -388,9 +388,20 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Remove a custom provider and its stored API key.
+    /// Remove a provider from Gyro.
+    ///
+    /// A `custom:` provider is deleted. A provider Gyro ships is hidden until
+    /// `restore-provider`. A stored API key is deleted. A vendor CLI stays signed in.
     RemoveProvider {
-        /// Provider id. Must start with `custom:`.
+        /// Provider id, for example `openai` or `custom:my-gateway`.
+        provider_id: String,
+        /// Emit versioned JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a shipped provider again after `remove-provider`.
+    RestoreProvider {
+        /// Provider id Gyro ships, for example `deepseek`.
         provider_id: String,
         /// Emit versioned JSON instead of text.
         #[arg(long)]
@@ -749,6 +760,9 @@ impl Cli {
             }))
             | Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::RemoveProvider { json, .. },
+            }))
+            | Some(Commands::Config(ConfigArgs {
+                command: ConfigCommand::RestoreProvider { json, .. },
             })) => *json,
             _ => false,
         }
@@ -5854,45 +5868,45 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             }
         }
         ConfigCommand::RemoveProvider { provider_id, json } => {
-            if !gyro_core::is_custom_provider_id(&provider_id) {
-                return Err(cli_failure(
-                    CliErrorCategory::InvalidInput,
-                    format!(
-                        "`{provider_id}` is a provider Gyro ships; only `{}` providers can be removed",
-                        gyro_core::CUSTOM_PROVIDER_PREFIX
-                    ),
-                ));
-            }
-            let display_name = GyroConfig::update(&paths, |config| {
-                let index = config
-                    .model_providers
-                    .iter()
-                    .position(|provider| provider.id == provider_id)
-                    .ok_or_else(|| {
-                        cli_failure(
-                            CliErrorCategory::InvalidInput,
-                            format!("unknown provider `{provider_id}`"),
-                        )
-                    })?;
-                let removed = config.model_providers.remove(index);
-                // A removed provider cannot stay the default for new chats.
-                if config.selected_provider_id.as_deref() == Some(provider_id.as_str()) {
-                    config.selected_provider_id = None;
-                }
-                Ok(removed.display_name)
+            let removed = GyroConfig::update(&paths, |config| {
+                config.remove_provider(&provider_id).map_err(|error| {
+                    cli_failure(CliErrorCategory::InvalidInput, error)
+                })
             })?;
-            // The config entry is gone either way; a key that was never stored
-            // is not a failure.
-            let cleared = gyro_core::clear_stored_provider_api_key(&provider_id).is_ok();
+            // A key that was never stored is not a failure.
+            let cleared = removed.clears_api_key
+                && gyro_core::clear_stored_provider_api_key(&provider_id).is_ok();
+            let mut message = if cleared {
+                format!("removed {} and its stored API key", removed.display_name)
+            } else {
+                format!("removed {}", removed.display_name)
+            };
+            if removed.keeps_cli_sign_in {
+                message.push_str(". The CLI sign-in on this Mac is unchanged");
+            }
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "remove-provider",
                 target: provider_id,
-                message: if cleared {
-                    format!("removed {display_name} and its stored API key")
-                } else {
-                    format!("removed {display_name}")
-                },
+                message,
+            };
+            if json {
+                print_json(&output)?;
+            } else {
+                println!("{}", output.message);
+            }
+        }
+        ConfigCommand::RestoreProvider { provider_id, json } => {
+            let display_name = GyroConfig::update(&paths, |config| {
+                config.restore_provider(&provider_id).map_err(|error| {
+                    cli_failure(CliErrorCategory::InvalidInput, error)
+                })
+            })?;
+            let output = ConfigMutationOutput {
+                status: CliStatus::Done,
+                action: "restore-provider",
+                target: provider_id,
+                message: format!("restored {display_name}"),
             };
             if json {
                 print_json(&output)?;

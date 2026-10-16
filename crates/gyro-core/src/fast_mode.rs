@@ -39,8 +39,24 @@ pub fn launch_model_id(
     model_id: Option<&str>,
 ) -> Option<String> {
     let model = model_id.map(str::trim).filter(|id| !id.is_empty())?;
-    if provider_id == "xai" && enabled(config, "xai", Some(model)) {
-        return Some(crate::grok::BUILD_FAST_MODEL_ID.to_string());
+    if provider_id == "xai" {
+        let selecting_fast_pool = model == crate::grok::BUILD_FAST_MODEL_ID;
+        let canonical = if selecting_fast_pool {
+            "grok-4.7"
+        } else {
+            model
+        };
+        // A stored fast-pool id stays fast until Fast is explicitly turned off.
+        let fast = if selecting_fast_pool {
+            config.fast_mode_models.get("xai:grok-4.7") != Some(&false)
+        } else {
+            enabled(config, "xai", Some(canonical))
+        };
+        return Some(if fast && canonical == "grok-4.7" {
+            crate::grok::BUILD_FAST_MODEL_ID.to_string()
+        } else {
+            canonical.to_string()
+        });
     }
     Some(model.to_string())
 }
@@ -117,6 +133,21 @@ mod tests {
         assert_eq!(
             launch_model_id(&config, "xai", Some("grok-4.6")).as_deref(),
             Some("grok-4.6")
+        );
+        // A chat still bound to the fast-pool id stays fast until Fast is off.
+        assert_eq!(
+            launch_model_id(
+                &GyroConfig::default(),
+                "xai",
+                Some(crate::grok::BUILD_FAST_MODEL_ID)
+            )
+            .as_deref(),
+            Some(crate::grok::BUILD_FAST_MODEL_ID)
+        );
+        config.fast_mode_models.insert("xai:grok-4.7".into(), false);
+        assert_eq!(
+            launch_model_id(&config, "xai", Some(crate::grok::BUILD_FAST_MODEL_ID)).as_deref(),
+            Some("grok-4.7")
         );
     }
 

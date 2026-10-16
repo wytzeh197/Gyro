@@ -1030,6 +1030,8 @@ export type ProviderChatStreamEvent = {
     outputTokens?: number;
     totalTokens?: number;
     modelContextWindow?: number;
+    /** Traffic lower bound. The provider did not measure the window. */
+    estimated?: boolean;
   } | null;
   /**
    * Every request this turn has billed, added together.
@@ -2392,6 +2394,8 @@ export type GyroConfig = {
   selectedProviderId?: ProviderId;
   /** Explicit per-model opt-in; absent choices use standard speed. */
   fastModeModels?: Record<string, boolean>;
+  /** Shipped providers the user removed from the picker and settings. */
+  removedProviderIds?: string[];
   efficiency?: EfficiencyConfig;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];

@@ -313,9 +313,15 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
         );
     }
     if normalized.contains("macos keychain") {
+        // Skip a second copy when the reader already told the person to
+        // unlock and send again. A bare Keychain refusal still needs it.
         return (
             "provider-config",
-            "Unlock your Mac and allow Gyro to read the saved credential, then send again.",
+            if normalized.contains("unlock your mac") {
+                ""
+            } else {
+                "Unlock your Mac and allow Gyro to read the saved credential, then send again."
+            },
         );
     }
     if normalized.contains("offline")
@@ -532,6 +538,13 @@ mod recovery_tests {
         let keychain = "Gyro could not read the saved credential from macOS Keychain without user interaction.";
         assert!(provider_failure_recovery(keychain).1.contains("Unlock"));
         assert!(!is_transient_provider_error(keychain));
+        let already_actionable = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
+        assert_eq!(
+            provider_failure_recovery(already_actionable).0,
+            "provider-config"
+        );
+        assert_eq!(provider_failure_recovery(already_actionable).1, "");
+        assert!(!is_transient_provider_error(already_actionable));
     }
 
     #[test]

@@ -169,6 +169,9 @@ struct KimiAcpConnection {
     context_usage: Option<AcpContextUsage>,
     /// Set once a wire frame, rather than a /usage text line, supplied occupancy.
     context_from_wire: bool,
+    /// Characters of prompt and tool traffic since `begin_usage`. A lower bound
+    /// for Grok turns that never name window occupancy.
+    traffic_chars: u64,
     bound_session_id: Option<String>,
 }
 
@@ -325,6 +328,7 @@ impl KimiAcpConnection {
             usage_observation: None,
             context_usage: None,
             context_from_wire: false,
+            traffic_chars: 0,
             bound_session_id: None,
         })
     }
@@ -334,6 +338,7 @@ impl KimiAcpConnection {
         // Clear replayed context: a resumed session may send historical updates.
         self.context_usage = None;
         self.context_from_wire = false;
+        self.traffic_chars = 0;
         let observation = acp_usage::normalize_prompt_usage(
             self.usage_provider,
             &Value::Null,
@@ -369,6 +374,40 @@ impl KimiAcpConnection {
         }
         self.context_usage = Some(context);
         Some(context)
+    }
+
+    /// Grow a lower-bound occupancy from traffic this turn has already seen.
+    ///
+    /// Grok's stdio ACP often never sends `session_status` or a per-response
+    /// window. The turn bill is not occupancy. Until a wire frame or a measured
+    /// probe arrives, the composer can show this bound instead of the visible
+    /// transcript. Returns the reading only when the token count changed.
+    fn note_traffic(&mut self, chars: u64) -> Option<AcpContextUsage> {
+        if self.usage_provider != AcpProvider::Grok
+            || !self.collecting_usage
+            || self.context_from_wire
+            || chars == 0
+        {
+            return None;
+        }
+        // A probe or last-call total already occupies the slot.
+        if self.context_usage.is_some_and(|current| !current.estimated) {
+            return None;
+        }
+        self.traffic_chars = self.traffic_chars.saturating_add(chars);
+        let mut used = self.traffic_chars.div_ceil(4);
+        let size = self.context_usage.map(|current| current.size).unwrap_or(0);
+        if size > 0 {
+            used = used.min(size);
+        }
+        self.note_live_context(
+            AcpContextUsage {
+                used,
+                size,
+                estimated: true,
+            },
+            false,
+        )
     }
 
     fn observe_prompt_response(&mut self, message: &Value) {
@@ -865,6 +904,13 @@ where
     {
         publish_live_context(&mut connection, context, false, on_activity);
     }
+    publish_traffic_estimate(
+        &mut connection,
+        serde_json::to_string(&prompt)
+            .map(|text| text.len() as u64)
+            .unwrap_or(0),
+        on_activity,
+    );
     let prompt_id = connection.send_request(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),
@@ -887,9 +933,9 @@ where
     }
     let result = result?;
     // A live frame wins. Flat `_meta.totalTokens` is last-call context only
-    // when Grok sent no occupancy during the turn, and only when it is not
-    // the summed bill.
-    if connection.usage_provider == AcpProvider::Grok && connection.context_usage.is_none() {
+    // when Grok sent no wire occupancy during the turn, and only when it is
+    // not the summed bill. A traffic estimate must not block that reading.
+    if connection.usage_provider == AcpProvider::Grok && !connection.context_from_wire {
         if let Some(context) = acp_usage::grok_prompt_context(&result) {
             publish_live_context(&mut connection, context, false, on_activity);
         }
@@ -1298,6 +1344,87 @@ fn acp_model_id(selected: &str, offered: &[String]) -> String {
         .unwrap_or_else(|| selected.to_string())
 }
 
+fn value_json_chars(value: &Value) -> u64 {
+    serde_json::to_string(value)
+        .map(|text| text.len() as u64)
+        .unwrap_or(0)
+}
+
+fn json_field_chars(value: Option<&Value>) -> u64 {
+    match value {
+        Some(Value::String(text)) => text.len() as u64,
+        Some(Value::Null) | None => 0,
+        Some(other) => value_json_chars(other),
+    }
+}
+
+/// Text, or a non-text payload such as an attachment, inside one content block.
+fn content_traffic_chars(content: Option<&Value>) -> u64 {
+    let Some(content) = content else {
+        return 0;
+    };
+    if let Some(text) = content.get("text").and_then(Value::as_str) {
+        return text.len() as u64;
+    }
+    if let Some(items) = content.as_array() {
+        return items
+            .iter()
+            .map(|item| content_traffic_chars(Some(item)))
+            .fold(0, u64::saturating_add);
+    }
+    if let Some(data) = content.get("data").and_then(Value::as_str) {
+        return data.len() as u64;
+    }
+    json_field_chars(Some(content))
+}
+
+/// Characters that belong in the occupancy lower bound.
+///
+/// `tool_call` counts `rawInput` once. The matching update repeats that input
+/// and carries the result in `rawOutput` / `content`. `user_message_chunk`
+/// repeats the prompt already counted at send. Turn bills are not traffic.
+fn session_update_traffic_chars(update: &Value) -> u64 {
+    match update.get("sessionUpdate").and_then(Value::as_str) {
+        Some("agent_message_chunk") | Some("agent_thought_chunk") => {
+            content_traffic_chars(update.get("content"))
+        }
+        Some("tool_call") => json_field_chars(update.get("rawInput")),
+        Some("tool_call_update") => {
+            let output = json_field_chars(update.get("rawOutput"));
+            let content = content_traffic_chars(update.get("content"));
+            if output == 0 || content == 0 || update.get("rawOutput") == update.get("content") {
+                output.max(content)
+            } else {
+                output.saturating_add(content)
+            }
+        }
+        _ => 0,
+    }
+}
+
+fn publish_traffic_estimate<Activity>(
+    connection: &mut KimiAcpConnection,
+    chars: u64,
+    on_activity: &mut Activity,
+) where
+    Activity: FnMut(&KimiAcpActivity),
+{
+    // `note_traffic` already stored the reading. Publishing through
+    // `publish_live_context` would call `note_live_context` again and drop it.
+    let Some(context) = connection.note_traffic(chars) else {
+        return;
+    };
+    on_activity(&KimiAcpActivity {
+        id: "live-context-usage".into(),
+        kind: "context-usage".into(),
+        label: "Context usage".into(),
+        detail: None,
+        file_counts: None,
+        status: "running".into(),
+        context_usage: Some(context),
+    });
+}
+
 fn publish_live_context<Activity>(
     connection: &mut KimiAcpConnection,
     context: AcpContextUsage,
@@ -1406,10 +1533,16 @@ where
         match method {
             "session/update" => {
                 if connection.collecting_usage {
-                    if let Some(context) =
-                        params.get("update").and_then(acp_usage::live_context_usage)
-                    {
-                        publish_live_context(connection, context, true, on_activity);
+                    if let Some(update) = params.get("update") {
+                        if let Some(context) = acp_usage::live_context_usage(update) {
+                            publish_live_context(connection, context, true, on_activity);
+                        } else {
+                            publish_traffic_estimate(
+                                connection,
+                                session_update_traffic_chars(update),
+                                on_activity,
+                            );
+                        }
                     }
                     // Reopening/loading a session can replay its old replies and
                     // tool activities. They already belong to native history;
@@ -1437,6 +1570,12 @@ where
                     ) {
                         if let Some(context) = acp_usage::live_context_usage(update) {
                             publish_live_context(connection, context, true, on_activity);
+                        } else {
+                            publish_traffic_estimate(
+                                connection,
+                                session_update_traffic_chars(update),
+                                on_activity,
+                            );
                         }
                     }
                 }
@@ -2312,14 +2451,13 @@ done
             Some(crate::acp_usage::AcpContextUsage {
                 used: 50000,
                 size: 100000,
+                estimated: false,
             })
         );
-        assert_eq!(
-            live_context,
-            vec![crate::acp_usage::AcpContextUsage {
-                used: 50000,
-                size: 100000
-            }]
+        assert_eq!(live_context.last().copied(), output.context_usage);
+        assert!(
+            live_context.iter().any(|reading| reading.estimated),
+            "prompt traffic is shown until the usage_update arrives"
         );
         // Occupancy is published while the turn is running, and never replaces billed consumption.
         assert_eq!(output.usage_observation.tokens.total_tokens, 125);
@@ -2394,10 +2532,20 @@ done
         let advertised = std::fs::read_to_string(workspace.join("initialize-request")).unwrap();
         assert!(advertised.contains("x.ai/statusLine"));
         assert!(!advertised.contains("incrementalBashOutput"));
-        let window = |used| crate::acp_usage::AcpContextUsage { used, size: 256000 };
+        let window = |used| crate::acp_usage::AcpContextUsage {
+            used,
+            size: 256000,
+            estimated: false,
+        };
+        assert!(
+            live_context
+                .first()
+                .is_some_and(|reading| reading.estimated && reading.used > 0),
+            "prompt traffic is a lower bound until a wire reading arrives"
+        );
         assert_eq!(
-            live_context,
-            vec![
+            live_context[1..],
+            [
                 window(33022),
                 window(20800),
                 window(21500),
@@ -2421,6 +2569,7 @@ done
                 Some(crate::acp_usage::AcpContextUsage {
                     used: 33022,
                     size: 0,
+                    estimated: false,
                 }),
             ),
             (reject, None),
@@ -2446,10 +2595,168 @@ done
                 |_, _| Ok(()),
             )
             .unwrap();
-            assert_eq!(output.context_usage, context);
-            assert_eq!(live_context, context.into_iter().collect::<Vec<_>>());
             assert_eq!(output.usage_observation.tokens.total_tokens, 333519);
+            assert!(
+                live_context.iter().all(|reading| reading.used != 333519),
+                "the turn bill is not occupancy"
+            );
+            match context {
+                Some(measured) => {
+                    assert_eq!(output.context_usage, Some(measured));
+                    assert_eq!(live_context.last().copied(), Some(measured));
+                    assert!(live_context.iter().any(|reading| reading.estimated));
+                }
+                None => {
+                    let estimate = output.context_usage.expect("traffic estimate");
+                    assert!(estimate.estimated);
+                    assert_ne!(estimate.used, 333519);
+                    assert!(estimate.used < 1_000);
+                    assert!(live_context.iter().all(|reading| reading.estimated));
+                }
+            }
         }
+    }
+
+    #[test]
+    fn grok_traffic_chars_count_tool_bodies_and_ignore_the_turn_bill() {
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "tool_call",
+                "rawInput": "12345678",
+                "rawOutput": "not-yet",
+            })),
+            8
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "tool_call_update",
+                "rawInput": "DO_NOT_COUNT",
+                "rawOutput": "a".repeat(400),
+            })),
+            400
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "tool_call_update",
+                "rawOutput": "same",
+                "content": "same",
+            })),
+            4
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "tool_call_update",
+                "rawOutput": "out",
+                "content": {"type": "text", "text": "view"},
+            })),
+            7
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "think"},
+            })),
+            5
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "user_message_chunk",
+                "content": {
+                    "data": "x".repeat(100),
+                    "mimeType": "image/png",
+                    "type": "image"
+                },
+            })),
+            0
+        );
+        assert_eq!(
+            super::session_update_traffic_chars(&json!({
+                "sessionUpdate": "turn_completed",
+                "usage": {"inputTokens": 7_515_785, "modelCalls": 67},
+            })),
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grok_traffic_estimate_grows_with_tool_output_until_a_wire_reading() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  id=${line#*'"id":'}
+  id=${id%%,*}
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"authMethods":[{"id":"login"}]}}\n' "$id" ;;
+    *'"method":"authenticate"'*|*'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"grok-session"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1","rawInput":"12345678"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1","rawInput":"DO_NOT_COUNT","rawOutput":"aaaaaaaa"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"sessionId":"grok-session","update":{"sessionUpdate":"turn_completed","usage":{"inputTokens":7515785,"modelCalls":67}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"session_status","context_window":{"context_tokens":180000,"context_window_size":500000}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t2","rawOutput":"bbbbbbbbbbbbbbbb"}}}'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"totalTokens":7554536,"usage":{"inputTokens":7515785,"modelCalls":67,"totalTokens":7554536}}}}\n' "$id" ;;
+  esac
+done
+"#,
+        );
+        let mut request =
+            fixture_request(program, temp.path().into(), CancellationToken::default(), None);
+        request.provider_label = "xAI".into();
+        let mut live_context = Vec::new();
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |activity| {
+                if let Some(context) = activity.context_usage {
+                    live_context.push(context);
+                }
+            },
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        let prompt_chars = serde_json::to_string(&vec![json!({"type": "text", "text": "hello"})])
+            .unwrap()
+            .len() as u64;
+        let prompt_tokens = prompt_chars.div_ceil(4);
+        let with_input = (prompt_chars + 8).div_ceil(4);
+        let with_output = (prompt_chars + 8 + 8).div_ceil(4);
+        assert_eq!(
+            live_context.first().map(|reading| reading.used),
+            Some(prompt_tokens)
+        );
+        assert!(live_context
+            .first()
+            .is_some_and(|reading| reading.estimated));
+        assert!(live_context
+            .iter()
+            .any(|reading| reading.estimated && reading.used == with_input));
+        assert!(live_context
+            .iter()
+            .any(|reading| reading.estimated && reading.used == with_output));
+        assert_eq!(
+            output.context_usage,
+            Some(crate::acp_usage::AcpContextUsage {
+                used: 180_000,
+                size: 500_000,
+                estimated: false,
+            })
+        );
+        assert_eq!(live_context.last().copied(), output.context_usage);
+        assert!(live_context.iter().all(|reading| reading.used != 7_515_785));
+        assert_eq!(
+            live_context
+                .iter()
+                .filter(|reading| !reading.estimated)
+                .count(),
+            1,
+            "tool output after the wire reading must not move occupancy"
+        );
     }
 
     #[cfg(unix)]
@@ -2737,7 +3044,8 @@ done
             output.context_usage,
             Some(crate::acp_usage::AcpContextUsage {
                 used: 99999,
-                size: 200000
+                size: 200000,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -2798,7 +3106,8 @@ done
             output.context_usage,
             Some(crate::acp_usage::AcpContextUsage {
                 used: 51000,
-                size: 262144
+                size: 262144,
+                estimated: false,
             })
         );
         assert_eq!(
@@ -2806,11 +3115,13 @@ done
             vec![
                 crate::acp_usage::AcpContextUsage {
                     used: 40000,
-                    size: 262144
+                    size: 262144,
+                    estimated: false,
                 },
                 crate::acp_usage::AcpContextUsage {
                     used: 51000,
-                    size: 262144
+                    size: 262144,
+                    estimated: false,
                 },
             ]
         );

@@ -17,6 +17,7 @@ import {
   type MotionSpeed,
   type ThemeMode,
   providersForConfig,
+  isCustomProviderId,
   type DesktopNotificationPreferences,
   type GyroConfig,
   type ProviderId,
@@ -243,11 +244,26 @@ function Preview() {
     };
     return {
       ...empty,
-      modelProviders: providersForConfig(empty).map((provider) => ({
-        ...provider,
-        enabled: false,
-        authStatus: "not-connected",
-      })),
+      modelProviders: [
+        ...providersForConfig(empty).map((provider) => ({
+          ...provider,
+          enabled: false,
+          authStatus: "not-connected" as const,
+        })),
+        {
+          id: "custom:lab" as const,
+          displayName: "Lab gateway",
+          apiKeyRef: "provider:custom:lab",
+          enabled: true,
+          authMode: "env" as const,
+          authStatus: "not-connected" as const,
+          baseUrl: "https://lab.example/v1",
+          defaultModelId: "local-model",
+          modelIds: ["local-model"],
+          kind: "openai-compatible",
+          models: [{ id: "local-model", displayName: "local-model" }],
+        },
+      ],
     };
   });
   const [connecting, setConnecting] = useState<ProviderId[]>([]);
@@ -413,6 +429,53 @@ function Preview() {
             savePreview();
           }}
           connectingProviderIds={connecting}
+          onRemoveProvider={async (id) => {
+            setConfig((current) => {
+              if (isCustomProviderId(id)) {
+                return {
+                  ...current,
+                  selectedProviderId:
+                    current.selectedProviderId === id
+                      ? undefined
+                      : current.selectedProviderId,
+                  modelProviders: current.modelProviders.filter(
+                    (provider) => provider.id !== id,
+                  ),
+                };
+              }
+              return {
+                ...current,
+                removedProviderIds: [
+                  ...new Set([...(current.removedProviderIds ?? []), id]),
+                ],
+                selectedProviderId:
+                  current.selectedProviderId === id
+                    ? undefined
+                    : current.selectedProviderId,
+                modelProviders: current.modelProviders.map((provider) =>
+                  provider.id === id
+                    ? {
+                        ...provider,
+                        enabled: false,
+                        authStatus: "not-connected",
+                      }
+                    : provider,
+                ),
+              };
+            });
+            setResult(`Removed ${id}`);
+            return true;
+          }}
+          onRestoreProvider={async (id) => {
+            setConfig((current) => ({
+              ...current,
+              removedProviderIds: (current.removedProviderIds ?? []).filter(
+                (removed) => removed !== id,
+              ),
+            }));
+            setResult(`Restored ${id}`);
+            return true;
+          }}
           onToggleProvider={(id) => setConnecting([id as ProviderId])}
           onSelectProviderDefaultModel={(id, modelId) =>
             setConfig((current) => ({

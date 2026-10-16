@@ -51,7 +51,7 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
-/** Grok 4.3, 4.6, 4.7, and 4.7 Fast expose xhigh; 4.5 stops at high. */
+/** Grok 4.3, 4.6, and 4.7 expose xhigh. Grok 4.5 stops at high. Fast is a mode, not a model. */
 export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
   ...GROK_REASONING_EFFORTS,
   "xhigh",
@@ -106,6 +106,21 @@ export const CUSTOM_PROVIDER_PREFIX = "custom:";
 
 export function isCustomProviderId(providerId: string) {
   return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
+/**
+ * Launch ids for Fast mode. They stay valid at turn time and stay out of the picker.
+ * Grok 4.7 Fast is Grok 4.7 with Fast on, which rewrites to this id.
+ */
+const PICKER_HIDDEN_MODELS: Record<string, readonly string[]> = {
+  xai: ["grok-4.7-build-fast"],
+};
+
+export function isPickerHiddenModel(providerId: string, modelId: string) {
+  return (
+    PICKER_HIDDEN_MODELS[providerId]?.includes(modelId.trim().toLowerCase()) ??
+    false
+  );
 }
 
 /** Providers that can authenticate with a pasted API key stored in Keychain. */
@@ -377,15 +392,6 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Grok 4.7",
         description:
           "xAI's frontier model for coding, agentic tasks, and knowledge work.",
-        contextWindowTokens: 500_000,
-        defaultReasoningEffort: "high",
-        supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
-      },
-      {
-        id: "grok-4.7-build-fast",
-        displayName: "Grok 4.7 Fast",
-        description:
-          "The same Grok 4.7 model on faster Grok Build infrastructure, at higher usage.",
         contextWindowTokens: 500_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
@@ -1025,7 +1031,9 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       catalogProvider.models.map((model) => model.id),
     );
     const models = [
-      ...catalogProvider.models.map((model) => ({
+      ...catalogProvider.models
+        .filter((model) => !isPickerHiddenModel(catalogProvider.id, model.id))
+        .map((model) => ({
         ...model,
         ...(model.catalogManaged ? {} : savedModels.get(model.id)),
         contextWindowTokens: liveModelContextTokens(
@@ -1040,7 +1048,13 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
         defaultReasoningEffort: model.defaultReasoningEffort,
         supportedReasoningEfforts: model.supportedReasoningEfforts,
       })),
-      ...retainedModels.filter((model) => !catalogModelIds.has(model.id)).map((model) => {
+      ...retainedModels
+        .filter(
+          (model) =>
+            !catalogModelIds.has(model.id) &&
+            !isPickerHiddenModel(catalogProvider.id, model.id),
+        )
+        .map((model) => {
         const baseUrl = savedProvider?.baseUrl ?? catalogProvider.baseUrl ?? null;
         const liveContextWindow = getLiveModelContext(catalogProvider.id, model.id, baseUrl) ?? model.liveContextWindow;
         return {
@@ -1114,7 +1128,10 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
     .filter((provider) => provider.id !== "gemini" && !catalogIds.has(provider.id))
     .map(customProviderForConfig);
 
-  return [...catalogProviders, ...customProviders];
+  const removed = new Set(config.removedProviderIds ?? []);
+  return [...catalogProviders, ...customProviders].filter(
+    (provider) => !removed.has(provider.id),
+  );
 }
 
 /**

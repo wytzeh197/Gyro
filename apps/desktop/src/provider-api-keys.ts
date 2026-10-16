@@ -4,11 +4,14 @@ import {
   providersForConfig,
   providerSupportsApiKey,
   CUSTOM_PROVIDER_PREFIX,
+  getProviderCatalogEntry,
+  isCustomProviderId,
   type CustomProviderDraft,
   type CustomProviderId,
   type GyroConfig,
   type ModelProviderConfig,
   type NotificationKind,
+  type ProviderId,
 } from "@gyro-dev/ui";
 
 /**
@@ -221,6 +224,99 @@ export function useProviderApiKeys(
     [config, native, notify, persistConfig, updateProviderApiKey],
   );
 
+  const removeProvider = useCallback(
+    async (providerId: string) => {
+      if (isCustomProviderId(providerId)) return removeCustomProvider(providerId);
+      if (!native) {
+        notify(
+          "command-failed",
+          "Provider unavailable",
+          "Open the desktop app to remove a provider.",
+        );
+        return false;
+      }
+      const catalog = getProviderCatalogEntry(providerId as ProviderId);
+      const name = catalog?.displayName ?? providerId;
+      try {
+        await persistConfig({
+          ...config,
+          removedProviderIds: [
+            ...new Set([...(config.removedProviderIds ?? []), providerId]),
+          ],
+          selectedProviderId:
+            config.selectedProviderId === providerId
+              ? undefined
+              : config.selectedProviderId,
+          modelProviders: config.modelProviders.map((provider) =>
+            provider.id === providerId
+              ? { ...provider, enabled: false, authStatus: "not-connected" }
+              : provider,
+          ),
+        });
+      } catch {
+        notify("command-failed", "Could not remove provider", name);
+        return false;
+      }
+      if (providerSupportsApiKey(providerId)) {
+        await updateProviderApiKey(providerId);
+      }
+      const cli = catalog?.capabilities.executionKind === "codex-cli"
+        || catalog?.capabilities.executionKind === "claude-code"
+        || catalog?.capabilities.executionKind === "kimi-acp"
+        || catalog?.capabilities.executionKind === "acp-cli";
+      notify(
+        "provider",
+        "Removed from Gyro",
+        cli
+          ? `${name}. The CLI on this Mac stays signed in.`
+          : providerId === "ollama"
+            ? `${name}. The app on this Mac stays installed.`
+            : providerSupportsApiKey(providerId)
+              ? `${name}. Its stored API key was deleted.`
+              : name,
+      );
+      return true;
+    },
+    [
+      config,
+      native,
+      notify,
+      persistConfig,
+      removeCustomProvider,
+      updateProviderApiKey,
+    ],
+  );
+
+  const restoreProvider = useCallback(
+    async (providerId: string) => {
+      if (!native) {
+        notify(
+          "command-failed",
+          "Provider unavailable",
+          "Open the desktop app to restore a provider.",
+        );
+        return false;
+      }
+      const name =
+        getProviderCatalogEntry(providerId as ProviderId)?.displayName ??
+        providerId;
+      try {
+        await persistConfig({
+          ...config,
+          removedProviderIds: (config.removedProviderIds ?? []).filter(
+            (id) => id !== providerId,
+          ),
+        });
+      } catch {
+        notify("command-failed", "Could not restore provider", name);
+        return false;
+      }
+      notify("provider", "Provider restored", name);
+      return true;
+    },
+    [config, native, notify, persistConfig],
+  );
+
   /**
    * Ask an endpoint which models it serves.
    *
@@ -249,6 +345,8 @@ export function useProviderApiKeys(
     },
     onAddCustomProvider: addCustomProvider,
     onRemoveCustomProvider: removeCustomProvider,
+    onRemoveProvider: removeProvider,
+    onRestoreProvider: restoreProvider,
     onFetchCustomProviderModels: fetchCustomProviderModels,
   };
 }

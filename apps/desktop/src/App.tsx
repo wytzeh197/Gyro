@@ -18960,6 +18960,8 @@ function normalizeChatMessage(value: string) {
   return value.replace(/\u0000/g, "").trim();
 }
 
+// Same rules as `session_title_from_message` in the desktop backend.
+// Titles stay local so the selected model is not billed to name the chat.
 function sessionTitleFromMessage(message: string) {
   const cleaned = normalizeChatMessage(message)
     .replace(/```[\s\S]*?```/g, " ")

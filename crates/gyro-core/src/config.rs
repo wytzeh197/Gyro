@@ -220,6 +220,9 @@ pub struct GyroConfig {
     /// Explicit per-model Fast mode opt-ins; absent choices use standard speed.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fast_mode_models: HashMap<String, bool>,
+    /// Shipped providers hidden from the picker and settings until restored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_provider_ids: Vec<String>,
     pub model_providers: Vec<ModelProviderConfig>,
     pub command_profiles: Vec<CommandProfile>,
     #[serde(default)]
@@ -243,6 +246,7 @@ impl Default for GyroConfig {
             account_session: AccountSessionState::default(),
             selected_provider_id: None,
             fast_mode_models: HashMap::new(),
+            removed_provider_ids: Vec::new(),
             council: CouncilConfig::default(),
             usage_guard: UsageGuardConfig::default(),
             efficiency: crate::efficiency::Config::default(),
@@ -457,6 +461,16 @@ impl Default for GyroConfig {
 
 fn default_automatic_update_checks() -> bool {
     true
+}
+
+/// What `remove_provider` changed, so the CLI can describe it without guessing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemovedProvider {
+    pub display_name: String,
+    /// Gyro had a Keychain entry it should delete. The caller clears it.
+    pub clears_api_key: bool,
+    /// The vendor CLI on this Mac stays signed in.
+    pub keeps_cli_sign_in: bool,
 }
 
 impl GyroConfig {
@@ -726,6 +740,46 @@ impl GyroConfig {
             }
         }
 
+        // Grok 4.7 Fast is the fast-pool launch id, not a picker model.
+        if self.model_providers.iter().any(|provider| {
+            provider.id == "xai"
+                && provider.default_model_id.as_deref() == Some(crate::grok::BUILD_FAST_MODEL_ID)
+        }) {
+            self.fast_mode_models
+                .entry("xai:grok-4.7".into())
+                .or_insert(true);
+            if let Some(provider) = self
+                .model_providers
+                .iter_mut()
+                .find(|provider| provider.id == "xai")
+            {
+                provider.default_model_id = Some("grok-4.7".into());
+            }
+        }
+        for profile in &mut self.command_profiles {
+            if profile.provider_id.as_deref() == Some("xai")
+                && profile.default_model.as_deref() == Some(crate::grok::BUILD_FAST_MODEL_ID)
+            {
+                profile.default_model = Some("grok-4.7".into());
+            }
+        }
+        for provider in &mut self.model_providers {
+            if self
+                .removed_provider_ids
+                .iter()
+                .any(|id| id == &provider.id)
+            {
+                provider.enabled = false;
+            }
+        }
+        if self
+            .selected_provider_id
+            .as_deref()
+            .is_some_and(|selected| self.removed_provider_ids.iter().any(|id| id == selected))
+        {
+            self.selected_provider_id = None;
+        }
+
         // Older config files predate the explicit provider selection. A
         // connected provider with no selection made the desktop composer say
         // that no provider was connected, even though provider settings had
@@ -807,6 +861,86 @@ impl GyroConfig {
                 self.command_profiles.push(profile);
             }
         }
+    }
+
+    /// Hide a shipped provider, or delete a `custom:` provider.
+    ///
+    /// Shipped providers stay in config so a later restore can show them again.
+    /// The caller deletes a stored API key when [`RemovedProvider::clears_api_key`]
+    /// is set. This does not sign out of a vendor CLI.
+    pub fn remove_provider(&mut self, provider_id: &str) -> Result<RemovedProvider, String> {
+        let provider_id = provider_id.trim();
+        if provider_id.is_empty() {
+            return Err("provider id is empty".into());
+        }
+        if crate::provider_registry::is_custom_provider_id(provider_id) {
+            let index = self
+                .model_providers
+                .iter()
+                .position(|provider| provider.id == provider_id)
+                .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+            let removed = self.model_providers.remove(index);
+            if self.selected_provider_id.as_deref() == Some(provider_id) {
+                self.selected_provider_id = None;
+            }
+            return Ok(RemovedProvider {
+                display_name: removed.display_name,
+                clears_api_key: true,
+                keeps_cli_sign_in: false,
+            });
+        }
+        let descriptor = crate::provider_registry::provider_descriptor(provider_id)
+            .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+        if !self.removed_provider_ids.iter().any(|id| id == provider_id) {
+            self.removed_provider_ids.push(provider_id.to_string());
+        }
+        let mut display_name = provider_id.to_string();
+        if let Some(provider) = self
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+        {
+            provider.enabled = false;
+            display_name = provider.display_name.clone();
+        }
+        if self.selected_provider_id.as_deref() == Some(provider_id) {
+            self.selected_provider_id = None;
+        }
+        let keeps_cli_sign_in = matches!(
+            descriptor.execution_kind,
+            crate::provider_registry::ProviderExecutionKind::CodexCli
+                | crate::provider_registry::ProviderExecutionKind::ClaudeCode
+                | crate::provider_registry::ProviderExecutionKind::KimiAcp
+                | crate::provider_registry::ProviderExecutionKind::AcpCli
+        );
+        Ok(RemovedProvider {
+            display_name,
+            clears_api_key: crate::credentials::provider_supports_api_key(provider_id),
+            keeps_cli_sign_in,
+        })
+    }
+
+    /// Show a shipped provider again. A deleted custom provider cannot return.
+    pub fn restore_provider(&mut self, provider_id: &str) -> Result<String, String> {
+        let provider_id = provider_id.trim();
+        if crate::provider_registry::is_custom_provider_id(provider_id) {
+            return Err(
+                "a custom provider is deleted with its config entry and cannot be restored".into(),
+            );
+        }
+        if crate::provider_registry::provider_descriptor(provider_id).is_none() {
+            return Err(format!("unknown provider `{provider_id}`"));
+        }
+        if !self.removed_provider_ids.iter().any(|id| id == provider_id) {
+            return Err(format!("`{provider_id}` is not removed"));
+        }
+        self.removed_provider_ids.retain(|id| id != provider_id);
+        Ok(self
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .map(|provider| provider.display_name.clone())
+            .unwrap_or_else(|| provider_id.to_string()))
     }
 }
 
@@ -1023,6 +1157,139 @@ mod tests {
         assert!(provider.get("models").is_none());
         let restored: GyroConfig = serde_json::from_value(json).unwrap();
         assert_eq!(restored.model_providers[0].model_ids, ["llama-3.3-70b"]);
+    }
+
+    #[test]
+    fn fast_pool_defaults_rewrite_and_providers_can_be_removed_and_restored() {
+        let mut config = GyroConfig::default();
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "xai")
+            .unwrap()
+            .default_model_id = Some(crate::grok::BUILD_FAST_MODEL_ID.into());
+        config.command_profiles.push(CommandProfile {
+            id: "fast-profile".into(),
+            display_name: "Fast".into(),
+            command: "grok".into(),
+            args: Vec::new(),
+            working_directory: None,
+            provider_id: Some("xai".into()),
+            default_model: Some(crate::grok::BUILD_FAST_MODEL_ID.into()),
+            readiness: CommandProfileReadiness::Waiting,
+        });
+        config.normalize_legacy_state();
+        assert_eq!(
+            config
+                .model_providers
+                .iter()
+                .find(|provider| provider.id == "xai")
+                .unwrap()
+                .default_model_id
+                .as_deref(),
+            Some("grok-4.7")
+        );
+        assert_eq!(config.fast_mode_models.get("xai:grok-4.7"), Some(&true));
+        assert_eq!(
+            config
+                .command_profiles
+                .iter()
+                .find(|profile| profile.id == "fast-profile")
+                .unwrap()
+                .default_model
+                .as_deref(),
+            Some("grok-4.7")
+        );
+
+        let mut explicit = GyroConfig::default();
+        explicit
+            .fast_mode_models
+            .insert("xai:grok-4.7".into(), false);
+        explicit
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "xai")
+            .unwrap()
+            .default_model_id = Some(crate::grok::BUILD_FAST_MODEL_ID.into());
+        explicit.normalize_legacy_state();
+        assert_eq!(explicit.fast_mode_models.get("xai:grok-4.7"), Some(&false));
+
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "openai")
+            .unwrap()
+            .enabled = true;
+        config.selected_provider_id = Some("openai".into());
+        let openai = config.remove_provider("openai").unwrap();
+        assert_eq!(openai.display_name, "OpenAI");
+        assert!(openai.clears_api_key);
+        assert!(openai.keeps_cli_sign_in);
+        assert!(
+            !config
+                .model_providers
+                .iter()
+                .find(|provider| provider.id == "openai")
+                .unwrap()
+                .enabled
+        );
+        assert_ne!(config.selected_provider_id.as_deref(), Some("openai"));
+        config.remove_provider("openai").unwrap();
+        assert_eq!(
+            config
+                .removed_provider_ids
+                .iter()
+                .filter(|id| id.as_str() == "openai")
+                .count(),
+            1
+        );
+
+        let deepseek = config.remove_provider("deepseek").unwrap();
+        assert!(deepseek.clears_api_key);
+        assert!(!deepseek.keeps_cli_sign_in);
+        let ollama = config.remove_provider("ollama").unwrap();
+        assert!(!ollama.clears_api_key);
+        assert!(!ollama.keeps_cli_sign_in);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(json["removedProviderIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "deepseek"));
+        let restored: GyroConfig = serde_json::from_value(json).unwrap();
+        assert!(restored
+            .removed_provider_ids
+            .iter()
+            .any(|id| id == "ollama"));
+
+        assert_eq!(config.restore_provider("ollama").unwrap(), "Ollama");
+        assert!(config.removed_provider_ids.iter().all(|id| id != "ollama"));
+        assert!(config.restore_provider("ollama").is_err());
+        assert!(config.remove_provider("not-a-provider").is_err());
+
+        config.model_providers.push(ModelProviderConfig {
+            id: "custom:lab".into(),
+            display_name: "Lab".into(),
+            base_url: Some("https://lab.example/v1".into()),
+            api_key_ref: "provider:custom:lab".into(),
+            enabled: true,
+            default_model_id: None,
+            kind: Some("openai-compatible".into()),
+            model_ids: vec!["local".into()],
+        });
+        config.selected_provider_id = Some("custom:lab".into());
+        let custom = config.remove_provider("custom:lab").unwrap();
+        assert_eq!(custom.display_name, "Lab");
+        assert!(custom.clears_api_key);
+        assert!(!custom.keeps_cli_sign_in);
+        assert!(config
+            .model_providers
+            .iter()
+            .all(|provider| provider.id != "custom:lab"));
+        assert_ne!(config.selected_provider_id.as_deref(), Some("custom:lab"));
+        assert!(config.remove_provider("custom:missing").is_err());
+        assert!(config.restore_provider("custom:lab").is_err());
     }
 
     #[test]

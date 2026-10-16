@@ -10,6 +10,7 @@ import {
 } from "../packages/ui/src/chat-commentary.ts";
 import {
   buildRunModel,
+  failureDetail,
   formatRunDuration,
   groupRunSteps,
   isGenericProviderToolLabel,
@@ -524,6 +525,22 @@ assert.deepEqual(
     recoveryMessage: undefined,
   },
   "a failed turn carries its message",
+);
+assert.equal(
+  failureDetail(
+    "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+    "Unlock your Mac and allow Gyro to read the saved credential, then send again.",
+  ),
+  "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+  "a Keychain error that already says to unlock should not repeat the recovery line",
+);
+assert.equal(
+  failureDetail(
+    "The provider stopped responding.",
+    "Send again to continue.",
+  ),
+  "The provider stopped responding. Send again to continue.",
+  "recovery advice still follows an error that does not already include it",
 );
 // A turn left in flight by a restart is interrupted, not still working.
 assert.deepEqual(

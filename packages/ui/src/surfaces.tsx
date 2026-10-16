@@ -1,4 +1,4 @@
-import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu } from "./provider-settings-fields";
+import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu, ProviderRemoveControl, RemovedProvidersSection } from "./provider-settings-fields";
 import { AntigravityMark } from "./antigravity-mark";
 import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import { CodeModeActivityCard } from "./code-mode-card";
@@ -114,7 +114,7 @@ import { WorkspaceDefaultSettings } from "./settings-workspace-defaults";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
-import { composerFastMode } from "./provider-fast-mode";
+import { composerFastMode, pickerModelId, pickerModelLabel } from "./provider-fast-mode";
 import { ComposerModelRail } from "./composer-model-rail";
 import { ComposerCompletionMenu } from "./composer-completion-menu";
 import { clippingBounds } from "./composer-popover-bounds";
@@ -21199,6 +21199,10 @@ export type SettingsSurfaceProps = {
   onClearProviderApiKey?: (providerId: string) => void;
   onAddCustomProvider?: (draft: CustomProviderDraft) => Promise<boolean>;
   onRemoveCustomProvider?: (providerId: string) => Promise<boolean>;
+  /** Hides a shipped provider, or deletes a custom one. */
+  onRemoveProvider?: (providerId: string) => Promise<boolean> | boolean;
+  /** Shows a shipped provider that was removed. */
+  onRestoreProvider?: (providerId: string) => Promise<boolean> | boolean;
   onFetchCustomProviderModels?: (
     baseUrl: string,
     apiKey?: string,
@@ -21440,6 +21444,8 @@ export function SettingsSurface({
   onClearProviderApiKey,
   onAddCustomProvider,
   onRemoveCustomProvider,
+  onRemoveProvider,
+  onRestoreProvider,
   onFetchCustomProviderModels,
   providerStatuses,
   onSelectProviderDefaultModel,
@@ -22314,6 +22320,15 @@ export function SettingsSurface({
                               Disable in Gyro
                             </button>
                           ) : null}
+                          <ProviderRemoveControl
+                            provider={provider}
+                            onRemove={
+                              onRemoveProvider ??
+                              (isCustomProviderId(provider.id)
+                                ? onRemoveCustomProvider
+                                : undefined)
+                            }
+                          />
                         </div>
                       </ProviderDetailsMenu>
                     </div>
@@ -22434,6 +22449,10 @@ export function SettingsSurface({
               onAddCustomProvider={onAddCustomProvider}
               onRemoveCustomProvider={onRemoveCustomProvider}
               onFetchCustomProviderModels={onFetchCustomProviderModels}
+            />
+            <RemovedProvidersSection
+              config={config}
+              onRestoreProvider={onRestoreProvider}
             />
           </SettingsSection>
         ) : null}
@@ -24750,9 +24769,15 @@ function Composer({
     (sessionProvider &&
       isProviderRuntimeUsable(sessionProvider, sessionProviderHealth)),
   );
-  const effectiveModelId = boundToSession
+  const rawModelId = boundToSession
     ? sessionModel?.modelId
     : selectedProvider?.selectedModelId;
+  const modelProviderId = boundToSession
+    ? (sessionProvider?.id ?? selectedProvider?.id)
+    : selectedProvider?.id;
+  // A stored fast-pool id is still Grok 4.7. Fast mode keeps the raw id so a
+  // chat launched on that pool stays fast until the user turns it off.
+  const effectiveModelId = pickerModelId(modelProviderId, rawModelId);
   const resolvedBoundModel =
     selectedProvider && effectiveModelId
       ? getProviderModel(selectedProvider, effectiveModelId)
@@ -24767,7 +24792,8 @@ function Composer({
       ? selectedModelLabel(selectedProvider)
       : (sessionModel?.modelLabel ?? "Select provider");
   const modelChipLabel = hasSelectedProvider
-    ? providerModelLabel
+    ? (pickerModelLabel(modelProviderId, rawModelId, providerModelLabel) ??
+      providerModelLabel)
     : "Choose model";
   const providerReasoningEffort = boundToSession
     ? (sessionModel?.reasoningEffort ??
@@ -26430,7 +26456,7 @@ function Composer({
                 fastMode={composerFastMode(
                   config,
                   effectiveProviderId,
-                  effectiveModelId,
+                  rawModelId,
                   onComposerAction,
                 )}
                 labels={effortItems.map((item) => item.label)}

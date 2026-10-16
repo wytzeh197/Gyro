@@ -48,10 +48,15 @@ gyro config add-provider custom:my-gateway \
 gyro config set-provider-key custom:my-gateway --env MY_GATEWAY_KEY
 
 gyro config remove-provider custom:my-gateway
+gyro config remove-provider deepseek
+gyro config restore-provider deepseek
 ```
 
-`remove-provider` drops the config entry, clears the stored key, and clears the
-provider as the default for new chats if it was selected.
+`remove-provider` works for every provider. A `custom:` id is deleted. A
+provider Gyro ships is hidden until `restore-provider`. Either way a stored
+API key is deleted, and the provider is cleared as the default for new chats
+if it was selected. The vendor CLI on this Mac stays signed in. A deleted
+custom provider has to be added again.
 
 ## Local servers
 

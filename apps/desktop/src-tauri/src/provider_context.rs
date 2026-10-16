@@ -19,6 +19,14 @@ pub(super) struct ProviderContextUsage {
     pub(super) total_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) model_context_window: Option<u64>,
+    /// Lower bound counted from traffic Gyro saw. Not a provider measurement,
+    /// so the composer keeps the estimate mark.
+    #[serde(default, skip_serializing_if = "skip_false")]
+    pub(super) estimated: bool,
+}
+
+fn skip_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Default)]
@@ -360,6 +368,7 @@ pub(super) fn provider_context_usage_from_app_server(
         model_context_window: token_usage
             .get("modelContextWindow")
             .and_then(Value::as_u64),
+        ..ProviderContextUsage::default()
     })
 }
 
@@ -396,6 +405,7 @@ pub(super) fn provider_billed_usage_from_acp_tokens(
             .then_some(tokens.reasoning_output_tokens),
         total_tokens: Some(tokens.total_tokens),
         model_context_window: None,
+        ..ProviderContextUsage::default()
     })
 }
 
@@ -416,6 +426,7 @@ pub(super) fn provider_context_usage_from_codex_exec(
             .get("model_context_window")
             .or_else(|| value.get("model_context_window"))
             .and_then(Value::as_u64),
+        ..ProviderContextUsage::default()
     })
 }
 
@@ -481,6 +492,7 @@ pub(super) fn provider_context_usage_from_claude_stream(
                 .zip(output_tokens)
                 .map(|(input, output)| input.saturating_add(output)),
             model_context_window: claude_stream_context_window(value),
+            ..ProviderContextUsage::default()
         },
     ))
 }
@@ -592,10 +604,21 @@ pub(super) fn provider_context_usage_with_window(
                 usage.model_context_window = catalog_window;
             }
             if exceeds_context_window(&usage) {
-                usage = ProviderContextUsage {
-                    model_context_window: usage.model_context_window,
-                    ..ProviderContextUsage::default()
-                };
+                // A traffic estimate past the window still means the window is
+                // full. Wiping it would drop the meter back to the visible-text
+                // fallback. A billed total past the window is not occupancy.
+                if usage.estimated {
+                    if let Some(window) = usage.model_context_window.filter(|window| *window > 0) {
+                        usage.input_tokens = Some(window);
+                        usage.output_tokens = None;
+                        usage.total_tokens = Some(window);
+                    }
+                } else {
+                    usage = ProviderContextUsage {
+                        model_context_window: usage.model_context_window,
+                        ..ProviderContextUsage::default()
+                    };
+                }
             }
             Some(usage)
         }
@@ -1003,6 +1026,39 @@ mod tests {
         let messages = tool_exchange(0, 4_000);
         assert!(message_size(&messages[0]).0 > 100);
         assert!(message_size(&messages[1]).0 >= 4_000);
+    }
+
+    #[test]
+    fn estimated_traffic_past_the_window_is_capped_not_discarded() {
+        let usage = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(7_515_785),
+                total_tokens: Some(7_515_785),
+                estimated: true,
+                ..ProviderContextUsage::default()
+            }),
+            "xai",
+            Some("grok-4.7"),
+        )
+        .unwrap();
+        assert_eq!(usage.input_tokens, Some(500_000));
+        assert_eq!(usage.total_tokens, Some(500_000));
+        assert!(usage.estimated);
+        assert_eq!(usage.model_context_window, Some(500_000));
+
+        let billed = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(7_515_785),
+                total_tokens: Some(7_515_785),
+                ..ProviderContextUsage::default()
+            }),
+            "xai",
+            Some("grok-4.7"),
+        )
+        .unwrap();
+        assert_eq!(billed.input_tokens, None);
+        assert!(!billed.estimated);
+        assert_eq!(billed.model_context_window, Some(500_000));
     }
 
     #[test]

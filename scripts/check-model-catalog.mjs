@@ -623,6 +623,32 @@ assert.throws(() =>
   reset();
 }
 
+for (const provider of providersForConfig({
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  modelProviders: [],
+  commandProfiles: [],
+})) {
+  assert.ok(
+    !provider.models.some((model) => model.id === "grok-4.7-build-fast"),
+    `${provider.id} still lists Grok 4.7 Fast as a picker model`,
+  );
+}
+const withoutDeepseek = providersForConfig({
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  modelProviders: [],
+  commandProfiles: [],
+  removedProviderIds: ["deepseek"],
+});
+assert.equal(
+  withoutDeepseek.some((provider) => provider.id === "deepseek"),
+  false,
+  "A removed provider must stay out of the picker",
+);
+
 console.log(
   "Model catalog parsing, picker merge/order, rollback, rollout, offline, announcements, and model metadata checks passed.",
 );

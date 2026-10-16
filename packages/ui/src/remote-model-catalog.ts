@@ -1,4 +1,4 @@
-import { providerCatalog } from "./provider-catalog.ts";
+import { isPickerHiddenModel, providerCatalog } from "./provider-catalog.ts";
 import { retiredModelReplacement } from "./model-retirements.ts";
 import type { ProviderModel, ReasoningEffort } from "./types";
 
@@ -156,6 +156,7 @@ export function applyModelCatalog(catalog: ModelCatalog, bucket: number): void {
       if (
         entry.providerId !== provider.id ||
         entry.minClientRevision > MODEL_CATALOG_CLIENT_REVISION ||
+        isPickerHiddenModel(entry.providerId, entry.id) ||
         retiredModelReplacement(entry.providerId, entry.id)
       )
         continue;

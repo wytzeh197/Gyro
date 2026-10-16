@@ -20663,6 +20663,12 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   overflow-wrap: anywhere;
 }
+.gyro-provider-remove-copy {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.4;
+  margin: 0;
+}
 
 .gyro-cli-launch-column-head {
   color: var(--gyro-faint);
