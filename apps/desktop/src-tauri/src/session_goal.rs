@@ -21,17 +21,28 @@ pub(crate) fn stored_session_goal(events: &[SessionEvent]) -> Option<SessionGoal
     {
         let payload = &event.payload;
         if payload["source"] == "goal-runner" {
-            if goal.is_none() || payload["goalVersion"].as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) != revision {
+            if goal.is_none()
+                || payload["goalVersion"]
+                    .as_str()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    != revision
+            {
                 continue;
             }
             // Runner status never reopens a completed outcome.
-            if goal.as_ref().is_some_and(|goal| goal.status == "complete") && payload["status"] != "complete" {
+            if goal.as_ref().is_some_and(|goal| goal.status == "complete")
+                && payload["status"] != "complete"
+            {
                 continue;
             }
         } else if payload["source"] == "model" {
-            if !goal.as_ref().is_some_and(|goal| payload["text"].as_str() == Some(goal.text.as_str()))
-                || payload.get("goalVersion").is_some_and(|value|
-                    value.as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) != revision) {
+            if !goal
+                .as_ref()
+                .is_some_and(|goal| payload["text"].as_str() == Some(goal.text.as_str()))
+                || payload.get("goalVersion").is_some_and(|value| {
+                    value.as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) != revision
+                })
+            {
                 continue;
             }
         } else {
@@ -64,8 +75,15 @@ pub(crate) fn stored_session_goal(events: &[SessionEvent]) -> Option<SessionGoal
 }
 
 pub(crate) fn goal_revision(events: &[SessionEvent]) -> Option<uuid::Uuid> {
-    events.iter().rev().find(|event| event.kind == SessionEventKind::GoalUpdated
-        && event.payload["source"] != "goal-runner" && event.payload["source"] != "model").map(|event| event.id)
+    events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.kind == SessionEventKind::GoalUpdated
+                && event.payload["source"] != "goal-runner"
+                && event.payload["source"] != "model"
+        })
+        .map(|event| event.id)
 }
 
 pub(crate) fn stored_or_unsaved_goal(
@@ -123,14 +141,17 @@ pub(crate) fn goal_change(
         Some(goal) if goal.status == "complete" && status == "active" && goal.text == text => {
             format!("Goal reopened: {text}")
         }
-        Some(goal) if goal.text == text && goal.status == status && payload.get("runLimits").is_none() => {
+        Some(goal)
+            if goal.text == text && goal.status == status && payload.get("runLimits").is_none() =>
+        {
             return Err("the goal is already set to that".into())
         }
         Some(_) => format!("Goal updated: {text}"),
     };
     let mut stored = serde_json::json!({ "action": "set", "text": text, "status": status });
     if let Some(value) = payload.get("runLimits") {
-        let limits: crate::goal_runner::Limits = serde_json::from_value(value.clone()).map_err(|_| "invalid goal run limits".to_string())?;
+        let limits: crate::goal_runner::Limits = serde_json::from_value(value.clone())
+            .map_err(|_| "invalid goal run limits".to_string())?;
         limits.validate()?;
         stored["runLimits"] = serde_json::to_value(limits).map_err(|error| error.to_string())?;
     }
@@ -248,26 +269,57 @@ mod tests {
 
     #[test]
     fn late_runner_and_model_events_cannot_revive_or_reopen_a_changed_goal() {
-        let initial = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
-        let stale_run = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active",
-            "source":"goal-runner","goalVersion":initial.id}));
-        let stale_done = goal_event(serde_json::json!({"action":"set","text":"Original","status":"complete",
-            "source":"model","goalVersion":initial.id}));
+        let initial =
+            goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
+        let stale_run = goal_event(
+            serde_json::json!({"action":"set","text":"Original","status":"active",
+            "source":"goal-runner","goalVersion":initial.id}),
+        );
+        let stale_done = goal_event(
+            serde_json::json!({"action":"set","text":"Original","status":"complete",
+            "source":"model","goalVersion":initial.id}),
+        );
         let cleared = goal_event(serde_json::json!({"action":"clear"}));
-        assert!(stored_session_goal(&[initial.clone(), cleared, stale_run.clone(), stale_done.clone()]).is_none());
-        let reopened = goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
-        assert_eq!(stored_session_goal(&[initial.clone(), reopened, stale_done]).unwrap().status, "active");
-        let done = goal_event(serde_json::json!({"action":"set","text":"Original","status":"complete"}));
-        assert_eq!(stored_session_goal(&[initial, done, stale_run]).unwrap().status, "complete");
+        assert!(stored_session_goal(&[
+            initial.clone(),
+            cleared,
+            stale_run.clone(),
+            stale_done.clone()
+        ])
+        .is_none());
+        let reopened =
+            goal_event(serde_json::json!({"action":"set","text":"Original","status":"active"}));
+        assert_eq!(
+            stored_session_goal(&[initial.clone(), reopened, stale_done])
+                .unwrap()
+                .status,
+            "active"
+        );
+        let done =
+            goal_event(serde_json::json!({"action":"set","text":"Original","status":"complete"}));
+        assert_eq!(
+            stored_session_goal(&[initial, done, stale_run])
+                .unwrap()
+                .status,
+            "complete"
+        );
     }
     #[test]
     fn goal_limits_are_configurable_and_validated() {
         let active = goal("Finish", "active");
-        let (_, stored) = goal_change(&serde_json::json!({"action":"set","runLimits":{
-            "maxAutomaticTurns":4,"maxMinutes":30,"maxNewTokens":50_000
-        }}), Some(&active)).unwrap();
+        let (_, stored) = goal_change(
+            &serde_json::json!({"action":"set","runLimits":{
+                "maxAutomaticTurns":4,"maxMinutes":30,"maxNewTokens":50_000
+            }}),
+            Some(&active),
+        )
+        .unwrap();
         assert_eq!(stored["runLimits"]["maxAutomaticTurns"], 4);
-        assert!(goal_change(&serde_json::json!({"action":"set","runLimits":{"maxMinutes":0}}), Some(&active)).is_err());
+        assert!(goal_change(
+            &serde_json::json!({"action":"set","runLimits":{"maxMinutes":0}}),
+            Some(&active)
+        )
+        .is_err());
     }
     #[test]
     fn empty_oversized_repeated_and_orphan_changes_are_refused() {

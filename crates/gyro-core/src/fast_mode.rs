@@ -24,8 +24,25 @@ pub fn supports_fast_mode(provider_id: &str, model_id: Option<&str>) -> bool {
             model_id.as_str(),
             "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8"
         ),
+        // Grok Build exposes the faster pool as its own model id. The toggle
+        // applies to grok-4.7; selecting grok-4.7-build-fast is already fast.
+        "xai" => model_id == "grok-4.7",
         _ => false,
     }
+}
+
+/// Model id to pass to the provider. xAI Fast rewrites `grok-4.7` to the
+/// Grok Build fast id; every other selection is unchanged.
+pub fn launch_model_id(
+    config: &GyroConfig,
+    provider_id: &str,
+    model_id: Option<&str>,
+) -> Option<String> {
+    let model = model_id.map(str::trim).filter(|id| !id.is_empty())?;
+    if provider_id == "xai" && enabled(config, "xai", Some(model)) {
+        return Some(crate::grok::BUILD_FAST_MODEL_ID.to_string());
+    }
+    Some(model.to_string())
 }
 
 pub fn enabled(config: &GyroConfig, provider_id: &str, model_id: Option<&str>) -> bool {
@@ -58,6 +75,7 @@ pub fn cli_args(config: &GyroConfig, provider_id: &str, model_id: Option<&str>) 
             "--settings".into(),
             serde_json::json!({ "fastMode": enabled(config, provider_id, model_id) }).to_string(),
         ],
+        // xAI has no fast flag. `launch_model_id` selects grok-4.7-build-fast.
         _ => Vec::new(),
     }
 }
@@ -85,7 +103,21 @@ mod tests {
         assert!(!enabled(&config, "openrouter", Some("claude-opus-5")));
         assert!(!supports_fast_mode("anthropic", Some("claude-opus-4-7")));
         assert!(!supports_fast_mode("openai", Some("gpt-unknown")));
-        assert!(!supports_fast_mode("xai", Some("grok-4.7")));
+        assert!(supports_fast_mode("xai", Some("grok-4.7")));
+        assert!(!supports_fast_mode(
+            "xai",
+            Some(crate::grok::BUILD_FAST_MODEL_ID)
+        ));
+        assert!(!enabled(&config, "xai", Some("grok-4.7")));
+        config.fast_mode_models.insert("xai:grok-4.7".into(), true);
+        assert_eq!(
+            launch_model_id(&config, "xai", Some("grok-4.7")).as_deref(),
+            Some(crate::grok::BUILD_FAST_MODEL_ID)
+        );
+        assert_eq!(
+            launch_model_id(&config, "xai", Some("grok-4.6")).as_deref(),
+            Some("grok-4.6")
+        );
     }
 
     #[test]

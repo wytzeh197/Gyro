@@ -242,7 +242,9 @@ const empty = summarizeSessionCost(undefined);
 assert.equal(empty.isEmpty, true);
 assert.equal(summarizeSessionCost(totals()).isEmpty, true);
 for (const invalid of [-1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-  const summary = summarizeSessionCost(totals({ calls: 1, measuredCalls: 1, totalTokens: invalid }));
+  const summary = summarizeSessionCost(
+    totals({ calls: 1, measuredCalls: 1, totalTokens: invalid }),
+  );
   assert.equal(summary.label, "Usage unavailable · 1 call");
   assert.doesNotMatch(summary.title, /NaN|Infinity|0 tokens/);
 }
@@ -292,7 +294,8 @@ assert.equal(
 );
 assert.match(council.title, /1,240,000 tokens across 7 provider calls/);
 
-// Estimates are labelled, never blended into a confident number.
+// Chat totals show real provider observations; aggregates containing estimates
+// retain their data while withholding an invented or unverified chat count.
 const mixed = summarizeSessionCost(
   totals({
     calls: 5,
@@ -306,7 +309,8 @@ const mixed = summarizeSessionCost(
 );
 assert.equal(mixed.estimateNote, "2 estimated");
 assert.match(mixed.title, /estimated or unverified counts/);
-assert.equal(mixed.label, "~80K tokens · 5 calls");
+assert.equal(mixed.label, "Usage unavailable · 5 calls");
+assert.doesNotMatch(mixed.title, /80,000 tokens|80K tokens/);
 
 const allEstimated = summarizeSessionCost(
   totals({
@@ -320,13 +324,141 @@ const allEstimated = summarizeSessionCost(
 );
 assert.equal(allEstimated.estimateNote, "estimated");
 assert.match(allEstimated.title, /the total is estimated/);
-const partialUsage = summarizeSessionCost(totals({ calls: 2, measuredCalls: 1, partialCalls: 1, totalTokens: 120 }));
+assert.equal(allEstimated.label, "Usage unavailable · 2 calls");
+assert.match(allEstimated.title, /subtotal cannot be isolated/);
+const estimatedWithCache = summarizeSessionCost(
+  totals({
+    calls: 2,
+    measuredCalls: 1,
+    estimatedCalls: 1,
+    inputTokens: 10_000,
+    cachedInputTokens: 9_000,
+    totalTokens: 10_000,
+  }),
+);
+assert.equal(estimatedWithCache.cachedNote, undefined);
+assert.doesNotMatch(estimatedWithCache.title, /9,000|10,000 tokens/);
+const mixedProviderSubtotal = summarizeSessionCost(
+  totals({
+    calls: 2,
+    measuredCalls: 1,
+    estimatedCalls: 1,
+    inputTokens: 9_100,
+    cachedInputTokens: 9_000,
+    totalTokens: 9_100,
+    reportedTotalTokens: 100,
+  }),
+);
+assert.equal(mixedProviderSubtotal.label, "≥100 tokens · 2 calls");
+assert.equal(mixedProviderSubtotal.cachedNote, undefined);
+assert.equal(mixedProviderSubtotal.estimateNote, "incomplete coverage");
+assert.match(
+  mixedProviderSubtotal.title,
+  /at least 100 provider-reported tokens/,
+);
+assert.match(mixedProviderSubtotal.title, /estimates are excluded/);
+assert.doesNotMatch(
+  mixedProviderSubtotal.title,
+  /9,100 tokens|9,000 cached|total is estimated/,
+);
+const reportedZeroSubtotal = summarizeSessionCost(
+  totals({
+    calls: 2,
+    measuredCalls: 1,
+    estimatedCalls: 1,
+    totalTokens: 9_000,
+    reportedTotalTokens: 0,
+  }),
+);
+assert.equal(
+  reportedZeroSubtotal.label,
+  "≥0 tokens · 2 calls",
+  "Present zero is a real observed subtotal rather than absent usage",
+);
+assert.match(reportedZeroSubtotal.title, /at least 0 provider-reported tokens/);
+assert.doesNotMatch(reportedZeroSubtotal.title, /9,000 tokens/);
+assert.equal(
+  summarizeSessionCost(
+    totals({
+      calls: 1,
+      estimatedCalls: 1,
+      totalTokens: 9_000,
+    }),
+  ).label,
+  "Usage unavailable · 1 call",
+);
+assert.equal(
+  summarizeSessionCost(
+    totals({
+      calls: 2,
+      measuredCalls: 1,
+      unavailableCalls: 1,
+      totalTokens: 9_100,
+      reportedTotalTokens: 100,
+    }),
+  ).label,
+  "≥100 tokens · 2 calls",
+);
+assert.equal(
+  summarizeSessionCost(
+    totals({
+      calls: 1,
+      measuredCalls: 1,
+      totalTokens: 100,
+      reportedTotalTokens: 100,
+    }),
+  ).label,
+  "100 tokens · 1 call",
+  "Complete provider totals retain exact formatting",
+);
+for (const invalidSubtotal of [
+  -1,
+  NaN,
+  Infinity,
+  1.5,
+  Number.MAX_SAFE_INTEGER + 1,
+]) {
+  assert.equal(
+    summarizeSessionCost(
+      totals({
+        calls: 2,
+        measuredCalls: 1,
+        estimatedCalls: 1,
+        totalTokens: 9_100,
+        reportedTotalTokens: invalidSubtotal,
+      }),
+    ).label,
+    "Usage unavailable · 2 calls",
+  );
+}
+for (const unclassified of [
+  { calls: 1, totalTokens: 0 },
+  { calls: 1, totalTokens: 100 },
+  { calls: 2, measuredCalls: 1, totalTokens: 100 },
+]) {
+  const summary = summarizeSessionCost(totals(unclassified));
+  assert.match(summary.label, /^Usage unavailable/);
+  assert.doesNotMatch(summary.title, /0 tokens|100 tokens/);
+}
+assert.equal(
+  summarizeSessionCost(totals({ calls: 1, measuredCalls: 1, totalTokens: 0 }))
+    .label,
+  "0 tokens · 1 call",
+  "An explicitly measured zero remains different from unclassified zero",
+);
+const partialUsage = summarizeSessionCost(
+  totals({ calls: 2, measuredCalls: 1, partialCalls: 1, totalTokens: 120 }),
+);
 assert.equal(partialUsage.label, "≥120 tokens · 2 calls");
 assert.match(partialUsage.title, /partial usage/);
-const unavailableUsage = summarizeSessionCost(totals({ calls: 1, unavailableCalls: 1 }));
+const unavailableUsage = summarizeSessionCost(
+  totals({ calls: 1, unavailableCalls: 1 }),
+);
 assert.equal(unavailableUsage.label, "Usage unavailable · 1 call");
 assert.doesNotMatch(unavailableUsage.title, /0 tokens/);
-const mixedUnavailableUsage = summarizeSessionCost(totals({ calls: 2, measuredCalls: 1, unavailableCalls: 1, totalTokens: 100 }));
+const mixedUnavailableUsage = summarizeSessionCost(
+  totals({ calls: 2, measuredCalls: 1, unavailableCalls: 1, totalTokens: 100 }),
+);
 assert.equal(mixedUnavailableUsage.label, "≥100 tokens · 2 calls");
 
 // An automation quietly outspending the chat has to be visible in the split.
@@ -365,7 +497,10 @@ const toolHeavy = summarizeSessionCost(
 );
 assert.equal(toolHeavy.label, "600K tokens · 9 calls");
 assert.equal(toolHeavy.cachedNote, "565K cached input");
-assert.match(toolHeavy.title, /565,389 cached input tokens, already part of the total/);
+assert.match(
+  toolHeavy.title,
+  /565,389 cached input tokens, already part of the total/,
+);
 
 // Below the threshold the split is noise, and an unmeasured provider reports no
 // cache reading at all, so neither claims one.

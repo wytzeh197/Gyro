@@ -72,7 +72,22 @@ const initial = [
     status: "completed",
     startedAt: null,
     elapsedMs: 23_000,
-    tokens: { totalTokens: 3300, measured: false },
+    tokens: {
+      totalTokens: 3300,
+      measured: true,
+      accounting: {
+        source: "provider",
+        scope: "session",
+        coverage: "complete",
+        known: {
+          input: false,
+          output: false,
+          cacheRead: false,
+          cacheWrite: false,
+          reasoning: false,
+        },
+      },
+    },
     summary: "Found two boundary cases. No files changed.",
   },
   {
@@ -108,17 +123,24 @@ const parentEvents = [
     status: "done",
   }),
   ...initial.flatMap((agent) => [
-    event(parent, turn, `spawn-${agent.agentId}`, "system-event", "Agent launched", {
-      schema: "gyro.capability.v1",
-      kind: "capability-call",
-      callId: `spawn-${agent.agentId}`,
-      capabilityId: "agent-spawn",
-      providerId: "openai",
-      policyRevision: 1,
-      status: "completed",
-      summary: "Started sub-agent",
-      resource: { id: agent.agentId, kind: "chat", label: agent.name },
-    }),
+    event(
+      parent,
+      turn,
+      `spawn-${agent.agentId}`,
+      "system-event",
+      "Agent launched",
+      {
+        schema: "gyro.capability.v1",
+        kind: "capability-call",
+        callId: `spawn-${agent.agentId}`,
+        capabilityId: "agent-spawn",
+        providerId: "openai",
+        policyRevision: 1,
+        status: "completed",
+        summary: "Started sub-agent",
+        resource: { id: agent.agentId, kind: "chat", label: agent.name },
+      },
+    ),
     event(parent, turn, agent.agentId, "system-event", "Agent launched", {
       kind: "subagent-state",
       agent,
@@ -375,13 +397,15 @@ function Fixture() {
           }
           queuedMessages={
             params.get("scenario") === "changes"
-              ? [{
-                  id: "queued-followup",
-                  message: "Check the parser documentation next.",
-                  attachmentCount: 0,
-                  hasFailed: false,
-                  isDispatching: false,
-                }]
+              ? [
+                  {
+                    id: "queued-followup",
+                    message: "Check the parser documentation next.",
+                    attachmentCount: 0,
+                    hasFailed: false,
+                    isDispatching: false,
+                  },
+                ]
               : []
           }
           activeChatPanel={

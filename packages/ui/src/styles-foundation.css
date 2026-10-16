@@ -177,7 +177,8 @@
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #76aaff;
   --gyro-provider-cursor: #f2efe9;
-  --gyro-provider-opencode: #f2efe9;
+  --gyro-provider-opencode: #ffffff;
+  --gyro-provider-opencode-block: #4b4646;
   --gyro-provider-deepseek: #5b95ff;
   --gyro-provider-mistral: #ff924c;
   /* OpenRouter's own assets carry a hue: the lime glyph is the one drawn for
@@ -988,7 +989,8 @@
   --gyro-theme-preview-dark-content: #383838;
   --gyro-theme-preview-light-canvas: #f7f7f7;
   --gyro-theme-preview-light-content: #e5e5e5;
-  --gyro-provider-opencode: #1c2027;
+  --gyro-provider-opencode: #211e1e;
+  --gyro-provider-opencode-block: #cfcecd;
   --gyro-provider-deepseek: #205fda;
   --gyro-provider-mistral: #c74a0a;
   --gyro-provider-openrouter: #7624f4;

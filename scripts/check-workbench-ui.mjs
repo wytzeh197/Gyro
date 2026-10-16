@@ -5785,8 +5785,13 @@ expect(
     chatSurfaceSource.includes(
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
+    chatSurfaceSource.includes("const composerDraft =") &&
     chatSurfaceSource.includes(
-      'draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? "")\n                : localDraft\n            }',
+      "isGoalComposerActive && sessionGoal?.text\n      ? (goalDraft ?? sessionGoal.text)\n      : localDraft",
+    ) &&
+    chatSurfaceSource.includes("draft={composerDraft}") &&
+    chatSurfaceSource.includes(
+      "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel,",
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&

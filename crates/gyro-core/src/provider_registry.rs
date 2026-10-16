@@ -152,7 +152,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "cursor-acp",
         auth_owner: "provider-cli",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -164,7 +164,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "opencode-acp",
         auth_owner: "provider-cli",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -193,7 +193,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "openai-compatible-api",
         auth_owner: "provider-sdk",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -205,7 +205,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "openai-compatible-api",
         auth_owner: "provider-sdk",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -218,6 +218,19 @@ pub fn provider_registry() -> &'static [ProviderDescriptor] {
 
 pub fn provider_descriptor(provider_id: &str) -> Option<&'static ProviderDescriptor> {
     PROVIDERS.iter().find(|provider| provider.id == provider_id)
+}
+
+/// Whether this provider can be sent image input.
+///
+/// Ollama stays false here: vision is decided per installed model. DeepSeek's
+/// descriptor stays true and the runner still limits that to Flash models.
+/// A user-defined endpoint uses the same image content path as the other
+/// OpenAI-compatible providers.
+pub fn provider_accepts_images(provider_id: &str) -> bool {
+    if is_custom_provider_id(provider_id) {
+        return true;
+    }
+    provider_descriptor(provider_id).is_some_and(|provider| provider.supports_images)
 }
 
 pub fn provider_is_executable(provider_id: &str) -> bool {
@@ -296,8 +309,30 @@ mod tests {
         let antigravity = provider_descriptor("antigravity").unwrap();
         assert_eq!(antigravity.execution_kind, ProviderExecutionKind::AcpCli);
         assert_eq!(antigravity.support_tier, ProviderSupportTier::Experimental);
-        assert!(antigravity.supports_approvals && antigravity.supports_images && antigravity.supports_resume);
+        assert!(
+            antigravity.supports_approvals
+                && antigravity.supports_images
+                && antigravity.supports_resume
+        );
         assert!(!antigravity.supports_usage);
+        for id in [
+            "openai",
+            "anthropic",
+            "kimi",
+            "xai",
+            "gemini",
+            "antigravity",
+            "deepseek",
+            "cursor",
+            "opencode",
+            "mistral",
+            "openrouter",
+            "custom:my-gateway",
+        ] {
+            assert!(provider_accepts_images(id), "{id}");
+        }
+        assert!(!provider_accepts_images("ollama"));
+        assert!(!provider_accepts_images("unknown"));
         assert!(provider_is_executable("ollama"));
         assert!(provider_is_executable("cursor"));
         assert!(provider_is_executable("opencode"));

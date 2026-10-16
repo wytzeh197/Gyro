@@ -11327,10 +11327,11 @@ export function App() {
 
   const startNewGoalChat = useCallback(
     (goal: string) => {
-      // The goal composer keeps its own text, so the chat draft stays put.
+      // A new goal is the message already in the composer, same as Plan, so
+      // sending it consumes that draft instead of leaving a second copy.
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
-        preserveDraft: true,
+        preserveDraft: false,
         consumeDraftMode: true,
       });
     },
@@ -16474,7 +16475,7 @@ export function App() {
         onStartGoalChat={(goal) =>
           requestSend(goal, {
             goal: { text: goal, status: "active" },
-            preserveDraft: true,
+            preserveDraft: false,
             consumeDraftMode: true,
           })
         }
@@ -16832,8 +16833,34 @@ export function App() {
           notify("command-failed", "Could not show the file", String(error)),
         );
       },
+      resolveCitedImage: async (request: {
+        target: string;
+        providerId?: string;
+        providerSessionId?: string;
+      }) => {
+        const workspace = activeSession?.workspacePath ?? workspacePath;
+        const key = `${activeSessionId ?? ""}:${request.providerId ?? ""}:${request.providerSessionId ?? ""}:${workspace ?? ""}:${request.target}`;
+        let pending = chatCitedImageCache.get(key);
+        if (!pending) {
+          pending = invoke<string | null>("resolve_cited_chat_image", {
+            request: {
+              target: request.target,
+              workspacePath: workspace,
+              providerId: request.providerId,
+              providerSessionId: request.providerSessionId,
+              sessionId: activeSessionId,
+            },
+          }).then((path) => path || undefined);
+          if (chatCitedImageCache.size >= 64) {
+            chatCitedImageCache.delete(chatCitedImageCache.keys().next().value!);
+          }
+          chatCitedImageCache.set(key, pending);
+          void pending.catch(() => chatCitedImageCache.delete(key));
+        }
+        return pending;
+      },
     }),
-    [activeSessionId, workspacePath, notify],
+    [activeSession?.workspacePath, activeSessionId, workspacePath, notify],
   );
 
   const appChrome = (
@@ -18224,6 +18251,7 @@ export function App() {
 }
 
 const chatFilePreviewCache = new Map<string, Promise<string>>();
+const chatCitedImageCache = new Map<string, Promise<string | undefined>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const stored = loadStoredWorkbenchState();

@@ -36,6 +36,60 @@ export function chatFileKind(name: string, mimeType = ""): ChatFileKind {
   return "file";
 }
 
+const citedImageExtension = /\.(png|jpe?g|webp)$/i;
+
+/**
+ * A path a model cited that can be resolved into a chat image.
+ * Web URLs and GIF stay on their existing paths. `..` cannot be a segment.
+ */
+export function isCitedImageTarget(value: string): boolean {
+  const target = value.trim();
+  if (!target || target.length > 4096 || /[\u0000-\u001f]/.test(target)) {
+    return false;
+  }
+  const lower = target.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("javascript:")
+  ) {
+    return false;
+  }
+  let path = target;
+  if (lower.startsWith("file:")) {
+    try {
+      const url = new URL(target);
+      if (
+        url.protocol !== "file:" ||
+        (url.hostname && url.hostname !== "localhost")
+      ) {
+        return false;
+      }
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      return false;
+    }
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+    return false;
+  }
+  if (path.split(/[/\\]/).some((part) => part === "..")) return false;
+  const name = path.split(/[/\\]/).pop() ?? "";
+  return citedImageExtension.test(name);
+}
+
+/** Image targets already shown as markdown, so a repeated backtick is dropped. */
+export function markdownImageTargets(message: string): Set<string> {
+  const targets = new Set<string>();
+  for (const part of message.split(chatInlineTokenPattern)) {
+    const link = parseChatMarkdownLink(part);
+    if (link?.image && isCitedImageTarget(link.target)) {
+      targets.add(link.target.trim());
+    }
+  }
+  return targets;
+}
+
 /** Only explicit local paths and web URLs can become file cards. */
 export function linkedChatFile(
   label: string,

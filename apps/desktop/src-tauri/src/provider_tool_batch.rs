@@ -29,7 +29,9 @@ pub(super) fn model_tools(
             })
         })
         .collect();
-    if efficiency::config().policies() && efficiency::config().cache_assembly { gyro_core::efficiency::context::stable_tools(&mut tools); }
+    if efficiency::config().policies() && efficiency::config().cache_assembly {
+        gyro_core::efficiency::context::stable_tools(&mut tools);
+    }
     tools
 }
 

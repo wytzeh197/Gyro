@@ -7,12 +7,13 @@
 //!
 //! Grok ACP PromptUsage uses inclusive input; its headless projector differs.
 //!
-//! Kimi's ACPSession.prompt and replay_history discard StatusUpdate. A Wire
+//! Legacy Kimi's ACPSession.prompt and replay_history discard StatusUpdate. A Wire
 //! transport replacement would also need parity for ACPKaos/client filesystem,
 //! approvals, MCP configuration and session resume. The ACP handshake exposes no
 //! authenticated Wire journal path or turn boundary; guessing private session
-//! files is not a safe bridge. Preserve the existing ACP transport and report
-//! UnsupportedRuntime until a reviewed bridge supplies that contract.
+//! files is not a safe bridge. Legacy runtimes remain UnsupportedRuntime.
+//! The separately pinned Kimi Code local /usage contract below preserves ACP
+//! and obtains main-agent consumption without a Wire transport replacement.
 use crate::usage::{UsageCoverage, UsageReason, UsageScope, UsageTokens};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,6 +50,7 @@ pub enum AcpUsageContract {
     OpenCodeLastStep,
     CursorUnverified,
     KimiAcpUnavailable,
+    KimiCode037SessionDelta,
     Unknown,
 }
 
@@ -83,6 +85,107 @@ impl AcpRuntimeInfo {
     }
 }
 
+/// Kimi Code is a different runtime from the archived Python kimi-cli. The
+/// pinned 0.37.2 ACP implementation executes /usage locally, without launching
+/// a model turn, and reports inclusive main-agent session totals. Keep this
+/// contract narrow: neither arbitrary versions nor the legacy adapter qualify.
+/// https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/packages/acp-server/src/builtin-commands.ts
+pub(crate) fn kimi_code_037_usage_supported(runtime: &AcpRuntimeInfo) -> bool {
+    runtime.agent_name.as_deref() == Some("Kimi Code CLI")
+        && runtime.agent_version.as_deref() == Some("0.37.2")
+        && runtime.protocol_version == Some(1)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct KimiCodeUsageSnapshot {
+    input: u64,
+    output: u64,
+    recorded: bool,
+    /// `Context: USED / SIZE tokens` when the report names both. Billing stays
+    /// on the session-total line; this is occupancy only.
+    pub(crate) context: Option<AcpContextUsage>,
+}
+
+/// `Context: 99999 / 200000 tokens (50%)`. A line that only says
+/// `Context: 0 tokens` has no window, so it stays `None`.
+fn kimi_context_occupancy(line: &str) -> Option<AcpContextUsage> {
+    let rest = line.strip_prefix("Context: ")?.trim();
+    let (used, rest) = rest.split_once(" / ")?;
+    let (size, rest) = rest.split_once(" tokens")?;
+    if !(rest.is_empty() || rest.starts_with(' ') || rest.starts_with('(')) {
+        return None;
+    }
+    let used = exact_token_count(used)?;
+    let size = exact_token_count(size)?;
+    (size > 0 && used <= size).then_some(AcpContextUsage { used, size })
+}
+
+fn exact_token_count(text: &str) -> Option<u64> {
+    // The runtime uses JavaScript numbers; larger values cannot establish
+    // exact integer counts even though Rust can represent them.
+    (!text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| text.parse::<u64>().ok())
+        .flatten()
+        .filter(|count| *count <= 9_007_199_254_740_991)
+}
+
+pub(crate) fn parse_kimi_code_037_usage_report(text: &str) -> Option<KimiCodeUsageSnapshot> {
+    let mut lines = text.lines();
+    let context_line = lines.next()?;
+    let context = kimi_context_occupancy(context_line);
+    context_line.strip_prefix("Context: ")?;
+    let total = lines.next()?.strip_prefix("Session total: ")?;
+    if lines.next().is_some() {
+        return None;
+    }
+    if total == "no LLM calls yet" {
+        return Some(KimiCodeUsageSnapshot {
+            input: 0,
+            output: 0,
+            recorded: false,
+            context,
+        });
+    }
+    let (input, output) = total.split_once(" input, ")?;
+    Some(KimiCodeUsageSnapshot {
+        input: exact_token_count(input)?,
+        output: exact_token_count(output.strip_suffix(" output")?)?,
+        recorded: true,
+        context,
+    })
+}
+
+pub(crate) fn kimi_code_037_usage_delta(
+    before: KimiCodeUsageSnapshot,
+    after: KimiCodeUsageSnapshot,
+    runtime: AcpRuntimeInfo,
+) -> AcpUsageObservation {
+    let tokens = if !after.recorded {
+        UsageTokens::unavailable(UsageReason::MissingUsage)
+    } else if let Some((input, output)) = after
+        .input
+        .checked_sub(before.input)
+        .zip(after.output.checked_sub(before.output))
+    {
+        // Native child agents own separate counters. This is a real lower
+        // bound for the chat's main agent, not a complete task receipt.
+        UsageTokens::measured(Some(input), None, Some(output), None, None)
+            .with_scope(UsageScope::Turn)
+            .partial(UsageReason::ProviderIncomplete)
+    } else {
+        UsageTokens::unavailable(UsageReason::InconsistentCounts)
+    };
+    AcpUsageObservation {
+        contract: AcpUsageContract::KimiCode037SessionDelta,
+        tokens,
+        runtime,
+        usage_is_incomplete: true,
+        model_calls: None,
+        model_usage: Vec::new(),
+        provenance: "Kimi Code 0.37.2 ACP /usage session-total delta (main agent)",
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpContextUsage {
@@ -95,6 +198,94 @@ pub fn context_usage(update: &Value) -> Option<AcpContextUsage> {
     let used = update.get("used")?.as_u64()?;
     let size = update.get("size")?.as_u64()?;
     (size > 0 && used <= size).then_some(AcpContextUsage { used, size })
+}
+
+/// Occupancy from a live session update.
+///
+/// Standard `usage_update` is one shape. Grok also sends the window the
+/// status line draws (`session_status`: `context_tokens` is the conversation,
+/// input only) and one frame per model response. `input_tokens` on those
+/// frames is the uncached portion, so cache read and cache creation are added
+/// back. A turn total (`turn_completed`, `turn_usage`, session counters) is
+/// the bill across every call and is not occupancy.
+///
+/// `size` is `0` when that frame does not name a window. Callers keep the
+/// window an earlier frame already established.
+pub fn live_context_usage(update: &Value) -> Option<AcpContextUsage> {
+    if let Some(context) = context_usage(update) {
+        return Some(context);
+    }
+    let kind = update.get("sessionUpdate").and_then(Value::as_str)?;
+    let context = match kind {
+        "session_status" => {
+            let window = update.get("context_window")?;
+            let used = window.get("context_tokens")?.as_u64()?;
+            let size = window
+                .get("context_window_size")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            AcpContextUsage { used, size }
+        }
+        "response_started" => AcpContextUsage {
+            used: grok_response_prompt_tokens(update)?,
+            size: 0,
+        },
+        "response_completed" => AcpContextUsage {
+            used: grok_response_prompt_tokens(update.get("usage")?)?,
+            size: 0,
+        },
+        "auto_compact_started" => {
+            let used = update.get("tokens_used")?.as_u64()?;
+            let size = update.get("context_window")?.as_u64()?;
+            AcpContextUsage { used, size }
+        }
+        "auto_compact_completed" => AcpContextUsage {
+            used: update.get("tokens_after")?.as_u64()?,
+            size: 0,
+        },
+        _ => return None,
+    };
+    // A zero-seeded response frame is a placeholder, not an empty conversation.
+    if matches!(kind, "response_started" | "response_completed") && context.used == 0 {
+        return None;
+    }
+    (context.size == 0 || context.used <= context.size).then_some(context)
+}
+
+/// Full prompt of one Grok response. `input_tokens` is uncached only.
+fn grok_response_prompt_tokens(usage: &Value) -> Option<u64> {
+    let input = usage.get("input_tokens").and_then(Value::as_u64);
+    let read = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
+    let created = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64);
+    if input.is_none() && read.is_none() && created.is_none() {
+        return None;
+    }
+    Some(
+        input
+            .unwrap_or(0)
+            .saturating_add(read.unwrap_or(0))
+            .saturating_add(created.unwrap_or(0)),
+    )
+}
+
+/// Last-call occupancy carried beside a Grok prompt bill.
+///
+/// Flat `_meta.totalTokens` is the last model call, not the turn sum in
+/// `_meta.usage`. When several calls were billed, a flat total at least as
+/// large as that sum is the bill and is rejected.
+pub fn grok_prompt_context(result: &Value) -> Option<AcpContextUsage> {
+    let meta = result.get("_meta")?;
+    let used = meta.get("totalTokens").and_then(Value::as_u64)?;
+    if let Some(usage) = meta.get("usage").filter(|usage| usage.is_object()) {
+        let calls = usage.get("modelCalls").and_then(Value::as_u64);
+        let turn_input = usage.get("inputTokens").and_then(Value::as_u64);
+        if calls.is_some_and(|calls| calls > 1) && turn_input.is_some_and(|input| used >= input) {
+            return None;
+        }
+    }
+    Some(AcpContextUsage { used, size: 0 })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -441,15 +632,109 @@ mod tests {
     fn read(provider: AcpProvider, value: Value) -> AcpUsageObservation {
         normalize_prompt_usage(provider, &value, AcpRuntimeInfo::default())
     }
+    fn kimi_code_runtime() -> AcpRuntimeInfo {
+        AcpRuntimeInfo {
+            agent_name: Some("Kimi Code CLI".into()),
+            agent_version: Some("0.37.2".into()),
+            protocol_version: Some(1),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn kimi_code_usage_is_bound_to_the_reviewed_runtime_and_exact_report_shape() {
+        assert!(kimi_code_037_usage_supported(&kimi_code_runtime()));
+        for runtime in [
+            AcpRuntimeInfo {
+                agent_version: Some("0.37.3".into()),
+                ..kimi_code_runtime()
+            },
+            AcpRuntimeInfo {
+                agent_name: Some("kimi-cli".into()),
+                ..kimi_code_runtime()
+            },
+            AcpRuntimeInfo {
+                protocol_version: None,
+                ..kimi_code_runtime()
+            },
+        ] {
+            assert!(!kimi_code_037_usage_supported(&runtime));
+        }
+        for text in [
+            "Session total: 1 input, 2 output",
+            "Context: 10 tokens\nSession total: -1 input, 2 output",
+            "Context: 10 tokens\nSession total: 9007199254740992 input, 2 output",
+            "Context: 10 tokens\nSession total: 1 input, 2 output\nSession total: 5 input, 6 output",
+            "Session usage:\n- Total: input 1, output 2, cache read 0, cache creation 0",
+        ] { assert!(parse_kimi_code_037_usage_report(text).is_none()); }
+    }
+    #[test]
+    fn kimi_code_session_delta_keeps_inclusive_multi_request_counts_and_zeroes() {
+        let report = |input, output| {
+            parse_kimi_code_037_usage_report(&format!(
+            "Context: 99999 / 200000 tokens (50%)\nSession total: {input} input, {output} output"))
+            .unwrap()
+        };
+        let observed =
+            kimi_code_037_usage_delta(report(1000, 100), report(1470, 145), kimi_code_runtime());
+        assert_eq!(
+            (
+                observed.tokens.input_tokens,
+                observed.tokens.output_tokens,
+                observed.tokens.total_tokens
+            ),
+            (470, 45, 515)
+        );
+        assert_eq!(
+            observed.tokens.effective_accounting().source,
+            crate::usage::UsageSource::Provider
+        );
+        assert_eq!(
+            observed.tokens.effective_accounting().coverage,
+            UsageCoverage::Partial
+        );
+        // The default report includes input caches exactly once in input, but
+        // does not expose a numeric cache breakdown or native child sessions.
+        assert!(!observed.tokens.effective_accounting().known.cache_read);
+        assert!(!observed.tokens.effective_accounting().known.cache_write);
+        let fresh =
+            parse_kimi_code_037_usage_report("Context: 0 tokens\nSession total: no LLM calls yet")
+                .unwrap();
+        let zero = kimi_code_037_usage_delta(fresh, report(0, 0), kimi_code_runtime()).tokens;
+        assert_eq!(zero.total_tokens, 0);
+        assert!(
+            zero.effective_accounting().known.input && zero.effective_accounting().known.output
+        );
+        assert_eq!(zero.effective_accounting().coverage, UsageCoverage::Partial);
+        assert_eq!(
+            kimi_code_037_usage_delta(report(100, 20), report(99, 30), kimi_code_runtime())
+                .tokens
+                .effective_accounting()
+                .reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+        assert_eq!(
+            kimi_code_037_usage_delta(fresh, fresh, kimi_code_runtime())
+                .tokens
+                .effective_accounting()
+                .coverage,
+            UsageCoverage::Unavailable
+        );
+    }
     #[test]
     fn gemini_outer_incomplete_flag_demotes_the_standard_receipt() {
-        let observed = read(AcpProvider::Gemini, json!({
-            "usageIsIncomplete": true,
-            "usage": {"inputTokens": 100, "outputTokens": 20, "thoughtTokens": 0, "totalTokens": 120}
-        }));
+        let observed = read(
+            AcpProvider::Gemini,
+            json!({
+                "usageIsIncomplete": true,
+                "usage": {"inputTokens": 100, "outputTokens": 20, "thoughtTokens": 0, "totalTokens": 120}
+            }),
+        );
         assert_eq!(observed.tokens.total_tokens, 120);
         assert!(observed.usage_is_incomplete);
-        assert_eq!(observed.tokens.effective_accounting().coverage, UsageCoverage::Partial);
+        assert_eq!(
+            observed.tokens.effective_accounting().coverage,
+            UsageCoverage::Partial
+        );
         assert!(!observed.tokens.measured);
     }
     #[test]
@@ -511,6 +796,157 @@ mod tests {
             observed.tokens.effective_accounting().coverage,
             UsageCoverage::Unavailable
         );
+        // The same field is last-call occupancy. It must not be billed.
+        assert_eq!(
+            grok_prompt_context(&json!({"_meta":{"totalTokens":50000}})),
+            Some(AcpContextUsage {
+                used: 50000,
+                size: 0
+            })
+        );
+    }
+    #[test]
+    fn live_context_usage_reads_occupancy_and_ignores_turn_bills() {
+        let status = json!({
+            "sessionUpdate": "session_status",
+            "context_window": {"context_tokens": 33022, "context_window_size": 256000},
+            "session_input_tokens": 900000,
+            "session_output_tokens": 4000
+        });
+        assert_eq!(
+            live_context_usage(&status),
+            Some(AcpContextUsage {
+                used: 33022,
+                size: 256000
+            })
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "response_started",
+                "input_tokens": 800,
+                "cache_read_input_tokens": 20000,
+                "cache_creation_input_tokens": 0
+            })),
+            Some(AcpContextUsage {
+                used: 20800,
+                size: 0
+            })
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "response_completed",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 50,
+                    "cache_read_input_tokens": 20000,
+                    "cache_creation_input_tokens": 500,
+                    "reasoning_tokens": 10
+                }
+            })),
+            Some(AcpContextUsage {
+                used: 21500,
+                size: 0
+            })
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "response_completed",
+                "usage": {"input_tokens": 0, "cache_read_input_tokens": 0}
+            })),
+            None
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "auto_compact_started",
+                "tokens_used": 40000,
+                "context_window": 256000
+            })),
+            Some(AcpContextUsage {
+                used: 40000,
+                size: 256000
+            })
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "auto_compact_completed",
+                "tokens_after": 12000
+            })),
+            Some(AcpContextUsage {
+                used: 12000,
+                size: 0
+            })
+        );
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "session_status",
+                "context_window": {"context_tokens": 300000, "context_window_size": 256000}
+            })),
+            None
+        );
+        for kind in ["turn_usage", "turn_completed"] {
+            assert_eq!(
+                live_context_usage(&json!({
+                    "sessionUpdate": kind,
+                    "usage": {"input_tokens": 329203, "inputTokens": 329203, "output_tokens": 4316}
+                })),
+                None
+            );
+        }
+    }
+    #[test]
+    fn grok_prompt_context_is_last_call_not_the_turn_bill() {
+        assert_eq!(
+            grok_prompt_context(&json!({
+                "_meta": {
+                    "totalTokens": 33022,
+                    "usage": {"inputTokens": 329203, "modelCalls": 13, "totalTokens": 333519}
+                }
+            })),
+            Some(AcpContextUsage {
+                used: 33022,
+                size: 0
+            })
+        );
+        assert_eq!(
+            grok_prompt_context(&json!({
+                "_meta": {
+                    "totalTokens": 333519,
+                    "usage": {"inputTokens": 329203, "modelCalls": 13, "totalTokens": 333519}
+                }
+            })),
+            None
+        );
+        assert_eq!(
+            grok_prompt_context(&json!({
+                "_meta": {
+                    "totalTokens": 4000,
+                    "usage": {"inputTokens": 4000, "modelCalls": 1, "totalTokens": 4200}
+                }
+            })),
+            Some(AcpContextUsage {
+                used: 4000,
+                size: 0
+            })
+        );
+    }
+    #[test]
+    fn kimi_usage_report_keeps_context_occupancy_off_the_bill() {
+        let report = parse_kimi_code_037_usage_report(
+            "Context: 99999 / 200000 tokens (50%)\nSession total: 1470 input, 145 output",
+        )
+        .unwrap();
+        assert_eq!(
+            report.context,
+            Some(AcpContextUsage {
+                used: 99999,
+                size: 200000
+            })
+        );
+        let fresh =
+            parse_kimi_code_037_usage_report("Context: 0 tokens\nSession total: no LLM calls yet")
+                .unwrap();
+        assert_eq!(fresh.context, None);
+        assert!(!fresh.recorded);
     }
     #[test]
     fn opencode_adds_cache_and_thoughts_once_and_is_only_last_step() {

@@ -1,5 +1,5 @@
 //! Shared product knowledge. Command schemas come from the actual tool registry.
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const GUIDE: &str = include_str!("../../../../docs/product-knowledge/browser.md");
 pub const VERSION: &str = "gyro.product-knowledge.browser.v1";

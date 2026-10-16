@@ -18,9 +18,34 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
     let events = store.read_events(session_uuid).ok()?;
     if super::efficiency::config().policies() && super::efficiency::config().task_state {
         let context = store.read_efficiency_context_events(session_uuid).ok()?;
-        if let Some(record) = context.iter().rev().filter(|e|e.kind == SessionEventKind::TaskCheckpoint).find_map(|e|serde_json::from_value::<gyro_core::efficiency::checkpoint::TaskCheckpoint>(e.payload.clone()).ok()) {
-            let recent = events.into_iter().filter(|e|e.created_at > context.iter().rev().find(|e|e.kind == SessionEventKind::TaskCheckpoint).map(|e|e.created_at).unwrap_or_default()).collect();
-            return Some(format!("{}\n{}", record.handoff(), conversation_history_from_events(recent).unwrap_or_default()));
+        if let Some(record) = context
+            .iter()
+            .rev()
+            .filter(|e| e.kind == SessionEventKind::TaskCheckpoint)
+            .find_map(|e| {
+                serde_json::from_value::<gyro_core::efficiency::checkpoint::TaskCheckpoint>(
+                    e.payload.clone(),
+                )
+                .ok()
+            })
+        {
+            let recent = events
+                .into_iter()
+                .filter(|e| {
+                    e.created_at
+                        > context
+                            .iter()
+                            .rev()
+                            .find(|e| e.kind == SessionEventKind::TaskCheckpoint)
+                            .map(|e| e.created_at)
+                            .unwrap_or_default()
+                })
+                .collect();
+            return Some(format!(
+                "{}\n{}",
+                record.handoff(),
+                conversation_history_from_events(recent).unwrap_or_default()
+            ));
         }
     }
     conversation_history_from_events(events)

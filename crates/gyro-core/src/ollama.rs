@@ -4,7 +4,7 @@
 //! local. This module accepts only loopback HTTP endpoints and keeps runtime
 //! discovery separate from persisted provider configuration.
 
-use crate::usage::{UsageReason, UsageSource, UsageTokens};
+use crate::usage::{UsageReason, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -396,12 +396,18 @@ where
         // consumption already observed or establish a fresh zero receipt.
         usage_regressed |= retain_usage_snapshot(&mut input_tokens, frame.prompt_eval_count);
         usage_regressed |= retain_usage_snapshot(&mut output_tokens, frame.eval_count);
-        usage_regressed |= retain_usage_snapshot(&mut cached_input_tokens, frame.prompt_eval_cached_count);
+        usage_regressed |=
+            retain_usage_snapshot(&mut cached_input_tokens, frame.prompt_eval_cached_count);
         observation.reported(input_tokens, output_tokens);
         observation.details(cached_input_tokens, None);
         if usage_regressed {
             observation.accounted_usage(regressed_usage(UsageTokens::measured(
-                input_tokens, cached_input_tokens, output_tokens, None, None)));
+                input_tokens,
+                cached_input_tokens,
+                output_tokens,
+                None,
+                None,
+            )));
         }
         if let Some(error) = frame.error {
             if content.is_empty()
@@ -473,7 +479,6 @@ where
         input_tokens,
         output_tokens,
         cached_input_tokens,
-        thinking_chars,
         crate::provider_observation::text_size(&payload).0,
         output_chars,
         receipt_completed && (final_usage || !is_stream),
@@ -523,45 +528,19 @@ fn ollama_accounted_usage(
     input: Option<u64>,
     output: Option<u64>,
     cached: Option<u64>,
-    thinking_chars: usize,
     input_chars: usize,
     output_chars: usize,
     receipt_complete: bool,
 ) -> UsageTokens {
-    let mut tokens = if input.is_none() && output.is_none() {
+    let mut tokens = if input.is_none() && output.is_none() && cached.is_none() {
         UsageTokens::estimated(input_chars, output_chars)
     } else {
-        let mut tokens = UsageTokens::measured(input, cached, output, None, None);
-        if input.is_none() || output.is_none() {
-            let estimate = UsageTokens::estimated(input_chars, output_chars);
-            if input.is_none() {
-                tokens.input_tokens = estimate.input_tokens.max(tokens.input_tokens);
-            }
-            if output.is_none() {
-                tokens.output_tokens = estimate.output_tokens.max(tokens.output_tokens);
-            }
-            tokens.total_tokens = tokens.input_tokens.saturating_add(tokens.output_tokens);
-            if let Some(accounting) = tokens.accounting.as_mut() {
-                accounting.source = UsageSource::Mixed;
-                accounting.coverage = crate::usage::UsageCoverage::Estimated;
-                accounting.reason = Some(UsageReason::MissingUsage);
-            }
-        }
-        tokens
+        // Retain only provider-observed buckets when the receipt is partial.
+        UsageTokens::measured(input, cached, output, None, None)
     };
-    if thinking_chars > 0 {
-        // Ollama's eval_count already includes thinking. No separate tokenizer
-        // count is reported, so only the breakdown is a character estimate.
-        tokens.reasoning_output_tokens =
-            crate::usage::estimate_tokens(thinking_chars).min(tokens.output_tokens);
-        if let Some(accounting) = tokens.accounting.as_mut() {
-            if accounting.source == UsageSource::Provider {
-                accounting.source = UsageSource::Mixed;
-            }
-            accounting.known.reasoning = false;
-        }
-        tokens = tokens.partial(UsageReason::ProviderIncomplete);
-    }
+    // eval_count includes the generated response, including thinking. Ollama
+    // reports no separate token count for the thinking text: keep that bucket
+    // unknown rather than substituting characters for the model's tokenizer.
     if input.is_none() || output.is_none() {
         tokens = tokens.partial(UsageReason::MissingUsage);
     } else if !receipt_complete {
@@ -781,6 +760,7 @@ fn model_context_window(value: &serde_json::Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::UsageSource;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener};
 
@@ -941,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_and_thinking_are_output_subsets_without_double_counting() {
+    fn thinking_keeps_real_output_totals_without_inventing_a_reasoning_count() {
         let _scope = crate::provider_observation::Scope::start();
         let response = chat_once_from_body(concat!(
             "{\"message\":{\"content\":null,\"thinking\":\"reasoning\",\"tool_calls\":null},\"done\":false}\n",
@@ -960,14 +940,20 @@ mod tests {
             ),
             (100, 20, 80, 120)
         );
-        assert_eq!(tokens.reasoning_output_tokens, 3);
+        assert_eq!(tokens.reasoning_output_tokens, 0);
         let accounting = tokens.accounting.unwrap();
-        assert_eq!(accounting.source, UsageSource::Mixed);
+        assert_eq!(accounting.source, UsageSource::Provider);
         assert!(accounting.known.cache_read);
         assert!(!accounting.known.reasoning);
-        assert!(!tokens.measured);
-        assert_eq!(crate::provider_observation::snapshot().unwrap().tokens.unwrap(),
-            tokens.with_scope(crate::usage::UsageScope::Turn));
+        assert!(tokens.measured);
+        assert_eq!(accounting.coverage, crate::usage::UsageCoverage::Complete);
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap(),
+            tokens.with_scope(crate::usage::UsageScope::Turn)
+        );
     }
 
     #[test]
@@ -979,10 +965,23 @@ mod tests {
         ).to_string(), "application/x-ndjson").unwrap();
         assert_eq!(response.accounted_usage.total_tokens, 120);
         assert!(!response.accounted_usage.measured);
-        assert_eq!(response.accounted_usage.effective_accounting().coverage, crate::usage::UsageCoverage::Estimated);
-        assert_eq!(response.accounted_usage.effective_accounting().reason, Some(UsageReason::InconsistentCounts));
-        assert_eq!(crate::provider_observation::snapshot().unwrap().tokens.unwrap(),
-            response.accounted_usage.with_scope(crate::usage::UsageScope::Turn));
+        assert_eq!(
+            response.accounted_usage.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Estimated
+        );
+        assert_eq!(
+            response.accounted_usage.effective_accounting().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap(),
+            response
+                .accounted_usage
+                .with_scope(crate::usage::UsageScope::Turn)
+        );
     }
 
     #[test]
@@ -1012,12 +1011,68 @@ mod tests {
     }
 
     #[test]
-    fn estimating_a_missing_half_changes_the_total_to_estimated() {
-        let tokens = ollama_accounted_usage(None, Some(5), Some(100), 0, 8, 20, true);
+    fn missing_buckets_preserve_only_provider_observed_counts() {
+        let tokens = ollama_accounted_usage(None, Some(5), Some(100), 80_000, 40_000, true);
         assert_eq!(tokens.input_tokens, 100);
         assert_eq!(tokens.total_tokens, 105);
-        assert_eq!(tokens.effective_accounting().coverage, crate::usage::UsageCoverage::Estimated);
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
         assert!(!tokens.effective_accounting().known.input);
+        assert!(tokens.effective_accounting().known.output);
+        assert!(tokens.effective_accounting().known.cache_read);
+        let cache_only = ollama_accounted_usage(None, None, Some(100), 80_000, 40_000, true);
+        assert_eq!(
+            (
+                cache_only.input_tokens,
+                cache_only.output_tokens,
+                cache_only.total_tokens
+            ),
+            (100, 0, 100)
+        );
+        assert_eq!(
+            cache_only.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert_eq!(
+            cache_only.effective_accounting().source,
+            UsageSource::Provider
+        );
+    }
+
+    #[test]
+    fn partial_final_metrics_reach_the_request_collector_without_character_substitutes() {
+        for (metrics, expected) in [
+            ("\"prompt_eval_count\":7", 7),
+            ("\"eval_count\":3", 3),
+            ("\"prompt_eval_cached_count\":5", 5),
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let response = chat_once_from_body(
+                format!(
+                    "{{\"message\":{{\"content\":\"{}\"}},\"done\":true,{metrics}}}\n",
+                    "x".repeat(4000),
+                ),
+                "application/x-ndjson",
+            )
+            .unwrap();
+            let tokens = response.accounted_usage;
+            assert_eq!(tokens.total_tokens, expected);
+            assert_eq!(
+                tokens.effective_accounting().coverage,
+                crate::usage::UsageCoverage::Partial
+            );
+            assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
+            assert_eq!(
+                crate::provider_observation::snapshot()
+                    .unwrap()
+                    .tokens
+                    .unwrap(),
+                tokens.with_scope(crate::usage::UsageScope::Turn)
+            );
+        }
     }
 
     #[test]

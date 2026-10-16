@@ -1068,7 +1068,7 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         ),
         supports_approvals: custom
             || descriptor.is_some_and(|provider| provider.supports_approvals),
-        supports_images: descriptor.is_some_and(|provider| provider.supports_images),
+        supports_images: crate::provider_registry::provider_accepts_images(provider_id),
         supports_resume: custom || descriptor.is_some_and(|provider| provider.supports_resume),
         supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
         efficiency: crate::efficiency::controls(provider_id),
@@ -1098,7 +1098,10 @@ pub fn capability_advertised_for_mode(id: CapabilityId, mode: CapabilityRunMode)
     match mode {
         CapabilityRunMode::Council => false,
         CapabilityRunMode::Plan => {
-            if matches!(id, CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun) {
+            if matches!(
+                id,
+                CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
+            ) {
                 return true;
             }
             // Both edit tools are classified as workspace inspection, so the
@@ -1205,6 +1208,16 @@ pub fn validate_capability_result_data(value: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_input_is_advertised_for_custom_endpoints_and_vision_providers() {
+        assert!(provider_capability_support("cursor").supports_images);
+        assert!(provider_capability_support("opencode").supports_images);
+        assert!(provider_capability_support("mistral").supports_images);
+        assert!(provider_capability_support("openrouter").supports_images);
+        assert!(provider_capability_support("custom:gateway").supports_images);
+        assert!(!provider_capability_support("ollama").supports_images);
+    }
 
     #[test]
     fn provider_tool_names_round_trip() {

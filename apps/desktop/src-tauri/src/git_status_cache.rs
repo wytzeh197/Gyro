@@ -776,7 +776,9 @@ mod tests {
         run_git(root, &["commit", "-m", "base"]);
         fs::write(root.join("tracked.txt"), "one\ntwo\n").unwrap();
         fs::create_dir(root.join("new")).unwrap();
-        for index in 0..150 { fs::write(root.join(format!("new/file-{index}.txt")), "text\n").unwrap(); }
+        for index in 0..150 {
+            fs::write(root.join(format!("new/file-{index}.txt")), "text\n").unwrap();
+        }
         let detailed = git_status_impl(root.to_str().unwrap()).unwrap();
         assert!(detailed.details_loaded);
         let started = Instant::now();
@@ -786,8 +788,16 @@ mod tests {
         assert!(model.history.is_empty());
         assert!(model.compared_to_main.is_none());
         assert!(model.stats_partial && !model.details_loaded);
-        assert!(last_git_status(&root.canonicalize().unwrap()).unwrap().details_loaded);
-        eprintln!("model Git fixture: {} files, {} ms, no statistics/history passes", model.files.len(), started.elapsed().as_millis());
+        assert!(
+            last_git_status(&root.canonicalize().unwrap())
+                .unwrap()
+                .details_loaded
+        );
+        eprintln!(
+            "model Git fixture: {} files, {} ms, no statistics/history passes",
+            model.files.len(),
+            started.elapsed().as_millis()
+        );
     }
 
     #[test]
@@ -806,7 +816,10 @@ mod tests {
         assert_eq!(file(&preparation, "tracked.txt").state, "modified");
         assert!(!preparation.details_loaded);
         assert!(preparation.stats_partial);
-        assert_eq!(serde_json::to_value(&preparation).unwrap()["detailsLoaded"], false);
+        assert_eq!(
+            serde_json::to_value(&preparation).unwrap()["detailsLoaded"],
+            false
+        );
 
         let detailed = git_status_impl(path).unwrap();
         assert!(detailed.details_loaded);
@@ -820,7 +833,10 @@ mod tests {
         let preparation = git_status_for_preparation(path).unwrap();
         assert!(!preparation.details_loaded);
         let retained = last_git_status(&root.canonicalize().unwrap()).unwrap();
-        assert!(retained.details_loaded, "cheap reads cannot replace detailed cache");
+        assert!(
+            retained.details_loaded,
+            "cheap reads cannot replace detailed cache"
+        );
         assert_eq!(retained.history.len(), 1);
     }
 
@@ -879,7 +895,10 @@ mod tests {
         let workspace_path = workspace.to_str().unwrap().to_string();
 
         let status = git_status_impl(&workspace_path).unwrap();
-        assert_eq!(status.workspace_path.as_deref(), Some(workspace_path.as_str()));
+        assert_eq!(
+            status.workspace_path.as_deref(),
+            Some(workspace_path.as_str())
+        );
         assert_eq!(
             serde_json::to_value(&status).unwrap()["workspacePath"],
             workspace_path

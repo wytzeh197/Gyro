@@ -100,9 +100,13 @@ pub(crate) async fn list_custom_provider_models(
     tauri::async_runtime::spawn_blocking(move || {
         let api_key = match api_key.filter(|value| !value.trim().is_empty()) {
             Some(value) => value,
-            None => provider_id.as_deref()
+            None => provider_id
+                .as_deref()
                 .map(gyro_core::try_provider_api_key_value)
-                .transpose().map_err(to_string)?.flatten().unwrap_or_default(),
+                .transpose()
+                .map_err(to_string)?
+                .flatten()
+                .unwrap_or_default(),
         };
         let discovery =
             gyro_core::openai_compat_list_models(&base_url, &api_key).map_err(to_string)?;

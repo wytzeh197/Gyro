@@ -1,5 +1,11 @@
 import type { SessionEvent } from "./types.ts";
-import { turnTokensFromValue, turnTokensLabel } from "./turn-tokens.ts";
+import {
+  formatTokenCount,
+  turnTokensFromValue,
+  turnTokensLabel,
+  type TurnTokens,
+  type UsageAccounting,
+} from "./turn-tokens.ts";
 
 export type SubagentSnapshot = {
   agentId: string;
@@ -27,8 +33,10 @@ export type SubagentSnapshot = {
     outputTokens?: number;
     totalTokens?: number;
     cachedInputTokens?: number;
+    cacheWriteTokens?: number;
     reasoningOutputTokens?: number;
     measured?: boolean;
+    accounting?: UsageAccounting;
   } | null;
   runId: string;
   summary?: string | null;
@@ -132,7 +140,25 @@ export function subagentElapsedMs(agent: SubagentSnapshot, now: number) {
 
 export function subagentTokensLabel(agent: SubagentSnapshot) {
   const tokens = turnTokensFromValue(agent.tokens);
-  return tokens ? turnTokensLabel(tokens) : "Usage unavailable";
+  return tokens ? cumulativeAgentConsumptionLabel(tokens) : "Usage unavailable";
+}
+
+/** Agent snapshots aggregate Gyro's consumption ledger across agent followups. */
+function cumulativeAgentConsumptionLabel(tokens: TurnTokens) {
+  const accounting = tokens.accounting;
+  // Session scope is valid here because the dedicated snapshot field contains
+  // ledger consumption for this agent, rather than a provider session counter
+  // or a single turn's usage. Keep that exception outside the turn formatter.
+  if (accounting?.scope === "session") {
+    if (
+      accounting.source !== "provider" ||
+      (accounting.coverage !== "complete" && accounting.coverage !== "partial")
+    )
+      return "Usage unavailable";
+    return `${accounting.coverage === "partial" ? "≥" : ""}${formatTokenCount(tokens.totalTokens)} tokens total`;
+  }
+  const label = turnTokensLabel(tokens);
+  return label === "Usage unavailable" ? label : `${label} total`;
 }
 
 export function sortedSubagents(agents: SubagentSnapshot[]) {

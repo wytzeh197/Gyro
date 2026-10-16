@@ -39,6 +39,7 @@
     "test:chat-retry-dispatch": "node --experimental-strip-types scripts/check-chat-retry-dispatch.mjs",
     "test:canvas-browser": "node scripts/run-canvas-preview-browser.mjs",
     "test:cli-update-scope": "node --experimental-strip-types scripts/check-cli-update-scope.mjs",
+    "test:dictation": "node --experimental-strip-types scripts/check-dictation.mjs",
     "test:efficiency-pilot": "node scripts/check-efficiency-pilot.mjs",
     "test:efficiency-browser": "node scripts/check-efficiency-browser.mjs",
     "test:google-models-browser": "node scripts/check-google-models-browser.mjs",

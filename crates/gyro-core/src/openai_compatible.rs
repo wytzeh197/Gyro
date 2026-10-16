@@ -12,7 +12,7 @@
 //! header, never in the URL, and redirects are refused so a Bearer token cannot
 //! be walked to a host the user did not configure.
 
-use crate::usage::{UsageReason, UsageSource, UsageTokens};
+use crate::usage::{UsageReason, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -341,8 +341,17 @@ where
             request.reasoning_effort,
             include_usage,
         );
-        let efficiency = crate::GyroPaths::for_current_user().ok().and_then(|p|crate::GyroConfig::load(&p).ok()).map(|c|c.efficiency).unwrap_or_default();
-        crate::efficiency::cache::apply(&mut payload,&endpoint,model,efficiency.policies() && efficiency.cache_assembly);
+        let efficiency = crate::GyroPaths::for_current_user()
+            .ok()
+            .and_then(|p| crate::GyroConfig::load(&p).ok())
+            .map(|c| c.efficiency)
+            .unwrap_or_default();
+        crate::efficiency::cache::apply(
+            &mut payload,
+            &endpoint,
+            model,
+            efficiency.policies() && efficiency.cache_assembly,
+        );
         observation = Some(crate::provider_observation::Request::start(&payload));
         let result = match post_chat(&url, api_key, &payload, &receipt.transport) {
             Err(ureq::Error::Status(400, response)) => {
@@ -363,7 +372,12 @@ where
                         request.reasoning_effort,
                         false,
                     );
-                    crate::efficiency::cache::apply(&mut payload,&endpoint,model,efficiency.policies() && efficiency.cache_assembly);
+                    crate::efficiency::cache::apply(
+                        &mut payload,
+                        &endpoint,
+                        model,
+                        efficiency.policies() && efficiency.cache_assembly,
+                    );
                     observation = Some(crate::provider_observation::Request::start(&payload));
                     post_chat(&url, api_key, &payload, &receipt.transport)
                 } else {
@@ -652,8 +666,17 @@ pub fn openai_compat_list_model_metadata(
     let mut models = Vec::new();
     for entry in entries {
         let context_window_tokens = entry.context_window_tokens();
-        let aliases = entry.metadata.get("aliases").and_then(|value| value.as_array())
-            .map(|values| values.iter().filter_map(|value| value.as_str()).map(str::to_string).collect::<Vec<_>>())
+        let aliases = entry
+            .metadata
+            .get("aliases")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let id = entry
             .id
@@ -661,21 +684,35 @@ pub fn openai_compat_list_model_metadata(
             .unwrap_or_default()
             .trim()
             .to_string();
-        if id.is_empty() { continue; }
-        let requested = if model_ids.is_empty() { vec![id] } else {
-            model_ids.iter().filter(|wanted| *wanted == &id || aliases.contains(wanted)).cloned().collect()
+        if id.is_empty() {
+            continue;
+        }
+        let requested = if model_ids.is_empty() {
+            vec![id]
+        } else {
+            model_ids
+                .iter()
+                .filter(|wanted| *wanted == &id || aliases.contains(wanted))
+                .cloned()
+                .collect()
         };
         for id in requested {
-            if !seen.insert(id.clone()) { continue; }
+            if !seen.insert(id.clone()) {
+                continue;
+            }
             models.push(OpenAiCompatModel {
                 display_name: id.clone(),
                 description: format!("Model served by {host}."),
                 id,
                 context_window_tokens,
             });
-            if models.len() >= MAX_DISCOVERED_MODELS { break; }
+            if models.len() >= MAX_DISCOVERED_MODELS {
+                break;
+            }
         }
-        if models.len() >= MAX_DISCOVERED_MODELS { break; }
+        if models.len() >= MAX_DISCOVERED_MODELS {
+            break;
+        }
     }
     Ok(OpenAiCompatDiscovery {
         base_url: endpoint.as_str().trim_end_matches('/').to_string(),
@@ -870,29 +907,9 @@ impl ChatAccumulator {
         let mut tokens = self.usage.tokens();
         let inconsistent =
             tokens.effective_accounting().reason == Some(UsageReason::InconsistentCounts);
-        // Estimate only an actually absent half. A total can infer the other
-        // half, and an explicit zero never permits a character substitution.
-        let input = self
-            .input_tokens
-            .or_else(|| self.usage.total_tokens?.checked_sub(self.output_tokens?));
-        let output = self
-            .output_tokens
-            .or_else(|| self.usage.total_tokens?.checked_sub(self.input_tokens?));
-        if self.usage.total_tokens.is_none() && (input.is_none() || output.is_none()) {
-            let estimate = UsageTokens::estimated(input_chars, output_chars);
-            if input.is_none() {
-                tokens.input_tokens = estimate.input_tokens.max(tokens.input_tokens);
-            }
-            if output.is_none() {
-                tokens.output_tokens = estimate.output_tokens.max(tokens.output_tokens);
-            }
-            tokens.total_tokens = tokens.input_tokens.saturating_add(tokens.output_tokens);
-            tokens = tokens.partial(UsageReason::MissingUsage);
-            if let Some(accounting) = tokens.accounting.as_mut() {
-                accounting.source = UsageSource::Mixed;
-                accounting.coverage = crate::usage::UsageCoverage::Estimated;
-            }
-        }
+        // A partial receipt is an observed lower bound. Do not replace its
+        // missing buckets with character guesses: tools, images and hidden
+        // reasoning have no reliable character-to-token conversion.
         if inconsistent {
             tokens = estimated_inconsistent_usage(tokens);
         } else if !receipt_complete {
@@ -1442,8 +1459,12 @@ impl WireTokenDetails {
 }
 impl WireUsage {
     fn has_counts(&self) -> bool {
-        self.input().is_some() || self.completion_tokens.is_some() || self.total_tokens.is_some()
-            || self.cached().is_some() || self.cache_write().is_some() || self.reasoning().is_some()
+        self.input().is_some()
+            || self.completion_tokens.is_some()
+            || self.total_tokens.is_some()
+            || self.cached().is_some()
+            || self.cache_write().is_some()
+            || self.reasoning().is_some()
     }
     fn merge(&mut self, other: Self) {
         // Compare normalized aliases too: switching from DeepSeek's cache split
@@ -1461,8 +1482,14 @@ impl WireUsage {
             (&mut self.prompt_tokens, other.prompt_tokens),
             (&mut self.completion_tokens, other.completion_tokens),
             (&mut self.total_tokens, other.total_tokens),
-            (&mut self.prompt_cache_hit_tokens, other.prompt_cache_hit_tokens),
-            (&mut self.prompt_cache_miss_tokens, other.prompt_cache_miss_tokens),
+            (
+                &mut self.prompt_cache_hit_tokens,
+                other.prompt_cache_hit_tokens,
+            ),
+            (
+                &mut self.prompt_cache_miss_tokens,
+                other.prompt_cache_miss_tokens,
+            ),
         ] {
             self.regressed |= retain_usage_lower_bound(current, incoming);
         }
@@ -1592,12 +1619,22 @@ struct WireModelEntry {
 
 impl WireModelEntry {
     fn context_window_tokens(&self) -> Option<u64> {
-        let positive = |value: &serde_json::Value| value.as_u64().filter(|n| (1..=100_000_000).contains(n));
+        let positive =
+            |value: &serde_json::Value| value.as_u64().filter(|n| (1..=100_000_000).contains(n));
         let advertised = [
-            "context_length", "max_context_length", "context_window",
-            "contextWindow", "contextWindowTokens", "max_model_len",
-        ].iter().filter_map(|key| self.metadata.get(*key).and_then(positive)).min();
-        let routed = self.metadata.get("top_provider")
+            "context_length",
+            "max_context_length",
+            "context_window",
+            "contextWindow",
+            "contextWindowTokens",
+            "max_model_len",
+        ]
+        .iter()
+        .filter_map(|key| self.metadata.get(*key).and_then(positive))
+        .min();
+        let routed = self
+            .metadata
+            .get("top_provider")
             .and_then(|provider| provider.get("context_length"))
             .and_then(positive);
         // Routing may provision less than the model's advertised maximum.
@@ -1608,15 +1645,14 @@ impl WireModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::UsageSource;
     use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
 
     #[test]
     fn openrouter_receipt_endpoint_preserves_origin_and_rejects_custom_gateways() {
-        let endpoint = openai_compat_endpoint(
-            "https://openrouter.ai:443/api/v1/?tenant=test&id=old",
-        )
-        .unwrap();
+        let endpoint =
+            openai_compat_endpoint("https://openrouter.ai:443/api/v1/?tenant=test&id=old").unwrap();
         let receipt = openrouter_generation_endpoint(&endpoint, "gen-example-123").unwrap();
         assert_eq!(receipt.origin(), endpoint.origin());
         assert_eq!(receipt.path(), "/api/v1/generation");
@@ -1637,11 +1673,10 @@ mod tests {
         for id in ["", "gen-", "chatcmpl-example", "gen-a?other=1", "gen-a/b"] {
             assert!(openrouter_generation_endpoint(&endpoint, id).is_none());
         }
-        assert!(openrouter_generation_endpoint(
-            &endpoint,
-            &format!("gen-{}", "a".repeat(125))
-        )
-        .is_none());
+        assert!(
+            openrouter_generation_endpoint(&endpoint, &format!("gen-{}", "a".repeat(125)))
+                .is_none()
+        );
         // A non-string gateway id must not change its formerly valid response.
         let frame: WireCompletion = serde_json::from_value(serde_json::json!({
             "id": {"private": 1}, "choices": []
@@ -1665,18 +1700,30 @@ mod tests {
             "native_tokens_cached": 60, "native_tokens_reasoning": 5,
             "tokens_prompt": 999, "tokens_completion": 888,
             "usage": 0.01, "cache_discount": 0.005
-        }})).unwrap();
+        }}))
+        .unwrap();
         let tokens = recovered.usage.tokens();
         assert!(recovered.complete);
-        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 25, 125));
-        assert_eq!((tokens.cached_input_tokens, tokens.reasoning_output_tokens), (60, 5));
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens
+            ),
+            (100, 25, 125)
+        );
+        assert_eq!(
+            (tokens.cached_input_tokens, tokens.reasoning_output_tokens),
+            (60, 5)
+        );
         assert!(!tokens.accounting.unwrap().known.cache_write);
 
         let zero = normalized_openrouter_receipt(serde_json::json!({"data": {
             "id": "gen-fixture", "cancelled": false, "finish_reason": "tool_calls",
             "native_tokens_prompt": 0, "native_tokens_completion": 0,
             "native_tokens_cached": 0, "native_tokens_reasoning": 0
-        }})).unwrap();
+        }}))
+        .unwrap();
         assert!(zero.complete);
         assert!(zero.usage.tokens().measured);
         assert_eq!(zero.usage.tokens().total_tokens, 0);
@@ -1687,7 +1734,8 @@ mod tests {
             "native_tokens_prompt": 10, "native_tokens_completion": null,
             "native_tokens_cached": "8", "native_tokens_reasoning": -1,
             "tokens_completion": 999, "cache_discount": 0.1
-        }})).unwrap();
+        }}))
+        .unwrap();
         assert!(!partial.complete);
         assert_eq!(partial.usage.completion_tokens, None);
         assert_eq!(partial.usage.total_tokens, None);
@@ -1697,7 +1745,8 @@ mod tests {
             let receipt = normalized_openrouter_receipt(serde_json::json!({"data": {
                 "id": "gen-fixture", "cancelled": cancelled, "finish_reason": "length",
                 "native_tokens_prompt": 10, "native_tokens_completion": 2
-            }})).unwrap();
+            }}))
+            .unwrap();
             assert!(!receipt.complete);
         }
         for data in [
@@ -1729,13 +1778,18 @@ mod tests {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            assert!(std::time::Instant::now() < deadline, "fixture request missing");
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "fixture request missing"
+                            );
                             std::thread::sleep(Duration::from_millis(2));
                         }
                         Err(error) => panic!("{error}"),
                     }
                 };
-                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
                 requests.push(read_request(&mut stream));
                 let _ = stream.write_all(response.as_bytes());
             }
@@ -1770,7 +1824,8 @@ mod tests {
     );
 
     #[test]
-    fn openrouter_receipt_recovers_completed_stream_without_a_second_generation_or_double_counting() {
+    fn openrouter_receipt_recovers_completed_stream_without_a_second_generation_or_double_counting()
+    {
         let _scope = crate::provider_observation::Scope::start();
         let (result, sent) = openrouter_stream_fixture(
             OPENROUTER_PARTIAL_STREAM,
@@ -1782,22 +1837,42 @@ mod tests {
         assert_eq!(response.reasoning_content.as_deref(), Some("state"));
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].arguments, serde_json::json!({}));
-        assert_eq!((response.input_tokens, response.output_tokens), (Some(50), Some(10)));
+        assert_eq!(
+            (response.input_tokens, response.output_tokens),
+            (Some(50), Some(10))
+        );
         assert_eq!(response.accounted_usage.total_tokens, 60);
         assert_eq!(response.accounted_usage.cached_input_tokens, 8);
         assert_eq!(response.accounted_usage.reasoning_output_tokens, 3);
         assert!(response.accounted_usage.measured);
-        assert_eq!(response.accounted_usage.accounting.unwrap().scope, crate::usage::UsageScope::Request);
+        assert_eq!(
+            response.accounted_usage.accounting.unwrap().scope,
+            crate::usage::UsageScope::Request
+        );
         assert_eq!(sent.len(), 2);
-        assert_eq!(sent[1].request_line, "GET /api/v1/generation?tenant=test&id=gen-fixture HTTP/1.1");
+        assert_eq!(
+            sent[1].request_line,
+            "GET /api/v1/generation?tenant=test&id=gen-fixture HTTP/1.1"
+        );
         assert!(sent[1].body.is_empty());
-        assert_eq!(sent[0].header("authorization"), sent[1].header("authorization"));
-        assert_eq!(sent[1].header("authorization").as_deref(), Some("Bearer receipt-test-key"));
+        assert_eq!(
+            sent[0].header("authorization"),
+            sent[1].header("authorization")
+        );
+        assert_eq!(
+            sent[1].header("authorization").as_deref(),
+            Some("Bearer receipt-test-key")
+        );
         let observed = crate::provider_observation::snapshot().unwrap();
-        assert_eq!((observed.requests, observed.completed, observed.retries), (1, 1, 0));
+        assert_eq!(
+            (observed.requests, observed.completed, observed.retries),
+            (1, 1, 0)
+        );
         assert_eq!(
             observed.tokens.unwrap(),
-            response.accounted_usage.with_scope(crate::usage::UsageScope::Turn)
+            response
+                .accounted_usage
+                .with_scope(crate::usage::UsageScope::Turn)
         );
     }
 
@@ -1807,16 +1882,25 @@ mod tests {
             ("404 Not Found", r#"{"error":{"message":"not ready"}}"#),
             ("500 Internal Server Error", "{}"),
             ("200 OK", "invalid json"),
-            ("200 OK", r#"{"data":{"id":"gen-other","native_tokens_prompt":999}}"#),
+            (
+                "200 OK",
+                r#"{"data":{"id":"gen-other","native_tokens_prompt":999}}"#,
+            ),
         ] {
             let (result, sent) = openrouter_stream_fixture(OPENROUTER_PARTIAL_STREAM, status, body);
             let response = result.unwrap();
             assert_eq!(response.content, "answer");
             assert_eq!(response.tool_calls.len(), 1);
-            assert_eq!((response.input_tokens, response.output_tokens), (Some(9), Some(1)));
+            assert_eq!(
+                (response.input_tokens, response.output_tokens),
+                (Some(9), Some(1))
+            );
             assert_eq!(response.accounted_usage.total_tokens, 10);
             assert!(!response.accounted_usage.measured);
-            assert_eq!(response.accounted_usage.accounting.unwrap().reason, Some(UsageReason::ProviderIncomplete));
+            assert_eq!(
+                response.accounted_usage.accounting.unwrap().reason,
+                Some(UsageReason::ProviderIncomplete)
+            );
             assert_eq!(sent.len(), 2);
         }
         let (result, _) = openrouter_stream_fixture(
@@ -1825,7 +1909,10 @@ mod tests {
             r#"{"data":{"id":"gen-fixture","cancelled":false,"finish_reason":"stop","native_tokens_prompt":50}}"#,
         );
         let response = result.unwrap();
-        assert_eq!((response.input_tokens, response.output_tokens), (Some(50), Some(1)));
+        assert_eq!(
+            (response.input_tokens, response.output_tokens),
+            (Some(50), Some(1))
+        );
         assert!(!response.accounted_usage.measured);
     }
 
@@ -1868,7 +1955,10 @@ mod tests {
             "data: {\"id\":\"gen-fixture\",\"choices\":[{\"delta\":{\"content\":\"gateway answer\"},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n"
         ).unwrap();
         assert_eq!(response.content, "gateway answer");
-        assert_eq!((response.input_tokens, response.output_tokens), (None, None));
+        assert_eq!(
+            (response.input_tokens, response.output_tokens),
+            (None, None)
+        );
     }
 
     #[test]
@@ -1876,21 +1966,47 @@ mod tests {
         let sink = TcpListener::bind("127.0.0.1:0").unwrap();
         sink.set_nonblocking(true).unwrap();
         for response in [
-            format!("HTTP/1.1 302 Found\r\nLocation: http://{}/stolen\r\nContent-Length: 0\r\n\r\n", sink.local_addr().unwrap()),
-            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", MAX_USAGE_RECEIPT_BYTES + 1),
-            format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n", MAX_USAGE_RECEIPT_BYTES + 1, " ".repeat(MAX_USAGE_RECEIPT_BYTES + 1)),
+            format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://{}/stolen\r\nContent-Length: 0\r\n\r\n",
+                sink.local_addr().unwrap()
+            ),
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                MAX_USAGE_RECEIPT_BYTES + 1
+            ),
+            format!(
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+                MAX_USAGE_RECEIPT_BYTES + 1,
+                " ".repeat(MAX_USAGE_RECEIPT_BYTES + 1)
+            ),
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let url = Url::parse(&format!("http://{}/generation?id=gen-fixture", listener.local_addr().unwrap())).unwrap();
+            let url = Url::parse(&format!(
+                "http://{}/generation?id=gen-fixture",
+                listener.local_addr().unwrap()
+            ))
+            .unwrap();
             let server = std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
                 let sent = read_request(&mut stream);
                 let _ = stream.write_all(response.as_bytes());
                 sent
             });
-            assert!(read_openrouter_receipt(&url, "receipt-test-key", "gen-fixture", &CancellationToken::default(), Duration::from_secs(1)).is_none());
-            assert_eq!(server.join().unwrap().header("authorization").as_deref(), Some("Bearer receipt-test-key"));
-            assert!(matches!(sink.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+            assert!(read_openrouter_receipt(
+                &url,
+                "receipt-test-key",
+                "gen-fixture",
+                &CancellationToken::default(),
+                Duration::from_secs(1)
+            )
+            .is_none());
+            assert_eq!(
+                server.join().unwrap().header("authorization").as_deref(),
+                Some("Bearer receipt-test-key")
+            );
+            assert!(
+                matches!(sink.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+            );
         }
     }
 
@@ -1898,11 +2014,17 @@ mod tests {
     fn openrouter_receipt_deadline_and_cancellation_close_silent_headers_and_bodies() {
         for (headers, stop) in [(false, false), (true, false), (false, true), (true, true)] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let url = Url::parse(&format!("http://{}/generation?id=gen-fixture", listener.local_addr().unwrap())).unwrap();
+            let url = Url::parse(&format!(
+                "http://{}/generation?id=gen-fixture",
+                listener.local_addr().unwrap()
+            ))
+            .unwrap();
             let (started, ready) = std::sync::mpsc::channel();
             let server = std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
                 let _ = read_request(&mut stream);
                 if headers {
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n").unwrap();
@@ -1920,7 +2042,14 @@ mod tests {
                 }
             });
             let began = std::time::Instant::now();
-            assert!(read_openrouter_receipt(&url, "", "gen-fixture", &cancellation, Duration::from_millis(100)).is_none());
+            assert!(read_openrouter_receipt(
+                &url,
+                "",
+                "gen-fixture",
+                &cancellation,
+                Duration::from_millis(100)
+            )
+            .is_none());
             assert!(began.elapsed() < Duration::from_secs(1));
             cancel.join().unwrap();
             server.join().unwrap();
@@ -1949,11 +2078,20 @@ mod tests {
             |_, _, _, _| panic!("cancelled generation must not fetch a receipt"),
         );
         server.join().unwrap();
-        assert_eq!(result.unwrap_err().to_string(), OPENAI_COMPAT_CANCELLED_MESSAGE);
-        let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            OPENAI_COMPAT_CANCELLED_MESSAGE
+        );
+        let tokens = crate::provider_observation::snapshot()
+            .unwrap()
+            .tokens
+            .unwrap();
         assert_eq!((tokens.input_tokens, tokens.output_tokens), (7, 1));
         assert!(!tokens.measured);
-        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::Interrupted));
+        assert_eq!(
+            tokens.accounting.unwrap().reason,
+            Some(UsageReason::Interrupted)
+        );
     }
 
     #[test]
@@ -1982,8 +2120,14 @@ mod tests {
         assert_eq!(tokens.cached_input_tokens, 80);
         assert_eq!(tokens.reasoning_output_tokens, 5);
         assert_eq!(tokens.total_tokens, 150);
-        assert!(!tokens.measured, "100 input plus 20 output does not reconcile with a 150 total");
-        assert_eq!(tokens.effective_accounting().reason, Some(UsageReason::InconsistentCounts));
+        assert!(
+            !tokens.measured,
+            "100 input plus 20 output does not reconcile with a 150 total"
+        );
+        assert_eq!(
+            tokens.effective_accounting().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
     }
 
     fn accounting_fixture(body: &str) -> Result<OpenAiCompatChatResponse> {
@@ -2025,12 +2169,38 @@ mod tests {
             let mut usage: WireUsage = serde_json::from_value(baseline.clone()).unwrap();
             usage.merge(serde_json::from_value(incoming).unwrap());
             let tokens = usage.tokens();
-            assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 20, 120));
-            assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (60, 30, 5));
-            assert_eq!((usage.prompt_cache_hit_tokens, usage.prompt_cache_miss_tokens), (Some(60), Some(40)));
+            assert_eq!(
+                (
+                    tokens.input_tokens,
+                    tokens.output_tokens,
+                    tokens.total_tokens
+                ),
+                (100, 20, 120)
+            );
+            assert_eq!(
+                (
+                    tokens.cached_input_tokens,
+                    tokens.cache_write_tokens,
+                    tokens.reasoning_output_tokens
+                ),
+                (60, 30, 5)
+            );
+            assert_eq!(
+                (
+                    usage.prompt_cache_hit_tokens,
+                    usage.prompt_cache_miss_tokens
+                ),
+                (Some(60), Some(40))
+            );
             assert!(!tokens.measured);
-            assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
-            assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+            assert_eq!(
+                tokens.accounting.unwrap().coverage,
+                crate::usage::UsageCoverage::Estimated
+            );
+            assert_eq!(
+                tokens.accounting.unwrap().reason,
+                Some(UsageReason::InconsistentCounts)
+            );
 
             // Repeated/later snapshots cannot erase the contradiction.
             usage.merge(serde_json::from_value(baseline.clone()).unwrap());
@@ -2056,15 +2226,32 @@ mod tests {
         let mut usage: WireUsage = serde_json::from_value(serde_json::json!({
             "prompt_cache_hit_tokens": 60, "prompt_cache_miss_tokens": 40,
             "completion_tokens": 20
-        })).unwrap();
-        usage.merge(serde_json::from_value(serde_json::json!({
-            "prompt_tokens": 90, "prompt_tokens_details": {"cached_tokens": 40}
-        })).unwrap());
+        }))
+        .unwrap();
+        usage.merge(
+            serde_json::from_value(serde_json::json!({
+                "prompt_tokens": 90, "prompt_tokens_details": {"cached_tokens": 40}
+            }))
+            .unwrap(),
+        );
         let tokens = usage.tokens();
-        assert_eq!((tokens.input_tokens, tokens.cached_input_tokens, tokens.total_tokens), (100, 60, 120));
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.cached_input_tokens,
+                tokens.total_tokens
+            ),
+            (100, 60, 120)
+        );
         assert!(!tokens.measured);
-        assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
-        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+        assert_eq!(
+            tokens.accounting.unwrap().coverage,
+            crate::usage::UsageCoverage::Estimated
+        );
+        assert_eq!(
+            tokens.accounting.unwrap().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
     }
 
     #[test]
@@ -2082,7 +2269,10 @@ mod tests {
         for (receipt, failed) in [
             (serde_json::json!({"usage":zero}), false),
             (serde_json::json!({"x_groq":{"usage":zero}}), false),
-            (serde_json::json!({"usage":zero, "error":{"message":"failed"}}), true),
+            (
+                serde_json::json!({"usage":zero, "error":{"message":"failed"}}),
+                true,
+            ),
         ] {
             let _scope = crate::provider_observation::Scope::start();
             let response = accounting_fixture(&format!(
@@ -2094,18 +2284,44 @@ mod tests {
             ));
             let tokens = if failed {
                 assert!(response.is_err());
-                crate::provider_observation::snapshot().unwrap().tokens.unwrap()
+                crate::provider_observation::snapshot()
+                    .unwrap()
+                    .tokens
+                    .unwrap()
             } else {
                 let response = response.unwrap();
                 assert_eq!(response.content, "answer");
-                assert_eq!((response.input_tokens, response.output_tokens), (Some(100), Some(20)));
+                assert_eq!(
+                    (response.input_tokens, response.output_tokens),
+                    (Some(100), Some(20))
+                );
                 response.accounted_usage
             };
-            assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (100, 20, 120));
-            assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (60, 30, 5));
+            assert_eq!(
+                (
+                    tokens.input_tokens,
+                    tokens.output_tokens,
+                    tokens.total_tokens
+                ),
+                (100, 20, 120)
+            );
+            assert_eq!(
+                (
+                    tokens.cached_input_tokens,
+                    tokens.cache_write_tokens,
+                    tokens.reasoning_output_tokens
+                ),
+                (60, 30, 5)
+            );
             assert!(!tokens.measured);
-            assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
-            assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+            assert_eq!(
+                tokens.accounting.unwrap().coverage,
+                crate::usage::UsageCoverage::Estimated
+            );
+            assert_eq!(
+                tokens.accounting.unwrap().reason,
+                Some(UsageReason::InconsistentCounts)
+            );
         }
     }
 
@@ -2137,12 +2353,32 @@ mod tests {
             },
         );
         server.join().unwrap();
-        assert_eq!(result.unwrap_err().to_string(), OPENAI_COMPAT_CANCELLED_MESSAGE);
-        let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
-        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens, tokens.cache_write_tokens), (100, 20, 120, 30));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            OPENAI_COMPAT_CANCELLED_MESSAGE
+        );
+        let tokens = crate::provider_observation::snapshot()
+            .unwrap()
+            .tokens
+            .unwrap();
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens,
+                tokens.cache_write_tokens
+            ),
+            (100, 20, 120, 30)
+        );
         assert!(!tokens.measured);
-        assert_eq!(tokens.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
-        assert_eq!(tokens.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+        assert_eq!(
+            tokens.accounting.unwrap().coverage,
+            crate::usage::UsageCoverage::Estimated
+        );
+        assert_eq!(
+            tokens.accounting.unwrap().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
     }
 
     #[test]
@@ -2154,11 +2390,20 @@ mod tests {
         );
         let response = result.unwrap();
         assert_eq!(response.content, "answer");
-        assert_eq!((response.input_tokens, response.output_tokens), (Some(9), Some(1)));
+        assert_eq!(
+            (response.input_tokens, response.output_tokens),
+            (Some(9), Some(1))
+        );
         assert_eq!(response.accounted_usage.total_tokens, 10);
         assert!(!response.accounted_usage.measured);
-        assert_eq!(response.accounted_usage.accounting.unwrap().coverage, crate::usage::UsageCoverage::Estimated);
-        assert_eq!(response.accounted_usage.accounting.unwrap().reason, Some(UsageReason::InconsistentCounts));
+        assert_eq!(
+            response.accounted_usage.accounting.unwrap().coverage,
+            crate::usage::UsageCoverage::Estimated
+        );
+        assert_eq!(
+            response.accounted_usage.accounting.unwrap().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
     }
 
     #[test]
@@ -2255,19 +2500,72 @@ mod tests {
     }
 
     #[test]
-    fn estimated_missing_halves_never_claim_a_reported_lower_bound() {
+    fn partial_receipts_keep_only_reported_lower_bounds() {
         let mut state = ChatAccumulator::default();
         let frame: WireCompletion = serde_json::from_value(serde_json::json!({
             "usage": { "prompt_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 5},
                 "completion_tokens_details": {"reasoning_tokens": 9} }
-        })).unwrap();
+        }))
+        .unwrap();
         state.record_usage(&frame);
-        let tokens = state.accounted_usage(80, 40, true);
-        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (25, 10, 35));
-        assert_eq!(tokens.effective_accounting().coverage, crate::usage::UsageCoverage::Estimated);
-        assert_eq!(tokens.effective_accounting().source, UsageSource::Mixed);
-        assert!(!tokens.effective_accounting().known.input && !tokens.effective_accounting().known.output);
-        assert_eq!((tokens.cached_input_tokens, tokens.cache_write_tokens, tokens.reasoning_output_tokens), (20, 5, 9));
+        let tokens = state.accounted_usage(80_000, 40_000, true);
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens
+            ),
+            (25, 9, 34)
+        );
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
+        assert!(
+            !tokens.effective_accounting().known.input
+                && !tokens.effective_accounting().known.output
+        );
+        assert_eq!(
+            (
+                tokens.cached_input_tokens,
+                tokens.cache_write_tokens,
+                tokens.reasoning_output_tokens
+            ),
+            (20, 5, 9)
+        );
+    }
+
+    #[test]
+    fn a_partial_wire_receipt_and_the_request_collector_preserve_the_same_real_counts() {
+        for (usage, expected) in [
+            (serde_json::json!({"prompt_tokens": 7}), 7),
+            (serde_json::json!({"completion_tokens": 3}), 3),
+            (
+                serde_json::json!({"prompt_tokens_details": {"cached_tokens": 5}}),
+                5,
+            ),
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let response = accounting_fixture(&format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{}\"}},\"finish_reason\":\"stop\"}}],\"usage\":{usage}}}\ndata: [DONE]\n",
+                "x".repeat(4000),
+            )).unwrap();
+            let tokens = response.accounted_usage;
+            assert_eq!(tokens.total_tokens, expected);
+            assert_eq!(
+                tokens.effective_accounting().coverage,
+                crate::usage::UsageCoverage::Partial
+            );
+            assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
+            assert_eq!(
+                crate::provider_observation::snapshot()
+                    .unwrap()
+                    .tokens
+                    .unwrap(),
+                tokens.with_scope(crate::usage::UsageScope::Turn)
+            );
+        }
     }
 
     #[test]
@@ -3080,8 +3378,14 @@ mod tests {
     #[test]
     fn model_metadata_uses_published_route_limits_and_rejects_invalid_counts() {
         for (raw, expected) in [
-            (r#"{"id":"mistral","max_context_length":256000}"#, Some(256_000)),
-            (r#"{"id":"routed","context_length":1000000,"top_provider":{"context_length":128000}}"#, Some(128_000)),
+            (
+                r#"{"id":"mistral","max_context_length":256000}"#,
+                Some(256_000),
+            ),
+            (
+                r#"{"id":"routed","context_length":1000000,"top_provider":{"context_length":128000}}"#,
+                Some(128_000),
+            ),
             (r#"{"id":"local","context_window":32768}"#, Some(32_768)),
             (r#"{"id":"unknown"}"#, None),
             (r#"{"id":"bad","context_length":0}"#, None),
@@ -3102,8 +3406,11 @@ mod tests {
         let body = serde_json::json!({"data":models}).to_string();
         let (address, server) = serve_once("200 OK", "application/json", &body);
         let discovery = openai_compat_list_model_metadata(
-            &format!("http://{address}/v1"), "", &["wanted".to_string()],
-        ).unwrap();
+            &format!("http://{address}/v1"),
+            "",
+            &["wanted".to_string()],
+        )
+        .unwrap();
         server.join().unwrap();
         assert_eq!(discovery.models.len(), 1);
         assert_eq!(discovery.models[0].id, "wanted");

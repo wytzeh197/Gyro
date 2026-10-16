@@ -1395,6 +1395,8 @@ export type SessionUsageTotals = {
   cachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Trustworthy provider consumption only; present zero is an observed zero. */
+  reportedTotalTokens?: number;
   byOrigin: UsageOriginTotals[];
   firstCallAt?: string;
   lastCallAt?: string;

@@ -12,7 +12,9 @@ pub(super) fn completion_status<'a>(
     if method != "turn/completed" {
         return None;
     }
-    if params.get("threadId").and_then(Value::as_str)
+    if params
+        .get("threadId")
+        .and_then(Value::as_str)
         .is_some_and(|id| id != thread_id)
     {
         return None;
@@ -24,7 +26,12 @@ pub(super) fn completion_status<'a>(
             return None;
         }
     }
-    Some(params.pointer("/turn/status").and_then(Value::as_str).unwrap_or("failed"))
+    Some(
+        params
+            .pointer("/turn/status")
+            .and_then(Value::as_str)
+            .unwrap_or("failed"),
+    )
 }
 
 #[cfg(test)]
@@ -38,25 +45,49 @@ mod tests {
             "type":"agentMessage",
             "text":"GYRO_ARTIFACTS: {\"items\":[{\"id\":\"preview\",\"kind\":\"preview\",\"title\":\"Preview\",\"url\":\"http://127.0.0.1:1420\"}]}"
         }});
-        assert_eq!(completion_status("item/completed", &artifact, "thread", Some("turn")), None);
+        assert_eq!(
+            completion_status("item/completed", &artifact, "thread", Some("turn")),
+            None
+        );
         // Silence after the artifact is not a notification. Later tool work and
         // the final message must still be accepted before the turn closes.
         for method in ["item/started", "item/completed", "item/agentMessage/delta"] {
-            assert_eq!(completion_status(method, &json!({}), "thread", Some("turn")), None);
+            assert_eq!(
+                completion_status(method, &json!({}), "thread", Some("turn")),
+                None
+            );
         }
-        assert_eq!(completion_status("turn/completed",
-            &json!({"threadId":"thread", "turn":{"id":"turn","status":"completed"}}),
-            "thread", Some("turn")), Some("completed"));
+        assert_eq!(
+            completion_status(
+                "turn/completed",
+                &json!({"threadId":"thread", "turn":{"id":"turn","status":"completed"}}),
+                "thread",
+                Some("turn")
+            ),
+            Some("completed")
+        );
     }
 
     #[test]
     fn completion_is_scoped_and_preserves_failure_and_interrupt_statuses() {
         for status in ["completed", "failed", "interrupted"] {
             let params = json!({"threadId":"thread", "turn":{"id":"turn","status":status}});
-            assert_eq!(completion_status("turn/completed", &params, "thread", Some("turn")), Some(status));
-            assert_eq!(completion_status("turn/completed", &params, "other", Some("turn")), None);
-            assert_eq!(completion_status("turn/completed", &params, "thread", Some("other")), None);
+            assert_eq!(
+                completion_status("turn/completed", &params, "thread", Some("turn")),
+                Some(status)
+            );
+            assert_eq!(
+                completion_status("turn/completed", &params, "other", Some("turn")),
+                None
+            );
+            assert_eq!(
+                completion_status("turn/completed", &params, "thread", Some("other")),
+                None
+            );
         }
-        assert_eq!(completion_status("turn/completed", &json!({}), "thread", None), Some("failed"));
+        assert_eq!(
+            completion_status("turn/completed", &json!({}), "thread", None),
+            Some("failed")
+        );
     }
 }

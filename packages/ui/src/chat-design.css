@@ -894,6 +894,14 @@
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
+  .gyro-dictation-button.is-listening {
+  background: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 22%, transparent);
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
   .gyro-send-button {
   border-radius: 50%;
   box-shadow: none;

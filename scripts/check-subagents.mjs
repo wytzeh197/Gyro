@@ -44,30 +44,48 @@ assert.equal(
 assert.equal(subagentElapsedMs({ ...agent, startedAt: "invalid" }, now), 5000);
 assert.equal(subagentTokensLabel(agent), "Usage unavailable");
 const accounting = (coverage = "complete") => ({
-  source: "provider", scope: "turn", coverage,
-  known: { input: false, output: false, cacheRead: false, cacheWrite: false, reasoning: false },
+  source: "provider",
+  scope: "turn",
+  coverage,
+  known: {
+    input: false,
+    output: false,
+    cacheRead: false,
+    cacheWrite: false,
+    reasoning: false,
+  },
 });
 assert.equal(
   subagentTokensLabel({
     ...agent,
     tokens: { totalTokens: 123456, measured: true, accounting: accounting() },
   }),
-  "123K tokens",
+  "123K tokens total",
 );
 assert.equal(
   subagentTokensLabel({
     ...agent,
     tokens: { totalTokens: 100, measured: false },
   }),
-  "~100 tokens",
+  "Usage unavailable",
 );
 assert.equal(
-  subagentTokensLabel({ ...agent, tokens: { totalTokens: 100, measured: false, accounting: accounting("partial") } }),
-  "≥100 tokens",
+  subagentTokensLabel({
+    ...agent,
+    tokens: {
+      totalTokens: 100,
+      measured: false,
+      accounting: accounting("partial"),
+    },
+  }),
+  "≥100 tokens total",
 );
 assert.equal(
-  subagentTokensLabel({ ...agent, tokens: { totalTokens: 0, measured: true, accounting: accounting() } }),
-  "0 tokens",
+  subagentTokensLabel({
+    ...agent,
+    tokens: { totalTokens: 0, measured: true, accounting: accounting() },
+  }),
+  "0 tokens total",
 );
 assert.equal(
   subagentTokensLabel({ ...agent, tokens: null }),
@@ -76,6 +94,50 @@ assert.equal(
 assert.equal(
   subagentTokensLabel({ ...agent, tokens: { totalTokens: 0 } }),
   "Usage unavailable",
+);
+for (const [coverage, source, expected] of [
+  ["complete", "provider", "100 tokens total"],
+  ["partial", "provider", "≥100 tokens total"],
+  ["estimated", "provider", "Usage unavailable"],
+  ["complete", "character-estimate", "Usage unavailable"],
+  ["complete", "mixed", "Usage unavailable"],
+  ["unavailable", "provider", "Usage unavailable"],
+]) {
+  assert.equal(
+    subagentTokensLabel({
+      ...agent,
+      status: "completed",
+      tokens: {
+        totalTokens: 100,
+        measured: coverage === "complete",
+        accounting: { ...accounting(coverage), source, scope: "session" },
+      },
+    }),
+    expected,
+    "Agent ledger session consumption is explicitly cumulative and preserves provider provenance",
+  );
+}
+assert.equal(
+  subagentTokensLabel({
+    ...agent,
+    tokens: {
+      inputTokens: 90,
+      outputTokens: 20,
+      totalTokens: 100,
+      measured: true,
+      accounting: {
+        ...accounting(),
+        scope: "session",
+        known: {
+          ...accounting().known,
+          input: true,
+          output: true,
+        },
+      },
+    },
+  }),
+  "Usage unavailable",
+  "The dedicated agent formatter still rejects inconsistent session consumption",
 );
 const settled = {
   ...agent,

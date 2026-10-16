@@ -117,8 +117,7 @@ function resolveContextWindow(
       : undefined) ??
     providerCatalog
       .find((provider) => provider.id === model.providerId)
-      ?.models.find((entry) => entry.id === model.modelId)
-      ?.contextWindowTokens
+      ?.models.find((entry) => entry.id === model.modelId)?.contextWindowTokens
   );
 }
 
@@ -129,7 +128,12 @@ function resolveContextWindow(
  * Repeated request consumption is kept separate from this occupancy reading.
  */
 function occupiedTokens(usage: Record<string, unknown>) {
-  for (const key of ["inputTokens", "outputTokens", "totalTokens", "modelContextWindow"]) {
+  for (const key of [
+    "inputTokens",
+    "outputTokens",
+    "totalTokens",
+    "modelContextWindow",
+  ]) {
     if (usage[key] != null && !isTokenCount(usage[key])) return undefined;
   }
   const input = tokenCount(usage, "inputTokens");
@@ -137,8 +141,37 @@ function occupiedTokens(usage: Record<string, unknown>) {
   const total = tokenCount(usage, "totalTokens");
   if (input === undefined) return undefined;
   const sum = input + (output ?? 0);
-  if (!isTokenCount(sum) || (total !== undefined && (total < sum || (output !== undefined && total !== sum)))) return undefined;
+  if (
+    !isTokenCount(sum) ||
+    (total !== undefined &&
+      (total < sum || (output !== undefined && total !== sum)))
+  )
+    return undefined;
   return total ?? sum;
+}
+
+function usableOccupancy(
+  usage: Record<string, unknown>,
+  payload: Record<string, unknown> | undefined,
+  model: ContextModelSelection,
+) {
+  const occupancy = occupiedTokens(usage);
+  if (occupancy === undefined) return undefined;
+  const providerId = stringValue(payload, "providerId") as
+    ProviderId | undefined;
+  const modelId = stringValue(payload, "modelId");
+  const matchesModel =
+    (!model.providerId || providerId === model.providerId) &&
+    (!model.modelId || modelId === model.modelId);
+  const observationWindow =
+    tokenCount(usage, "modelContextWindow") ||
+    resolveContextWindow(
+      undefined,
+      matchesModel ? model : { providerId, modelId },
+    );
+  // Switching to a smaller model does not empty the previous model's context.
+  // Reject impossible observations against the window that produced them.
+  return occupancy <= (observationWindow ?? Infinity) ? occupancy : undefined;
 }
 
 /**
@@ -197,15 +230,21 @@ export function estimateComposerContextUsage(
       break;
     }
     if (!usage) continue;
-    // A completed response replaces the live checkpoint even when its streamed
-    // assistant row has retained an earlier position in the event array.
+    // A completed response replaces the live checkpoint only when it contains
+    // a usable observation. Some runtimes publish occupancy in a stream frame
+    // but omit it from the closing response.
     if (
       payload?.kind === "provider-context-usage" &&
       events.some(
         (item) =>
           item.turnId === event.turnId &&
           item.sessionId === event.sessionId &&
-          eventPayload(item)?.kind === "provider-response",
+          eventPayload(item)?.kind === "provider-response" &&
+          usableOccupancy(
+            recordFromUnknown(eventPayload(item)?.contextUsage) ?? {},
+            eventPayload(item),
+            model,
+          ) !== undefined,
       )
     )
       continue;
@@ -216,25 +255,21 @@ export function estimateComposerContextUsage(
         stringValue(payload, "providerId") === model.providerId) &&
       (!model.modelId || eventModelId === model.modelId);
     // The window is only meaningful for the model that reported it.
-    if (matchesModel && reportedContextWindow === undefined &&
-        payload?.contextWindowSource !== "catalog") {
+    if (
+      matchesModel &&
+      reportedContextWindow === undefined &&
+      payload?.contextWindowSource !== "catalog"
+    ) {
       reportedContextWindow = tokenCount(usage, "modelContextWindow");
     }
     if (reportedUsage) continue;
-    const occupancy = occupiedTokens(usage);
+    const occupancy = usableOccupancy(usage, payload, model);
     if (occupancy === undefined) continue;
     // A run that used tools bills the re-sent conversation once per request, so
     // some CLIs report a turn total several times the window. Nothing can
     // occupy more of the window than it holds, so a reading that large is
     // ignored and the thread estimate stands in — including for turns recorded
     // before Gyro stopped storing those totals.
-    if (
-      occupancy >
-      (resolveContextWindow(reportedContextWindow, model) ?? Infinity)
-    ) {
-      continue;
-    }
-
     // How full the thread is belongs to the conversation, not to the model that
     // last read it: switching model or provider mid-chat does not empty it. The
     // newest reading therefore stands even when another model produced it,
@@ -271,9 +306,7 @@ export function estimateComposerContextUsage(
   ) {
     const event = events[index];
     if (event) {
-      const previous = checkpoint
-        ? (tokenCount(checkpoint, event.id) ?? 0)
-        : 0;
+      const previous = checkpoint ? (tokenCount(checkpoint, event.id) ?? 0) : 0;
       estimatedCharacters += Math.max(
         0,
         estimatedEventCharacters(event) - previous,
@@ -294,7 +327,9 @@ export function estimateComposerContextUsage(
   const isOtherModelReading = Boolean(
     isReported &&
     ((reportedModelId && model.modelId && reportedModelId !== model.modelId) ||
-      (reportedProviderId && model.providerId && reportedProviderId !== model.providerId)),
+      (reportedProviderId &&
+        model.providerId &&
+        reportedProviderId !== model.providerId)),
   );
   const detail = isReported
     ? isOtherModelReading
@@ -311,7 +346,10 @@ export function estimateComposerContextUsage(
     contextWindowTokens,
     detail,
     modelLabel,
-    source: isReported && liveEstimatedTokens === 0 && !isOtherModelReading ? "reported" : "estimated",
+    source:
+      isReported && liveEstimatedTokens === 0 && !isOtherModelReading
+        ? "reported"
+        : "estimated",
     usedTokens,
   });
 }

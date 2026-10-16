@@ -11,11 +11,12 @@ pub mod council;
 pub mod credentials;
 pub mod diff;
 pub mod doctor;
-pub mod execution;
 pub mod efficiency;
+pub mod execution;
 pub mod fast_mode;
 pub mod file_review;
 pub mod github;
+pub mod grok;
 pub mod harness;
 pub mod ipc;
 pub mod keychain;
@@ -31,6 +32,7 @@ pub mod project_import;
 pub mod provider_contract;
 pub mod provider_health;
 pub mod provider_observation;
+pub mod provider_permissions;
 pub mod provider_registry;
 pub mod provider_retry;
 pub mod provider_stream;
@@ -97,8 +99,9 @@ pub use credentials::{
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
-    register_process_group, run_command, terminate_live_process_groups, unregister_process_group, CancellationToken, ExecutionChunk,
-    ExecutionOutcome, ExecutionRequest, ExecutionStream, ExecutionTermination,
+    register_process_group, run_command, terminate_live_process_groups, unregister_process_group,
+    CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest, ExecutionStream,
+    ExecutionTermination,
 };
 pub use file_review::{
     build_summary_prompt, cached_summaries, content_hash as file_review_content_hash,
@@ -126,10 +129,10 @@ pub use ipc::{
     DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
-    check_acp_health, check_kimi_acp_health, discover_acp_models, run_kimi_acp, AcpModel,
-    AcpModelDiscovery, KimiAcpActivity,
-    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth,
-    KimiAcpHealthStatus, KimiAcpMode, KimiAcpOutput, KimiAcpRequest,
+    check_acp_health, check_kimi_acp_health, discover_acp_models, plan_mode_denies_approval,
+    run_kimi_acp, AcpModel, AcpModelDiscovery, KimiAcpActivity, KimiAcpApprovalDecision,
+    KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth, KimiAcpHealthStatus, KimiAcpMode,
+    KimiAcpOutput, KimiAcpRequest,
 };
 pub use mutations::{
     apply_provider_mutation_transaction, apply_provider_mutation_transaction_with_cancellation,
@@ -151,11 +154,10 @@ pub use ollama::{
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,
 };
 pub use openai_compatible::{
-    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
-    openai_compat_list_model_metadata,
-    openai_compat_tool_chat, openai_compat_tool_chat_with_progress, OpenAiCompatChatRequest,
-    OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel, OpenAiCompatToolCall,
-    OPENAI_COMPAT_CANCELLED_MESSAGE,
+    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_model_metadata,
+    openai_compat_list_models, openai_compat_tool_chat, openai_compat_tool_chat_with_progress,
+    OpenAiCompatChatRequest, OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel,
+    OpenAiCompatToolCall, OPENAI_COMPAT_CANCELLED_MESSAGE,
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
@@ -171,11 +173,15 @@ pub use provider_health::{
     should_skip_codex_login_for_external_env, ProviderHealthCheck, ProviderHealthRequest,
     ProviderHealthService, PROVIDER_HEALTH_CACHE_TTL,
 };
+pub use provider_permissions::{
+    acp_permission_args, approval_posture, approve_for_me_keeps_escalations,
+    claude_permission_mode, codex_execution_policy, ApprovalPosture,
+};
 pub use provider_registry::{
     execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,
-    provider_descriptor, provider_is_executable, provider_is_executable_for, provider_registry,
-    ProviderDescriptor, ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
-    CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
+    provider_accepts_images, provider_descriptor, provider_is_executable,
+    provider_is_executable_for, provider_registry, ProviderDescriptor, ProviderExecutionKind,
+    ProviderHealthKind, ProviderSupportTier, CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
 };
 pub use provider_stream::{
     extract_codex_agent_message_text, extract_provider_session_id, extract_provider_text_chunk,

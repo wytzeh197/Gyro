@@ -135,7 +135,10 @@ pub(super) fn observe(
     let goal_stop = control.goal_token_budget.lock().ok().and_then(|budget| {
         let (before, limit) = (*budget)?;
         let used = before.saturating_add(gyro_core::call_ceiling_tokens(
-            Some(tokens.input_tokens), Some(tokens.cached_input_tokens), Some(tokens.output_tokens)));
+            Some(tokens.input_tokens),
+            Some(tokens.cached_input_tokens),
+            Some(tokens.output_tokens),
+        ));
         (used >= limit).then_some(ProviderStopReason::GoalTokenBudget { used, limit })
     });
     if let Some(reason) = goal_stop {

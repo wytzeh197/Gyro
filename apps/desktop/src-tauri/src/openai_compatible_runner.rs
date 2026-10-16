@@ -71,16 +71,46 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
         .and_then(|provider| provider.kind.clone())
 }
 
-/// Image support is model-specific: DeepSeek Pro is still text-only.
+/// Image support is model-specific for DeepSeek. Ollama vision is discovered
+/// per installed model, so this shared check stays false and the Ollama runner
+/// decides on its own. Every other provider, including a user-defined endpoint,
+/// can receive images.
 pub(super) fn supports_images(request: &ProviderChatRequest) -> bool {
-    if request.provider_id != "deepseek" {
-        return provider_descriptor(&request.provider_id)
-            .is_some_and(|provider| provider.supports_images);
+    if image_input_enabled(&request.provider_id, request.model_id.as_deref(), None) {
+        return true;
     }
-    matches!(
-        request.model_id.as_deref().map(str::trim),
-        Some("deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp")
+    // Known providers are decided above. Only an id with no table row needs
+    // the config entry that names an OpenAI-compatible endpoint.
+    if provider_descriptor(&request.provider_id).is_some()
+        || provider_accepts_images(&request.provider_id)
+    {
+        return false;
+    }
+    image_input_enabled(
+        &request.provider_id,
+        request.model_id.as_deref(),
+        declared_provider_kind(&request.provider_id).as_deref(),
     )
+}
+
+fn image_input_enabled(
+    provider_id: &str,
+    model_id: Option<&str>,
+    declared_kind: Option<&str>,
+) -> bool {
+    if provider_id == "deepseek" {
+        return matches!(
+            model_id.map(str::trim),
+            Some("deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp")
+        );
+    }
+    if provider_id == "ollama" {
+        return false;
+    }
+    if provider_accepts_images(provider_id) {
+        return true;
+    }
+    declared_kind == Some(gyro_core::OPENAI_COMPATIBLE_KIND)
 }
 
 fn user_content(
@@ -95,7 +125,7 @@ fn user_content(
                 mime,
                 "image/png" | "image/jpeg" | "image/gif" | "image/webp"
             ),
-            "DeepSeek accepts PNG, JPEG, GIF, and WebP images."
+            "This provider accepts PNG, JPEG, GIF, and WebP images."
         );
         let bytes = fs::read(&attachment.path)?;
         content.push(serde_json::json!({
@@ -224,11 +254,23 @@ pub(super) fn run_openai_compatible_chat(
     } else {
         format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     };
-    let build = || provider_context_message_with_capabilities(request,local_conversation_history_for_request(request).as_deref(),true,supports_images);
+    let build = || {
+        provider_context_message_with_capabilities(
+            request,
+            local_conversation_history_for_request(request).as_deref(),
+            true,
+            supports_images,
+        )
+    };
     let cfg = efficiency::config();
     let user = if cfg.policies() && cfg.cache_assembly {
-        let (stable,dynamic)=efficiency::capture_prompt(build); system.push('\n');system.push_str(&stable);dynamic
-    } else {build()};
+        let (stable, dynamic) = efficiency::capture_prompt(build);
+        system.push('\n');
+        system.push_str(&stable);
+        dynamic
+    } else {
+        build()
+    };
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),
@@ -295,7 +337,9 @@ pub(super) fn run_openai_compatible_chat(
                     context_window,
                     auto_compact_percent,
                 ) {
-                    if let Ok(store)=open_store(){let _=efficiency::save_checkpoint(app,&store,request);}
+                    if let Ok(store) = open_store() {
+                        let _ = efficiency::save_checkpoint(app, &store, request);
+                    }
                     let activity =
                         context_compaction::activity(auto_compactions.len(), &compaction);
                     emit_provider_activity_event(
@@ -717,6 +761,39 @@ mod image_tests {
             .unwrap();
             assert_eq!(supports_images(&request), expected, "{model}");
         }
+        for provider in [
+            "cursor",
+            "opencode",
+            "mistral",
+            "openrouter",
+            "custom:gateway",
+            "xai",
+            "anthropic",
+        ] {
+            let request: ProviderChatRequest = serde_json::from_value(serde_json::json!({
+                "sessionId": "test", "providerId": provider, "modelId": "any",
+                "message": "describe this", "mode": "normal"
+            }))
+            .unwrap();
+            assert!(supports_images(&request), "{provider}");
+        }
+        let ollama: ProviderChatRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "test", "providerId": "ollama", "modelId": "llava",
+            "message": "describe this", "mode": "normal"
+        }))
+        .unwrap();
+        assert!(!supports_images(&ollama));
+        assert!(image_input_enabled(
+            "my-gateway",
+            None,
+            Some(gyro_core::OPENAI_COMPATIBLE_KIND)
+        ));
+        assert!(!image_input_enabled("my-gateway", None, None));
+        assert!(!image_input_enabled(
+            "ollama",
+            Some("llava"),
+            Some(gyro_core::OPENAI_COMPATIBLE_KIND)
+        ));
     }
 
     #[test]

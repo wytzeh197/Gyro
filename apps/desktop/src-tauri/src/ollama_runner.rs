@@ -368,7 +368,9 @@ pub(super) fn run_ollama_chat(
                     context_window,
                     auto_compact_percent,
                 ) {
-                    if let Ok(store)=open_store(){let _=efficiency::save_checkpoint(app,&store,request);}
+                    if let Ok(store) = open_store() {
+                        let _ = efficiency::save_checkpoint(app, &store, request);
+                    }
                     let activity =
                         context_compaction::activity(auto_compactions.len(), &compaction);
                     emit_provider_activity_event(

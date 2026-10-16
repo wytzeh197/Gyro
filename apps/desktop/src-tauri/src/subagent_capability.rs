@@ -194,7 +194,11 @@ impl ParentStopWatcher {
         child: &CancellationToken,
         runtime: Option<Duration>,
     ) -> anyhow::Result<Self> {
-        Self::start_until_deadline(parent, child, runtime.map(|runtime| Instant::now() + runtime))
+        Self::start_until_deadline(
+            parent,
+            child,
+            runtime.map(|runtime| Instant::now() + runtime),
+        )
     }
 
     fn start_until_deadline(
@@ -279,14 +283,15 @@ impl ChildRunControl {
         let control = claim_child_run_control(&mut flags, session_id, parent_session_id)?;
         let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
         let deadline = runtime.map(|runtime| Instant::now() + runtime);
-        let watcher = match ParentStopWatcher::start_until_deadline(&parent, &control.cancellation, deadline)
-        {
-            Ok(watcher) => watcher,
-            Err(error) => {
-                release_child_run_control(&mut flags, session_id, &control);
-                return Err(error.context("could not start the sub-agent stop watcher"));
-            }
-        };
+        let watcher =
+            match ParentStopWatcher::start_until_deadline(&parent, &control.cancellation, deadline)
+            {
+                Ok(watcher) => watcher,
+                Err(error) => {
+                    release_child_run_control(&mut flags, session_id, &control);
+                    return Err(error.context("could not start the sub-agent stop watcher"));
+                }
+            };
         drop(flags);
         Ok(Self {
             app: app.clone(),
@@ -318,7 +323,11 @@ impl ChildRunControl {
             &self.control,
         )?;
         let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
-        let watcher = match ParentStopWatcher::start_until_deadline(&parent, &next.cancellation, self.deadline) {
+        let watcher = match ParentStopWatcher::start_until_deadline(
+            &parent,
+            &next.cancellation,
+            self.deadline,
+        ) {
             Ok(watcher) => watcher,
             Err(error) => {
                 flags.insert(self.session_id.clone(), Arc::clone(&self.control));
@@ -332,11 +341,18 @@ impl ChildRunControl {
     }
 }
 
-fn remaining_child_runtime(deadline: Option<Instant>, now: Instant) -> anyhow::Result<Option<Duration>> {
-    deadline.map(|deadline| {
-        deadline.checked_duration_since(now).filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| anyhow::anyhow!("the sub-agent reached its runtime limit"))
-    }).transpose()
+fn remaining_child_runtime(
+    deadline: Option<Instant>,
+    now: Instant,
+) -> anyhow::Result<Option<Duration>> {
+    deadline
+        .map(|deadline| {
+            deadline
+                .checked_duration_since(now)
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or_else(|| anyhow::anyhow!("the sub-agent reached its runtime limit"))
+        })
+        .transpose()
 }
 
 impl Drop for ChildRunControl {
@@ -412,11 +428,22 @@ mod tests {
     fn child_continuations_keep_the_original_runtime_deadline() {
         let now = Instant::now();
         let deadline = now + Duration::from_secs(10);
-        assert_eq!(remaining_child_runtime(Some(deadline), now).unwrap(), Some(Duration::from_secs(10)));
-        assert_eq!(remaining_child_runtime(Some(deadline), now + Duration::from_secs(7)).unwrap(), Some(Duration::from_secs(3)));
+        assert_eq!(
+            remaining_child_runtime(Some(deadline), now).unwrap(),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            remaining_child_runtime(Some(deadline), now + Duration::from_secs(7)).unwrap(),
+            Some(Duration::from_secs(3))
+        );
         assert!(remaining_child_runtime(Some(deadline), deadline).is_err());
-        assert!(remaining_child_runtime(Some(deadline), deadline + Duration::from_secs(1)).is_err());
-        assert_eq!(remaining_child_runtime(None, now + Duration::from_secs(1000)).unwrap(), None);
+        assert!(
+            remaining_child_runtime(Some(deadline), deadline + Duration::from_secs(1)).is_err()
+        );
+        assert_eq!(
+            remaining_child_runtime(None, now + Duration::from_secs(1000)).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -665,5 +692,4 @@ mod tests {
         assert!(child.is_cancelled(), "research outlived its runtime");
         assert!(!parent.is_cancelled());
     }
-
 }

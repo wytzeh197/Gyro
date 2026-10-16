@@ -1672,7 +1672,8 @@ impl SessionStore {
     /// Metadata-only display revision. Identity and modification time also
     /// invalidate a same-size replacement; no event text is read or retained.
     pub fn transcript_revision(&self, session_id: Uuid) -> Result<String> {
-        let session = self.get_session(session_id)?
+        let session = self
+            .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
         let path = self.session_events_path(session.id)?;
         if !path.exists() {
@@ -1681,18 +1682,28 @@ impl SessionStore {
         let file = open_session_event_log_for_read(&path)?;
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)?;
         let metadata = file.metadata()?;
-        let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)
-            .map(|time| time.as_nanos()).unwrap_or(0);
+        let modified = metadata
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_nanos())
+            .unwrap_or(0);
         #[cfg(unix)]
         let identity = {
             use std::os::unix::fs::MetadataExt;
             format!("{}:{}", metadata.dev(), metadata.ino())
         };
         #[cfg(not(unix))]
-        let identity = metadata.created().ok()
+        let identity = metadata
+            .created()
+            .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|time| time.as_nanos()).unwrap_or(0).to_string();
-        Ok(format!("{session_id}:{identity}:{}:{modified}", metadata.len()))
+            .map(|time| time.as_nanos())
+            .unwrap_or(0)
+            .to_string();
+        Ok(format!(
+            "{session_id}:{identity}:{}:{modified}",
+            metadata.len()
+        ))
     }
 
     /// Complete display history. Provider context continues to use bounded reads.
@@ -1712,7 +1723,9 @@ impl SessionStore {
         let mut line_index = 0;
         while let Some(line) = read_bounded_session_event_line(&mut reader)? {
             if !line.trim().is_empty() {
-                if let Some(event) = parse_session_event_line_or_skip(&events_path, line_index, &line) {
+                if let Some(event) =
+                    parse_session_event_line_or_skip(&events_path, line_index, &line)
+                {
                     events.push(event);
                 }
             }
@@ -1767,13 +1780,17 @@ impl SessionStore {
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id,false)
+        self.read_context_events_filtered(session_id, false)
     }
     /// Latest structured records plus durable routing evidence, without loading every old checkpoint.
     pub fn read_efficiency_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id,true)
+        self.read_context_events_filtered(session_id, true)
     }
-    fn read_context_events_filtered(&self, session_id: Uuid, efficiency: bool) -> Result<Vec<SessionEvent>> {
+    fn read_context_events_filtered(
+        &self,
+        session_id: Uuid,
+        efficiency: bool,
+    ) -> Result<Vec<SessionEvent>> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1855,7 +1872,9 @@ impl SessionStore {
                         | SessionEventKind::PlanUpdated
                         | SessionEventKind::ChatModeChanged
                         | SessionEventKind::TaskCheckpoint
-                ) || (event.kind == SessionEventKind::SystemEvent && event.payload["kind"] == "efficiency-phase-route") {
+                ) || (event.kind == SessionEventKind::SystemEvent
+                    && event.payload["kind"] == "efficiency-phase-route")
+                {
                     context_events.push((offset, event));
                 }
             }
@@ -1924,7 +1943,9 @@ impl SessionStore {
 
         let sql = if efficiency {
             "select event_json from session_context_events e where session_id=?1 and (json_extract(event_json,'$.payload.kind')='efficiency-phase-route' or json_extract(event_json,'$.kind')='goal-updated' or log_offset=(select max(log_offset) from session_context_events n where n.session_id=e.session_id and json_extract(n.event_json,'$.kind')=json_extract(e.event_json,'$.kind'))) order by log_offset asc"
-        } else {"select event_json from session_context_events where session_id = ?1 order by log_offset asc"};
+        } else {
+            "select event_json from session_context_events where session_id = ?1 order by log_offset asc"
+        };
         let mut statement = self.conn.prepare(sql)?;
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             row.get::<_, String>(0)
@@ -2349,10 +2370,18 @@ impl SessionStore {
     pub fn link_efficiency_task(&self, task: Uuid, session: Uuid, turn: Uuid) -> Result<()> {
         crate::efficiency::accounting::link(&self.conn, task, session, turn)
     }
-    pub fn record_efficiency_metadata(&self, usage: Uuid, price: Option<&crate::efficiency::pricing::PriceSnapshot>, attribution: &crate::efficiency::context::Attribution) -> Result<()> {
+    pub fn record_efficiency_metadata(
+        &self,
+        usage: Uuid,
+        price: Option<&crate::efficiency::pricing::PriceSnapshot>,
+        attribution: &crate::efficiency::context::Attribution,
+    ) -> Result<()> {
         crate::efficiency::accounting::metadata(&self.conn, usage, price, attribution)
     }
-    pub fn efficiency_task_totals(&self, task: Uuid) -> Result<crate::efficiency::accounting::TaskTotals> {
+    pub fn efficiency_task_totals(
+        &self,
+        task: Uuid,
+    ) -> Result<crate::efficiency::accounting::TaskTotals> {
         crate::efficiency::accounting::totals(&self.conn, task)
     }
 
@@ -2382,11 +2411,18 @@ impl SessionStore {
         crate::usage_receipts::note_call(&self.conn, session_id, turn_id)
     }
 
-    pub fn session_usage_tokens(&self, session_id: Uuid) -> Result<Option<crate::usage::UsageTokens>> {
+    pub fn session_usage_tokens(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<crate::usage::UsageTokens>> {
         crate::usage_receipts::session_tokens(&self.conn, session_id)
     }
 
-    pub fn task_usage_tokens(&self, session_id: Uuid, turn_id: Uuid) -> Result<Option<crate::usage::UsageTokens>> {
+    pub fn task_usage_tokens(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<crate::usage::UsageTokens>> {
         crate::usage_receipts::task_tokens(&self.conn, session_id, turn_id)
     }
 
@@ -2397,11 +2433,29 @@ impl SessionStore {
         session_id: Uuid,
         turn_id: Uuid,
     ) -> Result<crate::usage::UsageTotals> {
-        crate::usage::provider_usage_outside_turn_since(&self.conn, provider_id, since, session_id, turn_id)
+        crate::usage::provider_usage_outside_turn_since(
+            &self.conn,
+            provider_id,
+            since,
+            session_id,
+            turn_id,
+        )
     }
 
-    pub fn link_usage_turn(&self, child_session: Uuid, child_turn: Uuid, parent_session: Uuid, parent_turn: Uuid) -> Result<()> {
-        crate::usage_receipts::link_turn(&self.conn, child_session, child_turn, parent_session, parent_turn)
+    pub fn link_usage_turn(
+        &self,
+        child_session: Uuid,
+        child_turn: Uuid,
+        parent_session: Uuid,
+        parent_turn: Uuid,
+    ) -> Result<()> {
+        crate::usage_receipts::link_turn(
+            &self.conn,
+            child_session,
+            child_turn,
+            parent_session,
+            parent_turn,
+        )
     }
 
     /// What one chat has cost, across every call it produced.
@@ -3674,14 +3728,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(indexed_bytes, durable.len() as u64);
-        assert_eq!(store.read_context_events(session.id).unwrap()[0].id, goal.id);
+        assert_eq!(
+            store.read_context_events(session.id).unwrap()[0].id,
+            goal.id
+        );
 
         // Recovery reads leave the file alone; the next append repairs only
         // the unfinished record and remains visible to the context index.
-        assert_eq!(
-            std::fs::read(&session.events_path).unwrap(),
-            interrupted
-        );
+        assert_eq!(std::fs::read(&session.events_path).unwrap(), interrupted);
         let resumed = store
             .append_event(
                 session.id,

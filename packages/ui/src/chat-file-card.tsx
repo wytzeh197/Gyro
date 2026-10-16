@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image, Music2, Video, X } from "lucide-react";
 import { workspaceFileBadge } from "./workspace-file-icons";
@@ -12,9 +19,24 @@ export const ChatFileActionsContext = createContext<
         kind: "image" | "video" | "audio",
       ) => Promise<string | undefined>;
       open: (path: string) => void;
+      resolveCitedImage?: (request: {
+        target: string;
+        providerId?: string;
+        providerSessionId?: string;
+      }) => Promise<string | undefined>;
     }
   | undefined
 >(undefined);
+
+export type ChatImageHint = {
+  providerId?: string;
+  providerSessionId?: string;
+  markdownImages?: ReadonlySet<string>;
+};
+
+export const ChatImageHintContext = createContext<ChatImageHint | undefined>(
+  undefined,
+);
 
 export function ChatFileCard({
   file,
@@ -245,6 +267,73 @@ export function ChatFileCard({
           )
         : null}
     </>
+  );
+}
+
+/**
+ * Turn a model-cited image path into a preview card.
+ * Without a resolver, or when the file is not in an allowed root, the original
+ * text stays. A backtick that repeats a markdown image in the same message
+ * renders nothing.
+ */
+export function CitedChatImage({
+  target,
+  alt,
+  fallback,
+  skipWhenMarkdownImage = false,
+}: {
+  target: string;
+  alt?: string;
+  fallback: ReactNode;
+  skipWhenMarkdownImage?: boolean;
+}) {
+  const actions = useContext(ChatFileActionsContext);
+  const hint = useContext(ChatImageHintContext);
+  const skipped =
+    skipWhenMarkdownImage &&
+    hint?.markdownImages?.has(target.trim()) === true;
+  const resolve = skipped ? undefined : actions?.resolveCitedImage;
+  const [path, setPath] = useState<string>();
+  const [settled, setSettled] = useState(!resolve);
+  useEffect(() => {
+    if (!resolve) {
+      setPath(undefined);
+      setSettled(true);
+      return;
+    }
+    let current = true;
+    setSettled(false);
+    setPath(undefined);
+    void resolve({
+      target,
+      providerId: hint?.providerId,
+      providerSessionId: hint?.providerSessionId,
+    })
+      .then((resolved) => {
+        if (!current) return;
+        setPath(resolved);
+        setSettled(true);
+      })
+      .catch(() => {
+        if (!current) return;
+        setPath(undefined);
+        setSettled(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [resolve, target, hint?.providerId, hint?.providerSessionId]);
+  if (skipped) return null;
+  if (!resolve) return <>{fallback}</>;
+  if (!settled || !path) {
+    return settled ? <>{fallback}</> : <span hidden />;
+  }
+  const name = alt?.trim() || path.split("/").pop() || "image";
+  return (
+    <ChatFileCard
+      file={{ target: path, name, kind: "image", local: true }}
+      variant="card"
+    />
   );
 }
 

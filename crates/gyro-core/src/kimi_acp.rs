@@ -25,6 +25,7 @@ const ACP_MAX_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 const ACP_MAX_STDERR_CHARS: usize = 64 * 1024;
 const ACP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const KIMI_USAGE_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KimiAcpMode {
@@ -37,6 +38,17 @@ pub enum KimiAcpApprovalKind {
     Command,
     FileChange,
     Other,
+}
+
+/// Plan mode blocks file writes. It does not block commands.
+///
+/// Grok treats `reject_once` on a shell tool as the person declining it and
+/// ends the whole turn (`permission_rejected`). Gyro then showed that as
+/// Stopped. A local backend check that runs `grok models --help` died that
+/// way. File edits stay rejected. Commands use the turn's normal approval
+/// policy, which already allows them when command approval is off.
+pub fn plan_mode_denies_approval(kind: KimiAcpApprovalKind) -> bool {
+    kind == KimiAcpApprovalKind::FileChange
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,7 +73,7 @@ pub struct KimiAcpActivity {
     /// Lines added and removed, measured from the call's ACP `diff` content.
     pub file_counts: Option<(usize, usize)>,
     pub status: String,
-    /// Live occupancy from ACP usage_update; kept separate from billed usage.
+    /// Live occupancy from the agent. Kept separate from billed usage.
     pub context_usage: Option<AcpContextUsage>,
 }
 
@@ -155,6 +167,9 @@ struct KimiAcpConnection {
     collecting_usage: bool,
     usage_observation: Option<AcpUsageObservation>,
     context_usage: Option<AcpContextUsage>,
+    /// Set once a wire frame, rather than a /usage text line, supplied occupancy.
+    context_from_wire: bool,
+    bound_session_id: Option<String>,
 }
 
 impl Drop for KimiAcpConnection {
@@ -309,6 +324,8 @@ impl KimiAcpConnection {
             collecting_usage: false,
             usage_observation: None,
             context_usage: None,
+            context_from_wire: false,
+            bound_session_id: None,
         })
     }
 
@@ -316,6 +333,7 @@ impl KimiAcpConnection {
         self.collecting_usage = true;
         // Clear replayed context: a resumed session may send historical updates.
         self.context_usage = None;
+        self.context_from_wire = false;
         let observation = acp_usage::normalize_prompt_usage(
             self.usage_provider,
             &Value::Null,
@@ -323,6 +341,34 @@ impl KimiAcpConnection {
         );
         crate::provider_observation::native_acp_usage(&observation);
         self.usage_observation = Some(observation);
+    }
+
+    /// Remember occupancy for this turn.
+    ///
+    /// A frame that does not name a window keeps the size already known.
+    /// Unchanged numbers do not publish another activity. `from_wire` marks a
+    /// session update so a later /usage text line cannot overwrite it.
+    fn note_live_context(
+        &mut self,
+        mut context: AcpContextUsage,
+        from_wire: bool,
+    ) -> Option<AcpContextUsage> {
+        if !self.collecting_usage {
+            return None;
+        }
+        if context.size == 0 {
+            if let Some(previous) = self.context_usage {
+                context.size = previous.size;
+            }
+        }
+        if from_wire {
+            self.context_from_wire = true;
+        }
+        if self.context_usage.is_some_and(|current| current == context) {
+            return None;
+        }
+        self.context_usage = Some(context);
+        Some(context)
     }
 
     fn observe_prompt_response(&mut self, message: &Value) {
@@ -398,6 +444,10 @@ impl KimiAcpConnection {
     }
 
     fn receive(&mut self) -> Result<Value> {
+        self.receive_until(None)
+    }
+
+    fn receive_until(&mut self, deadline: Option<Instant>) -> Result<Value> {
         loop {
             if self.cancellation.is_cancelled() {
                 anyhow::bail!("{} ACP run cancelled", self.provider_label);
@@ -407,6 +457,9 @@ impl KimiAcpConnection {
             }
             if self.last_activity_at.elapsed() >= self.inactivity_timeout {
                 anyhow::bail!("{} ACP run became inactive", self.provider_label);
+            }
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                anyhow::bail!("{} ACP usage query timed out", self.provider_label);
             }
             match self.incoming.recv_timeout(ACP_POLL_INTERVAL) {
                 Ok(Ok(frame)) => {
@@ -446,6 +499,77 @@ impl KimiAcpConnection {
             }
         }
     }
+
+    fn supports_kimi_usage_probe(&self) -> bool {
+        self.usage_provider == AcpProvider::Kimi
+            && acp_usage::kimi_code_037_usage_supported(&self.runtime_info)
+            && std::env::var_os("KIMI_CODE_LEGACY_FLAG").is_none()
+    }
+
+    /// A local command on the exact verified runtime, never a model generation.
+    /// Its text stays private to this reader and never reaches chat callbacks.
+    fn kimi_usage_probe(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<acp_usage::KimiCodeUsageSnapshot>> {
+        let id = self.send_request(
+            "session/prompt",
+            json!({
+                "sessionId": session_id, "prompt": [{"type": "text", "text": "/usage"}],
+            }),
+        )?;
+        let deadline = Instant::now() + KIMI_USAGE_PROBE_TIMEOUT;
+        let mut report = String::new();
+        for _ in 0..128 {
+            let message = self.receive_until(Some(deadline))?;
+            if message.get("method").is_none()
+                && message.get("id").and_then(Value::as_u64) == Some(id)
+            {
+                return Ok(message
+                    .get("result")
+                    .filter(|result| {
+                        result.get("stopReason").and_then(Value::as_str) == Some("end_turn")
+                    })
+                    .and_then(|_| acp_usage::parse_kimi_code_037_usage_report(&report)));
+            }
+            if message.get("method").and_then(Value::as_str) == Some("session/update") {
+                let Some(params) = message.get("params") else {
+                    continue;
+                };
+                if params.get("sessionId").and_then(Value::as_str) != Some(session_id) {
+                    continue;
+                }
+                let Some(update) = params.get("update") else {
+                    continue;
+                };
+                if self.collecting_usage {
+                    if let Some(context) = acp_usage::live_context_usage(update) {
+                        let _ = self.note_live_context(context, true);
+                    }
+                }
+                if update.get("sessionUpdate").and_then(Value::as_str)
+                    == Some("agent_message_chunk")
+                {
+                    let Some(text) = update.pointer("/content/text").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    anyhow::ensure!(
+                        report.len().saturating_add(text.len()) <= 4096,
+                        "Kimi ACP usage report exceeded its size limit"
+                    );
+                    report.push_str(text);
+                }
+            } else if message.get("method").is_some() {
+                // Metadata must not execute tools or request approvals. Refuse
+                // an unexpected reverse request without invoking chat handlers.
+                if let Some(id) = message.get("id") {
+                    self.send_error(id.clone(), -32601, "unsupported during usage query")?;
+                    anyhow::bail!("Kimi ACP usage query requested an unexpected operation");
+                }
+            }
+        }
+        anyhow::bail!("Kimi ACP usage query exceeded its frame limit")
+    }
 }
 
 pub fn run_kimi_acp<Delta, Activity, Approval, WriteFile>(
@@ -461,20 +585,50 @@ where
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
     WriteFile: FnMut(&Path, &str) -> Result<()>,
 {
+    run_kimi_acp_with_usage_probe(
+        request,
+        &mut on_delta,
+        &mut on_activity,
+        &mut on_approval,
+        &mut on_write_file,
+        true,
+    )
+}
+
+fn run_kimi_acp_with_usage_probe<Delta, Activity, Approval, WriteFile>(
+    mut request: KimiAcpRequest,
+    mut on_delta: &mut Delta,
+    mut on_activity: &mut Activity,
+    mut on_approval: &mut Approval,
+    mut on_write_file: &mut WriteFile,
+    allow_usage_probe: bool,
+) -> Result<KimiAcpOutput>
+where
+    Delta: FnMut(&str),
+    Activity: FnMut(&KimiAcpActivity),
+    Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
+    WriteFile: FnMut(&Path, &str) -> Result<()>,
+{
     let started_at = Instant::now();
     crate::timing::mark(crate::timing::Stage::ProcessStart);
     let mut connection = KimiAcpConnection::start(&request)?;
     crate::timing::mark(crate::timing::Stage::ProcessSpawned);
     let mut response = String::new();
+    let mut client_capabilities = json!({
+        "fs": {"readTextFile": true, "writeTextFile": true},
+        "terminal": false,
+    });
+    // Grok sends live occupancy only when the client asks for the status line.
+    // The capability is the request. Gyro does not run a status-line script.
+    if is_grok_acp_program(&request.program) {
+        client_capabilities["_meta"] = json!({ "x.ai/statusLine": true });
+    }
     let initialize_id = connection.send_request(
         "initialize",
         json!({
             "protocolVersion": ACP_PROTOCOL_VERSION,
             "clientInfo": {"name": "Gyro", "version": env!("CARGO_PKG_VERSION")},
-            "clientCapabilities": {
-                "fs": {"readTextFile": true, "writeTextFile": true},
-                "terminal": false,
-            },
+            "clientCapabilities": client_capabilities,
         }),
     )?;
     let initialize = wait_for_response(
@@ -534,6 +688,13 @@ where
         &mut on_approval,
         &mut on_write_file,
     )?;
+    connection.bound_session_id = Some(session_id.clone());
+    if !allow_usage_probe && request.resume_session_id.is_some() && !resumed {
+        anyhow::bail!(
+            "{} could not reopen its session after a usage query; no generation was sent",
+            request.provider_label
+        );
+    }
     if let Some(slot) = &request.opened_session {
         if let Ok(mut slot) = slot.lock() {
             *slot = Some(session_id.clone());
@@ -574,9 +735,16 @@ where
             // An explicit Google model must not silently run the CLI default.
             if provider_id_from_program(&request.program.to_string_lossy())
                 .is_some_and(|id| matches!(id, "gemini" | "antigravity"))
-                || matches!(request.provider_label.as_str(), "Gemini" | "Google Antigravity")
+                || matches!(
+                    request.provider_label.as_str(),
+                    "Gemini" | "Google Antigravity"
+                )
             {
-                anyhow::bail!("{} could not select model {}: {error}", request.provider_label, request.model);
+                anyhow::bail!(
+                    "{} could not select model {}: {error}",
+                    request.provider_label,
+                    request.model
+                );
             }
         }
     }
@@ -618,7 +786,7 @@ where
     }
 
     crate::timing::mark(crate::timing::Stage::ProtocolReady);
-    let mut prompt = request.prompt;
+    let mut prompt = std::mem::take(&mut request.prompt);
     if resumed {
         if let Some(short_prompt) = request.resumed_prompt.as_deref() {
             if let Some(text) = prompt.first_mut().and_then(|part| part.get_mut("text")) {
@@ -654,9 +822,49 @@ where
         }
     }
 
+    let usage_baseline = if allow_usage_probe && connection.supports_kimi_usage_probe() {
+        match connection.kimi_usage_probe(&session_id) {
+            Ok(snapshot) => snapshot,
+            Err(_) if !request.cancellation.is_cancelled() => {
+                // A timed-out metadata response can arrive late as uncorrelated
+                // session/update text. Reopen before the one real generation,
+                // so it can never leak into or replace the user's answer.
+                drop(connection);
+                let mut retry = request;
+                retry.resume_session_id = Some(session_id);
+                retry.resumed_prompt = None;
+                retry.prompt = prompt;
+                retry.conversation_history_text = None;
+                retry.timeout = retry.timeout.saturating_sub(started_at.elapsed());
+                let mut output = run_kimi_acp_with_usage_probe(
+                    retry,
+                    on_delta,
+                    on_activity,
+                    on_approval,
+                    on_write_file,
+                    false,
+                )?;
+                output.resumed &= resumed;
+                output.duration_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                return Ok(output);
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+
     crate::timing::mark(crate::timing::Stage::PromptSent);
     crate::provider_observation::native_prompt(&json!(prompt));
     connection.begin_usage();
+    // The before-probe ran first and begin_usage cleared its replay. A resumed
+    // Kimi session can still show that occupancy as soon as the turn starts.
+    if let Some(context) = usage_baseline
+        .as_ref()
+        .and_then(|snapshot| snapshot.context)
+    {
+        publish_live_context(&mut connection, context, false, on_activity);
+    }
     let prompt_id = connection.send_request(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),
@@ -678,6 +886,39 @@ where
         connection.interrupted_usage();
     }
     let result = result?;
+    // A live frame wins. Flat `_meta.totalTokens` is last-call context only
+    // when Grok sent no occupancy during the turn, and only when it is not
+    // the summed bill.
+    if connection.usage_provider == AcpProvider::Grok && connection.context_usage.is_none() {
+        if let Some(context) = acp_usage::grok_prompt_context(&result) {
+            publish_live_context(&mut connection, context, false, on_activity);
+        }
+    }
+    if let Some(baseline) = usage_baseline {
+        if !request.cancellation.is_cancelled() {
+            if let Ok(Some(after)) = connection.kimi_usage_probe(&session_id) {
+                // The probe stores a usage_update on the wire. A text line fills
+                // occupancy only when that update never arrived, including when
+                // the only reading so far is the pre-turn baseline.
+                if let Some(context) = after.context {
+                    if connection.context_usage.is_none() || !connection.context_from_wire {
+                        publish_live_context(&mut connection, context, false, on_activity);
+                    }
+                }
+                let observation = acp_usage::kimi_code_037_usage_delta(
+                    baseline,
+                    after,
+                    connection.runtime_info.clone(),
+                );
+                crate::provider_observation::native_acp_usage(&observation);
+                connection.usage_observation = Some(observation);
+            }
+        }
+    }
+    if request.cancellation.is_cancelled() {
+        connection.interrupted_usage();
+        anyhow::bail!("{} ACP run cancelled", request.provider_label);
+    }
     let stop_reason = result
         .get("stopReason")
         .and_then(Value::as_str)
@@ -693,9 +934,15 @@ where
     // Cancellation and refusal must reach the caller's existing non-success
     // paths, even when the agent streamed text before stopping.
     match stop_reason.as_str() {
+        // A Stop the person already asked for is handled above, where the
+        // token is already cancelled. This branch is the agent ending the
+        // prompt on its own — a declined tool, for example. Setting the
+        // shared token here made Gyro report "You stopped this turn."
         "cancelled" => {
-            request.cancellation.cancel();
-            anyhow::bail!("{} ACP run cancelled", request.provider_label);
+            anyhow::bail!(
+                "{} ended this turn because a tool permission was declined",
+                request.provider_label
+            );
         }
         "refusal" => {
             anyhow::bail!("{} ACP agent refused to continue", request.provider_label);
@@ -844,6 +1091,10 @@ where
                         || lower.contains("expired")
                         || lower.contains("unknown")
                         || lower.contains("unsupported")
+                        // Grok refuses to load a session whose saved sandbox
+                        // profile differs from this process. A fresh session
+                        // keeps the turn; Gyro still has the transcript.
+                        || lower.contains("sandbox")
                 };
                 if recoverable {
                     continue;
@@ -930,44 +1181,95 @@ pub struct AcpModelDiscovery {
 fn acp_model_discovery(session: &Value) -> AcpModelDiscovery {
     let mut models = Vec::<AcpModel>::new();
     let mut append = |option: &Value| {
-        let Some(id) = option.get("modelId").or_else(|| option.get("value"))
-            .and_then(Value::as_str).map(str::trim)
+        let Some(id) = option
+            .get("modelId")
+            .or_else(|| option.get("value"))
+            .and_then(Value::as_str)
+            .map(str::trim)
             .filter(|id| !id.is_empty() && id.len() <= 200 && !id.chars().any(char::is_control))
-        else { return; };
-        if models.len() >= 500 || models.iter().any(|model| model.id == id) { return; }
-        let label = option.get("name").or_else(|| option.get("label"))
-            .and_then(Value::as_str).filter(|label| !label.trim().is_empty()).unwrap_or(id);
+        else {
+            return;
+        };
+        if models.len() >= 500 || models.iter().any(|model| model.id == id) {
+            return;
+        }
+        let label = option
+            .get("name")
+            .or_else(|| option.get("label"))
+            .and_then(Value::as_str)
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or(id);
         models.push(AcpModel {
             id: id.into(),
             display_name: redact_secrets(&label.chars().take(160).collect::<String>()),
-            description: option.get("description").and_then(Value::as_str)
+            description: option
+                .get("description")
+                .and_then(Value::as_str)
                 .map(|text| redact_secrets(&text.chars().take(500).collect::<String>())),
         });
     };
-    for option in session.pointer("/models/availableModels")
-        .and_then(Value::as_array).into_iter().flatten() {
+    for option in session
+        .pointer("/models/availableModels")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         append(option);
     }
-    for config in session.get("configOptions").and_then(Value::as_array).into_iter().flatten()
-        .filter(|config| config.get("id").and_then(Value::as_str) == Some("model")
-            || config.get("category").and_then(Value::as_str) == Some("model")) {
-        for option in config.get("options").and_then(Value::as_array).into_iter().flatten() {
+    for config in session
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|config| {
+            config.get("id").and_then(Value::as_str) == Some("model")
+                || config.get("category").and_then(Value::as_str) == Some("model")
+        })
+    {
+        for option in config
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(group) = option.get("options").and_then(Value::as_array) {
-                for option in group { append(option); }
-            } else { append(option); }
+                for option in group {
+                    append(option);
+                }
+            } else {
+                append(option);
+            }
         }
     }
-    let current_model_id = session.pointer("/models/currentModelId").and_then(Value::as_str)
-        .or_else(|| session.get("configOptions").and_then(Value::as_array)
-            .and_then(|options| options.iter().find(|option|
-                option.get("id").and_then(Value::as_str) == Some("model")))
-            .and_then(|option| option.get("currentValue")).and_then(Value::as_str))
-        .filter(|id| models.iter().any(|model| model.id == *id)).map(str::to_string);
-    AcpModelDiscovery { models, current_model_id }
+    let current_model_id = session
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            session
+                .get("configOptions")
+                .and_then(Value::as_array)
+                .and_then(|options| {
+                    options
+                        .iter()
+                        .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+                })
+                .and_then(|option| option.get("currentValue"))
+                .and_then(Value::as_str)
+        })
+        .filter(|id| models.iter().any(|model| model.id == *id))
+        .map(str::to_string);
+    AcpModelDiscovery {
+        models,
+        current_model_id,
+    }
 }
 
 fn acp_offered_model_ids(session: &Value) -> Vec<String> {
-    acp_model_discovery(session).models.into_iter().map(|model| model.id).collect()
+    acp_model_discovery(session)
+        .models
+        .into_iter()
+        .map(|model| model.id)
+        .collect()
 }
 
 /// Name a selected model the way the agent names it.
@@ -994,6 +1296,57 @@ fn acp_model_id(selected: &str, offered: &[String]) -> String {
         // Nothing advertised matches, so the agent is the one who gets to
         // reject it. Rewriting the id further would only invent a new guess.
         .unwrap_or_else(|| selected.to_string())
+}
+
+fn publish_live_context<Activity>(
+    connection: &mut KimiAcpConnection,
+    context: AcpContextUsage,
+    from_wire: bool,
+    on_activity: &mut Activity,
+) where
+    Activity: FnMut(&KimiAcpActivity),
+{
+    let Some(context) = connection.note_live_context(context, from_wire) else {
+        return;
+    };
+    on_activity(&KimiAcpActivity {
+        id: "live-context-usage".into(),
+        kind: "context-usage".into(),
+        label: "Context usage".into(),
+        detail: None,
+        file_counts: None,
+        status: "running".into(),
+        context_usage: Some(context),
+    });
+}
+
+/// Grok puts the update under `params.update`, or sends the update as `params`.
+fn xai_context_update(params: &Value) -> Option<&Value> {
+    if let Some(update) = params
+        .get("update")
+        .filter(|update| update.get("sessionUpdate").is_some())
+    {
+        return Some(update);
+    }
+    params.get("sessionUpdate").is_some().then_some(params)
+}
+
+/// Ignore a frame that names some other session. A frame that names no session
+/// still belongs to this process.
+fn announced_session_matches(bound: Option<&str>, params: &Value, update: &Value) -> bool {
+    let Some(bound) = bound else {
+        return true;
+    };
+    let announced = ["sessionId", "session_id"].into_iter().find_map(|key| {
+        params
+            .get(key)
+            .or_else(|| update.get(key))
+            .and_then(Value::as_str)
+    });
+    match announced {
+        Some(id) => id == bound,
+        None => true,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1053,17 +1406,10 @@ where
         match method {
             "session/update" => {
                 if connection.collecting_usage {
-                    if let Some(context) = params.get("update").and_then(acp_usage::context_usage) {
-                        connection.context_usage = Some(context);
-                        on_activity(&KimiAcpActivity {
-                            id: "live-context-usage".into(),
-                            kind: "context-usage".into(),
-                            label: "Context usage".into(),
-                            detail: None,
-                            file_counts: None,
-                            status: "running".into(),
-                            context_usage: Some(context),
-                        });
+                    if let Some(context) =
+                        params.get("update").and_then(acp_usage::live_context_usage)
+                    {
+                        publish_live_context(connection, context, true, on_activity);
                     }
                     // Reopening/loading a session can replay its old replies and
                     // tool activities. They already belong to native history;
@@ -1076,6 +1422,23 @@ where
                         on_delta,
                         on_activity,
                     );
+                }
+            }
+            // Grok's occupancy rail. Notifications only: a request falls through
+            // to the unsupported-method error. Chat text stays on session/update.
+            "_x.ai/session/update" | "x.ai/session/update" | "x.ai/session_notification"
+                if message.get("id").is_none() =>
+            {
+                if let Some(update) = xai_context_update(&params) {
+                    if announced_session_matches(
+                        connection.bound_session_id.as_deref(),
+                        &params,
+                        update,
+                    ) {
+                        if let Some(context) = acp_usage::live_context_usage(update) {
+                            publish_live_context(connection, context, true, on_activity);
+                        }
+                    }
                 }
             }
             "session/request_permission" => {
@@ -1598,26 +1961,39 @@ pub fn discover_acp_models(
         opened_session: None,
     };
     let mut connection = KimiAcpConnection::start(&request)?;
-    let id = connection.send_request("initialize", json!({
-        "protocolVersion": ACP_PROTOCOL_VERSION,
-        "clientInfo": {"name": "Gyro model discovery", "version": env!("CARGO_PKG_VERSION")},
-        "clientCapabilities": {},
-    }))?;
+    let id = connection.send_request(
+        "initialize",
+        json!({
+            "protocolVersion": ACP_PROTOCOL_VERSION,
+            "clientInfo": {"name": "Gyro model discovery", "version": env!("CARGO_PKG_VERSION")},
+            "clientCapabilities": {},
+        }),
+    )?;
     let initialize = wait_for_simple_response(&mut connection, id)?;
-    let advertised = initialize.get("authMethods").and_then(Value::as_array)
-        .into_iter().flatten().filter_map(|method| method.get("id").and_then(Value::as_str))
+    let advertised = initialize
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|method| method.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
-    if let Some(method) = request.auth_method_ids.iter()
-        .find(|method| advertised.is_empty() || advertised.contains(&method.as_str())) {
+    if let Some(method) = request
+        .auth_method_ids
+        .iter()
+        .find(|method| advertised.is_empty() || advertised.contains(&method.as_str()))
+    {
         let id = connection.send_request("authenticate", json!({"methodId": method}))?;
         wait_for_simple_response(&mut connection, id)?;
     } else if !advertised.is_empty() {
         anyhow::bail!("{provider_label} does not advertise a supported authentication method");
     }
-    let id = connection.send_request("session/new", json!({
-        "cwd": request.workspace,
-        "mcpServers": [],
-    }))?;
+    let id = connection.send_request(
+        "session/new",
+        json!({
+            "cwd": request.workspace,
+            "mcpServers": [],
+        }),
+    )?;
     let session = wait_for_simple_response(&mut connection, id)?;
     Ok(acp_model_discovery(&session))
 }
@@ -1759,9 +2135,9 @@ mod tests {
     use super::{
         acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
         acp_session_reopen_methods, check_kimi_acp_health, classify_approval,
-        is_acp_method_not_found, permission_option_id, resolve_workspace_write_path, run_kimi_acp,
-        CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
-        KimiAcpMode, KimiAcpRequest,
+        is_acp_method_not_found, permission_option_id, plan_mode_denies_approval,
+        resolve_workspace_write_path, run_kimi_acp, CredentialPolicy, KimiAcpApprovalDecision,
+        KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
     };
 
     #[test]
@@ -1776,8 +2152,14 @@ mod tests {
                 {"group": "Other", "options": [{"value": "gemini-3.7-flash", "name": "Gemini 3.7 Flash"}]}
             ]}]
         }));
-        assert_eq!(result.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
-            ["gemini-3.8-flash", "gemini-3.7-flash"]);
+        assert_eq!(
+            result
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["gemini-3.8-flash", "gemini-3.7-flash"]
+        );
         assert_eq!(result.current_model_id.as_deref(), Some("gemini-3.8-flash"));
         assert_eq!(result.models[0].display_name, "Gemini 3.8 Flash");
     }
@@ -1785,7 +2167,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn google_discovery_opens_metadata_without_sending_a_prompt() {
-        let (_temp, program) = acp_fixture(r#"
+        let (_temp, program) = acp_fixture(
+            r#"
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"gemini-api-key"}]}}' ;;
@@ -1794,18 +2177,24 @@ while IFS= read -r line; do
     *'"method":"session/prompt"'*) exit 9 ;;
   esac
 done
-"#);
+"#,
+        );
         let result = super::discover_acp_models(
-            "Google Antigravity", program, vec![], &["gemini-api-key"],
+            "Google Antigravity",
+            program,
+            vec![],
+            &["gemini-api-key"],
             std::time::Duration::from_secs(2),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.models[0].id, "gemini-3.8-flash");
     }
 
     #[cfg(unix)]
     #[test]
     fn google_rejected_model_stops_before_any_prompt() {
-        let (temp, program) = acp_fixture(r#"
+        let (temp, program) = acp_fixture(
+            r#"
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
@@ -1815,13 +2204,27 @@ while IFS= read -r line; do
     *'"method":"session/prompt"'*) touch unexpected-prompt; exit 9 ;;
   esac
 done
-"#);
-        let mut request = fixture_request(program, temp.path().to_path_buf(), super::CancellationToken::default(), None);
+"#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            super::CancellationToken::default(),
+            None,
+        );
         request.provider_label = "Google Antigravity".into();
         request.model = "unavailable-model".into();
-        let result = run_kimi_acp(request, |_| {}, |_| {},
-            |_| Ok(KimiAcpApprovalDecision::RejectOnce), |_, _| Ok(()));
-        assert!(result.unwrap_err().to_string().contains("could not select model"));
+        let result = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("could not select model"));
         assert!(!temp.path().join("unexpected-prompt").exists());
     }
 
@@ -1896,7 +2299,9 @@ done
             request,
             |_| {},
             |activity| {
-                if let Some(context) = activity.context_usage { live_context.push(context); }
+                if let Some(context) = activity.context_usage {
+                    live_context.push(context);
+                }
             },
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
             |_, _| Ok(()),
@@ -1909,9 +2314,142 @@ done
                 size: 100000,
             })
         );
-        assert_eq!(live_context, vec![crate::acp_usage::AcpContextUsage { used: 50000, size: 100000 }]);
+        assert_eq!(
+            live_context,
+            vec![crate::acp_usage::AcpContextUsage {
+                used: 50000,
+                size: 100000
+            }]
+        );
         // Occupancy is published while the turn is running, and never replaces billed consumption.
         assert_eq!(output.usage_observation.tokens.total_tokens, 125);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grok_status_line_occupancy_ignores_turn_bills_and_preserves_the_window() {
+        use std::os::unix::fs::symlink;
+        let (temp, script) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  id=${line#*'"id":'}
+  id=${id%%,*}
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '%s\n' "$line" > initialize-request
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"authMethods":[{"id":"login"}]}}\n' "$id" ;;
+    *'"method":"authenticate"'*|*'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"grok-session"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"other-session","update":{"sessionUpdate":"session_status","context_window":{"context_tokens":1,"context_window_size":256000},"session_input_tokens":900000}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":99,"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"session_status","context_window":{"context_tokens":2,"context_window_size":256000}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"sessionId":"grok-session","update":{"sessionUpdate":"session_status","context_window":{"context_tokens":33022,"context_window_size":256000},"session_input_tokens":900000}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"grok-session","update":{"sessionUpdate":"response_started","input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"grok-session","update":{"sessionUpdate":"response_started","message_id":"m1","input_tokens":800,"cache_read_input_tokens":20000,"cache_creation_input_tokens":0}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"sessionId":"grok-session","update":{"sessionUpdate":"response_completed","message_id":"m1","usage":{"input_tokens":1000,"output_tokens":50,"cache_read_input_tokens":20000,"cache_creation_input_tokens":500,"reasoning_tokens":10}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionUpdate":"turn_usage","sessionId":"grok-session","usage":{"input_tokens":329203,"output_tokens":4316}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"sessionId":"grok-session","update":{"sessionUpdate":"turn_completed","usage":{"inputTokens":329203,"outputTokens":4316,"totalTokens":333519}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"grok-session","sessionUpdate":"auto_compact_started","tokens_used":40000,"context_window":256000}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"sessionId":"grok-session","update":{"sessionUpdate":"auto_compact_completed","tokens_after":12000}}}'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"totalTokens":333519,"usage":{"inputTokens":329203,"outputTokens":4316,"totalTokens":333519,"modelCalls":13}}}}\n' "$id" ;;
+  esac
+done
+"#,
+        );
+        let workspace = temp.path().to_path_buf();
+        let run = |program: PathBuf| {
+            let mut request = fixture_request(
+                program,
+                workspace.clone(),
+                CancellationToken::default(),
+                None,
+            );
+            request.provider_label = "xAI".into();
+            let mut live_context = Vec::new();
+            let output = run_kimi_acp(
+                request,
+                |_| {},
+                |activity| {
+                    if let Some(context) = activity.context_usage {
+                        live_context.push(context);
+                    }
+                },
+                |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            (output, live_context)
+        };
+        let _ = run(script.clone());
+        let plain = std::fs::read_to_string(workspace.join("initialize-request")).unwrap();
+        assert!(
+            !plain.contains("x.ai/statusLine"),
+            "only the grok program advertises the status line"
+        );
+        let program = workspace.join("grok");
+        symlink(&script, &program).unwrap();
+        let (output, live_context) = run(program);
+        let advertised = std::fs::read_to_string(workspace.join("initialize-request")).unwrap();
+        assert!(advertised.contains("x.ai/statusLine"));
+        assert!(!advertised.contains("incrementalBashOutput"));
+        let window = |used| crate::acp_usage::AcpContextUsage { used, size: 256000 };
+        assert_eq!(
+            live_context,
+            vec![
+                window(33022),
+                window(20800),
+                window(21500),
+                window(40000),
+                window(12000)
+            ]
+        );
+        assert_eq!(output.context_usage, Some(window(12000)));
+        assert_eq!(output.response, "");
+        assert_eq!(output.usage_observation.tokens.total_tokens, 333519);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grok_prompt_total_tokens_fill_context_only_when_they_are_not_the_turn_bill() {
+        let accept = r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn","_meta":{"totalTokens":33022,"usage":{"inputTokens":329203,"outputTokens":4316,"totalTokens":333519,"modelCalls":13}}}}"#;
+        let reject = r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn","_meta":{"totalTokens":333519,"usage":{"inputTokens":329203,"outputTokens":4316,"totalTokens":333519,"modelCalls":13}}}}"#;
+        for (completion, context) in [
+            (
+                accept,
+                Some(crate::acp_usage::AcpContextUsage {
+                    used: 33022,
+                    size: 0,
+                }),
+            ),
+            (reject, None),
+        ] {
+            let (temp, program) = completion_fixture(completion, false);
+            let mut request = fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            );
+            request.provider_label = "xAI".into();
+            let mut live_context = Vec::new();
+            let output = run_kimi_acp(
+                request,
+                |_| {},
+                |activity| {
+                    if let Some(context) = activity.context_usage {
+                        live_context.push(context);
+                    }
+                },
+                |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(output.context_usage, context);
+            assert_eq!(live_context, context.into_iter().collect::<Vec<_>>());
+            assert_eq!(output.usage_observation.tokens.total_tokens, 333519);
+        }
     }
 
     #[cfg(unix)]
@@ -2114,6 +2652,403 @@ done
     }
 
     #[cfg(unix)]
+    fn kimi_code_usage_fixture(mode: &str) -> (tempfile::TempDir, PathBuf) {
+        acp_fixture(&format!(
+            r#"
+starts=0
+test ! -f starts || starts=$(cat starts)
+starts=$((starts + 1))
+printf '%s' "$starts" > starts
+queries=0
+while IFS= read -r line; do
+  id=${{line#*'"id":'}}
+  id=${{id%%,*}}
+  case "$line" in
+    *'"method":"initialize"'*) printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":1,"agentInfo":{{"name":"Kimi Code CLI","version":"0.37.2"}}}}}}\n' "$id" ;;
+    *'"method":"authenticate"'*|*'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*) printf '{{"jsonrpc":"2.0","id":%s,"result":{{}}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{{"jsonrpc":"2.0","id":%s,"result":{{"sessionId":"same-session"}}}}\n' "$id" ;;
+    *'"method":"session/resume"'*|*'"method":"session/load"'*)
+      if test '{mode}' = resume-failure && test "$starts" = 2; then
+        printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"Method not found"}}}}\n' "$id"
+      else
+        printf '{{"jsonrpc":"2.0","id":%s,"result":{{"sessionId":"same-session"}}}}\n' "$id"
+      fi ;;
+    *'"text":"/usage"'*)
+      queries=$((queries + 1))
+      printf 'query\n' >> queries
+      if {{ {{ test '{mode}' = timeout || test '{mode}' = resume-failure; }} && test "$starts" = 1; }} || {{ test '{mode}' = post-timeout && test "$queries" = 2; }}; then
+        printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"same-session","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"internal report must never leak"}}}}}}}}'
+        sleep 10
+      elif test '{mode}' = error || {{ test '{mode}' = post-error && test "$queries" = 2; }}; then
+        printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32603,"message":"usage query failed"}}}}\n' "$id"
+      else
+        input=1000
+        output=100
+        context_text="Context: 99999 tokens"
+        if test "$queries" = 2; then
+          input=1470
+          output=145
+          if test '{mode}' = text-context; then
+            context_text="Context: 51000 / 262144 tokens (19%)"
+          else
+            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"same-session","update":{{"sessionUpdate":"usage_update","used":99999,"size":200000}}}}}}'
+          fi
+        elif test '{mode}' = text-context; then
+          context_text="Context: 40000 / 262144 tokens (15%)"
+        fi
+        printf '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"same-session","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"%s\\nSession total: %s input, %s output"}}}}}}}}\n' "$context_text" "$input" "$output"
+        printf '{{"jsonrpc":"2.0","id":%s,"result":{{"stopReason":"end_turn"}}}}\n' "$id"
+      fi ;;
+    *'"method":"session/prompt"'*)
+      printf 'generation\n' >> generations
+      printf '%s\n' "$line" >> generation-requests
+      printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"same-session","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"original answer"}}}}}}}}'
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"stopReason":"end_turn"}}}}\n' "$id" ;;
+  esac
+done
+"#
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_local_usage_queries_recover_real_counts_without_publishing_report_or_generating_again(
+    ) {
+        let _scope = crate::provider_observation::Scope::start();
+        crate::provider_observation::attempt();
+        let (temp, program) = kimi_code_usage_fixture("success");
+        let mut deltas = String::new();
+        let output = run_kimi_acp(
+            fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            ),
+            |text| deltas.push_str(text),
+            |_| {},
+            |_| panic!("metadata must not request approval"),
+            |_, _| panic!("metadata must not write files"),
+        )
+        .unwrap();
+        assert_eq!(output.response, "original answer");
+        assert_eq!(deltas, "original answer");
+        assert_eq!(
+            output.context_usage,
+            Some(crate::acp_usage::AcpContextUsage {
+                used: 99999,
+                size: 200000
+            })
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("generations")).unwrap(),
+            "generation\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("queries")).unwrap(),
+            "query\nquery\n"
+        );
+        let tokens = output.usage_observation.tokens;
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens
+            ),
+            (470, 45, 515)
+        );
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        let summary = crate::provider_observation::snapshot().unwrap();
+        assert_eq!(summary.tokens, Some(tokens));
+        assert_eq!(
+            (summary.requests, summary.provider_attempts, summary.retries),
+            (0, 1, 0)
+        );
+        assert_eq!(summary.usage_observations.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_usage_text_sets_occupancy_when_no_usage_update_arrives() {
+        let (temp, program) = kimi_code_usage_fixture("text-context");
+        let mut deltas = String::new();
+        let mut live_context = Vec::new();
+        let output = run_kimi_acp(
+            fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            ),
+            |text| deltas.push_str(text),
+            |activity| {
+                if let Some(context) = activity.context_usage {
+                    live_context.push(context);
+                }
+            },
+            |_| panic!("metadata must not request approval"),
+            |_, _| panic!("metadata must not write files"),
+        )
+        .unwrap();
+        assert_eq!(deltas, "original answer");
+        assert_eq!(
+            output.context_usage,
+            Some(crate::acp_usage::AcpContextUsage {
+                used: 51000,
+                size: 262144
+            })
+        );
+        assert_eq!(
+            live_context,
+            vec![
+                crate::acp_usage::AcpContextUsage {
+                    used: 40000,
+                    size: 262144
+                },
+                crate::acp_usage::AcpContextUsage {
+                    used: 51000,
+                    size: 262144
+                },
+            ]
+        );
+        let tokens = output.usage_observation.tokens;
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens
+            ),
+            (470, 45, 515)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_usage_query_errors_preserve_the_original_answer_and_unavailable_receipt() {
+        for mode in ["error", "post-error"] {
+            let (temp, program) = kimi_code_usage_fixture(mode);
+            let mut deltas = String::new();
+            let output = run_kimi_acp(
+                fixture_request(
+                    program,
+                    temp.path().into(),
+                    CancellationToken::default(),
+                    None,
+                ),
+                |text| deltas.push_str(text),
+                |_| {},
+                |_| panic!("unexpected approval"),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(output.response, "original answer");
+            assert_eq!(deltas, "original answer");
+            assert_eq!(
+                output
+                    .usage_observation
+                    .tokens
+                    .effective_accounting()
+                    .coverage,
+                crate::usage::UsageCoverage::Unavailable
+            );
+            assert_eq!(
+                std::fs::read_to_string(temp.path().join("generations")).unwrap(),
+                "generation\n"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_usage_query_timeout_reopens_before_the_only_generation_and_cannot_leak_text() {
+        let _scope = crate::provider_observation::Scope::start();
+        crate::provider_observation::attempt();
+        let (temp, program) = kimi_code_usage_fixture("timeout");
+        let mut request = fixture_request(
+            program,
+            temp.path().into(),
+            CancellationToken::default(),
+            None,
+        );
+        request.timeout = Duration::from_secs(6);
+        let mut deltas = String::new();
+        let started = std::time::Instant::now();
+        let output = run_kimi_acp(
+            request,
+            |text| deltas.push_str(text),
+            |_| {},
+            |_| panic!("unexpected approval"),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("starts")).unwrap(),
+            "2"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("generations")).unwrap(),
+            "generation\n"
+        );
+        assert_eq!(deltas, "original answer");
+        assert_eq!(output.response, "original answer");
+        assert!(!output.resumed);
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .provider_attempts,
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_usage_timeout_preserves_the_exact_fresh_handoff_and_resumed_prompt() {
+        for resumed in [false, true] {
+            let (temp, program) = kimi_code_usage_fixture("timeout");
+            let mut request = fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                resumed.then(|| "same-session".into()),
+            );
+            request.prompt = vec![json!({"type":"text","text":"full instructions"})];
+            request.resumed_prompt = Some("selected short".into());
+            request.conversation_history_text = Some("earlier context".into());
+            request.timeout = Duration::from_secs(6);
+            let output = run_kimi_acp(
+                request,
+                |_| {},
+                |_| {},
+                |_| panic!("unexpected approval"),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(output.resumed, resumed);
+            let sent = std::fs::read_to_string(temp.path().join("generation-requests")).unwrap();
+            assert_eq!(sent.lines().count(), 1);
+            let sent: serde_json::Value = serde_json::from_str(sent.trim()).unwrap();
+            let expected = if resumed {
+                vec![json!({"type":"text","text":"selected short"})]
+            } else {
+                vec![
+                    json!({"type":"text","text":"Prior conversation in this Gyro chat (this is a fresh agent session for a local Gyro chat handoff, so this is continuity context):\nearlier context"}),
+                    json!({"type":"text","text":"full instructions"}),
+                ]
+            };
+            assert_eq!(sent["params"]["prompt"], json!(expected));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_usage_timeout_cannot_send_a_resumed_prompt_to_an_unrelated_fresh_session() {
+        let (temp, program) = kimi_code_usage_fixture("resume-failure");
+        let mut request = fixture_request(
+            program,
+            temp.path().into(),
+            CancellationToken::default(),
+            Some("same-session".into()),
+        );
+        request.timeout = Duration::from_secs(6);
+        let result = run_kimi_acp(
+            request,
+            |_| panic!("unexpected text"),
+            |_| {},
+            |_| panic!("unexpected approval"),
+            |_, _| Ok(()),
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no generation was sent"));
+        assert!(!temp.path().join("generations").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_cancellation_during_local_usage_query_never_starts_generation() {
+        let (temp, program) = kimi_code_usage_fixture("timeout");
+        let cancellation = CancellationToken::default();
+        let cancel = cancellation.clone();
+        let directory = temp.path().to_path_buf();
+        let cancelling = std::thread::spawn(move || {
+            for _ in 0..500 {
+                if directory.join("queries").exists() {
+                    cancel.cancel();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("usage query did not start");
+        });
+        let started = std::time::Instant::now();
+        let mut request = fixture_request(program, temp.path().into(), cancellation, None);
+        request.timeout = Duration::from_secs(6);
+        let result = run_kimi_acp(
+            request,
+            |_| panic!("internal report leaked"),
+            |_| {},
+            |_| panic!("unexpected approval"),
+            |_, _| Ok(()),
+        );
+        cancelling.join().unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(!temp.path().join("generations").exists());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("starts")).unwrap(),
+            "1"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_code_cancellation_during_final_usage_query_is_honored_without_replay() {
+        let (temp, program) = kimi_code_usage_fixture("post-timeout");
+        let cancellation = CancellationToken::default();
+        let cancel = cancellation.clone();
+        let directory = temp.path().to_path_buf();
+        let cancelling = std::thread::spawn(move || {
+            for _ in 0..500 {
+                if std::fs::read_to_string(directory.join("queries"))
+                    .ok()
+                    .is_some_and(|text| text.lines().count() == 2)
+                {
+                    cancel.cancel();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("final usage query did not start");
+        });
+        let mut deltas = String::new();
+        let mut request = fixture_request(program, temp.path().into(), cancellation, None);
+        request.timeout = Duration::from_secs(6);
+        let result = run_kimi_acp(
+            request,
+            |text| deltas.push_str(text),
+            |_| {},
+            |_| panic!("unexpected approval"),
+            |_, _| Ok(()),
+        );
+        cancelling.join().unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        assert_eq!(deltas, "original answer");
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("generations")).unwrap(),
+            "generation\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("starts")).unwrap(),
+            "1"
+        );
+    }
+
+    #[cfg(unix)]
     fn completion_fixture(completion: &str, collide: bool) -> (tempfile::TempDir, PathBuf) {
         let permission = if collide {
             r#"printf '%s\n' '{"jsonrpc":"2.0","id":6,"method":"session/request_permission","params":{"toolCall":{"kind":"read","title":"Read project code"},"options":[{"optionId":"yes","kind":"allow_once"}]}}'"#
@@ -2237,7 +3172,7 @@ done
     #[test]
     fn provider_cancelled_or_refused_turns_are_not_successful_even_after_text() {
         for (reason, expected_detail) in [
-            ("cancelled", "ACP run cancelled"),
+            ("cancelled", "tool permission was declined"),
             ("refusal", "ACP agent refused to continue"),
         ] {
             let completion = json!({
@@ -2262,8 +3197,18 @@ done
                 "provider {reason} was incorrectly treated as a completed turn"
             );
             assert!(result.unwrap_err().to_string().contains(expected_detail));
-            assert_eq!(cancellation.is_cancelled(), reason == "cancelled");
+            assert!(
+                !cancellation.is_cancelled(),
+                "{reason} must not look like the user pressed Stop"
+            );
         }
+    }
+
+    #[test]
+    fn plan_mode_blocks_file_writes_and_lets_commands_through() {
+        assert!(plan_mode_denies_approval(KimiAcpApprovalKind::FileChange));
+        assert!(!plan_mode_denies_approval(KimiAcpApprovalKind::Command));
+        assert!(!plan_mode_denies_approval(KimiAcpApprovalKind::Other));
     }
 
     #[cfg(unix)]

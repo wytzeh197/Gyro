@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "codex_rollout_usage.rs"]
+mod codex_rollout_usage;
 #[path = "native_accounting.rs"]
 mod native_accounting;
 pub(super) use native_accounting::ClaudeTurnUsage;
@@ -36,6 +38,8 @@ pub(super) struct CodexTurnUsage {
     high_water: Option<UsageTokens>,
     uncertain: Option<gyro_core::usage::UsageReason>,
     tokens: Option<UsageTokens>,
+    thread: Option<serde_json::Value>,
+    turn_id: Option<String>,
 }
 impl CodexTurnUsage {
     pub(super) fn new(resumed: bool) -> Self {
@@ -47,7 +51,19 @@ impl CodexTurnUsage {
             high_water: None,
             uncertain: None,
             tokens: None,
+            thread: None,
+            turn_id: None,
         }
+    }
+    pub(super) fn bind_thread(&mut self, thread: &serde_json::Value) {
+        self.thread = Some(serde_json::json!({"id": thread.get("id"), "path": thread.get("path")}));
+    }
+    pub(super) fn bind_turn(&mut self, turn: Option<&str>) {
+        self.turn_id = turn.map(str::to_string);
+    }
+    pub(super) fn recover(&mut self) -> Option<UsageTokens> {
+        let update = codex_rollout_usage::ending(self.thread.as_ref()?, self.turn_id.as_deref()?)?;
+        self.observe(&update)
     }
     pub(super) fn set_baseline(&mut self, baseline: Option<UsageTokens>) {
         if let Some(baseline) = baseline.filter(|tokens| tokens.measured) {
@@ -66,16 +82,23 @@ impl CodexTurnUsage {
             self.uncertain = Some(reason);
             if let Some(last) = params.pointer("/tokenUsage/last").and_then(parse_counts) {
                 let observed = last.with_scope(UsageScope::Turn).partial(reason);
-                self.tokens = Some(self.tokens.map_or(observed, |old|
-                    retain_observed_lower_bounds(old, observed)));
+                self.tokens = Some(
+                    self.tokens
+                        .map_or(observed, |old| retain_observed_lower_bounds(old, observed)),
+                );
             } else {
                 self.tokens = self.tokens.map(|tokens| tokens.partial(reason));
             }
             return self.tokens;
         };
-        if self.high_water.is_some_and(|old| counts_regressed(total, old)) {
+        if self
+            .high_water
+            .is_some_and(|old| counts_regressed(total, old))
+        {
             self.uncertain = Some(UsageReason::InconsistentCounts);
-            self.tokens = self.tokens.map(|tokens| tokens.partial(UsageReason::InconsistentCounts));
+            self.tokens = self
+                .tokens
+                .map(|tokens| tokens.partial(UsageReason::InconsistentCounts));
             return self.tokens;
         }
         self.high_water = Some(total);
@@ -84,8 +107,14 @@ impl CodexTurnUsage {
             None => {
                 self.uncertain = Some(UsageReason::MissingBaseline);
                 let Some(last) = params.pointer("/tokenUsage/last").and_then(parse_counts) else {
-                    self.tokens = Some(UsageTokens::unavailable(UsageReason::MissingBaseline)
-                        .with_scope(UsageScope::Turn));
+                    self.tokens = Some(
+                        self.tokens
+                            .map_or_else(
+                                || UsageTokens::unavailable(UsageReason::MissingBaseline),
+                                |tokens| tokens.partial(UsageReason::MissingBaseline),
+                            )
+                            .with_scope(UsageScope::Turn),
+                    );
                     return self.tokens;
                 };
                 if counts_regressed(total, last) {
@@ -108,6 +137,12 @@ impl CodexTurnUsage {
     pub(super) fn tokens(&self) -> Option<UsageTokens> {
         self.tokens
     }
+    pub(super) fn interrupt(&mut self) -> Option<UsageTokens> {
+        let reason = gyro_core::usage::UsageReason::Interrupted;
+        self.uncertain = Some(reason);
+        self.tokens = self.tokens.map(|tokens| tokens.partial(reason));
+        self.tokens
+    }
 }
 
 fn counts_regressed(total: UsageTokens, old: UsageTokens) -> bool {
@@ -123,7 +158,9 @@ fn counts_regressed(total: UsageTokens, old: UsageTokens) -> bool {
         || (a.output && b.output && total.output_tokens < old.output_tokens)
         || (a.cache_read && b.cache_read && total.cached_input_tokens < old.cached_input_tokens)
         || (a.cache_write && b.cache_write && total.cache_write_tokens < old.cache_write_tokens)
-        || (a.reasoning && b.reasoning && total.reasoning_output_tokens < old.reasoning_output_tokens)
+        || (a.reasoning
+            && b.reasoning
+            && total.reasoning_output_tokens < old.reasoning_output_tokens)
         || total.total_tokens < old.total_tokens
 }
 /// Match both identities before allowing a notification to affect any meter.
@@ -141,57 +178,15 @@ pub(super) fn codex_usage_matches(
 /// The protocol's optional rollout path is a best-effort source; absent,
 /// rotated, malformed or mismatched logs retain the uncertain fallback.
 pub(super) fn codex_usage_baseline(thread: &serde_json::Value) -> Option<UsageTokens> {
-    use std::io::{BufRead, Read, Seek, SeekFrom};
-    const TAIL_BYTES: u64 = 2 * 1024 * 1024;
-    let id = thread.get("id")?.as_str()?;
-    let path = std::path::Path::new(thread.get("path")?.as_str()?);
-    if !path.is_absolute() || path.extension()?.to_str()? != "jsonl" {
-        return None;
-    }
-    let mut file = std::fs::File::open(path).ok()?;
-    let metadata = file.metadata().ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    let mut first = String::new();
-    std::io::BufReader::new((&mut file).take(256 * 1024))
-        .read_line(&mut first)
-        .ok()?;
-    let header: serde_json::Value = serde_json::from_str(&first).ok()?;
-    if header.get("type")?.as_str()? != "session_meta"
-        || header.pointer("/payload/id")?.as_str()? != id
-    {
-        return None;
-    }
-    let offset = metadata.len().saturating_sub(TAIL_BYTES);
-    file.seek(SeekFrom::Start(offset)).ok()?;
-    let mut tail = Vec::new();
-    file.take(TAIL_BYTES).read_to_end(&mut tail).ok()?;
-    let mut lines = tail.split(|byte| *byte == b'\n').collect::<Vec<_>>();
-    if offset > 0 {
-        lines.remove(0);
-    } // never parse a truncated leading record
-    for line in lines.into_iter().rev() {
-        let Ok(event) = serde_json::from_slice::<serde_json::Value>(line) else {
-            continue;
-        };
-        if event.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
-            && event
-                .pointer("/payload/type")
-                .and_then(serde_json::Value::as_str)
-                == Some("token_count")
-        {
-            if let Some(total) = event.pointer("/payload/info/total_token_usage") {
-                return parse_counts(total).filter(|tokens| tokens.measured);
-            }
-        }
-    }
-    None
+    parse_counts(&codex_rollout_usage::baseline(thread)?).filter(|tokens| tokens.measured)
 }
 
 fn parse_counts(value: &serde_json::Value) -> Option<UsageTokens> {
     let field = |camel: &str, snake: &str| {
-        value.get(camel).or_else(|| value.get(snake)).and_then(serde_json::Value::as_u64)
+        value
+            .get(camel)
+            .or_else(|| value.get(snake))
+            .and_then(serde_json::Value::as_u64)
     };
     let input = field("inputTokens", "input_tokens");
     let output = field("outputTokens", "output_tokens");
@@ -205,8 +200,12 @@ fn parse_counts(value: &serde_json::Value) -> Option<UsageTokens> {
     let mut tokens = UsageTokens::measured(input, cached, output, reasoning, total)
         .with_cache_write(write)
         .with_scope(gyro_core::usage::UsageScope::Session);
-    if cached.zip(input).is_some_and(|(cache, input)| cache > input)
-        || reasoning.zip(output).is_some_and(|(reasoning, output)| reasoning > output)
+    if cached
+        .zip(input)
+        .is_some_and(|(cache, input)| cache > input)
+        || reasoning
+            .zip(output)
+            .is_some_and(|(reasoning, output)| reasoning > output)
     {
         tokens = tokens.partial(gyro_core::usage::UsageReason::InconsistentCounts);
     }
@@ -223,13 +222,34 @@ fn subtract(total: UsageTokens, baseline: UsageTokens) -> UsageTokens {
     let b = known(baseline);
     let delta = |value: u64, old: u64, supplied: bool| supplied.then(|| value.saturating_sub(old));
     let mut tokens = UsageTokens::measured(
-        delta(total.input_tokens, baseline.input_tokens, a.input && b.input),
-        delta(total.cached_input_tokens, baseline.cached_input_tokens, a.cache_read && b.cache_read),
-        delta(total.output_tokens, baseline.output_tokens, a.output && b.output),
-        delta(total.reasoning_output_tokens, baseline.reasoning_output_tokens, a.reasoning && b.reasoning),
+        delta(
+            total.input_tokens,
+            baseline.input_tokens,
+            a.input && b.input,
+        ),
+        delta(
+            total.cached_input_tokens,
+            baseline.cached_input_tokens,
+            a.cache_read && b.cache_read,
+        ),
+        delta(
+            total.output_tokens,
+            baseline.output_tokens,
+            a.output && b.output,
+        ),
+        delta(
+            total.reasoning_output_tokens,
+            baseline.reasoning_output_tokens,
+            a.reasoning && b.reasoning,
+        ),
         Some(total.total_tokens.saturating_sub(baseline.total_tokens)),
-    ).with_cache_write(delta(total.cache_write_tokens, baseline.cache_write_tokens, a.cache_write && b.cache_write))
-        .with_scope(gyro_core::usage::UsageScope::Turn);
+    )
+    .with_cache_write(delta(
+        total.cache_write_tokens,
+        baseline.cache_write_tokens,
+        a.cache_write && b.cache_write,
+    ))
+    .with_scope(gyro_core::usage::UsageScope::Turn);
     if counts_regressed(total, baseline) {
         tokens = tokens.partial(gyro_core::usage::UsageReason::InconsistentCounts);
     } else if !total.measured || !baseline.measured {
@@ -242,11 +262,17 @@ fn subtract(total: UsageTokens, baseline: UsageTokens) -> UsageTokens {
 /// lower bounds while the latest snapshot's known flags remain conservative.
 fn retain_observed_lower_bounds(previous: UsageTokens, mut current: UsageTokens) -> UsageTokens {
     current.input_tokens = current.input_tokens.max(previous.input_tokens);
-    current.cached_input_tokens = current.cached_input_tokens.max(previous.cached_input_tokens);
+    current.cached_input_tokens = current
+        .cached_input_tokens
+        .max(previous.cached_input_tokens);
     current.cache_write_tokens = current.cache_write_tokens.max(previous.cache_write_tokens);
     current.output_tokens = current.output_tokens.max(previous.output_tokens);
-    current.reasoning_output_tokens = current.reasoning_output_tokens.max(previous.reasoning_output_tokens);
-    current.total_tokens = current.total_tokens.max(previous.total_tokens)
+    current.reasoning_output_tokens = current
+        .reasoning_output_tokens
+        .max(previous.reasoning_output_tokens);
+    current.total_tokens = current
+        .total_tokens
+        .max(previous.total_tokens)
         .max(current.input_tokens.saturating_add(current.output_tokens));
     current
 }
@@ -442,33 +468,62 @@ pub(super) fn record_provider_usage(
     match store.record_usage(&entry) {
         Ok(id) => {
             let cfg = efficiency::config();
-            let attribution = gyro_core::provider_observation::snapshot().map(|s|s.context_attribution).unwrap_or_default();
-            let price = if gyro_core::efficiency::controls(&request.provider_id).owns_requests && request.provider_id != "ollama" {
-                request.model_id.as_deref().and_then(|model|gyro_core::efficiency::pricing::snapshot(&cfg.prices,&request.provider_id,model,&chrono::Utc::now().format("%Y-%m-%d").to_string()))
-            } else {None};
-            let _ = store.record_efficiency_metadata(id,price,&attribution);
+            let attribution = gyro_core::provider_observation::snapshot()
+                .map(|s| s.context_attribution)
+                .unwrap_or_default();
+            let price = if gyro_core::efficiency::controls(&request.provider_id).owns_requests
+                && request.provider_id != "ollama"
+            {
+                request.model_id.as_deref().and_then(|model| {
+                    gyro_core::efficiency::pricing::snapshot(
+                        &cfg.prices,
+                        &request.provider_id,
+                        model,
+                        &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            let _ = store.record_efficiency_metadata(id, price, &attribution);
             if let Some(turn) = entry.turn_id {
-                let task = efficiency::checkpoint(store,session_id,request.workspace_path.as_deref().unwrap_or(""),0).map(|c|c.task_id).unwrap_or(session_id);
-                let _ = store.link_efficiency_task(task,session_id,turn);
+                let task = efficiency::checkpoint(
+                    store,
+                    session_id,
+                    request.workspace_path.as_deref().unwrap_or(""),
+                    0,
+                )
+                .map(|c| c.task_id)
+                .unwrap_or(session_id);
+                let _ = store.link_efficiency_task(task, session_id, turn);
                 let totals = store.efficiency_task_totals(task).ok();
                 let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":gyro_core::provider_observation::snapshot().map(|s|s.requests.max(s.provider_attempts)),"estimatedCost":price.and_then(|p|p.price(tokens)),"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
             }
         }
-        Err(error) => eprintln!("Provider usage recording failed: {}",gyro_core::security::redact_secrets(&error.to_string())),
+        Err(error) => eprintln!(
+            "Provider usage recording failed: {}",
+            gyro_core::security::redact_secrets(&error.to_string())
+        ),
     }
     // Terminal receipts survive reload even when no assistant answer exists.
     if let Some(turn_id) = entry.turn_id {
-        let total = store.task_usage_tokens(session_id, turn_id)
-            .ok().flatten().unwrap_or(tokens);
+        let total = store
+            .task_usage_tokens(session_id, turn_id)
+            .ok()
+            .flatten()
+            .unwrap_or(tokens);
         let _ = store.append_event_with_turn_id(
-            session_id, SessionEventKind::SystemEvent, "",
+            session_id,
+            SessionEventKind::SystemEvent,
+            "",
             serde_json::json!({
                 "kind": "provider-turn-tokens", "accountingVersion": 1,
                 "providerId": request.provider_id, "modelId": request.model_id,
                 "turnTokens": total,
                 "usageObservations": gyro_core::provider_observation::snapshot()
                     .map(|summary| summary.usage_observations).unwrap_or_default(),
-            }), Some(turn_id),
+            }),
+            Some(turn_id),
         );
     }
 }
@@ -665,14 +720,23 @@ mod tests {
             assert_eq!(tokens.output_tokens, 3_120);
             assert_eq!(tokens.reasoning_output_tokens, 1_046);
             assert_eq!(tokens.total_tokens, 1_837_177);
-            assert_eq!(tokens.total_tokens, tokens.input_tokens + tokens.output_tokens);
+            assert_eq!(
+                tokens.total_tokens,
+                tokens.input_tokens + tokens.output_tokens
+            );
             assert!(tokens.measured);
             let metadata = tokens.accounting.unwrap();
             assert_eq!(metadata.scope, gyro_core::usage::UsageScope::Turn);
             assert!(metadata.known.cache_read && metadata.known.reasoning);
             gyro_core::provider_observation::native_usage(tokens);
-            assert_eq!(gyro_core::provider_observation::current_usage().unwrap().1, Some(tokens));
-            assert_eq!(gyro_core::provider_observation::snapshot().unwrap().tokens, Some(tokens));
+            assert_eq!(
+                gyro_core::provider_observation::current_usage().unwrap().1,
+                Some(tokens)
+            );
+            assert_eq!(
+                gyro_core::provider_observation::snapshot().unwrap().tokens,
+                Some(tokens)
+            );
         }
     }
 
@@ -686,8 +750,14 @@ mod tests {
         assert_eq!(next.total_tokens, 375);
         let regressed = usage.observe(&update(250, 15, 250, 15)).unwrap();
         assert_eq!(regressed.total_tokens, next.total_tokens);
-        assert_eq!(regressed.accounting.unwrap().coverage, gyro_core::usage::UsageCoverage::Partial);
-        assert_eq!(regressed.accounting.unwrap().reason, Some(gyro_core::usage::UsageReason::InconsistentCounts));
+        assert_eq!(
+            regressed.accounting.unwrap().coverage,
+            gyro_core::usage::UsageCoverage::Partial
+        );
+        assert_eq!(
+            regressed.accounting.unwrap().reason,
+            Some(gyro_core::usage::UsageReason::InconsistentCounts)
+        );
     }
 
     #[test]
@@ -774,20 +844,22 @@ mod tests {
         assert!(codex_usage_baseline(&serde_json::json!({"id":"test"})).is_none());
     }
 
-
     #[test]
     fn codex_absent_breakdowns_stay_unknown_after_a_verified_baseline() {
         let mut usage = CodexTurnUsage::new(true);
         usage.set_baseline(parse_counts(&serde_json::json!({
             "inputTokens":1000, "outputTokens":100, "totalTokens":1100
         })));
-        let mut current = update(1200,120,200,20);
+        let mut current = update(1200, 120, 200, 20);
         current["tokenUsage"]["total"]["cachedInputTokens"] = serde_json::json!(800);
         current["tokenUsage"]["total"]["reasoningOutputTokens"] = serde_json::json!(30);
         let tokens = usage.observe(&current).unwrap();
-        assert_eq!(tokens.total_tokens,220);
+        assert_eq!(tokens.total_tokens, 220);
         let known = tokens.accounting.unwrap().known;
-        assert!(!known.cache_read, "the baseline did not supply cached input");
+        assert!(
+            !known.cache_read,
+            "the baseline did not supply cached input"
+        );
         assert!(!known.reasoning, "the baseline did not supply reasoning");
         assert!(!known.cache_write);
     }
@@ -795,26 +867,50 @@ mod tests {
     #[test]
     fn codex_missing_baseline_is_provider_partial_not_a_character_estimate() {
         let mut usage = CodexTurnUsage::new(true);
-        let tokens = usage.observe(&update(1200,120,200,20)).unwrap();
+        let tokens = usage.observe(&update(1200, 120, 200, 20)).unwrap();
         let metadata = tokens.accounting.unwrap();
-        assert_eq!(metadata.source,gyro_core::usage::UsageSource::Provider);
-        assert_eq!(metadata.scope,gyro_core::usage::UsageScope::Turn);
-        assert_eq!(metadata.coverage,gyro_core::usage::UsageCoverage::Partial);
-        assert_eq!(metadata.reason,Some(gyro_core::usage::UsageReason::MissingBaseline));
-        assert_eq!(tokens.total_tokens,220);
+        assert_eq!(metadata.source, gyro_core::usage::UsageSource::Provider);
+        assert_eq!(metadata.scope, gyro_core::usage::UsageScope::Turn);
+        assert_eq!(metadata.coverage, gyro_core::usage::UsageCoverage::Partial);
+        assert_eq!(
+            metadata.reason,
+            Some(gyro_core::usage::UsageReason::MissingBaseline)
+        );
+        assert_eq!(tokens.total_tokens, 220);
     }
 
     #[test]
     fn codex_reset_never_replays_or_erases_known_consumption() {
         let mut usage = CodexTurnUsage::new(false);
-        assert_eq!(usage.observe(&update(100,10,100,10)).unwrap().total_tokens,110);
+        assert_eq!(
+            usage
+                .observe(&update(100, 10, 100, 10))
+                .unwrap()
+                .total_tokens,
+            110
+        );
         for _ in 0..3 {
-            let tokens = usage.observe(&update(20,2,20,2)).unwrap();
-            assert_eq!(tokens.total_tokens,110);
-            assert_eq!(tokens.accounting.unwrap().coverage,gyro_core::usage::UsageCoverage::Partial);
+            let tokens = usage.observe(&update(20, 2, 20, 2)).unwrap();
+            assert_eq!(tokens.total_tokens, 110);
+            assert_eq!(
+                tokens.accounting.unwrap().coverage,
+                gyro_core::usage::UsageCoverage::Partial
+            );
         }
-        assert_eq!(usage.observe(&update(150,15,130,13)).unwrap().total_tokens,165);
-        assert_eq!(usage.observe(&update(150,15,130,13)).unwrap().total_tokens,165);
+        assert_eq!(
+            usage
+                .observe(&update(150, 15, 130, 13))
+                .unwrap()
+                .total_tokens,
+            165
+        );
+        assert_eq!(
+            usage
+                .observe(&update(150, 15, 130, 13))
+                .unwrap()
+                .total_tokens,
+            165
+        );
     }
 
     #[test]
@@ -825,9 +921,12 @@ mod tests {
         }}});
         for _ in 0..3 {
             let tokens = usage.observe(&frame).unwrap();
-            assert_eq!(tokens.total_tokens,110);
-            assert_eq!(tokens.cached_input_tokens,80);
-            assert_eq!(tokens.accounting.unwrap().coverage,gyro_core::usage::UsageCoverage::Partial);
+            assert_eq!(tokens.total_tokens, 110);
+            assert_eq!(tokens.cached_input_tokens, 80);
+            assert_eq!(
+                tokens.accounting.unwrap().coverage,
+                gyro_core::usage::UsageCoverage::Partial
+            );
         }
     }
 
@@ -853,19 +952,137 @@ mod tests {
         let invalid = parse_counts(&serde_json::json!({
             "inputTokens":100, "cachedInputTokens":80, "cacheWriteInputTokens":30,
             "outputTokens":10, "totalTokens":110
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!invalid.measured);
-        assert_eq!(invalid.effective_accounting().reason, Some(gyro_core::usage::UsageReason::InconsistentCounts));
+        assert_eq!(
+            invalid.effective_accounting().reason,
+            Some(gyro_core::usage::UsageReason::InconsistentCounts)
+        );
     }
 
     #[test]
     fn codex_missing_last_cannot_expose_session_totals_as_turn_spend() {
         let mut usage = CodexTurnUsage::new(true);
-        let tokens = usage.observe(&serde_json::json!({"tokenUsage":{
-            "total":{"inputTokens":1000,"outputTokens":100,"totalTokens":1100}
-        }})).unwrap();
+        let tokens = usage
+            .observe(&serde_json::json!({"tokenUsage":{
+                "total":{"inputTokens":1000,"outputTokens":100,"totalTokens":1100}
+            }}))
+            .unwrap();
         assert!(tokens.is_empty());
-        assert_eq!(tokens.accounting.unwrap().coverage,gyro_core::usage::UsageCoverage::Unavailable);
+        assert_eq!(
+            tokens.accounting.unwrap().coverage,
+            gyro_core::usage::UsageCoverage::Unavailable
+        );
+    }
+
+    #[test]
+    fn codex_missing_last_retains_previously_observed_request_without_a_baseline() {
+        let mut usage = CodexTurnUsage::new(true);
+        let first = usage
+            .observe(&serde_json::json!({"tokenUsage":{"last":{
+                "inputTokens":100,"outputTokens":10,"cachedInputTokens":80
+            }}}))
+            .unwrap();
+        assert_eq!(first.total_tokens, 110);
+        let counter_only = serde_json::json!({"tokenUsage":{"total":{
+            "inputTokens":1000,"outputTokens":100,"totalTokens":1100
+        }}});
+        for _ in 0..3 {
+            let tokens = usage.observe(&counter_only).unwrap();
+            assert_eq!(tokens.total_tokens, 110);
+            assert_eq!(tokens.cached_input_tokens, 80);
+            assert_eq!(
+                tokens.effective_accounting().coverage,
+                gyro_core::usage::UsageCoverage::Partial
+            );
+            assert_eq!(
+                tokens.effective_accounting().reason,
+                Some(gyro_core::usage::UsageReason::MissingBaseline)
+            );
+        }
+    }
+
+    #[test]
+    fn codex_interruption_preserves_observed_consumption_without_claiming_full_coverage() {
+        let _scope = gyro_core::provider_observation::Scope::start();
+        let mut usage = CodexTurnUsage::new(false);
+        let complete = usage.observe(&update(100, 10, 100, 10)).unwrap();
+        assert!(complete.measured);
+        let tokens = usage.interrupt().unwrap();
+        assert_eq!(tokens.total_tokens, 110);
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            gyro_core::usage::UsageCoverage::Partial
+        );
+        assert_eq!(
+            tokens.effective_accounting().reason,
+            Some(gyro_core::usage::UsageReason::Interrupted)
+        );
+        gyro_core::provider_observation::native_usage(tokens);
+        assert_eq!(
+            gyro_core::provider_observation::snapshot().unwrap().tokens,
+            Some(tokens)
+        );
+        assert_eq!(usage.interrupt(), Some(tokens));
+        assert!(CodexTurnUsage::new(true).interrupt().is_none());
+    }
+
+    #[test]
+    fn cancelled_codex_recovers_exact_native_receipt_when_stream_notifications_were_lost() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        let thread = serde_json::json!({"id":"thread", "path":path});
+        let mut file = std::fs::File::create(&path).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"session_meta","payload":{"id":"thread"}})
+        )
+        .unwrap();
+        let baseline = serde_json::json!({"input_tokens":65_483_350,"cached_input_tokens":64_101_248,
+            "output_tokens":259_309,"reasoning_output_tokens":151_032,"total_tokens":65_742_659});
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"event_msg","payload":{
+            "type":"token_count","info":{"total_token_usage":baseline}}})
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let mut usage = CodexTurnUsage::new(true);
+        usage.bind_thread(&thread);
+        usage.bind_turn(Some("cancelled-turn"));
+        usage.set_baseline(codex_usage_baseline(&thread));
+        assert!(usage.tokens().is_none());
+        for event in [
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"cancelled-turn"}}),
+            serde_json::json!({"type":"turn_context","payload":{"turn_id":"cancelled-turn"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"token_count","info":{
+                "total_token_usage":{"input_tokens":65_761_407,"cached_input_tokens":64_377_856,
+                    "output_tokens":259_452,"reasoning_output_tokens":151_032,"total_tokens":66_020_859},
+                "last_token_usage":{"input_tokens":278_057,"cached_input_tokens":276_608,
+                    "output_tokens":143,"reasoning_output_tokens":0,"total_tokens":278_200}}}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"cancelled-turn"}}),
+        ] {
+            writeln!(file, "{event}").unwrap();
+        }
+        file.flush().unwrap();
+        let recovered = usage.recover().unwrap();
+        assert_eq!(recovered.total_tokens, 278_200);
+        assert_eq!(recovered.input_tokens, 278_057);
+        assert_eq!(recovered.cached_input_tokens, 276_608);
+        assert_eq!(recovered.output_tokens, 143);
+        assert_eq!(recovered.reasoning_output_tokens, 0);
+        assert_eq!(
+            usage.recover(),
+            Some(recovered),
+            "recovery replaces, never adds another request"
+        );
+        assert_eq!(usage.interrupt().unwrap().total_tokens, 278_200);
+        usage.bind_turn(Some("another-turn"));
+        assert!(usage.recover().is_none());
     }
 
     #[test]

@@ -556,7 +556,8 @@ impl GyroConfig {
 
         // Gemini CLI is retired from the provider picker. Its OAuth session and
         // model ids are not Antigravity credentials or an Antigravity inventory.
-        self.model_providers.retain(|provider| provider.id != "gemini");
+        self.model_providers
+            .retain(|provider| provider.id != "gemini");
         self.command_profiles.retain(|profile| {
             profile.provider_id.as_deref() != Some("gemini")
                 && !matches!(profile.id.as_str(), "gemini" | "gemini-cli")
@@ -1076,18 +1077,14 @@ mod tests {
             router.default_model_id.as_deref(),
             Some("google/gemini-3.8-flash")
         );
-        assert!(
-            !router
-                .model_ids
-                .iter()
-                .any(|id| id == "google/gemini-3-pro-preview")
-        );
-        assert!(
-            router
-                .model_ids
-                .iter()
-                .any(|id| id == "deepseek/deepseek-chat")
-        );
+        assert!(!router
+            .model_ids
+            .iter()
+            .any(|id| id == "google/gemini-3-pro-preview"));
+        assert!(router
+            .model_ids
+            .iter()
+            .any(|id| id == "deepseek/deepseek-chat"));
         let local = config
             .model_providers
             .iter()
@@ -1279,10 +1276,7 @@ mod tests {
                 "missing migrated provider {provider_id}"
             );
         }
-        for (profile_id, provider_id) in [
-            ("kimi-code", "kimi"),
-            ("grok-build", "xai"),
-        ] {
+        for (profile_id, provider_id) in [("kimi-code", "kimi"), ("grok-build", "xai")] {
             assert!(config.command_profiles.iter().any(|profile| {
                 profile.id == profile_id && profile.provider_id.as_deref() == Some(provider_id)
             }));
@@ -1292,7 +1286,10 @@ mod tests {
     #[test]
     fn retires_gemini_without_transferring_its_authentication() {
         let mut config = GyroConfig::default();
-        assert!(!config.model_providers.iter().any(|provider| provider.id == "gemini"));
+        assert!(!config
+            .model_providers
+            .iter()
+            .any(|provider| provider.id == "gemini"));
         config.model_providers.push(ModelProviderConfig {
             id: "gemini".into(),
             display_name: "Gemini".into(),
@@ -1315,11 +1312,20 @@ mod tests {
         });
         config.selected_provider_id = Some("gemini".into());
         config.normalize_legacy_state();
-        assert!(!config.model_providers.iter().any(|provider| provider.id == "gemini"));
-        assert!(!config.command_profiles.iter().any(|profile| profile.command == "gemini"));
+        assert!(!config
+            .model_providers
+            .iter()
+            .any(|provider| provider.id == "gemini"));
+        assert!(!config
+            .command_profiles
+            .iter()
+            .any(|profile| profile.command == "gemini"));
         assert_eq!(config.selected_provider_id, None);
-        let antigravity = config.model_providers.iter_mut()
-            .find(|provider| provider.id == "antigravity").unwrap();
+        let antigravity = config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "antigravity")
+            .unwrap();
         assert!(!antigravity.enabled);
         assert_eq!(antigravity.default_model_id, None);
         antigravity.enabled = true;

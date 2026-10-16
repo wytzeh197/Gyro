@@ -1367,6 +1367,7 @@ export function applyProviderChatStreamTurnTokens(
       message: "",
       payload: {
         kind: "provider-turn-tokens",
+        streaming: true,
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         turnTokens: streamEvent.turnTokens,

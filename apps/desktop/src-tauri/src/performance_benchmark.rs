@@ -35,7 +35,9 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         return Err("benchmark data must be in an absolute temporary directory".into());
     }
     let raw: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
-    if raw["schema"] == "gyro.efficiency-benchmark.v2" {return super::efficiency_benchmark::start(app, root, raw).map_err(Into::into);}
+    if raw["schema"] == "gyro.efficiency-benchmark.v2" {
+        return super::efficiency_benchmark::start(app, root, raw).map_err(Into::into);
+    }
     let spec: Spec = serde_json::from_value(raw)?;
     if !(1..=5).contains(&spec.trials)
         || !(10..=300).contains(&spec.timeout_seconds)
@@ -365,7 +367,8 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                             .take(1200)
                                             .collect::<String>()
                                             .into();
-                                    record["correct"] = (task != "no-tool" && verify(&workspace, &task)).into();
+                                    record["correct"] =
+                                        (task != "no-tool" && verify(&workspace, &task)).into();
                                     if matches!(
                                         class,
                                         "authentication"
@@ -526,7 +529,11 @@ mod tests {
     use super::*;
     #[test]
     fn absent_benchmark_effort_uses_the_provider_default() {
-        let mut provider = Provider { id: "openai".into(), model: "fixture".into(), effort: "".into() };
+        let mut provider = Provider {
+            id: "openai".into(),
+            model: "fixture".into(),
+            effort: "".into(),
+        };
         assert_eq!(selected_effort(&provider), None);
         provider.effort = "high".into();
         assert_eq!(selected_effort(&provider), Some("high"));

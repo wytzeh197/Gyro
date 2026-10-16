@@ -26,10 +26,17 @@ import "./workspace-folder-icons.css";
 import { navigateTabList } from "./tab-navigation";
 import { CliSessionList } from "./cli-session-list";
 import { buildDiffFileTree, type DiffTreeNode } from "./diff-file-tree";
-import { ChatFileCard, chatFileKind } from "./chat-file-card";
+import {
+  ChatFileCard,
+  ChatImageHintContext,
+  CitedChatImage,
+  chatFileKind,
+} from "./chat-file-card";
 import {
   chatInlineTokenPattern,
+  isCitedImageTarget,
   linkedChatFile,
+  markdownImageTargets,
   parseChatMarkdownLink,
 } from "./chat-file-links";
 import { SubagentPanel, SubagentMark, SubagentStrip } from "./subagents-view";
@@ -169,6 +176,7 @@ import {
   Maximize2,
   MessageSquare,
   MessageCirclePlus,
+  Mic,
   Minimize2,
   Minus,
   Moon,
@@ -238,6 +246,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
+import { browserDictation, dictationDraft, type DictationController } from "./dictation";
 import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
 import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
 import {
@@ -309,6 +318,7 @@ import { remainingUsage } from "./usage-remaining";
 import {
   turnTokenReadingForResponse,
   turnTokensDetail,
+  turnTokensFromEvents,
   turnTokensFromValue,
   turnTokensLabel,
   type TurnTokenReading,
@@ -8515,6 +8525,8 @@ type ChatSurfaceProps = {
     value?: string,
   ) => boolean | void | Promise<boolean | void>;
   onCancelGoalComposer?: () => void;
+  /** Local speech-to-text. Omitted composers use the browser microphone. */
+  dictation?: DictationController;
   onAgentAction?: (action: string) => void;
   /**
    * End-of-turn file review, shown only in "Ask first".
@@ -8748,6 +8760,7 @@ export function ChatSurface({
   onGoalAction,
   onStartGoalChat,
   onCancelGoalComposer,
+  dictation,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
   onPlanEditorRequestHandled,
@@ -8784,16 +8797,23 @@ export function ChatSurface({
     },
     [onDraftChange],
   );
+  // A new goal is a chip on the message already typed, the same way Plan is.
+  // Opening it must not blank the composer. Editing a goal that is already
+  // saved still uses that goal's own text.
+  const composerDraft =
+    isGoalComposerActive && sessionGoal?.text
+      ? (goalDraft ?? sessionGoal.text)
+      : localDraft;
   const handleComposerDraftChange = useCallback(
     (value: string) => {
-      if (isGoalComposerActive) {
+      if (isGoalComposerActive && sessionGoal?.text) {
         setGoalDraft(value);
         setGoalSaveNotice("");
         return;
       }
       handleDraftChange(value);
     },
-    [handleDraftChange, isGoalComposerActive],
+    [handleDraftChange, isGoalComposerActive, sessionGoal?.text],
   );
   const cancelGoalComposer = useCallback(() => {
     onCancelGoalComposer?.();
@@ -8801,7 +8821,7 @@ export function ChatSurface({
   const handleSend = useCallback(async () => {
     if (composerBlockedReason) return;
     if (isGoalComposerActive) {
-      const goal = (goalDraft ?? sessionGoal?.text ?? "").trim();
+      const goal = composerDraft.trim();
       if (!goal) return;
       // A new goal is also the first message toward it: sending sets it and
       // starts the work. Editing a goal already on the chat only saves it.
@@ -8839,7 +8859,7 @@ export function ChatSurface({
   }, [
     cancelGoalComposer,
     composerBlockedReason,
-    goalDraft,
+    composerDraft,
     isGoalComposerActive,
     localDraft,
     onGoalAction,
@@ -9091,8 +9111,15 @@ export function ChatSurface({
   ]);
   const contextUsage = useMemo(
     () =>
-      estimateComposerContextUsage(transcriptEvents, localDraft, contextModel),
-    [contextModel, localDraft, transcriptEvents],
+      // The meter follows the text in the composer, including a goal being
+      // edited, so the ring moves as you type instead of staying on a draft
+      // the field is no longer showing.
+      estimateComposerContextUsage(
+        transcriptEvents,
+        composerDraft,
+        contextModel,
+      ),
+    [composerDraft, contextModel, transcriptEvents],
   );
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
@@ -9535,15 +9562,19 @@ export function ChatSurface({
             renderSay={(text) =>
               renderAssistantInlineContent(text, onBrowserNavigate)
             }
-            renderResponse={(text) =>
-              assistantResponseBlocks(text).map((block, index) => (
-                <AssistantResponseBlockView
-                  block={block}
-                  key={`${block.kind}-${index}`}
-                  onOpenBrowserUrl={onBrowserNavigate}
-                />
-              ))
-            }
+            renderResponse={(text) => (
+              <ChatImageHintContext.Provider
+                value={{ markdownImages: markdownImageTargets(text) }}
+              >
+                {assistantResponseBlocks(text).map((block, index) => (
+                  <AssistantResponseBlockView
+                    block={block}
+                    key={`${block.kind}-${index}`}
+                    onOpenBrowserUrl={onBrowserNavigate}
+                  />
+                ))}
+              </ChatImageHintContext.Provider>
+            )}
           />
         ) : displayedRailPanel === "side-chat" ? (
           <SideChatPanel
@@ -9570,6 +9601,7 @@ export function ChatSurface({
                 branchName={branchName}
                 shellReady={shellReady && Boolean(sideChat?.onSend)}
                 isCliUpdating={isCliUpdating}
+                dictation={dictation}
                 showContextRow={false}
               />
             )}
@@ -9730,11 +9762,7 @@ export function ChatSurface({
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={
-              isGoalComposerActive
-                ? (goalDraft ?? sessionGoal?.text ?? "")
-                : localDraft
-            }
+            draft={composerDraft}
             branchName={branchName}
             branchCatalog={branchCatalog}
             onDraftChange={handleComposerDraftChange}
@@ -9770,6 +9798,7 @@ export function ChatSurface({
             isGoalComposerActive={isGoalComposerActive}
             startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
+            dictation={dictation}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -9978,11 +10007,7 @@ export function ChatSurface({
             constrainToParent={Boolean(
               activeRailPanel && activeRailPanel !== "environment",
             )}
-            draft={
-              isGoalComposerActive
-                ? (goalDraft ?? sessionGoal?.text ?? "")
-                : localDraft
-            }
+            draft={composerDraft}
             branchName={branchName}
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
@@ -10017,6 +10042,7 @@ export function ChatSurface({
             isGoalComposerActive={isGoalComposerActive}
             startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
+            dictation={dictation}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -10055,33 +10081,39 @@ function PlanDocument({
     () => assistantResponseBlocks(visibleContent),
     [visibleContent],
   );
+  const imageHint = useMemo(
+    () => ({ markdownImages: markdownImageTargets(visibleContent) }),
+    [visibleContent],
+  );
   const firstHeadingIndex = blocks.findIndex(
     (block) => block.kind === "heading",
   );
 
   return (
-    <article className="gyro-plan-document">
-      {firstHeadingIndex < 0 ? <h1>{title || "Implementation plan"}</h1> : null}
-      {blocks.map((block, index) =>
-        block.kind === "heading" ? (
-          index === firstHeadingIndex ? (
-            <h1 key={`plan-heading-${index}`}>
-              {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
-            </h1>
+    <ChatImageHintContext.Provider value={imageHint}>
+      <article className="gyro-plan-document">
+        {firstHeadingIndex < 0 ? <h1>{title || "Implementation plan"}</h1> : null}
+        {blocks.map((block, index) =>
+          block.kind === "heading" ? (
+            index === firstHeadingIndex ? (
+              <h1 key={`plan-heading-${index}`}>
+                {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
+              </h1>
+            ) : (
+              <h2 key={`plan-heading-${index}`}>
+                {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
+              </h2>
+            )
           ) : (
-            <h2 key={`plan-heading-${index}`}>
-              {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
-            </h2>
-          )
-        ) : (
-          <AssistantResponseBlockView
-            block={block}
-            key={`${block.kind}-${index}`}
-            onOpenBrowserUrl={onOpenBrowserUrl}
-          />
-        ),
-      )}
-    </article>
+            <AssistantResponseBlockView
+              block={block}
+              key={`${block.kind}-${index}`}
+              onOpenBrowserUrl={onOpenBrowserUrl}
+            />
+          ),
+        )}
+      </article>
+    </ChatImageHintContext.Provider>
   );
 }
 
@@ -11850,17 +11882,21 @@ function SideChatPanel({
                 key={message.id}
               >
                 {message.role === "assistant" ? (
-                  <div className="gyro-response-body">
-                    {assistantResponseBlocks(message.text).map(
-                      (block, index) => (
-                        <AssistantResponseBlockView
-                          block={block}
-                          key={`${block.kind}-${index}`}
-                          onOpenBrowserUrl={onOpenBrowserUrl}
-                        />
-                      ),
-                    )}
-                  </div>
+                  <ChatImageHintContext.Provider
+                    value={{ markdownImages: markdownImageTargets(message.text) }}
+                  >
+                    <div className="gyro-response-body">
+                      {assistantResponseBlocks(message.text).map(
+                        (block, index) => (
+                          <AssistantResponseBlockView
+                            block={block}
+                            key={`${block.kind}-${index}`}
+                            onOpenBrowserUrl={onOpenBrowserUrl}
+                          />
+                        ),
+                      )}
+                    </div>
+                  </ChatImageHintContext.Provider>
                 ) : (
                   <div className="gyro-user-message-bubble">
                     <p>{message.text}</p>
@@ -24045,9 +24081,9 @@ function ProviderLogo({
     );
   }
 
-  // Cursor and OpenCode marks from Simple Icons 16.27.1 (CC0-1.0), the same
-  // source the download site inlines. Both are monochrome, so currentColor
-  // carries them across themes.
+  // Cursor's cube is the monochrome mark from Simple Icons 16.27.1 (CC0-1.0),
+  // the same source the download site inlines. currentColor carries it
+  // across themes.
   if (providerId === "cursor") {
     return (
       <span
@@ -24062,6 +24098,8 @@ function ProviderLogo({
     );
   }
 
+  // OpenCode's square mark. The frame follows the theme ink and the block is
+  // the published weak tone. The top third of the window stays open.
   if (providerId === "opencode") {
     return (
       <span
@@ -24069,15 +24107,22 @@ function ProviderLogo({
         className="gyro-provider-logo is-opencode"
         title="OpenCode"
       >
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M22 24H2V0h20zM17 4.8H7v14.4h10z" />
+        <svg viewBox="0 0 240 300">
+          <path
+            className="gyro-opencode-logo-block"
+            d="M180 240H60V120H180V240Z"
+          />
+          <path
+            fill="currentColor"
+            d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"
+          />
         </svg>
       </span>
     );
   }
 
   // DeepSeek and Mistral marks from Simple Icons 16.27.1 (CC0-1.0), the same
-  // source as Cursor and OpenCode above. Each is a single monochrome path, so
+  // source as Cursor above. Each is a single monochrome path, so
   // currentColor carries the brand ink set in the stylesheet.
   if (providerId === "deepseek") {
     return (
@@ -24294,6 +24339,7 @@ function Composer({
   canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
+  dictation = browserDictation(),
   overlay,
   onGoalAction,
   sessionModel,
@@ -24352,6 +24398,8 @@ function Composer({
   canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
+  /** Local speech-to-text. Defaults to the browser microphone. */
+  dictation?: DictationController;
   /** Covers the whole composer while it asks for a decision, e.g. plan approval. */
   overlay?: ReactNode;
   /**
@@ -24402,6 +24450,117 @@ function Composer({
     null,
   );
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const dictationAnchorRef = useRef<{ base: string; caret: number } | null>(
+    null,
+  );
+  const dictationAppliedRef = useRef<string | null>(null);
+  const dictationCaretRef = useRef<number | null>(null);
+  /** Caret the user last placed. Unset means dictation appends. */
+  const dictationCaretChoiceRef = useRef<number | null>(null);
+  const dictationSessionRef = useRef<AbortController | null>(null);
+  const [dictationPhase, setDictationPhase] = useState<"idle" | "listening">(
+    "idle",
+  );
+  const [dictationNotice, setDictationNotice] = useState("");
+  const releaseDictation = useCallback(
+    (restoreBase: boolean) => {
+      const anchor = dictationAnchorRef.current;
+      dictationSessionRef.current?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      if (restoreBase) dictationCaretRef.current = null;
+      dictation?.stop();
+      setDictationPhase("idle");
+      if (
+        restoreBase &&
+        anchor &&
+        anchor.base !== dictationAppliedRef.current
+      ) {
+        dictationAppliedRef.current = anchor.base;
+        dictationCaretRef.current = anchor.caret;
+        dictationCaretChoiceRef.current = anchor.caret;
+        onDraftChange(anchor.base);
+      }
+    },
+    [dictation, onDraftChange],
+  );
+  const toggleDictation = useCallback(() => {
+    if (!dictation) return;
+    if (dictationAnchorRef.current) {
+      releaseDictation(true);
+      return;
+    }
+    const textarea = composerTextareaRef.current;
+    const caret = dictationCaretChoiceRef.current ?? draft.length;
+    const at = Math.min(Math.max(0, caret), draft.length);
+    dictationAnchorRef.current = { base: draft, caret: at };
+    dictationAppliedRef.current = draft;
+    const session = new AbortController();
+    dictationSessionRef.current = session;
+    setDictationNotice("");
+    setDictationPhase("listening");
+    textarea?.focus({ preventScroll: true });
+    const limit = isGoalComposerActive ? 1000 : maxDraftLength;
+    const applyUtterance = (utterance: string) => {
+      const anchor = dictationAnchorRef.current;
+      if (!anchor || session.signal.aborted) return;
+      const next = dictationDraft(anchor.base, anchor.caret, utterance, limit);
+      dictationAppliedRef.current = next.draft;
+      dictationCaretRef.current = next.caret;
+      dictationCaretChoiceRef.current = next.caret;
+      onDraftChange(next.draft);
+    };
+    dictation.start({
+      signal: session.signal,
+      onPartial: applyUtterance,
+      onFinal: (utterance) => {
+        if (session.signal.aborted) return;
+        applyUtterance(utterance);
+        dictationAnchorRef.current = null;
+        dictationSessionRef.current = null;
+        setDictationPhase("idle");
+        dictation.stop();
+      },
+      onError: (message) => {
+        if (session.signal.aborted) return;
+        session.abort();
+        dictationSessionRef.current = null;
+        const anchor = dictationAnchorRef.current;
+        dictationAnchorRef.current = null;
+        if (anchor && anchor.base !== dictationAppliedRef.current) {
+          dictationAppliedRef.current = anchor.base;
+          dictationCaretRef.current = anchor.caret;
+          dictationCaretChoiceRef.current = anchor.caret;
+          onDraftChange(anchor.base);
+        }
+        setDictationNotice(message);
+        setDictationPhase("idle");
+        dictation.stop();
+      },
+    });
+  }, [
+    dictation,
+    draft,
+    isGoalComposerActive,
+    maxDraftLength,
+    onDraftChange,
+    releaseDictation,
+  ]);
+  useEffect(() => {
+    return () => {
+      dictationSessionRef.current?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      dictation?.stop();
+    };
+  }, [dictation]);
+  useLayoutEffect(() => {
+    const caret = dictationCaretRef.current;
+    const textarea = composerTextareaRef.current;
+    if (caret == null || !textarea) return;
+    textarea.setSelectionRange(caret, caret);
+    if (dictationPhase !== "listening") dictationCaretRef.current = null;
+  }, [dictationPhase, draft]);
   const hadComposerOverlayRef = useRef(Boolean(overlay));
   useEffect(() => {
     const wasCovered = hadComposerOverlayRef.current;
@@ -25684,14 +25843,31 @@ function Composer({
           setIsSlashMenuDismissed(false);
         }}
         maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
+        onSelect={(event) => {
+          if (dictationAnchorRef.current) return;
+          dictationCaretChoiceRef.current = event.currentTarget.selectionStart;
+        }}
         onChange={(event) => {
+          const value = event.target.value;
+          if (
+            dictationAnchorRef.current &&
+            value !== dictationAppliedRef.current
+          ) {
+            releaseDictation(false);
+          }
+          dictationCaretChoiceRef.current = event.target.selectionStart;
           setMentionDismissed(false);
           setMentionIndex(0);
           setIsSlashHelpOpen(false);
           setIsSlashMenuDismissed(false);
-          onDraftChange(event.target.value);
+          onDraftChange(value);
         }}
         onKeyDown={(event) => {
+          if (event.key === "Escape" && dictationAnchorRef.current) {
+            event.preventDefault();
+            releaseDictation(true);
+            return;
+          }
           if (mentionOpen && !event.nativeEvent.isComposing) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
@@ -25787,6 +25963,7 @@ function Composer({
           if (shouldSend) {
             event.preventDefault();
             setActivePopover(null);
+            if (dictationAnchorRef.current) releaseDictation(false);
             if (canSubmitComposer && draft.trim().length > 0) {
               setHistoryIndex(undefined);
               requestSend();
@@ -26270,6 +26447,30 @@ function Composer({
             ) : null}
           </div>
         ) : null}
+        {dictation ? (
+          <button
+            aria-label={
+              dictationPhase === "listening" ? "Stop dictation" : "Dictate"
+            }
+            aria-pressed={dictationPhase === "listening"}
+            className={[
+              "gyro-composer-tool",
+              "gyro-dictation-button",
+              dictationPhase === "listening" ? "is-listening" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            data-dictation-phase={dictationPhase}
+            onClick={() => {
+              setActivePopover(null);
+              toggleDictation();
+            }}
+            title={dictationPhase === "listening" ? "Stop dictation" : "Dictate"}
+            type="button"
+          >
+            <Mic aria-hidden="true" size={17} />
+          </button>
+        ) : null}
         <button
           aria-label={
             isStopAction
@@ -26376,6 +26577,11 @@ function Composer({
           )}
         </button>
       </div>
+      {dictation && (dictationPhase === "listening" || dictationNotice) ? (
+        <p className="gyro-dictation-status" role="status">
+          {dictationPhase === "listening" ? "Listening" : dictationNotice}
+        </p>
+      ) : null}
       {shouldShowContextRow ? (
         <ChatContextSection
           branchCatalog={branchCatalog}
@@ -26974,6 +27180,7 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
 }
 
 function deriveTranscriptState(events: SessionEvent[], turnCache?: ReturnType<typeof createTranscriptTurnCache<ChatTranscriptTurn>>) {
+  const turnTokenReadings = turnTokensFromEvents(events);
   const mutationDecisions = new Map<string, Record<string, unknown>>();
   const providerApprovalDecisions = new Map<string, Record<string, unknown>>();
   /*
@@ -27103,10 +27310,10 @@ function deriveTranscriptState(events: SessionEvent[], turnCache?: ReturnType<ty
       }
     }
     // Read before the hidden-event filter below, which is what keeps the live
-    // checkpoint out of the transcript. Later events win, so the finished
-    // response's total supersedes the running one the moment it lands.
+    // checkpoint out of the transcript. Canonical receipts take precedence
+    // over stale optimistic checkpoints, including after array merging.
     if (event.turnId && payload?.turnTokens) {
-      const tokens = turnTokensFromValue(payload.turnTokens);
+      const tokens = turnTokenReadings.get(event.turnId);
       if (tokens) {
         ensureTurn(turnId, event.createdAt).turnTokens = tokens;
       }
@@ -28264,6 +28471,16 @@ type AssistantResponseBlock =
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
 
+function chatImageHint(event: SessionEvent, message: string) {
+  const payload = eventPayloadRecord(event);
+  const cursor = recordFromUnknown(payload?.resumeCursor);
+  return {
+    providerId: stringFromRecord(payload, "providerId"),
+    providerSessionId: stringFromRecord(cursor, "sessionId"),
+    markdownImages: markdownImageTargets(message),
+  };
+}
+
 function AssistantResponse({
   actions,
   event,
@@ -28302,6 +28519,10 @@ function AssistantResponse({
     () => (shouldUsePlainText ? [] : assistantResponseBlocks(visibleMessage)),
     [shouldUsePlainText, visibleMessage],
   );
+  const imageHint = useMemo(
+    () => chatImageHint(event, visibleMessage),
+    [event, visibleMessage],
+  );
   if (council) {
     return (
       <CouncilResponseCard
@@ -28326,7 +28547,9 @@ function AssistantResponse({
   );
   return (
     <div className="gyro-response">
-      <div className="gyro-response-body">{body}</div>
+      <ChatImageHintContext.Provider value={imageHint}>
+        <div className="gyro-response-body">{body}</div>
+      </ChatImageHintContext.Provider>
       <ChatArtifacts
         actions={actions}
         artifacts={artifacts}
@@ -28432,6 +28655,10 @@ function CouncilResponseCard({
         ? []
         : assistantResponseBlocks(markdown),
     [markdown],
+  );
+  const imageHint = useMemo(
+    () => chatImageHint(event, markdown),
+    [event, markdown],
   );
   const succeeded = payload.seats.filter(
     (seat) => seat.status === "done",
@@ -28582,19 +28809,21 @@ function CouncilResponseCard({
         })}
       </div>
 
-      <div className="gyro-response-body">
-        {blocks.length === 0 ? (
-          <p className="gyro-response-streaming-text">{markdown}</p>
-        ) : (
-          blocks.map((block, index) => (
-            <AssistantResponseBlockView
-              block={block}
-              key={`${block.kind}-${index}`}
-              onOpenBrowserUrl={onOpenBrowserUrl}
-            />
-          ))
-        )}
-      </div>
+      <ChatImageHintContext.Provider value={imageHint}>
+        <div className="gyro-response-body">
+          {blocks.length === 0 ? (
+            <p className="gyro-response-streaming-text">{markdown}</p>
+          ) : (
+            blocks.map((block, index) => (
+              <AssistantResponseBlockView
+                block={block}
+                key={`${block.kind}-${index}`}
+                onOpenBrowserUrl={onOpenBrowserUrl}
+              />
+            ))
+          )}
+        </div>
+      </ChatImageHintContext.Provider>
 
       {payload.synthesis?.parseWarnings?.length ? (
         <p className="gyro-council-banner is-warn">
@@ -28654,6 +28883,7 @@ function AssistantResponseBlockView({
   block: AssistantResponseBlock;
   onOpenBrowserUrl?: (url: string) => void;
 }) {
+  const imageHint = useContext(ChatImageHintContext);
   if (block.kind === "heading") {
     return (
       <h3>{renderAssistantInlineContent(block.content, onOpenBrowserUrl)}</h3>
@@ -28682,13 +28912,23 @@ function AssistantResponseBlockView({
     );
   }
   if (block.kind === "commands") {
-    return (
-      <div className="gyro-response-command-list">
-        {block.items.map((item, index) => (
-          <code key={`${item}-${index}`}>{item}</code>
-        ))}
-      </div>
-    );
+    const nodes = block.items.flatMap((item, index) => {
+      const target = item.trim();
+      if (isCitedImageTarget(target)) {
+        if (imageHint?.markdownImages?.has(target)) return [];
+        return [
+          <CitedChatImage
+            fallback={<code>{item}</code>}
+            key={`${target}-${index}`}
+            skipWhenMarkdownImage
+            target={target}
+          />,
+        ];
+      }
+      return [<code key={`${item}-${index}`}>{item}</code>];
+    });
+    if (nodes.length === 0) return null;
+    return <div className="gyro-response-command-list">{nodes}</div>;
   }
   if (block.kind === "code") {
     return (
@@ -28841,9 +29081,23 @@ function renderAssistantInlineContent(
     .filter(Boolean)
     .map((part, index) => {
       if (part.startsWith("`") && part.endsWith("`")) {
+        const text = part.slice(1, -1);
+        const target = text.trim();
+        if (isCitedImageTarget(target)) {
+          return (
+            <CitedChatImage
+              fallback={
+                <code className="gyro-response-inline-code">{text}</code>
+              }
+              key={`${part}-${index}`}
+              skipWhenMarkdownImage
+              target={target}
+            />
+          );
+        }
         return (
           <code className="gyro-response-inline-code" key={`${part}-${index}`}>
-            {part.slice(1, -1)}
+            {text}
           </code>
         );
       }
@@ -28862,6 +29116,16 @@ function renderAssistantInlineContent(
               variant={link.image ? "card" : "inline"}
             />
           );
+        if (link.image && isCitedImageTarget(link.target)) {
+          return (
+            <CitedChatImage
+              alt={link.label}
+              fallback={<span>{link.label}</span>}
+              key={`${part}-${index}`}
+              target={link.target}
+            />
+          );
+        }
         const href = safeAssistantLinkUrl(link.target);
         if (!href) {
           return <span key={`${part}-${index}`}>{link.label}</span>;

@@ -150,6 +150,8 @@ pub(crate) struct CodexAppServerRequest {
     pub resume_session_id: Option<String>,
     pub require_command_approval: bool,
     pub require_file_edit_approval: bool,
+    pub full_access: bool,
+    pub advisory: bool,
     pub timeout: Duration,
     pub cancellation: CancellationToken,
 }
@@ -252,28 +254,13 @@ where
     write_message(&mut stdin, &json!({ "method": "initialized" }))?;
 
     let workspace = request.workspace.display().to_string();
-    let approval_policy = if request.require_command_approval {
-        "untrusted"
-    } else {
-        "on-request"
-    };
-    let (sandbox, sandbox_policy) = if request.require_file_edit_approval {
-        (
-            "read-only",
-            json!({ "type": "readOnly", "networkAccess": false }),
-        )
-    } else {
-        (
-            "workspace-write",
-            json!({
-                "type": "workspaceWrite",
-                "writableRoots": [workspace],
-                "networkAccess": false,
-                "excludeTmpdirEnvVar": false,
-                "excludeSlashTmp": false,
-            }),
-        )
-    };
+    let (approval_policy, sandbox, sandbox_policy) = gyro_core::codex_execution_policy(
+        request.advisory,
+        request.require_command_approval,
+        request.require_file_edit_approval,
+        request.full_access,
+        &request.workspace,
+    );
     let thread_request = if let Some(thread_id) = request.resume_session_id.as_deref() {
         json!({
             "id": 2,
@@ -979,6 +966,8 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },
@@ -1035,6 +1024,8 @@ exit 9
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },
@@ -1077,6 +1068,8 @@ case "$decision" in *'"decision":"cancel"'*) exit 0 ;; *) exit 25 ;; esac
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },

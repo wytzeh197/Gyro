@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { remainingUsage } from "../packages/ui/src/usage-remaining.ts";
 
 for (const [used, expected, label] of [
-  [0, 100, "100%"], [46, 54, "54%"], [100, 0, "0%"],
-  [105, 0, "0%"], [-5, 100, "100%"],
-  [99.6, 0.4, "<1%"], [0.4, 99.6, ">99%"],
+  [0, 100, "100%"],
+  [46, 54, "54%"],
+  [100, 0, "0%"],
+  [105, 0, "0%"],
+  [-5, 100, "100%"],
+  [99.6, 0.4, "<1%"],
+  [0.4, 99.6, ">99%"],
 ]) {
   const left = remainingUsage(used);
   assert.ok(Math.abs(left.percent - expected) < 1e-9);
@@ -14,7 +18,10 @@ for (const unknown of [undefined, NaN, Infinity]) {
   assert.equal(remainingUsage(unknown).percent, undefined);
   assert.equal(remainingUsage(unknown).percentLabel, "—");
 }
-assert.deepEqual(remainingUsage(undefined, true), { percent: 0, percentLabel: "0%" });
+assert.deepEqual(remainingUsage(undefined, true), {
+  percent: 0,
+  percentLabel: "0%",
+});
 assert.deepEqual(remainingUsage(25, true), { percent: 0, percentLabel: "0%" });
 import {
   providerUsageFromSnapshot,
@@ -77,24 +84,41 @@ for (const providerId of ["cursor", "opencode", "custom:unknown"]) {
 
 // Malformed or contradictory token readings must never be labeled measured.
 for (const invalid of [
-  { inputTokens: -1 }, { inputTokens: 1.5 }, { inputTokens: NaN },
+  { inputTokens: -1 },
+  { inputTokens: 1.5 },
+  { inputTokens: NaN },
   { inputTokens: Number.MAX_SAFE_INTEGER + 1 },
   { inputTokens: 10, outputTokens: -1 },
   { inputTokens: 10, outputTokens: 5, totalTokens: 999 },
   { inputTokens: 10, outputTokens: 5, totalTokens: 0 },
   { inputTokens: 10, modelContextWindow: Infinity },
 ]) {
-  const reading = estimateComposerContextUsage([
-    event("invalid", "assistant-message", "", { providerId: "openai", modelId: "fixture", contextUsage: invalid }),
-  ], "", { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 });
+  const reading = estimateComposerContextUsage(
+    [
+      event("invalid", "assistant-message", "", {
+        providerId: "openai",
+        modelId: "fixture",
+        contextUsage: invalid,
+      }),
+    ],
+    "",
+    { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+  );
   assert.equal(reading.source, "estimated");
   assert.equal(reading.usedTokens, 0);
   assert.equal(reading.contextWindowTokens, 1000);
 }
-const pureProvider = estimateComposerContextUsage([
-  event("pure", "assistant-message", "", { providerId: "openai", modelId: "fixture",
-    contextUsage: { inputTokens: 120, outputTokens: 20, totalTokens: 140 } }),
-], "", { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 });
+const pureProvider = estimateComposerContextUsage(
+  [
+    event("pure", "assistant-message", "", {
+      providerId: "openai",
+      modelId: "fixture",
+      contextUsage: { inputTokens: 120, outputTokens: 20, totalTokens: 140 },
+    }),
+  ],
+  "",
+  { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+);
 assert.equal(pureProvider.source, "reported");
 assert.equal(pureProvider.usedTokens, 140);
 
@@ -128,7 +152,11 @@ const reported = estimateComposerContextUsage(events, "z".repeat(400), {
   modelLabel: "GPT-5.6 Sol",
   contextWindowTokens: 1_050_000,
 });
-assert.equal(reported.source, "estimated", "Provider usage plus a newer draft has estimated coverage");
+assert.equal(
+  reported.source,
+  "estimated",
+  "Provider usage plus a newer draft has estimated coverage",
+);
 assert.equal(reported.usedLabel, "12.2K");
 // A matching runtime window wins over the API/catalog maximum.
 assert.equal(reported.windowLabel, "100K");
@@ -229,6 +257,93 @@ assert.equal(switchedModel.source, "estimated");
 assert.equal(switchedModel.usedLabel, "12.1K");
 assert.equal(switchedModel.windowLabel, "400K");
 assert.match(switchedModel.detail, /ran on gpt-5\.6-sol/);
+
+const smallerModel = estimateComposerContextUsage(events, "", {
+  providerId: "custom:smaller",
+  modelId: "small-model",
+  contextWindowTokens: 4_096,
+});
+assert.equal(
+  smallerModel.usedTokens,
+  switchedModel.usedTokens,
+  "Selecting a smaller model must preserve the observed conversation occupancy",
+);
+assert.equal(smallerModel.percent, 100);
+assert.equal(smallerModel.remainingPercent, 0);
+assert.equal(smallerModel.source, "estimated");
+
+const liveContext = {
+  ...event("live-context", "system-event", "", {
+    kind: "provider-context-usage",
+    providerId: "openai",
+    modelId: "fixture",
+    contextUsage: {
+      inputTokens: 120,
+      outputTokens: 20,
+      totalTokens: 140,
+      modelContextWindow: 1000,
+    },
+  }),
+  turnId: "live-turn",
+};
+const finalResponse = {
+  ...event("final-context", "assistant-message", "", {
+    kind: "provider-response",
+    providerId: "openai",
+    modelId: "fixture",
+  }),
+  turnId: "live-turn",
+};
+for (const contextUsage of [
+  undefined,
+  { modelContextWindow: 1000 },
+  { inputTokens: 1.5 },
+  { inputTokens: 2_000, totalTokens: 2_000, modelContextWindow: 1000 },
+]) {
+  const retained = estimateComposerContextUsage(
+    [
+      liveContext,
+      {
+        ...finalResponse,
+        payload: { ...finalResponse.payload, contextUsage },
+      },
+    ],
+    "",
+    { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+  );
+  assert.equal(
+    retained.usedTokens,
+    140,
+    "A response without usable occupancy cannot erase the provider's stream observation",
+  );
+  assert.equal(retained.source, "reported");
+}
+const finalContext = {
+  ...finalResponse,
+  payload: {
+    ...finalResponse.payload,
+    contextUsage: {
+      inputTokens: 160,
+      outputTokens: 20,
+      totalTokens: 180,
+      modelContextWindow: 1000,
+    },
+  },
+};
+for (const ordered of [
+  [liveContext, finalContext],
+  [finalContext, liveContext],
+]) {
+  assert.equal(
+    estimateComposerContextUsage(ordered, "", {
+      providerId: "openai",
+      modelId: "fixture",
+      contextWindowTokens: 1000,
+    }).usedTokens,
+    180,
+    "A final context observation supersedes a stale live checkpoint in either array order",
+  );
+}
 
 const clamped = estimateComposerContextUsage(
   [

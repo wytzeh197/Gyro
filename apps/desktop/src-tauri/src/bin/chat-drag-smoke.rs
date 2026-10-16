@@ -1,7 +1,10 @@
 //! Isolated native WebKit fixture for actual macOS splitview drag gestures.
 //! The normal application entrypoint, providers, and user state are never used.
 
-use std::{path::PathBuf, sync::{Arc, Mutex}};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[path = "../window_controls.rs"]
@@ -26,28 +29,27 @@ async fn report_chat_drag_smoke(
     let native_csp = fixture.native_csp.clone();
     let write_lock = Arc::clone(&fixture.write_lock);
     tauri::async_runtime::spawn_blocking(move || {
-    let _lock = write_lock
-        .lock()
-        .map_err(|_| "Native drag report writer is unavailable")?;
-    let object = report.as_object_mut().ok_or("Expected a JSON object")?;
-    object.insert(
-        "nativeBuild".into(),
-        serde_json::Value::String("debug-embedded-tauri".into()),
-    );
-    object.insert("nativeWindow".into(), native_window);
-    object.insert(
-        "nativeCsp".into(),
-        serde_json::Value::String(native_csp),
-    );
-    let bytes = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
-    if bytes.len() > MAX_REPORT_BYTES {
-        return Err("Native drag report exceeds the payload limit".into());
-    }
-    // Readers see a whole snapshot even while drag events update the fixture.
-    let pending = path.with_extension("pending");
-    std::fs::write(&pending, bytes).map_err(|error| error.to_string())?;
-    std::fs::rename(pending, &path).map_err(|error| error.to_string())
-    }).await.map_err(|error| error.to_string())?
+        let _lock = write_lock
+            .lock()
+            .map_err(|_| "Native drag report writer is unavailable")?;
+        let object = report.as_object_mut().ok_or("Expected a JSON object")?;
+        object.insert(
+            "nativeBuild".into(),
+            serde_json::Value::String("debug-embedded-tauri".into()),
+        );
+        object.insert("nativeWindow".into(), native_window);
+        object.insert("nativeCsp".into(), serde_json::Value::String(native_csp));
+        let bytes = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
+        if bytes.len() > MAX_REPORT_BYTES {
+            return Err("Native drag report exceeds the payload limit".into());
+        }
+        // Readers see a whole snapshot even while drag events update the fixture.
+        let pending = path.with_extension("pending");
+        std::fs::write(&pending, bytes).map_err(|error| error.to_string())?;
+        std::fs::rename(pending, &path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn fixture_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {

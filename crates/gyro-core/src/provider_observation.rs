@@ -69,9 +69,15 @@ pub fn native_prompt(payload: &Value) {
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
             summary.native.prompt_chars = text_size(payload).0;
-            let mut attribution = categorize_prompt(crate::efficiency::context::Attribution::from_request(payload), &summary.prepared_context);
+            let mut attribution = categorize_prompt(
+                crate::efficiency::context::Attribution::from_request(payload),
+                &summary.prepared_context,
+            );
             attribution.hidden_content = true;
-            if attribution.estimated_tokens == 0 { attribution.other_text = summary.native.prompt_chars as u64; attribution.estimated_tokens = attribution.other_text.div_ceil(4); }
+            if attribution.estimated_tokens == 0 {
+                attribution.other_text = summary.native.prompt_chars as u64;
+                attribution.estimated_tokens = attribution.other_text.div_ceil(4);
+            }
             summary.context_attribution.combine(&attribution);
         }
     });
@@ -106,14 +112,29 @@ pub fn native_acp_usage(observation: &crate::acp_usage::AcpUsageObservation) {
 }
 /// Categories are supplied by the prompt builder, never inferred from user/source text.
 pub fn prepared_context(attribution: crate::efficiency::context::Attribution) {
-    ACTIVE.with(|slot| { if let Some(summary) = slot.borrow_mut().as_mut() { summary.prepared_context = attribution; } });
+    ACTIVE.with(|slot| {
+        if let Some(summary) = slot.borrow_mut().as_mut() {
+            summary.prepared_context = attribution;
+        }
+    });
 }
-fn categorize_prompt(mut attribution: crate::efficiency::context::Attribution, prepared: &crate::efficiency::context::Attribution) -> crate::efficiency::context::Attribution {
+fn categorize_prompt(
+    mut attribution: crate::efficiency::context::Attribution,
+    prepared: &crate::efficiency::context::Attribution,
+) -> crate::efficiency::context::Attribution {
     let available = attribution.other_text;
-    let classified = prepared.instructions + prepared.history + prepared.task_state + prepared.source_excerpts + prepared.tool_results;
+    let classified = prepared.instructions
+        + prepared.history
+        + prepared.task_state
+        + prepared.source_excerpts
+        + prepared.tool_results;
     if classified <= available {
-        attribution.other_text -= classified; attribution.instructions += prepared.instructions; attribution.history += prepared.history;
-        attribution.task_state += prepared.task_state; attribution.source_excerpts += prepared.source_excerpts; attribution.tool_results += prepared.tool_results;
+        attribution.other_text -= classified;
+        attribution.instructions += prepared.instructions;
+        attribution.history += prepared.history;
+        attribution.task_state += prepared.task_state;
+        attribution.source_excerpts += prepared.source_excerpts;
+        attribution.tool_results += prepared.tool_results;
     }
     attribution
 }
@@ -145,9 +166,13 @@ pub fn snapshot() -> Option<Summary> {
             } else if summary.requests == summary.rejected && summary.tokens.is_none() {
                 // No generation was observed. Keep this explicit so the ledger
                 // does not fall back to charging an estimate of the user prompt.
-                summary.tokens = Some(UsageTokens::unavailable(crate::usage::UsageReason::MissingUsage));
+                summary.tokens = Some(UsageTokens::unavailable(
+                    crate::usage::UsageReason::MissingUsage,
+                ));
             }
-            summary.tokens = summary.tokens.map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn));
+            summary.tokens = summary
+                .tokens
+                .map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn));
             summary
         })
     })
@@ -165,9 +190,14 @@ pub fn current_usage() -> Option<(u32, Option<UsageTokens>)> {
                 add_usage(&mut tokens, native);
             }
         } else if summary.requests == summary.rejected && tokens.is_none() {
-            tokens = Some(UsageTokens::unavailable(crate::usage::UsageReason::MissingUsage));
+            tokens = Some(UsageTokens::unavailable(
+                crate::usage::UsageReason::MissingUsage,
+            ));
         }
-        Some((summary.requests, tokens.map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn))))
+        Some((
+            summary.requests,
+            tokens.map(|tokens| tokens.with_scope(crate::usage::UsageScope::Turn)),
+        ))
     })
 }
 pub fn retry() {
@@ -198,7 +228,10 @@ impl Request {
         let index = ACTIVE.with(|slot| {
             slot.borrow_mut().as_mut().map_or(0, |summary| {
                 summary.requests = summary.requests.saturating_add(1);
-                let attribution = categorize_prompt(crate::efficiency::context::Attribution::from_request(payload), &summary.prepared_context);
+                let attribution = categorize_prompt(
+                    crate::efficiency::context::Attribution::from_request(payload),
+                    &summary.prepared_context,
+                );
                 summary.context_attribution.combine(&attribution);
                 summary.requests
             })
@@ -276,13 +309,25 @@ impl Drop for Request {
             let output = self
                 .output_tokens
                 .or_else(|| self.total_tokens?.checked_sub(self.input_tokens?));
-            let reported = self.total_tokens.is_some() || input.is_some() || output.is_some()
-                || self.cached.is_some() || self.cache_write.is_some() || self.reasoning.is_some();
-            let mut tokens = self.accounted_receipt.unwrap_or_else(|| if reported {
-                UsageTokens::measured(input, self.cached, output, self.reasoning, self.total_tokens)
+            let reported = self.total_tokens.is_some()
+                || input.is_some()
+                || output.is_some()
+                || self.cached.is_some()
+                || self.cache_write.is_some()
+                || self.reasoning.is_some();
+            let mut tokens = self.accounted_receipt.unwrap_or_else(|| {
+                if reported {
+                    UsageTokens::measured(
+                        input,
+                        self.cached,
+                        output,
+                        self.reasoning,
+                        self.total_tokens,
+                    )
                     .with_cache_write(self.cache_write)
-            } else {
-                estimate
+                } else {
+                    estimate
+                }
             });
             if self.accounted_receipt.is_none() && !self.complete {
                 tokens = tokens.partial(crate::usage::UsageReason::Interrupted);
@@ -340,7 +385,13 @@ mod tests {
         let _scope = Scope::start();
         attempt();
         native_prompt(&serde_json::json!("prompt"));
-        native_usage(UsageTokens::measured(Some(100), Some(80), Some(20), None, None));
+        native_usage(UsageTokens::measured(
+            Some(100),
+            Some(80),
+            Some(20),
+            None,
+            None,
+        ));
         attempt();
         native_usage(UsageTokens::measured(Some(50), None, Some(10), None, None));
         assert_eq!(current_usage().unwrap().1, snapshot().unwrap().tokens);
@@ -363,23 +414,41 @@ mod tests {
         use crate::acp_usage::{normalize_prompt_usage, AcpProvider, AcpRuntimeInfo};
         let _scope = Scope::start();
         attempt();
-        let mut receipt = normalize_prompt_usage(AcpProvider::Grok,
+        let mut receipt = normalize_prompt_usage(
+            AcpProvider::Grok,
             &serde_json::json!({"usage": {"inputTokens": 100, "outputTokens": 20, "modelCalls": 2}}),
-            AcpRuntimeInfo { agent_version: Some("fixture".into()), ..Default::default() });
+            AcpRuntimeInfo {
+                agent_version: Some("fixture".into()),
+                ..Default::default()
+            },
+        );
         native_acp_usage(&receipt);
         receipt.interrupted();
         native_acp_usage(&receipt);
         let summary = snapshot().unwrap();
         assert_eq!(summary.usage_observations.len(), 1);
-        assert_eq!(summary.usage_observations[0].runtime.agent_version.as_deref(), Some("fixture"));
+        assert_eq!(
+            summary.usage_observations[0]
+                .runtime
+                .agent_version
+                .as_deref(),
+            Some("fixture")
+        );
         assert_eq!(summary.usage_observations[0].model_calls, Some(2));
         assert_eq!(summary.tokens.unwrap().total_tokens, 120);
         attempt();
-        native_acp_usage(&normalize_prompt_usage(AcpProvider::Kimi, &Value::Null, Default::default()));
+        native_acp_usage(&normalize_prompt_usage(
+            AcpProvider::Kimi,
+            &Value::Null,
+            Default::default(),
+        ));
         let summary = snapshot().unwrap();
         assert_eq!(summary.usage_observations.len(), 2);
         assert_eq!(summary.tokens.unwrap().total_tokens, 120);
-        assert_eq!(summary.tokens.unwrap().effective_accounting().coverage, crate::usage::UsageCoverage::Partial);
+        assert_eq!(
+            summary.tokens.unwrap().effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
     }
 
     #[test]
@@ -411,7 +480,10 @@ mod tests {
             assert_eq!(tokens.total_tokens, 150);
             assert_eq!(tokens.measured, input.is_none() || output.is_none());
             if !tokens.measured {
-                assert_eq!(tokens.effective_accounting().reason, Some(crate::usage::UsageReason::InconsistentCounts));
+                assert_eq!(
+                    tokens.effective_accounting().reason,
+                    Some(crate::usage::UsageReason::InconsistentCounts)
+                );
             }
         }
     }
@@ -491,10 +563,26 @@ mod tests {
             request.details(None, Some(2));
         }
         let tokens = snapshot().unwrap().tokens.unwrap();
-        assert_eq!((tokens.input_tokens, tokens.output_tokens, tokens.total_tokens), (5, 2, 7));
-        assert_eq!(tokens.effective_accounting().source, crate::usage::UsageSource::Provider);
-        assert_eq!(tokens.effective_accounting().coverage, crate::usage::UsageCoverage::Partial);
-        assert!(!tokens.effective_accounting().known.input && !tokens.effective_accounting().known.output);
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.total_tokens
+            ),
+            (5, 2, 7)
+        );
+        assert_eq!(
+            tokens.effective_accounting().source,
+            crate::usage::UsageSource::Provider
+        );
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert!(
+            !tokens.effective_accounting().known.input
+                && !tokens.effective_accounting().known.output
+        );
     }
     #[test]
     fn partial_usage_preserves_reported_buckets_without_inventing_output() {
@@ -513,9 +601,14 @@ mod tests {
             assert_eq!(tokens.input_tokens, 100);
             assert_eq!(tokens.output_tokens, if finished { 30 } else { 5 });
             assert_eq!(tokens.effective_accounting().known.output, finished);
-            assert_eq!(tokens.effective_accounting().coverage, if finished {
-                crate::usage::UsageCoverage::Complete
-            } else { crate::usage::UsageCoverage::Partial });
+            assert_eq!(
+                tokens.effective_accounting().coverage,
+                if finished {
+                    crate::usage::UsageCoverage::Complete
+                } else {
+                    crate::usage::UsageCoverage::Partial
+                }
+            );
             assert_eq!(tokens.cached_input_tokens, 60);
             assert_eq!(tokens.reasoning_output_tokens, 5);
             assert_eq!(tokens.measured, finished);

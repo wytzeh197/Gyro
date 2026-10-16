@@ -276,7 +276,10 @@ pub(super) fn auto_compact_messages(
                 carries_tool_calls(message) || carries_compatibility_tool_call(message)
             })
             .count(),
-        characters: sizes[2..split].iter().map(|(characters, _)| *characters).sum(),
+        characters: sizes[2..split]
+            .iter()
+            .map(|(characters, _)| *characters)
+            .sum(),
         percent: fill,
     };
     messages.insert(
@@ -382,9 +385,15 @@ pub(super) fn provider_billed_usage_from_acp_tokens(
     }
     Some(ProviderContextUsage {
         input_tokens: Some(tokens.input_tokens),
-        cached_input_tokens: accounting.known.cache_read.then_some(tokens.cached_input_tokens),
+        cached_input_tokens: accounting
+            .known
+            .cache_read
+            .then_some(tokens.cached_input_tokens),
         output_tokens: accounting.known.output.then_some(tokens.output_tokens),
-        reasoning_output_tokens: accounting.known.reasoning.then_some(tokens.reasoning_output_tokens),
+        reasoning_output_tokens: accounting
+            .known
+            .reasoning
+            .then_some(tokens.reasoning_output_tokens),
         total_tokens: Some(tokens.total_tokens),
         model_context_window: None,
     })
@@ -415,19 +424,28 @@ pub(super) fn provider_context_usage_from_claude_stream(
 ) -> Option<(ClaudeUsageFrame, ProviderContextUsage)> {
     // Child messages are already represented by whole-tree accounting when
     // verified. They never describe the main conversation's context window.
-    if value.get("parent_tool_use_id").is_some_and(|id| !id.is_null()) {
+    if value
+        .get("parent_tool_use_id")
+        .is_some_and(|id| !id.is_null())
+    {
         return None;
     }
     let frame_type = value.get("type").and_then(Value::as_str)?;
     let (frame, usage) = match frame_type {
         "result" => (ClaudeUsageFrame::Turn, value.get("usage")?),
-        "assistant" => (ClaudeUsageFrame::Request, value.get("message")?.get("usage")?),
+        "assistant" => (
+            ClaudeUsageFrame::Request,
+            value.get("message")?.get("usage")?,
+        ),
         "stream_event" => {
             let event = value.get("event")?;
             if event.get("type").and_then(Value::as_str) != Some("message_start") {
                 return None;
             }
-            (ClaudeUsageFrame::Request, event.get("message")?.get("usage")?)
+            (
+                ClaudeUsageFrame::Request,
+                event.get("message")?.get("usage")?,
+            )
         }
         _ => return None,
     };
@@ -437,28 +455,41 @@ pub(super) fn provider_context_usage_from_claude_stream(
     let fresh_input = field("input_tokens");
     let cache_creation = field("cache_creation_input_tokens");
     let cache_read = field("cache_read_input_tokens");
-    let input_tokens = fresh_input.map(|fresh| fresh
-        .saturating_add(cache_creation.unwrap_or_default())
-        .saturating_add(cache_read.unwrap_or_default()));
+    let input_tokens = fresh_input.map(|fresh| {
+        fresh
+            .saturating_add(cache_creation.unwrap_or_default())
+            .saturating_add(cache_read.unwrap_or_default())
+    });
     let output_tokens = field("output_tokens");
-    Some((frame, ProviderContextUsage {
-        input_tokens,
-        // Legacy context display treats both cache buckets as reused context.
-        // The billing parser retains separate read and write buckets.
-        cached_input_tokens: match (cache_creation, cache_read) {
-            (None, None) => None,
-            (write, read) => Some(write.unwrap_or_default().saturating_add(read.unwrap_or_default())),
+    Some((
+        frame,
+        ProviderContextUsage {
+            input_tokens,
+            // Legacy context display treats both cache buckets as reused context.
+            // The billing parser retains separate read and write buckets.
+            cached_input_tokens: match (cache_creation, cache_read) {
+                (None, None) => None,
+                (write, read) => Some(
+                    write
+                        .unwrap_or_default()
+                        .saturating_add(read.unwrap_or_default()),
+                ),
+            },
+            output_tokens,
+            reasoning_output_tokens: None,
+            total_tokens: input_tokens
+                .zip(output_tokens)
+                .map(|(input, output)| input.saturating_add(output)),
+            model_context_window: claude_stream_context_window(value),
         },
-        output_tokens,
-        reasoning_output_tokens: None,
-        total_tokens: input_tokens.zip(output_tokens).map(|(input, output)| input.saturating_add(output)),
-        model_context_window: claude_stream_context_window(value),
-    }))
+    ))
 }
 
 pub(super) fn claude_stream_context_window(value: &Value) -> Option<u64> {
     let entries = value.get("modelUsage")?.as_object()?;
-    let mut windows = entries.values().filter_map(|entry| entry.get("contextWindow").and_then(Value::as_u64));
+    let mut windows = entries
+        .values()
+        .filter_map(|entry| entry.get("contextWindow").and_then(Value::as_u64));
     let window = windows.next()?;
     // A mixed-model result cannot identify which window the last request used.
     windows.all(|other| other == window).then_some(window)
@@ -468,17 +499,15 @@ pub(super) fn provider_model_context_window(
     provider_id: &str,
     model_id: Option<&str>,
 ) -> Option<u64> {
-    if let Some(window) = model_id.and_then(|model|
-        crate::live_model_context::known_window(provider_id, model)) {
+    if let Some(window) =
+        model_id.and_then(|model| crate::live_model_context::known_window(provider_id, model))
+    {
         return Some(window);
     }
     catalog_context_window(provider_id, model_id)
 }
 
-pub(super) fn catalog_context_window(
-    provider_id: &str,
-    model_id: Option<&str>,
-) -> Option<u64> {
+pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) -> Option<u64> {
     if let Some(window) = crate::model_catalog::catalog_model_profile(provider_id, model_id)
         .and_then(|profile| profile.context_window_tokens)
     {
@@ -490,16 +519,16 @@ pub(super) fn catalog_context_window(
         "openai" => match model_id {
             "gpt-6.1-sol" => 500_000,
             "gpt-5.4-mini" => 400_000,
-            "" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna" |
-            "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" |
-            "gpt-5.5" | "gpt-5.4" => 272_000,
+            "" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna" | "gpt-5.6-sol" | "gpt-5.6-terra"
+            | "gpt-5.6-luna" | "gpt-5.5" | "gpt-5.4" => 272_000,
             _ => return None,
         },
         "anthropic" => match model_id {
             "claude-haiku-4-5" => 200_000,
-            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5" |
-            "claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-5-5" |
-            "claude-sonnet-5" | "claude-haiku-5-5" => 1_000_000,
+            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5" | "claude-opus-5"
+            | "claude-opus-4-8" | "claude-sonnet-5-5" | "claude-sonnet-5" | "claude-haiku-5-5" => {
+                1_000_000
+            }
             _ => return None,
         },
         // K3's 1M entitlement depends on the plan; retain the Plus baseline
@@ -508,7 +537,7 @@ pub(super) fn catalog_context_window(
         "gemini" if matches!(model_id, "" | "gemini-default" | "gemini-3.8-flash") => 1_048_576,
         "xai" => match model_id {
             "grok-4.3" => 1_000_000,
-            "" | "grok-4.7" | "grok-4.6" | "grok-4.5" => 500_000,
+            "" | "grok-4.7" | "grok-4.7-build-fast" | "grok-4.6" | "grok-4.5" => 500_000,
             _ => return None,
         },
         "deepseek" => match model_id {
@@ -542,10 +571,12 @@ fn exceeds_context_window(usage: &ProviderContextUsage) -> bool {
     let Some(window) = usage.model_context_window.filter(|window| *window > 0) else {
         return false;
     };
-    let occupied = usage
-        .total_tokens
-        .unwrap_or_default()
-        .max(usage.input_tokens.unwrap_or_default().saturating_add(usage.output_tokens.unwrap_or_default()));
+    let occupied = usage.total_tokens.unwrap_or_default().max(
+        usage
+            .input_tokens
+            .unwrap_or_default()
+            .saturating_add(usage.output_tokens.unwrap_or_default()),
+    );
     occupied > window
 }
 

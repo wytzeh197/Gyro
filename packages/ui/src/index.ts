@@ -634,6 +634,13 @@ export type {
 export { ChatQuestionPopup } from "./chat-question-popup";
 export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
 export { sendableChatImage } from "./chat-media-transfer";
+export {
+  browserDictation,
+  dictationAccessError,
+  dictationDraft,
+  setDictationAccessRequest,
+} from "./dictation";
+export type { DictationController, DictationListener } from "./dictation";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,

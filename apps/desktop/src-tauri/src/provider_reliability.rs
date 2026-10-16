@@ -247,6 +247,14 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
     // Checked next: a stop is not a failure, and every branch below reads it
     // as one. The ceiling case in particular must not be offered a plain retry,
     // which would run into the same ceiling and stop in the same place.
+    // A declined tool ends the provider turn. That is not the person pressing
+    // Stop, and it must not be offered as a generic crash retry.
+    if normalized.contains("tool permission was declined") {
+        return (
+            "permission-declined",
+            "A tool was declined, so the provider ended the turn. Send again to continue.",
+        );
+    }
     if error.contains(PROVIDER_STOP_MARKER) {
         return if normalized.contains("per-call ceiling") {
             (

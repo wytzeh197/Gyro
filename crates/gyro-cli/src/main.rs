@@ -15,18 +15,17 @@ use gyro_core::{
     create_worktree,
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
-    prepare_claude_provider_mutation_transaction,
-    prepare_provider_mutation_transaction, provider_descriptor,
-    recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
-    AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
-    CredentialPolicy, DoctorStatus, ExecutionRequest, ExecutionStream, ExecutionTermination,
-    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-    KimiAcpApprovalRequest, KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal,
-    MutationProposalOperation, MutationProposalStatus, OllamaChatRequest,
-    PendingProviderMutationCommit, ProviderFileChange, ProviderHealthRequest,
-    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload, ProviderTextChunk,
-    Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
-    TerminalRequestPayload,
+    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
+    slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
+    CancellationToken, CreateSessionContext, CredentialPolicy, DoctorStatus, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode,
+    KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
+    MutationProposalStatus, OllamaChatRequest, PendingProviderMutationCommit, ProviderFileChange,
+    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;
@@ -2253,6 +2252,8 @@ fn build_cli_provider_invocation(
     resume_cursor: Option<(&str, &str)>,
     permission_mcp_config: Option<&str>,
     timeout_seconds: u64,
+    posture: gyro_core::ApprovalPosture,
+    plan_mode: bool,
 ) -> Result<CliProviderInvocation> {
     let provider_kind = cli_provider_kind(profile)?;
     let mut args = profile.args.clone();
@@ -2296,12 +2297,20 @@ fn build_cli_provider_invocation(
             "--mcp-config".into(),
             permission_mcp_config.into(),
             "--strict-mcp-config".into(),
+        ]);
+    }
+    if plan_mode {
+        args.extend(["--permission-mode".into(), "plan".into()]);
+    } else if posture == gyro_core::ApprovalPosture::FullAccess {
+        args.push("--dangerously-skip-permissions".into());
+    } else if permission_mcp_config.is_some() {
+        args.extend([
             "--permission-prompt-tool".into(),
             "mcp__gyro_approval__approve".into(),
             "--allowedTools".into(),
             "mcp__gyro_approval__approve".into(),
             "--permission-mode".into(),
-            "default".into(),
+            gyro_core::claude_permission_mode(posture).into(),
         ]);
     }
     args.push(prompt.into());
@@ -2313,9 +2322,10 @@ fn build_cli_provider_invocation(
     request.credentials =
         CredentialPolicy::for_provider(profile.provider_id.as_deref().unwrap_or_default());
     #[cfg(not(test))]
-    if let Some((name, value)) =
-        gyro_core::try_stored_provider_api_key_env(profile.provider_id.as_deref().unwrap_or_default())
-            .map_err(|error| cli_failure(CliErrorCategory::ProviderUnavailable, error.to_string()))?
+    if let Some((name, value)) = gyro_core::try_stored_provider_api_key_env(
+        profile.provider_id.as_deref().unwrap_or_default(),
+    )
+    .map_err(|error| cli_failure(CliErrorCategory::ProviderUnavailable, error.to_string()))?
     {
         request.env.push((name, Some(value)));
     }
@@ -2521,6 +2531,8 @@ fn execute_codex_app_server_provider(
             resume_session_id,
             require_command_approval: config.require_command_approval,
             require_file_edit_approval: config.require_file_edit_approval,
+            full_access: config.full_access,
+            advisory: matches!(mode, "plan" | "council"),
             timeout: Duration::from_secs(timeout_seconds),
             cancellation: cancellation.clone(),
         },
@@ -3154,16 +3166,28 @@ fn decide_kimi_provider_approval(
         payload.clone(),
         Some(turn_id),
     )?;
-    let required = match approval.kind {
-        KimiAcpApprovalKind::Command => config.require_command_approval,
-        KimiAcpApprovalKind::FileChange => config.require_file_edit_approval,
-        KimiAcpApprovalKind::Other => true,
+    let posture = gyro_core::approval_posture(
+        config.full_access,
+        config.require_command_approval,
+        config.require_file_edit_approval,
+    );
+    let provider_id = profile.provider_id.as_deref().unwrap_or("");
+    // Grok `auto` and Kimi `--yolo` already let the safe set through. A
+    // request that still arrives is outside that set.
+    let required = if posture == gyro_core::ApprovalPosture::ApproveForMe
+        && gyro_core::approve_for_me_keeps_escalations(provider_id)
+    {
+        true
+    } else {
+        match approval.kind {
+            KimiAcpApprovalKind::Command => config.require_command_approval,
+            KimiAcpApprovalKind::FileChange => config.require_file_edit_approval,
+            KimiAcpApprovalKind::Other => true,
+        }
     };
-    let denied_by_plan = plan_mode
-        && matches!(
-            approval.kind,
-            KimiAcpApprovalKind::Command | KimiAcpApprovalKind::FileChange
-        );
+    // File writes stay blocked. Commands do not: Grok treats a shell
+    // reject_once as the user declining the tool and cancels the turn.
+    let denied_by_plan = plan_mode && gyro_core::plan_mode_denies_approval(approval.kind);
     let allowed = if denied_by_plan {
         false
     } else if !required || approved {
@@ -3209,26 +3233,58 @@ fn decide_kimi_provider_approval(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_cli_collected_usage(store: &SessionStore, session: Uuid, turn: Uuid,
-    provider: &str, model: Option<String>, succeeded: bool, cancelled: bool, wall_ms: u64) {
+fn record_cli_collected_usage(
+    store: &SessionStore,
+    session: Uuid,
+    turn: Uuid,
+    provider: &str,
+    model: Option<String>,
+    succeeded: bool,
+    cancelled: bool,
+    wall_ms: u64,
+) {
     let summary = gyro_core::provider_observation::snapshot().unwrap_or_default();
-    let tokens = summary.tokens.unwrap_or_else(||
-        gyro_core::UsageTokens::unavailable(gyro_core::usage::UsageReason::MissingUsage));
+    let tokens = summary.tokens.unwrap_or_else(|| {
+        gyro_core::UsageTokens::unavailable(gyro_core::usage::UsageReason::MissingUsage)
+    });
     let entry = gyro_core::UsageEntry {
-        session_id: session, turn_id: Some(turn), seat_id: None,
-        provider_id: provider.into(), model_id: model, reasoning_effort: None,
+        session_id: session,
+        turn_id: Some(turn),
+        seat_id: None,
+        provider_id: provider.into(),
+        model_id: model,
+        reasoning_effort: None,
         origin: gyro_core::UsageOrigin::Chat,
-        outcome: if cancelled { gyro_core::UsageOutcome::Cancelled }
-            else if succeeded { gyro_core::UsageOutcome::Done } else { gyro_core::UsageOutcome::Failed },
-        tokens, wall_ms, retry_count: summary.retries,
+        outcome: if cancelled {
+            gyro_core::UsageOutcome::Cancelled
+        } else if succeeded {
+            gyro_core::UsageOutcome::Done
+        } else {
+            gyro_core::UsageOutcome::Failed
+        },
+        tokens,
+        wall_ms,
+        retry_count: summary.retries,
     };
     if let Err(error) = store.record_usage(&entry) {
-        eprintln!("could not record usage: {}", gyro_core::security::redact_secrets(&error.to_string()));
+        eprintln!(
+            "could not record usage: {}",
+            gyro_core::security::redact_secrets(&error.to_string())
+        );
     }
-    let total = store.task_usage_tokens(session, turn).ok().flatten().unwrap_or(tokens);
-    let _ = store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "",
+    let total = store
+        .task_usage_tokens(session, turn)
+        .ok()
+        .flatten()
+        .unwrap_or(tokens);
+    let _ = store.append_event_with_turn_id(
+        session,
+        SessionEventKind::SystemEvent,
+        "",
         serde_json::json!({"kind": "provider-turn-tokens", "accountingVersion": 1,
-            "turnTokens": total, "usageObservations": summary.usage_observations}), Some(turn));
+            "turnTokens": total, "usageObservations": summary.usage_observations}),
+        Some(turn),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3258,13 +3314,41 @@ fn execute_kimi_acp_provider(
     })?;
     let provider_label = runtime.label;
     let plan_mode = mode == "plan";
+    let selected_model = if provider_id == "xai" {
+        gyro_core::fast_mode::launch_model_id(config, "xai", model.as_deref())
+    } else {
+        model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let posture = gyro_core::approval_posture(
+        config.full_access,
+        config.require_command_approval,
+        config.require_file_edit_approval,
+    );
     let mut program_args = profile
         .args
         .iter()
         .cloned()
         .map(Into::into)
         .collect::<Vec<_>>();
-    program_args.extend(runtime.args.iter().map(Into::into));
+    if provider_id == "xai" {
+        // Grok ignores session/set_model. The process flag is the selection,
+        // and the permission mode has to be one too.
+        program_args.extend(gyro_core::grok::acp_program_args(
+            selected_model
+                .as_deref()
+                .filter(|value| *value != runtime.default_model),
+            None,
+            posture,
+        ));
+    } else if let Some(args) = gyro_core::acp_permission_args(&provider_id, posture) {
+        program_args.extend(args.iter().copied().map(Into::into));
+    } else {
+        program_args.extend(runtime.args.iter().map(Into::into));
+    }
     let _usage_scope = gyro_core::provider_observation::Scope::start();
     let _ = store.note_usage_call(session.id, turn_id);
     let usage_started = std::time::Instant::now();
@@ -3282,7 +3366,7 @@ fn execute_kimi_acp_provider(
             conversation_history_text: None,
             // The CLI has no desktop capability bridge to attach.
             mcp_servers: Vec::new(),
-            model: model
+            model: selected_model
                 .clone()
                 .filter(|model| !(provider_id == "xai" && model == runtime.default_model))
                 .unwrap_or_else(|| {
@@ -3405,8 +3489,19 @@ fn execute_kimi_acp_provider(
         },
     );
 
-    record_cli_collected_usage(store, session.id, turn_id, &provider_id, model.clone(),
-        result.is_ok(), cancellation.is_cancelled(), usage_started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+    record_cli_collected_usage(
+        store,
+        session.id,
+        turn_id,
+        &provider_id,
+        model.clone(),
+        result.is_ok(),
+        cancellation.is_cancelled(),
+        usage_started
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64,
+    );
     let output = match result {
         Ok(output) => output,
         Err(error) => {
@@ -3619,12 +3714,14 @@ fn execute_ollama_provider_inner(
             format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
         )
     })?;
-    let selected = selected.ok_or_else(|| cli_failure(
+    let selected = selected.ok_or_else(|| {
+        cli_failure(
             CliErrorCategory::InvalidInput,
             format!(
                 "Ollama model `{model}` is not installed; run `ollama pull {model}` and retry."
             ),
-        ))?;
+        )
+    })?;
     if cancellation.is_cancelled() {
         return Err(cli_failure(
             CliErrorCategory::Cancelled,
@@ -3640,17 +3737,28 @@ fn execute_ollama_provider_inner(
     };
     let _usage_scope = gyro_core::provider_observation::Scope::start();
     let _ = store.note_usage_call(session.id, turn_id);
-    let result = gyro_core::ollama_chat_with_cancellation(OllamaChatRequest {
-        base_url: provider.base_url.as_deref(),
-        model,
-        system,
-        user: &user,
-        context_window_tokens: selected.context_window_tokens,
-    }, cancellation);
+    let result = gyro_core::ollama_chat_with_cancellation(
+        OllamaChatRequest {
+            base_url: provider.base_url.as_deref(),
+            model,
+            system,
+            user: &user,
+            context_window_tokens: selected.context_window_tokens,
+        },
+        cancellation,
+    );
     deadline.finish();
     let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-    record_cli_collected_usage(store, session.id, turn_id, "ollama", Some(model.to_string()),
-        result.is_ok(), cancellation.is_cancelled(), duration_ms);
+    record_cli_collected_usage(
+        store,
+        session.id,
+        turn_id,
+        "ollama",
+        Some(model.to_string()),
+        result.is_ok(),
+        cancellation.is_cancelled(),
+        duration_ms,
+    );
     let response = match result {
         Ok(result) if !cancellation.is_cancelled() => result.content,
         Ok(_) => {
@@ -3893,14 +4001,36 @@ fn execute_cli_provider(
         resume_cursor,
         Some(&permission_mcp_config),
         timeout_seconds,
+        gyro_core::approval_posture(
+            config.full_access,
+            config.require_command_approval,
+            config.require_file_edit_approval,
+        ),
+        mode == "plan" || mode == "council",
     ) {
         Ok(invocation) => invocation,
         Err(error) => {
             let detail = gyro_core::sanitize_harness_text(&error.to_string());
-            update_cli_provider_binding_status(store, session.id, &provider_id, "failed", Some(&detail))?;
-            append_cli_run_status(store, session, turn_id, attempt_id, mode,
-                HarnessRunStatus::Failed, profile, model.clone(),
-                "CLI provider setup failed.", Some(&detail), None)?;
+            update_cli_provider_binding_status(
+                store,
+                session.id,
+                &provider_id,
+                "failed",
+                Some(&detail),
+            )?;
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Failed,
+                profile,
+                model.clone(),
+                "CLI provider setup failed.",
+                Some(&detail),
+                None,
+            )?;
             return Err(error);
         }
     };
@@ -4007,9 +4137,10 @@ fn execute_cli_provider(
     let status = if approval_rejected {
         HarnessRunStatus::Blocked
     } else if approval_failed
-        || decoder.provider_failure.as_ref().is_some_and(|failure| {
-            failure.kind == CliProviderFailureKind::AccessRestricted
-        })
+        || decoder
+            .provider_failure
+            .as_ref()
+            .is_some_and(|failure| failure.kind == CliProviderFailureKind::AccessRestricted)
     {
         HarnessRunStatus::Failed
     } else {
@@ -6182,32 +6313,67 @@ done
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         let store = SessionStore::open(paths.clone()).unwrap();
-        let session = store.create_session(temp.path(), SessionOrigin::Cli, "Usage fixture").unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "Usage fixture")
+            .unwrap();
         let turn = Uuid::new_v4();
         {
             let _scope = gyro_core::provider_observation::Scope::start();
-            let tokens = gyro_core::UsageTokens::measured(Some(100), Some(60), Some(20), Some(5), None)
-                .with_cache_write(Some(10)).partial(gyro_core::usage::UsageReason::Interrupted);
+            let tokens =
+                gyro_core::UsageTokens::measured(Some(100), Some(60), Some(20), Some(5), None)
+                    .with_cache_write(Some(10))
+                    .partial(gyro_core::usage::UsageReason::Interrupted);
             gyro_core::provider_observation::native_usage(tokens);
             store.note_usage_call(session.id, turn).unwrap();
-            record_cli_collected_usage(&store, session.id, turn, "grok", Some("fixture".into()), false, true, 1);
+            record_cli_collected_usage(
+                &store,
+                session.id,
+                turn,
+                "grok",
+                Some("fixture".into()),
+                false,
+                true,
+                1,
+            );
         }
         let unavailable_turn = Uuid::new_v4();
         {
             let _scope = gyro_core::provider_observation::Scope::start();
             store.note_usage_call(session.id, unavailable_turn).unwrap();
-            record_cli_collected_usage(&store, session.id, unavailable_turn, "kimi", None, false, false, 1);
+            record_cli_collected_usage(
+                &store,
+                session.id,
+                unavailable_turn,
+                "kimi",
+                None,
+                false,
+                false,
+                1,
+            );
         }
         drop(store);
         let store = SessionStore::open(paths).unwrap();
         let result = store.task_usage_tokens(session.id, turn).unwrap().unwrap();
         assert_eq!((result.total_tokens, result.cache_write_tokens), (120, 10));
-        assert_eq!(result.effective_accounting().coverage, gyro_core::usage::UsageCoverage::Partial);
-        let unavailable = store.task_usage_tokens(session.id, unavailable_turn).unwrap().unwrap();
-        assert_eq!(unavailable.effective_accounting().coverage, gyro_core::usage::UsageCoverage::Unavailable);
+        assert_eq!(
+            result.effective_accounting().coverage,
+            gyro_core::usage::UsageCoverage::Partial
+        );
+        let unavailable = store
+            .task_usage_tokens(session.id, unavailable_turn)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            unavailable.effective_accounting().coverage,
+            gyro_core::usage::UsageCoverage::Unavailable
+        );
         let events = store.read_events(session.id).unwrap();
-        assert!(events.iter().any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "partial"));
-        assert!(events.iter().any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "unavailable"));
+        assert!(events
+            .iter()
+            .any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "partial"));
+        assert!(events
+            .iter()
+            .any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "unavailable"));
     }
 
     #[test]
@@ -6551,6 +6717,8 @@ done
             None,
             Some(r#"{"mcpServers":{}}"#),
             5,
+            gyro_core::ApprovalPosture::Ask,
+            false,
         )
         .unwrap();
         let args = invocation
@@ -6564,6 +6732,7 @@ done
         assert!(args.contains(&"mcp__gyro_approval__approve".into()));
         assert!(args.contains(&"--setting-sources".into()));
         assert!(args.contains(&"--verbose".into()));
+        assert!(args.windows(2).any(|pair| pair == ["--permission-mode", "manual"]));
         assert!(!args.contains(&"--dangerously-skip-permissions".into()));
     }
 
@@ -6587,6 +6756,8 @@ done
             None,
             Some(r#"{"mcpServers":{}}"#),
             5,
+            gyro_core::ApprovalPosture::FullAccess,
+            false,
         )
         .err()
         .expect("permission bypass must fail");

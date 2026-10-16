@@ -1579,6 +1579,19 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-muted);
 }
 
+.gyro-dictation-button.is-listening {
+  background: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 22%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-dictation-status {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  margin: 0;
+  padding: 0 calc(12px * var(--gyro-ui-scale, 1))
+    calc(6px * var(--gyro-ui-scale, 1));
+}
+
 .gyro-chat-surface-controls {
   align-items: center;
   display: inline-flex;
@@ -5044,14 +5057,20 @@ button.gyro-account-menu-row:hover {
   color: #f0ece5;
 }
 
-/* Cursor and OpenCode publish monochrome marks, so like Grok they follow a
+/* Cursor publishes a monochrome mark, so like Grok it follows a
    theme-flipping token rather than a fixed light ink. */
 .gyro-provider-logo.is-cursor {
   color: var(--gyro-provider-cursor);
 }
 
+/* The frame follows the theme ink. The inner block is a second published
+   tone, so it does not inherit the frame. */
 .gyro-provider-logo.is-opencode {
   color: var(--gyro-provider-opencode);
+}
+
+.gyro-provider-logo.is-opencode .gyro-opencode-logo-block {
+  fill: var(--gyro-provider-opencode-block);
 }
 
 .gyro-provider-logo.is-deepseek {
@@ -26184,20 +26203,11 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-session-group.is-chat > button {
-  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   min-height: max(38px, calc(38px * var(--gyro-ui-scale, 1)));
 }
 
 .gyro-sidebar-session-group.is-chat > button strong {
   font-weight: 600;
-}
-
-.gyro-sidebar-session-group.is-chat > button > svg {
-  color: var(--gyro-accent);
-}
-
-.gyro-sidebar-session-group.is-chat > button:not(:disabled):is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--gyro-accent) 15%, transparent);
 }
 
 .gyro-sidebar-new-session-menu

@@ -3,6 +3,8 @@ import {
   linkedChatFile,
   parseChatMarkdownLink,
   chatInlineTokenPattern,
+  isCitedImageTarget,
+  markdownImageTargets,
 } from "../packages/ui/src/chat-file-links.ts";
 assert.deepEqual(
   linkedChatFile("Launch demo", "/Users/me/Screen Recording (2).mov"),
@@ -61,6 +63,17 @@ assert.equal(
   "`[Code](/tmp/a.pdf)`".split(chatInlineTokenPattern).filter(Boolean).length,
   1,
 );
+assert.equal(isCitedImageTarget("images/composer.png"), true);
+assert.equal(isCitedImageTarget("/tmp/shot.webp"), true);
+assert.equal(isCitedImageTarget("file:///tmp/shot.jpg"), true);
+assert.equal(isCitedImageTarget("../secret.png"), false);
+assert.equal(isCitedImageTarget("https://example.com/a.png"), false);
+assert.equal(isCitedImageTarget("/tmp/a.gif"), false);
+assert.equal(isCitedImageTarget("notes\n.png"), false);
+const cited =
+  "![Composer with the microphone left of Send](images/composer.png)\n\n`images/composer.png`";
+assert.equal(markdownImageTargets(cited).has("images/composer.png"), true);
+assert.equal(markdownImageTargets("see `images/other.png`").size, 0);
 console.log(
   "Chat file link checks passed: media, documents, local paths, encoded names, nested parentheses, and unsafe schemes.",
 );

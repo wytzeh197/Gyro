@@ -266,15 +266,25 @@ pub(super) fn bound_command_result(
     arguments: &serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
     if efficiency::config().policies() && efficiency::config().structured_evidence {
-        let _measure=timing::EfficiencyTimer::start(timing::EfficiencyComponent::StructuredEvidence);
-        if let Some(evidence) = gyro_core::efficiency::evidence::parse(data["stdout"].as_str().unwrap_or_default(), data["stderr"].as_str().unwrap_or_default(), data["exitCode"].as_i64()) {
+        let _measure =
+            timing::EfficiencyTimer::start(timing::EfficiencyComponent::StructuredEvidence);
+        if let Some(evidence) = gyro_core::efficiency::evidence::parse(
+            data["stdout"].as_str().unwrap_or_default(),
+            data["stderr"].as_str().unwrap_or_default(),
+            data["exitCode"].as_i64(),
+        ) {
             let summary = serde_json::to_value(&evidence)?;
             // Preserve the existing byte contract and fall back to raw windows for large/partial summaries.
             if serde_json::to_vec(&summary)?.len() < workspace_result_byte_limit(arguments)? / 2 {
                 data["evidenceSummary"] = summary;
-                if evidence.coverage == "complete" && !data["sourceTruncated"].as_bool().unwrap_or(false) && arguments.get("stdoutOffset").is_none() && arguments.get("stderrOffset").is_none() {
+                if evidence.coverage == "complete"
+                    && !data["sourceTruncated"].as_bool().unwrap_or(false)
+                    && arguments.get("stdoutOffset").is_none()
+                    && arguments.get("stderrOffset").is_none()
+                {
                     let total_chars = data["stdout"].as_str().unwrap_or_default().chars().count();
-                    data["stdout"] = json!(""); data["rawOutput"] = json!({"available":true,"outputId":data["id"],"stdoutChars":total_chars,"retrieve":"Use read_output with outputId and stdoutOffset: 0"});
+                    data["stdout"] = json!("");
+                    data["rawOutput"] = json!({"available":true,"outputId":data["id"],"stdoutChars":total_chars,"retrieve":"Use read_output with outputId and stdoutOffset: 0"});
                 }
             }
         }

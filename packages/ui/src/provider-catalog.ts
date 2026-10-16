@@ -51,7 +51,7 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
-/** Grok 4.3, 4.6, and 4.7 expose xhigh; 4.5 stops at high. */
+/** Grok 4.3, 4.6, 4.7, and 4.7 Fast expose xhigh; 4.5 stops at high. */
 export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
   ...GROK_REASONING_EFFORTS,
   "xhigh",
@@ -382,6 +382,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
       {
+        id: "grok-4.7-build-fast",
+        displayName: "Grok 4.7 Fast",
+        description:
+          "The same Grok 4.7 model on faster Grok Build infrastructure, at higher usage.",
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
+      },
+      {
         id: "grok-4.6",
         displayName: "Grok 4.6",
         description:
@@ -453,7 +462,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "acp-cli",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "standard",
@@ -482,7 +491,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "acp-cli",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "standard",
@@ -558,7 +567,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",
@@ -614,7 +623,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",
@@ -1143,7 +1152,7 @@ function customProviderForConfig(
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",

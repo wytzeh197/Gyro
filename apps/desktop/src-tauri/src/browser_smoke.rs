@@ -156,7 +156,10 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     find("[data-gyro-browser-pointer]")?;
     call("hidePointer", json!({}))?;
     let hidden = call("find", json!({"selector":"[data-gyro-browser-pointer]"}))?;
-    if hidden["results"].as_array().is_some_and(|items| !items.is_empty()) {
+    if hidden["results"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
         return Err("AI cursor was not hidden for capture".into());
     }
     call("restorePointer", json!({}))?;
@@ -173,76 +176,76 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     }
     steps.push("repeat read/find/click exactly once/read changed state".into());
     if mouse_enabled {
-    let _pointer_capture = capture_session_browser_png(app, session)?;
-    let pointer_status = call("status", json!({}))?;
-    let pointer_url = pointer_status["url"]
-        .as_str()
-        .ok_or("missing pointer URL")?;
-    let pointer_viewport = pointer_status["viewport"]
-        .as_object()
-        .ok_or("missing pointer viewport")?;
-    app.state::<SessionBrowserManager>()
-        .remember_pointer_capture(
-            session,
-            "native-smoke-pointer.png".into(),
-            pointer_url.into(),
-            Value::Object(pointer_viewport.clone()),
-        )?;
-    let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
-        let outcome = browser_pointer::execute(
+        let _pointer_capture = capture_session_browser_png(app, session)?;
+        let pointer_status = call("status", json!({}))?;
+        let pointer_url = pointer_status["url"]
+            .as_str()
+            .ok_or("missing pointer URL")?;
+        let pointer_viewport = pointer_status["viewport"]
+            .as_object()
+            .ok_or("missing pointer viewport")?;
+        app.state::<SessionBrowserManager>()
+            .remember_pointer_capture(
+                session,
+                "native-smoke-pointer.png".into(),
+                pointer_url.into(),
+                Value::Object(pointer_viewport.clone()),
+            )?;
+        let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
+            let outcome = browser_pointer::execute(
+                app,
+                session,
+                "Claude",
+                &json!({
+                    "action": action,
+                    "captureId": "native-smoke-pointer.png",
+                    "x": x,
+                    "y": y,
+                    "toX": to_x,
+                    "toY": to_y,
+                }),
+            )?;
+            if outcome.action != action {
+                return Err("browser mouse returned the wrong action".into());
+            }
+            Ok(())
+        };
+        let (hover_x, hover_y) = point("#hover-trigger")?;
+        let pointer_target = call("pointerTarget", json!({"x":hover_x,"y":hover_y}))?;
+        if pointer_target["name"] != "Hover target" {
+            return Err(format!(
+                "pointer coordinates missed hover target: {pointer_target}"
+            ));
+        }
+        if browser_pointer::execute(
             app,
             session,
-            "Claude",
-            &json!({
-                "action": action,
-                "captureId": "native-smoke-pointer.png",
-                "x": x,
-                "y": y,
-                "toX": to_x,
-                "toY": to_y,
-            }),
-        )?;
-        if outcome.action != action {
-            return Err("browser mouse returned the wrong action".into());
+            "Model",
+            &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
+        )
+        .is_ok()
+        {
+            return Err("stale pointer capture was accepted".into());
         }
-        Ok(())
-    };
-    let (hover_x, hover_y) = point("#hover-trigger")?;
-    let pointer_target = call("pointerTarget", json!({"x":hover_x,"y":hover_y}))?;
-    if pointer_target["name"] != "Hover target" {
-        return Err(format!(
-            "pointer coordinates missed hover target: {pointer_target}"
-        ));
-    }
-    if browser_pointer::execute(
-        app,
-        session,
-        "Model",
-        &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
-    )
-    .is_ok()
-    {
-        return Err("stale pointer capture was accepted".into());
-    }
-    mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
-    wait_page("Hover: open")?;
-    let pointer_highlight = capture_session_browser_png(app, session)?;
-    std::fs::write(
-        output.join("browser-smoke-mouse-highlight.png"),
-        pointer_highlight.png,
-    )
-    .map_err(|e| e.to_string())?;
-    call("clearHighlight", json!({}))?;
-    mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
-    wait_page("Context: opened")?;
-    let (canvas_x, canvas_y) = point("#pointer-canvas")?;
-    mouse("click", canvas_x, canvas_y, canvas_x, canvas_y)?;
-    wait_page("Canvas: clicked")?;
-    let (drag_x, drag_y) = point("#drag-handle")?;
-    let (drop_x, drop_y) = point("#drop-zone")?;
-    mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
-    wait_page("Drag: completed")?;
-    steps.push("native hover/secondary-click/canvas click/drag".into());
+        mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
+        wait_page("Hover: open")?;
+        let pointer_highlight = capture_session_browser_png(app, session)?;
+        std::fs::write(
+            output.join("browser-smoke-mouse-highlight.png"),
+            pointer_highlight.png,
+        )
+        .map_err(|e| e.to_string())?;
+        call("clearHighlight", json!({}))?;
+        mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
+        wait_page("Context: opened")?;
+        let (canvas_x, canvas_y) = point("#pointer-canvas")?;
+        mouse("click", canvas_x, canvas_y, canvas_x, canvas_y)?;
+        wait_page("Canvas: clicked")?;
+        let (drag_x, drag_y) = point("#drag-handle")?;
+        let (drop_x, drop_y) = point("#drop-zone")?;
+        mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
+        wait_page("Drag: completed")?;
+        steps.push("native hover/secondary-click/canvas click/drag".into());
     } else {
         steps.push("SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1 (macOS Accessibility permission unavailable)".into());
     }

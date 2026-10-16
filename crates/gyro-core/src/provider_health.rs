@@ -4,8 +4,8 @@ use crate::execution::{
 use crate::{
     check_acp_health, check_kimi_acp_health, discover_ollama_models, health_kind_for,
     openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
-    provider_api_key_env_name, provider_has_api_key,
-    try_stored_provider_api_key_env, KimiAcpHealthStatus, ProviderHealthKind,
+    provider_api_key_env_name, provider_has_api_key, try_stored_provider_api_key_env,
+    KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -610,11 +610,14 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         login_command: Some(login_command.into()),
         account_label: None,
         subscription_label: None,
-        provider_mode: Some(if provider_id == "antigravity" {
-            "local-api-key-acp"
-        } else {
-            "local-subscription-cli"
-        }.into()),
+        provider_mode: Some(
+            if provider_id == "antigravity" {
+                "local-api-key-acp"
+            } else {
+                "local-subscription-cli"
+            }
+            .into(),
+        ),
         secret_storage: "Provider CLI, OS Keychain, or provider-owned files".into(),
         privacy_note:
             "Gyro checks the local ACP login state without reading provider credential values."
@@ -899,7 +902,8 @@ fn command_output_with_limits_scoped(
         ));
     }
     if let Some((name, value)) = try_stored_provider_api_key_env(provider_id)
-        .map_err(|error| CommandOutputError::Unavailable(error.to_string()))? {
+        .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?
+    {
         request.env.push((name, Some(value)));
     }
     apply_health_data_home(&mut request, provider_id, data_home);

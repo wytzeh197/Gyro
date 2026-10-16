@@ -14,6 +14,8 @@ const fastModels: Record<string, readonly string[]> = {
     "gpt-5.5",
   ],
   anthropic: ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"],
+  // The fast pool is a separate model id. The toggle rewrites grok-4.7 to it.
+  xai: ["grok-4.7"],
 };
 
 export function supportsFastMode(providerId?: string, modelId?: string) {
