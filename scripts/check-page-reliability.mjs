@@ -14,6 +14,8 @@ const transpile = (path) =>
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const boot = transpile("../apps/desktop/src/main.tsx");
 const appFailure = transpile("../apps/desktop/src/app-failure.tsx");
+const nativeAppearance = transpile("../apps/desktop/src/native-appearance.ts");
+const uiStorage = transpile("../apps/desktop/src/ui-storage.ts");
 const element = (type, props, ...children) => ({
   type,
   props: { ...props, children },
@@ -31,6 +33,7 @@ async function runBoot(surface, failure) {
     self: {},
     location: { search: "", reload: () => reloads++ },
     matchMedia: () => ({ matches: false }),
+    localStorage: { getItem: () => null },
   };
   window.top = window.self;
   runInNewContext(boot, {
@@ -56,6 +59,29 @@ async function runBoot(surface, failure) {
       if (id === "./surface-boundary")
         return { resolveBootSurface: () => surface };
       if (id === "./early-shell") return { EarlyShell: "early-shell" };
+      if (id === "./native-appearance" || id === "./ui-storage") {
+        const exports = {};
+        runInNewContext(
+          id === "./native-appearance" ? nativeAppearance : uiStorage,
+          {
+            exports,
+            window,
+            document: { documentElement: { dataset: {} } },
+            require: (dependency) => {
+              if (dependency === "@tauri-apps/api/core")
+                return { isTauri: () => false };
+              if (dependency === "@tauri-apps/api/app")
+                return {
+                  setTheme: () => {
+                    throw new Error("Browser boot must not set a native theme");
+                  },
+                };
+              throw new Error("Unexpected appearance import " + dependency);
+            },
+          },
+        );
+        return exports;
+      }
       if (id === "./app-failure") {
         const exports = {};
         runInNewContext(appFailure, {

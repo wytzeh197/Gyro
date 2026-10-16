@@ -6,6 +6,10 @@ type OpenMenu = {
 };
 const openMenus: OpenMenu[] = [];
 
+export function hasOpenMenus() {
+  return openMenus.length > 0;
+}
+
 export function dismissOpenMenus() {
   for (const menu of [...openMenus].reverse()) menu.dismiss();
 }
@@ -27,6 +31,9 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
     if (!isOpen || !element) return;
     const returnFocus =
       triggerRef?.current ??
+      element.querySelector<HTMLElement>(
+        '[aria-haspopup][aria-expanded="true"]',
+      ) ??
       (element.querySelector("[aria-haspopup]") as HTMLElement | null) ??
       (document.activeElement as HTMLElement | null);
     // Nested menus stay open together; unrelated overlays never stack.
@@ -46,6 +53,14 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
         return;
       menu.dismiss();
     };
+    const handleFocusIn = (event: FocusEvent) => {
+      const path = event.composedPath();
+      if (
+        !path.includes(element) &&
+        !(triggerRef?.current && path.includes(triggerRef.current))
+      )
+        menu.dismiss();
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || openMenus.at(-1) !== menu) return;
       if (event.key === "Escape") {
@@ -53,15 +68,26 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
         event.stopPropagation();
         if (escapeRef.current?.()) return;
         menu.dismiss();
-        const focusTarget = triggerRef?.current ?? returnFocus;
-        if (focusTarget?.isConnected) focusTarget.focus();
+        const focusTarget =
+          triggerRef?.current ??
+          element.querySelector<HTMLElement>(
+            '[aria-haspopup][aria-expanded="true"]',
+          ) ??
+          returnFocus;
+        if (focusTarget?.isConnected)
+          focusTarget.focus({ preventScroll: true });
         return;
       }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+        return;
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
       const target = event.target as HTMLElement | null;
       if (
         !target ||
-        target.matches("input, textarea, select, [contenteditable=true]")
+        (!element.contains(target) && !triggerRef?.current?.contains(target)) ||
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+        )
       )
         return;
       const items = [
@@ -88,11 +114,13 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
       items[next]?.focus();
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("focusin", handleFocusIn);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       const index = openMenus.indexOf(menu);
       if (index >= 0) openMenus.splice(index, 1);
       document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen, triggerRef]);

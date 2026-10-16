@@ -136,7 +136,9 @@
   min-height: 0;
   grid-template-rows: minmax(0, 1fr);
 }
-.gyro-workspace-primary:has(> .gyro-workspace-edit-bar) {
+/* Match the base grid's specificity so the edit bar stays an auto-sized row. */
+:is(.gyro-workspace-route.is-code, .workspace-fixture)
+  > .gyro-workspace-primary:has(> .gyro-workspace-edit-bar) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }

@@ -9417,7 +9417,7 @@ export function App() {
           const provider = providersForConfig(config).find(
             (item) => item.id === providerId,
           );
-          if (providerId === "gemini" || providerId === "antigravity") {
+          if (providerId === "antigravity") {
             void refreshGoogleModels(providerId, true).then((discovery) => {
               notify(
                 discovery ? "provider" : "command-failed",
@@ -19925,8 +19925,8 @@ function approvalNotificationCopy(
         ? "Kimi"
         : config.selectedProviderId === "xai"
           ? "Grok"
-          : config.selectedProviderId === "gemini"
-            ? "Gemini"
+          : config.selectedProviderId === "antigravity"
+            ? "Google Antigravity"
             : "Codex";
   if (mode === "gated") {
     return {

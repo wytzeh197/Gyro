@@ -150,7 +150,7 @@ assert.equal(
 for (const [providerId, modelId, window] of [
   ["openai", "gpt-6.1-sol", 500_000],
   ["xai", "grok-4.3", 1_000_000],
-  ["gemini", "gemini-default", 1_048_576],
+  ["antigravity", "antigravity-default", 0],
   ["openrouter", "z-ai/glm-5.3", 1_048_576],
 ]) {
   assert.equal(
@@ -159,6 +159,15 @@ for (const [providerId, modelId, window] of [
     window,
   );
 }
+
+assert.equal(
+  estimateComposerContextUsage([], "", {
+    providerId: "gemini",
+    modelId: "gemini-default",
+  }).contextWindowTokens,
+  0,
+  "A retired provider must not advertise a guessed context allocation",
+);
 
 // A provisioned Kimi plan and a local Ollama allocation can differ from the
 // offline catalog, in either direction. Counts must use the actual window.

@@ -114,7 +114,6 @@ export function providerSupportsApiKey(providerId: string) {
     providerId === "openai" ||
     providerId === "anthropic" ||
     providerId === "xai" ||
-    providerId === "gemini" ||
     providerId === "antigravity" ||
     providerId === "kimi" ||
     providerId === "cursor" ||
@@ -135,7 +134,6 @@ export function providerApiKeyEnvName(providerId: string) {
       return "ANTHROPIC_API_KEY";
     case "xai":
       return "XAI_API_KEY";
-    case "gemini":
     case "antigravity":
       return "GEMINI_API_KEY";
     case "kimi":
@@ -407,39 +405,6 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "low",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
-      },
-    ],
-    effort: "medium",
-    allowedTools: ["files", "terminal", "diff"],
-  },
-  {
-    id: "gemini",
-    displayName: "Gemini",
-    apiKeyRef: "provider-cli:gemini",
-    enabled: false,
-    authMode: "cli",
-    authStatus: "not-connected",
-    baseUrl: null,
-    defaultModelId: "gemini-default",
-    selectedModelId: "gemini-default",
-    capabilities: {
-      executionKind: "acp-cli",
-      executable: true,
-      supportsApprovals: true,
-      supportsImages: true,
-      supportsResume: true,
-      // No plan-window API; spend is the local ledger only (not fake 5h/weekly).
-      supportsUsage: false,
-      visibility: "standard",
-    },
-    models: [
-      {
-        id: "gemini-default",
-        displayName: "Gemini",
-        description:
-          "Uses Gemini credentials from the local environment or Google-owned tooling.",
-        // Gemini CLI's tokenLimit default; custom routing may report less.
-        contextWindowTokens: 1_048_576,
       },
     ],
     effort: "medium",
@@ -1135,8 +1100,9 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
   // drop it and it would never reach the picker, the API-key section, or the
   // model list. Append those straight from config.
   const catalogIds = new Set(providerCatalog.map((provider) => provider.id));
+  // Retired built-ins must not return as user-defined endpoints on old installs.
   const customProviders = config.modelProviders
-    .filter((provider) => !catalogIds.has(provider.id))
+    .filter((provider) => provider.id !== "gemini" && !catalogIds.has(provider.id))
     .map(customProviderForConfig);
 
   return [...catalogProviders, ...customProviders];
@@ -1195,13 +1161,16 @@ export function normalizedConfig(config: GyroConfig): GyroConfig {
   // provider in catalog order so a restored installation can start a new chat
   // with the default model it already configured. The native config migration
   // makes the same choice, and future saves preserve it.
+  const requestedProviderId = config.selectedProviderId === "gemini"
+    ? "antigravity"
+    : config.selectedProviderId;
   const selectedProviderId =
-    isProviderId(config.selectedProviderId) &&
+    isProviderId(requestedProviderId) &&
     providers.some(
       (provider) =>
-        provider.id === config.selectedProviderId && provider.enabled,
+        provider.id === requestedProviderId && provider.enabled,
     )
-      ? config.selectedProviderId
+      ? requestedProviderId
       : providers.find((provider) => provider.enabled)?.id;
   return {
     ...config,
@@ -1214,6 +1183,9 @@ export function normalizedConfig(config: GyroConfig): GyroConfig {
     accountSession: config.accountSession ?? { signedIn: false },
     selectedProviderId,
     modelProviders: providers,
+    commandProfiles: (config.commandProfiles ?? []).filter((profile) =>
+      profile.providerId !== "gemini" && !["gemini", "gemini-cli"].includes(profile.id),
+    ),
   };
 }
 

@@ -288,16 +288,6 @@ impl Default for GyroConfig {
                     model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
-                    id: "gemini".into(),
-                    display_name: "Gemini".into(),
-                    base_url: None,
-                    api_key_ref: "provider-cli:gemini".into(),
-                    enabled: false,
-                    default_model_id: None,
-                    kind: None,
-                    model_ids: Vec::new(),
-                },
-                ModelProviderConfig {
                     id: "antigravity".into(),
                     display_name: "Google Antigravity".into(),
                     base_url: None,
@@ -426,16 +416,6 @@ impl Default for GyroConfig {
                     working_directory: None,
                     provider_id: Some("xai".into()),
                     default_model: Some("grok-4.7".into()),
-                    readiness: CommandProfileReadiness::Waiting,
-                },
-                CommandProfile {
-                    id: "gemini-cli".into(),
-                    display_name: "Gemini CLI".into(),
-                    command: "gemini".into(),
-                    args: Vec::new(),
-                    working_directory: None,
-                    provider_id: Some("gemini".into()),
-                    default_model: Some("gemini-default".into()),
                     readiness: CommandProfileReadiness::Waiting,
                 },
                 CommandProfile {
@@ -574,6 +554,17 @@ impl GyroConfig {
             self.account_session.issuer = Some("local-device://gyro".into());
         }
 
+        // Gemini CLI is retired from the provider picker. Its OAuth session and
+        // model ids are not Antigravity credentials or an Antigravity inventory.
+        self.model_providers.retain(|provider| provider.id != "gemini");
+        self.command_profiles.retain(|profile| {
+            profile.provider_id.as_deref() != Some("gemini")
+                && !matches!(profile.id.as_str(), "gemini" | "gemini-cli")
+        });
+        if self.selected_provider_id.as_deref() == Some("gemini") {
+            self.selected_provider_id = Some("antigravity".into());
+        }
+
         for profile in &mut self.command_profiles {
             if profile.provider_id.is_none() {
                 profile.provider_id = match profile.id.as_str() {
@@ -581,7 +572,6 @@ impl GyroConfig {
                     "claude" | "claude-code" => Some("anthropic".into()),
                     "kimi" | "kimi-code" => Some("kimi".into()),
                     "grok" | "grok-build" => Some("xai".into()),
-                    "gemini" | "gemini-cli" => Some("gemini".into()),
                     "ollama" => Some("ollama".into()),
                     "cursor" | "cursor-agent" => Some("cursor".into()),
                     "opencode" => Some("opencode".into()),
@@ -606,16 +596,6 @@ impl GyroConfig {
                 display_name: "xAI".into(),
                 base_url: None,
                 api_key_ref: "provider-cli:grok".into(),
-                enabled: false,
-                default_model_id: None,
-                kind: None,
-                model_ids: Vec::new(),
-            },
-            ModelProviderConfig {
-                id: "gemini".into(),
-                display_name: "Gemini".into(),
-                base_url: None,
-                api_key_ref: "provider-cli:gemini".into(),
                 enabled: false,
                 default_model_id: None,
                 kind: None,
@@ -785,16 +765,6 @@ impl GyroConfig {
                 working_directory: None,
                 provider_id: Some("xai".into()),
                 default_model: Some("grok-4.7".into()),
-                readiness: CommandProfileReadiness::Waiting,
-            },
-            CommandProfile {
-                id: "gemini-cli".into(),
-                display_name: "Gemini CLI".into(),
-                command: "gemini".into(),
-                args: Vec::new(),
-                working_directory: None,
-                provider_id: Some("gemini".into()),
-                default_model: Some("gemini-default".into()),
                 readiness: CommandProfileReadiness::Waiting,
             },
             CommandProfile {
@@ -1300,7 +1270,7 @@ mod tests {
             config.command_profiles[1].provider_id.as_deref(),
             Some("anthropic")
         );
-        for provider_id in ["kimi", "xai", "gemini"] {
+        for provider_id in ["kimi", "xai", "antigravity"] {
             assert!(
                 config
                     .model_providers
@@ -1312,12 +1282,50 @@ mod tests {
         for (profile_id, provider_id) in [
             ("kimi-code", "kimi"),
             ("grok-build", "xai"),
-            ("gemini-cli", "gemini"),
         ] {
             assert!(config.command_profiles.iter().any(|profile| {
                 profile.id == profile_id && profile.provider_id.as_deref() == Some(provider_id)
             }));
         }
+    }
+
+    #[test]
+    fn retires_gemini_without_transferring_its_authentication() {
+        let mut config = GyroConfig::default();
+        assert!(!config.model_providers.iter().any(|provider| provider.id == "gemini"));
+        config.model_providers.push(ModelProviderConfig {
+            id: "gemini".into(),
+            display_name: "Gemini".into(),
+            base_url: None,
+            api_key_ref: "provider-cli:gemini".into(),
+            enabled: true,
+            default_model_id: Some("gemini-default".into()),
+            kind: None,
+            model_ids: Vec::new(),
+        });
+        config.command_profiles.push(CommandProfile {
+            id: "gemini-cli".into(),
+            display_name: "Gemini CLI".into(),
+            command: "gemini".into(),
+            args: Vec::new(),
+            working_directory: None,
+            provider_id: Some("gemini".into()),
+            default_model: None,
+            readiness: CommandProfileReadiness::Waiting,
+        });
+        config.selected_provider_id = Some("gemini".into());
+        config.normalize_legacy_state();
+        assert!(!config.model_providers.iter().any(|provider| provider.id == "gemini"));
+        assert!(!config.command_profiles.iter().any(|profile| profile.command == "gemini"));
+        assert_eq!(config.selected_provider_id, None);
+        let antigravity = config.model_providers.iter_mut()
+            .find(|provider| provider.id == "antigravity").unwrap();
+        assert!(!antigravity.enabled);
+        assert_eq!(antigravity.default_model_id, None);
+        antigravity.enabled = true;
+        config.selected_provider_id = Some("gemini".into());
+        config.normalize_legacy_state();
+        assert_eq!(config.selected_provider_id.as_deref(), Some("antigravity"));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { Zap } from "lucide-react";
+import { clippingBounds } from "./composer-popover-bounds";
 import {
   useEffect,
   useLayoutEffect,
@@ -34,6 +35,8 @@ function effortViewportRect(element: HTMLElement) {
   return {
     left: rect.left * scale,
     right: rect.right * scale,
+    top: rect.top * scale,
+    bottom: rect.bottom * scale,
     width: rect.width * scale,
     height: rect.height * scale,
     zoom,
@@ -85,20 +88,32 @@ export function ComposerEffortSelector({
     if (!panel) return;
     const position = () => {
       panel.style.translate = "";
+      const bounds = clippingBounds(panel, effortViewportRect);
+      const pad = 12;
+      const zoom = effortViewportRect(panel).zoom;
+      panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / zoom}px`;
       const rect = effortViewportRect(panel);
       const shift = Math.max(
-        12 - rect.left,
-        Math.min(0, window.innerWidth - 12 - rect.right),
+        bounds.left + pad - rect.left,
+        Math.min(0, bounds.right - pad - rect.right),
       );
       panel.style.translate = `${shift / rect.zoom}px 0`;
     };
     position();
     const observer = new ResizeObserver(position);
-    observer.observe(panel.parentElement!);
+    for (
+      let ancestor = panel.parentElement;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
     window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
     };
   }, [placement]);
   const commit = (next: number) => {

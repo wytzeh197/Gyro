@@ -39,6 +39,8 @@ mod workspace_context_capability;
 mod capability_workspace_helpers;
 use capability_workspace_helpers::*;
 mod capability_execution_guard;
+mod command_execution;
+use command_execution::*;
 mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
@@ -1521,6 +1523,14 @@ struct TerminalPaneRequest {
     /// Resolved from persisted import metadata, never accepted as renderer env.
     #[serde(skip)]
     provider_data_home: Option<(String, String)>,
+    /// Set by the model capability broker; ordinary terminal/login panes inherit.
+    #[serde(skip)]
+    credential_policy: CredentialPolicy,
+    /// Backend-selected process boundary, never accepted from the renderer.
+    #[serde(skip)]
+    execution_boundary: ModelCommandBoundary,
+    #[serde(skip)]
+    model_command_context: Option<ModelCommandContext>,
     cols: Option<u16>,
     rows: Option<u16>,
     /// Ask Gyro to run this pane under its approval policy.
@@ -1557,6 +1567,8 @@ struct TerminalPaneSnapshot {
     title: String,
     profile_id: Option<String>,
     command: String,
+    /// Selected policy; failed sandbox setup exits without running the command.
+    execution_policy: &'static str,
     output: Option<String>,
     output_revision: u64,
     output_complete: bool,
@@ -10424,134 +10436,6 @@ fn test_tree_from_tasks(tasks: &[TaskDefinitionResult]) -> Vec<TestTreeItemResul
     }]
 }
 
-fn run_command_output(command: Command) -> anyhow::Result<IdeCommandOutput> {
-    run_command_output_with_cancellation(command, CancellationToken::default())
-}
-
-fn run_command_output_with_cancellation(
-    command: Command,
-    cancellation: CancellationToken,
-) -> anyhow::Result<IdeCommandOutput> {
-    run_command_output_with_limits(
-        command,
-        cancellation,
-        Duration::from_secs(30 * 60),
-        Some(Duration::from_secs(5 * 60)),
-    )
-}
-
-/// Build and test commands can be quiet while they compile or download. Keep
-/// them cancellable, but do not treat silence as a failure or stop them after
-/// the short task window used by incidental helper commands.
-fn run_workspace_task_output_with_cancellation(
-    command: Command,
-    cancellation: CancellationToken,
-) -> anyhow::Result<IdeCommandOutput> {
-    run_command_output_with_limits(
-        command,
-        cancellation,
-        Duration::from_secs(2 * 60 * 60),
-        None,
-    )
-}
-
-fn run_command_output_with_limits(
-    command: Command,
-    cancellation: CancellationToken,
-    timeout: Duration,
-    inactivity_timeout: Option<Duration>,
-) -> anyhow::Result<IdeCommandOutput> {
-    let output = run_bounded_command_with_cancellation(
-        &command,
-        timeout,
-        inactivity_timeout,
-        2 * 1024 * 1024,
-        1024 * 1024,
-        cancellation,
-    )?;
-    let mut stdout = gyro_core::security::redact_secrets(&output.stdout);
-    let mut stderr = gyro_core::security::redact_secrets(&output.stderr);
-    if output.stdout_truncated {
-        stdout.push_str("\n[stdout truncated by Gyro]");
-    }
-    if output.stderr_truncated {
-        stderr.push_str("\n[stderr truncated by Gyro]");
-    }
-    Ok(IdeCommandOutput {
-        exit_code: match output.termination { ExecutionTermination::Exited {code} => code, _ => None },
-        source_truncated: output.stdout_truncated || output.stderr_truncated,
-        status: match output.termination {
-            ExecutionTermination::Exited { code: Some(0) } => "done",
-            ExecutionTermination::Cancelled => "cancelled",
-            ExecutionTermination::TimedOut => "timed-out",
-            ExecutionTermination::Inactive => "inactive",
-            ExecutionTermination::OutputLimit => "output-limit",
-            ExecutionTermination::Exited { .. } => "failed",
-        }
-        .into(),
-        stdout,
-        stderr,
-    })
-}
-
-fn run_bounded_command(
-    command: &Command,
-    timeout: Duration,
-    inactivity_timeout: Option<Duration>,
-    max_stdout_chars: usize,
-    max_stderr_chars: usize,
-) -> anyhow::Result<gyro_core::ExecutionOutcome> {
-    run_bounded_command_with_cancellation(
-        command,
-        timeout,
-        inactivity_timeout,
-        max_stdout_chars,
-        max_stderr_chars,
-        CancellationToken::default(),
-    )
-}
-
-fn run_bounded_command_with_cancellation(
-    command: &Command,
-    timeout: Duration,
-    inactivity_timeout: Option<Duration>,
-    max_stdout_chars: usize,
-    max_stderr_chars: usize,
-    cancellation: CancellationToken,
-) -> anyhow::Result<gyro_core::ExecutionOutcome> {
-    let mut request = ExecutionRequest::new(command.get_program().to_os_string());
-    request.args = command
-        .get_args()
-        .map(std::ffi::OsStr::to_os_string)
-        .collect();
-    request.current_dir = command.get_current_dir().map(Path::to_path_buf);
-    request.env = command
-        .get_envs()
-        .map(|(key, value)| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
-        .collect();
-    request.timeout = timeout;
-    request.inactivity_timeout = inactivity_timeout;
-    request.max_stdout_chars = max_stdout_chars;
-    request.max_stderr_chars = max_stderr_chars;
-    gyro_core::run_command(request, cancellation, |_| {})
-}
-
-fn bounded_command_error(label: &str, output: &gyro_core::ExecutionOutcome) -> anyhow::Error {
-    let reason = match &output.termination {
-        ExecutionTermination::Exited { code } => format!("exited with {code:?}"),
-        ExecutionTermination::Cancelled => "was cancelled".into(),
-        ExecutionTermination::TimedOut => "timed out".into(),
-        ExecutionTermination::Inactive => "stopped after no output".into(),
-        ExecutionTermination::OutputLimit => "exceeded its output limit".into(),
-    };
-    let detail = output.stderr.trim();
-    if detail.is_empty() {
-        anyhow::anyhow!("{label} {reason}")
-    } else {
-        anyhow::anyhow!("{label} {reason}: {}", truncate_error_detail(detail))
-    }
-}
-
 fn content_hash(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -10837,11 +10721,12 @@ async fn close_terminal_pane(
 
 #[tauri::command]
 async fn restart_terminal_pane(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<TerminalPaneSnapshot, String> {
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.restart(&pane_id).map_err(to_string))
+    tauri::async_runtime::spawn_blocking(move || manager.restart_with(&pane_id, |request| refresh_model_terminal_boundary(&app, request)).map_err(to_string))
         .await
         .map_err(|error| format!("terminal restart worker failed: {error}"))?
 }
@@ -10902,8 +10787,8 @@ async fn discover_ollama_models_command(
 async fn discover_google_models_command(
     provider_id: String,
 ) -> Result<gyro_core::AcpModelDiscovery, String> {
-    if !matches!(provider_id.as_str(), "gemini" | "antigravity") {
-        return Err("Google model discovery requires Gemini CLI or Antigravity".into());
+    if provider_id != "antigravity" {
+        return Err("Google model discovery requires Antigravity".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
         let runtime = acp_provider_runtime(&provider_id)
@@ -20047,21 +19932,14 @@ fn claim_model_terminal(
     }
     let resource_id = Uuid::new_v4().to_string();
     let pane_id = format!("model:{}", bound.session_id);
+    let mut terminal_request = model_terminal_request(
+        pane_id.clone(), title, command, args, &bound.workspace_key, cwd,
+        model_command_boundary(app, bound)?,
+    );
+    terminal_request.model_command_context = Some(ModelCommandContext::from_bound(bound));
     let snapshot = app
         .state::<TerminalProcessManager>()
-        .create(TerminalPaneRequest {
-            pane_id: pane_id.clone(),
-            title,
-            profile_id: None,
-            command,
-            args,
-            workspace_path: Some(bound.workspace_key.clone()),
-            workspace_mode: Some("local".into()),
-            working_directory: Some(cwd.display().to_string()),
-            cols: Some(120),
-            rows: Some(32),
-            ..Default::default()
-        })?;
+        .create(terminal_request)?;
     terminals.insert(
         bound.session_id.clone(),
         ModelTerminalResource {
@@ -20274,7 +20152,7 @@ fn execute_provider_capability(
                     label: snapshot.title.clone(),
                 };
                 (
-                    format!("Started {kind} {task_id} in this chat's terminal"),
+                    format!("Started {kind} {task_id} in this chat's terminal ({})", model_command_policy_summary(snapshot.execution_policy)),
                     terminal_capability::bound_terminal_result(serde_json::json!({
                         "taskId": task.id,
                         "label": task.label,
@@ -20294,6 +20172,7 @@ fn execute_provider_capability(
                     Some(resource),
                 )
             } else {
+                let boundary = model_command_boundary(app, bound)?;
                 let output_resource = CapabilityResourceRef {
                     id: format!("output:{}:{}:{}", bound.session_id, task_id, request.context.call_id),
                     kind: "output".into(),
@@ -20313,6 +20192,7 @@ fn execute_provider_capability(
                             "status": "running",
                             "command": task.command,
                             "args": task.args,
+                            "executionPolicy": boundary.policy_name(),
                         }),
                     },
                 );
@@ -20327,7 +20207,7 @@ fn execute_provider_capability(
                 let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
                 let mut command = command_with_gui_path(&task.command);
                 command.current_dir(&bound.workspace).args(&task.args);
-                let mut output = run_command_output_with_cancellation(command, cancellation)?;
+                let mut output = run_model_task_output_with_cancellation(command, cancellation, &boundary)?;
                 if is_test {
                     output.stdout = format!("tests {:?}\n{}", vec![task.id.clone()], output.stdout);
                 } else if output.status == "done" {
@@ -20341,6 +20221,7 @@ fn execute_provider_capability(
                     "status": output.status,
                     "exitCode": output.exit_code,
                     "sourceTruncated": output.source_truncated,
+                    "executionPolicy": boundary.policy_name(),
                     "stdout": output.stdout,
                     "stderr": output.stderr,
                     "finishedAt": chrono::Utc::now(),
@@ -20359,7 +20240,7 @@ fn execute_provider_capability(
                     context.active_output = Some(output_data.clone());
                 }
                 (
-                    format!("Ran {kind} {task_id}"),
+                    format!("Ran {kind} {task_id} ({})", boundary.summary()),
                     terminal_capability::bound_command_result(output_data, arguments)?,
                     Some(output_resource),
                 )
@@ -20453,7 +20334,7 @@ fn execute_provider_capability(
                 label: snapshot.title.clone(),
             };
             (
-                format!("Opened {}", snapshot.title),
+                format!("Opened {} ({})", snapshot.title, model_command_policy_summary(snapshot.execution_policy)),
                 terminal_capability::bound_terminal_result(serde_json::json!({
                     "pane": snapshot,
                     "owner": {

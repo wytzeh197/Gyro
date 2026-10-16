@@ -11,7 +11,6 @@ const profiles: CommandProfile[] = [
   { id: "kimi-code", displayName: "Kimi Code", command: "kimi", args: [], providerId: "kimi", readiness: "ready" },
   { id: "grok-build", displayName: "Grok Build", command: "grok", args: [], providerId: "xai", readiness: "ready" },
   { id: "ollama", displayName: "Ollama (local)", command: "ollama", args: [], providerId: "ollama", readiness: "ready" },
-  { id: "gemini", displayName: "Gemini CLI", command: "gemini", args: [], providerId: "google", readiness: "blocked" },
   { id: "opencode", displayName: "OpenCode", command: "opencode", args: [], readiness: "blocked" },
   { id: "qwen", displayName: "Qwen Code with a longer fixture name", command: "qwen", args: [], providerId: "qwen", readiness: "blocked" },
 ];

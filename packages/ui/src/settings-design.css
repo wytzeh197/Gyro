@@ -232,11 +232,27 @@
 :root[data-theme] .gyro-settings-surface .gyro-settings-control-column {
   padding: 0;
 }
+:root[data-theme]
+  .gyro-settings-surface
+  button.gyro-settings-row:not(:disabled):hover {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-row > div:first-child,
+    .gyro-workspace-keybindings label > span
+  ) {
+  min-width: 0;
+}
 .gyro-settings-select-field {
   display: inline-flex;
   position: relative;
   min-width: 0;
   max-width: 100%;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-select-field {
+  margin-top: 0;
 }
 .gyro-settings-select-field > svg {
   position: absolute;
@@ -512,6 +528,10 @@
     :is(
       .gyro-settings-row:has(.gyro-settings-select-field),
       .gyro-settings-row:has(.gyro-settings-segmented),
+      .gyro-settings-row:has(.gyro-color-control),
+      .gyro-settings-row:has(input:not([type="checkbox"])):not(
+          :has(.gyro-settings-switch)
+        ),
       .gyro-workspace-settings-list > label
     ) {
     grid-template-columns: minmax(0, 1fr);
@@ -521,10 +541,33 @@
     .gyro-settings-surface
     .gyro-settings-row:is(
       :has(.gyro-settings-select-field),
-      :has(.gyro-settings-segmented)
+      :has(.gyro-settings-segmented),
+      :has(.gyro-color-control),
+      :has(input:not([type="checkbox"])):not(:has(.gyro-settings-switch))
     )
     > .gyro-settings-control-column {
     justify-content: flex-start;
+    text-align: left;
+  }
+  :root[data-theme]
+    .gyro-settings-surface
+    .gyro-workspace-keybindings
+    > div
+    > label {
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: 8px;
+  }
+  :root[data-theme]
+    .gyro-settings-surface
+    .gyro-workspace-keybindings
+    > div
+    > label
+    > span {
+    grid-column: 1 / -1;
+  }
+  :root[data-theme] .gyro-settings-surface .gyro-workspace-keybindings input {
+    min-width: 0;
+    width: 100%;
   }
 }
 @container gyro-settings (max-width: 760px) {

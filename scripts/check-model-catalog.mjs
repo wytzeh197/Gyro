@@ -484,6 +484,11 @@ assert.throws(() =>
   );
   for (const retirement of facts.retirements) {
     const source = providerCatalog.find((p) => p.id === retirement.providerId);
+    if (!source) {
+      assert.equal(retirement.providerId, "gemini", "Only a retired provider can lack a catalog entry");
+      assert.ok(!providersForConfig({modelProviders: [{id: "gemini", enabled: true}]}).some(p => p.id === "gemini"));
+      continue;
+    }
     for (const id of retirement.modelIds) {
       const oldModel = { id, displayName: id };
       const normalized = providersForConfig({
@@ -619,5 +624,5 @@ assert.throws(() =>
 }
 
 console.log(
-  "Model catalog parsing, picker merge/order, rollback, rollout, offline, announcements, and all 43 model metadata checks passed.",
+  "Model catalog parsing, picker merge/order, rollback, rollout, offline, announcements, and model metadata checks passed.",
 );

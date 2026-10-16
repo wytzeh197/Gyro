@@ -214,7 +214,16 @@ fn has_trusted_parent_channel() -> bool {
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(path.len());
-    &path[..end] == executable.as_os_str().as_bytes()
+    // Resolve launch aliases on both sides without changing the kernel peer
+    // PID check, so a Homebrew symlink can still use its own credential reader.
+    let Ok(parent_executable) =
+        std::path::Path::new(std::ffi::OsStr::from_bytes(&path[..end])).canonicalize()
+    else {
+        return false;
+    };
+    executable
+        .canonicalize()
+        .is_ok_and(|executable| executable == parent_executable)
 }
 
 #[cfg(test)]

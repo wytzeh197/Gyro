@@ -486,9 +486,9 @@ exit 1"#,
 }
 
 #[test]
-fn real_binary_runs_gemini_and_xai_through_the_shared_acp_adapter() {
+fn real_binary_runs_kimi_and_xai_through_the_shared_acp_adapter() {
     for (provider_id, auth_method, expected_cursor) in [
-        ("gemini", "oauth-personal", "gemini-acp-session"),
+        ("kimi", "login", "kimi-acp-session"),
         ("xai", "cached_token", "xai-acp-session"),
     ] {
         let temp = tempfile::tempdir().unwrap();
@@ -501,14 +501,17 @@ fn real_binary_runs_gemini_and_xai_through_the_shared_acp_adapter() {
             &format!(
                 r#"
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
-    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"authMethods":[{{"id":"{auth_method}"}}]}}}}' ;;
-    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}' ;;
-    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"{provider_id}-session"}}}}' ;;
-    *'"method":"session/set_config_option"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}' ;;
+    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"authMethods":[{{"id":"{auth_method}"}}]}}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"sessionId":"{provider_id}-session"}}}}' ;;
+    *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*|*'"method":"session/set_mode"'*)
+      printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{}}}}' ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"hello from {provider_id}"}}}}}}}}'
-      printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}' ;;
+      printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"stopReason":"end_turn"}}}}' ;;
+    *) printf '%s\n' 'Unexpected ACP fixture request' >&2; exit 1 ;;
   esac
 done
 "#
@@ -557,8 +560,68 @@ done
 }
 
 #[test]
+fn real_binary_retires_legacy_gemini_without_transferring_authentication() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let workspace = temp.path().join("workspace");
+    let marker = temp.path().join("provider-started");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    let provider = write_script(temp.path(), "touch \"$GYRO_TEST_MARKER\"");
+    write_provider_config(&home, &provider, false, "gemini");
+    let paths = GyroPaths::from_base_dir(data_base(&home));
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&paths.config_path).unwrap()).unwrap();
+    legacy["selectedProviderId"] = "gemini".into();
+    legacy["modelProviders"][0]["defaultModelId"] = "gemini-default".into();
+    legacy["modelProviders"][0]["modelIds"] = serde_json::json!(["gemini-default"]);
+    fs::write(&paths.config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+    let shown = gyro_command(&home, &workspace)
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    assert!(shown.status.success());
+    let config: GyroConfig = serde_json::from_slice(&shown.stdout).unwrap();
+    assert!(!config
+        .model_providers
+        .iter()
+        .any(|provider| provider.id == "gemini"));
+    assert!(!config
+        .command_profiles
+        .iter()
+        .any(|profile| profile.id == "test-provider"));
+    assert_eq!(config.selected_provider_id, None);
+    let antigravity = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == "antigravity")
+        .unwrap();
+    assert!(!antigravity.enabled);
+    assert_eq!(antigravity.api_key_ref, "provider-cli:antigravity");
+    assert_eq!(antigravity.default_model_id, None);
+    assert!(antigravity.model_ids.is_empty());
+
+    let blocked = gyro_command(&home, &workspace)
+        .env("GYRO_TEST_MARKER", &marker)
+        .args([
+            "run",
+            "--profile",
+            "test-provider",
+            "--no-open",
+            "--json",
+            "inspect",
+        ])
+        .output()
+        .unwrap();
+    assert_failure(&blocked, 2, "invalid-input");
+    assert!(!marker.exists());
+    let store = SessionStore::open(paths).unwrap();
+    assert!(store.latest_session().unwrap().is_none());
+}
+
+#[test]
 fn real_binary_preserves_acp_cancellation_and_refusal_for_every_acp_provider() {
-    for provider_id in ["kimi", "xai", "gemini", "cursor", "opencode"] {
+    for provider_id in ["kimi", "xai", "cursor", "opencode"] {
         for (reason, code, category, status) in [
             ("cancelled", 130, "cancelled", "cancelled"),
             ("refusal", 5, "execution-failed", "failed"),

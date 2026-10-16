@@ -2688,15 +2688,21 @@ fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<S
             MAX_SESSION_EVENT_LINE_BYTES
         ));
     }
+    let has_trailing_newline = bytes.last() == Some(&b'\n');
     while bytes
         .last()
         .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
     {
         bytes.pop();
     }
-    String::from_utf8(bytes)
-        .map(Some)
-        .context("session event log is not valid UTF-8")
+    match String::from_utf8(bytes) {
+        Ok(line) => Ok(Some(line)),
+        // An interrupted append can stop inside a UTF-8 character. Leave
+        // those bytes unconsumed by the context index until append repairs
+        // the tail; completed records must still decode strictly.
+        Err(_) if !has_trailing_newline => Ok(None),
+        Err(error) => Err(error).context("session event log is not valid UTF-8"),
+    }
 }
 
 fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
@@ -2762,16 +2768,19 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
         }
     }
 
-    let has_trailing_newline = bytes.last() == Some(&b'\n');
+    if bytes.last() != Some(&b'\n') {
+        let tail_start = bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |index| index + 1);
+        // Check the unfinished record before UTF-8 decoding the whole tail,
+        // otherwise a truncated character hides every earlier valid event.
+        if serde_json::from_slice::<SessionEvent>(&bytes[tail_start..]).is_err() {
+            bytes.truncate(tail_start);
+        }
+    }
     let text = String::from_utf8(bytes).context("session event log is not valid UTF-8")?;
     let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
-    if !has_trailing_newline
-        && lines
-            .last()
-            .is_some_and(|line| serde_json::from_str::<SessionEvent>(line).is_err())
-    {
-        lines.pop();
-    }
     if lines.len() > max_lines {
         lines.drain(..lines.len() - max_lines);
     }
@@ -3612,6 +3621,116 @@ mod tests {
         assert!(repaired
             .lines()
             .all(|line| { serde_json::from_str::<SessionEvent>(line).is_ok() }));
+    }
+
+    #[test]
+    fn incomplete_utf8_tail_does_not_hide_durable_session_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "interrupted write")
+            .unwrap();
+        let goal = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Keep the completed work",
+                serde_json::json!({"action":"set","text":"Ship","status":"active"}),
+            )
+            .unwrap();
+        let durable = std::fs::read(&session.events_path).unwrap();
+        // A process can exit after writing only part of an emoji's four bytes.
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(b"{\"message\":\"interrupted \xf0\x9f")
+            .unwrap();
+        file.sync_data().unwrap();
+        drop(file);
+        let interrupted = std::fs::read(&session.events_path).unwrap();
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+
+        let recent = store.read_events(session.id);
+        let transcript = store.read_transcript_events(session.id);
+        let context = store.read_context_events(session.id);
+        assert!(
+            recent.is_ok() && transcript.is_ok() && context.is_ok(),
+            "incomplete UTF-8 must not hide durable events: recent={recent:?}, transcript={transcript:?}, context={context:?}"
+        );
+        for events in [recent.unwrap(), transcript.unwrap()] {
+            assert_eq!(events.len(), 2);
+            assert_eq!(events.last().unwrap().id, goal.id);
+        }
+        assert_eq!(context.unwrap()[0].id, goal.id);
+        let indexed_bytes: u64 = store
+            .conn
+            .query_row(
+                "select indexed_bytes from session_context_index where session_id = ?1",
+                params![session.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_bytes, durable.len() as u64);
+        assert_eq!(store.read_context_events(session.id).unwrap()[0].id, goal.id);
+
+        // Recovery reads leave the file alone; the next append repairs only
+        // the unfinished record and remains visible to the context index.
+        assert_eq!(
+            std::fs::read(&session.events_path).unwrap(),
+            interrupted
+        );
+        let resumed = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Continue after recovery",
+                serde_json::json!({"action":"set","text":"Finish","status":"active"}),
+            )
+            .unwrap();
+        assert_eq!(store.read_transcript_events(session.id).unwrap().len(), 3);
+        let context = store.read_context_events(session.id).unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[1].id, resumed.id);
+        let repaired = std::fs::read_to_string(&session.events_path).unwrap();
+        assert!(!repaired.contains("interrupted"));
+    }
+
+    #[test]
+    fn complete_records_still_reject_invalid_utf8() {
+        let bytes = b"{\"message\":\"invalid \xf0\x9f\"}\n";
+        assert!(read_bounded_session_event_line(&mut &bytes[..]).is_err());
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(bytes).unwrap();
+        assert!(read_recent_event_lines(&mut file, 10).is_err());
+    }
+
+    #[test]
+    fn complete_event_without_final_newline_remains_readable() {
+        let event = SessionEvent::new(
+            Uuid::new_v4(),
+            SessionEventKind::AssistantMessage,
+            "Complete response 🦊",
+            serde_json::json!({}),
+        );
+        let bytes = serde_json::to_vec(&event).unwrap();
+        let line = read_bounded_session_event_line(&mut bytes.as_slice())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<SessionEvent>(&line).unwrap().id,
+            event.id
+        );
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&bytes).unwrap();
+        let recent = read_recent_event_lines(&mut file, 10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<SessionEvent>(&recent[0]).unwrap().id,
+            event.id
+        );
     }
 
     #[test]

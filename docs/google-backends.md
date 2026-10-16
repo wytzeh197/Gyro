@@ -1,9 +1,14 @@
 # Google agent backends
 
-Checked on 2026-10-13.
+Checked on 2026-10-14.
 
-Gyro supports Gemini CLI through `gemini --acp`. The new Google Antigravity
-provider uses Google's official `agy_acp_server.par`, ACP server version 1.3.0.
+Google Antigravity is Gyro's Google provider. It uses Google's official
+`agy_acp_server.par`, ACP server version 1.3.0. Gemini CLI has been removed from
+the provider catalog and built-in terminal profiles. Older configs drop its
+provider entry and profile; an already connected Antigravity provider can take
+over a Gemini selection. Gemini CLI OAuth sign-in is not transferred, so
+Antigravity must be connected separately. Historical Gemini chats retain their
+original identity.
 It shares the existing governed ACP transport for streaming, MCP tools,
 permissions, client filesystem access, cancellation, and session continuity.
 The Antigravity provider remains experimental until authenticated live tool,
@@ -40,9 +45,9 @@ choices; metadata alone cannot establish an account's entitlement.
 
 The macOS distribution can be installed under
 `~/.local/share/gyro/providers/antigravity/1.3.0/`; Gyro searches that directory,
-as well as its usual CLI PATH. The official server has been installed there on
-this development Mac and its real ACP handshake verified. It is not bundled
-into a desktop release by these changes.
+as well as its usual CLI PATH. The real ACP handshake has been verified using
+a temporary copy of the official server. Install the runtime separately; it is
+not bundled into a desktop release by these changes.
 
 Use the Google-published platform archive listed in the ACP Registry. Preserve
 the distribution's companion files alongside `agy_acp_server.par`.

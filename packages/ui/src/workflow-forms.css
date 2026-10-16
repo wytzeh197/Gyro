@@ -1,21 +1,36 @@
 .gyro-workflow-form {
+  box-sizing: border-box;
   display: grid;
   gap: var(--gyro-space-card);
   padding: var(--gyro-space-panel);
   margin: 12px;
-  border: 1px solid var(--gyro-border, #8884);
+  min-width: 0;
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-lg);
   max-width: 760px;
-  background: var(--gyro-surface, transparent);
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
 }
 .gyro-workflow-form h2,
 .gyro-workflow-form p {
   margin: 0;
 }
+.gyro-workflow-form h2 {
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.gyro-workflow-form > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
 .gyro-workflow-form label {
   display: grid;
   gap: 6px;
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
   min-width: 0;
 }
 .gyro-workflow-form input,
@@ -23,12 +38,28 @@
 .gyro-workflow-form select {
   box-sizing: border-box;
   width: 100%;
+  min-width: 0;
+  min-height: var(--gyro-control-height);
   padding: 9px 10px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--gyro-border, #8886);
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   font: inherit;
+}
+.gyro-workflow-form textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.gyro-workflow-form :is(input, textarea)::placeholder {
+  color: var(--gyro-faint);
+}
+.gyro-workflow-form :is(input, textarea, select):not(:disabled):hover {
+  border-color: var(--gyro-border-strong);
+}
+.gyro-workflow-form :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
 }
 .gyro-workflow-form-row {
   display: flex;
@@ -36,20 +67,46 @@
   gap: 12px;
 }
 .gyro-workflow-form-row > label {
-  flex: 1;
-  min-width: 140px;
+  flex: 1 1 180px;
 }
 .gyro-workflow-form-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+  padding-top: 4px;
 }
 .gyro-workflow-form button,
 .gyro-task-card button {
   padding: 7px 11px;
-  border: 1px solid var(--gyro-border, #8884);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
+}
+.gyro-workflow-form button {
+  min-height: var(--gyro-control-height);
+  background: var(--gyro-control-bg);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  cursor: pointer;
+}
+.gyro-workflow-form button:not(:disabled):hover {
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border-strong);
+}
+.gyro-workflow-form button.gyro-button-primary {
+  background: var(--gyro-primary-bg);
+  border-color: transparent;
+  color: var(--gyro-primary-text);
+}
+.gyro-workflow-form button.gyro-button-primary:not(:disabled):hover {
+  background: var(--gyro-primary-hover);
+  border-color: transparent;
+}
+.gyro-workflow-form :is(input, textarea, select, button):disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .gyro-workflow-overlay {
   position: fixed;
@@ -57,18 +114,34 @@
   z-index: 1000;
   display: grid;
   place-items: center;
-  background: #0006;
+  padding: 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--gyro-scrim);
 }
 .gyro-workflow-overlay .gyro-workflow-form {
-  width: min(680px, 90vw);
-  max-height: 85vh;
+  width: min(680px, 100%);
+  max-height: calc(100dvh - 40px);
+  margin: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 16px 48px var(--gyro-premium-shadow);
   background: var(--gyro-surface);
-  color: var(--gyro-text, inherit);
+  color: var(--gyro-text);
 }
-
+.gyro-workflow-form label:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
 .gyro-workflow-form input[type="checkbox"] {
+  flex: 0 0 auto;
   width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--gyro-accent);
 }
 
 .gyro-task-project-heading {

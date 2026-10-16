@@ -23,7 +23,7 @@ export function useGoogleModels(
   const scopeKey = JSON.stringify(
     providersForConfig(config)
       .filter(
-        (provider) => provider.id === "gemini" || provider.id === "antigravity",
+        (provider) => provider.id === "antigravity",
       )
       .map((provider) => [
         provider.id,
@@ -37,7 +37,7 @@ export function useGoogleModels(
     async (providerId: ProviderId, force = false) => {
       if (
         !isTauri() ||
-        (providerId !== "gemini" && providerId !== "antigravity")
+        (providerId !== "antigravity")
       )
         return undefined;
       const provider = providersForConfig(current.current).find(
@@ -86,7 +86,7 @@ export function useGoogleModels(
     if (optimizing || !isTauri()) return;
     for (const provider of providersForConfig(current.current)) {
       if (
-        (provider.id === "gemini" || provider.id === "antigravity") &&
+        (provider.id === "antigravity") &&
         provider.enabled &&
         provider.authStatus === "connected"
       )

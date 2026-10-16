@@ -15914,6 +15914,10 @@ textarea,
   color: var(--gyro-provider-gemini);
 }
 
+.gyro-provider-logo.is-antigravity {
+  color: var(--gyro-text);
+}
+
 /*
  * Sidebar session rows grey out their svg icons directly on the <svg>
  * (see `.gyro-sidebar-thread-main svg`), which otherwise overrides the
@@ -20612,6 +20616,8 @@ button.gyro-settings-row em::after {
   display: grid;
   gap: 9px;
   min-width: 230px;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 12px;
   position: absolute;
   right: 0;
@@ -29387,6 +29393,11 @@ button.gyro-account-menu-row:hover,
 
 /* ---- Workspace browser + tool panel: final geometry (do not override below) ---- */
 .gyro-workspace-route.is-code {
+  /* A tall drawer must leave the enlarged editor chrome and status bar intact. */
+  --gyro-tool-panel-max-height: calc(
+    100vh - var(--gyro-ide-tab-height, 30px) -
+      var(--gyro-ide-context-height, 30px) - var(--gyro-ide-status-height, 22px)
+  );
   grid-template-rows:
     minmax(0, 1fr) auto
     var(--gyro-ide-status-height, 22px);
@@ -40504,6 +40515,12 @@ textarea:focus-visible,
   .gyro-settings-provider-actions {
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  /* Actions move to the left in cards, so their menu opens into the page. */
+  .gyro-settings-provider-actions .gyro-provider-details > div {
+    left: 0;
+    right: auto;
   }
 
   .gyro-provider-connect-path {

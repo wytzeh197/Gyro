@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
+import { hasOpenMenus } from "./menu-dismiss";
+
+const openDialogs: HTMLElement[] = [];
 
 /** Cancel can settle visually; destructive confirmation callbacks remain immediate. */
-export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(onDismiss: () => void) {
+export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(
+  onDismiss: () => void,
+) {
   const ref = useRef<T>(null);
   const callback = useRef(onDismiss);
   const animations = useRef<Animation[]>([]);
@@ -60,13 +65,18 @@ export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(onDismi
       fill: "forwards",
     });
     // Settle the card as well as the scrim, continuing from interrupted entry.
-    const card = root instanceof HTMLDialogElement ? root : root.firstElementChild;
-    const cardAnimation = card instanceof HTMLElement && card !== root
-      ? card.animate([
-          { transform: getComputedStyle(card).transform },
-          { transform: "translateY(4px) scale(0.99)" },
-        ], { duration: duration || 0, easing, fill: "forwards" })
-      : undefined;
+    const card =
+      root instanceof HTMLDialogElement ? root : root.firstElementChild;
+    const cardAnimation =
+      card instanceof HTMLElement && card !== root
+        ? card.animate(
+            [
+              { transform: getComputedStyle(card).transform },
+              { transform: "translateY(4px) scale(0.99)" },
+            ],
+            { duration: duration || 0, easing, fill: "forwards" },
+          )
+        : undefined;
     animations.current = cardAnimation ? [fade, cardAnimation] : [fade];
     root.inert = true;
     fade.finished.then(
@@ -74,6 +84,81 @@ export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(onDismi
       () => {},
     );
   }, []);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    openDialogs.push(root);
+    const focusable = () =>
+      Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button, a[href], input, select, textarea, [tabindex], [contenteditable="true"]',
+        ),
+      ).filter(
+        (element) =>
+          element.tabIndex >= 0 &&
+          !element.matches(":disabled") &&
+          !element.closest("[inert], [hidden]") &&
+          element.getClientRects().length > 0 &&
+          getComputedStyle(element).visibility !== "hidden",
+      );
+    const focusInside = (last = false) => {
+      const items = focusable();
+      const target = last ? items.at(-1) : items[0];
+      if (target) target.focus({ preventScroll: true });
+      else {
+        root.tabIndex = -1;
+        root.focus({ preventScroll: true });
+      }
+    };
+    // Native modal dialogs already own focus containment and cancel events.
+    const isNative = root instanceof HTMLDialogElement;
+    if (!isNative && !root.contains(document.activeElement)) focusInside();
+    const handleTabKeyDown = (event: KeyboardEvent) => {
+      if (isNative || openDialogs.at(-1) !== root || event.defaultPrevented)
+        return;
+      if (
+        event.key === "Tab" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        const items = focusable();
+        const active = document.activeElement;
+        if (
+          closing.current ||
+          !root.contains(active) ||
+          !items.length ||
+          (event.shiftKey ? active === items[0] : active === items.at(-1))
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!closing.current) focusInside(event.shiftKey);
+        }
+      }
+    };
+    const handleDismissKeyDown = (event: KeyboardEvent) => {
+      if (isNative || openDialogs.at(-1) !== root || event.key !== "Escape")
+        return;
+      // Controls and nested menus get the first decision about Escape.
+      if (event.defaultPrevented) {
+        event.stopPropagation();
+        return;
+      }
+      if (hasOpenMenus()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+    };
+    document.addEventListener("keydown", handleTabKeyDown, true);
+    document.addEventListener("keydown", handleDismissKeyDown);
+    return () => {
+      const index = openDialogs.indexOf(root);
+      if (index >= 0) openDialogs.splice(index, 1);
+      document.removeEventListener("keydown", handleTabKeyDown, true);
+      document.removeEventListener("keydown", handleDismissKeyDown);
+    };
+  }, [dismiss]);
 
   return { ref, dismiss };
 }

@@ -308,6 +308,7 @@ export type {
   ReviewScopeListing,
 } from "./review-scope";
 export { default as gyroLogoMark } from "./assets/gyro-logo.svg";
+export { AntigravityMark } from "./antigravity-mark";
 export {
   createInitialWorkbenchState,
   createNotification,

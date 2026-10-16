@@ -4,6 +4,8 @@ import {
   providerCatalog,
   providersForConfig,
   providerSupportsApiKey,
+  normalizedConfig,
+  isProviderId,
 } from "../packages/ui/src/provider-catalog.ts";
 
 const source = providerCatalog.find(
@@ -13,6 +15,28 @@ assert.equal(source.capabilities.executionKind, "acp-cli");
 assert.equal(source.capabilities.supportsApprovals, true);
 assert.equal(source.authMode, "env");
 assert.equal(providerSupportsApiKey("antigravity"), true);
+assert.equal(isProviderId("gemini"), false);
+assert.equal(providerSupportsApiKey("gemini"), false);
+// Old installs must not resurrect Gemini, reuse its OAuth connection, or keep
+// a retired CLI entry in New Session.
+const legacy = {
+  selectedProviderId: "gemini",
+  commandProfiles: [
+    { id: "gemini-cli", command: "gemini", args: [], providerId: "gemini" },
+    { id: "my-shell", command: "zsh", args: [] },
+  ],
+  modelProviders: [{ id: "gemini", enabled: true, authStatus: "connected" }],
+};
+const retired = normalizedConfig(legacy);
+assert.ok(!retired.modelProviders.some((provider) => provider.id === "gemini"));
+assert.equal(retired.selectedProviderId, undefined);
+assert.equal(retired.modelProviders.find((provider) => provider.id === "antigravity").enabled, false);
+assert.deepEqual(retired.commandProfiles.map((profile) => profile.id), ["my-shell"]);
+const connectedReplacement = normalizedConfig({
+  ...legacy,
+  modelProviders: [...legacy.modelProviders, { ...source, enabled: true, authStatus: "connected" }],
+});
+assert.equal(connectedReplacement.selectedProviderId, "antigravity");
 const original = {
   modelProviders: [
     {

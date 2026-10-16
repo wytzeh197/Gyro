@@ -269,7 +269,13 @@ fn trusted_parent() -> Option<i32> {
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(path.len());
-    (&path[..end] == executable.as_os_str().as_bytes()).then_some(parent)
+    // proc_pidpath reports the physical path, while current_exe can retain a
+    // launch alias such as /var or a Homebrew symlink. Keep the executable
+    // identity check, but compare both paths after resolving those aliases.
+    let parent_executable = std::path::Path::new(std::ffi::OsStr::from_bytes(&path[..end]))
+        .canonicalize()
+        .ok()?;
+    (parent_executable == executable.canonicalize().ok()?).then_some(parent)
 }
 
 struct WatchedGroup {

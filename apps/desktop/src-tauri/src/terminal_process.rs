@@ -20,6 +20,8 @@ pub(crate) struct TerminalProcess {
     cols: u16,
     rows: u16,
     terminated: bool,
+    // Drop only after process termination, including close/replacement/restart.
+    sandbox: Option<gyro_core::workspace_sandbox::PreparedWorkspaceSandbox>,
 }
 
 pub(crate) type TerminalPane = Arc<Mutex<TerminalProcess>>;
@@ -246,8 +248,18 @@ impl TerminalProcessManager {
 
     /// Relaunches with the same request (and governance). The replacement is
     /// spawned first and the old process is terminated once it is swapped out.
+    #[cfg(test)]
     pub(crate) fn restart(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
-        let request = self.with_pane(pane_id, |process| Ok(process.request.clone()))?;
+        self.restart_with(pane_id, |_| Ok(()))
+    }
+
+    pub(crate) fn restart_with(
+        &self,
+        pane_id: &str,
+        refresh_policy: impl FnOnce(&mut TerminalPaneRequest) -> anyhow::Result<()>,
+    ) -> anyhow::Result<TerminalPaneSnapshot> {
+        let mut request = self.with_pane(pane_id, |process| Ok(process.request.clone()))?;
+        refresh_policy(&mut request)?;
         self.create(request)
     }
 
@@ -266,6 +278,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     }
 
     let cwd = resolve_terminal_cwd(&request)?;
+    let sandbox = request.execution_boundary.prepare(cwd.as_deref())?;
     let cols = request.cols.unwrap_or(120);
     let rows = request.rows.unwrap_or(32);
     let pty_system = native_pty_system();
@@ -276,11 +289,16 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         pixel_height: 0,
     })?;
     let command_path = terminal_command_path(&request.command);
-    let mut command = CommandBuilder::new(command_path.as_str());
-    command.args(request.args.iter().map(String::as_str));
+    let mut args: Vec<std::ffi::OsString> = request.args.iter().map(Into::into).collect();
     if let Some(governance) = request.governance.as_ref() {
-        command.args(governance.args.iter().map(String::as_str));
+        args.extend(governance.args.iter().map(std::ffi::OsString::from));
     }
+    let (program, args) = match sandbox.as_ref() {
+        Some(sandbox) => sandbox.wrap_command(std::ffi::OsStr::new(&command_path), &args),
+        None => (std::ffi::OsString::from(&command_path), args),
+    };
+    let mut command = CommandBuilder::new(program);
+    command.args(args);
     if let Some(cwd) = cwd.as_ref() {
         command.cwd(cwd);
     }
@@ -294,11 +312,19 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     if !command_path.contains('/') {
         command.env("PATH", augmented_gui_path());
     }
+    if let Some(sandbox) = sandbox.as_ref() {
+        for (key, value) in sandbox.environment() {
+            command.env(key, value);
+        }
+    }
 
-    let child = pair.slave.spawn_command(command)?;
-    let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
+    apply_terminal_credential_policy(&mut command, &request.credential_policy);
+    // Acquire fallible PTY handles before a child exists. Otherwise an error
+    // here could drop scratch while leaving the just-spawned process alive.
     let reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
+    let child = pair.slave.spawn_command(command)?;
+    let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
     spawn_terminal_reader(reader, Arc::clone(&output));
     drop(pair.slave);
 
@@ -314,6 +340,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         cols,
         rows,
         terminated: false,
+        sandbox,
     })
 }
 
@@ -332,20 +359,27 @@ fn terminate_terminal_process(process: &mut TerminalProcess) {
             .collect::<Vec<_>>();
         groups.sort_unstable();
         groups.dedup();
-        for group in &groups {
+        groups.retain(|group| {
             // PTY jobs can outlive their shell. Signal both the current
             // foreground job and the shell process group before reaping.
             unsafe {
-                libc::kill(-*group, libc::SIGHUP);
-                libc::kill(-*group, libc::SIGTERM);
+                let hung_up = libc::kill(-*group, libc::SIGHUP) == 0;
+                let terminated = libc::kill(-*group, libc::SIGTERM) == 0;
+                hung_up || terminated
             }
-        }
+        });
         groups
     };
-    let _ = process.child.kill();
+    // portable-pty signals the PID directly on Unix, even after try_wait has
+    // reaped it. A recorded exit code means only its groups still need cleanup.
+    if process.exit_code.is_none() {
+        let _ = process.child.kill();
+    }
     #[cfg(unix)]
     {
-        std::thread::sleep(Duration::from_millis(25));
+        if !process_groups.is_empty() {
+            std::thread::sleep(Duration::from_millis(25));
+        }
         for group in process_groups {
             unsafe {
                 if libc::kill(-group, 0) == 0 {
@@ -357,6 +391,7 @@ fn terminate_terminal_process(process: &mut TerminalProcess) {
     if let Ok(status) = process.child.wait() {
         process.exit_code = Some(status.exit_code() as i32);
         process.terminated = true;
+        process.sandbox.take();
     }
 }
 
@@ -515,6 +550,10 @@ fn snapshot_terminal_process(
     match process.child.try_wait() {
         Ok(Some(status)) => {
             process.exit_code = Some(status.exit_code() as i32);
+            // Retire remaining jobs as soon as the shell's exit is observed.
+            // Marking the pane settled first would make Stop/Close/Drop skip
+            // this cleanup and leave the descendant holding the PTY open.
+            terminate_terminal_process(process);
             process.terminated = true;
             process.status = if status.success() {
                 "done".into()
@@ -545,6 +584,7 @@ fn snapshot_terminal_process(
         pane_id: process.request.pane_id.clone(),
         title: process.request.title.clone(),
         profile_id: process.request.profile_id.clone(),
+        execution_policy: process.request.execution_boundary.policy_name(),
         command: std::iter::once(process.request.command.as_str())
             .chain(process.request.args.iter().map(String::as_str))
             .collect::<Vec<_>>()
@@ -748,6 +788,78 @@ mod tests {
             &manager.pane("pane").unwrap()
         ));
         manager.close("pane").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_terminal_stops_descendants_before_marking_the_pane_settled() {
+        struct FixtureGroup(i32);
+        impl Drop for FixtureGroup {
+            fn drop(&mut self) {
+                // A failing assertion must never leave this fixture running.
+                unsafe { libc::kill(-self.0, libc::SIGKILL) };
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let pid_path = directory.path().join("descendant.pid");
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "exited-with-descendant".into(),
+                title: "Background fixture".into(),
+                command: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "trap '' HUP; (trap '' HUP TERM; exec sleep 30) & printf '%s' \"$!\" > \"$1\"; printf finished; exit 0".into(),
+                    "fixture".into(),
+                    pid_path.to_string_lossy().into_owned(),
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+        let group = manager
+            .process_directory("exited-with-descendant")
+            .unwrap()
+            .0
+            .unwrap() as i32;
+        let _cleanup = FixtureGroup(group);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let pid = loop {
+            if let Ok(pid) = fs::read_to_string(&pid_path) {
+                if let Ok(pid) = pid.parse() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture never reported its child"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let snapshot = loop {
+            let snapshot = manager.read("exited-with-descendant", None).unwrap();
+            if snapshot.status != "running" {
+                break snapshot;
+            }
+            assert!(Instant::now() < deadline, "fixture shell never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(snapshot.status, "done");
+        assert_eq!(snapshot.exit_code, Some(0));
+
+        // Reaping an orphan can lag the signal briefly. Do not close the pane:
+        // the observed exit itself must retire the remaining process group.
+        while unsafe { libc::kill(pid, 0) } == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let survived_exit = unsafe { libc::kill(pid, 0) } == 0;
+        eprintln!("terminal background descendant survived observed exit: {survived_exit}");
+        assert!(
+            !survived_exit,
+            "completed terminal left its background child running"
+        );
+        manager.close("exited-with-descendant").unwrap();
     }
 
     #[test]

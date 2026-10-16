@@ -1,4 +1,5 @@
 import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu } from "./provider-settings-fields";
+import { AntigravityMark } from "./antigravity-mark";
 import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import { CodeModeActivityCard } from "./code-mode-card";
 import { groupWorkflowEvents, workflowDetails } from "./code-mode";
@@ -108,6 +109,7 @@ import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
 import { composerFastMode } from "./provider-fast-mode";
 import { ComposerModelRail } from "./composer-model-rail";
+import { ComposerCompletionMenu } from "./composer-completion-menu";
 import { clippingBounds } from "./composer-popover-bounds";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import { LanguagePicker } from "./editor/languages/language-picker";
@@ -1076,7 +1078,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     section: "providers",
     label: "Models & Accounts",
     detail: "Connect accounts and choose models",
-    keywords: "providers model api key authentication credentials openai anthropic gemini xai",
+    keywords: "providers model api key authentication credentials openai anthropic antigravity google xai",
   },
   {
     section: "cli-profiles",
@@ -16667,7 +16669,7 @@ export function WorkspaceToolPanel({
         canResize
           ? {
               height: currentHeight,
-              maxHeight: maxHeight,
+              maxHeight: `min(${maxHeight}px, var(--gyro-tool-panel-max-height, 100vh))`,
             }
           : undefined
       }
@@ -23498,41 +23500,50 @@ function ComposerPopover({
       panel.style.maxHeight = "";
       panel.style.translate = "";
       const bounds = clippingBounds(panel);
+      const anchorElement =
+        panel.offsetParent instanceof HTMLElement
+          ? panel.offsetParent
+          : panel.parentElement!;
+      const anchor = anchorElement.getBoundingClientRect();
+      const anchorStyle = window.getComputedStyle(anchorElement);
+      const scaleX = anchor.width / parseFloat(anchorStyle.width) || 1;
+      const scaleY = anchor.height / parseFloat(anchorStyle.height) || 1;
+      const pad = 8;
+      const gap = 8 * scaleY;
       if (panel.closest(".gyro-chat-surface.is-tiled")) {
         panel.style.minWidth = "0";
-        panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - 16)}px`;
+        panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX}px`;
       }
-      const rect = panel.getBoundingClientRect();
-      const pad = 8;
-      const gap = 8;
-      const anchor =
-        panel.offsetParent instanceof HTMLElement
-          ? panel.offsetParent.getBoundingClientRect()
-          : panel.parentElement!.getBoundingClientRect();
       const anchorTop = anchor.top;
       const anchorBottom = anchor.bottom;
       const above = Math.max(0, anchorTop - bounds.top - pad - gap);
       const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
       const preferred = placement === "up" ? above : below;
       const opposite = placement === "up" ? below : above;
-      const flip = rect.height > preferred && opposite > preferred;
+      const flip = panel.offsetHeight * scaleY > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
       panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
       panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
-      panel.style.maxHeight = `${Math.min(420, direction === "up" ? above : below)}px`;
+      panel.style.maxHeight = `${Math.min(420, (direction === "up" ? above : below) / scaleY)}px`;
       const positioned = panel.getBoundingClientRect();
       const shift = Math.max(
         bounds.left + pad - positioned.left,
         Math.min(0, bounds.right - pad - positioned.right),
       );
-      panel.style.translate = `${shift}px 0`;
+      panel.style.translate = `${shift / scaleX}px 0`;
       panel.scrollTop = scrollTop;
     };
     position();
     window.addEventListener("resize", position);
     window.addEventListener("scroll", position, true);
     const observer = new ResizeObserver(() => position());
-    if (panel.parentElement) observer.observe(panel.parentElement);
+    for (
+      let ancestor = panel.parentElement;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
     return () => {
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
@@ -23544,7 +23555,11 @@ function ComposerPopover({
       ref={panelRef}
       style={
         keepInBounds
-          ? { gridAutoRows: "max-content", alignContent: "start" }
+          ? {
+              gridAutoRows: "max-content",
+              alignContent: "start",
+              overflowY: "auto",
+            }
           : undefined
       }
       aria-label={title ?? "Menu"}
@@ -23996,6 +24011,18 @@ function ProviderLogo({
             fillRule="evenodd"
           />
         </svg>
+      </span>
+    );
+  }
+
+  if (providerId === "antigravity") {
+    return (
+      <span
+        aria-hidden="true"
+        className="gyro-provider-logo is-antigravity"
+        title="Google Antigravity"
+      >
+        <AntigravityMark />
       </span>
     );
   }
@@ -25457,7 +25484,7 @@ function Composer({
         </div>
       ) : null}
       {mentionOpen ? (
-        <div
+        <ComposerCompletionMenu
           className="gyro-composer-slash-menu"
           role="listbox"
           id={`${popoverBaseId}-context-menu`}
@@ -25483,10 +25510,10 @@ function Composer({
               <span>{item.label}</span>
             </button>
           ))}
-        </div>
+        </ComposerCompletionMenu>
       ) : null}
       {isSlashMenuOpen ? (
-        <div
+        <ComposerCompletionMenu
           aria-label="Chat commands"
           className="gyro-composer-slash-menu is-commands"
           id={`${popoverBaseId}-slash-menu`}
@@ -25559,7 +25586,7 @@ function Composer({
             <span><kbd>↵</kbd> Select</span>
             <span><kbd>esc</kbd> Close</span>
           </footer>
-        </div>
+        </ComposerCompletionMenu>
       ) : null}
       {activePopover === "branch" ? (
         <div
@@ -25863,6 +25890,7 @@ function Composer({
               {activePopover === "approval" ? (
                 <ComposerPopover
                   className="gyro-approval-picker"
+                  keepInBounds
                   id={`${popoverBaseId}-approval`}
                   items={[
                     {
@@ -29684,13 +29712,6 @@ function commandProfilesWithDefaults(
       workingDirectory: "Workspace",
       providerId: "cursor",
       defaultModel: "cursor-default",
-    },
-    {
-      id: "gemini",
-      displayName: "Gemini CLI",
-      command: "gemini",
-      args: ["--yolo=false"],
-      workingDirectory: "Workspace",
     },
     {
       id: "opencode",

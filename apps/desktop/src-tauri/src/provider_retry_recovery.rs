@@ -254,12 +254,17 @@ where
                 // same instruction as text.
                 let capacity =
                     provider_reliability::is_model_capacity_error(&format!("{last_error:#}"));
-                let delay = if capacity {
+                let fallback = if capacity {
                     provider_retry_recovery::CAPACITY_RETRY_DELAY
                 } else {
-                    gyro_core::provider_retry::retry_after_hint(&format!("{last_error:#}"))
-                        .or_else(|| gyro_core::provider_retry::transient_retry_delay(retry_index))
+                    gyro_core::provider_retry::transient_retry_delay(retry_index)
                         .unwrap_or(retry_ladder[retry_index])
+                };
+                let Some(delay) = gyro_core::provider_retry::retry_delay_with_hint(
+                    &format!("{last_error:#}"),
+                    fallback,
+                ) else {
+                    break;
                 };
                 if let Some(stop) = stopped() {
                     let stop = last_error.context(stop);
@@ -426,6 +431,76 @@ mod tests {
             resumed: true,
             output_summary: None,
             streamed_text: None,
+        }
+    }
+
+    #[test]
+    fn provider_cooldown_beyond_automatic_wait_does_not_restart_the_runner() {
+        for error in [
+            "HTTP 429: retry after 90 seconds",
+            "HTTP 429: try again in 1 hour",
+            "Selected model is at capacity. Retry after 90 seconds.",
+        ] {
+            let (_temp, store, request) = setup("openai");
+            let mut calls = 0;
+            let mut waits = Vec::new();
+            let result = run_provider_chat_with_retry_using_with_wait(
+                &store,
+                &request,
+                None,
+                |_, _| {
+                    calls += 1;
+                    anyhow::bail!("{error}");
+                },
+                || None,
+                |delay, _, _, _| {
+                    waits.push(delay);
+                    Ok(())
+                },
+            );
+            assert!(format!("{:#}", result.unwrap_err()).contains(error));
+            assert_eq!(
+                calls, 1,
+                "must not retry before the stated cooldown: {error}"
+            );
+            assert!(waits.is_empty(), "long cooldowns remain actionable errors");
+        }
+    }
+
+    #[test]
+    fn provider_cooldown_sets_the_wait_for_rate_limits_and_capacity_errors() {
+        for (error, expected) in [
+            ("HTTP 429: retry after 500ms", Duration::from_millis(500)),
+            ("HTTP 429: try again in 0.5 min", Duration::from_secs(30)),
+            (
+                "Selected model is at capacity. Retry after 2 seconds.",
+                Duration::from_secs(2),
+            ),
+        ] {
+            let (_temp, store, request) = setup("openai");
+            let mut calls = 0;
+            let mut waits = Vec::new();
+            let result = run_provider_chat_with_retry_using_with_wait(
+                &store,
+                &request,
+                None,
+                |_, _| {
+                    calls += 1;
+                    if calls == 1 {
+                        anyhow::bail!("{error}");
+                    }
+                    Ok(output(Vec::new()))
+                },
+                || None,
+                |delay, _, _, _| {
+                    waits.push(delay);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(calls, 2);
+            assert_eq!(waits, vec![expected], "{error}");
+            assert_eq!(result.retry_count, 1);
         }
     }
 

@@ -43,12 +43,25 @@ const js = ts.transpileModule(source, {
     esModuleInterop: true,
   },
 }).outputText;
+const bootHelper = (path) =>
+  ts.transpileModule(
+    readFileSync(new URL(path, import.meta.url), "utf8"),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  ).outputText;
+const nativeAppearance = bootHelper("../apps/desktop/src/native-appearance.ts");
+const uiStorage = bootHelper("../apps/desktop/src/ui-storage.ts");
 for (const framed of [false, true]) {
   const imports = [];
   const renders = [];
   const window = {
     location: { search: "?surface=menu-bar" },
     matchMedia: () => ({ matches: false }),
+    localStorage: { getItem: () => null },
   };
   window.self = window;
   window.top = framed ? {} : window;
@@ -80,6 +93,29 @@ for (const framed of [false, true]) {
         return { createRoot: () => ({ render: (node) => renders.push(node) }) };
       if (name === "./surface-boundary") return { resolveBootSurface };
       if (name === "@tauri-apps/api/core") return { isTauri: () => false };
+      if (name === "./native-appearance" || name === "./ui-storage") {
+        const exports = {};
+        runInNewContext(
+          name === "./native-appearance" ? nativeAppearance : uiStorage,
+          {
+            exports,
+            window,
+            document,
+            require(dependency) {
+              if (dependency === "@tauri-apps/api/core")
+                return { isTauri: () => false };
+              if (dependency === "@tauri-apps/api/app")
+                return {
+                  setTheme: () => {
+                    throw new Error("Embedded boot must not set a native theme");
+                  },
+                };
+              throw new Error(`Embedded boot helper imported ${dependency}`);
+            },
+          },
+        );
+        return exports;
+      }
       // Both are small boot-only components, with no workbench subscriptions.
       if (
         name === "./early-shell" ||

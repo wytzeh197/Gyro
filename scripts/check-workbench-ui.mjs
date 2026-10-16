@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
+import { completionMenuGeometry } from "../packages/ui/src/composer-completion-geometry.ts";
 import { providerLoginProfile, providerLoginCommandText } from "../apps/desktop/src/provider-login-profile.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
 import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
@@ -592,6 +593,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/cli-session-list.tsx"),
   readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
+  readRepoFile("packages/ui/src/browser-viewport-controls.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
   readRepoFile("packages/ui/src/menu-dismiss.ts"),
   readRepoFile("packages/ui/src/provider-settings-fields.tsx"),
@@ -1390,7 +1392,7 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini,cursor,opencode,deepseek,mistral,openrouter,ollama",
+    "openai,anthropic,kimi,xai,antigravity,cursor,opencode,deepseek,mistral,openrouter,ollama",
   "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
@@ -5464,8 +5466,13 @@ expect(
   cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
     (rule) =>
       rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
-      rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
-      rule.includes("padding: 8px"),
+      /box-shadow:\s*0\s+\d+px\s+\d+px\s+var\(--gyro-premium-shadow-soft\)/.test(
+        rule,
+      ) &&
+      /padding:\s*[4-8]px\s*;/.test(rule) &&
+      /display:\s*grid\s*;/.test(rule) &&
+      /left:\s*0\s*;/.test(rule) &&
+      /right:\s*0\s*;/.test(rule),
   ) &&
     surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
     surfaceSource.includes("gyro-sidebar-session-group is-cli") &&
@@ -6762,8 +6769,8 @@ expect(
     ) &&
     surfaceSource.includes('if (event.key === "Escape")') &&
     surfaceSource.includes("openMenus.at(-1) !== menu") &&
-    surfaceSource.includes("const focusTarget = triggerRef?.current ?? returnFocus") &&
-    surfaceSource.includes("if (focusTarget?.isConnected) focusTarget.focus()"),
+    /const focusTarget =\s*triggerRef\?\.current \?\?\s*element\.querySelector<HTMLElement>\(\s*'\[aria-haspopup\]\[aria-expanded="true"\]',?\s*\) \?\?\s*returnFocus;/.test(surfaceSource) &&
+    /if \(focusTarget\?\.isConnected\)\s*focusTarget\.focus\(\{ preventScroll: true \}\)/.test(surfaceSource),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 // Model rail: provider marks down the left, the previewed provider's models
@@ -7087,6 +7094,48 @@ expect(
     ),
   "Chat composer should expose a filtered, keyboard-accessible slash command menu whose actions are wired.",
 );
+const completionMenuSource = readRepoFile(
+  "packages/ui/src/composer-completion-menu.tsx",
+);
+const heroCompletionMenu = completionMenuGeometry({
+  bounds: { left: 0, right: 860, top: 0, bottom: 620 },
+  anchor: { left: 270, right: 790, top: 312, bottom: 400 },
+  naturalHeight: 418,
+  minimumHeight: 110,
+  gap: 8,
+});
+expect(
+  heroCompletionMenu.direction === "up" &&
+    heroCompletionMenu.height === 296 &&
+    (surfaceSource.match(/<ComposerCompletionMenu[\s\S]*?className="gyro-composer-slash-menu(?: is-commands)?"/g) ?? []).length === 2 &&
+    completionMenuSource.includes("clippingBounds(panel, popoverViewportRect)") &&
+    completionMenuSource.includes('[role="option"][aria-selected="true"]') &&
+    completionMenuSource.includes('scrollIntoView({ block: "nearest" })'),
+  "Slash and context completions must stay within the owning pane, with keyboard-selected context options visible.",
+);
+for (const scale of [0.8, 1, 1.15, 1.5]) {
+  for (const height of [180, 260, 620]) {
+    for (const anchorTop of [20, 70, 150]) {
+      const top = Math.min(anchorTop, height - 100);
+      const menu = completionMenuGeometry({
+        bounds: { left: 0, right: 320, top: 0, bottom: height },
+        anchor: { left: 8, right: 312, top, bottom: top + 90 },
+        naturalHeight: 418 * scale,
+        minimumHeight: 110 * scale,
+        gap: 8 * scale,
+      });
+      const menuTop = menu.direction === "overlay"
+        ? menu.top
+        : menu.direction === "up"
+          ? top - 8 * scale - menu.height
+          : top + 90 + 8 * scale;
+      expect(
+        menuTop >= 8 && menuTop + menu.height <= height - 8 && menu.height > 0,
+        `Completion menus must fit a ${height}px pane at ${scale} scale with anchor ${anchorTop}.`,
+      );
+    }
+  }
+}
 expect(
   ["/help", "/branch", "/review", "/test", "/diff", "/compact"].every(
     (command) => surfaceSource.includes(`command: "${command}"`),
@@ -7177,14 +7226,17 @@ expect(
 );
 expect(
   tauriSource.includes("fn normal_chat_requests_plan(message: &str)") &&
-    tauriSource.includes(
-      "request.mode == ChatMode::Normal && normal_chat_requests_plan(&request.message)",
+    /let automatically_entered_plan\s*=\s*request\.mode == ChatMode::Normal\s*&&\s*lease\.is_none\(\)\s*&&\s*normal_chat_requests_plan\(&request\.message\)/.test(
+      tauriSource,
     ) &&
-    tauriSource.includes("request.mode = ChatMode::Plan") &&
+    /if automatically_entered_plan\s*\{[\s\S]*?request\.mode = ChatMode::Plan/.test(
+      tauriSource,
+    ) &&
     tauriSource.includes('"source": "message-intent"') &&
     tauriSource.includes('"plan-mode-fallback"'),
   "Explicit plan requests in Normal chat should enter the real read-only Plan mode and always produce a plan document.",
 );
+
 expect(
   // The decision takes the composer's place, like a question: approve, type a
   // change (which stays in Plan mode), or keep planning.
@@ -8441,7 +8493,8 @@ expect(
         // CLI default aliases resolve the actual model at runtime. They must
         // not advertise a made-up catalog context window.
         (provider.id === "cursor" && model.id === "cursor-default") ||
-        (provider.id === "opencode" && model.id === "opencode-default")
+        (provider.id === "opencode" && model.id === "opencode-default") ||
+        (provider.id === "antigravity" && model.id === "antigravity-default")
           ? model.contextWindowTokens === undefined
           : (model.contextWindowTokens ?? 0) > 0,
       ),
@@ -8557,15 +8610,50 @@ expect(
   "Live file changes lead the composer dock above queued turns, without negative-margin overlap, and completed edits retain their file review card.",
 );
 
+const goalStripSource = surfaceSource.slice(
+  surfaceSource.indexOf("function SessionGoalStrip("),
+);
+const goalWorkingExpression = goalStripSource.match(
+  /const isWorking\s*=([\s\S]*?);/,
+)?.[1];
+const goalWorkingState = goalWorkingExpression
+  ? new Function(
+      "isActive",
+      "isRunning",
+      "runStatus",
+      `return (${goalWorkingExpression});`,
+    )
+  : undefined;
+const goalWorkingStatesCorrect =
+  Boolean(goalWorkingState) &&
+  [false, true].every((active) =>
+    [false, true].every((running) =>
+      [
+        undefined,
+        "queued",
+        "running",
+        "waiting-approval",
+        "blocked",
+        "paused",
+        "complete",
+      ].every(
+        (status) =>
+          goalWorkingState(active, running, status) ===
+          (active &&
+            running &&
+            (status === undefined ||
+              ["queued", "running", "waiting-approval"].includes(status))),
+      ),
+    ),
+  );
 expect(
   // The outcome is drawn on the composer, where the next message is typed,
   // instead of at the top of the transcript where it scrolled out of sight.
   // Nothing announces a save: a saved goal is simply the goal on screen.
   surfaceSource.includes("function SessionGoalStrip") &&
     surfaceSource.includes('className="gyro-goal-strip"') &&
-    surfaceSource.includes(
-      'data-running={isActive && isRunning ? "true" : undefined}',
-    ) &&
+    goalWorkingStatesCorrect &&
+    goalStripSource.includes('data-running={isWorking ? "true" : undefined}') &&
     surfaceSource.includes("isRunning={isSending}") &&
     surfaceSource.includes("sessionGoal?.text && !isGoalComposerActive") &&
     !surfaceSource.includes("Send a message to start work") &&

@@ -830,8 +830,7 @@
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+  box-shadow: none;
   filter: none;
 }
 
@@ -852,8 +851,7 @@
   > .gyro-composer-shell.is-hero.has-provider:focus-within {
   /* Keep the frame neutral when typing or using composer controls. */
   border-color: var(--gyro-border);
-  box-shadow: 0 2px 8px
-    color-mix(in srgb, var(--gyro-heavy-shadow) 22%, transparent);
+  box-shadow: none;
 }
 
 :root[data-theme]
@@ -898,18 +896,42 @@
   .gyro-composer-bar
   .gyro-send-button {
   border-radius: 50%;
+  box-shadow: none;
   display: grid;
   place-items: center;
   padding: 0;
   height: calc(28px * var(--gyro-ui-scale, 1));
   min-height: calc(28px * var(--gyro-ui-scale, 1));
-  min-width: 28px;
-  width: 28px;
+  min-width: calc(28px * var(--gyro-ui-scale, 1));
+  width: calc(28px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-send-button > svg {
   display: block;
   flex: none;
+}
+
+/* Tiled welcome screens already space children with a gap. Do not add the
+   full-window logo and composer margins a second time. */
+:root[data-theme]
+  .gyro-chat-surface.is-empty.is-tiled
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-brand-logo {
+  margin-bottom: 0;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty.is-tiled
+  > .gyro-chat-start:not(.is-mission)
+  > h1 {
+  font-size: var(--gyro-font-heading);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty.is-tiled
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell {
+  margin-top: 0;
 }
 
 /* A ready send shares the primary action palette across both chat layouts. */

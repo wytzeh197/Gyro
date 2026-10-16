@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { MoreHorizontal, Plus, RefreshCw } from "lucide-react";
 import { SettingsGroup, SettingsSelect } from "./settings-controls";
 import { useOutsidePointerDismiss } from "./menu-dismiss";
+import { clippingBounds } from "./composer-popover-bounds";
+import { providerDetailsPosition } from "./provider-details-position";
 import {
   providersForConfig,
   providerSupportsApiKey,
@@ -390,6 +392,70 @@ export function ProviderDetailsMenu({
   const detailsRef = useOutsidePointerDismiss<HTMLDetailsElement>(isOpen, () =>
     setIsOpen(false),
   );
+  useLayoutEffect(() => {
+    const details = detailsRef.current;
+    const summary = details?.querySelector("summary");
+    const menu = details?.querySelector<HTMLElement>(":scope > div");
+    if (!isOpen || !details || !summary || !menu) return;
+    const position = () => {
+      const scrollTop = menu.scrollTop;
+      menu.style.top = "";
+      menu.style.bottom = "";
+      menu.style.translate = "";
+      menu.style.maxHeight = "";
+      const bounds = clippingBounds(menu);
+      const availableWidth = Math.max(0, bounds.right - bounds.left - 16);
+      menu.style.maxWidth = `${availableWidth}px`;
+      menu.style.minWidth = `${Math.min(230, availableWidth)}px`;
+      const anchor = summary.getBoundingClientRect();
+      const natural = menu.getBoundingClientRect();
+      const prefersUp = natural.bottom <= anchor.top;
+      const gap = Math.max(
+        0,
+        prefersUp ? anchor.top - natural.bottom : natural.top - anchor.bottom,
+      );
+      const fitted = providerDetailsPosition({
+        anchorTop: anchor.top,
+        anchorBottom: anchor.bottom,
+        boundsTop: bounds.top,
+        boundsBottom: bounds.bottom,
+        menuHeight: natural.height,
+        prefersUp,
+        gap,
+      });
+      menu.style.maxHeight = `${fitted.maxHeight}px`;
+      menu.style.bottom = "auto";
+      menu.style.top = `${fitted.top - details.getBoundingClientRect().top}px`;
+      const rect = menu.getBoundingClientRect();
+      const shift = Math.max(
+        bounds.left + 8 - rect.left,
+        Math.min(0, bounds.right - 8 - rect.right),
+      );
+      menu.style.translate = `${shift}px 0`;
+      menu.scrollTop = scrollTop;
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    for (
+      let ancestor: HTMLElement | null = details;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
+    const onScroll = (event: Event) => {
+      // Scrolling the capped menu must not reset its own scroll position.
+      if (event.target === menu) return;
+      position();
+    };
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [isOpen, children]);
 
   return (
     <details

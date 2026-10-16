@@ -1,4 +1,16 @@
 {
+  "check-google-models.mjs": {
+    "kind": "behavioral",
+    "note": "Executes provider migration and discovered-model merges with explicit fixture metadata; no live Google transport."
+  },
+  "check-google-models-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Drives the production model picker in Chromium with discovered models and unknown context metadata."
+  },
+  "check-live-model-context.mjs": {
+    "kind": "behavioral",
+    "note": "Executes context allocation precedence, expiry, provider isolation, and stream updates against explicit fixture readings."
+  },
   "check-browser-viewport.mjs": { "kind": "behavioral" },
   "check-goal-runner.mjs": { "kind": "behavioral" },
   "check-system-access.mjs": { "kind": "behavioral" },

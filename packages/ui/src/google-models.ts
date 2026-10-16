@@ -16,7 +16,7 @@ export function applyGoogleModelDiscovery(
   providerId: ProviderId,
   discovery: GoogleModelDiscovery,
 ): GyroConfig {
-  if (providerId !== "gemini" && providerId !== "antigravity") return config;
+  if (providerId !== "antigravity") return config;
   return {
     ...config,
     modelProviders: providersForConfig(config).map((provider) => {

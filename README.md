@@ -78,9 +78,12 @@ session with you.
 
 ## Providers
 
-- **Subscription CLIs.** Claude Code, Codex, Gemini CLI, Kimi Code, and
+- **Subscription CLIs.** Claude Code, Codex, Kimi Code, and
   Grok Build run through their own local CLIs. Cursor and OpenCode are
   experimental.
+- **Experimental Google integration.** Antigravity requires a separately
+  installed ACP runtime and is available through the app. See
+  [Google backends](docs/google-backends.md) for setup and current limits.
 - **Local models.** Ollama runs on your Mac, with discovered models and governed
   Gyro tools where the model supports them. See [Local models](docs/local-models.md).
 - **API keys.** DeepSeek, Mistral, and OpenRouter ship as presets, and any

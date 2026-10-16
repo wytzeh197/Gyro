@@ -840,7 +840,7 @@ export type ProviderId =
   | "kimi"
   | "xai"
   | "cursor"
-  | "gemini"
+  | "gemini" // Legacy transcript identity; absent from the selectable catalog.
   | "antigravity"
   | "opencode"
   | "ollama"

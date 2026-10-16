@@ -127,6 +127,27 @@ try {
   const renameInputReady = `(()=>{const input=document.querySelector('dialog[open] input');return !!input && !input.disabled && document.activeElement===input;})()`;
   const previewRendered = `[...document.querySelectorAll('dialog .monaco-diff-editor .view-lines')].some(lines=>lines.textContent.includes('message') && lines.textContent.includes('welcome'))`;
   const state = `window.__workspaceFixture.getState()`;
+  const assertEditorLayout = async () => {
+    const geometry = await evaluate(
+      `(() => {
+        const primary = document.querySelector('.gyro-workspace-primary').getBoundingClientRect();
+        const editors = document.querySelector('.workspace-fixture-editors').getBoundingClientRect();
+        const editor = ${mainEditor}.getDomNode().getBoundingClientRect();
+        const bar = document.querySelector('.gyro-workspace-edit-bar')?.getBoundingClientRect();
+        return { primaryHeight: primary.height, editorHeight: editor.height,
+          barHeight: bar?.height ?? 0, barBottom: bar?.bottom ?? editors.top,
+          editorsTop: editors.top };
+      })()`,
+    );
+    assert.ok(
+      geometry.editorHeight >= geometry.primaryHeight * 0.7,
+      `the visible editor must retain the workspace row: ${JSON.stringify(geometry)}`,
+    );
+    assert.ok(
+      geometry.barHeight <= 80 && geometry.barBottom <= geometry.editorsTop + 1,
+      `the edit bar must stay compact above the editor: ${JSON.stringify(geometry)}`,
+    );
+  };
   const atTarget = () =>
     evaluate(`${state}.main === window.__workspaceFixture.targetPath`);
   const openMain = async () => {
@@ -138,6 +159,7 @@ try {
         ),
       "main model reattachment",
     );
+    await assertEditorLayout();
   };
   const symbol = () =>
     evaluate(
@@ -161,6 +183,7 @@ try {
       ),
     "production Monaco + syntax",
   );
+  await assertEditorLayout();
   assert.equal(
     await evaluate(
       `window.__workspaceFixture.monaco.editor.getModels().some(model => model.uri.path === window.__workspaceFixture.targetPath)`,

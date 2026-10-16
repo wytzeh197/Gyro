@@ -359,6 +359,7 @@ where
     let termination = loop {
         if drain_chunks(
             &receiver,
+            || cancellation.is_cancelled() || started_at.elapsed() >= request.timeout,
             &mut on_chunk,
             &mut stdout_text,
             &mut stderr_text,
@@ -575,6 +576,7 @@ fn send_text_chunk(
 #[allow(clippy::too_many_arguments)]
 fn drain_chunks<F>(
     receiver: &Receiver<ExecutionChunk>,
+    mut should_stop: impl FnMut() -> bool,
     on_chunk: &mut F,
     stdout: &mut String,
     stderr: &mut String,
@@ -590,7 +592,15 @@ where
     F: FnMut(&ExecutionChunk),
 {
     let mut received = false;
-    while let Ok(chunk) = receiver.try_recv() {
+    loop {
+        // Output callbacks can parse and persist provider events. Check between
+        // chunks so their work cannot starve a pending cancellation or deadline.
+        if should_stop() {
+            break;
+        }
+        let Ok(chunk) = receiver.try_recv() else {
+            break;
+        };
         received = true;
         handle_chunk(
             chunk,
@@ -901,6 +911,33 @@ mod tests {
         assert!(outcome.duration_ms < 2_000);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn output_budget_includes_buffered_output_after_the_process_exits() {
+        let mut request = ExecutionRequest::new("/usr/bin/head");
+        request.args = vec![
+            "-c".into(),
+            (32 * EXECUTION_READ_CHUNK_BYTES).to_string().into(),
+            "/dev/zero".into(),
+        ];
+        request.max_total_output_bytes = 20 * EXECUTION_READ_CHUNK_BYTES;
+        let mut streamed_bytes = 0;
+        let outcome = run_command(request, CancellationToken::default(), |chunk| {
+            streamed_bytes += chunk.text.len();
+            // The finite producer exits with the rest of its output queued
+            // while the consumer processes earlier events.
+            thread::sleep(Duration::from_millis(5));
+        })
+        .unwrap();
+
+        eprintln!(
+            "completed process output budget: {:?}, {} ms, {streamed_bytes} bytes streamed",
+            outcome.termination, outcome.duration_ms
+        );
+        assert_eq!(outcome.termination, ExecutionTermination::OutputLimit);
+        assert!(streamed_bytes <= 20 * EXECUTION_READ_CHUNK_BYTES);
+    }
+
     #[test]
     fn cancellation_stops_the_process_group_and_preserves_partial_output() {
         let mut request = ExecutionRequest::new("/bin/sh");
@@ -921,6 +958,71 @@ mod tests {
 
         assert_eq!(outcome.termination, ExecutionTermination::Cancelled);
         assert!(outcome.stdout.contains("started"));
+        assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[cfg(unix)]
+    fn continuous_output_request() -> ExecutionRequest {
+        let mut request = ExecutionRequest::new("/usr/bin/yes");
+        request.timeout = Duration::from_secs(5);
+        // The finite budget prevents a broken cancellation/deadline check from
+        // leaving an unbounded producer running for the rest of the test suite.
+        request.max_total_output_bytes = 2 * 1024 * 1024;
+        request
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_is_observed_while_output_continuously_refills_the_channel() {
+        let request = continuous_output_request();
+        let cancellation = CancellationToken::default();
+        let cancel_from_callback = cancellation.clone();
+        let mut chunks = 0;
+        let mut cancelled_at = None;
+        let outcome = run_command(request, cancellation, |_| {
+            chunks += 1;
+            cancelled_at.get_or_insert_with(Instant::now);
+            cancel_from_callback.cancel();
+            // Give the output reader time to refill the channel while the
+            // consumer performs work such as parsing/persisting provider events.
+            thread::sleep(Duration::from_millis(5));
+        })
+        .unwrap();
+
+        let stop_to_return = cancelled_at.unwrap().elapsed();
+        eprintln!(
+            "continuous output cancellation: {:?}, {} ms total, {} ms stop-to-return, {chunks} callbacks",
+            outcome.termination, outcome.duration_ms, stop_to_return.as_millis()
+        );
+        assert_eq!(outcome.termination, ExecutionTermination::Cancelled);
+        assert!(
+            !outcome.stdout.is_empty(),
+            "retain output read before cancellation"
+        );
+        assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_is_observed_while_output_continuously_refills_the_channel() {
+        let mut request = continuous_output_request();
+        request.timeout = Duration::from_millis(80);
+        let mut chunks = 0;
+        let outcome = run_command(request, CancellationToken::default(), |_| {
+            chunks += 1;
+            thread::sleep(Duration::from_millis(5));
+        })
+        .unwrap();
+
+        eprintln!(
+            "continuous output timeout: {:?}, {} ms total, {} ms deadline-to-return, {chunks} callbacks",
+            outcome.termination, outcome.duration_ms, outcome.duration_ms.saturating_sub(80)
+        );
+        assert_eq!(outcome.termination, ExecutionTermination::TimedOut);
+        assert!(
+            !outcome.stdout.is_empty(),
+            "retain output read before timeout"
+        );
         assert!(outcome.duration_ms < 2_000);
     }
 

@@ -5223,13 +5223,6 @@ export function defaultCommandProfiles(): CommandProfile[] {
       defaultModel: "cursor-default",
     },
     {
-      id: "gemini",
-      displayName: "Gemini CLI",
-      command: "gemini",
-      args: ["--yolo=false"],
-      workingDirectory: "Workspace",
-    },
-    {
       id: "opencode",
       displayName: "OpenCode",
       command: "opencode",

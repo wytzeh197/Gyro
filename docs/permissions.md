@@ -46,3 +46,22 @@ guarded file transaction. They return an applied result rather than an approval
 card. Hash conflicts, unsaved editor changes and workspace path checks still
 stop an unsafe replacement. Outside Full Access, the same submission remains a
 review proposal. An explicit editor review action still creates a proposal.
+
+## Execution boundaries
+
+Model-opened terminals and model-requested workspace tasks filter inherited
+credential-shaped environment variables, including explicit launch overrides.
+This applies independently of the selected approval mode. Human terminal panes
+and provider login flows keep their existing authentication behavior. Commands
+that rely on ambient API keys or tokens may therefore need a different credential
+path; an approval alone does not pass those secrets into a model-owned command.
+
+On macOS, these Gyro-owned model commands also use a workspace filesystem policy:
+writes are limited to the bound workspace and private scratch space, with known
+credential stores, control metadata, and Gyro private data protected. Full access
+bypasses this filesystem policy only in Normal mode and within a delegated
+child's inherited ceiling. Sandbox setup failure does not retry unrestricted.
+
+IP networking remains allowed. Human terminals and provider-native tools have
+separate execution paths. See the [agent execution boundary matrix](agent-execution-boundaries.md)
+for the exact scope, compatibility limits, and remaining acceptance work.

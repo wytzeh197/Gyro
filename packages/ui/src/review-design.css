@@ -140,10 +140,12 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+  max-width: 100%;
 }
 .gyro-recorded-diff-controls > select {
   min-width: 0;
   max-width: 100%;
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
   font: inherit;
   color: var(--gyro-text);
   background: var(--gyro-pane);
@@ -163,7 +165,7 @@
   font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 .gyro-comparison-review .gyro-diff-review-toolbar button {
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
   padding: 4px 8px;
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-sm);
@@ -172,7 +174,7 @@
   font: inherit;
   cursor: pointer;
 }
-.gyro-comparison-review .gyro-diff-review-toolbar button:hover {
+.gyro-comparison-review .gyro-diff-review-toolbar button:not(:disabled):hover {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div {
@@ -180,6 +182,8 @@
 }
 .gyro-comparison-review .gyro-diff-review-toolbar strong {
   font-size: calc(13px * var(--gyro-ui-scale, 1));
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar span {
   font-size: calc(11px * var(--gyro-ui-scale, 1));
@@ -282,7 +286,7 @@
   color: var(--gyro-accent);
   background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
 }
-.gyro-comparison-review button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
+.gyro-comparison-review :is(button, select):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
 }
