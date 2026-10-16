@@ -295,6 +295,7 @@ import {
 import {
   interleaveModelSwitches,
   isModelSwitchEvent,
+  modelSwitchLogoProvider,
   orderedChatTimelineEvents,
 } from "./chat-timeline";
 import {
@@ -26429,6 +26430,51 @@ function ComposerMediaPreview({ attachment }: { attachment: ChatAttachment }) {
   );
 }
 
+export function ModelSwitchMarker({ event }: { event: SessionEvent }) {
+  const payload = eventPayloadRecord(event) ?? {};
+  const previousProvider = modelSwitchLogoProvider(
+    payload.previousProviderId,
+    payload.previousModelId,
+  );
+  const nextProvider = modelSwitchLogoProvider(payload.providerId, payload.modelId);
+  const previousLabel =
+    typeof payload.previousModelId === "string"
+      ? payload.previousModelId
+      : previousProvider;
+  const nextLabel =
+    typeof payload.modelLabel === "string" ? payload.modelLabel : payload.modelId;
+  return (
+    <div
+      className="gyro-model-switch-marker"
+      title={
+        previousLabel && typeof nextLabel === "string"
+          ? `${previousLabel} → ${nextLabel}`
+          : event.message
+      }
+    >
+      {nextProvider ? (
+        <span aria-hidden="true" className="gyro-model-switch-logos">
+          {previousProvider ? (
+            <>
+              <ProviderLogo providerId={previousProvider} />
+              <ArrowRight size={12} />
+            </>
+          ) : null}
+          <ProviderLogo
+            providerId={nextProvider}
+            label={
+              typeof payload.providerLabel === "string"
+                ? payload.providerLabel
+                : undefined
+            }
+          />
+        </span>
+      ) : null}
+      <span className="gyro-model-switch-label">{event.message}</span>
+    </div>
+  );
+}
+
 const ChatEvent = memo(function ChatEvent({
   event,
   onOpenBrowserUrl,
@@ -26456,12 +26502,7 @@ const ChatEvent = memo(function ChatEvent({
 }) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   if (isModelSwitchEvent(event)) {
-    return (
-      <div className="gyro-model-switch-marker">
-        <Sparkles aria-hidden="true" size={12} />
-        <span>{event.message}</span>
-      </div>
-    );
+    return <ModelSwitchMarker event={event} />;
   }
   const providerStatus = providerStatusFromEvent(event);
   if (providerStatus) {

@@ -12981,6 +12981,7 @@ body {
   line-height: calc(16px * var(--gyro-ui-scale, 1));
   margin: 8px 0 20px;
   max-width: 760px;
+  width: 100%;
 }
 
 .gyro-model-switch-marker::before,
@@ -12991,12 +12992,27 @@ body {
   height: 1px;
 }
 
-.gyro-model-switch-marker > svg {
+.gyro-model-switch-logos {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.gyro-model-switch-logos .gyro-provider-logo {
+  color: inherit;
+  height: calc(14px * var(--gyro-ui-scale, 1));
+  width: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-model-switch-logos > svg {
   flex: 0 0 auto;
 }
 
-.gyro-model-switch-marker > span {
-  white-space: nowrap;
+.gyro-model-switch-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .gyro-chat-transcript .gyro-message {
