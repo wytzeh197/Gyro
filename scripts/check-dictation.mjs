@@ -6,6 +6,7 @@ import {
   dictationAccessError,
   dictationDraft,
   setDictationAccessRequest,
+  setSharedDictation,
 } from "../packages/ui/src/dictation.ts";
 
 assert.deepEqual(dictationDraft("", 0, "Hello"), {
@@ -308,11 +309,53 @@ const accessState = readFileSync(
   "utf8",
 );
 assert.match(desktopHook, /request_dictation_access/);
+assert.match(desktopHook, /start_dictation/);
+assert.match(desktopHook, /stop_dictation/);
+assert.match(desktopHook, /dictation-update/);
+assert.match(desktopHook, /setSharedDictation/);
 assert.match(accessState, /import "\.\/dictation-access"/);
 assert.match(accessCommand, /requestAccessForMediaType/);
 assert.match(accessCommand, /requestAuthorization/);
+assert.match(accessCommand, /AVMediaTypeAudio/);
+assert.match(accessCommand, /appendAudioPCMBuffer/);
 assert.match(desktopLib, /dictation_access::request_dictation_access/);
+assert.match(desktopLib, /dictation_access::start_dictation/);
+assert.match(desktopLib, /dictation_access::stop_dictation/);
 assert.match(plist, /NSMicrophoneUsageDescription/);
 assert.match(plist, /NSSpeechRecognitionUsageDescription/);
+const uiIndex = readFileSync(
+  new URL("../packages/ui/src/index.ts", import.meta.url),
+  "utf8",
+);
+assert.match(uiIndex, /setSharedDictation/);
+
+let nativeStarts = 0;
+let nativeStops = 0;
+setSharedDictation(() => ({
+  start(listener) {
+    nativeStarts += 1;
+    listener.onPartial("from the desktop microphone");
+  },
+  stop() {
+    nativeStops += 1;
+  },
+}));
+const installed = browserDictation();
+assert.equal(installed, browserDictation());
+const native = listen();
+installed.start(native);
+assert.equal(nativeStarts, 1);
+assert.deepEqual(native.events, [["partial", "from the desktop microphone"]]);
+installed.stop();
+assert.equal(nativeStops, 1);
+setSharedDictation(null);
+const restored = browserDictation();
+assert.notEqual(restored, installed);
+assert.equal(restored, browserDictation());
+const restoredListener = listen();
+restored.start(restoredListener);
+assert.deepEqual(restoredListener.events, [
+  ["error", "Dictation is not available in this window."],
+]);
 
 console.log("dictation microphone passed");

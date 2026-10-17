@@ -8660,7 +8660,9 @@ expect(
     goalWorkingStatesCorrect &&
     goalStripSource.includes('data-running={isWorking ? "true" : undefined}') &&
     surfaceSource.includes("isRunning={isSending}") &&
-    surfaceSource.includes("sessionGoal?.text && !isGoalComposerActive") &&
+    surfaceSource.includes(
+      'sessionGoal?.status === "active" &&\n      sessionGoal.text &&\n      !isGoalComposerActive',
+    ) &&
     !surfaceSource.includes("Send a message to start work") &&
     styleSource.includes(".gyro-goal-strip {") &&
     styleSource.includes(

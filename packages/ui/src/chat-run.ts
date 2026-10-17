@@ -16,6 +16,7 @@ import { FILE_REVIEW_SCHEMA } from "./types.ts";
 import {
   appliedFileChangeCounts,
   isAppliedFileMutationEvent,
+  measuredFileCounts,
 } from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
 
@@ -383,6 +384,36 @@ export function splitSegmentSummary(summary: string): {
 }
 
 /**
+ * The line delta for a finished stretch, drawn after its summary the way a
+ * file row draws `+26 -9`.
+ *
+ * Only edits contribute. A file with no measured count omits the total, so a
+ * partial sum is never presented as everything the stretch changed.
+ */
+export function segmentLineStats(
+  steps: RunStep[],
+): { additions: number; deletions: number } | undefined {
+  const files = segmentWorkSteps(steps).flatMap((step) =>
+    step.item.kind === "file" ? [step.item] : [],
+  );
+  if (files.length === 0) return undefined;
+  let additions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    if (file.additions == null && file.deletions == null) return undefined;
+    const measured = measuredFileCounts({
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+    });
+    if (!measured) return undefined;
+    additions += measured.additions;
+    deletions += measured.deletions;
+  }
+  if (additions === 0 && deletions === 0) return undefined;
+  return { additions, deletions };
+}
+
+/**
  * The live tail of a stretch: its newest calls, and how many scrolled out of
  * view above them. The in-flight call is always the newest, so it is never the
  * one hidden.
@@ -693,12 +724,24 @@ export function buildRunModel(
 
   // Guarded mutations record exact per-operation counts before writing. These
   // survive reloads and take precedence over duplicate provider/capability rows.
+  // The same numbers go on the file row, so the working-process line can show
+  // `+26 -9` instead of a bare path.
   for (const [path, counts] of appliedFileChangeCounts(events)) {
     const existing = files.find((file) => file.path === path);
     if (existing) {
       Object.assign(existing, counts);
     } else {
       files.push({ path, ...counts, status: "done" });
+    }
+    for (const step of steps) {
+      if (
+        step.kind === "work" &&
+        step.item.kind === "file" &&
+        step.item.path === path
+      ) {
+        step.item.additions = counts.additions;
+        step.item.deletions = counts.deletions;
+      }
     }
   }
 

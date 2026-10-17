@@ -31,6 +31,7 @@ import {
   runRetryText,
   runRowText,
   runWorkGroupText,
+  segmentLineStats,
   segmentRunSteps,
   segmentWorkSteps,
   splitSegmentSummary,
@@ -539,8 +540,8 @@ function RunWorkGroup({
 }
 
 /**
- * A finished stretch of work as one line — "Ran 3 commands, Read 1 file ›" —
- * that opens onto the exact calls behind it.
+ * A finished stretch of work as one line — "Edited 4 files, Ran 16 commands
+ * +26 -9 ›" — that opens onto the exact calls behind it.
  */
 function RunSegmentSummary({
   aggregateFileStats,
@@ -553,6 +554,7 @@ function RunSegmentSummary({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const summary = splitSegmentSummary(summarizeSegment(calls));
+  const lineStats = segmentLineStats(calls);
   const className = [
     "gyro-run-segment",
     isExpanded ? "is-expanded" : "",
@@ -577,6 +579,16 @@ function RunSegmentSummary({
             </>
           ) : null}
         </span>
+        {lineStats ? (
+          <span className="gyro-run-row-stat">
+            {lineStats.additions > 0 ? (
+              <em className="is-added">+{lineStats.additions}</em>
+            ) : null}
+            {lineStats.deletions > 0 ? (
+              <em className="is-removed">-{lineStats.deletions}</em>
+            ) : null}
+          </span>
+        ) : null}
         <ChevronRight
           aria-hidden="true"
           className="gyro-run-segment-chevron"

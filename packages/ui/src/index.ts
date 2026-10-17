@@ -642,6 +642,7 @@ export {
   dictationAccessError,
   dictationDraft,
   setDictationAccessRequest,
+  setSharedDictation,
 } from "./dictation";
 export type { DictationController, DictationListener } from "./dictation";
 export type {

@@ -23115,6 +23115,19 @@ function useLimitClock(enabled: boolean) {
   return now;
 }
 
+/** Plan limits turn at 80% and 95%. Context uses the same bands. */
+function contextMeterSeverity(
+  usage: { contextWindowTokens: number; percent: number } | undefined,
+  source: "reported" | "estimated" | "empty",
+) {
+  if (!usage || source === "empty" || usage.contextWindowTokens <= 0) {
+    return "normal" as const;
+  }
+  if (usage.percent >= 95) return "critical" as const;
+  if (usage.percent >= 80) return "warning" as const;
+  return "normal" as const;
+}
+
 function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
   const measured = window.remainingPercent !== undefined;
   return (
@@ -24743,6 +24756,7 @@ function Composer({
       : contextUsage.usedTokens > 0
         ? "estimated"
         : "empty";
+  const contextSeverity = contextMeterSeverity(contextUsage, contextSource);
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
     const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
@@ -25529,10 +25543,13 @@ function Composer({
       }}
     >
       {overlay}
-      {/* The goal rides on the composer, above the message that pursues it.
-          It steps aside for the goal editor, which is the same outcome being
-          written in the same place. */}
-      {sessionGoal?.text && !isGoalComposerActive ? (
+      {/* An open goal rides on the composer, above the message that pursues
+          it, and steps aside for the goal editor. A goal the model marks done
+          leaves this spot: the outcome stays in the chat, and the strip does
+          not. */}
+      {sessionGoal?.status === "active" &&
+      sessionGoal.text &&
+      !isGoalComposerActive ? (
         <SessionGoalStrip
           goal={sessionGoal}
           isRunning={isSending}
@@ -26217,7 +26234,7 @@ function Composer({
                   ? contextUsage.percent
                   : undefined
               }
-              className="gyro-composer-context-wheel"
+              className={`gyro-composer-context-wheel is-${contextSeverity}`}
               role="progressbar"
               tabIndex={0}
             >
@@ -26226,15 +26243,16 @@ function Composer({
                   className="gyro-composer-context-track"
                   cx="9"
                   cy="9"
-                  r="7.5"
+                  r="6.5"
                 />
                 <circle
                   className="gyro-composer-context-progress"
                   cx="9"
                   cy="9"
                   pathLength="100"
-                  r="7.5"
+                  r="6.5"
                   strokeDasharray={`${contextUsage.percent ?? 0} 100`}
+                  strokeLinecap={contextUsage.percent > 0 ? "round" : "butt"}
                   transform="rotate(-90 9 9)"
                 />
               </svg>
@@ -26244,7 +26262,9 @@ function Composer({
               id={`${popoverBaseId}-context-usage-tooltip`}
               role="tooltip"
             >
-              <section className="gyro-composer-context-section">
+              <section
+                className={`gyro-composer-context-section is-${contextSeverity}`}
+              >
                 <header>
                   <div className="gyro-composer-context-heading">
                     <strong>Context</strong>
@@ -26261,9 +26281,7 @@ function Composer({
                   title={
                     contextSource === "empty"
                       ? "Measured once the model replies"
-                      : contextUsage.contextWindowTokens > 0
-                        ? `${contextUsage.usedLabel} used`
-                        : "Context window unknown"
+                      : contextUsage.detail
                   }
                 >
                   <strong>
@@ -26271,15 +26289,24 @@ function Composer({
                       ? "—"
                       : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
                   </strong>
-                  <span>
-                    {contextUsage.contextWindowTokens > 0
-                      ? `/ ${contextUsage.windowLabel} tokens used`
-                      : "Window unknown"}
-                  </span>
-                  {contextSource === "empty" ? null : (
-                    <b>{contextUsage.percentLabel} used</b>
+                  {contextSource !== "empty" &&
+                  contextUsage.contextWindowTokens > 0 ? (
+                    <span>of {contextUsage.windowLabel}</span>
+                  ) : null}
+                  {contextSource === "empty" ||
+                  contextUsage.contextWindowTokens <= 0 ? null : (
+                    <b>{contextUsage.percentLabel}</b>
                   )}
                 </div>
+                <p className="gyro-composer-context-caption">
+                  {contextSource === "empty"
+                    ? "Measured once the model replies"
+                    : contextUsage.contextWindowTokens <= 0
+                      ? "Window unknown"
+                      : contextSource === "estimated"
+                        ? "Estimated from this thread"
+                        : "Reported by the provider"}
+                </p>
                 <div
                   aria-label="Context window used"
                   aria-valuemax={100}

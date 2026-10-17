@@ -25977,7 +25977,7 @@ button.gyro-account-menu-row:hover,
   fill: none;
   flex: none;
   height: 18px;
-  stroke-width: 3;
+  stroke-width: 2.5;
   width: 18px;
 }
 
@@ -33575,6 +33575,207 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-surface.is-thread > .gyro-chat-thread-canvas {
   position: relative;
   z-index: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * Page language
+ *
+ * Same workspace. The request is one soft card, the answer is open type, work
+ * is a faint label, the composer is one pill, and the selected row is a quiet
+ * pill. Geometry, controls, and the graphite/porcelain palette stay.
+ * -------------------------------------------------------------------------- */
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active {
+  background: color-mix(in srgb, var(--gyro-text) 7%, var(--gyro-sidebar));
+  border-radius: var(--gyro-radius-lg);
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-row,
+    .gyro-sidebar-thread,
+    .gyro-session-row,
+    .gyro-footer-button
+  ).is-active:hover {
+  background: color-mix(in srgb, var(--gyro-text) 10%, var(--gyro-sidebar));
+}
+
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-chat-turn {
+  margin-bottom: 28px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-turn
+  > .gyro-message.is-user {
+  margin-bottom: 28px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 18px;
+  box-shadow: none;
+  color: var(--gyro-text);
+  line-height: 1.65;
+  padding: 12px 16px;
+}
+
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border-soft);
+  box-shadow: 0 1px 2px var(--gyro-premium-shadow-soft);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text) {
+  line-height: 1.65;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run
+  .gyro-response-body {
+  gap: 14px;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-header,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments:has(> .gyro-run-rail)
+  > .gyro-run-header {
+  border-bottom: 0;
+  color: var(--gyro-faint);
+  font-weight: 400;
+  margin-bottom: 8px;
+  padding-bottom: 0;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
+  color: var(--gyro-faint);
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-call.is-failed {
+  color: var(--gyro-danger);
+}
+
+:root[data-theme]
+  :is(
+    .gyro-thread-diff-pill,
+    .gyro-change-totals,
+    .gyro-chat-run-change-summary
+  )
+  em {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-run-change-summary.is-complete {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed) {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 22px;
+  box-shadow: var(--gyro-hero-shadow);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(
+    .is-provider-collapsed
+  ):focus-within {
+  border-color: var(--gyro-border-strong);
+  box-shadow: var(--gyro-hero-shadow-focus);
+}
+
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > textarea,
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > .gyro-composer-bar {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > .gyro-composer-context-row {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  min-height: calc(40px * var(--gyro-ui-scale, 1));
+  padding: calc(8px * var(--gyro-ui-scale, 1))
+    calc(12px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  position: static;
+  top: auto;
+}
+
+:root[data-theme] .gyro-chat-surface .gyro-chat-start h1 {
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab {
+  border-radius: var(--gyro-radius-lg);
+  color: var(--gyro-faint);
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab.is-active,
+:root[data-theme]
+  .gyro-chat-companion.is-browser-focus
+  .gyro-chat-companion-tab.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  box-shadow: none;
+  color: var(--gyro-text);
 }
 
 /* Workspace context is a compact, grouped menu. The header and section labels
@@ -41301,6 +41502,37 @@ textarea:focus-visible,
 .gyro-composer-context-bar {
   height: 3px;
   margin: 0;
+}
+
+.gyro-composer-context-caption {
+  color: var(--gyro-premium-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  line-height: calc(15px * var(--gyro-ui-scale, 1));
+  margin: 0;
+}
+
+.gyro-composer-context-section.is-warning .gyro-composer-context-value > b,
+.gyro-composer-context-wheel.is-warning .gyro-composer-context-progress {
+  color: var(--gyro-warn);
+  stroke: var(--gyro-warn);
+}
+
+.gyro-composer-context-section.is-warning .gyro-composer-context-bar > span {
+  background: var(--gyro-warn);
+}
+
+.gyro-composer-context-section.is-critical .gyro-composer-context-value > b,
+.gyro-composer-context-wheel.is-critical .gyro-composer-context-progress {
+  color: var(--gyro-danger);
+  stroke: var(--gyro-danger);
+}
+
+.gyro-composer-context-section.is-critical .gyro-composer-context-bar > span {
+  background: var(--gyro-danger);
+}
+
+:root[data-theme="light"] .gyro-composer-context-caption {
+  color: var(--gyro-muted);
 }
 
 .gyro-composer-limit-reset {

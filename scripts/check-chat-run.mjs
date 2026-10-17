@@ -20,6 +20,7 @@ import {
   runHeaderLabel,
   runRetryText,
   runRowText,
+  segmentLineStats,
   segmentRunSteps,
   splitToolName,
   splitSegmentSummary,
@@ -1601,6 +1602,77 @@ assert.deepEqual(
   stringEdit.files.map((file) => file.path),
   ["src/lib.rs"],
   "a completed string-replacement edit should count as a changed file",
+);
+
+// The working-process line reads the receipt, not the bare path. Provider
+// payloads often omit the delta; the applied mutation is the measurement.
+const measuredEdit = buildRunModel([
+  activity(
+    "file",
+    "Updated src/app.ts",
+    { detail: "src/app.ts", additions: 1, deletions: 0 },
+    0,
+  ),
+  capabilityCall(
+    "workspace-edit",
+    { resource: { id: "p5", kind: "proposal", label: "src/lib.rs" } },
+    1,
+  ),
+  event(
+    "system-event",
+    "Applied src/app.ts",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-app",
+      status: "applied",
+      fileChanges: [{ path: "src/app.ts", additions: 20, deletions: 4 }],
+    },
+    2,
+  ),
+  event(
+    "system-event",
+    "Applied src/lib.rs",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-lib",
+      status: "applied",
+      fileChanges: [{ path: "src/lib.rs", additions: 6, deletions: 5 }],
+    },
+    3,
+  ),
+]);
+assert.deepEqual(
+  measuredEdit.steps.flatMap((step) =>
+    step.kind === "work" && step.item.kind === "file"
+      ? [[step.item.path, step.item.additions, step.item.deletions]]
+      : [],
+  ),
+  [
+    ["src/app.ts", 20, 4],
+    ["src/lib.rs", 6, 5],
+  ],
+  "applied receipts should put line counts on each working-process edit",
+);
+assert.deepEqual(
+  segmentLineStats(measuredEdit.steps),
+  { additions: 26, deletions: 9 },
+  "the folded edit line should total those counts, like +26 -9",
+);
+assert.equal(
+  segmentLineStats([
+    call("a", { kind: "file", path: "a.ts", additions: 4, deletions: 1 }),
+    call("b", { kind: "file", path: "b.ts" }),
+  ]),
+  undefined,
+  "one unmeasured edit should hide the stretch total",
+);
+assert.deepEqual(
+  segmentLineStats([
+    call("a", { kind: "read", path: "a.ts" }),
+    call("b", { kind: "file", path: "b.ts", additions: 4, deletions: 0 }),
+  ]),
+  { additions: 4, deletions: 0 },
+  "reads should not block the edit line delta",
 );
 
 assert.equal(

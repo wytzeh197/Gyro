@@ -279,9 +279,22 @@ export function createBrowserDictation(
 }
 
 let sharedBrowserDictation: DictationController | undefined;
+let sharedDictationFactory: (() => DictationController) | null = null;
+
+/**
+ * Desktop installs a native recognizer before the first composer renders.
+ * `null` restores the browser recognizer and drops the cached controller.
+ */
+export function setSharedDictation(
+  factory: (() => DictationController) | null,
+): void {
+  sharedDictationFactory = factory;
+  sharedBrowserDictation = undefined;
+}
 
 /** The microphone shared by composers that did not bring a transcriber. */
 export function browserDictation(): DictationController {
-  sharedBrowserDictation ??= createBrowserDictation();
+  sharedBrowserDictation ??=
+    sharedDictationFactory?.() ?? createBrowserDictation();
   return sharedBrowserDictation;
 }
