@@ -1,13 +1,16 @@
 //! Local efficiency policies. Accounting never implies provider billing or verified success.
 pub mod accounting;
 pub mod cache;
+pub mod cache_plan;
 pub mod checkpoint;
+pub mod compaction;
 pub mod context;
 pub mod evidence;
 pub mod pricing;
 pub mod progress;
 pub mod retrieval;
 pub mod routing;
+pub mod spill;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

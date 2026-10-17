@@ -362,7 +362,8 @@ pub(super) fn run_openai_compatible_chat(
                     context_window,
                 );
             }
-            gyro_core::efficiency::context::prepare_owned_model_request(&mut messages);
+            let retired = gyro_core::efficiency::context::prepare_owned_model_request(&mut messages);
+            gyro_core::provider_observation::retired_context(retired);
             let round_tools = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
                     messages.push(serde_json::json!({

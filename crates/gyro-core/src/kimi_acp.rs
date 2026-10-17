@@ -3316,7 +3316,15 @@ done
         );
         cancelling.join().unwrap();
         assert!(result.unwrap_err().to_string().contains("cancelled"));
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // What this proves is that cancellation does not wait for the usage-query timeout (6s).
+        // The bound used to be 2s, which a full-suite run on an oversubscribed machine exceeds on
+        // scheduling alone — this returns in ~0.2s isolated. 4s keeps the assertion meaningful
+        // while measuring behaviour instead of machine load.
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "cancellation waited for the usage query: {:?}",
+            started.elapsed()
+        );
         assert!(!temp.path().join("generations").exists());
         assert_eq!(
             std::fs::read_to_string(temp.path().join("starts")).unwrap(),
@@ -3844,8 +3852,13 @@ done
             |_, _| Ok(()),
         )
         .unwrap();
-        assert_eq!(activities[0].label, "xAI tool");
-        assert_eq!(activities[0].id, "call-1");
+        // A turn also publishes a live context-usage row, so the tool call is no longer
+        // `activities[0]`; find it by the id it was called with.
+        let tool = activities
+            .iter()
+            .find(|activity| activity.id == "call-1")
+            .expect("the tool call is published");
+        assert_eq!(tool.label, "xAI tool");
         assert!(!activities
             .iter()
             .any(|activity| activity.label.contains("Kimi")));
@@ -3889,9 +3902,15 @@ done
             |_, _| Ok(()),
         )
         .unwrap();
-        assert_eq!(activities[0].kind, "read");
-        assert_eq!(activities[0].label, "Read README.md");
-        assert_eq!(activities[0].detail.as_deref(), Some("README.md"));
+        // The live context-usage row published while traffic is estimated is not the tool call;
+        // assert on the activity that actually carries the tool kind.
+        let tool = activities
+            .iter()
+            .find(|activity| activity.kind != "context-usage")
+            .expect("the tool call is published");
+        assert_eq!(tool.kind, "read");
+        assert_eq!(tool.label, "Read README.md");
+        assert_eq!(tool.detail.as_deref(), Some("README.md"));
     }
 
     #[test]

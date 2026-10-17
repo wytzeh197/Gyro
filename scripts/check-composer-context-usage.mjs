@@ -31,8 +31,10 @@ import {
 import {
   composerContextUsageForModel,
   composerLimitWindows,
+  contextOccupancyEpoch,
   estimateComposerContextUsage,
   formatLimitReset,
+  holdContextOccupancyPeak,
   providerResetSummary,
 } from "../packages/ui/src/context-usage.ts";
 
@@ -989,3 +991,112 @@ assert.ok(
     .usedTokens >= 1_000,
 );
 console.log("Live context stream checks passed.");
+
+// A resend abandons the attempt that was running, so the newest reading is
+// smaller than the one before it even though the chat itself is unchanged.
+// The meter holds the peak so the bar never reads as history going missing,
+// which is the same rule for every provider and model because it only
+// compares reported numbers.
+const peakModel = {
+  providerId: "deepseek",
+  modelId: "deepseek-v4.1",
+  modelLabel: "DeepSeek V4.1",
+  contextWindowTokens: 1_048_576,
+};
+const chatStart = [event("1", "user-message", "why did the meter drop?")];
+const epoch = contextOccupancyEpoch(chatStart);
+const longAttempt = estimateComposerContextUsage(
+  chatStart,
+  "x".repeat(400_000),
+  peakModel,
+);
+const afterResend = estimateComposerContextUsage(
+  chatStart,
+  "x".repeat(8_000),
+  peakModel,
+);
+assert.ok(
+  afterResend.usedTokens < longAttempt.usedTokens,
+  "a resend re-bases the raw reading on the smaller prompt",
+);
+const firstReading = holdContextOccupancyPeak(undefined, longAttempt, epoch);
+assert.equal(firstReading.usage.usedTokens, longAttempt.usedTokens);
+const heldReading = holdContextOccupancyPeak(
+  firstReading.peak,
+  afterResend,
+  epoch,
+);
+assert.equal(
+  heldReading.usage.usedTokens,
+  longAttempt.usedTokens,
+  "the meter keeps the peak a resend abandoned",
+);
+assert.equal(heldReading.usage.percent, longAttempt.percent);
+assert.match(heldReading.usage.detail, /highest occupancy this chat has reached/);
+// The same epoch across a fresh attempt: a second resend cannot walk it back.
+assert.equal(
+  holdContextOccupancyPeak(
+    holdContextOccupancyPeak(heldReading.peak, afterResend, epoch).peak,
+    afterResend,
+    epoch,
+  ).usage.usedTokens,
+  longAttempt.usedTokens,
+);
+
+// A compaction really does release the thread, so the peak starts over.
+const compacted = event("9", "system-event", "Compacted context", {
+  kind: "provider-activity",
+  activityKind: "context",
+  activityId: "context-compaction-1",
+  status: "done",
+});
+const releasedEpoch = contextOccupancyEpoch([...chatStart, compacted]);
+assert.notEqual(releasedEpoch, epoch);
+assert.equal(
+  holdContextOccupancyPeak(heldReading.peak, afterResend, releasedEpoch).usage
+    .usedTokens,
+  afterResend.usedTokens,
+);
+
+// Every other activity row leaves the epoch alone, for every provider.
+const toolRow = event("8", "system-event", "Read chat-run.ts", {
+  kind: "provider-activity",
+  activityKind: "tools",
+  activityId: "tool-1",
+  status: "done",
+});
+assert.equal(contextOccupancyEpoch([...chatStart, toolRow]), epoch);
+assert.equal(
+  contextOccupancyEpoch([
+    ...chatStart.map((item) => ({ ...item, sessionId: "session-2" })),
+  ]) === epoch,
+  false,
+  "another chat never inherits this peak",
+);
+
+// A peak that does not fit the selected window must not claim it is full.
+const smallWindow = {
+  ...peakModel,
+  modelId: "small",
+  modelLabel: "Small",
+  contextWindowTokens: 64_000,
+};
+const smallReading = estimateComposerContextUsage(
+  chatStart,
+  "x".repeat(8_000),
+  smallWindow,
+);
+const narrowed = holdContextOccupancyPeak(
+  heldReading.peak,
+  smallReading,
+  epoch,
+);
+assert.equal(narrowed.usage.usedTokens, smallReading.usedTokens);
+assert.ok(narrowed.usage.percent < 100);
+
+// Selecting the large model again restores the peak the chat reached.
+assert.equal(
+  holdContextOccupancyPeak(narrowed.peak, afterResend, epoch).usage.usedTokens,
+  longAttempt.usedTokens,
+);
+console.log("Context peak checks passed.");

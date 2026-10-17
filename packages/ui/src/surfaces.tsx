@@ -4,6 +4,7 @@ import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import { CodeModeActivityCard } from "./code-mode-card";
 import { groupWorkflowEvents, workflowDetails } from "./code-mode";
 import { createTranscriptTurnCache } from "./chat-history-efficiency";
+import { capabilityLabel } from "./capability-ui.ts";
 import { EfficiencySettings } from "./efficiency-settings";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
 import {
@@ -309,10 +310,13 @@ import {
 } from "./chat-timeline";
 import {
   composerLimitWindows,
+  contextOccupancyEpoch,
   estimateComposerContextUsage,
+  holdContextOccupancyPeak,
   isManualCompaction,
   type ComposerContextUsage,
   type ComposerLimitWindow,
+  type ContextOccupancyPeak,
 } from "./context-usage";
 import { remainingUsage } from "./usage-remaining";
 import {
@@ -9109,18 +9113,33 @@ export function ChatSurface({
     sessionModel?.modelLabel,
     sessionModel?.providerId,
   ]);
-  const contextUsage = useMemo(
-    () =>
-      // The meter follows the text in the composer, including a goal being
-      // edited, so the ring moves as you type instead of staying on a draft
-      // the field is no longer showing.
-      estimateComposerContextUsage(
-        transcriptEvents,
-        composerDraft,
-        contextModel,
-      ),
-    [composerDraft, contextModel, transcriptEvents],
+  const contextEpoch = useMemo(
+    () => contextOccupancyEpoch(transcriptEvents),
+    [transcriptEvents],
   );
+  // The highest occupancy this chat has shown since its last release. A resend
+  // or a stop abandons the attempt that was running, and the reading that
+  // follows is much smaller; holding the peak stops the bar from reading as
+  // history that went missing. A compaction or a new chat changes the epoch
+  // and starts it over, and no provider or model needs its own rule.
+  const contextPeak = useRef<ContextOccupancyPeak | undefined>(undefined);
+  const contextUsage = useMemo(() => {
+    // The meter follows the text in the composer, including a goal being
+    // edited, so the ring moves as you type instead of staying on a draft
+    // the field is no longer showing.
+    const measured = estimateComposerContextUsage(
+      transcriptEvents,
+      composerDraft,
+      contextModel,
+    );
+    const held = holdContextOccupancyPeak(
+      contextPeak.current,
+      measured,
+      contextEpoch,
+    );
+    contextPeak.current = held.peak;
+    return held.usage;
+  }, [composerDraft, contextEpoch, contextModel, transcriptEvents]);
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
@@ -12653,7 +12672,7 @@ function capabilityActivitySummary(activities: CapabilityActivity[]) {
 }
 
 function capabilityActivityLabel(capabilityId: string) {
-  return capabilityId.replaceAll("-", " ");
+  return capabilityLabel(capabilityId);
 }
 
 function chatToolBrowserStatusLabel(browserPreview?: BrowserPreview) {
@@ -28514,12 +28533,20 @@ function formatMessageTime(value: string) {
   });
 }
 
+type AssistantResponseTableAlign = "left" | "center" | "right" | null;
+
 type AssistantResponseBlock =
   | { kind: "code"; content: string }
   | { kind: "commands"; items: string[] }
   | { kind: "heading"; content: string }
   | { kind: "list"; items: string[] }
   | { kind: "ordered-list"; items: string[]; start: number }
+  | {
+      align: AssistantResponseTableAlign[];
+      header: string[];
+      kind: "table";
+      rows: string[][];
+    }
   | { kind: "paragraph"; content: string };
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
@@ -28983,6 +29010,44 @@ function AssistantResponseBlockView({
     if (nodes.length === 0) return null;
     return <div className="gyro-response-command-list">{nodes}</div>;
   }
+  if (block.kind === "table") {
+    return (
+      <div className="gyro-response-table-wrap">
+        <table className="gyro-response-table">
+          <thead>
+            <tr>
+              {block.header.map((cell, index) => (
+                <th
+                  key={`head-${index}`}
+                  scope="col"
+                  style={{ textAlign: block.align[index] ?? undefined }}
+                >
+                  {renderAssistantInlineContent(cell, onOpenBrowserUrl)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {block.header.map((_, cellIndex) => (
+                  <td
+                    key={`cell-${rowIndex}-${cellIndex}`}
+                    style={{ textAlign: block.align[cellIndex] ?? undefined }}
+                  >
+                    {renderAssistantInlineContent(
+                      row[cellIndex] ?? "",
+                      onOpenBrowserUrl,
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   if (block.kind === "code") {
     return (
       <pre className="gyro-response-code-block">
@@ -28991,6 +29056,123 @@ function AssistantResponseBlockView({
     );
   }
   return <p>{renderAssistantInlineContent(block.content, onOpenBrowserUrl)}</p>;
+}
+
+const ASSISTANT_TABLE_DELIMITER_CELL = /^:?-+:?$/;
+
+type AssistantResponseTableBlock = Extract<
+  AssistantResponseBlock,
+  { kind: "table" }
+>;
+
+function assistantTableCells(line: string): string[] {
+  const trimmed = line.trim();
+  const inner = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+  const body =
+    inner.endsWith("|") && !inner.endsWith("\\|") ? inner.slice(0, -1) : inner;
+  const cells: string[] = [];
+  let cell = "";
+  let inCodeSpan = false;
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (character === "\\" && body[index + 1] === "|") {
+      cell += "|";
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      inCodeSpan = !inCodeSpan;
+      cell += character;
+      continue;
+    }
+    if (character === "|" && !inCodeSpan) {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function assistantTableAlignments(
+  line: string,
+): AssistantResponseTableAlign[] {
+  return assistantTableCells(line).map((cell) => {
+    if (!ASSISTANT_TABLE_DELIMITER_CELL.test(cell)) {
+      return null;
+    }
+    const leading = cell.startsWith(":");
+    const trailing = cell.endsWith(":");
+    if (leading && trailing) {
+      return "center" as const;
+    }
+    if (trailing) {
+      return "right" as const;
+    }
+    if (leading) {
+      return "left" as const;
+    }
+    return null;
+  });
+}
+
+function isAssistantTableDelimiterRow(line: string | undefined): boolean {
+  if (!line || !line.includes("-") || !line.includes("|")) {
+    return false;
+  }
+  const cells = assistantTableCells(line);
+  return (
+    cells.length > 0 &&
+    cells.every((cell) => ASSISTANT_TABLE_DELIMITER_CELL.test(cell))
+  );
+}
+
+function parseAssistantTable(
+  lines: string[],
+  startIndex: number,
+): { block: AssistantResponseTableBlock; nextIndex: number } | null {
+  const headerLine = lines[startIndex]?.trim() ?? "";
+  if (!headerLine.startsWith("|")) {
+    return null;
+  }
+  const delimiterLine = lines[startIndex + 1]?.trim() ?? "";
+  if (!isAssistantTableDelimiterRow(delimiterLine)) {
+    return null;
+  }
+  const header = assistantTableCells(headerLine);
+  const alignments = assistantTableAlignments(delimiterLine);
+  const columnCount = Math.max(header.length, alignments.length);
+  if (columnCount === 0) {
+    return null;
+  }
+  const padCells = (values: string[]) =>
+    Array.from({ length: columnCount }, (_, index) => values[index] ?? "");
+  const padAlign = (values: AssistantResponseTableAlign[]) =>
+    Array.from(
+      { length: columnCount },
+      (_, index) => values[index] ?? null,
+    );
+  const rows: string[][] = [];
+  let nextIndex = startIndex + 2;
+  while (nextIndex < lines.length) {
+    const candidate = lines[nextIndex] ?? "";
+    if (!candidate.trim().startsWith("|")) {
+      break;
+    }
+    rows.push(padCells(assistantTableCells(candidate)));
+    nextIndex += 1;
+  }
+  return {
+    block: {
+      align: padAlign(alignments),
+      header: padCells(header),
+      kind: "table",
+      rows,
+    },
+    nextIndex,
+  };
 }
 
 function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
@@ -29053,7 +29235,9 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     flushCommands();
   };
 
-  for (const line of message.replace(/\r\n/g, "\n").split("\n")) {
+  const contentLines = message.replace(/\r\n/g, "\n").split("\n");
+  for (let lineIndex = 0; lineIndex < contentLines.length; lineIndex += 1) {
+    const line = contentLines[lineIndex] ?? "";
     const trimmed = line.trim();
     if (trimmed.startsWith("```")) {
       if (isInCodeBlock) {
@@ -29074,6 +29258,13 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
       continue;
     }
 
+    const table = parseAssistantTable(contentLines, lineIndex);
+    if (table) {
+      flushOpenBlocks();
+      blocks.push(table.block);
+      lineIndex = table.nextIndex - 1;
+      continue;
+    }
     const heading = trimmed.match(/^#{1,3}\s+(.+)$/);
     if (heading) {
       flushOpenBlocks();

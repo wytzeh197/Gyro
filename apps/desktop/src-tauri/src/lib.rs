@@ -22261,12 +22261,20 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => serde_json::json!({
-            "path": { "type": "string" },
+            "path": {
+                "type": "string",
+                "description": "Workspace-relative file path, or a spill:// address quoted by a prior preview."
+            },
             "knownContentHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Omit unchanged text when rechecking evidence already read at this hash. Omit this argument to read new content or a new range." },
             "line": { "type": "integer", "minimum": 1 },
             "endLine": { "type": "integer", "minimum": 1 },
             "column": { "type": "integer", "minimum": 1 },
             "endColumn": { "type": "integer", "minimum": 1 },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Byte offset into a spill:// address. Ignored for file paths; the reply names the next offset."
+            },
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceReadEditor => serde_json::json!({

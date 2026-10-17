@@ -719,7 +719,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits.",
+        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits. A spill:// path names a retired copy quoted by a preview: pass its offset and read one window instead of the whole copy.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadRange,

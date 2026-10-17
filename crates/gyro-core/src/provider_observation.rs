@@ -118,10 +118,23 @@ pub fn prepared_context(attribution: crate::efficiency::context::Attribution) {
         }
     });
 }
+/// Bytes a request saved by retiring stale tool evidence; recorded on the active summary so the
+/// saving reaches the same record as the prompt categories instead of being computed and dropped.
+pub fn retired_context(bytes: usize) {
+    if bytes == 0 {
+        return;
+    }
+    ACTIVE.with(|slot| {
+        if let Some(summary) = slot.borrow_mut().as_mut() {
+            summary.prepared_context.retired_bytes += bytes as u64;
+        }
+    });
+}
 fn categorize_prompt(
     mut attribution: crate::efficiency::context::Attribution,
     prepared: &crate::efficiency::context::Attribution,
 ) -> crate::efficiency::context::Attribution {
+    attribution.retired_bytes = prepared.retired_bytes;
     let available = attribution.other_text;
     let classified = prepared.instructions
         + prepared.history

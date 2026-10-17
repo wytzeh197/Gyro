@@ -9,9 +9,18 @@ pub(super) fn execute(
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     let arguments = &request.arguments;
     let max_bytes = workspace_result_byte_limit(arguments)?;
-    let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
-        arguments, "path",
-    )?)?;
+    let requested_path = capability_argument_string(arguments, "path")?;
+    // A spill address names bytes this process already retired and read, so it never resolves
+    // against the workspace: no path normalization, no IDE buffer lookup, no file to authorize.
+    if gyro_core::efficiency::spill::is_address(requested_path) {
+        return read_spill(
+            &request.context.session_id,
+            arguments,
+            requested_path,
+            max_bytes,
+        );
+    }
+    let path = gyro_core::normalize_capability_relative_path(requested_path)?;
     let workspace = bound.workspace.display().to_string();
     let editor_read = request.capability_id == CapabilityId::WorkspaceReadEditor;
     let ranged = editor_read
@@ -116,6 +125,133 @@ pub(super) fn execute(
         label: path,
     };
     Ok((summary, data, Some(resource)))
+}
+
+/// A tool window is bounded tighter than the tool budget itself: the address exists because the
+/// value was too expensive to carry, so a single read must not reintroduce it wholesale.
+const SPILL_TOOL_WINDOW: usize = 64 * 1024;
+
+/// Headroom kept free for the address, the window numbers and the JSON keys, so the content
+/// returned never has to be trimmed after the offsets were computed from it.
+const SPILL_RESULT_OVERHEAD: usize = 512;
+
+/// Read one window of a retired copy.
+///
+/// The copy was disclosed by whatever read produced it, so there is no file to authorize here —
+/// but there is also no guarantee it still exists: the sweep drops old copies, and a machine
+/// without a data directory never wrote one. Absence is reported as such rather than as a
+/// workspace miss, so a caller does not go hunting for a path that was never a path.
+fn read_spill(
+    session_id: &str,
+    arguments: &Value,
+    address: &str,
+    max_bytes: usize,
+) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
+    let offset = arguments
+        .get("offset")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let limit = max_bytes
+        .saturating_sub(SPILL_RESULT_OVERHEAD)
+        .clamp(1, SPILL_TOOL_WINDOW);
+    let Some(window) = gyro_core::efficiency::spill::read_window(address, offset, limit)? else {
+        anyhow::bail!(
+            "{address} is not a copy this session can read: it was swept, or never written"
+        );
+    };
+    let (summary, data) = spill_payload(&window);
+    let resource = CapabilityResourceRef {
+        id: format!("spill:{session_id}:{address}"),
+        kind: "spill".into(),
+        label: window.address.clone(),
+    };
+    Ok((summary, data, Some(resource)))
+}
+
+/// The window as the tool reports it. The numbers are the ones the CLI prints, so a reader can
+/// copy the next offset from either surface without doing arithmetic.
+fn spill_payload(window: &gyro_core::efficiency::spill::SpillRead) -> (String, Value) {
+    let end = window.offset + window.text.len();
+    let next = window.next_offset();
+    let summary = match next {
+        Some(next) => format!(
+            "Read {} bytes {end} of {} · next offset={next}",
+            window.address, window.total_bytes
+        ),
+        None => format!(
+            "Read {} bytes {end} of {} (complete)",
+            window.address, window.total_bytes
+        ),
+    };
+    let data = json!({
+        "address": window.address,
+        "offset": window.offset,
+        "bytes": window.text.len(),
+        "totalBytes": window.total_bytes,
+        "truncated": window.truncated(),
+        "nextOffset": next,
+        "content": window.text,
+        "source": "spill",
+    });
+    (summary, data)
+}
+
+#[cfg(test)]
+mod spill_read_tests {
+    use super::*;
+    use gyro_core::efficiency::spill::SpillRead;
+
+    fn window(offset: usize, text: &str, total_bytes: usize) -> SpillRead {
+        SpillRead {
+            address: "spill://cap/tool/deadbeef00000000".to_owned(),
+            text: text.to_owned(),
+            offset,
+            total_bytes,
+        }
+    }
+
+    #[test]
+    fn spill_addresses_route_and_paths_do_not() {
+        assert!(gyro_core::efficiency::spill::is_address(
+            "spill://cap/tool/deadbeef00000000"
+        ));
+        assert!(!gyro_core::efficiency::spill::is_address("src/lib.rs"));
+        assert!(!gyro_core::efficiency::spill::is_address("./spill/x"));
+    }
+
+    #[test]
+    fn a_partial_window_names_the_next_offset() {
+        let (summary, data) = spill_payload(&window(0, &"a".repeat(40), 100));
+        assert!(summary.contains("bytes 40 of 100"), "{summary}");
+        assert!(summary.contains("next offset=40"), "{summary}");
+        assert_eq!(data["nextOffset"], json!(40));
+        assert_eq!(data["truncated"], json!(true));
+        assert_eq!(data["bytes"], json!(40));
+        assert_eq!(data["source"], json!("spill"));
+        assert_eq!(data["offset"], json!(0));
+    }
+
+    #[test]
+    fn the_last_window_says_so_instead_of_naming_a_next_one() {
+        let (summary, data) = spill_payload(&window(90, "0123456789", 100));
+        assert!(summary.contains("bytes 100 of 100"), "{summary}");
+        assert!(summary.contains("complete"), "{summary}");
+        assert_eq!(data["nextOffset"], Value::Null);
+        assert_eq!(data["truncated"], json!(false));
+    }
+
+    #[test]
+    fn an_address_with_no_copy_reports_absence_not_a_workspace_miss() {
+        let error = read_spill(
+            "session",
+            &json!({ "path": "spill://cap/tool/0000000000000000" }),
+            "spill://cap/tool/0000000000000000",
+            8192,
+        )
+        .err()
+        .expect("no copy was ever written at this address");
+        assert!(error.to_string().contains("never written"), "{error}");
+    }
 }
 
 /// Conditional reads still inspect disk. The caller explicitly asks to reuse

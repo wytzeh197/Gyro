@@ -19,6 +19,11 @@ import {
   measuredFileCounts,
 } from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
+import {
+  capabilityLabel,
+  capabilityUi,
+  type BrowserAction,
+} from "./capability-ui.ts";
 
 /**
  * The run model: one flat, ordered list of beats, with the raw material of each
@@ -104,24 +109,8 @@ export type WorkItem =
       historicalCallId?: string;
     };
 
-/** One Gyro Browser verb, so each row says what the agent did to the page. */
-export type BrowserAction =
-  | "open"
-  | "navigate"
-  | "back"
-  | "forward"
-  | "reload"
-  | "inspect"
-  | "read"
-  | "find"
-  | "console"
-  | "network"
-  | "capture"
-  | "mouse"
-  | "click"
-  | "type"
-  | "scroll"
-  | "form";
+// The verb vocabulary lives with the capability table that names each one.
+export type { BrowserAction };
 
 /** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
@@ -1359,6 +1348,9 @@ function workItemFromCapabilityCall(
   const summary = text(payload, "summary");
   const resource = record(payload?.resource);
   const resourceLabel = text(resource, "label");
+  const ui = capabilityUi(capabilityId);
+  const label = ui?.label ?? capabilityLabel(capabilityId);
+  const path = resourceLabel ?? summary;
   if (
     capabilityId === "code-mode-execute" ||
     capabilityId === "code-mode-discover"
@@ -1368,11 +1360,7 @@ function workItemFromCapabilityCall(
       kind: "tool",
       id,
       status,
-      tool:
-        text(workflow, "label") ??
-        (capabilityId === "code-mode-discover"
-          ? "Finding available workspace actions"
-          : "Inspecting workspace"),
+      tool: text(workflow, "label") ?? label,
       note: summary,
     };
   }
@@ -1394,96 +1382,65 @@ function workItemFromCapabilityCall(
     };
   }
 
-  // Terminal-shaped work → command row (matches "Ran command").
-  if (
-    capabilityId.startsWith("terminal-") ||
-    capabilityId === "workspace-run-task" ||
-    capabilityId === "workspace-run-test"
-  ) {
-    return classifyCommandActivity({
-      command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
-      id,
-      intent: summary,
-      status,
-    });
+  switch (ui?.row) {
+    // Terminal-shaped work → command row (matches "Ran command").
+    case "command":
+      return classifyCommandActivity({
+        command: summary ?? resourceLabel ?? label,
+        id,
+        intent: summary,
+        status,
+      });
+
+    // Project search → search row.
+    case "search":
+      return {
+        kind: "search",
+        id,
+        status,
+        scope: ui?.scope ?? "project",
+        query: summary ?? resourceLabel,
+      };
+
+    // Reading a workspace file is the same beat as a provider read, so it gets
+    // the same row rather than a generic wrench.
+    case "read":
+      return {
+        kind: "read",
+        id,
+        status,
+        path,
+        media: isImagePath(path) ? "image" : "file",
+      };
+
+    // Gyro's own edit and lifecycle tools change a file just like a provider
+    // edit does. The path only arrives on the completed call, and a failed call
+    // changed nothing, so it falls through to a plain beat.
+    case "file":
+      if (resourceLabel && status !== "failed") {
+        return { kind: "file", id, status, path: resourceLabel };
+      }
+      break;
+
+    case "browser": {
+      const action = ui?.action;
+      if (action) {
+        return {
+          kind: "browser",
+          id,
+          status,
+          action,
+          target:
+            text(payload, "target") ??
+            (resourceLabel ? browserPageLabel(resourceLabel) : undefined),
+        };
+      }
+      break;
+    }
   }
 
-  // Project search → search row.
-  if (capabilityId === "workspace-search") {
-    return {
-      kind: "search",
-      id,
-      status,
-      scope: "project",
-      query: summary ?? resourceLabel,
-    };
-  }
-
-  // Reading a workspace file is the same beat as a provider read, so it gets
-  // the same row rather than a generic wrench.
-  if (
-    capabilityId === "workspace-read" ||
-    capabilityId === "workspace-read-range"
-  ) {
-    const path = resourceLabel ?? summary;
-    return {
-      kind: "read",
-      id,
-      status,
-      path,
-      media: isImagePath(path) ? "image" : "file",
-    };
-  }
-  if (capabilityId === "workspace-list") {
-    return {
-      kind: "tool",
-      id,
-      status,
-      tool: humanizeCapabilityId(capabilityId),
-    };
-  }
-
-  // Gyro's own edit and lifecycle tools change a file just like a provider edit
-  // does. The path only arrives on the completed call; a failed call changed
-  // nothing.
-  if (
-    (capabilityId === "workspace-propose-edit" ||
-      capabilityId === "workspace-edit" ||
-      capabilityId === "workspace-create" ||
-      capabilityId === "workspace-rename" ||
-      capabilityId === "workspace-delete") &&
-    resourceLabel &&
-    status !== "failed"
-  ) {
-    return { kind: "file", id, status, path: resourceLabel };
-  }
-
-  // Semantic navigation is a read beat: the answer is source locations.
-  if (capabilityId.startsWith("code-")) {
-    const path = resourceLabel ?? summary;
-    return { kind: "read", id, status, path, media: "file" };
-  }
-
-  if (capabilityId.startsWith("browser-")) {
-    return {
-      kind: "browser",
-      id,
-      status,
-      action: browserActionFromName(capabilityId.slice("browser-".length)),
-      target:
-        text(payload, "target") ??
-        (resourceLabel ? browserPageLabel(resourceLabel) : undefined),
-    };
-  }
-
-  // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
-  // is a single tool beat with a human label.
-  return {
-    kind: "tool",
-    id,
-    status,
-    tool: humanizeCapabilityId(capabilityId),
-  };
+  // Everything else is a single tool beat with the table's own title.
+  return { kind: "tool", id, status, tool: label };
 }
 
 function capabilityWorkStatus(value: string | undefined): WorkStatus {
@@ -1494,70 +1451,6 @@ function capabilityWorkStatus(value: string | undefined): WorkStatus {
     return "failed";
   }
   return "done";
-}
-
-/** `workspace-context` → `Workspace context` */
-function humanizeCapabilityId(capabilityId: string): string {
-  const known: Record<string, string> = {
-    "workspace-context": "Workspace context",
-    "workspace-check": "Workspace check",
-    "workspace-list": "List workspace",
-    "workspace-search": "Workspace search",
-    "workspace-read": "Read file",
-    "workspace-read-range": "Read file range",
-    "workspace-diagnostics": "Workspace diagnostics",
-    "workspace-git-status": "Git status",
-    "workspace-diff": "Workspace diff",
-    "workspace-git-log": "Git log",
-    "workspace-git-show": "Git show",
-    "workspace-git-blame": "Git blame",
-    "workspace-propose-edit": "Propose edit",
-    "workspace-edit": "Edit file",
-    "workspace-create": "Create path",
-    "workspace-rename": "Rename path",
-    "workspace-delete": "Delete path",
-    "workspace-run-task": "Run task",
-    "workspace-run-test": "Run tests",
-    "workspace-read-output": "Read output",
-    "web-fetch": "Fetch page",
-    "memory-read": "Read memory",
-    "memory-write": "Remember",
-    "research-run": "Research sub-agent",
-    "agent-spawn": "Launch sub-agent",
-    "agent-wait": "Wait for sub-agents",
-    "agent-send": "Send agent task",
-    "agent-stop": "Stop sub-agent",
-    "code-definition": "Go to definition",
-    "code-references": "Find references",
-    "code-hover": "Hover info",
-    "code-symbols": "File symbols",
-    "ide-reveal": "Reveal in editor",
-    "ide-open-panel": "Open panel",
-    "terminal-open": "Open terminal",
-    "terminal-read": "Read terminal",
-    "terminal-wait": "Wait for command",
-    "terminal-stop": "Stop terminal",
-    "browser-open": "Open browser",
-    "browser-inspect": "Inspect browser",
-    "browser-reload": "Reload browser",
-    "browser-screenshot": "Browser screenshot",
-    "browser-navigate": "Navigate browser",
-    "browser-back": "Browser back",
-    "browser-forward": "Browser forward",
-    "browser-click": "Browser click",
-    "browser-type": "Browser type",
-    "browser-scroll": "Browser scroll",
-    "browser-form-input": "Browser form input",
-    "browser-read-page": "Read page",
-    "browser-find": "Find on page",
-    "browser-console": "Browser console",
-    "browser-network": "Browser network",
-  };
-  if (known[capabilityId]) {
-    return known[capabilityId] as string;
-  }
-  const human = capabilityId.split("-").filter(Boolean).join(" ");
-  return human ? human.charAt(0).toUpperCase() + human.slice(1) : capabilityId;
 }
 
 /**
@@ -1948,6 +1841,9 @@ const BROWSER_ACTIONS: Record<string, BrowserAction> = {
   console: "console",
   network: "network",
   screenshot: "capture",
+  viewport: "viewport",
+  "set-viewport": "viewport",
+  set_viewport: "viewport",
   mouse: "mouse",
   click: "click",
   type: "type",
@@ -1968,6 +1864,7 @@ const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
   console: ["Reading console", "Read console"],
   network: ["Reading network", "Read network"],
   capture: ["Capturing page", "Captured page"],
+  viewport: ["Resizing viewport", "Resized viewport"],
   mouse: ["Using browser mouse", "Used browser mouse"],
   click: ["Clicking", "Clicked"],
   type: ["Typing", "Typed"],
@@ -1984,7 +1881,12 @@ export function browserCapabilityText(
   status: string,
   target?: string,
 ): { label: string; description?: string } {
-  const action = browserActionFromName(capabilityId.replace(/^browser-/, ""));
+  const action = capabilityUi(capabilityId)?.action;
+  if (!action) {
+    // Not a browser verb: name the capability instead of reporting an
+    // inspection that never happened.
+    return { label: capabilityLabel(capabilityId), description: target };
+  }
   const [running, done] = BROWSER_ROW_LABELS[action];
   return {
     label: status === "completed" ? done : running,

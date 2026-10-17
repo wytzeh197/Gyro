@@ -16402,6 +16402,55 @@ textarea,
   font: inherit;
 }
 
+.gyro-response-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.gyro-response-table {
+  border-collapse: collapse;
+  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+  max-width: 100%;
+}
+
+.gyro-response-table th,
+.gyro-response-table td {
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.09);
+  padding: 7px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.gyro-response-table th {
+  border-bottom-color: rgba(255, 255, 255, 0.17);
+  color: #f0ece5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.gyro-response-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.gyro-response-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.022);
+}
+
+:root[data-theme="light"] .gyro-response-table th,
+:root[data-theme="light"] .gyro-response-table td {
+  border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme="light"] .gyro-response-table th {
+  border-bottom-color: rgba(0, 0, 0, 0.19);
+  color: #24262b;
+}
+
+:root[data-theme="light"] .gyro-response-table tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.022);
+}
+
 .gyro-response-actions {
   align-items: center;
   display: flex;
@@ -33700,7 +33749,7 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run-change-summary.is-complete {
   background: transparent;
-  border: 0;
+  border: 1px solid var(--gyro-premium-hairline-strong);
   box-shadow: none;
 }
 

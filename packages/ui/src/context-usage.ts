@@ -551,6 +551,79 @@ export function providerResetSummary(
     .join(" · ");
 }
 
+/**
+ * The chat, plus the releases that have reset its thread.
+ *
+ * A reading only describes the thread it measured, so a compaction has to
+ * invalidate every reading from before it. The newest completed compaction is
+ * enough to identify that boundary: nothing else releases context inside one
+ * session, and a new chat arrives with a different session id.
+ */
+export function contextOccupancyEpoch(events: SessionEvent[]): string {
+  let release = "";
+  for (const event of events) {
+    const payload = eventPayload(event);
+    if (payload?.kind !== "provider-activity") continue;
+    if (payload.activityKind !== "context") continue;
+    const activityId: unknown = payload.activityId;
+    if (typeof activityId !== "string") continue;
+    if (!activityId.startsWith("context-compaction-")) continue;
+    release = activityId;
+  }
+  return `${events[0]?.sessionId ?? ""}#${release}`;
+}
+
+/** The highest occupancy one epoch of one chat has shown. */
+export type ContextOccupancyPeak = { epoch: string; usedTokens: number };
+
+/**
+ * The composer meter shows the highest occupancy this chat has reached since
+ * its last release, not the newest single reading.
+ *
+ * A reading measures one request. Resending, stopping, or retrying abandons
+ * the attempt that was running, so the next reading describes a much smaller
+ * prompt while the conversation itself is untouched — and a context bar that
+ * falls reads as history going missing. Holding the peak answers the question
+ * the meter is asked ("how close is this chat to the window?") and never
+ * reports a drop that no release explains. A compaction or a new chat changes
+ * the epoch, which starts the peak over.
+ *
+ * The rule compares reported numbers and never inspects a provider, so a
+ * hosted API, a local model, and a CLI harness all behave the same way.
+ */
+export function holdContextOccupancyPeak(
+  peak: ContextOccupancyPeak | undefined,
+  usage: ComposerContextUsage,
+  epoch: string,
+): { peak: ContextOccupancyPeak; usage: ComposerContextUsage } {
+  const held = peak?.epoch === epoch ? peak.usedTokens : 0;
+  const highest = Math.max(held, usage.usedTokens);
+  const nextPeak = { epoch, usedTokens: highest };
+  // A peak that does not fit the selected window belongs to a model this chat
+  // has moved away from. Pinning the bar at 100% there would claim a window is
+  // full when the thread is not, so the live reading wins until a model large
+  // enough to hold the peak is selected again.
+  if (
+    highest === usage.usedTokens ||
+    (usage.contextWindowTokens > 0 && highest > usage.contextWindowTokens)
+  ) {
+    return { peak: nextPeak, usage };
+  }
+  return {
+    peak: nextPeak,
+    usage: finishComposerContextUsage({
+      providerId: usage.providerId,
+      modelId: usage.modelId,
+      reportedContextWindowTokens: usage.reportedContextWindowTokens,
+      contextWindowTokens: usage.contextWindowTokens,
+      detail: `${usage.detail} This is the highest occupancy this chat has reached since its last compaction; the newest request is smaller because it no longer carries the attempt that was abandoned.`,
+      modelLabel: usage.modelLabel,
+      source: usage.source,
+      usedTokens: highest,
+    }),
+  };
+}
+
 function limitSeverity(percent: number | undefined, status: string) {
   if (status === "exhausted" || (percent !== undefined && percent >= 95)) {
     return "critical" as const;

@@ -90,12 +90,18 @@ export type ChatGridState = {
   maximizedPaneId?: string;
 };
 
+/**
+ * Mirrors `CapabilityId` in `crates/gyro-core/src/capabilities.rs`, whose
+ * variants serialise to these kebab-case wire ids. The Rust enum decides which
+ * capabilities exist; `CAPABILITY_UI` must name every one of them, and
+ * `scripts/check-capability-labels.mjs` fails the build if the lists disagree.
+ */
 export type CapabilityId =
   | "code-mode-discover"
   | "code-mode-execute"
+  | "workspace-context"
   | "workspace-outline"
   | "task-checkpoint"
-  | "workspace-context"
   | "workspace-check"
   | "workspace-list"
   | "workspace-search"
@@ -110,20 +116,12 @@ export type CapabilityId =
   | "workspace-git-blame"
   | "workspace-propose-edit"
   | "workspace-edit"
-  | "workspace-create"
-  | "workspace-rename"
-  | "workspace-delete"
+  | "workspace-create-path"
+  | "workspace-rename-path"
+  | "workspace-delete-path"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
-  | "web-fetch"
-  | "memory-read"
-  | "memory-write"
-  | "research-run"
-  | "agent-spawn"
-  | "agent-wait"
-  | "agent-send"
-  | "agent-stop"
   | "code-definition"
   | "code-references"
   | "code-hover"
@@ -138,18 +136,34 @@ export type CapabilityId =
   | "browser-inspect"
   | "browser-reload"
   | "browser-screenshot"
+  | "browser-viewport"
   | "browser-navigate"
   | "browser-back"
   | "browser-forward"
-  | "browser-mouse"
   | "browser-click"
+  | "browser-mouse"
   | "browser-type"
   | "browser-scroll"
   | "browser-form-input"
   | "browser-read-page"
   | "browser-find"
   | "browser-console"
-  | "browser-network";
+  | "browser-network"
+  | "github-status"
+  | "github-pull-requests"
+  | "github-workflow-runs"
+  | "github-workflow-logs"
+  | "github-create-pull-request"
+  | "github-rerun-workflow"
+  | "github-push"
+  | "web-fetch"
+  | "memory-read"
+  | "memory-write"
+  | "research-run"
+  | "agent-spawn"
+  | "agent-wait"
+  | "agent-send"
+  | "agent-stop";
 
 export type CapabilityClass =
   | "workspace-inspect"

@@ -12,6 +12,9 @@ pub struct Attribution {
     pub other_text: u64,
     pub estimated_tokens: u64,
     pub hidden_content: bool,
+    /// Bytes withheld from this request by context retirement, so the saving is measurable.
+    #[serde(default)]
+    pub retired_bytes: u64,
 }
 impl Attribution {
     pub fn from_request(payload: &Value) -> Self {
@@ -388,6 +391,32 @@ fn slim_data(data: &Value, note: &str) -> Value {
                 }
             }
         }
+        // Spill instead of retire: keep a head/tail preview plus an addressable full copy, so a
+        // retired payload never costs a second full read to recover.
+        let capability = object
+            .get("capabilityId")
+            .and_then(Value::as_str)
+            .unwrap_or("tool");
+        for key in ["content", "stdout", "stderr", "output", "text"] {
+            let Some(text) = object.get(key).and_then(Value::as_str) else {
+                continue;
+            };
+            let preview = super::spill::preview(capability, key, text);
+            if !preview.spilled() {
+                continue;
+            }
+            let elided = preview.elided_bytes();
+            // The address in the preview is a promise until the copy is actually on disk, so this
+            // runs before the address is handed to the model as a place to re-read from.
+            super::spill::persist(&preview.address, text);
+            kept.insert(key.to_owned(), Value::String(preview.text));
+            kept.insert("elidedBytes".into(), Value::Number(elided.into()));
+            kept.insert("spill".into(), Value::String(preview.address));
+            if let Some(hint) = super::spill::retrieval_hint(data) {
+                kept.insert("retrievalHint".into(), Value::String(hint));
+            }
+            break;
+        }
     }
     kept.insert("evidenceOmitted".into(), Value::Bool(true));
     kept.insert("note".into(), Value::String(note.to_owned()));
@@ -539,7 +568,13 @@ mod tests {
         assert_eq!(first["callId"], "read-1");
         assert_eq!(first["status"], "completed");
         assert_eq!(first["result"]["summary"], "Read src/a.rs");
-        assert!(first["result"]["data"].get("content").is_none());
+        let preview = first["result"]["data"]["content"].as_str().unwrap_or_default();
+        assert!(!preview.is_empty(), "retired evidence keeps a bounded preview");
+        assert!(preview.len() < 2_400, "retired evidence stays bounded");
+        assert!(
+            preview.contains("spill://"),
+            "retired evidence names its full copy"
+        );
         assert_eq!(first["result"]["data"]["path"], "src/a.rs");
         assert_eq!(first["result"]["data"]["contentHash"], "abc");
         assert_eq!(first["result"]["data"]["evidenceOmitted"], true);
@@ -550,7 +585,12 @@ mod tests {
         let ran = parsed(&messages[5]);
         assert_eq!(ran["result"]["summary"], "Ran tests");
         assert_eq!(ran["status"], "completed");
-        assert!(ran["result"]["data"].get("stdout").is_none());
+        let stdout = ran["result"]["data"]["stdout"].as_str().unwrap_or_default();
+        assert!(stdout.len() < 2_400, "retired output stays bounded");
+        assert!(
+            stdout.contains("spill://"),
+            "retired output names its full copy"
+        );
         assert_eq!(ran["result"]["data"]["exitCode"], 0);
         assert_eq!(ran["result"]["data"]["stdoutWindow"]["nextOffset"], 100);
         assert!(ran["result"]["data"]["stdoutWindow"]
@@ -616,7 +656,12 @@ mod tests {
         let edited = parsed(&messages[4]);
         assert_eq!(edited["status"], "completed");
         assert_eq!(edited["result"]["summary"], "Replaced the timeout");
-        assert!(edited["result"]["data"].get("content").is_none());
+        let preview = edited["result"]["data"]["content"].as_str().unwrap_or_default();
+        assert!(preview.len() < 2_400, "retired evidence stays bounded");
+        assert!(
+            preview.contains("spill://"),
+            "retired evidence names its full copy"
+        );
         assert_eq!(edited["result"]["data"]["evidenceOmitted"], true);
         let error = parsed(&messages[5]);
         assert_eq!(error["status"], "failed");
@@ -624,7 +669,17 @@ mod tests {
         assert!(message.starts_with("disk full "));
         assert!(message.ends_with('…'));
         assert_eq!(message.chars().count(), 501);
-        assert!(error["result"]["data"].get("stdout").is_none());
+        let retired_stdout = error["result"]["data"]["stdout"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            retired_stdout.len() < 2_400,
+            "retired output stays bounded"
+        );
+        assert!(
+            retired_stdout.contains("spill://"),
+            "retired output names its full copy"
+        );
     }
 
     #[test]
@@ -730,10 +785,9 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or("")
             .contains(&text[..20]));
-        assert!(!messages[3]["content"]
-            .as_str()
-            .unwrap()
-            .contains(&text[..20]));
+        // Retirement spills a bounded preview rather than dropping the payload outright, so the
+        // head survives by design; what must not survive is the bulk.
+        assert!(messages[3]["content"].as_str().unwrap().len() < text.len());
     }
 
     #[test]

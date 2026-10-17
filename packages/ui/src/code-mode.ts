@@ -1,4 +1,5 @@
 import type { SessionEvent } from "./types.ts";
+import { capabilityIdFromToolName } from "./capability-ui.ts";
 
 export type WorkflowOutcome = {
   ok?: boolean;
@@ -63,12 +64,6 @@ function latest(previous: SessionEvent | undefined, event: SessionEvent) {
     : event;
 }
 function receiptEvents(event: SessionEvent): SessionEvent[] {
-  const names: Record<string, string> = {
-    gyro_workspace_list: "workspace-list",
-    gyro_workspace_search: "workspace-search",
-    gyro_workspace_read: "workspace-read",
-    gyro_workspace_read_range: "workspace-read-range",
-  };
   const details = workflowDetails(event);
   const calls = details?.outcome?.calls;
   if (!Array.isArray(calls)) return [];
@@ -77,10 +72,11 @@ function receiptEvents(event: SessionEvent): SessionEvent[] {
     if (
       !call ||
       typeof call.callId !== "string" ||
-      typeof call.name !== "string" ||
-      !names[call.name]
+      typeof call.name !== "string"
     )
       return [];
+    const capabilityId = capabilityIdFromToolName(call.name);
+    if (!capabilityId) return [];
     return [
       {
         ...event,
@@ -90,7 +86,7 @@ function receiptEvents(event: SessionEvent): SessionEvent[] {
           ...object(event.payload),
           codeMode: undefined,
           callId: call.callId,
-          capabilityId: names[call.name],
+          capabilityId,
           groupId: object(event.payload)?.callId,
           status: call.status,
           summary: call.summary,

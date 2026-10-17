@@ -99,6 +99,8 @@ enum Commands {
     Completions(CompletionsArgs),
     /// Review and decide pending workspace file approvals.
     Approvals(ApprovalsArgs),
+    /// Read a spilled context copy back through its `spill://` address.
+    Spill(SpillArgs),
     /// Internal MCP permission bridge used by Claude Code.
     #[command(hide = true)]
     ProviderPermissionServer,
@@ -109,6 +111,24 @@ struct CompletionsArgs {
     /// Shell to generate completions for.
     #[arg(value_enum)]
     shell: Shell,
+}
+
+#[derive(Debug, Args)]
+struct SpillArgs {
+    /// The `spill://` address a preview quoted.
+    address: String,
+
+    /// Emit versioned JSON instead of text.
+    #[arg(long, global = true)]
+    json: bool,
+
+    /// Byte offset to start the window at.
+    #[arg(long, global = true, default_value_t = 0)]
+    offset: usize,
+
+    /// Bytes to print. One window by default.
+    #[arg(long, global = true)]
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Args)]
@@ -742,6 +762,7 @@ impl Cli {
             Some(Commands::App(args)) => args.json,
             Some(Commands::Doctor(args)) => args.json,
             Some(Commands::Approvals(args)) => args.json,
+            Some(Commands::Spill(args)) => args.json,
             Some(Commands::ProviderPermissionServer) => false,
             Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::Show { json },
@@ -818,6 +839,7 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::Config(args)) => config_command(args),
         Some(Commands::Completions(args)) => completions_command(args),
         Some(Commands::Approvals(args)) => approvals_command(args),
+        Some(Commands::Spill(args)) => spill_command(args),
         Some(Commands::ProviderPermissionServer) => provider_permission_server(),
         None => interactive_chat(ChatArgs::default()),
     }
@@ -833,6 +855,55 @@ fn recover_provider_mutations_on_startup() -> Result<()> {
 fn completions_command(args: CompletionsArgs) -> Result<()> {
     let mut command = Cli::command();
     generate(args.shell, &mut command, "gyro", &mut io::stdout());
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillReadOutput {
+    address: String,
+    offset: usize,
+    total_bytes: usize,
+    truncated: bool,
+    next_offset: Option<usize>,
+    text: String,
+}
+
+/// Print one window of a spilled copy. The window is what keeps this from being a second way to
+/// flood a terminal: the address was handed out because the value was too big to carry.
+fn spill_command(args: SpillArgs) -> Result<()> {
+    const MAX_LIMIT: usize = 64 * 1024;
+    let limit = args
+        .limit
+        .unwrap_or(gyro_core::efficiency::spill::SPILL_READ_WINDOW);
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(cli_failure(
+            CliErrorCategory::InvalidInput,
+            format!("--limit must be between 1 and {MAX_LIMIT} bytes"),
+        ));
+    }
+    let window = gyro_core::efficiency::spill::read_window(&args.address, args.offset, limit)
+        .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error.to_string()))?;
+    let Some(window) = window else {
+        return Err(cli_failure(
+            CliErrorCategory::ExecutionFailed,
+            format!(
+                "no stored copy at {}; the sweep may have evicted it, or this machine never wrote one",
+                args.address
+            ),
+        ));
+    };
+    if args.json {
+        return print_json(&SpillReadOutput {
+            address: window.address.clone(),
+            offset: window.offset,
+            total_bytes: window.total_bytes,
+            truncated: window.truncated(),
+            next_offset: window.next_offset(),
+            text: window.text.clone(),
+        });
+    }
+    println!("{}", window.render());
     Ok(())
 }
 
