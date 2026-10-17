@@ -22742,6 +22742,8 @@ pub fn run() {
             system_access::check_system_access,
             system_access::open_system_access_settings,
             dictation_access::request_dictation_access,
+            dictation_access::start_dictation,
+            dictation_access::stop_dictation,
             capture_browser_preview,
             capture_session_browser_preview,
             session_browser::session_browser_open,
@@ -24635,6 +24637,9 @@ mod tests {
         let active = provider_context_message(&request);
         assert!(active.contains("Active Gyro session goal: Ship the plan rail"));
         assert!(active.contains("GYRO_GOAL_UPDATE:"));
+        assert!(active.contains("Gyro starts the next turn itself"));
+        assert!(active.contains("Do not ask the user to continue"));
+        assert!(active.contains("removes the goal from above the composer"));
 
         request.goal = Some(SessionGoalContext {
             text: "Ship the plan rail".into(),

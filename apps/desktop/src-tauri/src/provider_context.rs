@@ -354,6 +354,38 @@ pub(super) enum ClaudeUsageFrame {
     Turn,
 }
 
+/// Occupancy of one completed model request.
+///
+/// The prompt count is what that request held, and output is what it added.
+/// Cache and reasoning are copied only when the provider reported those
+/// buckets. A missing prompt count is not occupancy. Pass one request, never
+/// a turn's summed bill.
+pub(super) fn occupancy_from_request(
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    accounted: &gyro_core::usage::UsageTokens,
+    model_context_window: Option<u64>,
+) -> Option<ProviderContextUsage> {
+    let input_tokens = input_tokens?;
+    let known = accounted
+        .accounting
+        .map(|metadata| metadata.known)
+        .unwrap_or_default();
+    Some(ProviderContextUsage {
+        input_tokens: Some(input_tokens),
+        output_tokens,
+        cached_input_tokens: known
+            .cache_read
+            .then_some(accounted.cached_input_tokens),
+        reasoning_output_tokens: known
+            .reasoning
+            .then_some(accounted.reasoning_output_tokens),
+        total_tokens: output_tokens.map(|output| input_tokens.saturating_add(output)),
+        model_context_window: model_context_window.filter(|window| *window > 0),
+        ..ProviderContextUsage::default()
+    })
+}
+
 pub(super) fn provider_context_usage_from_app_server(
     params: &Value,
 ) -> Option<ProviderContextUsage> {
@@ -604,21 +636,14 @@ pub(super) fn provider_context_usage_with_window(
                 usage.model_context_window = catalog_window;
             }
             if exceeds_context_window(&usage) {
-                // A traffic estimate past the window still means the window is
-                // full. Wiping it would drop the meter back to the visible-text
-                // fallback. A billed total past the window is not occupancy.
-                if usage.estimated {
-                    if let Some(window) = usage.model_context_window.filter(|window| *window > 0) {
-                        usage.input_tokens = Some(window);
-                        usage.output_tokens = None;
-                        usage.total_tokens = Some(window);
-                    }
-                } else {
-                    usage = ProviderContextUsage {
-                        model_context_window: usage.model_context_window,
-                        ..ProviderContextUsage::default()
-                    };
-                }
+                // A count past the window is not occupancy. A traffic sum and a
+                // multi-call bill both grow without a bound, and neither says
+                // how full the window is. Keep the window and drop the count
+                // instead of painting the meter as exactly full.
+                usage = ProviderContextUsage {
+                    model_context_window: usage.model_context_window,
+                    ..ProviderContextUsage::default()
+                };
             }
             Some(usage)
         }
@@ -1029,7 +1054,27 @@ mod tests {
     }
 
     #[test]
-    fn estimated_traffic_past_the_window_is_capped_not_discarded() {
+    fn one_request_occupancy_uses_that_prompt_and_ignores_a_missing_one() {
+        let accounted = gyro_core::usage::UsageTokens::measured(
+            Some(1_000),
+            Some(40),
+            Some(20),
+            Some(5),
+            Some(1_020),
+        );
+        let usage = occupancy_from_request(Some(1_000), Some(20), &accounted, Some(0)).unwrap();
+        assert_eq!(usage.input_tokens, Some(1_000));
+        assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.cached_input_tokens, Some(40));
+        assert_eq!(usage.reasoning_output_tokens, Some(5));
+        assert_eq!(usage.total_tokens, Some(1_020));
+        assert_eq!(usage.model_context_window, None);
+        assert!(!usage.estimated);
+        assert!(occupancy_from_request(None, Some(20), &accounted, Some(128_000)).is_none());
+    }
+
+    #[test]
+    fn estimated_traffic_past_the_window_is_not_occupancy() {
         let usage = provider_context_usage_with_window(
             Some(ProviderContextUsage {
                 input_tokens: Some(7_515_785),
@@ -1041,10 +1086,27 @@ mod tests {
             Some("grok-4.7"),
         )
         .unwrap();
-        assert_eq!(usage.input_tokens, Some(500_000));
-        assert_eq!(usage.total_tokens, Some(500_000));
-        assert!(usage.estimated);
+        assert_eq!(usage.input_tokens, None);
+        assert_eq!(usage.output_tokens, None);
+        assert_eq!(usage.total_tokens, None);
+        assert!(!usage.estimated);
         assert_eq!(usage.model_context_window, Some(500_000));
+
+        let within = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(180_000),
+                total_tokens: Some(180_000),
+                estimated: true,
+                ..ProviderContextUsage::default()
+            }),
+            "xai",
+            Some("grok-4.7"),
+        )
+        .unwrap();
+        assert_eq!(within.input_tokens, Some(180_000));
+        assert_eq!(within.total_tokens, Some(180_000));
+        assert!(within.estimated);
+        assert_eq!(within.model_context_window, Some(500_000));
 
         let billed = provider_context_usage_with_window(
             Some(ProviderContextUsage {

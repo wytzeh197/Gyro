@@ -13,7 +13,23 @@ const PARENT_CHANNEL_FD: i32 = 3;
 const MAX_ACCOUNT_BYTES: usize = 4096;
 const MAX_REPLY_BYTES: u64 = 1024 * 1024;
 const READ_DEADLINE: Duration = Duration::from_secs(3);
+/// Long enough to click Always Allow. A silent denial is the usual result of
+/// an ad-hoc reinstall: the new signature is not on the item's access list.
+#[cfg(not(test))]
+const INTERACTIVE_READ_DEADLINE: Duration = Duration::from_secs(90);
+const INTERACTIVE_ENV: &str = "GYRO_KEYCHAIN_ALLOW_PROMPT";
 const ACCESS_DETAIL: &str = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
+
+/// The silent reader was refused. The user-facing text stays the same, but
+/// only this error is retried with the macOS prompt.
+#[derive(Debug)]
+struct InteractionRequired;
+impl std::fmt::Display for InteractionRequired {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(ACCESS_DETAIL)
+    }
+}
+impl std::error::Error for InteractionRequired {}
 
 #[derive(Serialize, Deserialize)]
 struct Reply {
@@ -28,9 +44,26 @@ extern "C" {
 
 #[cfg(not(test))]
 pub(super) fn get(account: &str) -> Result<Option<String>> {
+    let silent = read_with_command(reader_command()?, account, READ_DEADLINE);
+    // A rebuilt local app has a new ad-hoc signature. The saved item stays
+    // locked to the previous one until the user allows this binary.
+    if silent
+        .as_ref()
+        .is_err_and(|error| error.is::<InteractionRequired>())
+    {
+        let mut command = reader_command()?;
+        command.env(INTERACTIVE_ENV, "1");
+        return read_with_command(command, account, INTERACTIVE_READ_DEADLINE);
+    }
+    silent
+}
+
+#[cfg(not(test))]
+fn reader_command() -> Result<Command> {
     let mut command = Command::new(std::env::current_exe().context("locate credential reader")?);
     command.arg(HELPER_ARG);
-    read_with_command(command, account, READ_DEADLINE)
+    command.env_remove(INTERACTIVE_ENV);
+    Ok(command)
 }
 
 fn read_with_command(
@@ -118,7 +151,7 @@ fn read_with_command(
     let reply: Reply = serde_json::from_slice(&bytes)
         .map_err(|_| anyhow::anyhow!("invalid credential reader response"))?;
     if reply.denied {
-        bail!("{ACCESS_DETAIL}");
+        bail!(InteractionRequired);
     }
     Ok(reply.value)
 }
@@ -153,7 +186,12 @@ pub(super) fn run_helper() -> Option<i32> {
     // Per-query no-auth flags do not suppress UI for the file-based Keychain
     // used by keyring. Set the legacy policy ONLY inside this disposable child.
     // The parent retains its normal policy for explicit Settings writes.
-    if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
+    // A prompt is enabled only for the retry after a silent denial, so an
+    // ordinary turn still cannot hang on a dialog.
+    let allow_prompt = std::env::var_os(INTERACTIVE_ENV).is_some();
+    if allow_prompt {
+        unsafe { SecKeychainSetUserInteractionAllowed(1) };
+    } else if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
         return Some(3);
     }
     let reply = match super::get_api_key_direct(&account) {
@@ -241,13 +279,18 @@ mod tests {
         let start = Instant::now();
         let result = read_with_command(shell("sleep 10"), "fixture", Duration::from_millis(30));
         assert!(start.elapsed() < Duration::from_secs(1));
-        assert_eq!(result.unwrap_err().to_string(), ACCESS_DETAIL);
+        let error = result.unwrap_err();
+        assert_eq!(error.to_string(), ACCESS_DETAIL);
+        // A stall is not a Keychain refusal, so it must not raise a prompt.
+        assert!(!error.is::<InteractionRequired>());
         let result = read_with_command(
             shell("printf '%s' '{\"value\":null,\"denied\":true}'"),
             "fixture",
             READ_DEADLINE,
         );
-        assert_eq!(result.unwrap_err().to_string(), ACCESS_DETAIL);
+        let error = result.unwrap_err();
+        assert_eq!(error.to_string(), ACCESS_DETAIL);
+        assert!(error.is::<InteractionRequired>());
     }
 
     #[test]

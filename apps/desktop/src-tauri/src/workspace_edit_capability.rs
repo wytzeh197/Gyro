@@ -5,9 +5,19 @@
 //! string inside a file the model already read. Both land in the same proposal
 //! store, so the hash guard, atomic replacement, approval review and durable
 //! decision are identical; a string edit only removes the need to re-emit an
-//! entire file to change three lines of it.
+//! entire file to change three lines of it. Immediate string edits of one file
+//! run one at a time. When a sibling edit moves the hash and the matched text
+//! is still there, the same replacement is applied to the current file instead
+//! of failing the tool call.
 use super::*;
 use serde_json::{json, Value};
+
+const IMMEDIATE_EDIT_ATTEMPTS: usize = 4;
+
+/// Serializes immediate string edits in this process. The mutation journal
+/// lock covers only the final write, so two tool calls could both snapshot the
+/// same bytes and the second would then fail its hash check.
+static IMMEDIATE_EDIT_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const WORKSPACE_EDIT_SCHEMA: &str = "gyro.workspace-edit.v1";
 
@@ -37,7 +47,9 @@ pub(super) fn execute(
         && capability_full_access_enabled(&config)
         && delegated_agents::file_edit_ceiling(app, &bound.session_id);
 
-    let (content, expected_hash, shape) = match request.capability_id {
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
+    let (proposal, shape) = match request.capability_id {
         CapabilityId::WorkspaceProposeEdit => {
             let content = arguments
                 .get("content")
@@ -53,36 +65,41 @@ pub(super) fn execute(
                     "expectedHash is required when proposing changes to an existing file"
                 );
             }
-            (content, expected_hash, EditShape::Content)
+            let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
+                &store,
+                FileMutationProposalRequest {
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    path: path.clone(),
+                    content,
+                    expected_hash,
+                },
+                apply_immediately,
+                Some(&root_id),
+            )?;
+            (proposal, EditShape::Content)
         }
         CapabilityId::WorkspaceEdit => {
-            let replacement = string_replacement(&candidate, &path, arguments)?;
+            let committed = commit_string_edit(
+                &store,
+                &bound.session_id,
+                bound.turn_id.clone(),
+                Some(&root_id),
+                &candidate,
+                &path,
+                arguments,
+                apply_immediately,
+            )?;
             (
-                replacement.content,
-                Some(replacement.base_hash),
+                committed.proposal,
                 EditShape::Replacement {
-                    count: replacement.count,
-                    line: replacement.line,
+                    count: committed.count,
+                    line: committed.line,
                 },
             )
         }
         other => anyhow::bail!("workspace_edit_capability does not handle {other}"),
     };
-
-    let store = open_store().map_err(anyhow::Error::msg)?;
-    let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
-    let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
-        &store,
-        FileMutationProposalRequest {
-            session_id: bound.session_id.clone(),
-            turn_id: bound.turn_id.clone(),
-            path: path.clone(),
-            content,
-            expected_hash,
-        },
-        apply_immediately,
-        Some(&root_id),
-    )?;
     emit_proposal_events(app, bound, &proposal);
     let resource = CapabilityResourceRef {
         id: proposal.id.to_string(),
@@ -222,6 +239,93 @@ fn string_replacement(
     })
 }
 
+#[derive(Debug)]
+struct CommittedEdit {
+    proposal: MutationProposal,
+    count: usize,
+    line: u64,
+}
+
+fn hash_conflict(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("file changed on disk")
+        || message.contains("file changed after approval was requested")
+}
+
+/// Apply one exact replacement. Reviewed edits keep the caller's hash guard.
+/// Immediate edits hold the process gate and, when that guard is stale only
+/// because another edit landed first, retry against the current text.
+fn commit_string_edit(
+    store: &SessionStore,
+    session_id: &str,
+    turn_id: Option<String>,
+    root_id: Option<&str>,
+    candidate: &Path,
+    path: &str,
+    arguments: &Value,
+    apply_immediately: bool,
+) -> anyhow::Result<CommittedEdit> {
+    let _gate = apply_immediately.then(|| {
+        IMMEDIATE_EDIT_GATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    });
+    let mut arguments = arguments.clone();
+    let attempts = if apply_immediately {
+        IMMEDIATE_EDIT_ATTEMPTS
+    } else {
+        1
+    };
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            if let Some(object) = arguments.as_object_mut() {
+                object.remove("expectedHash");
+            }
+        }
+        let replacement = match string_replacement(candidate, path, &arguments) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                if attempt + 1 < attempts && hash_conflict(&error) {
+                    last_error = Some(error);
+                    continue;
+                }
+                return Err(error);
+            }
+        };
+        match workspace_mutations::create_file_mutation_proposal_at_root(
+            store,
+            FileMutationProposalRequest {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.clone(),
+                path: path.to_string(),
+                content: replacement.content,
+                expected_hash: Some(replacement.base_hash),
+            },
+            apply_immediately,
+            root_id,
+        ) {
+            Ok(proposal) => {
+                return Ok(CommittedEdit {
+                    proposal,
+                    count: replacement.count,
+                    line: replacement.line,
+                });
+            }
+            Err(error) => {
+                if attempt + 1 < attempts && hash_conflict(&error) {
+                    last_error = Some(error);
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        anyhow::anyhow!("file changed on disk; re-read it before editing")
+    }))
+}
+
 /// A proposed edit is meaningless while the user has unsaved changes in the
 /// editor, because approving it would silently overwrite what they typed.
 /// Shared with the lifecycle tools, which must not delete or move a file the
@@ -346,7 +450,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 },
                 "expectedHash": {
                     "type": "string",
-                    "description": "Optional guard: fail unless the file still hashes to this value. Prefer re-reading the file instead."
+                    "description": "Optional guard from a prior read. An immediate edit still applies when this hash is stale but oldString matches the current file. A reviewed edit fails until the file is read again."
                 },
                 "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
             }),
@@ -544,5 +648,109 @@ mod tests {
             "src/other.rs",
             "v2"
         ));
+    }
+
+    fn session_for(dir: &std::path::Path) -> (SessionStore, String) {
+        let store =
+            SessionStore::open(GyroPaths::from_base_dir(dir.join("Gyro"))).unwrap();
+        let session = store
+            .create_session(dir, SessionOrigin::Desktop, "edit")
+            .unwrap();
+        (store, session.id.to_string())
+    }
+
+    #[test]
+    fn immediate_edits_apply_when_a_sibling_moved_the_read_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = session_for(temp.path());
+        let target = temp.path().join("sample.ts");
+        let original = "alpha\nbeta\n";
+        fs::write(&target, original).unwrap();
+        let hash = content_hash(original.as_bytes());
+        let first = commit_string_edit(
+            &store,
+            &session_id,
+            None,
+            None,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "alpha",
+                "newString": "ALPHA",
+                "expectedHash": hash
+            }),
+            true,
+        )
+        .unwrap();
+        assert_eq!(first.proposal.status.as_str(), "applied");
+        let second = commit_string_edit(
+            &store,
+            &session_id,
+            None,
+            None,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "beta",
+                "newString": "BETA",
+                "expectedHash": hash
+            }),
+            true,
+        )
+        .unwrap();
+        assert_eq!(second.proposal.status.as_str(), "applied");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "ALPHA\nBETA\n");
+    }
+
+    #[test]
+    fn reviewed_edit_still_rejects_a_stale_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = session_for(temp.path());
+        let target = temp.path().join("sample.ts");
+        fs::write(&target, "alpha\n").unwrap();
+        let error = commit_string_edit(
+            &store,
+            &session_id,
+            None,
+            None,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "alpha",
+                "newString": "BETA",
+                "expectedHash": content_hash(b"other")
+            }),
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("changed on disk"), "{error}");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "alpha\n");
+    }
+
+    #[test]
+    fn immediate_edit_stops_when_the_matched_text_is_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = session_for(temp.path());
+        let target = temp.path().join("sample.ts");
+        fs::write(&target, "alpha\n").unwrap();
+        let error = commit_string_edit(
+            &store,
+            &session_id,
+            None,
+            None,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "before",
+                "newString": "after",
+                "expectedHash": content_hash(b"before\n")
+            }),
+            true,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("was not found"), "{error}");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "alpha\n");
     }
 }

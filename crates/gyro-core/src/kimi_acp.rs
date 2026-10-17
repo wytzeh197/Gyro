@@ -395,10 +395,12 @@ impl KimiAcpConnection {
             return None;
         }
         self.traffic_chars = self.traffic_chars.saturating_add(chars);
-        let mut used = self.traffic_chars.div_ceil(4);
+        let used = self.traffic_chars.div_ceil(4);
         let size = self.context_usage.map(|current| current.size).unwrap_or(0);
-        if size > 0 {
-            used = used.min(size);
+        // A sum past a known window is not a full window. Keep the last
+        // under-window bound instead of storing `used == size`.
+        if size > 0 && used > size {
+            return None;
         }
         self.note_live_context(
             AcpContextUsage {
@@ -932,11 +934,17 @@ where
         connection.interrupted_usage();
     }
     let result = result?;
-    // A live frame wins. Flat `_meta.totalTokens` is last-call context only
-    // when Grok sent no wire occupancy during the turn, and only when it is
-    // not the summed bill. A traffic estimate must not block that reading.
-    if connection.usage_provider == AcpProvider::Grok && !connection.context_from_wire {
-        if let Some(context) = acp_usage::grok_prompt_context(&result) {
+    // A live frame wins. These prompt fields are last-call context only when
+    // that frame never arrived, and only when the contract says the field is
+    // one request rather than the summed bill. A traffic estimate must not
+    // block that reading.
+    if !connection.context_from_wire {
+        let context = match connection.usage_provider {
+            AcpProvider::Grok => acp_usage::grok_prompt_context(&result),
+            AcpProvider::OpenCode => acp_usage::opencode_prompt_context(&result),
+            _ => None,
+        };
+        if let Some(context) = context {
             publish_live_context(&mut connection, context, false, on_activity);
         }
     }

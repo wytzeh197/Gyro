@@ -197,10 +197,14 @@ fn clean(value: &str) -> String {
         .collect()
 }
 pub(super) fn normalize_update(value: &serde_json::Value) -> Option<serde_json::Value> {
-    let status = value.get("status")?.as_str()?;
-    if !matches!(status, "complete" | "continue" | "blocked" | "paused") {
-        return None;
-    }
+    let raw = value.get("status")?.as_str()?;
+    // "done" is the word the model is told to use when the outcome is met.
+    // It is the same stop as complete: the composer goal then leaves.
+    let status = match raw {
+        "done" => "complete",
+        "complete" | "continue" | "blocked" | "paused" => raw,
+        _ => return None,
+    };
     let mut update = serde_json::json!({"status": status});
     for field in ["progress", "nextAction", "reason"] {
         if let Some(text) = value.get(field).and_then(serde_json::Value::as_str) {
@@ -701,6 +705,18 @@ mod tests {
         assert_eq!(run.status, "queued");
         run.after_response(&response(
             serde_json::json!({"status":"complete","progress":"Recovery passed"}),
+        ));
+        assert_eq!(run.status, "complete");
+        assert!(run.next_request.is_none());
+    }
+    #[test]
+    fn done_is_the_same_stop_as_complete() {
+        let update =
+            normalize_update(&serde_json::json!({"status":"done","progress":"Shipped"})).unwrap();
+        assert_eq!(update["status"], "complete");
+        let mut run = Run::new(Limits::default());
+        run.after_response(&response(
+            serde_json::json!({"status":"done","progress":"Shipped"}),
         ));
         assert_eq!(run.status, "complete");
         assert!(run.next_request.is_none());

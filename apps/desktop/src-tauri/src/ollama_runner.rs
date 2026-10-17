@@ -458,6 +458,15 @@ pub(super) fn run_ollama_chat(
             // What the live context note reports before the next request.
             context_window = turn.context_window_tokens;
             last_measured = Some((turn.input_tokens, turn.output_tokens));
+            // The meter shows this request's prompt, not the turn's summed bill.
+            if let Some(usage) = crate::provider_context::occupancy_from_request(
+                turn.input_tokens,
+                turn.output_tokens,
+                &turn.accounted_usage,
+                turn.context_window_tokens,
+            ) {
+                emit_provider_context_usage(app, request, &usage);
+            }
             if compatibility {
                 anyhow::ensure!(
                     turn.tool_calls.is_empty(),
@@ -623,26 +632,12 @@ pub(super) fn run_ollama_chat(
         Ok(ProviderRunnerOutput {
             accounted_usage,
             activities: provider_activities_for_response(auto_compactions, &response.content),
-            context_usage: Some(ProviderContextUsage {
-                input_tokens: response.input_tokens,
-                output_tokens: response.output_tokens,
-                cached_input_tokens: response
-                    .accounted_usage
-                    .accounting
-                    .filter(|accounting| accounting.known.cache_read)
-                    .map(|_| response.accounted_usage.cached_input_tokens),
-                reasoning_output_tokens: response
-                    .accounted_usage
-                    .accounting
-                    .filter(|accounting| accounting.known.reasoning)
-                    .map(|_| response.accounted_usage.reasoning_output_tokens),
-                total_tokens: response
-                    .input_tokens
-                    .zip(response.output_tokens)
-                    .map(|(input, output)| input.saturating_add(output)),
-                model_context_window: response.context_window_tokens,
-                ..ProviderContextUsage::default()
-            }),
+            context_usage: crate::provider_context::occupancy_from_request(
+                response.input_tokens,
+                response.output_tokens,
+                &response.accounted_usage,
+                response.context_window_tokens,
+            ),
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),
             paused_at_tool_budget,

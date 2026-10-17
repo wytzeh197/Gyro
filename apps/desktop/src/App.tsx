@@ -13087,7 +13087,7 @@ export function App() {
       const status =
         action === "complete"
           ? "complete"
-          : action === "set" || action === "reopen"
+          : action === "set" || action === "reopen" || action === "edit"
             ? "active"
             : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {

@@ -6,9 +6,10 @@ import "@gyro-dev/ui/styles.css";
 
 const empty: GyroConfig = { commandProfiles: [], modelProviders: [], requireCommandApproval: true, requireFileEditApproval: true, telemetryEnabled: false };
 const config: GyroConfig = { ...empty, selectedProviderId:"openai", modelProviders:providersForConfig(empty).filter(p => p.id === "openai").map(p => ({ ...p, enabled:true, authStatus:"connected", defaultModelId:"gpt-6.1-sol" })) };
-const scenes: Record<string, { used?: number; status?: ProviderUsageWindow["status"]; context: number; unknownContext?: boolean }> = {
+const scenes: Record<string, { used?: number; status?: ProviderUsageWindow["status"]; context: number; unknownContext?: boolean; estimated?: boolean }> = {
   reported: { used:46, context:32_000 },
   nearlyEmpty: { used:99.6, context:474_900 },
+  windowFull: { used:25, context:475_000, estimated:true },
   exhausted: { status:"exhausted", context:475_000 },
   unknown: { context:32_000, unknownContext:true },
   full: { used:0, context:0 },
@@ -24,7 +25,7 @@ function Preview() {
   const windows: ProviderUsageWindow[] = [{ id:"weekly",label:"Weekly window",usedPercent:state.used,status:state.status,resetsAt }];
   const modelId = state.unknownContext ? "unknown-model" : "gpt-6.1-sol";
   const providerId: ProviderId = state.unknownContext ? "custom:fixture" : "openai";
-  const events: SessionEvent[] = [{ id:"fixture-reply",sessionId:"capacity-fixture",turnId:"fixture-turn",kind:"assistant-message",createdAt:new Date().toISOString(),message:"Capacity fixture. Plan readings and context counts are simulated.",payload:{providerId,modelId,contextUsage:{inputTokens:state.context,outputTokens:0,totalTokens:state.context,...(state.unknownContext ? {} : {modelContextWindow:475_000})}} }];
+  const events: SessionEvent[] = [{ id:"fixture-reply",sessionId:"capacity-fixture",turnId:"fixture-turn",kind:"assistant-message",createdAt:new Date().toISOString(),message:"Capacity fixture. Plan readings and context counts are simulated.",payload:{providerId,modelId,contextUsage:{inputTokens:state.context,outputTokens:0,totalTokens:state.context,...(state.estimated ? {estimated:true} : {}),...(state.unknownContext ? {} : {modelContextWindow:475_000})}} }];
   return <main className={`usage-preview${inspect ? " is-inspecting" : ""}`}>
     <style>{`
       html,body,#root { height:100%; }
@@ -45,7 +46,7 @@ function Preview() {
     <header>
       <strong>Usage left · context used · actual components / fixture readings</strong>
       <select aria-label="Capacity scenario" value={scene} onChange={e => {setScene(e.target.value);setDraft("");}}>
-        <option value="reported">46% spent · 54% left</option><option value="nearlyEmpty">Nearly empty</option><option value="exhausted">Exhausted, no percentage</option><option value="unknown">Unknown limits</option><option value="full">Full allowance</option>
+        <option value="reported">46% spent · 54% left</option><option value="nearlyEmpty">Nearly empty</option><option value="windowFull">Window full · 75% plan left</option><option value="exhausted">Exhausted, no percentage</option><option value="unknown">Unknown limits</option><option value="full">Full allowance</option>
       </select>
       <button onClick={() => setInspect(!inspect)}>Inspect composer meter</button>
       <button onClick={() => setLight(!light)}>{light ? "Dark theme" : "Light theme"}</button>

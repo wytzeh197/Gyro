@@ -454,6 +454,16 @@
   .gyro-run-segment-failed {
   color: var(--gyro-danger);
 }
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
+  .gyro-run-segment-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-pulse {
   animation: gyro-run-breathe 1.6s ease-in-out infinite;
   display: block;

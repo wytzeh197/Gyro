@@ -297,6 +297,31 @@ fn grok_response_prompt_tokens(usage: &Value) -> Option<u64> {
     )
 }
 
+/// Last-step occupancy from an OpenCode prompt result.
+///
+/// OpenCode's `usage` is one final step, not a turn sum. Cache read and cache
+/// write sit outside `inputTokens`, and thoughts sit outside `outputTokens`,
+/// so both are added back. A wire `usage_update` still wins over this.
+pub fn opencode_prompt_context(result: &Value) -> Option<AcpContextUsage> {
+    let usage = result.get("usage").filter(|usage| usage.is_object())?;
+    let counts = serde_json::from_value::<PromptCounts>(usage.clone()).ok()?;
+    if counts.input_tokens.is_none() {
+        return None;
+    }
+    let tokens = counts.tokens(true, true);
+    if tokens.effective_accounting().reason == Some(UsageReason::InconsistentCounts) {
+        return None;
+    }
+    let used = tokens
+        .input_tokens
+        .saturating_add(tokens.output_tokens);
+    (used > 0).then_some(AcpContextUsage {
+        used,
+        size: 0,
+        estimated: false,
+    })
+}
+
 /// Last-call occupancy carried beside a Grok prompt bill.
 ///
 /// Flat `_meta.totalTokens` is the last model call, not the turn sum in
@@ -839,6 +864,26 @@ mod tests {
         );
     }
     #[test]
+    fn antigravity_usage_update_is_tokens_currently_in_the_window() {
+        // Installed `agy_acp_server.par` 1.3.0 sends this from
+        // `_maybe_send_usage_update` after each model step. `used` is the
+        // latest call's context, already reduced from the cumulative bill,
+        // and `size` is that model's window. The optional session `cost`
+        // is not part of this frame.
+        assert_eq!(
+            live_context_usage(&json!({
+                "sessionUpdate": "usage_update",
+                "used": 12000,
+                "size": 1048576
+            })),
+            Some(AcpContextUsage {
+                used: 12000,
+                size: 1048576,
+                estimated: false,
+            })
+        );
+    }
+    #[test]
     fn live_context_usage_reads_occupancy_and_ignores_turn_bills() {
         let status = json!({
             "sessionUpdate": "session_status",
@@ -931,6 +976,27 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn opencode_prompt_context_is_the_last_step_including_cache_and_thoughts() {
+        assert_eq!(
+            opencode_prompt_context(&json!({"usage":{
+                "inputTokens":100,"outputTokens":20,"cachedReadTokens":60,"cachedWriteTokens":10,
+                "thoughtTokens":5,"totalTokens":195
+            }})),
+            Some(AcpContextUsage {
+                used: 195,
+                size: 0,
+                estimated: false,
+            })
+        );
+        assert_eq!(
+            opencode_prompt_context(&json!({"usage":{
+                "inputTokens":100,"outputTokens":20,"totalTokens":1
+            }})),
+            None
+        );
+    }
+
     #[test]
     fn grok_prompt_context_is_last_call_not_the_turn_bill() {
         assert_eq!(
