@@ -1,0 +1,10 @@
+{
+  "originalFiles": 9154,
+  "unchanged": 9151,
+  "changed": [
+    "packages/ui/src/styles.css",
+    "packages/ui/src/surfaces.tsx",
+    "scripts/check-workbench-ui.mjs"
+  ],
+  "missing": []
+}

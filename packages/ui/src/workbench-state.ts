@@ -31,6 +31,7 @@ import type {
   IdeContribution,
   IdeViewId,
   LanguageServerState,
+  LaunchView,
   ModelFocus,
   ModelFollowMode,
   OutputChannel,
@@ -1677,6 +1678,7 @@ export type WorkbenchAction =
       keybinding?: WorkspaceKeybinding | null;
     }
   | { type: "set-settings-section"; section: SettingsSectionId }
+  | { type: "set-launch-view"; view: LaunchView }
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
   | { type: "set-daily-pace-warning"; enabled: boolean }
@@ -2054,6 +2056,51 @@ export function createInitialWorkbenchState(
   };
 }
 
+/**
+ * Applies the launch-view preference to a restored state.
+ *
+ * It runs once, while persisted state is being read, so the preference decides
+ * the first frame instead of fighting the user's navigation afterwards. `last`
+ * returns the state untouched, which is the restore-where-you-left-off default;
+ * the other three land on the same view `select-workspace-layout` produces, so
+ * a launch looks exactly like switching there by hand.
+ */
+export function applyLaunchView(
+  state: WorkbenchState,
+  view: LaunchView = state.preferences.launchView,
+): WorkbenchState {
+  switch (view) {
+    case "workspace":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        // Leaving the sidebar's AI view open would greet a code launch with a
+        // chat rail, so the explorer is what Workspace opens on.
+        ide: state.ide.activeView === "ai" ? { ...state.ide, activeView: "explorer" } : state.ide,
+      };
+    case "sessions":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "thread",
+        lastSessionsLayout: "thread",
+        isToolPanelOpen: false,
+      };
+    case "terminals":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "terminal-grid",
+        lastSessionsLayout: "terminal-grid",
+        activePaneTab: "terminal",
+        isToolPanelOpen: true,
+      };
+    default:
+      return state;
+  }
+}
+
 export function workbenchReducer(
   state: WorkbenchState,
   action: WorkbenchAction,
@@ -2421,6 +2468,14 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           lastSettingsSection: action.section,
+        },
+      };
+    case "set-launch-view":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          launchView: normalizedLaunchView(action.view),
         },
       };
     case "set-usage-provider":
@@ -4833,8 +4888,11 @@ function normalizedSettingsSection(
     case "import-projects":
     case "editor-workspace":
     case "tools-contributions":
-    case "providers":
     case "usage-limits":
+      // Retired page: usage limits now live on Models, Accounts & Limits.
+      return "providers";
+    case "providers":
+    case "efficiency":
     case "cli-profiles":
     case "appearance":
     case "permissions":
@@ -4850,6 +4908,17 @@ function normalizedSettingsSection(
 
 function normalizedModelFollowMode(value: unknown): ModelFollowMode {
   return value === "off" || value === "follow" ? value : "peek";
+}
+
+/**
+ * The launch view is a closed set, so an unknown or missing value falls back to
+ * restoring the previous view rather than promising a destination it cannot
+ * render.
+ */
+function normalizedLaunchView(value: unknown): LaunchView {
+  return value === "workspace" || value === "sessions" || value === "terminals"
+    ? value
+    : "last";
 }
 
 function normalizeAppearanceColor(value: unknown, fallback: string) {
@@ -4890,6 +4959,7 @@ function normalizeWorkbenchPreferences(
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
+    launchView: normalizedLaunchView(preferences?.launchView),
     missionSessionIds: Array.isArray(preferences?.missionSessionIds)
       ? [
           ...new Set(

@@ -1,0 +1,275 @@
+{
+  "result": "PASS",
+  "menuResults": [
+    {
+      "theme": "dark",
+      "large": false,
+      "narrow": false,
+      "width": 205,
+      "right": 214,
+      "height": 363,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        38,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ]
+    },
+    {
+      "theme": "dark",
+      "large": false,
+      "narrow": true,
+      "width": 191,
+      "right": 200,
+      "height": 363,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        38,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ]
+    },
+    {
+      "theme": "dark",
+      "large": true,
+      "narrow": false,
+      "width": 205,
+      "right": 214,
+      "height": 409.0625,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        43.6875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875
+      ]
+    },
+    {
+      "theme": "dark",
+      "large": true,
+      "narrow": true,
+      "width": 191,
+      "right": 200,
+      "height": 409.0625,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        43.6875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875
+      ]
+    },
+    {
+      "theme": "light",
+      "large": false,
+      "narrow": false,
+      "width": 205,
+      "right": 214,
+      "height": 363,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        38,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ]
+    },
+    {
+      "theme": "light",
+      "large": false,
+      "narrow": true,
+      "width": 191,
+      "right": 200,
+      "height": 363,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        38,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ]
+    },
+    {
+      "theme": "light",
+      "large": true,
+      "narrow": false,
+      "width": 205,
+      "right": 214,
+      "height": 409.0625,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        43.6875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875
+      ]
+    },
+    {
+      "theme": "light",
+      "large": true,
+      "narrow": true,
+      "width": 191,
+      "right": 200,
+      "height": 409.0625,
+      "overflow": false,
+      "overlap": false,
+      "chat": true,
+      "cli": true,
+      "picker": false,
+      "padding": "6px",
+      "rowHeights": [
+        43.6875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875,
+        36.796875
+      ]
+    }
+  ],
+  "goalResults": [
+    {
+      "running": "true",
+      "status": "queued",
+      "label": "Goal queued: Keep the outcome visible while planning and working.",
+      "animation": "gyro-chat-activity-spin"
+    },
+    {
+      "running": "true",
+      "status": "running",
+      "label": "Pursuing goal: Keep the outcome visible while planning and working.",
+      "animation": "gyro-chat-activity-spin"
+    },
+    {
+      "running": "true",
+      "status": "waiting-approval",
+      "label": "Waiting for approval: Keep the outcome visible while planning and working.",
+      "animation": "gyro-chat-activity-spin"
+    },
+    {
+      "running": null,
+      "status": "blocked",
+      "label": "Goal blocked: Keep the outcome visible while planning and working. — Single-agent restriction prevents live multi-agent validation.",
+      "animation": "none"
+    },
+    {
+      "running": null,
+      "status": "paused",
+      "label": "Goal paused: Keep the outcome visible while planning and working. — Goal reached its automatic turn limit. Resume after reviewing the checkpoint.",
+      "animation": "none"
+    },
+    {
+      "running": null,
+      "status": "complete",
+      "label": "Goal completed: Keep the outcome visible while planning and working.",
+      "animation": "none"
+    }
+  ],
+  "browserResults": [
+    {
+      "panel": 320,
+      "src": "http://127.0.0.1:1520/browser-viewport-page.html",
+      "title": "Browser preview",
+      "width": 318,
+      "parentWidth": 318,
+      "transform": "matrix(0.248437, 0, 0, 0.248437, 0, 0)",
+      "ready": "complete",
+      "body": "Northstar · App fixture\nAdd project\nWorkspace\nOverview\nProjects\nActivity\nSettings\n\nProject overview\n\nA responsive app us"
+    },
+    {
+      "panel": 480,
+      "src": "http://127.0.0.1:1520/browser-viewport-page.html",
+      "title": "Browser preview",
+      "width": 478,
+      "parentWidth": 478,
+      "transform": "matrix(0.373437, 0, 0, 0.373437, 0, 0)",
+      "ready": "complete",
+      "body": "Northstar · App fixture\nAdd project\nWorkspace\nOverview\nProjects\nActivity\nSettings\n\nProject overview\n\nA responsive app us"
+    },
+    {
+      "panel": 960,
+      "src": "http://127.0.0.1:1520/browser-viewport-page.html",
+      "title": "Browser preview",
+      "width": 886.4000244140625,
+      "parentWidth": 958,
+      "transform": "matrix(0.6925, 0, 0, 0.6925, 0, 0)",
+      "ready": "complete",
+      "body": "Northstar · App fixture\nAdd project\nWorkspace\nOverview\nProjects\nActivity\nSettings\n\nProject overview\n\nA responsive app us"
+    }
+  ]
+}

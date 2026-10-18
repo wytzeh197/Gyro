@@ -105,7 +105,12 @@ fn tool_names(messages: &[Value]) -> String {
             }
         }
     }
-    let shown = names.iter().take(TOOL_NAME_LIMIT).cloned().collect::<Vec<_>>().join(", ");
+    let shown = names
+        .iter()
+        .take(TOOL_NAME_LIMIT)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
     if names.len() > TOOL_NAME_LIMIT {
         format!("{shown}, +{} more", names.len() - TOOL_NAME_LIMIT)
     } else {
@@ -193,7 +198,10 @@ mod tests {
     fn conversation() -> Vec<Value> {
         vec![
             for_call("system", "You are Gyro. Keep changes small.".into()),
-            for_call("user", "Fix the parser bug and keep the tests green.".into()),
+            for_call(
+                "user",
+                "Fix the parser bug and keep the tests green.".into(),
+            ),
             json!({ "role": "assistant", "tool_calls": [{ "function": { "name": "workspace_read" } }] }),
             for_call("tool", "read output".repeat(4_000)),
             json!({ "role": "assistant", "tool_calls": [{ "function": { "name": "workspace_search" } }] }),
@@ -237,7 +245,10 @@ mod tests {
         let report = compact(&mut messages, MIN_COMPACT_BYTES);
         assert!(report.compacted());
         assert!(report.saved_bytes() > 0);
-        assert_eq!(report.before_bytes, report.before_bytes.max(report.after_bytes));
+        assert_eq!(
+            report.before_bytes,
+            report.before_bytes.max(report.after_bytes)
+        );
         assert_eq!(report.after_bytes, total_bytes(&messages));
         assert!(messages.len() < 9);
         // Anchors survive verbatim.
@@ -253,7 +264,10 @@ mod tests {
             if role(message) != "tool" {
                 continue;
             }
-            let parent = messages[..index].iter().rev().find(|parent| role(parent) != "tool");
+            let parent = messages[..index]
+                .iter()
+                .rev()
+                .find(|parent| role(parent) != "tool");
             assert_eq!(
                 parent.map(|parent| role(parent)),
                 Some("assistant"),
@@ -268,7 +282,10 @@ mod tests {
         for _ in 0..3 {
             compact(&mut messages, MIN_COMPACT_BYTES);
             assert_eq!(messages[0]["content"], "You are Gyro. Keep changes small.");
-            assert_eq!(messages[1]["content"], "Fix the parser bug and keep the tests green.");
+            assert_eq!(
+                messages[1]["content"],
+                "Fix the parser bug and keep the tests green."
+            );
         }
         let text = messages
             .iter()

@@ -245,6 +245,20 @@ impl ProviderHealthService {
                 data_home,
             ),
             ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
+            // `agy models` is the CLI's own readiness surface: it lists the
+            // plan's models when signed in and prints a sign-in error when not,
+            // so one probe answers "installed?" and "signed in?" together.
+            ProviderHealthKind::AntigravityCli => self.cli_check(
+                &CliProbe {
+                    provider_id: "antigravity",
+                    auth_owner: "google-antigravity",
+                    command: crate::antigravity_cli::PROGRAM,
+                    args: &["models"],
+                    login_command: Some(crate::antigravity_cli::PROGRAM),
+                    secret_storage: "Google account, held by the Antigravity CLI",
+                },
+                data_home,
+            ),
             ProviderHealthKind::CursorCli => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::Environment if request.provider_id == "xai" => Ok(
                 env_provider_health("xai", request.api_key_ref.as_deref(), &["XAI_API_KEY"]),
@@ -539,10 +553,10 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         ),
         "antigravity" => (
             "Google Antigravity",
-            "agy_acp_server.par",
-            vec![],
-            vec!["gemini-api-key"],
-            "Configure a Gemini API key in Gyro Settings",
+            crate::antigravity_cli::PROGRAM,
+            vec!["models"],
+            vec!["google-account"],
+            "agy",
         ),
         "cursor" => (
             "Cursor",

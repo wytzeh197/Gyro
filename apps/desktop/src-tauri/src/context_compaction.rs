@@ -62,6 +62,25 @@ pub(super) fn codex_context_compaction_activity(
     }
 }
 
+/// What a manual `/compact` on a provider without a resumable compacted
+/// session actually did to the transcript.
+///
+/// That rewrite is local: it either kept the history whole or replaced turns
+/// with a digest. It never paraphrased anything, so the row must not borrow the
+/// wording of the model compaction above.
+pub(super) fn local_compaction_detail(
+    compaction: &super::conversation_history::LocalCompaction,
+) -> String {
+    if compaction.condensed_turns == 0 {
+        "This chat already fit the model window, so no earlier message was dropped.".into()
+    } else {
+        format!(
+            "Condensed {} earlier messages into a short digest; their full text is no longer sent.",
+            compaction.condensed_turns
+        )
+    }
+}
+
 /// Set how full a model's window may get before a tool loop compacts itself.
 ///
 /// Its own command for the same reason budgets have one: the guard block is

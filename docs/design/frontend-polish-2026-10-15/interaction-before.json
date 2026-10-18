@@ -1,0 +1,69 @@
+{
+  "result": "FAIL",
+  "checks": [
+    {
+      "name": "ArrowDown enters first menu item",
+      "pass": true
+    },
+    {
+      "name": "Arrow navigation skips hidden and disabled items",
+      "pass": true
+    },
+    {
+      "name": "Escape returns focus to the trigger that opened the menu",
+      "pass": false
+    },
+    {
+      "name": "Command arrow shortcuts retain focus",
+      "pass": false
+    },
+    {
+      "name": "Search inputs retain text navigation",
+      "pass": true
+    },
+    {
+      "name": "Editable descendants retain text navigation",
+      "pass": false
+    },
+    {
+      "name": "Tab leaves the menu and dismisses it",
+      "pass": false
+    },
+    {
+      "name": "Arrow keys outside the menu do not steal focus",
+      "pass": false
+    },
+    {
+      "name": "Shift Tab leaves the wrapper without trapping focus",
+      "pass": true
+    },
+    {
+      "name": "Moving focus before the menu dismisses it",
+      "pass": false
+    },
+    {
+      "name": "Confirmation autofocus stays on its safe action",
+      "pass": true
+    },
+    {
+      "name": "Shift Tab wraps inside confirmation",
+      "pass": false
+    },
+    {
+      "name": "Tab wraps inside confirmation",
+      "pass": true
+    },
+    {
+      "name": "Escape dismisses project confirmation and restores focus",
+      "pass": false
+    },
+    {
+      "name": "Native dialog keeps initial input focus",
+      "pass": true
+    },
+    {
+      "name": "Native dialog Escape and focus restoration remain intact",
+      "pass": true
+    }
+  ]
+}

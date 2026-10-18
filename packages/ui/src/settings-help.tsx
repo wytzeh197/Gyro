@@ -14,8 +14,14 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I connect a provider?",
         answer:
-          "Open Settings → Models & Accounts to connect your account or configure a local model, then choose a model for your chat.",
+          "Open Settings → Models, Accounts & Limits to connect your account or configure a local model, then choose a model for your chat.",
         section: "providers",
+      },
+      {
+        title: "How do I control how hard Gyro works?",
+        answer:
+          "Open Settings → Efficiency to tune context efficiency, experiments, auto-compact, and parallel agents. Spend limits stay on Models, Accounts & Limits.",
+        section: "efficiency",
       },
       {
         title: "How do I start a task?",
@@ -61,8 +67,8 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I manage usage and budgets?",
         answer:
-          "Open Settings → Usage & Limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Estimated usage is labelled; billing and account allowances are managed by your provider.",
-        section: "usage-limits",
+          "Open Settings → Models, Accounts & Limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Estimated usage is labelled; billing and account allowances are managed by your provider.",
+        section: "providers",
       },
       {
         title: "Where does my data go?",
@@ -77,7 +83,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "Why is my provider not ready?",
         answer:
-          "Check Settings → Models & Accounts for connection status and available setup actions. Confirm that your provider is signed in and that the selected model is available.",
+          "Check Settings → Models, Accounts & Limits for connection status and available setup actions. Confirm that your provider is signed in and that the selected model is available.",
         section: "providers",
       },
       {
@@ -109,9 +115,9 @@ const resources = [
   ["Security policy", "SECURITY.md"],
 ] as const;
 const sectionLabels: Partial<Record<SettingsSectionId, string>> = {
-  providers: "Models & Accounts",
+  providers: "Models, Accounts & Limits",
+  efficiency: "Efficiency",
   permissions: "Permissions",
-  "usage-limits": "Usage & Limits",
   updates: "Updates",
   advanced: "Advanced",
 };
@@ -165,7 +171,7 @@ export function SettingsHelp({
       </div>
       {onSectionChange && (
         <nav className="gyro-help-shortcuts" aria-label="Settings shortcuts">
-          {(["providers", "permissions", "usage-limits"] as const).map(
+          {(["providers", "permissions", "advanced"] as const).map(
             (section) => (
               <button
                 type="button"

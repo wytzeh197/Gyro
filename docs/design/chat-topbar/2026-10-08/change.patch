@@ -1,0 +1,423 @@
+--- a/packages/ui/src/surfaces.tsx
++++ b/packages/ui/src/surfaces.tsx
+@@ -2182,6 +2182,16 @@
+         >
+           <PanelLeft size={17} strokeWidth={1.6} />
+         </button>
++        {!isIdeSurface && activeDestination === "workspace" ? (
++          <button
++            aria-label="New session"
++            onClick={onCreateSession}
++            title="New session"
++            type="button"
++          >
++            <SquarePen size={16} strokeWidth={1.5} />
++          </button>
++        ) : null}
+         {activeDestination === "settings" ? (
+           <button
+             onClick={() => {
+@@ -9368,7 +9378,9 @@
+                 className="gyro-thread-project-icon"
+                 size={16}
+               />
+-              <strong>{sessionTitle ?? "New chat"}</strong>
++              <strong title={sessionTitle ?? "New chat"}>
++                {sessionTitle ?? "New chat"}
++              </strong>
+             </div>
+             <div className="gyro-thread-topbar-actions">
+               <ChatSurfaceControls
+@@ -9531,15 +9543,22 @@
+             className="gyro-thread-project-icon"
+             size={16}
+           />
+-          <strong>{sessionTitle ?? "Gyro session"}</strong>
++          <strong title={sessionTitle ?? "Gyro session"}>
++            {sessionTitle ?? "Gyro session"}
++          </strong>
+           <ChatSurfaceControls
++            compactOverflowActions={isTiled}
+             isDockOpen={isCompanionPanel}
++            isEnvironmentOpen={isEnvironmentPopoverOpen}
+             isPlanOpen={activeRailPanel === "plan"}
+             isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+             modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
+             onToggleEnvironmentRail={onToggleEnvironmentRail}
++            onToggleDock={onReopenCompanionDock}
+             onTogglePlanPanel={onTogglePlanPanel}
+-            onToggleToolPanel={onToggleToolPanel}
++            onToggleToolPanel={
++              isToolPanelAvailable ? onToggleToolPanel : undefined
++            }
+             planItemCount={sessionPlan?.items.length ?? 0}
+             showClose={false}
+             showEnvironmentInOverflow={false}
+@@ -9958,6 +9977,7 @@
+  * bottom drawer, and the companion. The companion owns its own tool launcher.
+  */
+ function ChatSurfaceControls({
++  compactOverflowActions = false,
+   isDockOpen,
+   isEnvironmentOpen,
+   isPlanOpen,
+@@ -9977,6 +9997,7 @@
+   showToolPanel = false,
+   showToolPanelInOverflow = true,
+ }: {
++  compactOverflowActions?: boolean;
+   isDockOpen: boolean;
+   isEnvironmentOpen?: boolean;
+   isPlanOpen: boolean;
+@@ -10101,6 +10122,54 @@
+                 <span>Plan checklist</span>
+                 {planItemCount > 0 ? <small>{planItemCount}</small> : null}
+               </button>
++              {compactOverflowActions ? (
++                <>
++                  {onToggleEnvironmentRail ? (
++                    <button
++                      aria-pressed={isEnvironmentOpen === true}
++                      className="gyro-chat-header-compact-action"
++                      onClick={() => {
++                        setOpenMenu(undefined);
++                        onToggleEnvironmentRail();
++                      }}
++                      role="menuitem"
++                      type="button"
++                    >
++                      <SlidersHorizontal size={14} />
++                      <span>Environment</span>
++                    </button>
++                  ) : null}
++                  {!isDockOpen && onToggleToolPanel ? (
++                    <button
++                      aria-pressed={isToolPanelOpen}
++                      className="gyro-chat-header-compact-action"
++                      onClick={() => {
++                        setOpenMenu(undefined);
++                        onToggleToolPanel();
++                      }}
++                      role="menuitem"
++                      type="button"
++                    >
++                      <PanelBottom size={14} />
++                      <span>Bottom drawer</span>
++                    </button>
++                  ) : null}
++                  {!isDockOpen && onToggleDock ? (
++                    <button
++                      className="gyro-chat-header-compact-action"
++                      onClick={() => {
++                        setOpenMenu(undefined);
++                        onToggleDock();
++                      }}
++                      role="menuitem"
++                      type="button"
++                    >
++                      <PanelRight size={14} />
++                      <span>Show companion</span>
++                    </button>
++                  ) : null}
++                </>
++              ) : null}
+               {showToolPanelInOverflow ? (
+                 <button
+                   aria-pressed={isToolPanelOpen}
+--- a/packages/ui/src/styles.css
++++ b/packages/ui/src/styles.css
+@@ -25493,7 +25493,7 @@
+   > .gyro-chat-thread-topbar {
+   box-sizing: border-box;
+   min-height: 48px;
+-  padding-left: 212px;
++  padding-left: var(--gyro-chat-header-navigation-inset, 212px);
+ }
+ 
+ .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+@@ -25501,14 +25501,14 @@
+   .gyro-chat-grid-slot.is-window-origin
+   .gyro-chat-surface.is-thread
+   > .gyro-chat-thread-topbar {
+-  padding-left: max(212px, calc((100% - var(--gyro-chat-content-width)) / 2));
++  padding-left: var(--gyro-chat-header-navigation-inset, 212px);
+ }
+ 
+ @media (max-width: 720px) {
+   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+     .gyro-chat-surface.is-thread:not(.is-tiled)
+     > .gyro-chat-thread-topbar {
+-    padding-left: 200px;
++    padding-left: var(--gyro-chat-header-navigation-inset, 200px);
+   }
+ 
+   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+@@ -25516,7 +25516,7 @@
+     .gyro-chat-grid-slot.is-window-origin
+     .gyro-chat-surface.is-thread
+     > .gyro-chat-thread-topbar {
+-    padding-left: 200px;
++    padding-left: var(--gyro-chat-header-navigation-inset, 200px);
+   }
+ }
+ 
+@@ -42616,3 +42616,237 @@
+ :root .gyro-sidebar-explorer-row {
+   contain: layout paint;
+ }
++
++/* Chat window chrome: reserve the controls that are actually present, then
++   separate navigation from the conversation with one quiet hairline. Keep the
++   same measure when responsive navigation replaces the hidden-sidebar row. */
++:root .gyro-app-shell.is-thread-layout {
++  --gyro-chat-header-control-size: max(
++    24px,
++    calc(26px * var(--gyro-ui-scale, 1))
++  );
++  --gyro-chat-header-status-inset: 0px;
++  --gyro-chat-header-navigation-inset: calc(
++    90px + 2 * var(--gyro-chat-header-control-size) + 4px + 24px +
++      var(--gyro-chat-header-status-inset)
++  );
++}
++
++:root
++  .gyro-app-shell.is-thread-layout:has(
++    > .gyro-sidebar-restore-cluster .gyro-workspace-preparation
++  ) {
++  --gyro-chat-header-status-inset: calc(
++    var(--gyro-chat-header-control-size) + 4px
++  );
++}
++
++:root
++  .gyro-app-shell.is-thread-layout:has(.gyro-chat-grid.has-multiple-panes):has(
++    > .gyro-sidebar-restore-cluster
++      .gyro-workspace-preparation-button[data-status="ready"]
++  ) {
++  --gyro-chat-header-status-inset: 0px;
++}
++
++:root
++  .gyro-app-shell.is-thread-layout:has(.gyro-chat-grid.has-multiple-panes)
++  > .gyro-sidebar-restore-cluster
++  .gyro-workspace-preparation:has(
++    > .gyro-workspace-preparation-button[data-status="ready"]
++  ) {
++  display: none;
++}
++
++:root .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster {
++  align-items: center;
++  height: 48px;
++  min-height: 48px;
++  padding-block: 0;
++}
++
++:root .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster::after {
++  background: var(--gyro-border-soft);
++  content: "";
++  flex: 0 0 1px;
++  height: 16px;
++  margin-left: 7px;
++}
++
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-sidebar-restore-cluster
++  .gyro-sidebar-window-actions
++  > button,
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-sidebar-restore-cluster
++  .gyro-workspace-preparation-button,
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-chat-thread-topbar
++  .gyro-chat-surface-button {
++  box-sizing: border-box;
++  flex-shrink: 0;
++  height: var(--gyro-chat-header-control-size);
++  min-height: var(--gyro-chat-header-control-size);
++  min-width: var(--gyro-chat-header-control-size);
++  width: var(--gyro-chat-header-control-size);
++}
++
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-sidebar-restore-cluster
++  .gyro-workspace-preparation {
++  left: auto;
++  position: relative;
++  top: auto;
++}
++
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-sidebar-restore-cluster
++  .gyro-workspace-preparation-button {
++  padding: 0;
++}
++
++:root
++  .gyro-app-shell.is-thread-layout
++  .gyro-sidebar-restore-cluster
++  .gyro-workspace-preparation-button
++  > span:last-child {
++  display: none;
++}
++
++:root[data-theme]
++  .gyro-app-shell.is-thread-layout.is-sidebar-hidden
++  .gyro-chat-grid-slot.is-window-origin
++  > .gyro-chat-surface
++  > .gyro-chat-thread-topbar {
++  padding-left: var(--gyro-chat-header-navigation-inset);
++}
++
++:root
++  .gyro-app-shell
++  .gyro-chat-surface.is-tiled
++  .gyro-chat-thread-identity
++  > strong {
++  min-width: 0;
++}
++
++:root
++  .gyro-app-shell
++  .gyro-chat-companion-menu
++  > .gyro-chat-header-compact-action {
++  display: none;
++}
++
++:root
++  .gyro-app-shell
++  .gyro-chat-thread-topbar
++  .gyro-chat-companion-menu
++  > button
++  > span {
++  display: block;
++  max-width: none;
++}
++
++:root
++  .gyro-app-shell
++  .gyro-chat-surface.is-tiled
++  .gyro-chat-thread-identity
++  .gyro-chat-companion-menu.is-header {
++  left: auto;
++  max-width: calc(100cqi - 28px);
++  min-width: min(208px, calc(100cqi - 28px));
++  right: 0;
++}
++
++.gyro-chat-grid-slot {
++  container: gyro-chat-pane / inline-size;
++}
++
++/* The first split pane shares its header with window navigation. At this
++   width, optional actions stay available in More so the title can still read. */
++@container gyro-chat-pane (max-width: 440px) {
++  :root
++    .gyro-chat-grid-slot.is-window-origin
++    > .gyro-chat-surface.is-tiled
++    > .gyro-chat-thread-topbar:has(
++      .gyro-chat-thread-identity .gyro-chat-surface-menu-anchor
++    )
++    .gyro-thread-topbar-actions
++    .gyro-chat-surface-button:not([data-chat-pane-action="close"]) {
++    display: none;
++  }
++
++  :root
++    .gyro-chat-grid-slot.is-window-origin
++    > .gyro-chat-surface.is-tiled
++    .gyro-chat-companion-menu
++    > .gyro-chat-header-compact-action {
++    display: flex;
++  }
++}
++
++@container gyro-chat-pane (max-width: 360px) {
++  :root
++    .gyro-chat-grid-slot.is-window-origin
++    > .gyro-chat-surface.is-tiled
++    .gyro-thread-project-icon {
++    display: none;
++  }
++}
++
++@media (max-width: 780px) {
++  :root .gyro-app-shell.is-thread-layout,
++  :root
++    .gyro-app-shell.is-thread-layout:has(
++      > .gyro-sidebar-restore-cluster .gyro-workspace-preparation
++    ) {
++    --gyro-chat-header-status-inset: 0px;
++  }
++
++  :root .gyro-app-shell.is-thread-layout > .gyro-compact-navigation-toolbar {
++    gap: 4px;
++  }
++
++  :root
++    .gyro-app-shell.is-thread-layout
++    > .gyro-compact-navigation-toolbar::after {
++    background: var(--gyro-border-soft);
++    content: "";
++    flex: 0 0 1px;
++    height: 16px;
++    margin-left: 7px;
++  }
++
++  :root
++    .gyro-app-shell.is-thread-layout
++    > .gyro-compact-navigation-toolbar
++    > button {
++    background: transparent;
++    box-sizing: border-box;
++    height: var(--gyro-chat-header-control-size);
++    min-height: var(--gyro-chat-header-control-size);
++    min-width: var(--gyro-chat-header-control-size);
++    padding: 0;
++    width: var(--gyro-chat-header-control-size);
++  }
++
++  :root
++    .gyro-app-shell.is-thread-layout
++    > .gyro-compact-navigation-toolbar
++    > button:hover {
++    background: var(--gyro-control-hover);
++    color: var(--gyro-text);
++  }
++
++  :root[data-theme]
++    .gyro-app-shell.is-thread-layout
++    .gyro-chat-grid-slot.is-window-origin
++    > .gyro-chat-surface
++    > .gyro-chat-thread-topbar {
++    padding-left: var(--gyro-chat-header-navigation-inset);
++  }
++}
+--- a/apps/desktop/src/capture-fixtures.ts
++++ b/apps/desktop/src/capture-fixtures.ts
+@@ -98,7 +98,7 @@
+ 
+ const session = {
+   id: SESSION_ID,
+-  title: "Bound the sync queue retries",
++  title: parameters.get("title")?.trim() || "Bound the sync queue retries",
+   workspacePath: WORKSPACE,
+   workspaceIdentity: {
+     schema: "gyro.workspace.v2",
+--- a/scripts/check-workbench-ui.mjs
++++ b/scripts/check-workbench-ui.mjs
+@@ -726,7 +726,7 @@
+   "Chat headers should keep the title clean and move workspace context into the Environment control.",
+ );
+ expect(
+-  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong>\{sessionTitle \?\? "Gyro session"\}<\/strong>/.test(
++  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong title=\{sessionTitle \?\? "Gyro session"\}>\s*\{sessionTitle \?\? "Gyro session"\}\s*<\/strong>/.test(
+     surfaceSource,
+   ) &&
+     !surfaceSource.includes("items={threadWorkspaceItems}") &&

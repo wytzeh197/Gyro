@@ -9,6 +9,23 @@ pub const BUILD_FAST_MODEL_ID: &str = "grok-4.7-build-fast";
 ///
 /// Grok 4.5 stops at high. Grok 4.3, 4.6, 4.7, and 4.7 Fast also accept xhigh.
 /// An empty model id keeps xhigh so a default Grok 4.7 launch can still set it.
+pub fn bundled_reasoning_efforts(model_id: Option<&str>) -> &'static [&'static str] {
+    const BASE: &[&str] = &["low", "medium", "high"];
+    const WITH_XHIGH: &[&str] = &["low", "medium", "high", "xhigh"];
+    let model_id = model_id.map(str::trim).unwrap_or("");
+    if model_id.is_empty()
+        || model_id.eq_ignore_ascii_case("grok-4.3")
+        || model_id.eq_ignore_ascii_case("grok-4.6")
+        || model_id.eq_ignore_ascii_case("grok-4.7")
+        || model_id.eq_ignore_ascii_case(BUILD_FAST_MODEL_ID)
+    {
+        WITH_XHIGH
+    } else {
+        BASE
+    }
+}
+
+/// One level from [`bundled_reasoning_efforts`], or nothing when the model rejects it.
 pub fn reasoning_effort_arg(
     model_id: Option<&str>,
     reasoning_effort: Option<&str>,
@@ -17,15 +34,10 @@ pub fn reasoning_effort_arg(
     if effort.is_empty() {
         return None;
     }
-    let model_id = model_id.map(str::trim).unwrap_or_default();
-    let supported = matches!(effort.as_str(), "low" | "medium" | "high")
-        || (effort == "xhigh"
-            && (model_id.is_empty()
-                || matches!(
-                    model_id,
-                    "grok-4.3" | "grok-4.6" | "grok-4.7" | BUILD_FAST_MODEL_ID
-                )));
-    supported.then_some(effort)
+    bundled_reasoning_efforts(model_id)
+        .iter()
+        .any(|allowed| *allowed == effort)
+        .then_some(effort)
 }
 
 /// `grok agent stdio` argv. `validated_effort` is placed as given; callers that
@@ -87,6 +99,38 @@ mod tests {
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn bundled_menu_matches_the_picker() {
+        assert_eq!(
+            bundled_reasoning_efforts(Some("grok-4.7")),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(Some("grok-4.3")),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(Some("grok-4.6")),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(Some("Grok-4.7")),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(Some(BUILD_FAST_MODEL_ID)),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(None),
+            &["low", "medium", "high", "xhigh"][..]
+        );
+        assert_eq!(
+            bundled_reasoning_efforts(Some("grok-4.5")),
+            &["low", "medium", "high"][..]
+        );
     }
 
     #[test]

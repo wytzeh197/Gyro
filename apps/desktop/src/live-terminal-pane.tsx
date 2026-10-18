@@ -1,4 +1,4 @@
-import { useAppearance } from "@gyro-dev/ui";
+import { useAppearance, userIsTypingElsewhere } from "@gyro-dev/ui";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as XTermInstance } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
@@ -31,6 +31,8 @@ export function LiveTerminalPaneBody({
   const { scale, reduceMotion } = useAppearance();
   const appearanceRef = useRef({ scale, reduceMotion });
   appearanceRef.current = { scale, reduceMotion };
+  /** Whether this pane held the keyboard on the previous render. */
+  const wasActiveRef = useRef(isActive);
   const [selectionText, setSelectionText] = useState("");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermInstance | null>(null);
@@ -93,7 +95,10 @@ export function LiveTerminalPaneBody({
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
 
-        if (isActive) {
+        // Mounting is not a request for the keyboard: a command the model runs
+        // creates a pane while the user may be mid-sentence in the composer,
+        // and clicking into the composer never clears this pane's selection.
+        if (isActive && !userIsTypingElsewhere(host)) {
           terminal.focus();
         }
 
@@ -213,8 +218,18 @@ export function LiveTerminalPaneBody({
     if (terminalRef.current) {
       terminalRef.current.options.fontSize = 12 * scale;
       terminalRef.current.options.cursorBlink = !reduceMotion;
-      if (isActive) terminalRef.current.focus();
     }
+    // Selecting this pane is the user asking for the keyboard; a PTY status
+    // flip or an appearance change is not. Claim focus only on the
+    // inactive → active edge, and never over a text field the user typed in.
+    if (
+      isActive &&
+      !wasActiveRef.current &&
+      !userIsTypingElsewhere(hostRef.current)
+    ) {
+      terminalRef.current?.focus();
+    }
+    wasActiveRef.current = isActive;
     // Also report dimensions when a stopped pane gets a new live process.
     const timer = window.setTimeout(() => {
       try {

@@ -17,6 +17,8 @@ pub enum ProviderExecutionKind {
     ClaudeCode,
     KimiAcp,
     AcpCli,
+    /// Google Antigravity's official CLI (`agy`) in headless print mode.
+    AntigravityCli,
     OllamaApi,
     OpenAiCompatibleApi,
     ReadinessOnly,
@@ -38,6 +40,8 @@ pub enum ProviderHealthKind {
     Environment,
     CursorCli,
     OpenCodeCli,
+    /// Google Antigravity CLI: present on PATH and signed in with Google.
+    AntigravityCli,
     OllamaApi,
     OpenAiCompatibleApi,
 }
@@ -122,14 +126,17 @@ const PROVIDERS: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         id: "antigravity",
-        execution_kind: ProviderExecutionKind::AcpCli,
-        health_kind: ProviderHealthKind::KimiAcp,
-        runner: "antigravity-acp",
+        // Google's official CLI (`agy`) in headless stream-json mode. Its own
+        // Google sign-in replaces the former ACP bridge and Gemini API key.
+        execution_kind: ProviderExecutionKind::AntigravityCli,
+        health_kind: ProviderHealthKind::AntigravityCli,
+        runner: "agy",
         auth_owner: "google-antigravity",
-        supports_approvals: true,
+        supports_approvals: false,
         supports_images: true,
         supports_resume: true,
-        // No verified billed-token or plan-window contract yet.
+        // Token counts come from each run's `result` frame, but no plan or
+        // quota window is scraped, so this stays false like Gemini.
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
     },
@@ -307,13 +314,16 @@ mod tests {
         assert!(provider_is_executable("gemini"));
         assert!(provider_is_executable("antigravity"));
         let antigravity = provider_descriptor("antigravity").unwrap();
-        assert_eq!(antigravity.execution_kind, ProviderExecutionKind::AcpCli);
-        assert_eq!(antigravity.support_tier, ProviderSupportTier::Experimental);
-        assert!(
-            antigravity.supports_approvals
-                && antigravity.supports_images
-                && antigravity.supports_resume
+        assert_eq!(
+            antigravity.execution_kind,
+            ProviderExecutionKind::AntigravityCli
         );
+        assert_eq!(antigravity.runner, "agy");
+        assert_eq!(antigravity.support_tier, ProviderSupportTier::Experimental);
+        assert!(antigravity.supports_images && antigravity.supports_resume);
+        // A headless `agy` run has no channel for an approval dialog.
+        assert!(!antigravity.supports_approvals);
+        // Tokens are accounted per run; no plan window is scraped.
         assert!(!antigravity.supports_usage);
         for id in [
             "openai",

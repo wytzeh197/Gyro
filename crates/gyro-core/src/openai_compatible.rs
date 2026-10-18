@@ -124,6 +124,10 @@ pub struct OpenAiCompatChatResponse {
     /// Request-scoped counts and their provenance, including provider subsets.
     pub accounted_usage: UsageTokens,
     pub tool_calls: Vec<OpenAiCompatToolCall>,
+    /// The provider stopped at its output-token cap. `content` is the text the
+    /// model managed to write; tool calls from that answer were dropped because
+    /// their arguments may be cut off.
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -613,9 +617,16 @@ where
     if let Some(error) = terminal_error {
         return Err(error);
     }
+    let truncated = state.truncated;
     let tool_calls = state.tool_calls()?;
     if content.is_empty() && tool_calls.is_empty() {
-        return Err(anyhow!("the provider finished without a text response"));
+        return Err(if truncated {
+            anyhow!(
+                "the provider reached its output token limit before producing any text; no tool calls from this response were executed"
+            )
+        } else {
+            anyhow!("the provider finished without a text response")
+        });
     }
     Ok(OpenAiCompatChatResponse {
         content,
@@ -624,6 +635,7 @@ where
         output_tokens,
         accounted_usage,
         tool_calls,
+        truncated,
     })
 }
 
@@ -865,6 +877,7 @@ struct ChatAccumulator {
     content: String,
     reasoning_content: Option<String>,
     tool_calls: Vec<ToolCallAccumulator>,
+    truncated: bool,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     usage: WireUsage,
@@ -939,9 +952,13 @@ impl ChatAccumulator {
             // Even syntactically valid arguments in that answer are unsafe to
             // execute: later tool calls or parameters may have been cut off.
             match choice.finish_reason.as_deref() {
-                Some("length") => anyhow::bail!(
-                    "the provider reached its output token limit; the response is incomplete and no tool calls from this response were executed"
-                ),
+                Some("length") => {
+                    // A capped generation still carries usable text, so keep it
+                    // rather than failing the turn. Tool calls from that answer
+                    // are unsafe: later arguments may have been cut off.
+                    self.truncated = true;
+                    self.tool_calls.clear();
+                },
                 Some("content_filter") => anyhow::bail!(
                     "the provider filtered the response; no tool calls from this response were executed"
                 ),
@@ -960,7 +977,8 @@ impl ChatAccumulator {
                 on_delta(&content);
                 self.content.push_str(&content);
             }
-            for call in &message.tool_calls {
+            let keep_tool_calls = !self.truncated;
+            for call in message.tool_calls.iter().filter(|_| keep_tool_calls) {
                 let slot = self.slot_for(call)?;
                 if let Some(id) = call.id.as_deref().filter(|id| !id.trim().is_empty()) {
                     slot.id = Some(id.to_string());

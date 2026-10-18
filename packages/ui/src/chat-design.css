@@ -897,14 +897,21 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   :is(.gyro-composer-chip, .gyro-composer-tool) {
-  border-radius: var(--gyro-radius-sm);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+/* Icon-only tools carry a circular hover target; text chips stay softly rounded. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-composer-tool {
+  border-radius: 50%;
 }
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
-  .gyro-dictation-button.is-listening {
+  .gyro-dictation-button:is(.is-listening, .is-processing) {
   background: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 22%, transparent);
   color: var(--gyro-text);
 }

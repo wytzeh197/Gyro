@@ -1,0 +1,114 @@
+GYRO FRONTEND LAYOUT CHECK — 14 OCTOBER 2026
+
+RESULT
+Six observed clipping/overlap defects were repaired in five focused areas.
+Fresh rendered acceptance found no remaining unintended overlap in the checked
+states. This is representative frontend acceptance, not a claim that every
+possible content combination or native window interaction has been tested.
+
+FIXES AND BEFORE/AFTER EVIDENCE
+1. Provider details: compact card menus opened leftward behind the sidebar
+   boundary (13), and menus near the lower window edge hid their bottom actions
+   (41). Compact cards now align the menu into the page; disclosures measure
+   scroll bounds, flip when necessary and scroll when constrained. Existing
+   native details behavior, dismissal and provider actions remain. After: 20,
+   56–58. Lower-edge Ollama summary y481–511 now opens a complete menu y294–475.
+   Remeasurement preserves the menu's scroll position.
+2. Approval options: a four-pane grid clipped the heading and right side (15).
+   The popup now respects its pane and uses internal scrolling. After:21–22,
+   25–26. First pane popup x138–421/y136–278 stays inside its canvas; scrolling
+   exposes the complete Full access option. No permission was changed.
+3. Reasoning effort: the split-pane popup lost its left edge, Fast toggle and
+   slider thumb (17). Horizontal bounds now use the actual clipped pane and
+   account for CSS scaling. After: 23–24,27. The x130–430 pane contains the popup
+   at x142–408, with both slider endpoints visible.
+4. Workspace terminal: maximizing the drawer at large/comfortable size left
+   only 20px for editor chrome and covered its controls (37,39). The drawer now
+   reserves the actual tab/context/status heights. After:54–55. The measured
+   grid rows are 69.016/521.094/29.891px at 620px height; the whole editor toolbar
+   remains visible, and Restore returns to the prior drawer height.
+5. Commands: typing '/' in the production new-chat shell positioned the menu
+   at y-113, hiding the header and first commands (52). Slash and @context
+   completions now use pane/viewport bounds, scroll and preserve keyboard
+   selection. After: 60–67,69–70. The production slash menu fits y10–305; the
+   last command is visible inside its scroll list while focus stays in the
+   textarea. Very short panes use a deliberately bounded popup overlay within
+   that pane. First/last pane, both themes, keyboard and open-menu resize pass.
+
+AUDITED FLOW HEALTH
+- Welcome/new chat, compact composer, creation/setup menus: clear.
+- Active chat, long title, hidden sidebar and full-shell split header: clear.
+- Model/context/approval/effort menus: clear after the fixes above.
+- Environment and companion drawer/terminal: clear; overlays are intentional.
+- General/Appearance, provider cards/details, CLI profile forms: clear.
+- Workspace Explorer, Source Control, Monaco diff and terminal panel: clear
+  after drawer fix; maximize/restore verified.
+- Automations: long titles/results/history, edit form, scrolled footer and wide
+  layout: clear. The narrow list wraps heavily but controls remain separate.
+- Update failure/ready states and global search: clear; lists/sections scroll.
+
+COVERAGE AND METHOD
+Fresh IAB screenshots of the current production App/components with fixture
+data/transport, plus read-only DOM geometry and actual click/keyboard/scroll/
+resize interactions. Principal viewports: 860x620 and 1440x900; initial default
+chat also inspected at 1280x720. Large/comfortable UI, light/dark themes, long
+text and four approximately 300px-wide panes were exercised. This is not a full
+cross-product of every view, theme and size.
+
+Screenshots/ stores numbered before/after and unaffected-state captures with
+adjacent diagnostic JSON. The JSON overlap lists include underlying UI covered
+by intentional popups and clipped descendants of closed native details. They
+are diagnostics, not a count of visual defects; screenshots and clipping
+ancestor bounds determined the findings. Capture 19 was an HMR reset to the
+wrong fixture state and is excluded. Capture 68 is the fixture's empty context
+case; it does not prove a populated split-pane context menu.
+
+CHECKS
+Current recursive checks/typechecks, focused completion geometry regression,
+workbench/token smoke, composer-context guard, surface-boundary guard and
+changed helper-file formatting are recorded in logs/. Git diff --check passes.
+The completion smoke regression covers 36 scale/pane/anchor combinations plus
+the compact production placement example; the separate pure run covers 38
+cases. Existing broader preflight quality failures remain documented in the
+earlier tester-preflight report; their thresholds were not raised.
+The architecture guard was rechecked and remains red at the same pre-existing
+App.tsx ceiling: 20,338 lines versus 20,329. lib.rs also retains its prior excess.
+The new frontend fixes did not edit either file or the size-baseline registry.
+
+LIMITS
+The Mac is still locked. Installed-app window chrome/material, actual native
+window resize/host clipping, native mouse input and clean-user installation
+remain pending. Browser/fixture screenshots do not establish that acceptance.
+One development HMR createRoot warning was observed; no conclusion about the
+packaged app follows from that fixture warning. No full accessibility
+compliance claim is made.
+
+ARTIFACT
+The optimized Apple Silicon local ad-hoc app/DMG was rebuilt with these fixes.
+Final source digest remained unchanged across the build (703 source/input files):
+ab016019059603d324f0bf32bf2d329e3c9568970797094c8e28832eeb9f7560
+DMG: /Users/wytze/Gyro/target/release/bundle/dmg/Gyro_0.1.0-alpha.49.7_aarch64.dmg
+SHA256: 9e556c0c50def32f605619ddebaa444e09d52401f5b9b60cfe68d3efc55631e1
+Size: 47,220,098 bytes.
+
+Checksum, hdiutil integrity, read-only mounted contents/Applications shortcut,
+version/minimum macOS14/arm64 metadata, sealed strict ad-hoc signatures and
+hardened runtime pass. The optimized signed packaged Code Mode worker executes
+its protocol and returns [2,4,6]. distribution/summary.json and adjacent logs
+and manifests retain the exact evidence. The formatting-only final rebuild
+produced identical frontend dist bytes and an unchanged final source snapshot.
+
+This is the current local candidate and supersedes the earlier preflight DMG.
+It is ad-hoc signed, not Developer ID signed or notarized. No signed updater or
+Intel artifact was produced; those acceptance paths remain pending if offered.
+The temporary packaging override only disabled updater artifact generation;
+the checked-in updater configuration was preserved.
+Nothing was committed, pushed, published or installed by this frontend audit.
+
+PRESERVATION
+All 9,154 files from the original dirty/untracked snapshot remain present.
+9,151 retain identical hashes. Only the original styles.css, surfaces.tsx and
+workbench guard were deliberately changed across this audit and the preceding
+preflight. Newly modified helpers contain the scoped fixes. The existing
+installed Gyro PID 76440 was preserved; QA stayed in local browser fixtures.
+The temporary dev server was stopped and browser viewport override reset.

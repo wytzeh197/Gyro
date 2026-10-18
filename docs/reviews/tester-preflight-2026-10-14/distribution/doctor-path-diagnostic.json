@@ -1,0 +1,57 @@
+[
+  {
+    "label": "resolved-git",
+    "command": "git",
+    "status": 0,
+    "stdout": "git version 2.50.1 (Apple Git-155)\n",
+    "stderr": ""
+  },
+  {
+    "label": "absolute-git",
+    "command": "/usr/bin/git",
+    "status": 0,
+    "stdout": "git version 2.50.1 (Apple Git-155)\n",
+    "stderr": ""
+  },
+  {
+    "label": "alias-copy-doctor",
+    "command": "/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-doctor-path-diag-8vRK43/gyro",
+    "status": 3,
+    "git": {
+      "id": "git",
+      "label": "Git",
+      "status": "fail",
+      "message": "start git",
+      "required": true,
+      "next": "install Git and confirm `git --version` succeeds"
+    },
+    "stderr": ""
+  },
+  {
+    "label": "canonical-copy-doctor",
+    "command": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-doctor-path-diag-8vRK43/gyro",
+    "status": 0,
+    "git": {
+      "id": "git",
+      "label": "Git",
+      "status": "pass",
+      "message": "git version 2.50.1 (Apple Git-155)",
+      "required": true
+    },
+    "stderr": ""
+  },
+  {
+    "label": "symlink-copy-doctor",
+    "command": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-doctor-path-diag-8vRK43/gyro-link",
+    "status": 3,
+    "git": {
+      "id": "git",
+      "label": "Git",
+      "status": "fail",
+      "message": "start git",
+      "required": true,
+      "next": "install Git and confirm `git --version` succeeds"
+    },
+    "stderr": ""
+  }
+]

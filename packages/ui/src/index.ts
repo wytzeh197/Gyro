@@ -1,7 +1,13 @@
 export { applyGoogleModelDiscovery } from "./google-models";
 export type { GoogleModelDiscovery } from "./google-models";
-export { applyModelContextWindows, liveModelContextTokens } from "./live-model-context";
-export type { ModelContextWindow, LiveModelContext } from "./live-model-context";
+export {
+  applyModelContextWindows,
+  liveModelContextTokens,
+} from "./live-model-context";
+export type {
+  ModelContextWindow,
+  LiveModelContext,
+} from "./live-model-context";
 export { EfficiencyDetails } from "./efficiency-details";
 export { CodeModeActivityCard } from "./code-mode-card";
 export { ChatArtifacts } from "./chat-artifacts";
@@ -12,6 +18,21 @@ export { ComposerEffortSelector } from "./composer-effort-selector";
 export { MotionDisclosure } from "./motion-disclosure";
 export { UsageCard } from "./settings-presentation";
 export { useDialogDismiss } from "./use-dialog-dismiss";
+export {
+  focusedElement,
+  isTextInput,
+  surfaceOwnsFocus,
+  userIsTypingElsewhere,
+} from "./focus-intent";
+export {
+  externalLinkIntent,
+  openExternalLink,
+  openReplyLink,
+  registerExternalLinkOpener,
+  replyLinkHint,
+  replyLinkMark,
+} from "./external-links";
+export type { ExternalLinkOpener, LinkClickIntent, ReplyLinkMark } from "./external-links";
 export { ChatFileActionsContext } from "./chat-file-card";
 export { CliSessionList } from "./cli-session-list";
 export { AppearanceContext, useAppearance } from "./appearance-context";
@@ -43,6 +64,7 @@ export type {
   CommandProfile,
   CustomTaskDraft,
   AppDestination,
+  LaunchView,
   BrowserHostBounds,
   BrowserPreview,
   BrowserPreviewCapture,
@@ -332,6 +354,7 @@ export {
   EDITOR_RECOVERY_MAX_BUFFER_CHARS,
   EDITOR_RECOVERY_MAX_TOTAL_CHARS,
   workbenchReducer,
+  applyLaunchView,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
   chatProjectKey,
@@ -717,10 +740,31 @@ export type { CalendarSchedule } from "./types.ts";
 
 export { ComposerContextCandidates } from "./composer-context.ts";
 
-export { isSubagentLive, subagentElapsedMs, subagentTokensLabel, sortedSubagents, pendingSubagentApprovals, mergeSubagentSnapshot, openSubagentTab, closeSubagentTab, nativeSubagentParents } from "./subagents";
-export type { SubagentSnapshot, SubagentSurfaceState, SubagentTabState } from "./subagents";
-export { sessionApprovalCounts, sessionQuestionCounts } from "./session-approvals";
+export {
+  isSubagentLive,
+  subagentElapsedMs,
+  subagentTokensLabel,
+  sortedSubagents,
+  pendingSubagentApprovals,
+  mergeSubagentSnapshot,
+  openSubagentTab,
+  closeSubagentTab,
+  nativeSubagentParents,
+} from "./subagents";
+export type {
+  SubagentSnapshot,
+  SubagentSurfaceState,
+  SubagentTabState,
+} from "./subagents";
+export {
+  sessionApprovalCounts,
+  sessionQuestionCounts,
+} from "./session-approvals";
 
-export { WorkspaceRenameDialog, WorkspaceEditBar, type RenamePreviewFile } from "./workspace-rename";
+export {
+  WorkspaceRenameDialog,
+  WorkspaceEditBar,
+  type RenamePreviewFile,
+} from "./workspace-rename";
 
 export { currentChatDrag } from "./chat-session-drag";

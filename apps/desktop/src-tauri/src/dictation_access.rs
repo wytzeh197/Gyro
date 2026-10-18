@@ -75,10 +75,14 @@ fn speech_label(status: isize) -> &'static str {
     }
 }
 
+/// Dictation may run on Apple's servers when the offline model is missing, so
+/// these codes mean the recognition service could not be reached.
+const NETWORK_NEEDED: &str = "Dictation needs a network connection.";
+
 fn speech_failure(code: isize) -> &'static str {
     match code {
         1110 => "No speech was heard.",
-        201 | 1100 | 1101 | 1107 | 1700 => "Dictation needs a network connection.",
+        201 | 1100 | 1101 | 1107 | 1700 => NETWORK_NEEDED,
         _ => "Dictation stopped.",
     }
 }
@@ -389,6 +393,23 @@ fn owned_new(
         .ok_or_else(|| "Dictation is not available in this window.".to_string())
 }
 
+/// Whether the offline dictation model for the recognizer's locale is
+/// installed. Dictation prefers it but no longer requires it.
+#[cfg(target_os = "macos")]
+fn supports_on_device(recognizer: &objc2::runtime::AnyObject) -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::Bool;
+
+    let responds: Bool = unsafe {
+        msg_send![recognizer, respondsToSelector: objc2::sel!(supportsOnDeviceRecognition)]
+    };
+    if !responds.as_bool() {
+        return false;
+    }
+    let supported: Bool = unsafe { msg_send![recognizer, supportsOnDeviceRecognition] };
+    supported.as_bool()
+}
+
 #[cfg(target_os = "macos")]
 fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
     use block2::RcBlock;
@@ -403,6 +424,9 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
     if !available.as_bool() {
         return Err(unavailable.to_string());
     }
+    // Prefer on-device recognition; macOS falls back to Apple's dictation
+    // service when the offline model for this locale is not installed.
+    let on_device = supports_on_device(&recognizer);
     let mut queue = None;
     if let Some(queue_class) = AnyClass::get(c"NSOperationQueue") {
         if let Ok(speech_queue) = owned_new(queue_class) {
@@ -417,6 +441,12 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
     let request = owned_new(request_class)?;
     let _: () = unsafe {
         msg_send![&*request, setShouldReportPartialResults: Bool::YES]
+    };
+    // Pin the request to on-device recognition only when the offline model is
+    // installed; otherwise let Apple's dictation service transcribe the audio.
+    let requires_on_device = if on_device { Bool::YES } else { Bool::NO };
+    let _: () = unsafe {
+        msg_send![&*request, setRequiresOnDeviceRecognition: requires_on_device]
     };
 
     let engine_class = unsafe { &*std::ptr::addr_of!(AV_AUDIO_ENGINE) };
@@ -627,7 +657,7 @@ fn emit_update(app: &AppHandle, kind: &'static str, text: String) {
 mod tests {
     use super::{
         access_error, av_authorization_label, speech_authorization_label, speech_failure,
-        speech_label, DictationAccess,
+        speech_label, DictationAccess, NETWORK_NEEDED,
     };
 
     #[test]
@@ -649,10 +679,8 @@ mod tests {
         assert_eq!(speech_authorization_label(1), "denied");
         assert_eq!(speech_authorization_label(2), "restricted");
         assert_eq!(speech_failure(1110), "No speech was heard.");
-        assert_eq!(
-            speech_failure(1101),
-            "Dictation needs a network connection."
-        );
+        assert_eq!(speech_failure(1101), NETWORK_NEEDED);
+        assert_eq!(speech_failure(203), "Dictation stopped.");
     }
 
     #[test]

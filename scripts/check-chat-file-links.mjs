@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import {
+  bareChatUrl,
+  chatBareUrlPattern,
   linkedChatFile,
   parseChatMarkdownLink,
   chatInlineTokenPattern,
   isCitedImageTarget,
   markdownImageTargets,
 } from "../packages/ui/src/chat-file-links.ts";
+import { replyLinkMark } from "../packages/ui/src/external-links.ts";
 assert.deepEqual(
   linkedChatFile("Launch demo", "/Users/me/Screen Recording (2).mov"),
   {
@@ -74,6 +77,33 @@ const cited =
   "![Composer with the microphone left of Send](images/composer.png)\n\n`images/composer.png`";
 assert.equal(markdownImageTargets(cited).has("images/composer.png"), true);
 assert.equal(markdownImageTargets("see `images/other.png`").size, 0);
+// A bare URL in a reply is a link, not grey text the user has to copy.
+assert.equal(bareChatUrl("https://gyro.dev"), "https://gyro.dev");
+assert.equal(
+  bareChatUrl("https://gyro.dev/docs)."),
+  "https://gyro.dev/docs",
+  "a sentence's closing bracket must not become part of the href",
+);
+assert.equal(
+  bareChatUrl("https://example.com/a_(b)"),
+  "https://example.com/a_(b)",
+  "brackets the URL opened itself stay",
+);
+assert.equal(bareChatUrl("https://gyro.dev."), "https://gyro.dev");
+assert.equal(bareChatUrl("https://"), undefined);
+assert.equal(bareChatUrl("javascript:alert(1)"), undefined);
+assert.deepEqual(
+  "see https://gyro.dev now".split(chatBareUrlPattern).filter(Boolean),
+  ["see ", "https://gyro.dev", " now"],
+);
+// Only hosts Gyro can name with confidence earn a mark; a lookalike host or a
+// non-web scheme must stay a plain link instead of borrowing the logo.
+assert.equal(replyLinkMark("https://github.com/gyro-dev/gyro/pull/12"), "github");
+assert.equal(replyLinkMark("https://gist.github.com/abc"), "github");
+assert.equal(replyLinkMark("https://www.github.com/x/y"), "github");
+assert.equal(replyLinkMark("https://example.com/github.com"), undefined);
+assert.equal(replyLinkMark("https://notgithub.com/x"), undefined);
+assert.equal(replyLinkMark("mailto:hi@gyro.dev"), undefined);
 console.log(
-  "Chat file link checks passed: media, documents, local paths, encoded names, nested parentheses, and unsafe schemes.",
+  "Chat file link checks passed: media, documents, local paths, encoded names, nested parentheses, unsafe schemes, and host marks.",
 );

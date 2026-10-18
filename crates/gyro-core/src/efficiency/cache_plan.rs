@@ -319,6 +319,9 @@ mod tests {
         ];
         assert_eq!(stable_prefix_len(&previous, &current), 1);
         assert!(!appended_only(&previous, &current));
-        assert_eq!(cacheable_bytes(&previous, &current), previous[0].to_string().len());
+        assert_eq!(
+            cacheable_bytes(&previous, &current),
+            previous[0].to_string().len()
+        );
     }
 }

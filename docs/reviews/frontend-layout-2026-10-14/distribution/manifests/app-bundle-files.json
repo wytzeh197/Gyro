@@ -1,0 +1,11 @@
+{
+  "digest": "bf3848e7174ab223733b279005980ca7f3830ac0392341cb953908fe786f5653",
+  "files": {
+    "Contents/Info.plist": "0b831d563105b91503421f58cf4fc41b4186472b9ee1911a275e7c1b827f1132",
+    "Contents/MacOS/gyro-codemode": "d509409a977287453235a1fca4133bffb29cdbe37fd6501a5ea0093172627bf7",
+    "Contents/MacOS/gyro-desktop": "175e09ae66c17fb6ef9abae361e08a487c62b8e8277fcc203c8a6f6a69b5a36b",
+    "Contents/Resources/_up_/_up_/_up_/packages/codemode/THIRD_PARTY_NOTICES.md": "d09a3c2b26467e997d3593a5e42aaa63bb18c5d44c034ebf0c6fcbf316b88069",
+    "Contents/Resources/icon.icns": "6fe0ebc3c18d360557772733a15beae8507f2375cbdddf3f4c30e106d9873793",
+    "Contents/_CodeSignature/CodeResources": "805613690338fdcc62b929789afafefd854878a25c3fcf09287d78be5badf26c"
+  }
+}

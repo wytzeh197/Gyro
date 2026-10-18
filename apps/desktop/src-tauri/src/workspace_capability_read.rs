@@ -31,26 +31,33 @@ pub(super) fn execute(
     let data = if !ranged {
         read_disk_file_data(&workspace, &path)?
     } else {
-        let context = app
-            .state::<CapabilityIdeEvidenceManager>()
-            .by_workspace
-            .lock()
-            .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-            .get(&bound.workspace_key)
-            .cloned()
-            .unwrap_or_else(|| bound.workspace_context.clone());
-        let buffer = context.buffers.iter().find(|buffer| {
-            buffer.get("path").and_then(Value::as_str) == Some(&path)
-                && buffer.get("content").and_then(Value::as_str).is_some()
-        });
+        // Copy only the buffer and selection this read needs; a snapshot holds
+        // the text of every open buffer, so cloning it copies the whole IDE.
+        let (buffer, context_selection, context_revision) =
+            with_ide_evidence(app, bound, |context| {
+                let buffer = context
+                    .buffers
+                    .iter()
+                    .find(|buffer| {
+                        buffer.get("path").and_then(Value::as_str) == Some(&path)
+                            && buffer.get("content").and_then(Value::as_str).is_some()
+                    })
+                    .cloned();
+                let selection = context
+                    .selection
+                    .as_ref()
+                    .filter(|selection| {
+                        selection.get("path").and_then(Value::as_str) == Some(&path)
+                            && selection.get("text").and_then(Value::as_str).is_some()
+                    })
+                    .cloned();
+                Ok((buffer, selection, context.revision))
+            })?;
         let selection_only = arguments
             .get("selectionOnly")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let selection = context.selection.as_ref().filter(|selection| {
-            selection.get("path").and_then(Value::as_str) == Some(&path)
-                && selection.get("text").and_then(Value::as_str).is_some()
-        });
+        let selection = context_selection;
         let (content, hash, disk_hash, dirty, source) = if editor_read && selection_only {
             let selection = selection.ok_or_else(|| {
                 anyhow::anyhow!("No text selection is available for this editor file")
@@ -68,7 +75,7 @@ pub(super) fn execute(
                 "editor-selection",
             )
         } else if editor_read && buffer.is_some() {
-            let buffer = buffer.unwrap();
+            let buffer = buffer.as_ref().expect("checked above");
             if buffer["truncated"].as_bool().unwrap_or(false) {
                 anyhow::bail!("Editor buffer exceeds the live-text limit; select a smaller range and use selectionOnly");
             }
@@ -97,9 +104,10 @@ pub(super) fn execute(
         data["dirty"] = json!(dirty);
         data["contentHash"] = hash;
         data["diskHash"] = disk_hash;
-        data["contextRevision"] = json!(context.revision);
+        data["contextRevision"] = json!(context_revision);
         if editor_read && !selection_only {
             data["documentVersion"] = buffer
+                .as_ref()
                 .and_then(|item| item.get("documentVersion"))
                 .cloned()
                 .unwrap_or(Value::Null);

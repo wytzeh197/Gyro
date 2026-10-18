@@ -8,7 +8,6 @@
 @import "./cli-view.css";
 @import "./window-material.css";
 
-
 .gyro-surface-row {
   align-items: center;
   background: transparent;
@@ -67,7 +66,8 @@
   gap: calc(7px * var(--gyro-ui-scale, 1));
   grid-template-columns: 16px minmax(0, 1fr) auto;
   min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1)) calc(6px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(6px * var(--gyro-ui-scale, 1));
   text-align: left;
   width: 100%;
 }
@@ -197,14 +197,16 @@
   gap: calc(7px * var(--gyro-ui-scale, 1));
   grid-template-columns: 16px minmax(0, 1fr) auto;
   min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1)) calc(6px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(6px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-thread {
   gap: calc(8px * var(--gyro-ui-scale, 1));
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-thread.is-indent {
@@ -390,7 +392,8 @@
   gap: calc(8px * var(--gyro-ui-scale, 1));
   grid-template-columns: minmax(0, 1fr);
   min-height: calc(28px * var(--gyro-ui-scale, 1));
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
   text-align: left;
   transition: padding-right var(--gyro-premium-motion) var(--gyro-premium-ease);
   width: 100%;
@@ -1250,7 +1253,11 @@ button.gyro-account-menu-row:hover {
 .gyro-chat-prompt h1 {
   color: var(--gyro-hero-heading);
   font-family: var(--gyro-font-display);
-  font-size: clamp(calc(24px * var(--gyro-ui-scale, 1)), 2vw, calc(30px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(24px * var(--gyro-ui-scale, 1)),
+    2vw,
+    calc(30px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -1534,7 +1541,8 @@ button.gyro-account-menu-row:hover {
   display: flex;
   gap: calc(7px * var(--gyro-ui-scale, 1));
   min-height: calc(42px * var(--gyro-ui-scale, 1));
-  padding: calc(8px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(8px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-composer-spacer {
@@ -1579,9 +1587,125 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-muted);
 }
 
+.gyro-dictation-button {
+  position: relative;
+}
+
 .gyro-dictation-button.is-listening {
   background: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 22%, transparent);
   color: var(--gyro-text);
+}
+
+/* The listening dot rides over the microphone glyph, never below the composer. */
+.gyro-dictation-badge {
+  align-items: center;
+  background: var(--gyro-accent, #6ea8fe);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--gyro-surface, #14171c) 70%, transparent);
+  color: #fff;
+  display: none;
+  height: calc(14px * var(--gyro-ui-scale, 1));
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  right: calc(1px * var(--gyro-ui-scale, 1));
+  top: calc(1px * var(--gyro-ui-scale, 1));
+  width: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-dictation-button.is-listening .gyro-dictation-badge,
+.gyro-dictation-button.is-processing .gyro-dictation-badge {
+  display: inline-flex;
+}
+
+.gyro-dictation-wave {
+  align-items: center;
+  display: inline-flex;
+  gap: calc(1.5px * var(--gyro-ui-scale, 1));
+  height: 100%;
+  justify-content: center;
+}
+
+.gyro-dictation-wave > span {
+  animation: gyro-dictation-beat 900ms ease-in-out infinite;
+  background: currentColor;
+  border-radius: 999px;
+  display: block;
+  height: calc(5px * var(--gyro-ui-scale, 1));
+  width: calc(2px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-dictation-wave > span:nth-child(2) {
+  animation-delay: 130ms;
+}
+
+.gyro-dictation-wave > span:nth-child(3) {
+  animation-delay: 260ms;
+}
+
+/* Hovering the live badge offers the stop square instead of the wave. */
+.gyro-dictation-stop {
+  display: none;
+}
+
+.gyro-dictation-button.is-listening:hover .gyro-dictation-wave,
+.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-wave,
+.gyro-dictation-button.is-processing .gyro-dictation-wave {
+  display: none;
+}
+
+.gyro-dictation-button.is-listening:hover .gyro-dictation-stop,
+.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-stop {
+  display: block;
+}
+
+.gyro-dictation-button.is-processing .gyro-dictation-stop {
+  display: none;
+}
+
+.gyro-dictation-spinner {
+  animation: gyro-dictation-spin 720ms linear infinite;
+  border-radius: 999px;
+  border: calc(1.5px * var(--gyro-ui-scale, 1)) solid
+    color-mix(in srgb, currentColor 32%, transparent);
+  border-top-color: currentColor;
+  display: none;
+  height: calc(8px * var(--gyro-ui-scale, 1));
+  width: calc(8px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-dictation-button.is-processing .gyro-dictation-spinner {
+  display: block;
+}
+
+@keyframes gyro-dictation-beat {
+  0%,
+  100% {
+    height: calc(2px * var(--gyro-ui-scale, 1));
+    opacity: 0.7;
+  }
+
+  50% {
+    height: calc(9px * var(--gyro-ui-scale, 1));
+    opacity: 1;
+  }
+}
+
+@keyframes gyro-dictation-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-dictation-wave > span {
+    animation: none;
+  }
+
+  .gyro-dictation-spinner {
+    animation-duration: 1.6s;
+  }
 }
 
 .gyro-dictation-status {
@@ -2481,7 +2605,8 @@ button.gyro-account-menu-row:hover {
   gap: calc(12px * var(--gyro-ui-scale, 1));
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: calc(52px * var(--gyro-ui-scale, 1));
-  padding: calc(10px * var(--gyro-ui-scale, 1)) calc(12px * var(--gyro-ui-scale, 1));
+  padding: calc(10px * var(--gyro-ui-scale, 1))
+    calc(12px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-row strong,
@@ -4184,7 +4309,8 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-browser-preview.is-capturing-frame .gyro-browser-page::after {
-  animation: gyro-browser-capture-flash calc(480ms * var(--gyro-motion-factor, 1)) ease-out;
+  animation: gyro-browser-capture-flash
+    calc(480ms * var(--gyro-motion-factor, 1)) ease-out;
   background: color-mix(in srgb, var(--gyro-text) 18%, transparent);
   content: "";
   inset: 0;
@@ -5934,7 +6060,11 @@ textarea:focus-visible {
 
 .gyro-chat-prompt h1 {
   font-family: var(--gyro-font-display);
-  font-size: clamp(calc(25px * var(--gyro-ui-scale, 1)), 2vw, calc(32px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(25px * var(--gyro-ui-scale, 1)),
+    2vw,
+    calc(32px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.08;
@@ -7430,7 +7560,8 @@ textarea:focus-visible {
   border-radius: var(--gyro-radius-sm);
   justify-items: stretch;
   min-height: calc(44px * var(--gyro-ui-scale, 1));
-  padding: calc(8px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(8px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
   text-align: left;
 }
 
@@ -7544,7 +7675,8 @@ textarea:focus-visible {
 }
 
 .gyro-command-palette.is-global-search {
-  animation: gyro-global-search-in calc(160ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1);
+  animation: gyro-global-search-in calc(160ms * var(--gyro-motion-factor, 1))
+    cubic-bezier(0.22, 1, 0.36, 1);
   background: color-mix(in srgb, var(--gyro-pane) 97%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-xl);
@@ -9015,7 +9147,11 @@ textarea:focus-visible {
 .gyro-ide-project-empty h1 {
   color: var(--gyro-text);
   font-family: var(--gyro-font-display);
-  font-size: clamp(calc(24px * var(--gyro-ui-scale, 1)), 2.5vw, calc(28px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(24px * var(--gyro-ui-scale, 1)),
+    2.5vw,
+    calc(28px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 500;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -9110,7 +9246,8 @@ textarea:focus-visible {
   justify-self: stretch;
   max-width: none;
   min-width: 0;
-  padding: calc(8px * var(--gyro-ui-scale, 1)) 0 calc(12px * var(--gyro-ui-scale, 1));
+  padding: calc(8px * var(--gyro-ui-scale, 1)) 0
+    calc(12px * var(--gyro-ui-scale, 1));
   width: 100%;
 }
 
@@ -10023,7 +10160,8 @@ textarea:focus-visible {
 }
 
 .gyro-sidebar-explorer-row {
-  animation: gyro-explorer-row-enter calc(130ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-explorer-row-enter calc(130ms * var(--gyro-motion-factor, 1))
+    var(--gyro-premium-ease) both;
 }
 
 @keyframes gyro-explorer-row-enter {
@@ -10511,7 +10649,11 @@ textarea:focus-visible {
 
 .gyro-chat-start h1 {
   color: #f0eee9;
-  font-size: clamp(calc(28px * var(--gyro-ui-scale, 1)), 1.9vw, calc(34px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(28px * var(--gyro-ui-scale, 1)),
+    1.9vw,
+    calc(34px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 520;
   letter-spacing: 0;
   line-height: 1.12;
@@ -10556,7 +10698,11 @@ textarea:focus-visible {
 }
 
 .gyro-chat-start.is-mission-docked h1 {
-  font-size: clamp(calc(20px * var(--gyro-ui-scale, 1)), 1.5vw, calc(26px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(20px * var(--gyro-ui-scale, 1)),
+    1.5vw,
+    calc(26px * var(--gyro-ui-scale, 1))
+  );
 }
 
 .gyro-chat-surface.is-empty.has-mission-workers {
@@ -10835,7 +10981,8 @@ textarea:focus-visible {
   border-top: 0;
   gap: calc(5px * var(--gyro-ui-scale, 1));
   min-height: calc(36px * var(--gyro-ui-scale, 1));
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-start .gyro-composer-bar {
@@ -10847,7 +10994,8 @@ textarea:focus-visible {
   gap: calc(9px * var(--gyro-ui-scale, 1));
   margin-bottom: -8px;
   min-height: calc(46px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(13px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(13px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
   position: relative;
   z-index: 2;
 }
@@ -10912,7 +11060,8 @@ textarea:focus-visible {
   gap: calc(12px * var(--gyro-ui-scale, 1));
   margin: 0 14px;
   min-height: calc(44px * var(--gyro-ui-scale, 1));
-  padding: calc(8px * var(--gyro-ui-scale, 1)) calc(14px * var(--gyro-ui-scale, 1)) 0;
+  padding: calc(8px * var(--gyro-ui-scale, 1))
+    calc(14px * var(--gyro-ui-scale, 1)) 0;
   position: relative;
   z-index: 1;
 }
@@ -10939,7 +11088,8 @@ textarea:focus-visible {
 }
 
 .gyro-composer-reveal {
-  animation: gyro-composer-reveal calc(180ms * var(--gyro-motion-factor, 1)) ease both;
+  animation: gyro-composer-reveal calc(180ms * var(--gyro-motion-factor, 1))
+    ease both;
 }
 
 @keyframes gyro-composer-reveal {
@@ -11833,7 +11983,8 @@ textarea:focus-visible {
 }
 
 .gyro-chat-thread-canvas {
-  animation: gyro-thread-enter calc(180ms * var(--gyro-motion-factor, 1)) ease both;
+  animation: gyro-thread-enter calc(180ms * var(--gyro-motion-factor, 1)) ease
+    both;
 }
 
 @keyframes gyro-thread-enter {
@@ -12425,7 +12576,8 @@ textarea:focus-visible {
     min-height: calc(38px * var(--gyro-ui-scale, 1));
     overflow-x: auto;
     overflow-y: hidden;
-    padding: calc(5px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+    padding: calc(5px * var(--gyro-ui-scale, 1))
+      calc(8px * var(--gyro-ui-scale, 1));
     scrollbar-width: none;
   }
 
@@ -12438,7 +12590,8 @@ textarea:focus-visible {
     gap: calc(3px * var(--gyro-ui-scale, 1));
     min-height: calc(38px * var(--gyro-ui-scale, 1));
     overflow: visible;
-    padding: calc(5px * var(--gyro-ui-scale, 1)) calc(6px * var(--gyro-ui-scale, 1));
+    padding: calc(5px * var(--gyro-ui-scale, 1))
+      calc(6px * var(--gyro-ui-scale, 1));
   }
 
   .gyro-chat-start .gyro-composer-spacer {
@@ -13140,7 +13293,8 @@ body {
   background: transparent;
   border-top: 0;
   min-height: calc(44px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(6px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-composer-dock .gyro-composer-chip,
@@ -13282,7 +13436,11 @@ body {
 }
 
 .gyro-plan-document h1 {
-  font-size: clamp(calc(24px * var(--gyro-ui-scale, 1)), 2.1vw, calc(30px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(24px * var(--gyro-ui-scale, 1)),
+    2.1vw,
+    calc(30px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 690;
   letter-spacing: -0.035em;
   line-height: 1.18;
@@ -13291,7 +13449,11 @@ body {
 }
 
 .gyro-plan-document h2 {
-  font-size: clamp(calc(18px * var(--gyro-ui-scale, 1)), 1.5vw, calc(22px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(18px * var(--gyro-ui-scale, 1)),
+    1.5vw,
+    calc(22px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 660;
   letter-spacing: -0.025em;
   line-height: 1.25;
@@ -14210,7 +14372,8 @@ body {
   align-items: center;
   gap: calc(7px * var(--gyro-ui-scale, 1));
   min-height: calc(42px * var(--gyro-ui-scale, 1));
-  padding: calc(2px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(2px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-composer-dock .gyro-composer-chip,
@@ -15913,14 +16076,6 @@ textarea,
     transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 
-
-
-
-
-
-
-
-
 .gyro-provider-logo.is-openai {
   color: var(--gyro-provider-openai-logo);
 }
@@ -16144,7 +16299,9 @@ textarea,
 @keyframes gyro-premium-pop-in {
   from {
     opacity: 0;
-    transform: translateY(var(--gyro-popover-offset, var(--gyro-motion-distance)));
+    transform: translateY(
+      var(--gyro-popover-offset, var(--gyro-motion-distance))
+    );
   }
 
   to {
@@ -16209,7 +16366,8 @@ textarea,
 }
 
 .gyro-chat-transcript .gyro-message.is-thinking {
-  animation: gyro-chat-thinking-enter calc(160ms * var(--gyro-motion-factor, 1)) ease both;
+  animation: gyro-chat-thinking-enter calc(160ms * var(--gyro-motion-factor, 1))
+    ease both;
   margin-bottom: 24px;
 }
 
@@ -16381,6 +16539,16 @@ textarea,
   color: #c5e0ff;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* The mark rides inline before the label, so the anchor stays a plain inline
+   link: prose still wraps around it, and the anchor's own hover underline is
+   painted on the text only, never across the glyph. */
+.gyro-response-link-mark {
+  height: calc(13px * var(--gyro-ui-scale, 1));
+  margin-right: 5px;
+  vertical-align: -0.15em;
+  width: calc(13px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-response-code-block {
@@ -17856,7 +18024,8 @@ body,
 .gyro-workspace-route.is-thread > .gyro-workspace-primary,
 .gyro-workspace-route.is-code > .gyro-workspace-primary,
 .gyro-workspace-route.is-terminal-grid > .gyro-workspace-tool-panel {
-  animation: gyro-native-surface-enter calc(160ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-native-surface-enter
+    calc(160ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
 }
 
 @keyframes gyro-native-surface-enter {
@@ -17968,8 +18137,6 @@ body,
     opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
-
-
 
 .gyro-composer-popover,
 .gyro-provider-picker .gyro-composer-popover,
@@ -18382,7 +18549,8 @@ textarea:focus-visible,
   box-shadow: none;
   margin: 0;
   min-height: calc(42px * var(--gyro-ui-scale, 1));
-  padding: calc(3px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(3px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
   z-index: 2;
 }
 
@@ -18402,7 +18570,8 @@ textarea:focus-visible,
   gap: calc(6px * var(--gyro-ui-scale, 1));
   margin: 0;
   min-height: calc(36px * var(--gyro-ui-scale, 1));
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
   z-index: 1;
 }
 
@@ -18634,7 +18803,9 @@ textarea:focus-visible,
   gap: calc(7px * var(--gyro-ui-scale, 1));
   grid-template-columns: 23px minmax(0, 1fr) auto;
   min-height: calc(34px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1)) calc(30px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1)) calc(6px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(30px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1))
+    calc(6px * var(--gyro-ui-scale, 1));
   width: 100%;
 }
 
@@ -19790,7 +19961,8 @@ textarea:focus-visible,
   border-radius: 0;
   box-shadow: none;
   min-height: calc(62px * var(--gyro-ui-scale, 1));
-  padding: calc(12px * var(--gyro-ui-scale, 1)) calc(13px * var(--gyro-ui-scale, 1));
+  padding: calc(12px * var(--gyro-ui-scale, 1))
+    calc(13px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-section-body > .gyro-settings-row:last-child,
@@ -19827,7 +19999,8 @@ textarea:focus-visible,
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 520;
   min-width: 108px;
-  padding: calc(8px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: calc(8px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
   text-align: left;
 }
 
@@ -19958,7 +20131,9 @@ button.gyro-settings-row em::after {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 240px;
   min-height: calc(68px * var(--gyro-ui-scale, 1));
-  padding: calc(12px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1)) calc(12px * var(--gyro-ui-scale, 1)) calc(18px * var(--gyro-ui-scale, 1));
+  padding: calc(12px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1)) calc(12px * var(--gyro-ui-scale, 1))
+    calc(18px * var(--gyro-ui-scale, 1));
   text-align: left;
   width: 100%;
 }
@@ -21406,7 +21581,11 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-start h1 {
   color: var(--gyro-hero-heading);
-  font-size: clamp(calc(27px * var(--gyro-ui-scale, 1)), 3.05vw, calc(32px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(27px * var(--gyro-ui-scale, 1)),
+    3.05vw,
+    calc(32px * var(--gyro-ui-scale, 1))
+  );
   font-weight: 430;
   letter-spacing: 0;
   line-height: 1.14;
@@ -21454,7 +21633,8 @@ button.gyro-settings-row em::after {
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
   min-height: calc(42px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(10px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-start
@@ -21465,7 +21645,8 @@ button.gyro-settings-row em::after {
   border-top: 1px solid var(--gyro-hero-border);
   box-shadow: none;
   min-height: calc(38px * var(--gyro-ui-scale, 1));
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(13px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(13px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-start .gyro-composer-shell textarea::placeholder {
@@ -21574,7 +21755,8 @@ button.gyro-settings-row em::after {
   box-shadow: none;
   gap: calc(7px * var(--gyro-ui-scale, 1));
   min-height: calc(42px * var(--gyro-ui-scale, 1));
-  padding: 0 calc(10px * var(--gyro-ui-scale, 1)) calc(10px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(10px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-composer-dock
@@ -21585,7 +21767,8 @@ button.gyro-settings-row em::after {
   border-radius: 0 0 16px 16px;
   box-shadow: none;
   min-height: calc(38px * var(--gyro-ui-scale, 1));
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(13px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(13px * var(--gyro-ui-scale, 1)) calc(5px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
@@ -21743,7 +21926,8 @@ button.gyro-settings-row em::after {
 
 /* Live chat turns: prompt, run activity, and response share one transcript flow. */
 .gyro-chat-turn {
-  animation: gyro-chat-turn-enter calc(320ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: gyro-chat-turn-enter calc(320ms * var(--gyro-motion-factor, 1))
+    cubic-bezier(0.22, 1, 0.36, 1) both;
   box-sizing: border-box;
   margin: 0 auto 34px;
   max-width: var(--gyro-chat-content-width);
@@ -23569,7 +23753,8 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-chat-run-timeline > .gyro-message.is-assistant {
-  animation: gyro-chat-final-response-enter calc(260ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1)
+  animation: gyro-chat-final-response-enter
+    calc(260ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1)
     both;
   margin: 13px 0 0;
   max-width: 100%;
@@ -23743,11 +23928,13 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-thread-canvas {
-  animation: gyro-chat-thread-morph calc(360ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: gyro-chat-thread-morph calc(360ms * var(--gyro-motion-factor, 1))
+    cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .gyro-chat-composer-dock {
-  animation: gyro-chat-composer-dock-enter calc(420ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1)
+  animation: gyro-chat-composer-dock-enter
+    calc(420ms * var(--gyro-motion-factor, 1)) cubic-bezier(0.22, 1, 0.36, 1)
     both;
 }
 
@@ -23818,7 +24005,8 @@ button.gyro-response-changed-files:hover {
   align-self: stretch;
   background: var(--gyro-app);
   border: 0;
-  border-left: 1px solid var(--gyro-border-soft);
+  /* No border-left: the seam line is the resizer's own 1px ::after, so the
+     visible seam sits exactly on the edge the pointer drags, not 1px inside. */
   border-radius: 0;
   box-sizing: border-box;
   color: var(--gyro-text);
@@ -23832,7 +24020,8 @@ button.gyro-response-changed-files:hover {
   position: relative;
 }
 
-/* Keep the resize target forgiving without turning the seam into a blue bar. */
+/* The seam line and the drag target are one element: the 1px ::after is drawn
+   on the panel edge itself, so the line always sits where the pointer drags. */
 .gyro-chat-companion-resizer {
   background: transparent;
   border: 0;
@@ -23842,15 +24031,18 @@ button.gyro-response-changed-files:hover {
   padding: 0;
   position: absolute;
   top: 0;
-  width: 8px;
+  /* Wide enough to meet the tab strip's 14px and the browser toolbar's 12px
+     inset, so the seam highlights steadily instead of flickering in the band
+     between the handle and the first control. */
+  width: 12px;
   z-index: 3;
 }
 
 .gyro-chat-companion-resizer::after {
-  background: transparent;
+  background: var(--gyro-border-soft);
   bottom: 0;
   content: "";
-  left: 3px;
+  left: 0;
   position: absolute;
   top: 0;
   transition: background-color calc(120ms * var(--gyro-motion-factor, 1)) ease;
@@ -23870,12 +24062,32 @@ button.gyro-response-changed-files:hover {
   opacity: 0.58;
 }
 
+/* Mid-drag the line is the panel edge itself, so it holds full strength. */
+.gyro-chat-companion.is-resizing > .gyro-chat-companion-resizer::after {
+  opacity: 0.9;
+}
+
 .gyro-chat-companion-resizer:focus-visible {
   outline: 0;
 }
 
 .gyro-chat-companion.is-resizing {
   user-select: none;
+}
+
+/* Hold the resize cursor for the whole gesture. Cursors are hit-tested per
+   element, so without this the pointer adopts whatever the transcript, the
+   editor or the docked page sets the moment it slips off the 8px handle — and
+   the Browser is the one dock tool whose content sets its own. */
+.gyro-chat-surface.is-companion-resizing,
+.gyro-chat-surface.is-companion-resizing * {
+  cursor: col-resize !important;
+}
+
+/* A docked page is its own document: it keeps its own cursor and swallows the
+   pointer moves that cross it, so take it out of hit testing while dragging. */
+.gyro-chat-companion.is-resizing .gyro-chat-companion-content {
+  pointer-events: none;
 }
 
 .gyro-chat-companion-tabs {
@@ -25524,7 +25736,9 @@ button.gyro-account-menu-row:hover,
   flex: none;
   font: inherit;
   gap: 10px;
-  grid-template-columns: 16px calc(96px * var(--gyro-ui-scale, 1)) minmax(0, 1fr) 16px;
+  grid-template-columns:
+    16px calc(96px * var(--gyro-ui-scale, 1)) minmax(0, 1fr)
+    16px;
   font-size: var(--gyro-font-micro);
   min-height: calc(34px * var(--gyro-ui-scale, 1));
   padding: 7px 8px;
@@ -25537,7 +25751,11 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-menu button:hover,
 .gyro-composer-slash-menu button.is-selected {
-  background: color-mix(in srgb, var(--gyro-accent) 7%, var(--gyro-control-hover));
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 7%,
+    var(--gyro-control-hover)
+  );
   color: var(--gyro-text);
 }
 
@@ -25877,7 +26095,8 @@ button.gyro-account-menu-row:hover,
   display: inline-flex;
   font-size: calc(11px * var(--gyro-ui-scale, 1));
   gap: calc(4px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(6px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
   white-space: nowrap;
 }
 
@@ -26310,7 +26529,6 @@ button.gyro-account-menu-row:hover,
   height: 16px;
   width: 16px;
 }
-
 
 .gyro-sidebar-thread.has-icon {
   grid-template-columns: 16px minmax(0, 1fr) auto;
@@ -27783,7 +28001,11 @@ button.gyro-account-menu-row:hover,
   width: clamp(40px, 11cqi, 56px);
 }
 .gyro-chat-surface.is-tiled .gyro-chat-start h1 {
-  font-size: clamp(calc(18px * var(--gyro-ui-scale, 1)), 6cqi, calc(28px * var(--gyro-ui-scale, 1)));
+  font-size: clamp(
+    calc(18px * var(--gyro-ui-scale, 1)),
+    6cqi,
+    calc(28px * var(--gyro-ui-scale, 1))
+  );
 }
 @media (max-width: 980px), (max-height: 700px) {
   .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar > div:first-child span,
@@ -31239,7 +31461,8 @@ button.gyro-account-menu-row:hover,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row {
   gap: calc(9px * var(--gyro-ui-scale, 1));
   min-height: calc(32px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(6px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-action,
@@ -31269,13 +31492,15 @@ button.gyro-account-menu-row:hover,
   gap: calc(9px * var(--gyro-ui-scale, 1));
   grid-template-columns: 17px minmax(0, 1fr) auto;
   min-height: calc(32px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(6px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-thread,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread {
   min-height: calc(32px * var(--gyro-ui-scale, 1));
-  padding: calc(6px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(6px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-section {
@@ -32057,7 +32282,6 @@ button.gyro-account-menu-row:hover,
  * provider controls, and transient menus.
  * -------------------------------------------------------------------------- */
 
-
 :root[data-theme="light"] .gyro-app-shell,
 :root[data-theme="light"] .gyro-chat-surface,
 :root[data-theme="light"] .gyro-providers-surface,
@@ -32191,7 +32415,6 @@ button.gyro-account-menu-row:hover,
 
 /* Neutral charcoal keeps the canvas quiet. The lighter navigation and raised
    controls establish hierarchy without tinted surfaces or heavy outlines. */
-
 
 :root[data-theme="dark"] .gyro-app-shell,
 :root[data-theme="dark"] .gyro-main,
@@ -32490,7 +32713,8 @@ button.gyro-account-menu-row:hover,
   gap: 0;
   grid-template-columns: minmax(0, 1fr);
   min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: calc(2px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(2px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-sidebar-project-row.has-remove,
@@ -32642,7 +32866,8 @@ button.gyro-account-menu-row:hover,
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   grid-template-columns: minmax(0, 1fr) minmax(190px, 250px);
   min-height: calc(80px * var(--gyro-ui-scale, 1));
-  padding: calc(15px * var(--gyro-ui-scale, 1)) calc(18px * var(--gyro-ui-scale, 1));
+  padding: calc(15px * var(--gyro-ui-scale, 1))
+    calc(18px * var(--gyro-ui-scale, 1));
 }
 
 /* A switch or short status should not inherit the provider table's wide value
@@ -33288,21 +33513,24 @@ button.gyro-account-menu-row:hover,
 /* Close enough to the chip to read as hanging off it. */
 .gyro-composer-control-model > .gyro-composer-popover[data-placement="down"],
 .gyro-composer-control-model > .gyro-provider-picker[data-placement="down"] {
-  animation: gyro-model-menu-in-down calc(140ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-model-menu-in-down calc(140ms * var(--gyro-motion-factor, 1))
+    var(--gyro-premium-ease) both;
   top: calc(100% + 6px);
   transform-origin: top right;
 }
 
 .gyro-composer-control-model > .gyro-composer-popover[data-placement="up"],
 .gyro-composer-control-model > .gyro-provider-picker[data-placement="up"] {
-  animation: gyro-model-menu-in-up calc(140ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-model-menu-in-up calc(140ms * var(--gyro-motion-factor, 1))
+    var(--gyro-premium-ease) both;
   bottom: calc(100% + 6px);
   transform-origin: bottom right;
 }
 
 /* Models arrive from the list they belong to, on the side they open. */
 .gyro-provider-model-flyout {
-  animation: gyro-model-flyout-in calc(110ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-model-flyout-in calc(110ms * var(--gyro-motion-factor, 1))
+    var(--gyro-premium-ease) both;
 }
 
 .gyro-provider-picker[data-flyout-side="left"] .gyro-provider-model-flyout {
@@ -33705,10 +33933,7 @@ button.gyro-account-menu-row:hover,
   gap: 14px;
 }
 
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
-  .gyro-run-header,
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header,
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments:has(> .gyro-run-rail)
@@ -34014,7 +34239,7 @@ button.gyro-account-menu-row:hover,
   position: absolute;
   right: 14px;
   top: 56px;
-  width: min(300px, calc(100% - 28px));
+  width: min(320px, calc(100% - 28px));
   z-index: 100;
 }
 
@@ -34036,7 +34261,11 @@ button.gyro-account-menu-row:hover,
   padding: 0 4px 2px 6px;
 }
 
-.gyro-chat-environment-popover > header > strong,
+/* "Environment" is a caption for the repository name below it, not a title.
+   It used to be forced to the 12px header size, which made the loudest text in
+   the card the one label that carries no information. It now inherits the
+   .gyro-environment-overline scale shared with the section headers
+   ("Working tree"), so the repo name leads. */
 .gyro-chat-environment-popover-sources > header > span {
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 560;
@@ -34301,6 +34530,383 @@ button.gyro-account-menu-row:hover,
   .gyro-image-preview-overlay {
     padding: 16px;
   }
+}
+
+/* The card answers "where am I" in its first two lines and groups what is
+   left. Every row shares one icon gutter and one label column, so values stack
+   into a single edge instead of a ragged label → far edge → chevron path. */
+.gyro-environment-overline {
+  color: var(--gyro-faint);
+  font-size: calc(8.5px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.gyro-environment-identity {
+  align-items: center;
+  column-gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 1px 6px 8px;
+  row-gap: 6px;
+}
+
+.gyro-environment-repo {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: flex;
+  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 1px 5px;
+  text-align: left;
+}
+
+.gyro-environment-repo > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-environment-repo:hover,
+.gyro-environment-repo:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+.gyro-environment-sub {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.gyro-environment-chip {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 999px;
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  gap: 5px;
+  min-width: 0;
+  padding: 1px 6px 1px 7px;
+}
+
+.gyro-environment-chip > svg {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+}
+
+.gyro-environment-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-environment-chip:hover,
+.gyro-environment-chip:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+.gyro-environment-state {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.gyro-environment-state-dot {
+  background: var(--gyro-warn);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gyro-warn) 18%, transparent);
+  height: 5px;
+  width: 5px;
+}
+
+.gyro-environment-state.is-clean > .gyro-environment-state-dot {
+  background: var(--gyro-success);
+  box-shadow: none;
+}
+
+.gyro-environment-sync {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-faint);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  gap: 2px;
+  padding: 1px 4px;
+  white-space: nowrap;
+}
+
+.gyro-environment-sync:hover,
+.gyro-environment-sync:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+.gyro-environment-sync.is-pending,
+.gyro-environment-sync.is-warning {
+  color: var(--gyro-warn);
+}
+
+.gyro-environment-section {
+  border-top: 1px solid var(--gyro-border-soft);
+  margin-top: 3px;
+  padding-top: 6px;
+}
+
+.gyro-environment-section > header {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: calc(9.5px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.11em;
+  padding: 0 6px 2px;
+  text-transform: uppercase;
+}
+
+.gyro-environment-section > header > span {
+  color: var(--gyro-faint);
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.gyro-environment-section > header > small {
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  margin-left: auto;
+  text-transform: none;
+}
+
+.gyro-environment-plan-bar {
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 2px;
+  margin: 0 6px 4px;
+  overflow: hidden;
+}
+
+.gyro-environment-plan-fill {
+  background: color-mix(in srgb, var(--gyro-text) 46%, transparent);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.gyro-chat-environment-popover .gyro-environment-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  grid-template-columns:
+    15px calc(84px * var(--gyro-ui-scale, 1)) minmax(0, 1fr)
+    13px;
+  min-width: 0;
+  padding: 5px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-chat-environment-popover .gyro-environment-row:hover,
+.gyro-chat-environment-popover .gyro-environment-row:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+.gyro-environment-row > svg:first-child {
+  color: var(--gyro-muted);
+}
+
+.gyro-chat-environment-popover .gyro-environment-label {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-environment-popover .gyro-environment-value {
+  align-items: center;
+  color: var(--gyro-text);
+  display: flex;
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gyro-environment-value.is-changed > .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-environment-value.is-changed > .is-removed {
+  color: var(--gyro-danger);
+}
+
+.gyro-environment-value > .is-quiet {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gyro-environment-value-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gyro-environment-trail {
+  color: var(--gyro-faint);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.gyro-environment-row:hover > .gyro-environment-trail,
+.gyro-environment-row:focus-visible > .gyro-environment-trail,
+.gyro-environment-repo:hover > .gyro-environment-trail,
+.gyro-environment-repo:focus-visible > .gyro-environment-trail {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-environment-trail {
+    transition: none;
+  }
+}
+
+/* The two rows that act rather than report share the status rows' icon gutter
+   and lose their stacked subtitle, so the card keeps one grid to the end. */
+.gyro-chat-environment-popover .gyro-chat-environment-popover-actions > button {
+  align-items: center;
+  box-sizing: border-box;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 15px max-content minmax(0, 1fr);
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.gyro-chat-environment-popover-actions > button > svg {
+  color: var(--gyro-muted);
+}
+
+.gyro-chat-environment-popover-actions > button > span {
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-environment-popover-actions > button > small {
+  color: var(--gyro-faint);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  justify-self: end;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sources are chips on one wrapping line: a handful of names is a glance, not
+   a list that pushes the actions off the card. */
+.gyro-chat-environment-popover-sources > ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 1px 6px 2px;
+}
+
+.gyro-chat-environment-popover-sources > ul > li {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px 1px 6px;
+}
+
+.gyro-chat-environment-popover-sources > ul > li > svg {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-environment-popover-sources > ul > li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The branch menu is this card's dropdown, so it speaks the same language:
+   overline headings and rows that select rather than navigate. */
+.gyro-environment-branch-menu {
+  border-radius: var(--gyro-radius-md);
+  min-width: 264px;
+}
+
+.gyro-environment-branch-menu .gyro-composer-popover-title,
+.gyro-environment-branch-menu .gyro-composer-popover-section-title {
+  color: var(--gyro-faint);
+  font-size: calc(9.5px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  padding: 6px 8px 3px;
+  text-transform: uppercase;
+}
+
+.gyro-environment-branch-menu .gyro-composer-menu-item {
+  align-items: center;
+  border-radius: var(--gyro-radius-sm);
+  gap: 8px;
+  min-width: 0;
+}
+
+.gyro-environment-branch-menu .gyro-composer-menu-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A blocked composer needs an explanation and a way out, not only a disabled
@@ -35197,9 +35803,9 @@ textarea:focus-visible,
 
 /* Settings --------------------------------------------------------------- */
 
-.gyro-app-shell.is-workspace-shell:has(.gyro-settings-sidebar-search) {
-  --gyro-workspace-sidebar-column-width: 280px;
-}
+/* Settings shares the Sessions rail and inherits its column width: 240px, or
+   224px/190px on narrower windows. A settings-only width made the rail jump as
+   soon as Settings opened, so the shell keeps one width for both destinations. */
 
 .gyro-sidebar:has(.gyro-settings-sidebar-search) {
   border-right: 1px solid var(--gyro-border-soft);
@@ -35389,7 +35995,8 @@ textarea:focus-visible,
   background: transparent;
   border-bottom: 1px solid var(--gyro-border-soft);
   min-height: calc(72px * var(--gyro-ui-scale, 1));
-  padding: calc(14px * var(--gyro-ui-scale, 1)) calc(4px * var(--gyro-ui-scale, 1));
+  padding: calc(14px * var(--gyro-ui-scale, 1))
+    calc(4px * var(--gyro-ui-scale, 1));
 }
 
 /* Align ordinary settings copy and controls with their section edges. */
@@ -35497,7 +36104,8 @@ textarea:focus-visible,
   min-height: var(--gyro-control-height);
   max-width: 100%;
   min-width: 0;
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(8px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-surface .gyro-primary-button,
@@ -35510,7 +36118,8 @@ textarea:focus-visible,
   box-shadow: none;
   font-size: calc(13px * var(--gyro-ui-scale, 1));
   min-height: var(--gyro-control-height);
-  padding: calc(4px * var(--gyro-ui-scale, 1)) calc(12px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(12px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-settings-disclosure {
@@ -36563,7 +37172,8 @@ textarea:focus-visible,
   left: 0;
   margin-top: 0;
   min-height: calc(38px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1)) calc(13px * var(--gyro-ui-scale, 1));
+  padding: calc(5px * var(--gyro-ui-scale, 1))
+    calc(13px * var(--gyro-ui-scale, 1));
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
@@ -37074,7 +37684,10 @@ textarea:focus-visible,
 }
 
 .gyro-composer-control-model {
-  --gyro-model-popover-width: min(calc(280px * var(--gyro-ui-scale, 1)), calc(100vw - 24px));
+  --gyro-model-popover-width: min(
+    calc(280px * var(--gyro-ui-scale, 1)),
+    calc(100vw - 24px)
+  );
 }
 
 /* The model list grows out of the effort panel without changing its width. */
@@ -37820,7 +38433,7 @@ textarea:focus-visible,
    pane, while the top bar still spans the full window. */
 @media (min-width: 981px) {
   .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-    --gyro-environment-popover-gutter: 322px;
+    --gyro-environment-popover-gutter: 342px;
   }
 
   .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
@@ -39227,12 +39840,14 @@ textarea:focus-visible,
 }
 
 .gyro-scm-history-entry.is-head .gyro-scm-graph-dot {
-  box-shadow: inset 0 0 0 2px currentColor,
+  box-shadow:
+    inset 0 0 0 2px currentColor,
     0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
 }
 
 .gyro-scm-history-entry[aria-describedby] .gyro-scm-graph-dot {
-  box-shadow: inset 0 0 0 2px currentColor,
+  box-shadow:
+    inset 0 0 0 2px currentColor,
     0 0 0 4px color-mix(in srgb, currentColor 22%, transparent);
 }
 
@@ -39249,7 +39864,9 @@ textarea:focus-visible,
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-sidebar);
   color: var(--gyro-text);
-  box-shadow: 0 12px 36px rgb(0 0 0 / 24%), 0 2px 6px rgb(0 0 0 / 12%);
+  box-shadow:
+    0 12px 36px rgb(0 0 0 / 24%),
+    0 2px 6px rgb(0 0 0 / 12%);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
   line-height: 1.5;
   user-select: text;
@@ -40510,7 +41127,8 @@ textarea:focus-visible,
 .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
 .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
 .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
-  animation: gyro-native-surface-enter calc(160ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
+  animation: gyro-native-surface-enter
+    calc(160ms * var(--gyro-motion-factor, 1)) var(--gyro-premium-ease) both;
 }
 
 /*
@@ -41318,7 +41936,8 @@ textarea:focus-visible,
   min-height: 0;
   padding: 0 6px 6px;
   overflow-y: auto;
-  animation: gyro-model-rail-swap calc(140ms * var(--gyro-motion-factor, 1)) ease-out;
+  animation: gyro-model-rail-swap calc(140ms * var(--gyro-motion-factor, 1))
+    ease-out;
 }
 /* A class (Opus, Fable, GPT-6) heads the models that belong to it. */
 .gyro-model-rail-class {
@@ -41744,13 +42363,19 @@ textarea:focus-visible,
    change: inner = outer - border - padding. */
 :root .gyro-composer-popover > .gyro-composer-menu-item:not(.is-disclosure) {
   /* Menu corners follow their own panel, independently of the composer. */
-  border-radius: max(var(--gyro-radius-xs), calc(var(--gyro-radius-xl) - 1px - 5px));
+  border-radius: max(
+    var(--gyro-radius-xs),
+    calc(var(--gyro-radius-xl) - 1px - 5px)
+  );
 }
 :root
   .gyro-composer-popover.gyro-context-picker
   > .gyro-composer-menu-item:not(.is-disclosure) {
   /* The context picker pads by 4px. */
-  border-radius: max(var(--gyro-radius-xs), calc(var(--gyro-radius-xl) - 1px - 4px));
+  border-radius: max(
+    var(--gyro-radius-xs),
+    calc(var(--gyro-radius-xl) - 1px - 4px)
+  );
 }
 :root .gyro-composer-blocker,
 :root .gyro-sidebar-new-session-menu {
@@ -41843,7 +42468,6 @@ textarea:focus-visible,
   width: 26px;
 }
 
-
 /* Refined density pass: chrome controls and edited-file rows at the quieter
    desktop scale. Row heights and type live in the Design polish layer. */
 :root .gyro-app-shell .gyro-chat-thread-identity {
@@ -41851,14 +42475,18 @@ textarea:focus-visible,
   font-weight: 500;
 }
 
-:root .gyro-app-shell :is(.gyro-chat-surface-button, .gyro-sidebar-toggle-button) {
+:root
+  .gyro-app-shell
+  :is(.gyro-chat-surface-button, .gyro-sidebar-toggle-button) {
   border-radius: var(--gyro-radius-sm);
   height: calc(26px * var(--gyro-ui-scale, 1));
   min-height: calc(26px * var(--gyro-ui-scale, 1));
   min-width: calc(26px * var(--gyro-ui-scale, 1));
 }
 
-:root .gyro-app-shell :is(.gyro-change-summary-file > button, .gyro-change-summary-file-static) {
+:root
+  .gyro-app-shell
+  :is(.gyro-change-summary-file > button, .gyro-change-summary-file-static) {
   min-height: 28px;
   padding-block: 4px;
 }
@@ -41883,7 +42511,9 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 
-:root .gyro-editor-statusbar.is-quiet :is(
+:root
+  .gyro-editor-statusbar.is-quiet
+  :is(
     .gyro-editor-statusbar-sync,
     .gyro-editor-buffer-state,
     .gyro-editor-statusbar-notice
@@ -41910,17 +42540,14 @@ textarea:focus-visible,
 
 .gyro-editor-statusbar-sync[data-tone="warning"],
 .gyro-editor-statusbar-notice,
-.gyro-editor-statusbar.is-quiet .gyro-editor-buffer-state:is(
-    [data-state="conflict"],
-    [data-state="error"]
-  ) {
+.gyro-editor-statusbar.is-quiet
+  .gyro-editor-buffer-state:is([data-state="conflict"], [data-state="error"]) {
   color: var(--gyro-warn);
 }
 
-:root .gyro-editor-statusbar.is-quiet :is(
-    .gyro-editor-statusbar-problems,
-    .gyro-editor-statusbar-panel-toggle
-  ) {
+:root
+  .gyro-editor-statusbar.is-quiet
+  :is(.gyro-editor-statusbar-problems, .gyro-editor-statusbar-panel-toggle) {
   align-items: center;
   background: transparent;
   border: 0;
@@ -41943,11 +42570,15 @@ textarea:focus-visible,
   width: calc(22px * var(--gyro-ui-scale, 1));
 }
 
-:root .gyro-editor-statusbar.is-quiet .gyro-editor-statusbar-panel-toggle[aria-pressed="true"] {
+:root
+  .gyro-editor-statusbar.is-quiet
+  .gyro-editor-statusbar-panel-toggle[aria-pressed="true"] {
   color: var(--gyro-text);
 }
 
-:root .gyro-editor-statusbar.is-quiet :is(
+:root
+  .gyro-editor-statusbar.is-quiet
+  :is(
     .gyro-editor-statusbar-problems,
     .gyro-editor-statusbar-panel-toggle
   ):hover {
@@ -42248,7 +42879,11 @@ textarea:focus-visible,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-browser-preview.is-workbench
   .gyro-browser-preview-toolbar
-  :is(.gyro-browser-nav-group, .gyro-browser-device-group, .gyro-browser-actions)
+  :is(
+    .gyro-browser-nav-group,
+    .gyro-browser-device-group,
+    .gyro-browser-actions
+  )
   > button {
   /* The drawer spans the window, so it keeps every control that the
      narrow-window rule trims from other toolbars. */
@@ -42270,7 +42905,11 @@ textarea:focus-visible,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-browser-preview.is-workbench
   .gyro-browser-preview-toolbar
-  :is(.gyro-browser-nav-group, .gyro-browser-device-group, .gyro-browser-actions)
+  :is(
+    .gyro-browser-nav-group,
+    .gyro-browser-device-group,
+    .gyro-browser-actions
+  )
   > button:hover:not(:disabled),
 :root[data-theme]
   .gyro-workspace-tool-panel.is-resizable
@@ -42470,10 +43109,12 @@ textarea:focus-visible,
 :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
 :root .gyro-sidebar-persistent-header ~ .gyro-ide-sidebar-activity,
 :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list {
-  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion)
+    var(--gyro-premium-ease);
 }
 
-:root :is(
+:root
+  :is(
     button,
     select,
     input,
@@ -42493,7 +43134,8 @@ textarea:focus-visible,
     opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 
-:root :is(
+:root
+  :is(
     .gyro-sidebar-action,
     .gyro-sidebar-row,
     .gyro-sidebar-project-row,
@@ -42512,7 +43154,8 @@ textarea:focus-visible,
 }
 
 :root .gyro-sidebar-thread-main {
-  transition: background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  transition: background-color var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
 }
 
 :root .gyro-session-actions {
@@ -42523,10 +43166,12 @@ textarea:focus-visible,
 /* Discrete navigation changes share the short layout duration. Direct resize
    gestures bypass the transition so content stays attached to the pointer. */
 :root .gyro-app-shell.is-chat-shell.is-workspace-shell {
-  transition: grid-template-columns var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+  transition: grid-template-columns var(--gyro-premium-motion-slow)
+    var(--gyro-premium-ease);
 }
 :root .gyro-app-shell.is-workspace-shell .gyro-sidebar-windowbar {
-  transition: padding-left var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
+  transition: padding-left var(--gyro-premium-motion-slow)
+    var(--gyro-premium-ease);
 }
 :root .gyro-app-shell:has(.is-resizing) {
   transition: none;
@@ -42780,4 +43425,1023 @@ textarea:focus-visible,
 .gyro-workspace-tool-launcher > button:focus-visible {
   outline: 2px solid var(--gyro-accent);
   outline-offset: -2px;
+}
+
+/*
+ * Providers: one quiet panel.
+ *
+ * The account rows were ten independently bordered cards, and each one
+ * stretched a border-boxed <select> across its whole width — a raw form
+ * control sitting in the middle of Settings, which is what read as cheap.
+ * The list is now a single hairline panel: hairline dividers, the default
+ * model as a quiet value, a status pill, and action chrome that only firms
+ * up on hover. Geometry and DOM order are untouched.
+ */
+:root[data-theme] .gyro-provider-table.is-native-list {
+  background: color-mix(in srgb, var(--gyro-text) 1.6%, transparent) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 14px !important;
+  gap: 0 !important;
+  row-gap: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-table.is-native-list > .gyro-provider-row {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  gap: 6px 12px !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  transition: background-color 140ms ease;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row.is-readiness-only {
+  background: color-mix(in srgb, var(--gyro-pane) 24%, transparent) !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:first-child {
+  border-radius: 13px 13px 0 0 !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:last-child {
+  border-bottom: 0 !important;
+  border-radius: 0 0 13px 13px !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:hover {
+  background: color-mix(in srgb, var(--gyro-text) 2.4%, transparent) !important;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-identity {
+  gap: 12px;
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-provider-identity
+  > .gyro-provider-logo {
+  border: 0.5px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 9px;
+  box-shadow: none;
+  height: 32px;
+  width: 32px;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-identity strong {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.006em;
+}
+
+/* The default model reads as a value, not a field: no border, muted, and only
+   as wide as its own text. */
+/* Stacked layout: the value sits on the second line and the actions close that
+   same line, so a row is two lines instead of three. */
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-provider-default-model {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  justify-self: start !important;
+  margin: 0 !important;
+  min-width: 0;
+  width: fit-content !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-provider-actions {
+  align-self: center !important;
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  justify-content: flex-end !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-default-model
+  select {
+  background-color: transparent !important;
+  border: 0 !important;
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  height: calc(24px * var(--gyro-ui-scale, 1)) !important;
+  max-width: 100%;
+  padding: 0 22px 0 0;
+  width: fit-content !important;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-default-model select:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-provider-default-model
+  select:focus-visible {
+  color: var(--gyro-text);
+  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-default-model > strong {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+}
+
+/* Connection state inherits its status tint instead of floating as loose text. */
+/* State is text, not a third chip: the row already carries a button and a menu,
+   and a pill beside them read as three controls of equal weight. */
+.gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-status {
+  background: none;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  gap: 7px;
+  justify-self: end;
+  letter-spacing: 0.004em;
+  padding: 0;
+  white-space: nowrap;
+}
+
+/* Inside the pill the dot stands alone; the halo ring doubled it up. */
+.gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-status
+  > i {
+  box-shadow: none;
+  height: calc(6px * var(--gyro-ui-scale, 1));
+  width: calc(6px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-secondary-button,
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-primary-button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--gyro-text) 86%, transparent);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 550;
+  letter-spacing: 0.008em;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 11px;
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-secondary-button:hover:not(:disabled),
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-primary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-accent) 34%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-provider-details
+  > summary {
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--gyro-text) 52%, transparent);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-provider-details
+  > summary:hover {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+}
+
+/* The details popover holds five different things at five different weights —
+   a bordered button, a bold label, a code string, a muted note, a red button.
+   It becomes a menu: one radius, one gutter, quiet items, a red last item. */
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div {
+  border-radius: 12px;
+  gap: 2px;
+  justify-items: stretch;
+  min-width: 240px;
+  max-width: 280px;
+  padding: 8px;
+  position: absolute !important;
+  right: 0;
+  text-align: left;
+}
+
+/* Anchored to its own trigger, so the menu does not hang past the panel edge. */
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-provider-details {
+  flex: none;
+  position: relative !important;
+  width: fit-content;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > code,
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > span {
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  padding-inline: 10px;
+  text-align: left;
+}
+
+/* Every row in the menu lines up on the same gutter. */
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > * {
+  justify-self: stretch !important;
+  text-align: left !important;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > strong {
+  color: var(--gyro-faint);
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  padding: 8px 10px 2px;
+  text-transform: uppercase;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  .gyro-secondary-button,
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  .gyro-danger-button {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  justify-content: flex-start;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  .gyro-secondary-button:hover:not(:disabled),
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border: 0;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > .gyro-danger-button {
+  color: var(--gyro-danger);
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-details
+  > div
+  > .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-danger) 10%, transparent);
+}
+
+/*
+ * One line per provider once the row is wide enough to hold it.
+ *
+ * The stacked three-band card left roughly half of every 850px row empty:
+ * a name, a 115px value, and a button spread over 160px of height. Above
+ * 620px the row becomes a single line — identity, model, state, actions —
+ * which is both quieter and much shorter. Narrower panes keep the stacked
+ * layout, where a line of four columns would not fit.
+ */
+@media (min-width: 1120px) {
+  :root[data-theme] .gyro-provider-table.is-native-list > .gyro-provider-row {
+    align-items: center !important;
+    column-gap: 14px !important;
+    /*
+     * Every column is content-independent. `auto` tracks made each row its own
+     * grid: a longer model name widened that row's track and pushed its state
+     * and actions sideways, so no two rows shared a vertical (state started
+     * anywhere between 807 and 967px). fr tracks resolve identically in every
+     * row, so the four zones sit on shared verticals and the header can use the
+     * same list.
+     */
+    grid-template-columns:
+      minmax(176px, 0.86fr) minmax(146px, 0.76fr) minmax(146px, 0.5fr)
+      minmax(280px, 1.1fr) !important;
+    min-height: calc(56px * var(--gyro-ui-scale, 1)) !important;
+    padding: 10px 16px !important;
+    row-gap: 0 !important;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-provider-identity {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-provider-default-model {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    justify-self: stretch !important;
+    margin: 0 !important;
+    min-width: 0;
+    /* The cell fills its column so the value starts on the column's left edge
+       instead of shrinking and centring itself in the space. */
+    width: 100% !important;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-settings-status {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    /* Left edge on the column, so states of different lengths read as a column
+       and line up under the CONNECTION label. The column fits the longest label
+       ("verified via Claude Code"); anything longer truncates instead of
+       bleeding into the actions. */
+    justify-self: start !important;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-settings-provider-actions {
+    grid-column: 4 !important;
+    grid-row: 1 !important;
+    justify-content: flex-end !important;
+  }
+
+  /*
+   * The header is a separate grid, so it needs the row's exact list to sit on
+   * the same verticals. Without this it kept the old four-column list and its
+   * labels landed 100–200px away from the values they name.
+   */
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-table-head {
+    column-gap: 14px !important;
+    grid-template-columns:
+      minmax(176px, 0.86fr) minmax(146px, 0.76fr) minmax(146px, 0.5fr)
+      minmax(280px, 1.1fr) !important;
+    padding: 10px 16px !important;
+  }
+}
+
+/*
+ * Below the single-line breakpoint the rows stack — name on one line, model and
+ * actions on the next — so four column labels would hang over nothing.
+ */
+@media (max-width: 1119px) {
+  .gyro-provider-table.is-native-list > .gyro-provider-table-head {
+    display: none !important;
+  }
+}
+
+/*
+ * Provider connect surfaces: the API-key card, the custom-endpoint form and the
+ * usage picker.
+ *
+ * They were the last boxed-in-a-box controls in this section: a 620px content
+ * rail that stopped 240px short of its own panel edge, a filled blue button
+ * among hairline ghost actions, labels heavier than the values they describe,
+ * and a provider picker with no mark — so the row did not read as the same
+ * provider the list above just showed with its logo. Same language as the list:
+ * one panel, hairline bands, quiet values, ghost actions.
+ */
+
+/* --- the panel both groups sit in ------------------------------------- */
+:root[data-theme]
+  .gyro-settings-group-rows:has(> .gyro-provider-api-key-section),
+:root[data-theme]
+  .gyro-settings-group-rows:has(> .gyro-provider-custom-section) {
+  background: color-mix(in srgb, var(--gyro-text) 1.6%, transparent) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 14px !important;
+  gap: 0 !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+/* --- keycard: mark · provider · key · action on one 54px band --------- */
+:root[data-theme] .gyro-provider-api-key-section {
+  display: block !important;
+  max-width: none !important;
+  padding: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-api-key {
+  display: block !important;
+  gap: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row {
+  align-items: center !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px 10px !important;
+  min-height: 54px;
+  padding: 10px 14px !important;
+}
+
+/* The selected provider is identity, not a form value: same mark the list
+   rows carry, sized for a control band. */
+:root[data-theme] .gyro-provider-api-key-row .gyro-provider-logo {
+  border-radius: 7px !important;
+  flex: 0 0 auto;
+  height: 22px !important;
+  width: 22px !important;
+}
+
+/* ...and its name is a quiet value beside that mark, like the model column
+   in the list, rather than a bordered native <select> stretched across it. */
+:root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field {
+  flex: 0 1 auto;
+  max-width: 46%;
+}
+
+:root[data-theme]
+  .gyro-provider-api-key-row
+  .gyro-settings-select-field
+  > select.gyro-settings-select {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--gyro-text) !important;
+  field-sizing: content;
+  font-size: calc(12px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  height: 24px !important;
+  max-width: 100%;
+  min-height: 0 !important;
+  padding: 0 20px 0 1px !important;
+  width: auto;
+}
+
+:root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field > svg {
+  height: 12px;
+  right: 3px;
+  width: 12px;
+}
+
+:root[data-theme]
+  .gyro-provider-api-key-row
+  .gyro-settings-select-field
+  > select.gyro-settings-select:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input {
+  background: var(--gyro-premium-control) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  color: var(--gyro-text) !important;
+  flex: 1 1 200px !important;
+  font-size: calc(12px * var(--gyro-ui-scale, 1)) !important;
+  height: 32px !important;
+  min-height: 0 !important;
+  padding: 0 9px !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input::placeholder {
+  color: var(--gyro-faint);
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* Save and "Use in chat" are the same ghost chrome as the list's actions. */
+:root[data-theme] .gyro-provider-api-key-row > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-text) !important;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  height: 30px !important;
+  min-height: 0 !important;
+  padding: 0 12px !important;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:disabled {
+  color: var(--gyro-faint) !important;
+}
+
+/* The consequence line is a footer band, not a third line of the form. */
+:root[data-theme] .gyro-provider-api-key > span {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted) !important;
+  display: block !important;
+  font-size: calc(11px * var(--gyro-ui-scale, 1)) !important;
+  line-height: 1.45 !important;
+  margin: 0 !important;
+  padding: 8px 14px 9px !important;
+}
+
+/* --- custom endpoints: configured rows, then one form, all in the panel */
+:root[data-theme] .gyro-provider-custom-section {
+  display: block !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list {
+  gap: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+}
+
+/* A configured endpoint is a band in the panel, not a card inside a card. */
+:root[data-theme] .gyro-provider-custom-list > li {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft) !important;
+  border-radius: 0 !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li:hover {
+  background: color-mix(in srgb, var(--gyro-text) 2.4%, transparent) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > strong {
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > span {
+  color: var(--gyro-muted);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+}
+
+/* Removing an endpoint is a quiet text action; it stays red only on hover. */
+:root[data-theme] .gyro-provider-custom-list .gyro-danger-button {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
+  font-size: calc(11px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  height: 24px !important;
+  min-height: 0 !important;
+  padding: 0 7px !important;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-list
+  .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  ) !important;
+  color: var(--gyro-danger) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form {
+  display: grid !important;
+  gap: 12px 16px !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  max-width: none !important;
+  padding: 14px 14px 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label {
+  display: grid !important;
+  gap: 6px !important;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label > span {
+  color: var(--gyro-muted) !important;
+  font-size: calc(11px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label.is-wide,
+:root[data-theme] .gyro-provider-custom-actions,
+:root[data-theme] .gyro-provider-custom-note,
+:root[data-theme] .gyro-provider-custom-error {
+  grid-column: 1 / -1;
+}
+
+:root[data-theme] .gyro-provider-custom-form :is(input, textarea) {
+  background: var(--gyro-premium-control) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  color: var(--gyro-text) !important;
+  font-size: calc(12px * var(--gyro-ui-scale, 1)) !important;
+  min-width: 0;
+  width: 100% !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form input {
+  height: 32px !important;
+  min-height: 0 !important;
+  padding: 0 9px !important;
+}
+
+/* Model ids is a short list, not a document: four lines is the whole form's
+   height budget, so it does not push the actions out of view. */
+:root[data-theme] .gyro-provider-custom-form textarea {
+  line-height: 1.55 !important;
+  min-height: 68px !important;
+  padding: 7px 9px !important;
+  resize: vertical;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-form
+  :is(input, textarea):focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* "Fetch models" trails the key it reads, on the key's baseline. */
+:root[data-theme] .gyro-provider-custom-fetch {
+  align-self: end !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  padding-bottom: 1px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-actions {
+  align-items: center !important;
+  display: flex !important;
+  gap: 10px !important;
+  margin-top: 2px;
+}
+
+/* Adding an endpoint is not the section's loudest pixel. */
+:root[data-theme] .gyro-provider-custom-actions > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-text) !important;
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  gap: 6px;
+  height: 30px !important;
+  min-height: 0 !important;
+  padding: 0 12px !important;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-custom-actions > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
+  font-size: calc(11px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  gap: 6px;
+  height: 28px !important;
+  min-height: 0 !important;
+  padding: 0 10px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button:hover:not(:disabled) {
+  border-color: var(--gyro-premium-hairline-strong) !important;
+  color: var(--gyro-text) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-error {
+  margin: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-note {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft) !important;
+  color: var(--gyro-muted) !important;
+  font-size: calc(11px * var(--gyro-ui-scale, 1)) !important;
+  line-height: 1.45 !important;
+  margin: 2px -14px 0 !important;
+  padding: 8px 14px 9px !important;
+}
+
+@media (max-width: 760px) {
+  :root[data-theme] .gyro-provider-custom-form {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  :root[data-theme] .gyro-provider-custom-fetch {
+    padding-bottom: 0 !important;
+  }
+
+  :root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field {
+    max-width: none;
+  }
+}
+
+/* --- usage: the provider picker is a value, not a stretched control ---- */
+:root[data-theme] .gyro-usage-provider-select {
+  align-items: center !important;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 4px 10px !important;
+}
+
+:root[data-theme] .gyro-usage-provider-select > span {
+  color: var(--gyro-muted) !important;
+  font-size: calc(10px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.07em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+:root[data-theme] .gyro-usage-provider-select .gyro-settings-select-field {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > select.gyro-settings-select {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--gyro-text) !important;
+  field-sizing: content;
+  font-size: calc(12px * var(--gyro-ui-scale, 1)) !important;
+  font-weight: 500 !important;
+  height: 24px !important;
+  min-height: 0 !important;
+  padding: 0 20px 0 1px !important;
+  width: auto;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > svg {
+  height: 12px;
+  right: 3px;
+  width: 12px;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > select.gyro-settings-select:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+
+/* Removing a saved key is a band action, red only once it is hovered. */
+:root[data-theme] .gyro-provider-api-key-row > .gyro-danger-button {
+  color: var(--gyro-muted) !important;
+}
+
+:root[data-theme]
+  .gyro-provider-api-key-row
+  > .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-danger) 38%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  color: var(--gyro-danger) !important;
+}
+
+/* The open chat is marked, not announced: a quiet row, a neutral focus
+   hairline, and no accent fill, accent bar, or blue ring. */
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active:hover,
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active:focus-within {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active::before {
+  display: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active
+  .gyro-sidebar-thread-title
+  > span:first-child {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active
+  .gyro-sidebar-thread-main:focus-visible {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  outline: 0;
+}
+
+/* IDE polish pass -----------------------------------------------------------
+   The workbench chrome already states its hierarchy: a hairline under the tab
+   strip, muted inactive tabs, and an accent rule on the selected explorer row.
+   This pass only removes noise and adds the affordances that were missing:
+   tabs read as file names until the pointer or keyboard arrives, status
+   metrics stop jittering, hover and keyboard focus become visible, empty
+   editors read as captions, and motion is optional. */
+
+/* A tab is a file name first. Its close affordance appears with the pointer,
+   for the active tab, or while the tab holds keyboard focus; the 20px hit
+   target is unchanged, so nothing moves when it appears. */
+.gyro-editor-tabs > button {
+  transition: background-color 120ms ease;
+}
+
+.gyro-editor-tabs > button .gyro-editor-tab-close {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.gyro-editor-tabs > button:hover .gyro-editor-tab-close,
+.gyro-editor-tabs > button.is-active .gyro-editor-tab-close,
+.gyro-editor-tabs > button:focus-within .gyro-editor-tab-close {
+  opacity: 0.85;
+}
+
+.gyro-editor-tabs > button .gyro-editor-tab-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  opacity: 1;
+}
+
+/* Hovering an inactive tab previews the switch without competing with the
+   active tab accent underline. */
+.gyro-editor-tabs > button:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-editor-tabs > button:focus-visible,
+.gyro-editor-tab-close:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 70%, transparent);
+  outline-offset: -1px;
+}
+
+/* Status metrics are compared, not just read: tabular figures stop the column
+   from shifting as the cursor crosses a digit boundary. */
+.gyro-editor-statusbar {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The explorer row already marks selection. It still needs a hover hint that
+   the row is a target, and a visible ring when it is reached from the
+   keyboard. */
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:hover:not([aria-selected="true"]) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 60%, transparent);
+  outline-offset: -1px;
+}
+
+/* An empty editor is a caption, not loose text pinned to the top-left. */
+.gyro-code-empty {
+  color: var(--gyro-ide-secondary-foreground);
+  line-height: 1.5;
+  margin-inline: auto;
+  max-width: 44ch;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-editor-tabs > button,
+  .gyro-editor-tabs > button .gyro-editor-tab-close {
+    transition: none;
+  }
 }

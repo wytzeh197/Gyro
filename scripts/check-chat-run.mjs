@@ -934,10 +934,49 @@ assert.deepEqual(
 assert.deepEqual(rowText("memory", "Edited memory"), {
   label: "Edited memory",
 });
+// A compaction row may only claim what the provider actually did: only a Codex
+// session summarizes, everything else condenses the transcript or keeps it.
 assert.deepEqual(rowText("context", "Compacted context"), {
   label: "Compacted context",
-  description: "Earlier conversation summarized",
+  description: undefined,
 });
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "summarized" }),
+  {
+    label: "Compacted context",
+    description: "Earlier conversation summarized",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "condensed" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "kept" }),
+  {
+    label: "Compacted context",
+    description: "History already fit; nothing dropped",
+  },
+);
+// Events recorded before the marker existed: a checkpoint payload identifies
+// the local rewrite, which never summarized anything.
+assert.deepEqual(
+  rowText("context", "Compacted context", { contextSummary: "kept whole" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacting context", { status: "running" }),
+  {
+    label: "Compacting context",
+    description: "Making room for the next turn",
+  },
+);
 
 const compactionVisible = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),

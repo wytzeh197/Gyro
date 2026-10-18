@@ -51,7 +51,7 @@ export function EfficiencySettings({
   }
   const disabled = busy || !onChange;
   return (
-    <SettingsGroup label="Efficiency">
+    <SettingsGroup label="Context & experiments">
       <SettingsRow
         label="Context efficiency"
         detail="Enable validated context improvements. Experiments remain separate; model and reasoning choices stay yours."

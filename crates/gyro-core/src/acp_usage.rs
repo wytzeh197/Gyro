@@ -312,9 +312,7 @@ pub fn opencode_prompt_context(result: &Value) -> Option<AcpContextUsage> {
     if tokens.effective_accounting().reason == Some(UsageReason::InconsistentCounts) {
         return None;
     }
-    let used = tokens
-        .input_tokens
-        .saturating_add(tokens.output_tokens);
+    let used = tokens.input_tokens.saturating_add(tokens.output_tokens);
     (used > 0).then_some(AcpContextUsage {
         used,
         size: 0,

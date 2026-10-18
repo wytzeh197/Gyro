@@ -28,6 +28,7 @@ export function ProviderApiKeySection({
   savingProviderApiKeyId,
   onSaveProviderApiKey,
   onClearProviderApiKey,
+  renderProviderMark,
 }: Pick<
   SettingsSurfaceProps,
   | "config"
@@ -41,6 +42,8 @@ export function ProviderApiKeySection({
 > & {
   selectedProviderId?: ProviderId;
   onSelectedProviderChange?: (id: ProviderId) => void;
+  /** The provider's own mark, so the picker reads like a row in the list. */
+  renderProviderMark?: (id: ProviderId) => ReactNode;
 }) {
   const providers = providersForConfig(config).filter((provider) =>
     providerSupportsApiKey(provider.id),
@@ -75,7 +78,19 @@ export function ProviderApiKeySection({
               : undefined
           }
           saving={Boolean(savingProviderApiKeyId)}
+          action={
+            canUse && onUseProvider ? (
+              <button
+                className="gyro-primary-button"
+                type="button"
+                onClick={() => onUseProvider(provider.id, modelId!)}
+              >
+                Use in chat
+              </button>
+            ) : null
+          }
         >
+          {renderProviderMark?.(provider.id)}
           <SettingsSelect
             aria-label="API key provider"
             disabled={Boolean(savingProviderApiKeyId)}
@@ -92,15 +107,6 @@ export function ProviderApiKeySection({
             ))}
           </SettingsSelect>
         </ProviderApiKeyField>
-        {canUse && onUseProvider ? (
-          <button
-            className="gyro-primary-button"
-            type="button"
-            onClick={() => onUseProvider(provider.id, modelId!)}
-          >
-            Use in chat
-          </button>
-        ) : null}
       </div>
     </SettingsGroup>
   );
@@ -114,6 +120,7 @@ export function ProviderApiKeySection({
  * where the key is kept, and what quietly overrides it.
  */
 function ProviderApiKeyField({
+  action,
   children,
   configured,
   envName,
@@ -121,6 +128,8 @@ function ProviderApiKeyField({
   onSave,
   saving = false,
 }: {
+  /** The row's last action, so the band stays one line. */
+  action?: ReactNode;
   /** The provider picker, laid out inline with the key field. */
   children: ReactNode;
   configured: boolean;
@@ -166,6 +175,7 @@ function ProviderApiKeyField({
             Remove
           </button>
         ) : null}
+        {action}
       </div>
       <span>
         Kept in the macOS Keychain.

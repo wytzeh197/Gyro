@@ -105,9 +105,10 @@ pub fn approve_for_me_keeps_escalations(provider_id: &str) -> bool {
 /// Argv for an ACP CLI, including its subcommand, for the saved choice.
 ///
 /// `None` means this id is not an ACP CLI Gyro knows how to switch.
-/// Antigravity's ACP server (`agy_acp_server.par`) takes no permission flag
-/// that we can verify, so both non-ask choices return the same empty argv and
-/// Gyro's callback is the only control. OpenCode has `--auto` and no sandbox,
+/// Antigravity no longer runs an ACP server: its official CLI takes the posture
+/// as ordinary launch flags (`--sandbox`, `--mode`,
+/// `--dangerously-skip-permissions`), so it has no ACP argv here.
+/// OpenCode has `--auto` and no sandbox,
 /// so Approve for me and Full access are the same native mode; deny rules in
 /// the user's OpenCode config still apply.
 pub fn acp_permission_args(
@@ -143,7 +144,6 @@ pub fn acp_permission_args(
             ApprovalPosture::Ask => &["acp"],
             ApprovalPosture::ApproveForMe | ApprovalPosture::FullAccess => &["--auto", "acp"],
         },
-        "antigravity" => &[],
         _ => return None,
     })
 }
@@ -205,10 +205,7 @@ mod tests {
             acp_permission_args("opencode", ApprovalPosture::ApproveForMe),
             acp_permission_args("opencode", ApprovalPosture::FullAccess)
         );
-        assert_eq!(
-            acp_permission_args("antigravity", ApprovalPosture::FullAccess),
-            Some(&[][..])
-        );
+        assert!(acp_permission_args("antigravity", ApprovalPosture::FullAccess).is_none());
         assert!(acp_permission_args("ollama", ApprovalPosture::FullAccess).is_none());
     }
 }

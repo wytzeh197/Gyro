@@ -28,6 +28,18 @@ coverage/
 /artifacts/
 /release-assets/
 
+# Launch-video production workspaces (Remotion). Renders, frame studies,
+# imported plates and the 13 GB mezzanine cache are all regenerable from
+# source, so the tree stays on disk and out of the repo — same policy as
+# /artifacts/ above. Nested .gitignore already covers out/ and study/.
+/scripts/gyro-launch-v010-remotion/
+/scripts/gyro-launch-v010/remotion/
+
+# v0.1.0 launch cut ladder: only the shipped cut is tracked. The rest are
+# superseded renders kept locally for comparison.
+/docs/media/launch/v0.1.0/*.mp4
+!/docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-v5.mp4
+
 # Local tool / deploy state (never commit credentials or account metadata).
 .wrangler/
 .claude/settings.local.json

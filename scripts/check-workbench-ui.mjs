@@ -4,9 +4,16 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { completionMenuGeometry } from "../packages/ui/src/composer-completion-geometry.ts";
-import { providerLoginProfile, providerLoginCommandText } from "../apps/desktop/src/provider-login-profile.ts";
+import {
+  providerLoginProfile,
+  providerLoginCommandText,
+} from "../apps/desktop/src/provider-login-profile.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
-import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
+import {
+  appearanceAccentProperties,
+  colorContrast,
+  interfaceScales,
+} from "../packages/ui/src/appearance.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -468,7 +475,11 @@ expect(
     chatGridDropZones(
       [gridPane("one"), gridPane("two"), null, null],
       "rows",
-    ).every((zone) => zone.position.startsWith("stack-") && zone.placement?.arrangement === "rows"),
+    ).every(
+      (zone) =>
+        zone.position.startsWith("stack-") &&
+        zone.placement?.arrangement === "rows",
+    ),
   "A full row rejects new chats; stacks use horizontal insertion boundaries and grids use quadrants.",
 );
 const sanitizedChatGrid = sanitizeStoredChatGridState({
@@ -553,10 +564,18 @@ const captureFixtureSource = readRepoFile(
 );
 const workbenchSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
-const workspaceCodeEditorSource = readRepoFile("apps/desktop/src/editor/workspace-code-editor.tsx");
-const languageSessionsHookSource = readRepoFile("apps/desktop/src/editor/use-language-sessions.ts");
-const languageSessionsSource = readRepoFile("apps/desktop/src/editor/language-sessions.ts");
-const workspaceRenameSource = readRepoFile("apps/desktop/src/editor/use-workspace-rename.ts");
+const workspaceCodeEditorSource = readRepoFile(
+  "apps/desktop/src/editor/workspace-code-editor.tsx",
+);
+const languageSessionsHookSource = readRepoFile(
+  "apps/desktop/src/editor/use-language-sessions.ts",
+);
+const languageSessionsSource = readRepoFile(
+  "apps/desktop/src/editor/language-sessions.ts",
+);
+const workspaceRenameSource = readRepoFile(
+  "apps/desktop/src/editor/use-workspace-rename.ts",
+);
 const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
@@ -804,7 +823,9 @@ expect(
     chatGridDropSource.includes('"Bottom left"') &&
     chatGridDropSource.includes('"Bottom right"') &&
     surfaceSource.includes("const dropZones = zonesForDrag(dragIdentity)") &&
-    surfaceSource.includes("point && bounds ? { ...point, bounds, sourceSlotIndex }") &&
+    surfaceSource.includes(
+      "point && bounds ? { ...point, bounds, sourceSlotIndex }",
+    ) &&
     surfaceSource.includes(
       "const dropLayout = chatGridDropLayout(dropZones)",
     ) &&
@@ -1044,9 +1065,15 @@ expect(
 );
 expect(
   surfaceSource.includes("<ChatFileCard") &&
-    readRepoFile("packages/ui/src/chat-file-card.tsx").includes("{file.name}") &&
-    readRepoFile("packages/ui/src/chat-file-card.css").includes("object-fit: contain") &&
-    readRepoFile("packages/ui/src/chat-file-card.css").includes("text-overflow: ellipsis"),
+    readRepoFile("packages/ui/src/chat-file-card.tsx").includes(
+      "{file.name}",
+    ) &&
+    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+      "object-fit: contain",
+    ) &&
+    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+      "text-overflow: ellipsis",
+    ),
   "Linked files and restored media should show contained previews with visible, truncated titles.",
 );
 
@@ -1263,7 +1290,9 @@ const languageServerRustSource = readRepoFile(
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
 );
-const delegatedAgentRustSource = readRepoFile("apps/desktop/src-tauri/src/delegated_agents.rs");
+const delegatedAgentRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/delegated_agents.rs",
+);
 const subagentRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/subagent_capability.rs",
 );
@@ -1599,7 +1628,8 @@ expect(
             (model.id === "gpt-5.6-luna"
               ? "low,medium,high,xhigh,max"
               : "low,medium,high,xhigh,max,ultra") &&
-          model.contextWindowTokens === (model.id === "gpt-6.1-sol" ? 500_000 : 272_000),
+          model.contextWindowTokens ===
+            (model.id === "gpt-6.1-sol" ? 500_000 : 272_000),
       ),
   "OpenAI should expose GPT-6.1 Sol, GPT-6 Astra, and all GPT-5.6 variants with their supported effort levels.",
 );
@@ -1770,7 +1800,8 @@ expect(
   "Provider stream delta batches must retain the entire displayed history.",
 );
 expect(
-  limitSessionEventsForUi(streamRegressionState, MAX_CHAT_EVENT_RENDER_COUNT).length === MAX_CHAT_EVENT_RENDER_COUNT,
+  limitSessionEventsForUi(streamRegressionState, MAX_CHAT_EVENT_RENDER_COUNT)
+    .length === MAX_CHAT_EVENT_RENDER_COUNT,
   "Explicit transient buffers remain bounded.",
 );
 expect(
@@ -2130,14 +2161,35 @@ expect(
 );
 
 for (const scale of Object.values(interfaceScales)) {
-  const options = workspaceEditorOptions({ scale, reduceMotion: true, minimapEnabled: true, limited: true, readOnly: true });
-  expect(options.fontSize === 13.5 * scale && options.lineHeight >= options.fontSize && options.readOnly === true && options.minimap.enabled === false && options.smoothScrolling === false && options.cursorBlinking === "solid",
-    "Shared sizing must retain readable editor lines, reduced motion, and large-file safety settings.");
-  expect(styleSource.includes(`--gyro-ui-scale: ${scale};`), "Canvas font scaling and CSS must use the same size factors.");
+  const options = workspaceEditorOptions({
+    scale,
+    reduceMotion: true,
+    minimapEnabled: true,
+    limited: true,
+    readOnly: true,
+  });
+  expect(
+    options.fontSize === 13.5 * scale &&
+      options.lineHeight >= options.fontSize &&
+      options.readOnly === true &&
+      options.minimap.enabled === false &&
+      options.smoothScrolling === false &&
+      options.cursorBlinking === "solid",
+    "Shared sizing must retain readable editor lines, reduced motion, and large-file safety settings.",
+  );
+  expect(
+    styleSource.includes(`--gyro-ui-scale: ${scale};`),
+    "Canvas font scaling and CSS must use the same size factors.",
+  );
 }
 for (const theme of ["dark", "light"]) {
-  expect(colorContrast(workspaceEditorColors[theme]["editorLineNumber.foreground"], workspaceEditorColors[theme]["editorGutter.background"]) >= 4.5,
-    `${theme} editor line numbers must remain readable.`);
+  expect(
+    colorContrast(
+      workspaceEditorColors[theme]["editorLineNumber.foreground"],
+      workspaceEditorColors[theme]["editorGutter.background"],
+    ) >= 4.5,
+    `${theme} editor line numbers must remain readable.`,
+  );
 }
 
 // Appearance migrations accept only supported values and leave other state alone.
@@ -2147,30 +2199,81 @@ for (const [field, action, values] of [
 ]) {
   for (const value of [undefined, null, "invalid", 99, ...values]) {
     const expected = values.includes(value) ? value : "default";
-    const restored = createInitialWorkbenchState({ preferences: { [field]: value } });
-    expect(restored.preferences[field] === expected, `Restoring ${field} must validate ${value}.`);
-    const changed = workbenchReducer(initialState, { type: action, [field]: value });
-    expect(changed.preferences[field] === expected, `${field} actions must normalize invalid values.`);
-    const roundTrip = createInitialWorkbenchState(JSON.parse(JSON.stringify(changed)));
-    expect(roundTrip.preferences[field] === expected, `${field} must survive serialization and restore.`);
-    expect(changed.preferences.density === initialState.preferences.density && changed.preferences.mainColor === initialState.preferences.mainColor,
-      "Changing size or motion must preserve density and the user's palette.");
+    const restored = createInitialWorkbenchState({
+      preferences: { [field]: value },
+    });
+    expect(
+      restored.preferences[field] === expected,
+      `Restoring ${field} must validate ${value}.`,
+    );
+    const changed = workbenchReducer(initialState, {
+      type: action,
+      [field]: value,
+    });
+    expect(
+      changed.preferences[field] === expected,
+      `${field} actions must normalize invalid values.`,
+    );
+    const roundTrip = createInitialWorkbenchState(
+      JSON.parse(JSON.stringify(changed)),
+    );
+    expect(
+      roundTrip.preferences[field] === expected,
+      `${field} must survive serialization and restore.`,
+    );
+    expect(
+      changed.preferences.density === initialState.preferences.density &&
+        changed.preferences.mainColor === initialState.preferences.mainColor,
+      "Changing size or motion must preserve density and the user's palette.",
+    );
     const reset = workbenchReducer(changed, { type: "reset-ui-preferences" });
-    expect(reset.preferences[field] === "default", `Reset must restore ${field}.`);
+    expect(
+      reset.preferences[field] === "default",
+      `Reset must restore ${field}.`,
+    );
   }
 }
-expect(interfaceScales.small < 1 && interfaceScales.default === 1 && interfaceScales.large > 1,
-  "Default size must preserve the existing scale, with smaller and larger choices.");
+expect(
+  interfaceScales.small < 1 &&
+    interfaceScales.default === 1 &&
+    interfaceScales.large > 1,
+  "Default size must preserve the existing scale, with smaller and larger choices.",
+);
 for (const theme of ["dark", "light"]) {
-  for (const color of ["#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#0874df", "#8b6fcb", "#888888"]) {
+  for (const color of [
+    "#000000",
+    "#ffffff",
+    "#ff0000",
+    "#00ff00",
+    "#0000ff",
+    "#ffff00",
+    "#ff00ff",
+    "#00ffff",
+    "#0874df",
+    "#8b6fcb",
+    "#888888",
+  ]) {
     const palette = appearanceAccentProperties(color, color, theme);
-    for (const surface of theme === "dark" ? ["#181818", "#383c41"] : ["#ffffff", "#e7ebf0"]) {
-      for (const role of ["--gyro-accent", "--gyro-accent-strong", "--gyro-secondary-accent", "--gyro-secondary-accent-strong"]) {
-        expect(colorContrast(palette[role], surface) >= 4.5, `${theme} ${color} ${role} must remain readable on ${surface}.`);
+    for (const surface of theme === "dark"
+      ? ["#181818", "#383c41"]
+      : ["#ffffff", "#e7ebf0"]) {
+      for (const role of [
+        "--gyro-accent",
+        "--gyro-accent-strong",
+        "--gyro-secondary-accent",
+        "--gyro-secondary-accent-strong",
+      ]) {
+        expect(
+          colorContrast(palette[role], surface) >= 4.5,
+          `${theme} ${color} ${role} must remain readable on ${surface}.`,
+        );
       }
     }
     for (const role of ["--gyro-primary-bg", "--gyro-primary-hover"]) {
-      expect(colorContrast(palette[role], palette["--gyro-primary-text"]) >= 4.5, `${theme} ${color} buttons must retain readable text.`);
+      expect(
+        colorContrast(palette[role], palette["--gyro-primary-text"]) >= 4.5,
+        `${theme} ${color} buttons must retain readable text.`,
+      );
     }
   }
 }
@@ -2427,7 +2530,9 @@ expect(
     workspaceCodeEditorSource.includes('"textDocument/references"') &&
     appSource.includes("onRenameSymbol={workspaceRename.begin}") &&
     workspaceCodeEditorSource.includes('id: "gyro.workspace.renameSymbol"') &&
-    workspaceCodeEditorSource.includes("propsRef.current.onRenameSymbol?.(path, position)") &&
+    workspaceCodeEditorSource.includes(
+      "propsRef.current.onRenameSymbol?.(path, position)",
+    ) &&
     workspaceRenameSource.includes('"textDocument/rename"') &&
     workspaceRenameSource.includes("prepareWorkspaceEdit(raw, snapshots)"),
   "Developer workflows should include batch SCM, structured test results, and LSP definition, reference, and rename providers.",
@@ -2616,7 +2721,8 @@ const defaultDrawerState = workbenchReducer(
   { type: "open-tool-panel" },
 );
 expect(
-  defaultDrawerState.isToolPanelOpen && defaultDrawerState.activePaneTab === "terminal",
+  defaultDrawerState.isToolPanelOpen &&
+    defaultDrawerState.activePaneTab === "terminal",
   "Opening the drawer without choosing a tool should default to Shell.",
 );
 state = workbenchReducer(state, { type: "open-tool-panel", tab: "browser" });
@@ -4338,7 +4444,9 @@ expect(
     appSource.includes("const eventsRef = useRef<SessionEvent[]>([])") &&
     appSource.includes("eventsRef.current = events") &&
     appSource.includes("eventSessionEvents.find(") &&
-    appSource.includes("sessionEventsById[event.sessionId] ?? eventsRef.current") &&
+    appSource.includes(
+      "sessionEventsById[event.sessionId] ?? eventsRef.current",
+    ) &&
     appSource.includes("item.sessionId === event.sessionId &&") &&
     !appSource.includes("[connectProvider, events, sendDraft]") &&
     providerStreamSource.includes('kind: "provider-stream"') &&
@@ -4503,7 +4611,9 @@ expect(
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(scopedIde.sourceControl)") &&
-    appSource.includes("useScopedIdeState(workbench.ide, workspaceActionRoot)") &&
+    appSource.includes(
+      "useScopedIdeState(workbench.ide, workspaceActionRoot)",
+    ) &&
     appSource.includes('payload.activityKind !== "file"') &&
     appSource.includes("refreshIdeSourceControl(root)") &&
     appSource.includes("refreshedFileActivityKeysRef.current.clear()") &&
@@ -4551,7 +4661,9 @@ expect(
     !runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes('const isDone = model.phase.name === "done"') &&
     runViewSource.includes("setIsCollapsed(isDone && !needsApproval)") &&
-    runViewSource.includes("const showSteps = isLive || needsApproval || !isCollapsed") &&
+    runViewSource.includes(
+      "const showSteps = isLive || needsApproval || !isCollapsed",
+    ) &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
     styleSource.includes(".gyro-run-row") &&
@@ -4604,12 +4716,18 @@ expect(
     tauriSource.includes("async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
-    (/spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(tauriSource) ||
-      (tauriSource.includes("goal_runner::run(worker_app, request, expected_run)") &&
+    (/spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
+      tauriSource,
+    ) ||
+      (tauriSource.includes(
+        "goal_runner::run(worker_app, request, expected_run)",
+      ) &&
         /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
           readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
         ))) &&
-    /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(turnTimingRustSource) &&
+    /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(
+      turnTimingRustSource,
+    ) &&
     tauriSource.includes("async fn save_config") &&
     tauriSource.includes("config save worker failed") &&
     tauriSource.includes("async fn create_desktop_session") &&
@@ -4850,7 +4968,9 @@ expect(
     surfaceSource.includes('aria-label="Terminals"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
     surfaceSource.includes('aria-label="Start a CLI"') &&
-    surfaceSource.includes('onShowToolLauncher ? "Add drawer tab" : "New terminal"') &&
+    surfaceSource.includes(
+      'onShowToolLauncher ? "Add drawer tab" : "New terminal"',
+    ) &&
     styleSource.includes(
       ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
     ) &&
@@ -4981,7 +5101,9 @@ expect(
     appSource.includes(
       "sessionEventsRequestRef.current[sessionId] === requestId",
     ) &&
-    /optimisticEvents\?\.length|optimisticEvents && optimisticEvents.length > 0/.test(appSource) &&
+    /optimisticEvents\?\.length|optimisticEvents && optimisticEvents.length > 0/.test(
+      appSource,
+    ) &&
     appSource.includes("workspaceSearchRequestRef") &&
     appSource.includes("workspaceTreeRequestRef") &&
     appSource.includes("ideSourceControlRootRef.current === root") &&
@@ -5255,7 +5377,9 @@ expect(
   surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
     surfaceSource.includes("onRunCommandProfile(profile.id, launchOptions)") &&
-    surfaceSource.includes('onShowToolLauncher ? "Add drawer tab" : "New terminal"') &&
+    surfaceSource.includes(
+      'onShowToolLauncher ? "Add drawer tab" : "New terminal"',
+    ) &&
     surfaceSource.includes("cliProfileShortLabel") &&
     !surfaceSource.includes(
       'className="gyro-agent-launcher-heading">Start a terminal',
@@ -5336,7 +5460,9 @@ expect(
       chatDesignSource,
     ) &&
     // The composer card is the only solid surface. The dock stays clear.
-    /gyro-chat-composer-dock \{\n  background: transparent;/.test(chatDesignSource),
+    /gyro-chat-composer-dock \{\n  background: transparent;/.test(
+      chatDesignSource,
+    ),
   "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, and the composer dock stays clear.",
 );
 
@@ -5353,11 +5479,13 @@ expect(
 
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
-    styleSource.includes("--gyro-environment-popover-gutter: 322px") &&
+    styleSource.includes("--gyro-environment-popover-gutter: 342px") &&
     styleSource.includes(
       "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
     ) &&
-    styleSource.includes("width: calc(100% - var(--gyro-environment-popover-gutter))") &&
+    styleSource.includes(
+      "width: calc(100% - var(--gyro-environment-popover-gutter))",
+    ) &&
     styleSource.includes("width: auto;"),
   "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
 );
@@ -5649,8 +5777,8 @@ expect(
     surfaceSource.includes("Appearance") &&
     surfaceSource.includes('label: "Workspace"') &&
     surfaceSource.includes('label: "Tools"') &&
-    surfaceSource.includes('label: "Usage & Limits"') &&
-    surfaceSource.includes('label: "Models & Accounts"') &&
+    surfaceSource.includes('label: "Models, Accounts & Limits"') &&
+    !surfaceSource.includes('id: "usage-limits"') &&
     surfaceSource.includes("CLI Profiles") &&
     surfaceSource.includes("Permissions") &&
     surfaceSource.includes("Updates") &&
@@ -5661,6 +5789,9 @@ expect(
     surfaceSource.includes('activeSection === "editor-workspace"') &&
     surfaceSource.includes('activeSection === "tools-contributions"') &&
     surfaceSource.includes('activeSection === "providers"') &&
+    surfaceSource.includes('label: "Efficiency"') &&
+    surfaceSource.includes('activeSection === "efficiency"') &&
+    surfaceSource.includes('title="Efficiency"') &&
     !surfaceSource.includes("isAccountMenuOpen") &&
     !surfaceSource.includes("gyro-account-menu") &&
     !surfaceSource.includes('<nav className="gyro-settings-nav"') &&
@@ -5706,7 +5837,9 @@ expect(
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
     surfaceSource.includes("data-active-tab={activePaneTab}") &&
-    surfaceSource.includes('terminalTitle={activeTerminalPane?.title ?? "Shell"}') &&
+    surfaceSource.includes(
+      'terminalTitle={activeTerminalPane?.title ?? "Shell"}',
+    ) &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
     surfaceSource.includes('tab.id === "terminal"') &&
@@ -5979,9 +6112,11 @@ expect(
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
     appSource.includes(
-      '!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>',
+      "!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>",
     ) &&
-    appSource.includes('activeChatPane?.kind === "draft"\n          ? activeChatPane.workspacePath') &&
+    appSource.includes(
+      'activeChatPane?.kind === "draft"\n          ? activeChatPane.workspacePath',
+    ) &&
     appSource.includes('"gyro.recent-project-paths"') &&
     appSource.includes("loadRecentProjectPaths") &&
     appSource.includes("setRecentProjectPaths((current)") &&
@@ -6154,9 +6289,10 @@ expect(
 expect(
   surfaceSource.includes("function safeAssistantLinkUrl") &&
     surfaceSource.includes("onOpenBrowserUrl={onBrowserNavigate}") &&
-    surfaceSource.includes("onOpenBrowserUrl(href)") &&
-    surfaceSource.includes('target={onOpenBrowserUrl ? undefined : "_blank"}'),
-  "Reply links should open Gyro's Browser rail instead of navigating the app webview.",
+    surfaceSource.includes("openReplyLink(event, href, onOpenBrowserUrl)") &&
+    surfaceSource.includes("function renderBareReplyUrls") &&
+    surfaceSource.includes("title={replyLinkHint}"),
+  "Reply links should open Gyro's Browser rail on a click and the device browser on a modifier click, including bare URLs.",
 );
 expect(
   /:root\[data-theme="dark"\] \.gyro-chat-surface:not\(\.is-empty\),[\s\S]*?\.gyro-chat-composer-dock \{\s*background: var\(--gyro-app\);\s*\}/.test(
@@ -6576,11 +6712,19 @@ expect(
     surfaceSource.includes(
       "providerSignInLabel(providerStatus.recoveryKind)",
     ) &&
-    /connectProvider\(providerId,\s*\{\s*forceLogin:\s*needsSignIn,\s*importedSessionId:\s*event\.sessionId,\s*\}\)/.test(appSource) &&
-    /const retryContext:\s*ChatTurnContextSnapshot\s*=\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(appSource) &&
+    /connectProvider\(providerId,\s*\{\s*forceLogin:\s*needsSignIn,\s*importedSessionId:\s*event\.sessionId,\s*\}\)/.test(
+      appSource,
+    ) &&
+    /const retryContext:\s*ChatTurnContextSnapshot\s*=\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(
+      appSource,
+    ) &&
     appSource.includes("retryDispatchRef.current") &&
-    /sendDraftRef\.current\(userMessage,\s*\{\s*\.\.\.retryContext,\s*retryDispatchGuard/.test(appSource) &&
-    appSource.includes("sessionEventsById[event.sessionId] ?? eventsRef.current") &&
+    /sendDraftRef\.current\(userMessage,\s*\{\s*\.\.\.retryContext,\s*retryDispatchGuard/.test(
+      appSource,
+    ) &&
+    appSource.includes(
+      "sessionEventsById[event.sessionId] ?? eventsRef.current",
+    ) &&
     appSource.includes("item.sessionId === event.sessionId &&") &&
     appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
     appSource.includes("if (!forceLogin && result.connectionStatus"),
@@ -6678,13 +6822,17 @@ expect(
     ["opencode", "opencode", ["auth", "login"]],
   ].every(([id, command, args]) => {
     const profile = providerLoginProfile(id);
-    return profile.command === command &&
+    return (
+      profile.command === command &&
       JSON.stringify(profile.args) === JSON.stringify(args) &&
-      providerLoginCommandText(profile) === [command, ...args].join(" ");
+      providerLoginCommandText(profile) === [command, ...args].join(" ")
+    );
   }) &&
     appSource.includes('from "./provider-login-profile"') &&
     appSource.includes("const profile = providerLoginProfile(providerId)") &&
-    appSource.includes("const commandText = providerLoginCommandText(profile)") &&
+    appSource.includes(
+      "const commandText = providerLoginCommandText(profile)",
+    ) &&
     appSource.includes('"check_provider_health"') &&
     appSource.includes("providerHealthRequest(provider, providerId)") &&
     appSource.includes("configSaveQueueRef.current") &&
@@ -6696,8 +6844,12 @@ expect(
     appSource.includes('layout: "terminal-grid"') &&
     appSource.includes('tab: "terminal"') &&
     coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
-    /command:\s*"codex",\s*args:\s*&\["login", "status"\]/.test(coreProviderHealthSource) &&
-    /command:\s*"claude",\s*args:\s*&\["auth", "status"\]/.test(coreProviderHealthSource) &&
+    /command:\s*"codex",\s*args:\s*&\["login", "status"\]/.test(
+      coreProviderHealthSource,
+    ) &&
+    /command:\s*"claude",\s*args:\s*&\["auth", "status"\]/.test(
+      coreProviderHealthSource,
+    ) &&
     coreProviderHealthSource.includes('"xai"') &&
     coreProviderHealthSource.includes('"XAI_API_KEY"') &&
     coreProviderHealthSource.includes(
@@ -6774,8 +6926,12 @@ expect(
     ) &&
     surfaceSource.includes('if (event.key === "Escape")') &&
     surfaceSource.includes("openMenus.at(-1) !== menu") &&
-    /const focusTarget =\s*triggerRef\?\.current \?\?\s*element\.querySelector<HTMLElement>\(\s*'\[aria-haspopup\]\[aria-expanded="true"\]',?\s*\) \?\?\s*returnFocus;/.test(surfaceSource) &&
-    /if \(focusTarget\?\.isConnected\)\s*focusTarget\.focus\(\{ preventScroll: true \}\)/.test(surfaceSource),
+    /const focusTarget =\s*triggerRef\?\.current \?\?\s*element\.querySelector<HTMLElement>\(\s*'\[aria-haspopup\]\[aria-expanded="true"\]',?\s*\) \?\?\s*returnFocus;/.test(
+      surfaceSource,
+    ) &&
+    /if \(focusTarget\?\.isConnected\)\s*focusTarget\.focus\(\{ preventScroll: true \}\)/.test(
+      surfaceSource,
+    ),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 // Model rail: provider marks down the left, the previewed provider's models
@@ -6988,10 +7144,11 @@ expect(
     surfaceSource.includes('document.addEventListener("pointerdown"') &&
     surfaceSource.includes("const path = event.composedPath()") &&
     surfaceSource.includes("path.includes(element)") &&
+    surfaceSource.includes("focused.contains(element)") &&
     surfaceSource.includes("const menuRef = useOutsidePointerDismiss") &&
     surfaceSource.includes("event.target === event.currentTarget") &&
     surfaceSource.includes("ref={detailRef}"),
-  "Menus, popovers, command palette, and detail panels should dismiss on outside pointer clicks.",
+  "Menus, popovers, command palette, and detail panels should dismiss on outside pointer clicks, but a focus move onto an ancestor that still contains the menu must not close it.",
 );
 expect(
   surfaceSource.includes("triggerRef?: RefObject<HTMLElement | null>") &&
@@ -7112,8 +7269,14 @@ const heroCompletionMenu = completionMenuGeometry({
 expect(
   heroCompletionMenu.direction === "up" &&
     heroCompletionMenu.height === 296 &&
-    (surfaceSource.match(/<ComposerCompletionMenu[\s\S]*?className="gyro-composer-slash-menu(?: is-commands)?"/g) ?? []).length === 2 &&
-    completionMenuSource.includes("clippingBounds(panel, popoverViewportRect)") &&
+    (
+      surfaceSource.match(
+        /<ComposerCompletionMenu[\s\S]*?className="gyro-composer-slash-menu(?: is-commands)?"/g,
+      ) ?? []
+    ).length === 2 &&
+    completionMenuSource.includes(
+      "clippingBounds(panel, popoverViewportRect)",
+    ) &&
     completionMenuSource.includes('[role="option"][aria-selected="true"]') &&
     completionMenuSource.includes('scrollIntoView({ block: "nearest" })'),
   "Slash and context completions must stay within the owning pane, with keyboard-selected context options visible.",
@@ -7129,11 +7292,12 @@ for (const scale of [0.8, 1, 1.15, 1.5]) {
         minimumHeight: 110 * scale,
         gap: 8 * scale,
       });
-      const menuTop = menu.direction === "overlay"
-        ? menu.top
-        : menu.direction === "up"
-          ? top - 8 * scale - menu.height
-          : top + 90 + 8 * scale;
+      const menuTop =
+        menu.direction === "overlay"
+          ? menu.top
+          : menu.direction === "up"
+            ? top - 8 * scale - menu.height
+            : top + 90 + 8 * scale;
       expect(
         menuTop >= 8 && menuTop + menu.height <= height - 8 && menu.height > 0,
         `Completion menus must fit a ${height}px pane at ${scale} scale with anchor ${anchorTop}.`,
@@ -7254,7 +7418,9 @@ expect(
     chatSurfaceSource.includes(
       "onDecision={(decision) => void handlePlanDecision(decision)}",
     ) &&
-    chatSurfaceSource.includes("setDismissedPlanDecisionKey(planDecisionKey);") &&
+    chatSurfaceSource.includes(
+      "setDismissedPlanDecisionKey(planDecisionKey);",
+    ) &&
     // The plan lands in the transcript as a card holding the same document the
     // panel renders, and folds to one line while the panel shows it.
     planModeSource.includes("export function PlanCard") &&
@@ -7285,7 +7451,9 @@ expect(
     appSource.includes("preserveDraft: true") &&
     // Questions arrive one at a time with a recommended pick, and the answers
     // fold into an "Asked N questions" run row.
-    tauriSource.includes('const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";') &&
+    tauriSource.includes(
+      'const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";',
+    ) &&
     tauriSource.includes('object.insert("questions".into(), questions);') &&
     planModeSource.includes("export function questionsFromPayload") &&
     planModeSource.includes("export function formatChatAnswers") &&
@@ -7522,7 +7690,9 @@ expect(
     ) &&
     tauriSource.includes("write_workspace_file") &&
     appSource.includes("<MonacoEditorPane") &&
-    workspaceCodeEditorSource.includes('lazy(() => import("../monaco-editor"))') &&
+    workspaceCodeEditorSource.includes(
+      'lazy(() => import("../monaco-editor"))',
+    ) &&
     monacoEditorSource.includes("loader.config({ monaco })") &&
     monacoEditorSource.includes("MonacoEnvironment") &&
     monacoEditorSource.includes("export function disposeMonacoModel") &&
@@ -7725,8 +7895,12 @@ expect(
   "Terminal Grid should use the shared panel body without the IDE tool-tab header.",
 );
 expect(
-  surfaceSource.includes('(compact || activeTab === "terminal") && onAddPane') &&
-    surfaceSource.includes('aria-label={compact ? "Add drawer tab" : "New terminal"}') &&
+  surfaceSource.includes(
+    '(compact || activeTab === "terminal") && onAddPane',
+  ) &&
+    surfaceSource.includes(
+      'aria-label={compact ? "Add drawer tab" : "New terminal"}',
+    ) &&
     surfaceSource.includes('aria-label="Drawer tools"'),
   "The IDE drawer add control should open its tool picker while other terminal surfaces keep direct creation.",
 );
@@ -7807,9 +7981,7 @@ for (const secretPattern of [
 }
 
 expect(
-  surfaceSource.includes(
-    'value={isIdeSidebar ? "workspace" : "sessions"}',
-  ) &&
+  surfaceSource.includes('value={isIdeSidebar ? "workspace" : "sessions"}') &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes("justify-content: center") &&
     styleSource.includes("font-weight: 450") &&
@@ -7826,7 +7998,9 @@ expect(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 6px") &&
-    styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
+    styleSource.includes(
+      "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
+    ) &&
     styleSource.includes("--gyro-app: #181818") &&
     styleSource.includes("--gyro-pane: #1c1c1c") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
@@ -8305,7 +8479,9 @@ expect(
     surfaceSource.includes('label="Usage visualization"') &&
     surfaceSource.includes("`${remaining.percentLabel} left`") &&
     surfaceSource.includes("<small>left</small>") &&
-    surfaceSource.includes('"--usage": `${(remaining.percent ?? 0) * 3.6}deg`') &&
+    surfaceSource.includes(
+      '"--usage": `${(remaining.percent ?? 0) * 3.6}deg`',
+    ) &&
     surfaceSource.includes("No plan window API on this provider") &&
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
@@ -8358,8 +8534,12 @@ expect(
       ':root[data-density="comfortable"] .gyro-sidebar-action',
     ) &&
     styleSource.includes(".gyro-composer-context-row") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1))") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1))") &&
+    styleSource.includes(
+      "--gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1))",
+    ) &&
+    styleSource.includes(
+      "--gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1))",
+    ) &&
     styleSource.includes(
       ':root[data-density="comfortable"] .gyro-workspace-route.is-code',
     ),
@@ -8563,13 +8743,12 @@ expect(
   CLAUDE_REASONING_EFFORTS.join(",") === "low,medium,high,xhigh,max" &&
     providerCatalog
       .find((provider) => provider.id === "anthropic")
-      ?.models.every(
-        (model) =>
-          model.id === "claude-haiku-4-5"
-            ? model.supportedReasoningEfforts === undefined &&
-              model.defaultReasoningEffort === undefined
-            : model.supportedReasoningEfforts?.join(",") ===
-              CLAUDE_REASONING_EFFORTS.join(","),
+      ?.models.every((model) =>
+        model.id === "claude-haiku-4-5"
+          ? model.supportedReasoningEfforts === undefined &&
+            model.defaultReasoningEffort === undefined
+          : model.supportedReasoningEfforts?.join(",") ===
+            CLAUDE_REASONING_EFFORTS.join(","),
       ) === true &&
     desktopRustSource.includes("fn claude_reasoning_effort_arg") &&
     desktopRustSource.includes('args.push("--effort".into())'),
@@ -8578,7 +8757,9 @@ expect(
 
 expect(
   styleSource.includes("Conversation text shares the body scale") &&
-    styleSource.includes("--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));") &&
+    styleSource.includes(
+      "--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));",
+    ) &&
     styleSource.includes(
       "font-size: var(--gyro-font-body);\n  line-height: 1.6;",
     ) &&

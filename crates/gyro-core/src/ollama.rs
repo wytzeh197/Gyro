@@ -59,6 +59,10 @@ pub struct OllamaChatResponse {
     pub output_tokens: Option<u64>,
     pub accounted_usage: UsageTokens,
     pub tool_calls: Vec<OllamaToolCall>,
+    /// Ollama stopped at its output-token cap. `content` is the text it managed
+    /// to write; tool calls from that answer were dropped because their
+    /// arguments may be cut off.
+    pub truncated: bool,
     pub context_window_tokens: Option<u64>,
 }
 
@@ -366,6 +370,7 @@ where
     let mut receipt_completed = false;
     let mut final_usage = false;
     let mut usage_regressed = false;
+    let mut truncated = false;
     let mut terminal_error = None;
     loop {
         if cancellation.is_cancelled() {
@@ -423,9 +428,11 @@ where
             });
         }
         if frame.done_reason.as_deref() == Some("length") {
-            terminal_error.get_or_insert_with(|| anyhow!(
-                "Ollama reached its output token limit; the response is incomplete and no tool calls from this response were executed"
-            ));
+            // A capped generation still carries usable text, so keep it rather
+            // than failing the turn. Tool calls from that answer are unsafe:
+            // later arguments may have been cut off.
+            truncated = true;
+            tool_calls.clear();
         }
         // Some gateways label NDJSON as JSON. Incomplete frames still require
         // the terminal done marker before any tool call can be used.
@@ -442,6 +449,9 @@ where
                 content.push_str(&frame.message.content);
             }
             for call in frame.message.tool_calls {
+                if truncated {
+                    break;
+                }
                 if call.function.name.trim().is_empty() {
                     continue;
                 }
@@ -494,7 +504,13 @@ where
         return Err(error);
     }
     if content.is_empty() && tool_calls.is_empty() {
-        return Err(anyhow!("Ollama finished without a text response"));
+        return Err(if truncated {
+            anyhow!(
+                "Ollama reached its output token limit before producing any text; no tool calls from this response were executed"
+            )
+        } else {
+            anyhow!("Ollama finished without a text response")
+        });
     }
     Ok(OllamaChatResponse {
         content,
@@ -502,6 +518,7 @@ where
         output_tokens,
         accounted_usage,
         tool_calls,
+        truncated,
         context_window_tokens: window,
     })
 }

@@ -1,5 +1,8 @@
 pub mod account;
 pub mod acp_usage;
+pub mod agent_relay;
+pub mod agent_sessions;
+pub mod antigravity_cli;
 mod api_compatibility;
 pub mod automations;
 pub mod capabilities;
@@ -209,8 +212,8 @@ pub use usage::{
 pub use web_fetch::{fetch_text, WebFetchPage, MAX_WEB_FETCH_BYTES};
 pub use workspace_check::{
     check_workspace, check_workspace_with_timeout, is_workspace_unavailable_error,
-    WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief, WORKSPACE_CHECK_SCHEMA_V1,
-    WORKSPACE_CHECK_TIMEOUT, WORKSPACE_UNAVAILABLE_MESSAGE,
+    record_prepared_workspace, WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief,
+    WORKSPACE_CHECK_SCHEMA_V1, WORKSPACE_CHECK_TIMEOUT, WORKSPACE_UNAVAILABLE_MESSAGE,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,

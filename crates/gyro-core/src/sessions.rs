@@ -24,6 +24,10 @@ const MAX_SESSION_EVENTS_READ: usize = 1_000;
 const SESSION_EVENT_TAIL_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_SESSION_EVENT_LINE_BYTES: usize = 1024 * 1024;
 const MAX_SESSION_EVENT_TAIL_READ_BYTES: usize = 32 * 1024 * 1024;
+const MAX_WORKSPACE_CONTEXT_LOOKUP_BYTES: usize = 8 * 1024 * 1024;
+/// The payload marker every workspace-context event carries. A lookup matches
+/// it as plain text, so only events that could belong to the turn are decoded.
+const WORKSPACE_CONTEXT_MARKER: &str = "workspace-context";
 const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 /// How far back a replay check looks in a log that predates the turn index.
@@ -1777,6 +1781,50 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// The workspace-context event a turn already persisted, if any.
+    ///
+    /// A retried or resumed turn reuses the snapshot its earlier attempt wrote.
+    /// The lookup walks back from the end of the session log and stops at the
+    /// newest matching event, so a long chat pays for its recent tail instead
+    /// of a fixed window of older turns.
+    pub fn latest_workspace_context_event(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(None);
+        }
+        let mut file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for workspace context", events_path.display()))?;
+        let mut found = None;
+        // Both markers are literal substrings of the serialized event, so a
+        // long chat pays JSON decoding only for lines that could belong to this
+        // turn instead of every event in the tail window.
+        let turn_marker = turn_id.to_string();
+        visit_recent_event_lines(&mut file, MAX_WORKSPACE_CONTEXT_LOOKUP_BYTES, |line| {
+            if !line.contains(&turn_marker) || !line.contains(WORKSPACE_CONTEXT_MARKER) {
+                return false;
+            }
+            let Some(event) = parse_session_event_line_or_skip(&events_path, 0, line) else {
+                return false;
+            };
+            if event.turn_id == Some(turn_id)
+                && event.payload.get("kind").and_then(Value::as_str) == Some("workspace-context")
+            {
+                found = Some(event);
+                return true;
+            }
+            false
+        })?;
+        Ok(found)
+    }
+
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
@@ -2759,6 +2807,71 @@ fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<S
     }
 }
 
+/// Visits complete event lines from the end of the log, newest first.
+///
+/// Stops when `visit` returns true, the log was visited, or `max_bytes` of the
+/// tail was read. Windows end on a line boundary, so an event that spans a
+/// window edge is read whole by the next, larger window instead of in halves.
+fn visit_recent_event_lines(
+    file: &mut std::fs::File,
+    max_bytes: usize,
+    mut visit: impl FnMut(&str) -> bool,
+) -> Result<bool> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len == 0 || max_bytes == 0 {
+        return Ok(false);
+    }
+    let mut window_bytes = SESSION_EVENT_TAIL_CHUNK_BYTES.min(max_bytes);
+    let mut window_end = file_len;
+    while window_end > 0 {
+        let window_start = window_end.saturating_sub(window_bytes as u64);
+        let length = usize::try_from(window_end - window_start)?;
+        file.seek(SeekFrom::Start(window_start))?;
+        let mut buffer = vec![0u8; length];
+        file.read_exact(&mut buffer)?;
+        let line_start = if window_start == 0 {
+            0
+        } else {
+            match buffer.iter().position(|byte| *byte == b'\n') {
+                Some(newline) => newline + 1,
+                None => {
+                    // Still inside one event; widen the window instead of
+                    // parsing a fragment.
+                    window_end = window_start;
+                    if window_bytes >= max_bytes {
+                        break;
+                    }
+                    window_bytes = (window_bytes.saturating_mul(2)).min(max_bytes);
+                    continue;
+                }
+            }
+        };
+        let mut line_end = buffer.len();
+        if window_end == file_len && !buffer.ends_with(b"\n") {
+            // A crashed append left a partial last line; never parse it.
+            line_end = match buffer.iter().rposition(|byte| *byte == b'\n') {
+                Some(newline) => newline + 1,
+                None => 0,
+            };
+        }
+        if line_end > line_start {
+            let text = String::from_utf8_lossy(&buffer[line_start..line_end]);
+            for line in text.split('\n').rev().filter(|line| !line.is_empty()) {
+                if visit(line) {
+                    return Ok(true);
+                }
+            }
+        }
+        let aligned_start = window_start + line_start as u64;
+        if aligned_start == 0 || window_bytes >= max_bytes {
+            break;
+        }
+        window_end = aligned_start;
+        window_bytes = (window_bytes.saturating_mul(2)).min(max_bytes);
+    }
+    Ok(false)
+}
+
 fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
     if max_lines == 0 {
         return Ok(Vec::new());
@@ -3248,6 +3361,150 @@ mod tests {
         assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
         assert_eq!(events[1].message, "hello");
         assert!(store.latest_session().unwrap().is_some());
+    }
+
+    #[test]
+    fn finds_the_workspace_context_event_for_its_turn_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "workspace chat")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "schema": "gyro.workspace-context.v1",
+                    "snapshot": { "schema": "gyro.workspace-context.v1", "revision": 7 },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..64 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::AssistantMessage,
+                    format!("later message {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event");
+        assert_eq!(found.turn_id, Some(turn_id));
+        assert_eq!(found.payload["kind"], "workspace-context");
+        assert_eq!(found.payload["snapshot"]["revision"], 7);
+        assert!(store
+            .latest_workspace_context_event(session.id, Uuid::new_v4())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn workspace_context_lookup_reads_events_larger_than_the_tail_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "large context")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "snapshot": {
+                        "schema": "gyro.workspace-context.v1",
+                        "revision": 9,
+                        "buffers": ["x".repeat(90 * 1024)],
+                    },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..16 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::AssistantMessage,
+                    format!("after {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event spanning the tail window");
+        assert_eq!(found.payload["snapshot"]["revision"], 9);
+    }
+
+    #[test]
+    fn workspace_context_lookup_reads_a_crowded_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "busy chat")
+            .unwrap();
+        for index in 0..240 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("turn {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "snapshot": { "revision": 41 },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..80 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("later {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event behind a crowded tail");
+        assert_eq!(found.turn_id, Some(turn_id));
+        assert_eq!(found.payload["snapshot"]["revision"], 41);
+        assert!(store
+            .latest_workspace_context_event(session.id, Uuid::new_v4())
+            .unwrap()
+            .is_none());
     }
 
     #[test]

@@ -1,0 +1,365 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "",
+      "label": "Dark",
+      "rect": {
+        "bottom": 45,
+        "height": 29,
+        "right": 426.796875,
+        "width": 48.4375,
+        "x": 378.359375,
+        "y": 16
+      }
+    },
+    {
+      "className": "",
+      "label": "Light",
+      "rect": {
+        "bottom": 45,
+        "height": 29,
+        "right": 485.3125,
+        "width": 50.515625,
+        "x": 434.796875,
+        "y": 16
+      }
+    },
+    {
+      "className": "",
+      "label": "All commands",
+      "rect": {
+        "bottom": 45,
+        "height": 29,
+        "right": 594.8125,
+        "width": 101.5,
+        "x": 493.3125,
+        "y": 16
+      }
+    },
+    {
+      "className": "",
+      "label": "Filter permissions",
+      "rect": {
+        "bottom": 45,
+        "height": 29,
+        "right": 724.8125,
+        "width": 122,
+        "x": 602.8125,
+        "y": 16
+      }
+    },
+    {
+      "className": "",
+      "label": "Help command",
+      "rect": {
+        "bottom": 45,
+        "height": 29,
+        "right": 840,
+        "width": 107.1875,
+        "x": 732.8125,
+        "y": 16
+      }
+    },
+    {
+      "className": "",
+      "label": "Workspace commands",
+      "rect": {
+        "bottom": 82,
+        "height": 29,
+        "right": 170.109375,
+        "width": 150.109375,
+        "x": 20,
+        "y": 53
+      }
+    },
+    {
+      "className": "is-selected",
+      "label": "/helpShow command help",
+      "rect": {
+        "bottom": 74.546875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 42.25
+      }
+    },
+    {
+      "className": "",
+      "label": "/compactCompact context?Compact this chat after the first reply.",
+      "rect": {
+        "bottom": 108.734375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 76.4375
+      }
+    },
+    {
+      "className": "",
+      "label": "/goalSave goal?Say what a good result looks like, and Gyro keeps it in",
+      "rect": {
+        "bottom": 142.921875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 110.625
+      }
+    },
+    {
+      "className": "",
+      "label": "/normalNormal mode?Go back to the usual way of working, where Gyro jus",
+      "rect": {
+        "bottom": 177.109375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 144.8125
+      }
+    },
+    {
+      "className": "",
+      "label": "/editorAttach editor snapshot?Sends a copy of the file you have open, ",
+      "rect": {
+        "bottom": 211.296875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 179
+      }
+    },
+    {
+      "className": "",
+      "label": "/imageAttach image",
+      "rect": {
+        "bottom": 245.484375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 213.1875
+      }
+    },
+    {
+      "className": "",
+      "label": "/videoAttach video",
+      "rect": {
+        "bottom": 279.671875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 247.375
+      }
+    },
+    {
+      "className": "",
+      "label": "/fileAttach file",
+      "rect": {
+        "bottom": 313.859375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 281.5625
+      }
+    },
+    {
+      "className": "",
+      "label": "/folderChoose folder?Pick the project folder this chat is allowed to w",
+      "rect": {
+        "bottom": 348.046875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 315.75
+      }
+    },
+    {
+      "className": "",
+      "label": "/searchSearch workspace",
+      "rect": {
+        "bottom": 382.234375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 349.9375
+      }
+    },
+    {
+      "className": "",
+      "label": "/modelChoose model",
+      "rect": {
+        "bottom": 416.421875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 384.125
+      }
+    },
+    {
+      "className": "",
+      "label": "/permissionsChange permissions?Choose how often Gyro checks with you b",
+      "rect": {
+        "bottom": 450.609375,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 418.3125
+      }
+    },
+    {
+      "className": "",
+      "label": "/newNew chat",
+      "rect": {
+        "bottom": 484.796875,
+        "height": 32.296875,
+        "right": 439.90625,
+        "width": 336.625,
+        "x": 103.28125,
+        "y": 452.5
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 477.546875,
+        "height": 49.390625,
+        "right": 771,
+        "width": 682,
+        "x": 89,
+        "y": 428.15625
+      }
+    },
+    {
+      "className": "",
+      "label": "Connect a provider",
+      "rect": {
+        "bottom": 514.625,
+        "height": 26.59375,
+        "right": 749.109375,
+        "width": 127.78125,
+        "x": 621.328125,
+        "y": 488.03125
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 557.40625,
+        "height": 28.5,
+        "right": 123.1875,
+        "width": 26.59375,
+        "x": 96.59375,
+        "y": 528.90625
+      }
+    },
+    {
+      "className": "gyro-composer-chip is-auto-approve",
+      "label": "Approval mode: Approve for me",
+      "rect": {
+        "bottom": 556.453125,
+        "height": 26.59375,
+        "right": 266.59375,
+        "width": 136.765625,
+        "x": 129.828125,
+        "y": 529.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip is-plan",
+      "label": "Remove Plan mode",
+      "rect": {
+        "bottom": 556.453125,
+        "height": 26.59375,
+        "right": 353.34375,
+        "width": 80.109375,
+        "x": 273.234375,
+        "y": 529.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-6.1 Sol",
+      "rect": {
+        "bottom": 556.453125,
+        "height": 26.59375,
+        "right": 730.171875,
+        "width": 99.25,
+        "x": 630.921875,
+        "y": 529.859375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 556.453125,
+        "height": 26.59375,
+        "right": 763.40625,
+        "width": 26.59375,
+        "x": 736.8125,
+        "y": 529.859375
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "Workspace commands",
+      "b": "/helpShow command help",
+      "height": 21.546875,
+      "width": 66.828125
+    },
+    {
+      "a": "Workspace commands",
+      "b": "/compactCompact context?Compact this chat after the first re",
+      "height": 5.5625,
+      "width": 66.828125
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Message Gyro",
+      "height": 22.453125,
+      "width": 336.625
+    },
+    {
+      "a": "/newNew chat",
+      "b": "Message Gyro",
+      "height": 25.046875,
+      "width": 336.625
+    }
+  ],
+  "popovers": [
+    {
+      "className": "gyro-composer-slash-menu is-commands",
+      "clientHeight": 438,
+      "label": "Chat commands",
+      "rect": {
+        "bottom": 420.5625,
+        "height": 418,
+        "right": 457.59375,
+        "width": 361,
+        "x": 96.59375,
+        "y": 2.5625
+      },
+      "scrollHeight": 454
+    }
+  ],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

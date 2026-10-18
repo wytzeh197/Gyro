@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub const WORKSPACE_CHECK_SCHEMA_V1: &str = "gyro.workspace-check.v1";
@@ -43,6 +43,14 @@ const PROJECT_MARKERS: &[(&str, &str)] = &[
     ("mix.exs", "elixir"),
     ("pubspec.yaml", "dart"),
 ];
+
+/// Marker slots, so one listing can settle every marker without a per-file
+/// stat and without allocating.
+const MARKER_SLOTS: usize = PROJECT_MARKERS.len();
+
+/// A root this large costs more to list than to stat marker by marker, so the
+/// scan stops and the markers a listing did not reach fall back to stats.
+const MAX_SCAN_ENTRIES: usize = 512;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -105,6 +113,16 @@ impl WorkspaceCheckReport {
 
     pub fn is_unavailable(&self) -> bool {
         self.status == WorkspaceCheckStatus::Unavailable
+    }
+
+    /// The canonical root this report describes.
+    ///
+    /// The check resolves the root once and keys its report by that path, so a
+    /// caller that needs a canonical root — binding a turn's capability
+    /// context, for one — takes it from here instead of resolving it again.
+    pub fn canonical_workspace(&self) -> Option<PathBuf> {
+        let path = Path::new(&self.workspace_key);
+        path.is_absolute().then(|| path.to_path_buf())
     }
 
     pub fn briefing(&self) -> String {
@@ -197,14 +215,86 @@ fn workspace_check_cache() -> &'static Mutex<HashMap<String, (Instant, Workspace
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn check_workspace(path: impl AsRef<Path>) -> WorkspaceCheckReport {
-    let key = path.as_ref().display().to_string();
-    if let Ok(cache) = workspace_check_cache().lock() {
-        if let Some((cached_at, report)) = cache.get(&key) {
-            if cached_at.elapsed() < WORKSPACE_CHECK_CACHE_TTL && !report.is_unavailable() {
-                return report.clone();
-            }
+fn cached_workspace_check(key: &str) -> Option<WorkspaceCheckReport> {
+    let cache = workspace_check_cache().lock().ok()?;
+    let (cached_at, report) = cache.get(key)?;
+    if cached_at.elapsed() < WORKSPACE_CHECK_CACHE_TTL && !report.is_unavailable() {
+        Some(report.clone())
+    } else {
+        None
+    }
+}
+
+/// One probe per workspace at a time.
+///
+/// A session chat, its side chats, delegated agents, and the Workspace panel
+/// can all ask about the same workspace within a few milliseconds. The first
+/// caller probes the folder and Git; the rest wait here and then read the
+/// report it cached instead of starting a probe of their own.
+fn workspace_probe_gates() -> &'static Mutex<HashMap<String, Arc<Mutex<()>>>> {
+    static GATES: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    GATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn workspace_probe_gate(key: &str) -> Arc<Mutex<()>> {
+    let mut gates = match workspace_probe_gates().lock() {
+        Ok(gates) => gates,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(gate) = gates.get(key) {
+        return gate.clone();
+    }
+    if gates.len() >= MAX_WORKSPACE_CHECK_CACHES {
+        // Only a gate nobody is probing or waiting on can be dropped.
+        if let Some(idle) = gates
+            .iter()
+            .find(|(_, gate)| Arc::strong_count(gate) == 1)
+            .map(|(key, _)| key.clone())
+        {
+            gates.remove(&idle);
         }
+    }
+    let gate = Arc::new(Mutex::new(()));
+    gates.insert(key.to_string(), gate.clone());
+    gate
+}
+
+/// The home directory, resolved once per process.
+///
+/// Every probe compared the root against a canonical home, which cost a full
+/// path resolution per probe and per Source Control refresh. Home does not move
+/// while the app runs, so resolve it once.
+fn canonical_home() -> Option<&'static Path> {
+    static HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
+    HOME.get_or_init(|| dirs::home_dir().and_then(|home| home.canonicalize().ok()))
+        .as_deref()
+}
+
+pub fn check_workspace(path: impl AsRef<Path>) -> WorkspaceCheckReport {
+    let raw = path.as_ref();
+    let handed_key = raw.display().to_string();
+    if let Some(report) = cached_workspace_check(&handed_key) {
+        return report;
+    }
+    // The same workspace can arrive under another spelling: a trailing slash,
+    // a `~` path, a symlinked root. Resolving costs one call on a miss and
+    // nothing on the fast path above, and keeps every spelling on one entry
+    // and one probe.
+    let key = match raw.canonicalize() {
+        Ok(canonical) => canonical.display().to_string(),
+        Err(_) => handed_key,
+    };
+    if let Some(report) = cached_workspace_check(&key) {
+        return report;
+    }
+    let gate = workspace_probe_gate(&key);
+    let _probe = match gate.lock() {
+        Ok(probe) => probe,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    // A caller that queued behind the probe that just finished reads its report.
+    if let Some(report) = cached_workspace_check(&key) {
+        return report;
     }
     let report = check_workspace_with_timeout(path, WORKSPACE_CHECK_TIMEOUT);
     if !report.is_unavailable() {
@@ -224,6 +314,57 @@ pub fn check_workspace(path: impl AsRef<Path>) -> WorkspaceCheckReport {
         }
     }
     report
+}
+
+/// Seeds the check cache with the Source Control view the Workspace pane just
+/// prepared.
+///
+/// Opening a workspace and sending its first chat used to probe the folder and
+/// Git twice: once to prepare the pane and once at turn start. The pane now
+/// hands its fresh Git view to the check cache, so the first turn reuses it and
+/// both surfaces describe the same branch and dirty state.
+pub fn record_prepared_workspace(path: impl AsRef<Path>, git: WorkspaceGitBrief) -> bool {
+    let raw = path.as_ref();
+    let Ok(canonical) = raw.canonicalize() else {
+        return false;
+    };
+    let home_workspace = canonical_home().is_some_and(|home| home == canonical);
+    let (project_kind, markers) = detect_project(&canonical);
+    let report = WorkspaceCheckReport {
+        schema: WORKSPACE_CHECK_SCHEMA_V1.into(),
+        workspace_key: canonical.display().to_string(),
+        status: WorkspaceCheckStatus::Ready,
+        duration_ms: 0,
+        path_exists: true,
+        is_directory: true,
+        readable: true,
+        git: Some(git),
+        project_kind,
+        markers,
+        home_workspace,
+        error: home_workspace.then(|| {
+            "Workspace is the home folder; treat it as a broad, sensitive root.".to_string()
+        }),
+    };
+    let Ok(mut cache) = workspace_check_cache().lock() else {
+        return false;
+    };
+    let cached_at = Instant::now();
+    // One entry under the canonical key. `check_workspace` resolves whatever
+    // spelling it is handed to this key, so the pane's prepared view reaches
+    // the chat without a duplicate cache row.
+    cache.insert(report.workspace_key.clone(), (cached_at, report));
+    while cache.len() > MAX_WORKSPACE_CHECK_CACHES {
+        let oldest = cache
+            .iter()
+            .min_by_key(|(_, (cached_at, _))| *cached_at)
+            .map(|(key, _)| key.clone());
+        let Some(oldest) = oldest else {
+            break;
+        };
+        cache.remove(&oldest);
+    }
+    true
 }
 
 pub fn check_workspace_with_timeout(
@@ -247,19 +388,17 @@ pub fn check_workspace_with_timeout(
     if !is_directory {
         return unavailable_report(display_key(raw), started, true, false, false);
     }
-    let readable = fs::read_dir(raw).is_ok();
-    if !readable {
-        return unavailable_report(display_key(raw), started, true, true, false);
-    }
+    // One listing answers readability and the project markers together, so a
+    // turn start no longer opens the root and then stats fourteen markers.
+    let project = match scan_project_root(raw) {
+        Ok(project) => project,
+        Err(_) => return unavailable_report(display_key(raw), started, true, true, false),
+    };
 
     let canonical = raw.canonicalize().unwrap_or_else(|_| raw.to_path_buf());
     let workspace_key = canonical.display().to_string();
-    let home_workspace = dirs::home_dir().is_some_and(|home| {
-        home.canonicalize()
-            .ok()
-            .is_some_and(|home| home == canonical)
-    });
-    let (project_kind, markers) = detect_project(&canonical);
+    let home_workspace = canonical_home().is_some_and(|home| home == canonical);
+    let (project_kind, markers) = (project.project_kind, project.markers);
 
     let remaining = timeout.saturating_sub(started.elapsed());
     let git = if remaining >= MIN_GIT_BUDGET {
@@ -354,21 +493,98 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-fn detect_project(root: &Path) -> (Option<String>, Vec<String>) {
+/// What one pass over a project root learned.
+struct ProjectScan {
+    project_kind: Option<String>,
+    markers: Vec<String>,
+}
+
+/// One pass over a project root answers both questions the check asks of it:
+/// can it be listed at all, and which project markers it carries. A listing is
+/// one directory read instead of one stat per marker; a root too large to list
+/// cheaply falls back to those stats, which stay bounded either way.
+fn scan_project_root(root: &Path) -> std::io::Result<ProjectScan> {
+    let mut found = [false; MARKER_SLOTS];
+    let mut outstanding = MARKER_SLOTS;
+    let mut entries = 0usize;
+    let mut settled = false;
+    let mut listing = fs::read_dir(root)?;
+    while let Some(Ok(entry)) = listing.next() {
+        entries += 1;
+        if let Some(index) = marker_index(&entry.file_name()) {
+            if !found[index] && entry_is_file(&entry) {
+                found[index] = true;
+                outstanding -= 1;
+                if outstanding == 0 {
+                    settled = true;
+                    break;
+                }
+            }
+        }
+        if entries >= MAX_SCAN_ENTRIES {
+            break;
+        }
+    }
+    if !settled {
+        mark_markers_by_stat(root, &mut found);
+    }
+    Ok(project_scan(&found))
+}
+
+fn marker_index(name: &std::ffi::OsStr) -> Option<usize> {
+    let name = name.to_str()?;
+    PROJECT_MARKERS
+        .iter()
+        .position(|(file_name, _)| *file_name == name)
+}
+
+fn entry_is_file(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        // A marker reached through a symlink still counts, exactly as it did
+        // when the check stat-ed `root/<marker>` directly.
+        Ok(file_type) if file_type.is_symlink() => entry.path().is_file(),
+        Ok(file_type) => file_type.is_file(),
+        Err(_) => false,
+    }
+}
+
+fn mark_markers_by_stat(root: &Path, found: &mut [bool; MARKER_SLOTS]) {
+    for (index, (file_name, _)) in PROJECT_MARKERS.iter().enumerate() {
+        if !found[index] && root.join(file_name).is_file() {
+            found[index] = true;
+        }
+    }
+}
+
+fn project_scan(found: &[bool; MARKER_SLOTS]) -> ProjectScan {
     let mut markers = Vec::new();
     let mut kind = None;
-    for (file_name, project_kind) in PROJECT_MARKERS {
+    for (index, (file_name, project_kind)) in PROJECT_MARKERS.iter().enumerate() {
+        if !found[index] {
+            continue;
+        }
         if markers.len() >= MAX_MARKERS {
             break;
         }
-        if root.join(file_name).is_file() {
-            markers.push((*file_name).to_string());
-            if kind.is_none() {
-                kind = Some((*project_kind).to_string());
-            }
+        markers.push((*file_name).to_string());
+        if kind.is_none() {
+            kind = Some((*project_kind).to_string());
         }
     }
-    (kind, markers)
+    ProjectScan {
+        project_kind: kind,
+        markers,
+    }
+}
+
+fn detect_project(root: &Path) -> (Option<String>, Vec<String>) {
+    let scan = scan_project_root(root).unwrap_or_else(|_| {
+        // Not listable from here; a plain stat still knows what is there.
+        let mut found = [false; MARKER_SLOTS];
+        mark_markers_by_stat(root, &mut found);
+        project_scan(&found)
+    });
+    (scan.project_kind, scan.markers)
 }
 
 enum GitInspection {
@@ -491,6 +707,76 @@ mod tests {
         assert_eq!(report.status, WorkspaceCheckStatus::Unavailable);
         assert!(report.path_exists);
         assert!(!report.is_directory);
+    }
+
+    #[test]
+    fn one_probe_gate_is_shared_per_workspace() {
+        let first = workspace_probe_gate("/tmp/gyro-probe-gate-shared");
+        let second = workspace_probe_gate("/tmp/gyro-probe-gate-shared");
+        assert!(Arc::ptr_eq(&first, &second));
+        let other = workspace_probe_gate("/tmp/gyro-probe-gate-other");
+        assert!(!Arc::ptr_eq(&first, &other));
+    }
+
+    #[test]
+    fn prepared_workspace_status_is_reused_by_the_next_check() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        assert!(record_prepared_workspace(
+            root,
+            WorkspaceGitBrief {
+                available: true,
+                branch: Some("prepared".into()),
+                ahead: 1,
+                behind: 2,
+                dirty_count: 3,
+                conflicted: false,
+            },
+        ));
+        let report = check_workspace(root);
+        assert_eq!(report.status, WorkspaceCheckStatus::Ready);
+        let git = report.git.expect("prepared Git brief");
+        assert_eq!(git.branch.as_deref(), Some("prepared"));
+        assert_eq!(git.ahead, 1);
+        assert_eq!(git.behind, 2);
+        assert_eq!(git.dirty_count, 3);
+        assert_eq!(report.duration_ms, 0);
+    }
+
+    #[test]
+    fn queued_checks_reuse_the_report_published_by_the_running_probe() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        // `check_workspace` queues on the canonical root, so every spelling of
+        // one workspace waits behind the same probe.
+        let key = root.canonicalize().unwrap().display().to_string();
+        let gate = workspace_probe_gate(&key);
+        let held = gate.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let root = root.clone();
+                let tx = tx.clone();
+                scope.spawn(move || {
+                    let report = check_workspace(&root);
+                    tx.send(report.duration_ms).unwrap();
+                });
+            }
+            drop(tx);
+            // Workers are blocked on the gate. Publish what the running probe
+            // would have written; every queued caller must read that report.
+            std::thread::sleep(Duration::from_millis(50));
+            let seeded = check_workspace_with_timeout(&root, WORKSPACE_CHECK_TIMEOUT);
+            let seeded_duration = seeded.duration_ms;
+            workspace_check_cache()
+                .lock()
+                .unwrap()
+                .insert(key.clone(), (Instant::now(), seeded));
+            drop(held);
+            for _ in 0..4 {
+                assert_eq!(rx.recv().unwrap(), seeded_duration);
+            }
+        });
     }
 
     #[test]
@@ -619,5 +905,74 @@ mod tests {
         report.markers = vec!["package.json".into()];
         let briefing = report.briefing_with_signals(3, 1);
         assert!(briefing.contains("3 diagnostics, 1 failing test"));
+    }
+
+    #[test]
+    fn one_listing_finds_the_project_markers() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
+        fs::write(root.join("package.json"), "{}\n").unwrap();
+        // A directory that shares a marker's name is not a marker.
+        fs::create_dir(root.join("go.mod")).unwrap();
+        let (kind, markers) = detect_project(root);
+        assert_eq!(kind.as_deref(), Some("rust"));
+        assert_eq!(
+            markers,
+            vec!["Cargo.toml".to_string(), "package.json".to_string()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_marker_still_counts() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("real-package.json");
+        fs::write(&target, "{}\n").unwrap();
+        std::os::unix::fs::symlink(&target, temp.path().join("package.json")).unwrap();
+        let (kind, markers) = detect_project(temp.path());
+        assert_eq!(kind.as_deref(), Some("node"));
+        assert_eq!(markers, vec!["package.json".to_string()]);
+    }
+
+    #[test]
+    fn another_spelling_reuses_the_prepared_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        assert!(record_prepared_workspace(
+            root,
+            WorkspaceGitBrief {
+                available: true,
+                branch: Some("prepared".into()),
+                ahead: 0,
+                behind: 0,
+                dirty_count: 0,
+                conflicted: false,
+            },
+        ));
+        let report = check_workspace(root.join("."));
+        assert_eq!(report.duration_ms, 0, "the prepared report is reused");
+        assert_eq!(
+            report.git.and_then(|git| git.branch).as_deref(),
+            Some("prepared")
+        );
+        assert_eq!(
+            report.workspace_key,
+            root.canonicalize().unwrap().display().to_string()
+        );
+    }
+
+    #[test]
+    fn a_report_carries_the_canonical_root_it_probed() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = check_workspace(temp.path());
+        assert_eq!(
+            report.canonical_workspace(),
+            Some(temp.path().canonicalize().unwrap())
+        );
+        assert_eq!(
+            WorkspaceCheckReport::placeholder("relative/root").canonical_workspace(),
+            None
+        );
     }
 }

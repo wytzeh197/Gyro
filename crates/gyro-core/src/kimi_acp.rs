@@ -51,6 +51,62 @@ pub fn plan_mode_denies_approval(kind: KimiAcpApprovalKind) -> bool {
     kind == KimiAcpApprovalKind::FileChange
 }
 
+/// Sent to the agent when its own decline ended the prompt.
+///
+/// The agent has already dropped the turn on a rejected permission. One short
+/// note lets it route around that call instead of the person losing the rest
+/// of the work and having to send the task again.
+const DECLINED_TOOL_CONTINUATION: &str = "Gyro declined one tool permission. \
+Do not retry that exact action. Continue with the remaining steps of the goal, \
+and say plainly what you could not do.";
+
+/// How many times one turn may be re-asked after the agent stopped its own turn.
+/// Agents report a declined or failed tool as their own stop, and a turn that
+/// does real work can meet more than one.
+const ACP_AGENT_STOP_RECOVERY_ATTEMPTS: usize = 3;
+
+/// Sent to the agent when its own output limit ended the prompt mid-answer.
+///
+/// Grok, Kimi and OpenCode all end a long answer at the model's output cap
+/// instead of failing it, and ACP reports that as a normal stopped prompt. The
+/// turn then looked finished while the text stopped mid-word. Asking the same
+/// session to carry on is what turns that into one complete answer.
+const ACP_OUTPUT_LIMIT_CONTINUATION: &str = "Your previous message stopped at the \
+output limit before the answer was finished. Continue from the exact character where \
+you stopped, with no preamble and without repeating what you already wrote.";
+
+/// Whether a stop reason means the agent ran out of room rather than finishing.
+///
+/// ACP names the limit `max_tokens` or `max_turn_requests`; agents built on it
+/// spell the same stop with their own casing, underscores, or a word of their
+/// own. Matching the shape instead of one literal spelling keeps every agent on
+/// this path honest about a cut-off answer.
+fn acp_stop_is_output_limit(reason: &str) -> bool {
+    let normalized = reason
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    matches!(
+        normalized.as_str(),
+        "maxtokens"
+            | "maxoutputtokens"
+            | "maxcompletiontokens"
+            | "tokenslimit"
+            | "tokenlimit"
+            | "length"
+            | "maxturnrequests"
+            | "maxturns"
+            | "turnlimit"
+            | "maxsteps"
+            | "steplimit"
+            | "maxrequests"
+            | "requestlimit"
+            | "contextlimit"
+            | "maxcontexttokens"
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KimiAcpApprovalDecision {
     AllowOnce,
@@ -99,6 +155,11 @@ pub struct KimiAcpRequest {
     /// Override the agent's thinking level only when the user selected one.
     pub reasoning_effort: Option<String>,
     pub mode: KimiAcpMode,
+    /// Full access: answer the agent's permission requests with an allow option
+    /// without asking anyone. A card that never resolves, or a host that cannot
+    /// answer it, must not become a declined tool -- agents end the whole turn
+    /// for that, and every step around it is lost.
+    pub auto_allow_permissions: bool,
     pub resume_session_id: Option<String>,
     pub timeout: Duration,
     pub inactivity_timeout: Duration,
@@ -118,6 +179,10 @@ pub struct KimiAcpOutput {
     pub response: String,
     pub session_id: String,
     pub stop_reason: String,
+    /// The agent stopped because it ran out of room, not because it finished.
+    /// The response is real work up to that point, so it is kept and flagged
+    /// rather than failed.
+    pub truncated: bool,
     pub resumed: bool,
     pub duration_ms: u64,
     /// Compatibility copy of the provider's usage object. Its semantics depend
@@ -173,6 +238,12 @@ struct KimiAcpConnection {
     /// for Grok turns that never name window occupancy.
     traffic_chars: u64,
     bound_session_id: Option<String>,
+    /// Full access was chosen for this run, so a permission request is answered
+    /// with an allow option here and never reaches an approval card.
+    auto_allow_permissions: bool,
+    /// Set when a permission request was answered with a rejection. Some agents
+    /// end the whole prompt for that alone, so the run resumes after it.
+    declined_permission: bool,
 }
 
 impl Drop for KimiAcpConnection {
@@ -330,6 +401,8 @@ impl KimiAcpConnection {
             context_from_wire: false,
             traffic_chars: 0,
             bound_session_id: None,
+            auto_allow_permissions: request.auto_allow_permissions,
+            declined_permission: false,
         })
     }
 
@@ -917,6 +990,7 @@ where
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),
     )?;
+    connection.declined_permission = false;
     let result = wait_for_response(
         &mut connection,
         prompt_id,
@@ -933,7 +1007,63 @@ where
     if result.is_err() {
         connection.interrupted_usage();
     }
-    let result = result?;
+    let mut result = result?;
+    // An agent-side cancel drops every step after it, and a rejected permission
+    // is reported exactly like the agent's own stop. An output-limit stop is the
+    // third shape of the same event: the agent ends the prompt mid-answer and
+    // ACP calls it a normal result, so the turn looked finished while the text
+    // stopped inside a word. Ask the same session to carry on instead of failing
+    // a turn that already did work. One attempt was not enough: a long turn can
+    // meet a second stop, and dying there lost every step around it. The attempts
+    // are bounded, so a run that keeps stopping still surfaces instead of
+    // looping.
+    let mut agent_stops = 0usize;
+    loop {
+        if request.cancellation.is_cancelled() || agent_stops >= ACP_AGENT_STOP_RECOVERY_ATTEMPTS {
+            break;
+        }
+        let stopped = result
+            .get("stopReason")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let cut_short = acp_stop_is_output_limit(stopped);
+        if stopped != "cancelled" && !cut_short {
+            break;
+        }
+        agent_stops += 1;
+        // Each attempt is judged on its own: a decline during the first one must
+        // not make the last one read as a decline too.
+        connection.declined_permission = false;
+        // A cancelled turn dropped whole steps, so its continuation reads as a
+        // new paragraph. An output-limit turn stopped inside a word: joining the
+        // halves with nothing between them is what puts that word back together.
+        if !cut_short && !response.trim().is_empty() && !response.ends_with('\n') {
+            response.push_str("\n\n");
+        }
+        let continuation = if cut_short {
+            ACP_OUTPUT_LIMIT_CONTINUATION
+        } else {
+            DECLINED_TOOL_CONTINUATION
+        };
+        crate::provider_observation::native_prompt(&json!(continuation));
+        let continuation_id = connection.send_request(
+            "session/prompt",
+            json!({
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": continuation}],
+            }),
+        )?;
+        result = wait_for_response(
+            &mut connection,
+            continuation_id,
+            &request.workspace,
+            &mut response,
+            &mut on_delta,
+            &mut on_activity,
+            &mut on_approval,
+            &mut on_write_file,
+        )?;
+    }
     // A live frame wins. These prompt fields are last-call context only when
     // that frame never arrived, and only when the contract says the field is
     // one request rather than the summed bill. A traffic estimate must not
@@ -993,20 +1123,33 @@ where
         // prompt on its own — a declined tool, for example. Setting the
         // shared token here made Gyro report "You stopped this turn."
         "cancelled" => {
+            // The continuation above already gave the agent one chance to carry
+            // on, so this is a real stop. Say what happened instead of blaming
+            // a permission nobody declined.
             anyhow::bail!(
-                "{} ended this turn because a tool permission was declined",
-                request.provider_label
+                "{} ended the turn without finishing{}",
+                request.provider_label,
+                if connection.declined_permission {
+                    " because a tool permission was declined"
+                } else {
+                    ""
+                }
             );
         }
         "refusal" => {
             anyhow::bail!("{} ACP agent refused to continue", request.provider_label);
         }
+        // Every other reason finished the turn. An output limit did not: the
+        // answer is real but unfinished, so it is kept and flagged instead of
+        // being reported as a complete answer.
         _ => {}
     }
+    let truncated = acp_stop_is_output_limit(&stop_reason);
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
         stop_reason,
+        truncated,
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
         usage: acp_usage::prompt_usage_object(&result),
@@ -1599,24 +1742,51 @@ where
                 };
                 let decision = if connection.cancellation.is_cancelled() {
                     KimiAcpApprovalDecision::Cancelled
+                } else if connection.auto_allow_permissions {
+                    // Full access answered this before the request arrived. No
+                    // card, no host callback, and no way for a broken card to
+                    // turn into a declined tool that ends the turn.
+                    KimiAcpApprovalDecision::AllowOnce
                 } else {
-                    on_approval(&request)?
+                    match on_approval(&request) {
+                        Ok(decision) => decision,
+                        // A turn the person cancelled keeps its own error path.
+                        Err(error) if connection.cancellation.is_cancelled() => return Err(error),
+                        // A card that cannot be answered declines this one tool.
+                        // Ending the turn over it threw away every step around
+                        // it, which is the failure this whole path avoids.
+                        Err(error) => {
+                            on_activity(&KimiAcpActivity {
+                                id: "approval-unavailable".into(),
+                                kind: "tool".into(),
+                                label: "Gyro could not ask for approval".into(),
+                                detail: Some(redact_secrets(&error.to_string())),
+                                file_counts: None,
+                                status: "failed".into(),
+                                context_usage: None,
+                            });
+                            KimiAcpApprovalDecision::RejectOnce
+                        }
+                    }
                 };
+                // A rejection is the one answer that can end the agent's whole
+                // prompt, so it is remembered: the turn continues after it
+                // instead of failing with the work thrown away.
+                if decision == KimiAcpApprovalDecision::RejectOnce {
+                    connection.declined_permission = true;
+                }
                 let option_id = permission_option_id(&params, decision);
-                let outcome = if decision == KimiAcpApprovalDecision::Cancelled {
-                    json!({"outcome": "cancelled"})
-                } else if let Some(option_id) = option_id {
+                let outcome = if let Some(option_id) = option_id {
                     json!({"outcome": "selected", "optionId": option_id})
                 } else {
-                    connection.send_error(
-                        id,
-                        -32602,
-                        &format!(
-                            "{} ACP did not offer a safe permission option",
-                            connection.provider_label
-                        ),
-                    )?;
-                    continue;
+                    // Never answer a permission request with a JSON-RPC error:
+                    // agents read that as a broken client and some end the
+                    // turn. "cancelled" declines this one call, and the
+                    // continuation below picks the turn back up.
+                    if decision != KimiAcpApprovalDecision::Cancelled {
+                        connection.declined_permission = true;
+                    }
+                    json!({"outcome": "cancelled"})
                 };
                 connection.send_result(id, json!({"outcome": outcome}))?;
             }
@@ -1951,19 +2121,72 @@ fn classify_approval(tool_call: &Value) -> KimiAcpApprovalKind {
     }
 }
 
+/// What an option calls itself, with punctuation folded away: `allow_once`,
+/// `allow-once`, `allowOnce` and `Allow once` all read as `allowonce`.
+fn permission_option_kind(option: &Value) -> String {
+    [
+        "kind",
+        "optionKind",
+        "name",
+        "title",
+        "label",
+        "optionId",
+        "id",
+    ]
+    .iter()
+    .filter_map(|key| option.get(*key).and_then(Value::as_str))
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase()
+    .chars()
+    .filter(|character| character.is_ascii_alphanumeric())
+    .collect()
+}
+
+/// An option's own id, or its `id` alias.
+fn permission_option_id_of(option: &Value) -> Option<&str> {
+    option
+        .get("optionId")
+        .or_else(|| option.get("id"))
+        .and_then(Value::as_str)
+}
+
 fn permission_option_id(params: &Value, decision: KimiAcpApprovalDecision) -> Option<&str> {
-    let wanted = match decision {
-        KimiAcpApprovalDecision::AllowOnce => "allow_once",
-        KimiAcpApprovalDecision::RejectOnce => "reject_once",
-        KimiAcpApprovalDecision::Cancelled => return None,
+    let options = params.get("options")?.as_array()?;
+    let naming = |wanted: &str| {
+        options
+            .iter()
+            .find(|option| permission_option_kind(option).contains(wanted))
+            .and_then(permission_option_id_of)
     };
-    params
-        .get("options")?
-        .as_array()?
-        .iter()
-        .find(|option| option.get("kind").and_then(Value::as_str) == Some(wanted))?
-        .get("optionId")?
-        .as_str()
+    match decision {
+        // The exact kind first, then the same answer in another flavour, then
+        // consent under a name nobody predicted. An agent that offers no option
+        // Gyro recognises still gets one of the options it offered: replying
+        // with an error or a cancellation ends the turn the agent is holding.
+        KimiAcpApprovalDecision::AllowOnce => {
+            naming("allowonce").or_else(|| naming("allow")).or_else(|| {
+                options
+                    .iter()
+                    .find(|option| {
+                        let kind = permission_option_kind(option);
+                        !kind.is_empty()
+                            && !["reject", "deny", "decline", "cancel", "abort", "dismiss"]
+                                .iter()
+                                .any(|word| kind.contains(word))
+                    })
+                    .and_then(permission_option_id_of)
+            })
+        }
+        // A decline only borrows an option that really says no. Cancelling is
+        // the honest answer otherwise, and a rejection must never be sent as
+        // consent just because the vocabulary was unfamiliar.
+        KimiAcpApprovalDecision::RejectOnce => naming("rejectonce")
+            .or_else(|| naming("reject"))
+            .or_else(|| naming("deny"))
+            .or_else(|| naming("decline")),
+        KimiAcpApprovalDecision::Cancelled => None,
+    }
 }
 
 fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> {
@@ -2100,6 +2323,7 @@ pub fn discover_acp_models(
         model: String::new(),
         reasoning_effort: None,
         mode: KimiAcpMode::Normal,
+        auto_allow_permissions: false,
         resume_session_id: None,
         timeout,
         inactivity_timeout: timeout,
@@ -2166,6 +2390,7 @@ pub fn check_acp_health(
         model: "k3".into(),
         reasoning_effort: None,
         mode: KimiAcpMode::Normal,
+        auto_allow_permissions: false,
         resume_session_id: None,
         timeout,
         inactivity_timeout: timeout,
@@ -2281,10 +2506,11 @@ mod tests {
 
     use super::{
         acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
-        acp_session_reopen_methods, check_kimi_acp_health, classify_approval,
-        is_acp_method_not_found, permission_option_id, plan_mode_denies_approval,
-        resolve_workspace_write_path, run_kimi_acp, CredentialPolicy, KimiAcpApprovalDecision,
-        KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
+        acp_session_reopen_methods, acp_stop_is_output_limit, check_kimi_acp_health,
+        classify_approval, is_acp_method_not_found, permission_option_id,
+        plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, CredentialPolicy,
+        KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode,
+        KimiAcpRequest,
     };
 
     #[test]
@@ -2712,8 +2938,12 @@ while IFS= read -r line; do
 done
 "#,
         );
-        let mut request =
-            fixture_request(program, temp.path().into(), CancellationToken::default(), None);
+        let mut request = fixture_request(
+            program,
+            temp.path().into(),
+            CancellationToken::default(),
+            None,
+        );
         request.provider_label = "xAI".into();
         let mut live_context = Vec::new();
         let output = run_kimi_acp(
@@ -2957,6 +3187,7 @@ done
             model: "k3".into(),
             reasoning_effort: Some("max".into()),
             mode: KimiAcpMode::Normal,
+            auto_allow_permissions: false,
             resume_session_id,
             timeout: Duration::from_secs(3),
             inactivity_timeout: Duration::from_secs(3),
@@ -3469,6 +3700,35 @@ done
         assert_eq!(activities.last().unwrap().status, "done");
     }
 
+    /// Full access must never depend on a card being shown or answered. An agent
+    /// that ends its turn over a declined tool would otherwise kill the run with
+    /// every step around it.
+    #[cfg(unix)]
+    #[test]
+    fn full_access_answers_permissions_without_an_approval_card() {
+        let (temp, program) = completion_fixture(
+            r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}"#,
+            true,
+        );
+        let mut request = fixture_request(program, temp.path().into(), Default::default(), None);
+        request.auto_allow_permissions = true;
+        let mut approvals = 0;
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| {
+                approvals += 1;
+                Ok(KimiAcpApprovalDecision::RejectOnce)
+            },
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(approvals, 0, "full access must not open a card");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert_eq!(output.response, "The terminal button opens a terminal.");
+    }
+
     #[cfg(unix)]
     #[test]
     fn malformed_prompt_completion_is_not_reported_as_end_turn() {
@@ -3495,13 +3755,187 @@ done
         }
     }
 
+    /// An agent that reports a rejected permission the way the ACP spec says
+    /// it must: it ends the prompt with `cancelled`, then answers a second
+    /// prompt normally. The turn keeps its streamed text and finishes.
+    #[cfg(unix)]
+    fn cancel_continuation_fixture() -> (tempfile::TempDir, PathBuf) {
+        acp_fixture(
+            r#"
+prompts=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"declined-session"}}' ;;
+    *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      prompts=$((prompts + 1))
+      if test "$prompts" -eq 1; then
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Before the declined tool."}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"cancelled"}}'
+      else
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" Continued after it."}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      fi ;;
+  esac
+done
+"#,
+        )
+    }
+
     #[cfg(unix)]
     #[test]
-    fn provider_cancelled_or_refused_turns_are_not_successful_even_after_text() {
-        for (reason, expected_detail) in [
-            ("cancelled", "tool permission was declined"),
-            ("refusal", "ACP agent refused to continue"),
+    fn a_cancelled_prompt_continues_the_turn_instead_of_failing_it() {
+        let (temp, program) = cancel_continuation_fixture();
+        let cancellation = CancellationToken::default();
+        let mut streamed = String::new();
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), cancellation.clone(), None),
+            |text| streamed.push_str(text),
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("one cancelled prompt must not fail the turn");
+        assert_eq!(output.stop_reason, "end_turn");
+        // Both halves are kept: the work before the cancel and the continuation.
+        assert!(output.response.contains("Before the declined tool."));
+        assert!(output.response.contains("Continued after it."));
+        assert!(!cancellation.is_cancelled(), "nobody pressed Stop");
+    }
+
+    /// An agent that ends the prompt at the model's output cap, the way Grok,
+    /// Kimi and OpenCode report it: an ordinary result with `max_tokens` and
+    /// the text stopping inside a word.
+    #[cfg(unix)]
+    fn output_limit_fixture(always_limited: bool) -> (tempfile::TempDir, PathBuf) {
+        let answer = if always_limited {
+            r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Refused at the limit. `reso"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"max_tokens"}}'"#
+        } else {
+            r#"if test "$prompts" -eq 1; then
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Refused. `reso"}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"max_tokens"}}'
+      else
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"urce resolution fails."}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      fi"#
+        };
+        let script = r#"
+prompts=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"limit-session"}}' ;;
+    *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      prompts=$((prompts + 1))
+      @ANSWER@ ;;
+  esac
+done
+"#
+        .replace("@ANSWER@", answer);
+        acp_fixture(&script)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_output_limit_stop_continues_the_answer_instead_of_ending_it() {
+        let (temp, program) = output_limit_fixture(false);
+        let mut streamed = String::new();
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), Default::default(), None),
+            |text| streamed.push_str(text),
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("an output-limit stop must not end the turn");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert!(!output.truncated, "the continuation finished the answer");
+        // The cut fell inside a word, so the halves join with nothing between
+        // them; a paragraph break here would split that word for good.
+        assert!(
+            output.response.contains("`resource resolution fails."),
+            "halves did not rejoin: {}",
+            output.response
+        );
+        assert_eq!(output.response.matches("Refused.").count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_that_never_finishes_is_flagged_not_failed() {
+        let (temp, program) = output_limit_fixture(true);
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), Default::default(), None),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("the streamed answer is real work and must be kept");
+        assert_eq!(output.stop_reason, "max_tokens");
+        assert!(
+            output.truncated,
+            "a turn that never finished must not read as complete"
+        );
+        assert!(output.response.contains("Refused at the limit."));
+    }
+
+    #[test]
+    fn every_spelling_of_an_output_limit_is_recognised() {
+        for reason in [
+            "max_tokens",
+            "maxTokens",
+            "max_output_tokens",
+            "maxTurnRequests",
+            "max_turn_requests",
+            "length",
+            "token_limit",
+            "step_limit",
+            "context_limit",
         ] {
+            assert!(
+                acp_stop_is_output_limit(reason),
+                "{reason} is an output limit"
+            );
+        }
+        for reason in [
+            "end_turn",
+            "endTurn",
+            "cancelled",
+            "canceled",
+            "refusal",
+            "tool_use",
+            "",
+        ] {
+            assert!(
+                !acp_stop_is_output_limit(reason),
+                "{reason} is not an output limit"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_refused_turns_are_not_successful_even_after_text() {
+        // `cancelled` left this list on purpose: the runner now asks the same
+        // session to carry on first, and only a second cancel surfaces. The
+        // continuation test below covers that path.
+        for (reason, expected_detail) in [("refusal", "ACP agent refused to continue")] {
             let completion = json!({
                 "jsonrpc": "2.0", "id": 6, "result": {"stopReason": reason},
             });
@@ -3616,6 +4050,44 @@ done
         assert_eq!(
             permission_option_id(&params, KimiAcpApprovalDecision::RejectOnce),
             Some("no")
+        );
+    }
+
+    #[test]
+    fn answers_a_permission_request_whose_option_names_gyro_does_not_know() {
+        // Consent under an unfamiliar label still gets an answer. A request Gyro
+        // could not answer used to become a cancelled tool, and the agent ended
+        // the whole turn for it.
+        let unfamiliar = json!({"options": [
+            {"optionId": "yes-proceed", "name": "Proceed"},
+            {"optionId": "no-stop", "name": "Stop here"}
+        ]});
+        assert_eq!(
+            permission_option_id(&unfamiliar, KimiAcpApprovalDecision::AllowOnce),
+            Some("yes-proceed")
+        );
+        // A decline never borrows an option that reads as consent.
+        assert_eq!(
+            permission_option_id(&unfamiliar, KimiAcpApprovalDecision::RejectOnce),
+            None
+        );
+        // The id alone tells the two sides apart.
+        let ids_only = json!({"options": [
+            {"optionId": "reject_once"},
+            {"optionId": "allow_always"}
+        ]});
+        assert_eq!(
+            permission_option_id(&ids_only, KimiAcpApprovalDecision::AllowOnce),
+            Some("allow_always")
+        );
+        // A cancel option is never read as consent either.
+        let with_abort = json!({"options": [
+            {"optionId": "abort", "kind": "cancel"},
+            {"optionId": "ok", "kind": "fine"}
+        ]});
+        assert_eq!(
+            permission_option_id(&with_abort, KimiAcpApprovalDecision::AllowOnce),
+            Some("ok")
         );
     }
 

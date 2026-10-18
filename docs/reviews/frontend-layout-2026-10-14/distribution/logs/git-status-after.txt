@@ -1,0 +1,58 @@
+ M README.md
+ M apps/desktop/src-tauri/src/lib.rs
+ M apps/desktop/src/App.tsx
+ M apps/desktop/src/MenuBarPopover.tsx
+ M apps/desktop/src/menu-bar-model-provider.ts
+ M apps/desktop/src/new-session-preview.tsx
+ M apps/desktop/src/use-google-models.ts
+ M crates/gyro-cli/tests/exit_codes.rs
+ M crates/gyro-core/src/config.rs
+ M crates/gyro-core/src/council.rs
+ M crates/gyro-core/src/keychain/macos_read.rs
+ M crates/gyro-core/src/process_guard/macos.rs
+ M docs/google-backends.md
+ M packages/ui/src/composer-effort-selector.tsx
+ M packages/ui/src/composer-popover-bounds.ts
+ M packages/ui/src/council.ts
+ M packages/ui/src/google-models.ts
+ M packages/ui/src/index.ts
+ M packages/ui/src/provider-catalog.ts
+ M packages/ui/src/provider-settings-fields.tsx
+ M packages/ui/src/styles.css
+ M packages/ui/src/surfaces.tsx
+ M packages/ui/src/terminal-profiles.ts
+ M packages/ui/src/types.ts
+ M packages/ui/src/workbench-state.ts
+ M packages/ui/src/workspace-rename.css
+ M scripts/check-composer-context-usage.mjs
+ M scripts/check-google-models.mjs
+ M scripts/check-model-catalog.mjs
+ M scripts/check-page-reliability.mjs
+ M scripts/check-surface-boundaries.mjs
+ M scripts/check-terminal-profiles.mjs
+ M scripts/check-workbench-ui.mjs
+ M scripts/check-workspace-navigation-browser.mjs
+ M scripts/fixtures/model-metadata.json
+ M scripts/verification-map.json
+?? crates/gyro-cli/tests/macos_install_paths.rs
+?? docs/design/chat-topbar/2026-10-08/change.patch
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-33s.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-48s.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-56s.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-58s.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-60s.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-silent.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-v2.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-v3.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-v4.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final-v5.mp4
+?? docs/media/launch/v0.1.0/gyro-v0.1.0-launch-final.mp4
+?? docs/reviews/frontend-layout-2026-10-14/
+?? docs/reviews/tester-preflight-2026-10-14/
+?? packages/ui/src/antigravity-mark.tsx
+?? packages/ui/src/assets/antigravity-icon.svg
+?? packages/ui/src/composer-completion-geometry.ts
+?? packages/ui/src/composer-completion-menu.tsx
+?? packages/ui/src/provider-details-position.ts
+?? scripts/gyro-launch-v010-remotion/
+?? scripts/gyro-launch-v010/remotion/

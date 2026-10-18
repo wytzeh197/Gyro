@@ -141,7 +141,10 @@ pub fn retrieval_hint(data: &serde_json::Value) -> Option<String> {
     let object = data.as_object()?;
     let path = object.get("path").and_then(|value| value.as_str())?;
     let start = object.get("line").and_then(|value| value.as_u64());
-    let end = object.get("endLine").and_then(|value| value.as_u64()).or(start);
+    let end = object
+        .get("endLine")
+        .and_then(|value| value.as_u64())
+        .or(start);
     match (start, end) {
         (Some(start), Some(end)) => Some(format!("re-read path={path} line={start} endLine={end}")),
         _ => Some(format!("re-read path={path}")),
@@ -163,7 +166,8 @@ impl SpillStore {
         &self.root
     }
     pub fn path_for(&self, address: &str) -> PathBuf {
-        self.root.join(format!("{}.txt", digest(address.as_bytes())))
+        self.root
+            .join(format!("{}.txt", digest(address.as_bytes())))
     }
     /// Write the full copy atomically, so a crash never leaves a half-written spill behind.
     pub fn save(&self, address: &str, text: &str) -> io::Result<PathBuf> {
@@ -278,8 +282,7 @@ impl SpillRead {
 
     /// Where the next window starts, when there is one.
     pub fn next_offset(&self) -> Option<usize> {
-        self.truncated()
-            .then_some(self.offset + self.text.len())
+        self.truncated().then_some(self.offset + self.text.len())
     }
 
     /// Address-stamped readback. The header is what stops a window being mistaken for the whole
@@ -291,7 +294,10 @@ impl SpillRead {
                 "{} · bytes {end} of {} · next offset={next}",
                 self.address, self.total_bytes
             ),
-            None => format!("{} · bytes {end} of {} · complete", self.address, self.total_bytes),
+            None => format!(
+                "{} · bytes {end} of {} · complete",
+                self.address, self.total_bytes
+            ),
         };
         match self.text.is_empty() {
             true => header,
@@ -347,7 +353,9 @@ fn check_address(address: &str) -> io::Result<()> {
     let shaped = address
         .strip_prefix(SPILL_PREFIX)
         .map(|rest| rest.split('/').collect::<Vec<_>>())
-        .is_some_and(|segments| segments.len() == 3 && segments.iter().all(|part| !part.is_empty()));
+        .is_some_and(|segments| {
+            segments.len() == 3 && segments.iter().all(|part| !part.is_empty())
+        });
     match shaped {
         true => Ok(()),
         false => Err(io::Error::new(
@@ -376,7 +384,9 @@ mod tests {
     fn long_text() -> String {
         let mut text = String::new();
         for index in 0..400 {
-            text.push_str(&format!("line {index}: some tool output that keeps going\n"));
+            text.push_str(&format!(
+                "line {index}: some tool output that keeps going\n"
+            ));
         }
         text
     }
@@ -554,7 +564,9 @@ mod tests {
             total_bytes: 40,
         };
         let rendered = window.render();
-        assert!(rendered.starts_with(&format!("{SPILL_PREFIX}cap/tool/deadbeef00000000 · bytes 20 of 40")));
+        assert!(rendered.starts_with(&format!(
+            "{SPILL_PREFIX}cap/tool/deadbeef00000000 · bytes 20 of 40"
+        )));
         assert!(rendered.contains("next offset=20"));
         assert!(rendered.ends_with("0123456789"));
 

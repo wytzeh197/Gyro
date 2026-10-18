@@ -478,13 +478,25 @@ fn revalidate_outputs(
     bound: &BoundProviderCapabilityContext,
     record: &mut TaskCheckpoint,
 ) {
-    let latest = app
-        .state::<CapabilityIdeEvidenceManager>()
-        .by_workspace
-        .lock()
-        .ok()
-        .and_then(|contexts| contexts.get(&bound.workspace_key).cloned())
-        .unwrap_or_else(|| bound.workspace_context.clone());
+    // Copy only the buffers this checkpoint references: the full snapshot
+    // carries the text of every open buffer in the IDE.
+    let Ok((context_revision, buffers)) = with_ide_evidence(app, bound, |latest| {
+        let buffers = record
+            .files
+            .iter()
+            .filter(|file| file.root_id == bound.workspace_key)
+            .filter_map(|file| {
+                latest
+                    .buffers
+                    .iter()
+                    .find(|buffer| buffer["path"] == file.path)
+                    .map(|buffer| (file.path.clone(), buffer.clone()))
+            })
+            .collect::<std::collections::HashMap<String, Value>>();
+        Ok((latest.revision, buffers))
+    }) else {
+        return;
+    };
     for file in &mut record.files {
         if file.root_id != bound.workspace_key {
             file.availability = "other root; revalidate with rootId".into();
@@ -502,10 +514,7 @@ fn revalidate_outputs(
             }
             fs::read(path).ok().map(|bytes| content_hash(&bytes))
         });
-        let buffer = latest
-            .buffers
-            .iter()
-            .find(|buffer| buffer["path"] == file.path);
+        let buffer = buffers.get(&file.path);
         let content = if file.dirty {
             buffer
                 .and_then(|b| b["content"].as_str())
@@ -517,7 +526,7 @@ fn revalidate_outputs(
         file.availability = if gyro_core::efficiency::retrieval::fresh(
             file,
             &bound.workspace_key,
-            latest.revision,
+            context_revision,
             content.as_deref(),
             disk.as_deref(),
             dirty,

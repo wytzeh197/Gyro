@@ -1,0 +1,90 @@
+{
+  "result": "PASS",
+  "motion": "no-preference",
+  "checks": [
+    {
+      "name": "ArrowDown enters first menu item",
+      "pass": true
+    },
+    {
+      "name": "Arrow navigation skips hidden and disabled items",
+      "pass": true
+    },
+    {
+      "name": "Escape returns focus to the trigger that opened the menu",
+      "pass": true
+    },
+    {
+      "name": "Escape follows a switched menu trigger",
+      "pass": true
+    },
+    {
+      "name": "Escape dismisses a menu when the webview did not retain trigger focus",
+      "pass": true
+    },
+    {
+      "name": "Command arrow shortcuts retain focus",
+      "pass": true
+    },
+    {
+      "name": "Search inputs retain text navigation",
+      "pass": true
+    },
+    {
+      "name": "Editable descendants retain text navigation",
+      "pass": true
+    },
+    {
+      "name": "Tab leaves the menu and dismisses it",
+      "pass": true
+    },
+    {
+      "name": "Arrow keys outside the menu do not steal focus",
+      "pass": true
+    },
+    {
+      "name": "Shift Tab leaves the wrapper without trapping focus",
+      "pass": true
+    },
+    {
+      "name": "Moving focus before the menu dismisses it",
+      "pass": true
+    },
+    {
+      "name": "Confirmation autofocus stays on its safe action",
+      "pass": true
+    },
+    {
+      "name": "Shift Tab wraps inside confirmation",
+      "pass": true
+    },
+    {
+      "name": "Tab wraps inside confirmation",
+      "pass": true
+    },
+    {
+      "name": "Escape dismisses project confirmation and restores focus",
+      "pass": true
+    },
+    {
+      "name": "Native dialog keeps initial input focus",
+      "pass": true
+    },
+    {
+      "name": "Native dialog Escape and focus restoration remain intact",
+      "pass": true
+    },
+    {
+      "name": "Escape closes a nested menu before its dialog",
+      "pass": true
+    },
+    {
+      "name": "Controls can consume Escape without dismissing a dialog",
+      "pass": true
+    },
+    {
+      "name": "Escape dismisses a dialog after its nested menu closes",
+      "pass": true
+    }
+  ]
+}

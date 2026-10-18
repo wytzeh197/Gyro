@@ -228,15 +228,22 @@
   border-top-color: var(--gyro-border-soft);
 }
 
-/* Navigation rows retain their rhythm in a narrow sidebar at Large size.
-   The button's title keeps the complete destination name available. */
+/* Navigation rows keep their rhythm and still show the complete page name:
+   a long destination wraps to a second line instead of disappearing into an
+   ellipsis, so no settings page is ever half-named in the sidebar. */
 :root[data-theme]
   .gyro-sidebar-action.is-settings-page
   > .gyro-settings-page-label {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 /* A placeholder is not a selected document. Keep its existing tab slot quiet. */

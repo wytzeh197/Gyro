@@ -1,0 +1,152 @@
+GYRO LOCAL TESTER PREFLIGHT — 14 OCTOBER 2026
+
+SUBSEQUENT FRONTEND AUDIT
+The local bundle at the path below has since been rebuilt with the frontend
+layout fixes. This report retains the earlier candidate's evidence and hash.
+Use docs/reviews/frontend-layout-2026-10-14/report.txt and its distribution/
+manifests for the current candidate. Native clean-user acceptance and the
+recorded existing quality gates are still open.
+
+HANDOFF DECISION
+Final sign-off is pending. Two real runtime defects were found and fixed. The
+available automated runtime, browser and artifact checks now pass, with the
+specific live account/model exceptions and quality gates below. The Mac remains
+locked, so clean-user installation and hands-on native acceptance are open.
+
+CANDIDATE
+Version: 0.1.0-alpha.49.7
+Branch: v0.1.0
+Commit: ca28b906b8ac8dd0468328d3c49e8acb13664b10
+The tested candidate includes the initial local changes and the repairs below.
+Selected source manifest SHA256: 7d1f0215b850b4a61c60ddba73de68fdab3d73a3471117e4abd1e28efa2ef349
+Host: Apple Silicon arm64, macOS 26.2; Rust 1.96.1; Node 26.0.0; pnpm 11.7.0.
+Version alone does not identify this dirty local candidate. Use artifact hashes.
+
+REAL DEFECTS FIXED
+1. A macOS helper identity check compared raw launch paths. An installed CLI
+   reached through /var or an executable symlink rejected its own watchdog,
+   making actual Git/provider commands fail with a misleading 'start git' error.
+   Both paths are now canonicalized. Kernel socket-peer PID checks, lifetime
+   checks and fail-closed behavior remain. The matching private Keychain helper
+   comparison was corrected too. Real copied, aliased and symlinked CLI doctor
+   executions and the packaging verifier now pass. Live Keychain credential
+   reads were not used to validate this fix.
+2. Workspace grid selector specificity let the edit bar consume 776px while
+   Monaco collapsed to 5px. The scoped override now wins, preserving a compact
+   33px bar and a usable editor. Full navigation/rename/undo/save/recovery browser
+   checks pass, including new height and nonoverlap assertions at 860x620.
+
+The README provider list now reflects intentional Gemini CLI retirement and
+Antigravity's separate, experimental app runtime. Published-version release
+notes were not rewritten. Stale boot, model-context, workbench, verification-map
+and CLI migration test assumptions were repaired; no failure baselines or
+architecture ceilings were raised. Scoped independent review found no remaining
+runtime issue in these repairs. The CLI fixture's unexpected-request behavior
+was tightened following that review and its focused test passed.
+
+AUTOMATED RESULTS
+- Rust workspace: 1,345 passed, zero failed. Seven opt-in tests were initially
+  ignored; all seven were subsequently executed. Five passed; two account usage
+  reads remain failures described below. Final default-suite evidence is
+  rust/cargo-test-workspace-postfix.log. Earlier files named 'final' contain
+  intermediate failures and must not be treated as the final result.
+- Complete frontend reliability sweep: 98 invocations of 97 unique guards;
+  97 pass, one fails at the pre-existing architecture ceiling. pnpm test stops
+  there; every later guard was independently executed. Recursive package tests
+  passed, including five Code Mode worker tests.
+- Typechecks and workbench smoke pass. Ten browser suites pass: chat dragging,
+  retry, Workspace navigation/rename, syntax/fault recovery, Google model picker,
+  Canvas, media, history, motion and efficiency. Additional menu/goal/browser
+  component matrices pass. History covers 3,100 initial and 5,100 grown events.
+  The browser fixtures use production components with clearly identified mock
+  LSP/disk/provider/storage boundaries.
+- Native packaged broker: seven acceptance steps pass, including approvals,
+  scope refusal, multi-root routing, Plan restrictions and worker cancellation.
+  It also passes after hardened ad-hoc signing of the debug bundle.
+- Native language server: definition, references and symbols pass through the
+  app's real LanguageServerManager.
+- Native browser: 16 executed steps pass, including actual WebKit screenshots,
+  DOM/forms/navigation, stale-ref/credential refusal and hidden 1280x800 use.
+  OS mouse input remains skipped. The unskipped suite correctly failed its
+  foreground requirement while the Mac was locked. The runner's generic footer
+  mentions both browser/LSP even when LSP is skipped; this report uses actual
+  per-test scope, not that footer.
+- Native embedded WebKit syntax: 59 production-CSP assertions and 11 blocked-WASM
+  recovery assertions pass. Tests use embedded tauri:// assets and AppleWebKit.
+- Native Codex: gpt-5.6-sol completes fresh AND actually resumed coding tasks,
+  edits only the two requested fixture files, adds the upper-bound regression,
+  and passes the Node tests plus independent clamp boundary checks. A fresh
+  gpt-6.1-sol no-tool response also passes; its later resume/coding attempts fail
+  with upstream HTTP429, not a proven local product regression. The benchmark
+  harness exits zero on captured provider failures, so records/correctness were
+  explicitly inspected instead of treating process exit as success.
+- Real Ollama context and cancellation probes pass with existing qwen3:0.6b:
+  18,039 input tokens retained with requested 20,480 context; cancellation after
+  visible output returns in 0.203ms. No model download was performed.
+- Release configuration, developer environment, local/download-site checks and
+  live committed-model-catalog equality pass. Production PNPM audit reports zero
+  known advisories across 21 production dependencies.
+- Git whitespace check passes. Existing installed Gyro process 76440 and its
+  production socket remain intact. QA stores/workspaces are isolated.
+
+INSTALLER AND CLI ARTIFACTS
+Optimized app and Apple Silicon DMG built successfully. Full macOS integrity
+verification passes: locally generated checksum, hdiutil image integrity,
+Applications shortcut, version/bundle metadata, arm64 architecture, complete
+sealed ad-hoc signatures and nested executable signatures. The optimized signed
+packaged Code Mode worker executes its protocol and returns the expected result.
+Optimized CLI locked build and packaging verification pass, including identical
+archives for identical inputs, extracted installed execution/completions,
+checksum tamper rejection and final checksums/Formula verification.
+
+DMG: /Users/wytze/Gyro/target/release/bundle/dmg/Gyro_0.1.0-alpha.49.7_aarch64.dmg
+SHA256: 010274c27d208bc06ee0f397ba8c66fd9cf1445164861fa053c0437b120ce2a6
+
+This is an ad-hoc alpha, not Developer ID-signed or notarized. Clean downloaded
+Gatekeeper/Open Anyway acceptance remains untested. The local packaging override
+only disabled updater artifact creation to avoid release signing credentials;
+the checked-in updater configuration remains unchanged. No signed updater or
+Intel artifact was produced, and no release/publication was performed.
+
+REMAINING FAILURES / LIMITS
+- pnpm test remains RED: App.tsx 20,338 lines exceeds 20,329; lib.rs 31,306 exceeds
+  31,217. Both exceedances are already in the inspected HEAD. Neither ceiling
+  was raised and no unrelated product refactor was performed to hide the gate.
+- cargo fmt --check remains RED across 38 files already unformatted at HEAD.
+  Existing local configuration changes also contain format drift.
+- Strict all-target Clippy remains RED on existing lint/MSRV debt. The full
+  advisory warning-level run completes. This is not a claim of strict lint pass.
+- Claude generation is blocked by this account's organization policy; its usage
+  endpoint also rejects the stored sign-in. Kimi's live usage probe receives no
+  recognized plan window; schema/account cause is not resolved.
+- Ollama's exact GYRO_OK instruction probe returns fenced Markdown, so that exact
+  response check fails even though real streaming/context/cancellation pass.
+- Antigravity, Cursor and OpenCode runtimes are missing on this machine. DeepSeek
+  protected credential access is blocked while locked; Mistral/OpenRouter keys
+  are absent. Antigravity remains experimental and app-only; Gemini retirement
+  is intentional and its credentials are not transferred.
+- An initial massively concurrent core run hit one timing assertion; its focused
+  test and the complete controlled-concurrency rerun pass. Initial red retained.
+
+BEFORE FINAL TESTER SIGN-OFF
+Unlock the Mac, then test the fresh app's real first-run path and native mouse/
+Finder/window interactions. Perform a browser-downloaded, quarantined install
+on a fresh supported macOS user: connect a supported provider, stream a response,
+approve and reject a file edit, restart and resume the session. Exercise Intel
+hardware and signed updater/data-preservation acceptance separately if those
+artifacts are offered. Resolve or explicitly accept the recorded existing
+quality gates before claiming a fully green release preflight.
+
+EVIDENCE AND PRESERVATION
+summary.json is the concise machine-readable result. artifact-manifest.json and
+final-source-manifest.json identify the exact artifacts and selected sources.
+Frontend/Rust/distribution subdirectories retain initial reds, repaired checks,
+logs, screenshots, JSON records and detailed notes. Native Codex fixture outputs
+are copied under native/codex-default and native/codex-6.1.
+
+All 9,154 original dirty/untracked files remain present. 9,153 have identical
+hashes; the only intentionally changed pre-existing file is the workbench test
+harness. Newly modified paths contain the focused runtime fixes, regression
+checks, harness corrections and README update. Only regenerable build caches
+were removed to make builds possible. No app user data was reset or migrated by
+these QA runs.

@@ -83,7 +83,16 @@ export type WorkItem =
       media: "image" | "file";
     }
   | { kind: "memory"; id: string; status: WorkStatus }
-  | { kind: "context"; id: string; status: WorkStatus }
+  | {
+      kind: "context";
+      id: string;
+      status: WorkStatus;
+      /**
+       * What a finished compaction actually did. A Codex session summarizes;
+       * every other provider condenses the transcript or keeps it whole.
+       */
+      compaction?: "summarized" | "condensed" | "kept";
+    }
   | {
       kind: "browser";
       id: string;
@@ -1207,7 +1216,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
     case "memory":
       return { kind: "memory", id, status };
     case "context":
-      return { kind: "context", id, status };
+      return {
+        kind: "context",
+        id,
+        status,
+        compaction: compactionModeFromPayload(payload),
+      };
     case "commentary":
       // Commentary is prose, not work. It reaches the rail as a `say` step via
       // the assistant-message path, so it must not become a row here.
@@ -1557,6 +1571,22 @@ export function runRetryText(
  * says what it was for. Splitting them here rather than in CSS keeps the row a
  * dumb two-span render and makes the wording assertable.
  */
+/**
+ * The compaction outcome recorded on a provider activity event.
+ *
+ * Older events carry no marker: only the local transcript rewrite wrote a
+ * checkpoint summary, so its presence identifies those as condensed.
+ */
+function compactionModeFromPayload(
+  payload: Record<string, unknown> | undefined,
+): "summarized" | "condensed" | "kept" | undefined {
+  const mode = text(payload, "compactionMode");
+  if (mode === "summarized" || mode === "condensed" || mode === "kept") {
+    return mode;
+  }
+  return text(payload, "contextSummary") ? "condensed" : undefined;
+}
+
 export function runRowText(step: RunStep): RunRowText {
   if (step.kind === "say" || step.kind === "status") {
     return { label: step.text };
@@ -1599,7 +1629,18 @@ export function runRowText(step: RunStep): RunRowText {
       };
     case "memory":
       return { label: "Edited memory" };
-    case "context":
+    case "context": {
+      // Only a Codex session summarizes. Every other provider rewrites the
+      // transcript locally, so the row names the digest or says nothing was
+      // dropped rather than repeating "summarized" over a truncation.
+      const described =
+        item.compaction === "condensed"
+          ? "Earlier turns condensed into a digest"
+          : item.compaction === "kept"
+            ? "History already fit; nothing dropped"
+            : item.compaction === "summarized"
+              ? "Earlier conversation summarized"
+              : undefined;
       return {
         label:
           item.status === "running"
@@ -1607,9 +1648,10 @@ export function runRowText(step: RunStep): RunRowText {
             : "Compacted context",
         description:
           item.status === "running"
-            ? "Summarizing earlier conversation"
-            : "Earlier conversation summarized",
+            ? "Making room for the next turn"
+            : described,
       };
+    }
     case "browser": {
       const [running, done] = BROWSER_ROW_LABELS[item.action];
       return {

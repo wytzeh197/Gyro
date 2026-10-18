@@ -98,9 +98,11 @@ already estimates from characters when nothing is reported. The work is
 persisting a row per call and tagging it with an origin, so a council turn
 shows up as five rows rather than one.
 
-`measured: false` rows are shown in the UI in a distinct, muted style with the
-word "estimated". They still count against budgets — an unmeasured provider is
-not a free one — but the user is never told a guess is a fact.
+Chat token readings show provider-reported totals, `≥` observed partial counts,
+or “Usage unavailable.” Character estimates, mixed totals, contradictory counts,
+and unverified legacy records do not display a numeric chat total. Explicitly
+reported zero remains zero. Stored estimates still count conservatively against
+budgets; the composer context estimate is a separate reading.
 
 ## Layer 1 — Budgets
 

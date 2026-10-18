@@ -1,0 +1,623 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 119.890625,
+        "width": 29.890625,
+        "x": 90,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 153.4375,
+        "width": 23.546875,
+        "x": 129.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 177,
+        "width": 23.5625,
+        "x": 153.4375,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "New Session",
+      "rect": {
+        "bottom": 82.5,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 48
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Search⌘K",
+      "rect": {
+        "bottom": 119,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 84.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Automations",
+      "rect": {
+        "bottom": 155.5,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 121
+      }
+    },
+    {
+      "className": "gyro-sidebar-project-toggle",
+      "label": "Collapse aurora",
+      "rect": {
+        "bottom": 225.15625,
+        "height": 26,
+        "right": 170.8125,
+        "width": 152.625,
+        "x": 18.1875,
+        "y": 199.15625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Bound the sync queue retries",
+      "rect": {
+        "bottom": 264.59375,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 232.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Fix flaky editor file tree",
+      "rect": {
+        "bottom": 297.78125,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 265.59375
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main",
+      "label": "Audit provider argument contracts",
+      "rect": {
+        "bottom": 330.96875,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 298.78125
+      }
+    },
+    {
+      "className": "gyro-account-button",
+      "label": "Settings",
+      "rect": {
+        "bottom": 608,
+        "height": 30,
+        "right": 107.34375,
+        "width": 99.34375,
+        "x": 8,
+        "y": 578
+      }
+    },
+    {
+      "className": "gyro-workspace-preparation-button",
+      "label": "Workspace ready, 100%",
+      "rect": {
+        "bottom": 606,
+        "height": 26,
+        "right": 175,
+        "width": 27,
+        "x": 148,
+        "y": 580
+      }
+    },
+    {
+      "className": "gyro-import-callout-open",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 78,
+        "height": 40,
+        "right": 806,
+        "width": 592,
+        "x": 214,
+        "y": 38
+      }
+    },
+    {
+      "className": "gyro-import-callout-dismiss",
+      "label": "Dismiss project import suggestion",
+      "rect": {
+        "bottom": 71,
+        "height": 26,
+        "right": 836,
+        "width": 26,
+        "x": 810,
+        "y": 45
+      }
+    },
+    {
+      "className": "gyro-chat-start-workspace-name",
+      "label": "aurora",
+      "rect": {
+        "bottom": 288.5625,
+        "height": 29.078125,
+        "right": 665.046875,
+        "width": 66.203125,
+        "x": 598.84375,
+        "y": 259.484375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 361.75,
+        "height": 49.390625,
+        "right": 781.40625,
+        "width": 512.8125,
+        "x": 268.59375,
+        "y": 312.359375
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 396.6875,
+        "height": 30.578125,
+        "right": 305.828125,
+        "width": 28.5,
+        "x": 277.328125,
+        "y": 366.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 396.6875,
+        "height": 30.578125,
+        "right": 368.390625,
+        "width": 58.203125,
+        "x": 310.1875,
+        "y": 366.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: Claude Opus 5",
+      "rect": {
+        "bottom": 396.6875,
+        "height": 30.578125,
+        "right": 668.265625,
+        "width": 155.34375,
+        "x": 512.921875,
+        "y": 366.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: High",
+      "rect": {
+        "bottom": 396.6875,
+        "height": 30.578125,
+        "right": 741.71875,
+        "width": 69.09375,
+        "x": 672.625,
+        "y": 366.109375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 396.6875,
+        "height": 30.578125,
+        "right": 772.671875,
+        "width": 26.59375,
+        "x": 746.078125,
+        "y": 366.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-project",
+      "label": "Project: aurora",
+      "rect": {
+        "bottom": 447.453125,
+        "height": 30.578125,
+        "right": 363.75,
+        "width": 80.96875,
+        "x": 282.78125,
+        "y": 416.875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-workspace-mode",
+      "label": "Workspace mode: Project folder",
+      "rect": {
+        "bottom": 447.453125,
+        "height": 30.578125,
+        "right": 492.703125,
+        "width": 126.78125,
+        "x": 365.921875,
+        "y": 416.875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-branch",
+      "label": "Branch: main",
+      "rect": {
+        "bottom": 447.453125,
+        "height": 30.578125,
+        "right": 584.203125,
+        "width": 89.328125,
+        "x": 494.875,
+        "y": 416.875
+      }
+    },
+    {
+      "className": "",
+      "label": "Search files, projects, sessions, and actions",
+      "rect": {
+        "bottom": 104.890625,
+        "height": 41,
+        "right": 712.84375,
+        "width": 571.84375,
+        "x": 141,
+        "y": 63.890625
+      }
+    },
+    {
+      "className": "is-active",
+      "label": "New chatStart a desktop session⌘N",
+      "rect": {
+        "bottom": 197.984375,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 151.796875
+      }
+    },
+    {
+      "className": "",
+      "label": "Open settingsPreferences⌘,",
+      "rect": {
+        "bottom": 244.171875,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 197.984375
+      }
+    },
+    {
+      "className": "",
+      "label": "Toggle themeSwitch between dark and light",
+      "rect": {
+        "bottom": 290.359375,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 244.171875
+      }
+    },
+    {
+      "className": "",
+      "label": "Start Codex CLIOpen Codex in a terminal pane",
+      "rect": {
+        "bottom": 336.546875,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 290.359375
+      }
+    },
+    {
+      "className": "",
+      "label": "Start Claude CodeOpen Claude in a terminal pane",
+      "rect": {
+        "bottom": 382.734375,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 336.546875
+      }
+    },
+    {
+      "className": "",
+      "label": "Set CLI launch presetChoose agents and pane counts",
+      "rect": {
+        "bottom": 428.921875,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 382.734375
+      }
+    },
+    {
+      "className": "",
+      "label": "backoff.jssrc/queue",
+      "rect": {
+        "bottom": 512.109375,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 465.921875
+      }
+    },
+    {
+      "className": "",
+      "label": "index.jssrc",
+      "rect": {
+        "bottom": 558.296875,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 512.109375
+      }
+    },
+    {
+      "className": "",
+      "label": "sync.jssrc",
+      "rect": {
+        "bottom": 604.484375,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 558.296875
+      }
+    },
+    {
+      "className": "",
+      "label": "sync.test.jssrc",
+      "rect": {
+        "bottom": 650.671875,
+        "height": 46.1875,
+        "right": 750,
+        "width": 651,
+        "x": 99,
+        "y": 604.484375
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "New Session",
+      "b": "Search files, projects, sessions, and actions",
+      "height": 18.609375,
+      "width": 39
+    },
+    {
+      "a": "Search⌘K",
+      "b": "Search files, projects, sessions, and actions",
+      "height": 20.390625,
+      "width": 39
+    },
+    {
+      "a": "Automations",
+      "b": "New chatStart a desktop session⌘N",
+      "height": 3.703125,
+      "width": 81
+    },
+    {
+      "a": "Collapse aurora",
+      "b": "Open settingsPreferences⌘,",
+      "height": 26,
+      "width": 71.8125
+    },
+    {
+      "a": "Bound the sync queue retries",
+      "b": "Open settingsPreferences⌘,",
+      "height": 11.765625,
+      "width": 82
+    },
+    {
+      "a": "Bound the sync queue retries",
+      "b": "Toggle themeSwitch between dark and light",
+      "height": 20.421875,
+      "width": 82
+    },
+    {
+      "a": "Fix flaky editor file tree",
+      "b": "Toggle themeSwitch between dark and light",
+      "height": 24.765625,
+      "width": 82
+    },
+    {
+      "a": "Fix flaky editor file tree",
+      "b": "Start Codex CLIOpen Codex in a terminal pane",
+      "height": 7.421875,
+      "width": 82
+    },
+    {
+      "a": "Audit provider argument contracts",
+      "b": "Start Codex CLIOpen Codex in a terminal pane",
+      "height": 32.1875,
+      "width": 82
+    },
+    {
+      "a": "Settings",
+      "b": "sync.jssrc",
+      "height": 26.484375,
+      "width": 8.34375
+    },
+    {
+      "a": "Settings",
+      "b": "sync.test.jssrc",
+      "height": 3.515625,
+      "width": 8.34375
+    },
+    {
+      "a": "Workspace ready, 100%",
+      "b": "sync.jssrc",
+      "height": 24.484375,
+      "width": 27
+    },
+    {
+      "a": "Import projects",
+      "b": "Search files, projects, sessions, and actions",
+      "height": 14.109375,
+      "width": 498.84375
+    },
+    {
+      "a": "aurora",
+      "b": "Toggle themeSwitch between dark and light",
+      "height": 29.078125,
+      "width": 66.203125
+    },
+    {
+      "a": "Message Gyro",
+      "b": "Start Codex CLIOpen Codex in a terminal pane",
+      "height": 24.1875,
+      "width": 481.40625
+    },
+    {
+      "a": "Message Gyro",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 25.203125,
+      "width": 481.40625
+    },
+    {
+      "a": "Add context",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 16.625,
+      "width": 28.5
+    },
+    {
+      "a": "Add context",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 13.953125,
+      "width": 28.5
+    },
+    {
+      "a": "Approval mode: Ask for approval",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 16.625,
+      "width": 58.203125
+    },
+    {
+      "a": "Approval mode: Ask for approval",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 13.953125,
+      "width": 58.203125
+    },
+    {
+      "a": "Model: Claude Opus 5",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 16.625,
+      "width": 155.34375
+    },
+    {
+      "a": "Model: Claude Opus 5",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 13.953125,
+      "width": 155.34375
+    },
+    {
+      "a": "Reasoning effort: High",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 16.625,
+      "width": 69.09375
+    },
+    {
+      "a": "Reasoning effort: High",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 13.953125,
+      "width": 69.09375
+    },
+    {
+      "a": "Send message",
+      "b": "Start Claude CodeOpen Claude in a terminal pane",
+      "height": 16.625,
+      "width": 3.921875
+    },
+    {
+      "a": "Send message",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 13.953125,
+      "width": 3.921875
+    },
+    {
+      "a": "Project: aurora",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 12.046875,
+      "width": 80.96875
+    },
+    {
+      "a": "Workspace mode: Project folder",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 12.046875,
+      "width": 126.78125
+    },
+    {
+      "a": "Branch: main",
+      "b": "Set CLI launch presetChoose agents and pane counts",
+      "height": 12.046875,
+      "width": 89.328125
+    }
+  ],
+  "popovers": [
+    {
+      "className": "gyro-command-overlay",
+      "clientHeight": 620,
+      "label": null,
+      "rect": {
+        "bottom": 620,
+        "height": 620,
+        "right": 860,
+        "width": 860,
+        "x": 0,
+        "y": 0
+      },
+      "scrollHeight": 1003
+    }
+  ],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

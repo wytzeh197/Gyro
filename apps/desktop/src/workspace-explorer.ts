@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceFile } from "@gyro-dev/ui";
 import { workspaceExplorerRootEntryGroup } from "@gyro-dev/ui/workspace-project";
 
@@ -40,6 +40,38 @@ export function mergeExplorerDirectories(
   return result.length ? result : files;
 }
 
+// A poll usually returns exactly what is already cached. Comparing entries
+// field by field is exact, exits on the first difference, and — unlike
+// comparing two `JSON.stringify` snapshots of every open folder — allocates
+// nothing while the tree is unchanged.
+function sameListing(left: DirectoryListing, right: DirectoryListing) {
+  if (left.path !== right.path || left.files.length !== right.files.length) {
+    return false;
+  }
+  for (let index = 0; index < left.files.length; index += 1) {
+    const a = left.files[index];
+    const b = right.files[index];
+    if (!a || !b) return false;
+    if (a.path !== b.path || a.kind !== b.kind || a.depth !== b.depth) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function sameListings(
+  current: DirectoryListing[],
+  next: DirectoryListing[],
+) {
+  return (
+    current.length === next.length &&
+    current.every((entry, index) => {
+      const other = next[index];
+      return other ? sameListing(entry, other) : false;
+    })
+  );
+}
+
 export function useWorkspaceExplorerFiles(
   files: WorkspaceFile[],
   loadDirectory: ((path: string) => Promise<WorkspaceFile[]>) | undefined,
@@ -47,43 +79,63 @@ export function useWorkspaceExplorerFiles(
 ) {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [listings, setListings] = useState<DirectoryListing[]>([]);
-  const roots = files
-    .filter((file) => file.isWorkspaceRoot)
-    .map((file) => file.path);
+  const roots = useMemo(
+    () => files.filter((file) => file.isWorkspaceRoot).map((file) => file.path),
+    [files],
+  );
   const rootKey = roots.join("\n");
   const explorerFiles = useMemo(
     () => mergeExplorerDirectories(files, listings),
     [files, listings],
   );
-  const directoryKey = explorerFiles
-    .filter((file) => {
-      if (file.kind !== "directory" || !expanded.includes(file.path))
-        return false;
-      if (file.isWorkspaceRoot) return true;
-      const root =
-        file.workspacePath ??
-        roots.find((path) => file.path.startsWith(`${path}/`));
-      if (!root) return false;
-      let parent = file.path.slice(0, file.path.lastIndexOf("/"));
-      while (parent.length >= root.length) {
-        if (!expanded.includes(parent)) return false;
-        parent = parent.slice(0, parent.lastIndexOf("/"));
-      }
-      return true;
-    })
-    .map((file) => file.path)
-    .join("\n");
+  // Membership is asked once per directory per ancestor level, so a Set keeps
+  // the walk linear instead of scanning the expanded list each time.
+  const expandedSet = useMemo(() => new Set(expanded), [expanded]);
+  const directoryKey = useMemo(
+    () =>
+      explorerFiles
+        .filter((file) => {
+          if (file.kind !== "directory" || !expandedSet.has(file.path)) {
+            return false;
+          }
+          if (file.isWorkspaceRoot) return true;
+          const root =
+            file.workspacePath ??
+            roots.find((path) => file.path.startsWith(`${path}/`));
+          if (!root) return false;
+          let parent = file.path.slice(0, file.path.lastIndexOf("/"));
+          while (parent.length >= root.length) {
+            if (!expandedSet.has(parent)) return false;
+            parent = parent.slice(0, parent.lastIndexOf("/"));
+          }
+          return true;
+        })
+        .map((file) => file.path)
+        .join("\n"),
+    [expandedSet, explorerFiles, roots],
+  );
+
+  // The polling loop should survive a parent re-render: restarting it for a
+  // new `files` array tore down the interval and re-listed every folder on
+  // each tree refresh. Only the visible roots and open folders matter.
+  const loadDirectoryRef = useRef(loadDirectory);
+  loadDirectoryRef.current = loadDirectory;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const rootsRef = useRef(roots);
+  rootsRef.current = roots;
 
   useEffect(() => {
-    if (!loadDirectory) return;
+    if (!loadDirectoryRef.current) return;
     let cancelled = false;
     let pending = false;
     const failed = new Set<string>();
     const directories = directoryKey ? directoryKey.split("\n") : [];
     const refresh = async () => {
-      if (pending || !directories.length) return;
+      const load = loadDirectoryRef.current;
+      if (pending || !directories.length || !load) return;
       pending = true;
-      const results = await Promise.allSettled(directories.map(loadDirectory));
+      const results = await Promise.allSettled(directories.map(load));
       pending = false;
       if (cancelled) return;
       const updated: DirectoryListing[] = [];
@@ -95,14 +147,15 @@ export function useWorkspaceExplorerFiles(
           updated.push({ path, files: result.value });
         } else if (!failed.has(path)) {
           failed.add(path);
-          onError(path, result.reason);
+          onErrorRef.current(path, result.reason);
         }
       });
       setListings((current) => {
+        const currentRoots = rootsRef.current;
         const byPath = new Map(
           current
             .filter((entry) =>
-              roots.some(
+              currentRoots.some(
                 (root) =>
                   entry.path === root || entry.path.startsWith(`${root}/`),
               ),
@@ -111,9 +164,7 @@ export function useWorkspaceExplorerFiles(
         );
         for (const entry of updated) byPath.set(entry.path, entry);
         const next = [...byPath.values()];
-        return JSON.stringify(current) === JSON.stringify(next)
-          ? current
-          : next;
+        return sameListings(current, next) ? current : next;
       });
     };
     void refresh();
@@ -131,6 +182,6 @@ export function useWorkspaceExplorerFiles(
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [directoryKey, files, rootKey, loadDirectory, onError]);
+  }, [directoryKey, rootKey]);
   return { explorerFiles, onExpandedDirectoriesChange: setExpanded };
 }

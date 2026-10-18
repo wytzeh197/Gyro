@@ -31,6 +31,8 @@ const USER_CLI_PATH_SUFFIXES: &[&str] = &[
     ".local/share/mise/shims",
     ".bun/bin",
     ".cargo/bin",
+    // Google Antigravity CLI
+    ".antigravity/bin",
     // npm / yarn / pnpm global bins (Claude, Codex, Gemini, Cursor, OpenCode)
     ".npm-global/bin",
     ".npm/bin",

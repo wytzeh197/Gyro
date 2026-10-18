@@ -1,0 +1,1472 @@
+[
+  {
+    "exceptionId": 1,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.2.1",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 2
+  },
+  {
+    "exceptionId": 2,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.2.2",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 2
+  },
+  {
+    "exceptionId": 3,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.2.3",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 2
+  },
+  {
+    "exceptionId": 4,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.2.4",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 2
+  },
+  {
+    "exceptionId": 5,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.2.5",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 2
+  },
+  {
+    "exceptionId": 8,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160269
+        },
+        {
+          "functionName": "Ki",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 1628
+        },
+        {
+          "functionName": "clear",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2136
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 518,
+          "columnNumber": 2046
+        },
+        {
+          "functionName": "dispose",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102384
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 102866
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+      "objectId": "-7303618614554682501.3.1",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at Sc.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160270)\n    at Ki (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:1629)\n    at b2.clear (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2137)\n    at b2.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:519:2047)\n    at bm.dispose (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102385)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:102867)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:521:3558)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 3
+  },
+  {
+    "exceptionId": 9,
+    "text": "Uncaught (in promise)",
+    "lineNumber": 520,
+    "columnNumber": 160139,
+    "scriptId": "4",
+    "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+    "stackTrace": {
+      "callFrames": [
+        {
+          "functionName": "cancel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 160139
+        },
+        {
+          "functionName": "restore",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 96081
+        },
+        {
+          "functionName": "restoreViewState",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1260,
+          "columnNumber": 103248
+        },
+        {
+          "functionName": "restoreViewState",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1162,
+          "columnNumber": 214290
+        },
+        {
+          "functionName": "restoreViewState",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 7567
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 497,
+          "columnNumber": 27012
+        },
+        {
+          "functionName": "_deliver",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3082
+        },
+        {
+          "functionName": "_deliverQueue",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3173
+        },
+        {
+          "functionName": "fire",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 520,
+          "columnNumber": 3557
+        },
+        {
+          "functionName": "setModel",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 1166,
+          "columnNumber": 679
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 511,
+          "columnNumber": 6619
+        },
+        {
+          "functionName": "ep",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 161,
+          "columnNumber": 23114
+        },
+        {
+          "functionName": "Yxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 13138
+        },
+        {
+          "functionName": "Kxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12884
+        },
+        {
+          "functionName": "qxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12790
+        },
+        {
+          "functionName": "Gxe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 12666
+        },
+        {
+          "functionName": "TLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 25151
+        },
+        {
+          "functionName": "gf",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24804
+        },
+        {
+          "functionName": "NLe",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 24609
+        },
+        {
+          "functionName": "M_",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 23163
+        },
+        {
+          "functionName": "Dte",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 19862
+        },
+        {
+          "functionName": "qg",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 91,
+          "columnNumber": 21837
+        },
+        {
+          "functionName": "",
+          "scriptId": "4",
+          "url": "http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js",
+          "lineNumber": 174,
+          "columnNumber": 17284
+        }
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "subtype": "error",
+      "className": "ad",
+      "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at bm.restore (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:96082)\n    at Gb.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:103249)\n    at nje.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1163:214291)\n    at gj.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1167:7568)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:498:27013)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)\n    at gj.setModel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1167:680)",
+      "objectId": "-7303618614554682501.3.2",
+      "preview": {
+        "type": "object",
+        "subtype": "error",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:160140)\n    at bm.restore (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:96082)\n    at Gb.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1261:103249)\n    at nje.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1163:214291)\n    at gj.restoreViewState (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1167:7568)\n    at mV.value (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:498:27013)\n    at ne._deliver (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3083)\n    at ne._deliverQueue (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3174)\n    at ne.fire (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:521:3558)\n    at gj.setModel (http://127.0.0.1:1522/assets/workspace-navigation-fixture-ENlweaXu.js:1167:680)",
+        "overflow": false,
+        "properties": [
+          {
+            "name": "name",
+            "type": "string",
+            "value": "Canceled"
+          },
+          {
+            "name": "stack",
+            "type": "string",
+            "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…orkspace-navigation-fixture-ENlweaXu.js:1167:680)"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "value": "Canceled"
+          }
+        ]
+      }
+    },
+    "executionContextId": 3
+  }
+]

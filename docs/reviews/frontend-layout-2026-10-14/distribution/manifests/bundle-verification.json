@@ -1,0 +1,51 @@
+{
+  "verifiedAtUtc": "2026-10-14T10:12:38.096Z",
+  "version": "0.1.0-alpha.49.7",
+  "minimumOS": "14.0",
+  "records": [
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app",
+      "verified": true,
+      "signature": "adhoc",
+      "hardenedRuntime": true,
+      "verification": {
+        "stdout": "",
+        "stderr": "--prepared:/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode\n--validated:/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode\n/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app: valid on disk\n/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app: satisfies its Designated Requirement\n"
+      },
+      "details": {
+        "stdout": "",
+        "stderr": "Executable=/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop\nIdentifier=dev.gyro.desktop\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20500 size=76273 flags=0x10002(adhoc,runtime) hashes=2377+3 location=embedded\nVersionPlatform=1\nVersionMin=917504\nVersionSDK=1704448\nHash type=sha256 size=32\nCandidateCDHash sha256=696c01df0850194a07b75aab89bfb23b6e84c6ce\nCandidateCDHashFull sha256=696c01df0850194a07b75aab89bfb23b6e84c6ce6c93921654dfc1f15ca6638c\nHash choices=sha256\nCMSDigest=696c01df0850194a07b75aab89bfb23b6e84c6ce6c93921654dfc1f15ca6638c\nCMSDigestType=2\nExecutable Segment base=0\nExecutable Segment limit=29884416\nExecutable Segment flags=0x1\nPage size=16384\nCDHash=696c01df0850194a07b75aab89bfb23b6e84c6ce\nSignature=adhoc\nInfo.plist entries=22\nTeamIdentifier=not set\nRuntime Version=26.2.0\nSealed Resources version=2 rules=13 files=3\nInternal requirements count=0 size=12\n"
+      }
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop",
+      "verified": true,
+      "signature": "adhoc",
+      "hardenedRuntime": true,
+      "architecture": "arm64",
+      "verification": {
+        "stdout": "",
+        "stderr": "--prepared:/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode\n--validated:/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode\n/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop: valid on disk\n/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop: satisfies its Designated Requirement\n"
+      },
+      "details": {
+        "stdout": "",
+        "stderr": "Executable=/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop\nIdentifier=dev.gyro.desktop\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20500 size=76273 flags=0x10002(adhoc,runtime) hashes=2377+3 location=embedded\nVersionPlatform=1\nVersionMin=917504\nVersionSDK=1704448\nHash type=sha256 size=32\nCandidateCDHash sha256=696c01df0850194a07b75aab89bfb23b6e84c6ce\nCandidateCDHashFull sha256=696c01df0850194a07b75aab89bfb23b6e84c6ce6c93921654dfc1f15ca6638c\nHash choices=sha256\nCMSDigest=696c01df0850194a07b75aab89bfb23b6e84c6ce6c93921654dfc1f15ca6638c\nCMSDigestType=2\nExecutable Segment base=0\nExecutable Segment limit=29884416\nExecutable Segment flags=0x1\nPage size=16384\nCDHash=696c01df0850194a07b75aab89bfb23b6e84c6ce\nSignature=adhoc\nInfo.plist entries=22\nTeamIdentifier=not set\nRuntime Version=26.2.0\nSealed Resources version=2 rules=13 files=3\nInternal requirements count=0 size=12\n"
+      }
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode",
+      "verified": true,
+      "signature": "adhoc",
+      "hardenedRuntime": true,
+      "architecture": "arm64",
+      "verification": {
+        "stdout": "",
+        "stderr": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode: valid on disk\n/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode: satisfies its Designated Requirement\n"
+      },
+      "details": {
+        "stdout": "",
+        "stderr": "Executable=/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode\nIdentifier=gyro-codemode-555549444c4c44b055553144a19222cb6dd58b41\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20500 size=138295 flags=0x10002(adhoc,runtime) hashes=4315+2 location=embedded\nVersionPlatform=1\nVersionMin=851968\nVersionSDK=1705216\nHash type=sha256 size=32\nCandidateCDHash sha256=f60141639eaab72ce074a1902cd89e0bb65b09ff\nCandidateCDHashFull sha256=f60141639eaab72ce074a1902cd89e0bb65b09ff42fcbbd8eb3269a19b5875ee\nHash choices=sha256\nCMSDigest=f60141639eaab72ce074a1902cd89e0bb65b09ff42fcbbd8eb3269a19b5875ee\nCMSDigestType=2\nExecutable Segment base=0\nExecutable Segment limit=68665344\nExecutable Segment flags=0x1\nPage size=16384\nCDHash=f60141639eaab72ce074a1902cd89e0bb65b09ff\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nRuntime Version=26.5.0\nSealed Resources=none\nInternal requirements count=0 size=12\n"
+      }
+    }
+  ]
+}

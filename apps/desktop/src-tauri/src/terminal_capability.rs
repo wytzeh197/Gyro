@@ -100,16 +100,17 @@ pub(super) fn read_workspace_output(
             .get(&bound.workspace_key, Some(&bound.session_id), id)
             .ok_or_else(|| anyhow::anyhow!("Requested output is not retained for this chat"))?
     } else {
-        let context = manager
-            .by_workspace
+        // Only the active output channel is needed, so borrow the snapshot
+        // instead of copying every open buffer out of the cache.
+        let evidence = manager
+            .evidence
             .lock()
-            .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-            .get(&bound.workspace_key)
-            .cloned()
-            .unwrap_or_else(|| bound.workspace_context.clone());
-        context
-            .active_output
-            .ok_or_else(|| anyhow::anyhow!("Workspace has no active task or test output"))?
+            .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?;
+        match evidence.get(&bound.workspace_key) {
+            Some(context) => context.active_output.clone(),
+            None => bound.workspace_context.active_output.clone(),
+        }
+        .ok_or_else(|| anyhow::anyhow!("Workspace has no active task or test output"))?
     };
     let data = if output["lines"].is_array() {
         capability_output_budget::array_page(output, "lines", arguments, 20, 1000)?

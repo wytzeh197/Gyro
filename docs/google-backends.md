@@ -1,81 +1,110 @@
 # Google agent backends
 
-Checked on 2026-10-14.
+Checked on 2026-10-18 against `agy` 1.4.2 (installed here from Google's
+installer) and Google's published CLI documentation.
 
-Google Antigravity is Gyro's Google provider. It uses Google's official
-`agy_acp_server.par`, ACP server version 1.3.0. Gemini CLI has been removed from
-the provider catalog and built-in terminal profiles. Older configs drop its
-provider entry and profile; an already connected Antigravity provider can take
-over a Gemini selection. Gemini CLI OAuth sign-in is not transferred, so
-Antigravity must be connected separately. Historical Gemini chats retain their
-original identity.
-It shares the existing governed ACP transport for streaming, MCP tools,
-permissions, client filesystem access, cancellation, and session continuity.
-The Antigravity provider remains experimental until authenticated live tool,
-approval, and resume checks have been completed.
+Google Antigravity is Gyro's Google provider, and it now runs through Google's
+first-party **Antigravity CLI (`agy`)** instead of the separately provisioned
+ACP bridge (`agy_acp_server.par`). Gemini CLI remains removed from the provider
+catalog and built-in terminal profiles: older configs drop its provider entry
+and profile, an already connected Antigravity provider can take over a Gemini
+selection, and historical Gemini chats retain their original identity.
 
-## Connection and models
+## Install and sign-in
 
-This first integration uses a Gemini API key: configure it on the Google
-Antigravity provider in Gyro Settings, or supply `GEMINI_API_KEY` in the local
-environment. Stored keys use a separate Antigravity Keychain account. Unrelated
-provider credentials are removed from agent processes.
+Google ships one installer per platform. On macOS, Linux, and Googlebooks:
 
-The server advertises Google personal/business OAuth and Agent Platform auth,
-but those sign-in flows are not wired into this version of Gyro. The Antigravity
-CLI `agy`, Python SDK, and official ACP server are different launch surfaces;
-installing or logging into one must not be assumed to configure the others.
+```
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
 
-After a provider connects, Gyro opens a metadata-only ACP session to discover
-its model IDs and labels. The model menu's refresh action repeats discovery.
-Both the legacy `models.availableModels` inventory and modern model
-`configOptions` are supported. Discovery makes no inference request and rejects
-all incoming client tool requests.
+The installer writes `agy` to `~/.local/bin/agy` (a path Gyro's provider PATH
+already includes) and keeps its binary set under `~/.antigravity/bin`. The CLI's
+settings and signed-in account live in `~/.gemini/antigravity-cli/settings.json`.
 
-Discovered models have no invented context limit or reasoning-effort ramp.
-Runtime-reported context remains authoritative. Selecting a specific Google
-model must succeed before Gyro sends the prompt; a failed switch cannot
-silently continue with the agent's default.
+Sign-in is a browser OAuth flow started by running `agy` with no arguments.
+Credentials are shared across Antigravity surfaces on the same machine, so one
+CLI sign-in also covers the App, the IDE extensions, and the SDK. Gyro does not
+run that flow itself: it detects the real state and tells the user to run `agy`
+once. `agy models` is the probe — it lists the plan's models when signed in and
+prints `Please sign in to view available models` when not, so a single call
+answers "installed?" and "signed in?" together.
 
-Gemini 4 Argon is in Google's restricted Fairwind rollout. It is not added as a
-public model. The provider's returned inventory determines the available
-choices; metadata alone cannot establish an account's entitlement.
+## Execution
 
-## Runtime setup
+One `agy` process per turn, in the CLI's headless ("print") mode:
 
-The macOS distribution can be installed under
-`~/.local/share/gyro/providers/antigravity/1.3.0/`; Gyro searches that directory,
-as well as its usual CLI PATH. The real ACP handshake has been verified using
-a temporary copy of the official server. Install the runtime separately; it is
-not bundled into a desktop release by these changes.
+```
+agy -p <prompt> --output-format stream-json [--model <id>] [--effort <level>]
+    [--sandbox --mode accept-edits | --dangerously-skip-permissions]
+    [--conversation <id>]
+```
 
-Use the Google-published platform archive listed in the ACP Registry. Preserve
-the distribution's companion files alongside `agy_acp_server.par`.
+The stream is line-delimited JSON (`crates/gyro-core/src/antigravity_cli.rs`
+owns the contract):
+
+```
+{"event":"step_update","step_update":{"conversation_id":"…","step_type":"agent_response","text_delta":"Hel"}}
+{"event":"result","result":{"conversation_id":"…","status":"SUCCESS","response":"Hello\n",
+ "usage":{"input_tokens":…,"output_tokens":…,"thinking_tokens":…,"cache_read_tokens":…,"total_tokens":…}}}
+```
+
+`step_update` frames drive the streaming text; the `result` frame is the answer
+backstop, the failure detail, the token counts, and the `conversation_id` the
+next turn resumes with `--conversation`. A stopped or failed turn still records
+that cursor, so the user's next message continues the same Antigravity thread.
+
+`--effort` is forwarded only for values the CLI documents (`low`, `medium`,
+`high`, `xhigh`, `max`); an unknown level is dropped rather than sent, because a
+rejected flag costs the whole turn.
+
+## Approvals
+
+A headless `agy` run has no channel for a per-call approval dialog, so the
+provider descriptor reports `supports_approvals: false` and Gyro maps its own
+posture onto the CLI's launch flags instead:
+
+| Gyro posture | `agy` flags |
+| --- | --- |
+| Full access (no command or edit approval required) | `--dangerously-skip-permissions` |
+| Plan mode / approval-gated | `--sandbox --mode accept-edits` |
+
+Every non-full-access run keeps Google's sandbox on, which is the containment
+the CLI offers without a dialog. Users who need a click-through approval should
+choose a provider whose CLI exposes a permission channel (Claude Code, Codex).
+
+## Models and usage
+
+The model menu is the CLI's own inventory (`agy models`), not a hardcoded list,
+so an enterprise or plan-specific catalog appears without a Gyro release. The
+`antigravity-default` model id means "send no `--model`" and keeps the CLI's
+current default. Token counts come from the `result` frame of each run; plan
+windows (`supports_usage`) are not scraped yet.
 
 ## Verification
 
-`node --experimental-strip-types scripts/check-google-models.mjs` checks picker
-merging, stale-selection fallback, custom model preservation, provider
-isolation, and unknown context/effort metadata. Core ACP tests cover both
-inventory shapes, metadata-only discovery, and rejection of unavailable
-models before a prompt. The production composer fixture includes explicitly
-labeled Antigravity discovery data without making provider requests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` — exit 0.
+- `cargo test -p gyro-core` — 727 passed. The 4 failures are the pre-existing
+  Ollama/OpenAI-compatible stream-cap tests, untouched by this change.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` — 725 passed,
+  0 failed.
+- `crates/gyro-core/src/antigravity_cli.rs` unit tests parse the documented
+  frames: deltas, tool steps ignored, result text, conversation id, usage,
+  failure status, sign-in marker, and argument vectors for both postures.
+- Live CLI checks on this Mac: `agy --version` → 1.4.2; `agy models` →
+  `Error: Please sign in to view available models`, which is exactly the state
+  Gyro reports as "installed, not signed in".
 
-The targeted model catalog, capability manifest, Google inventory merging,
-core ACP, config, credentials, desktop model tests, and workspace typecheck
-passed. `pnpm test:google-models-browser` verifies the actual composer fixture's
-model menu, selection, unknown context, and absent reasoning-effort control in
-a background browser. Start the desktop Vite server on port 1437 first, or set
-`GYRO_TEST_ORIGIN` to its origin.
-
-The real server's initialization verified image support, load/resume support,
-and authentication method IDs. No authenticated conversation was tested:
-a Gemini API key is not configured on this Mac.
+Not verified: an authenticated turn end to end, because this Mac has no Google
+account signed in to the CLI. `agy` sign-in is a user action; until it happens
+the provider correctly reports itself as not connected.
 
 ## Sources
 
-- [Official Antigravity ACP distribution](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json)
-- [Gemini CLI ACP mode](https://geminicli.com/docs/cli/acp-mode/)
-- [Antigravity CLI headless interface](https://antigravity.google/docs/cli/headless/)
+- [Get started (CLI install)](https://antigravity.google/docs/getting-started)
+- [Authenticate](https://antigravity.google/docs/install)
+- [Headless mode](https://antigravity.google/docs/cli/headless)
+- [CLI settings](https://antigravity.google/docs/cli/using)
+- [CLI reference](https://antigravity.google/docs/cli/reference)
 - [Antigravity SDK](https://antigravity.google/docs/sdk/overview)
 - [Gemini 4 Argon rollout](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)

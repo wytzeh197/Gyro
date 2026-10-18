@@ -9,9 +9,9 @@ use std::{
     sync::OnceLock,
 };
 
-static REDACTION_PATTERNS: OnceLock<[Regex; 4]> = OnceLock::new();
+static REDACTION_PATTERNS: OnceLock<[Regex; 10]> = OnceLock::new();
 
-fn redaction_patterns() -> &'static [Regex; 4] {
+fn redaction_patterns() -> &'static [Regex; 10] {
     REDACTION_PATTERNS.get_or_init(|| {
         [
             Regex::new(r"sk-[A-Za-z0-9_-]{20,}").expect("valid redaction regex"),
@@ -20,6 +20,17 @@ fn redaction_patterns() -> &'static [Regex; 4] {
             Regex::new(r#"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['"]?[^'"\s]+"#)
                 .expect("valid redaction regex"),
             Regex::new(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+")
+                .expect("valid redaction regex"),
+            // Token families that carry no `key=value` or JSON shape, so the
+            // generic patterns above never see them. They reach the model
+            // through tool output, previews, and error text.
+            Regex::new(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
+                .expect("valid redaction regex"),
+            Regex::new(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b").expect("valid redaction regex"),
+            Regex::new(r"\bAIza[0-9A-Za-z_-]{35}\b").expect("valid redaction regex"),
+            Regex::new(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b").expect("valid redaction regex"),
+            Regex::new(r"\bxai-[A-Za-z0-9]{20,}\b").expect("valid redaction regex"),
+            Regex::new(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
                 .expect("valid redaction regex"),
         ]
     })
@@ -214,6 +225,50 @@ mod tests {
             redacted,
             r#"{"loggedIn":false,"token":"[REDACTED]","password":"[REDACTED]"}"#
         );
+    }
+
+    #[test]
+    fn redacts_provider_and_cloud_token_shapes() {
+        // Built at runtime so no literal credential-shaped string lives in the
+        // source tree.
+        let tokens = [
+            format!("ghp_{}", "a".repeat(36)),
+            format!("github_pat_{}", "b".repeat(22)),
+            format!("AKIA{}", "C".repeat(16)),
+            format!("AIza{}", "d".repeat(35)),
+            format!("xoxb-{}-{}", "1234567890", "abcdefghij"),
+            format!("xai-{}", "e".repeat(32)),
+            format!(
+                "eyJ{}.{}.{}",
+                "f".repeat(20),
+                "g".repeat(20),
+                "h".repeat(20)
+            ),
+        ];
+        for token in tokens {
+            let source = format!("value={token} end");
+            let redacted = redact_secrets(&source);
+            assert!(redacted.contains("[REDACTED]"), "{redacted}");
+            assert!(!redacted.contains(&token[..12]), "{redacted}");
+            assert!(redacted.ends_with(" end"), "{redacted}");
+            // The position-preserving mask keeps lines and UTF-16 length.
+            let masked = redact_secrets_preserving_positions(&source);
+            assert!(!masked.contains(&token[..12]), "{masked}");
+            assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        }
+    }
+
+    #[test]
+    fn redaction_leaves_ordinary_identifiers_alone() {
+        for text in [
+            "AKIAsomething short",
+            "he said eyJ hi",
+            "xoxo hugs",
+            "prefix ghpx_1234567890",
+            "AIza short",
+        ] {
+            assert_eq!(redact_secrets(text), text, "{text}");
+        }
     }
 
     #[test]

@@ -104,6 +104,12 @@ enum Commands {
     /// Internal MCP permission bridge used by Claude Code.
     #[command(hide = true)]
     ProviderPermissionServer,
+    /// Allow a workspace, pair a relay, print the local endpoint, or revoke it.
+    #[command(hide = true)]
+    AgentSession(AgentSessionArgs),
+    /// Serve the agent relay over HTTP. Put HTTPS in front of this process.
+    #[command(hide = true)]
+    Relay(RelayArgs),
 }
 
 #[derive(Debug, Args)]
@@ -764,6 +770,8 @@ impl Cli {
             Some(Commands::Approvals(args)) => args.json,
             Some(Commands::Spill(args)) => args.json,
             Some(Commands::ProviderPermissionServer) => false,
+            Some(Commands::AgentSession(_)) => true,
+            Some(Commands::Relay(_)) => true,
             Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::Show { json },
             })) => *json,
@@ -841,8 +849,140 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::Approvals(args)) => approvals_command(args),
         Some(Commands::Spill(args)) => spill_command(args),
         Some(Commands::ProviderPermissionServer) => provider_permission_server(),
+        Some(Commands::AgentSession(args)) => agent_session_command(args),
+        Some(Commands::Relay(args)) => relay_command(args),
         None => interactive_chat(ChatArgs::default()),
     }
+}
+
+#[derive(Debug, Args)]
+struct RelayArgs {
+    /// Local HTTP address. This process does not terminate TLS.
+    #[arg(long, default_value = "127.0.0.1:8787")]
+    bind: String,
+    /// Directory for the relay database.
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+    /// Pairing code the Mac sends. Generated and saved when omitted.
+    #[arg(long)]
+    code: Option<String>,
+}
+
+fn relay_command(args: RelayArgs) -> Result<()> {
+    let data_dir = match args.data_dir {
+        Some(dir) => dir,
+        None => GyroPaths::for_current_user()?.base_dir.join("agent-relay"),
+    };
+    let server = gyro_core::agent_relay::AgentRelayServer::start(data_dir, args.bind, args.code)?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "schema": "gyro.agent-relay.v1",
+            "bind": server.origin(),
+            "mcpPath": "/mcp",
+            "pairingCode": server.pairing_code(),
+            "agentToken": server.agent_token(),
+        })
+    );
+    let flag = server.shutdown_flag();
+    let _ = ctrlc::set_handler(move || {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    server.wait()
+}
+
+#[derive(Debug, Args)]
+struct AgentSessionArgs {
+    #[command(subcommand)]
+    command: AgentSessionCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentSessionCommand {
+    /// Allow one workspace to accept sessions from a local agent.
+    Allow { workspace: PathBuf },
+    /// Print the loopback endpoint and the local bearer token.
+    Endpoint,
+    /// Rotate the local token and drop queued agent work.
+    Revoke,
+    /// Pair this Mac with a public relay. The credential stays on the Mac.
+    Pair {
+        /// Public relay URL.
+        #[arg(long)]
+        relay: String,
+        /// One-time pairing code from the relay.
+        #[arg(long)]
+        code: String,
+    },
+    /// Forget the relay credential and drop queued agent work.
+    Unpair,
+}
+
+fn agent_session_command(args: AgentSessionArgs) -> Result<()> {
+    let paths = GyroPaths::for_current_user()?;
+    let store = gyro_core::agent_sessions::AgentSessionStore::open(paths.clone())?;
+    match args.command {
+        AgentSessionCommand::Allow { workspace } => {
+            let allowed = store.allow_workspace(&workspace)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "allowed": allowed,
+                    "listening": gyro_core::agent_sessions::listening_endpoint(&paths)?.is_some(),
+                })
+            );
+        }
+        AgentSessionCommand::Endpoint => {
+            let url = gyro_core::agent_sessions::listening_endpoint(&paths)?;
+            let token = url
+                .as_ref()
+                .map(|_| gyro_core::agent_sessions::ensure_local_token(&paths))
+                .transpose()?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "listening": url.is_some(),
+                    "url": url,
+                    "token": token,
+                })
+            );
+        }
+        AgentSessionCommand::Revoke => {
+            gyro_core::agent_sessions::revoke_local_link(&paths)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "revoked": true,
+                })
+            );
+        }
+        AgentSessionCommand::Pair { relay, code } => {
+            let pairing = gyro_core::agent_sessions::pair_outbound(&paths, &relay, &code)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "deviceId": pairing.device_id,
+                    "relay": pairing.relay_url,
+                    "workspaces": store.list_workspaces()?,
+                })
+            );
+        }
+        AgentSessionCommand::Unpair => {
+            gyro_core::agent_sessions::unpair(&paths)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "unpaired": true,
+                })
+            );
+        }
+    }
+    Ok(())
 }
 
 fn recover_provider_mutations_on_startup() -> Result<()> {
@@ -3467,6 +3607,9 @@ fn execute_kimi_acp_provider(
             } else {
                 KimiAcpMode::Normal
             },
+            // Full access answers permission requests inside the core, so the
+            // CLI cannot be stopped by a tool permission it never meant to ask.
+            auto_allow_permissions: posture == gyro_core::ApprovalPosture::FullAccess,
             resume_session_id: resume_cursor
                 .filter(|(kind, _)| *kind == runtime.cursor_kind)
                 .map(|(_, session_id)| session_id.to_string()),
@@ -5940,9 +6083,9 @@ fn config_command(args: ConfigArgs) -> Result<()> {
         }
         ConfigCommand::RemoveProvider { provider_id, json } => {
             let removed = GyroConfig::update(&paths, |config| {
-                config.remove_provider(&provider_id).map_err(|error| {
-                    cli_failure(CliErrorCategory::InvalidInput, error)
-                })
+                config
+                    .remove_provider(&provider_id)
+                    .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error))
             })?;
             // A key that was never stored is not a failure.
             let cleared = removed.clears_api_key
@@ -5969,9 +6112,9 @@ fn config_command(args: ConfigArgs) -> Result<()> {
         }
         ConfigCommand::RestoreProvider { provider_id, json } => {
             let display_name = GyroConfig::update(&paths, |config| {
-                config.restore_provider(&provider_id).map_err(|error| {
-                    cli_failure(CliErrorCategory::InvalidInput, error)
-                })
+                config
+                    .restore_provider(&provider_id)
+                    .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error))
             })?;
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
@@ -6817,7 +6960,9 @@ done
         assert!(args.contains(&"mcp__gyro_approval__approve".into()));
         assert!(args.contains(&"--setting-sources".into()));
         assert!(args.contains(&"--verbose".into()));
-        assert!(args.windows(2).any(|pair| pair == ["--permission-mode", "manual"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "manual"]));
         assert!(!args.contains(&"--dangerously-skip-permissions".into()));
     }
 

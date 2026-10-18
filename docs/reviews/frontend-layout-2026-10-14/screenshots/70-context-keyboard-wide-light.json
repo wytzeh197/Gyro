@@ -1,0 +1,361 @@
+{
+  "bodyWidth": 1440,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 119.890625,
+        "width": 29.890625,
+        "x": 90,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 173.890625,
+        "width": 44,
+        "x": 129.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 217.890625,
+        "width": 44,
+        "x": 173.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "New Session",
+      "rect": {
+        "bottom": 82.5,
+        "height": 34.5,
+        "right": 229.984375,
+        "width": 220.984375,
+        "x": 9,
+        "y": 48
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Search⌘K",
+      "rect": {
+        "bottom": 119,
+        "height": 34.5,
+        "right": 229.984375,
+        "width": 220.984375,
+        "x": 9,
+        "y": 84.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Automations",
+      "rect": {
+        "bottom": 155.5,
+        "height": 34.5,
+        "right": 229.984375,
+        "width": 220.984375,
+        "x": 9,
+        "y": 121
+      }
+    },
+    {
+      "className": "gyro-sidebar-project-toggle",
+      "label": "Collapse aurora",
+      "rect": {
+        "bottom": 225.15625,
+        "height": 26,
+        "right": 220.796875,
+        "width": 202.609375,
+        "x": 18.1875,
+        "y": 199.15625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Bound the sync queue retries",
+      "rect": {
+        "bottom": 264.59375,
+        "height": 32.1875,
+        "right": 230.984375,
+        "width": 212.984375,
+        "x": 18,
+        "y": 232.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Fix flaky editor file tree",
+      "rect": {
+        "bottom": 297.78125,
+        "height": 32.1875,
+        "right": 230.984375,
+        "width": 212.984375,
+        "x": 18,
+        "y": 265.59375
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main",
+      "label": "Audit provider argument contracts",
+      "rect": {
+        "bottom": 330.96875,
+        "height": 32.1875,
+        "right": 230.984375,
+        "width": 212.984375,
+        "x": 18,
+        "y": 298.78125
+      }
+    },
+    {
+      "className": "gyro-account-button",
+      "label": "Settings",
+      "rect": {
+        "bottom": 888,
+        "height": 30,
+        "right": 107.34375,
+        "width": 99.34375,
+        "x": 8,
+        "y": 858
+      }
+    },
+    {
+      "className": "gyro-import-callout-open",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 137.671875,
+        "height": 65.671875,
+        "right": 1143.484375,
+        "width": 637,
+        "x": 506.484375,
+        "y": 72
+      }
+    },
+    {
+      "className": "gyro-import-callout-dismiss",
+      "label": "Dismiss project import suggestion",
+      "rect": {
+        "bottom": 117.828125,
+        "height": 26,
+        "right": 1173.484375,
+        "width": 26,
+        "x": 1147.484375,
+        "y": 91.828125
+      }
+    },
+    {
+      "className": "gyro-chat-start-workspace-name",
+      "label": "aurora",
+      "rect": {
+        "bottom": 428.5625,
+        "height": 29.078125,
+        "right": 980.03125,
+        "width": 66.203125,
+        "x": 913.828125,
+        "y": 399.484375
+      }
+    },
+    {
+      "className": "",
+      "label": "@filesrc/queue/backoff.js",
+      "rect": {
+        "bottom": 247.9375,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 210.796875
+      }
+    },
+    {
+      "className": "",
+      "label": "@filesrc/index.js",
+      "rect": {
+        "bottom": 286.015625,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 248.875
+      }
+    },
+    {
+      "className": "",
+      "label": "@filesrc/sync.js",
+      "rect": {
+        "bottom": 324.09375,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 286.953125
+      }
+    },
+    {
+      "className": "",
+      "label": "@filesrc/sync.test.js",
+      "rect": {
+        "bottom": 362.171875,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 325.03125
+      }
+    },
+    {
+      "className": "",
+      "label": "@filepackage.json",
+      "rect": {
+        "bottom": 400.25,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 363.109375
+      }
+    },
+    {
+      "className": "is-selected",
+      "label": "@fileREADME.md",
+      "rect": {
+        "bottom": 438.328125,
+        "height": 37.140625,
+        "right": 915.03125,
+        "width": 401.765625,
+        "x": 513.265625,
+        "y": 401.1875
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 501.75,
+        "height": 49.390625,
+        "right": 1180.984375,
+        "width": 682,
+        "x": 498.984375,
+        "y": 452.359375
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 536.6875,
+        "height": 30.578125,
+        "right": 536.21875,
+        "width": 28.5,
+        "x": 507.71875,
+        "y": 506.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 536.6875,
+        "height": 30.578125,
+        "right": 702.390625,
+        "width": 156.34375,
+        "x": 546.046875,
+        "y": 506.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: Claude Opus 5",
+      "rect": {
+        "bottom": 536.6875,
+        "height": 30.578125,
+        "right": 1056.90625,
+        "width": 155.34375,
+        "x": 901.5625,
+        "y": 506.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: High",
+      "rect": {
+        "bottom": 536.6875,
+        "height": 30.578125,
+        "right": 1135.828125,
+        "width": 69.09375,
+        "x": 1066.734375,
+        "y": 506.109375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 536.6875,
+        "height": 30.578125,
+        "right": 1172.25,
+        "width": 26.59375,
+        "x": 1145.65625,
+        "y": 506.109375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-project",
+      "label": "Project: aurora",
+      "rect": {
+        "bottom": 587.453125,
+        "height": 30.578125,
+        "right": 594.140625,
+        "width": 80.96875,
+        "x": 513.171875,
+        "y": 556.875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-workspace-mode",
+      "label": "Workspace mode: Project folder",
+      "rect": {
+        "bottom": 587.453125,
+        "height": 30.578125,
+        "right": 723.09375,
+        "width": 126.78125,
+        "x": 596.3125,
+        "y": 556.875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-branch",
+      "label": "Branch: main",
+      "rect": {
+        "bottom": 587.453125,
+        "height": 30.578125,
+        "right": 814.59375,
+        "width": 89.328125,
+        "x": 725.265625,
+        "y": 556.875
+      }
+    }
+  ],
+  "htmlWidth": 1440,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 900,
+    "width": 1440
+  }
+}

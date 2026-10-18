@@ -47,6 +47,13 @@ pub enum PromptDelivery {
     /// The prompt is sent over a stdio protocol after the process starts, so it
     /// never passes through argument parsing.
     Protocol,
+    /// The prompt is the value of a dedicated flag, which must be the last pair
+    /// on the command line.
+    ///
+    /// Google's Antigravity CLI takes its headless prompt as `-p <prompt>` and
+    /// offers no positional prompt, so the contract is that the flag and its
+    /// value close the vector.
+    PromptFlag(&'static str),
 }
 
 /// What Gyro relies on when it launches a provider CLI.
@@ -86,8 +93,8 @@ const CONTRACTS: &[ProviderCliContract] = &[
     },
     ProviderCliContract {
         provider_id: "antigravity",
-        program: "agy_acp_server.par",
-        prompt_delivery: PromptDelivery::Protocol,
+        program: "agy",
+        prompt_delivery: PromptDelivery::PromptFlag("-p"),
     },
     ProviderCliContract {
         provider_id: "cursor",
@@ -154,6 +161,23 @@ pub fn audit_provider_args<S: AsRef<str>>(
 ) -> Result<(), ArgContractViolation> {
     if contract.prompt_delivery == PromptDelivery::Protocol {
         return Ok(());
+    }
+    // A flag-delivered prompt never risks being absorbed by a variadic option,
+    // but it must still be the final pair, or the CLI would read a later flag as
+    // its value and report a missing prompt.
+    if let PromptDelivery::PromptFlag(flag) = contract.prompt_delivery {
+        let pair = args
+            .len()
+            .checked_sub(2)
+            .map(|index| (args[index].as_ref(), args[index + 1].as_ref()));
+        return match pair {
+            None => Err(ArgContractViolation::MissingPrompt),
+            Some((_, prompt)) if prompt.trim().is_empty() => {
+                Err(ArgContractViolation::MissingPrompt)
+            }
+            Some((value_of_flag, _)) if value_of_flag == flag => Ok(()),
+            Some(_) => Err(ArgContractViolation::UnterminatedPrompt),
+        };
     }
     // Claude's multimodal messages travel over stdin, not a positional
     // prompt. Require both stream formats before accepting that alternate

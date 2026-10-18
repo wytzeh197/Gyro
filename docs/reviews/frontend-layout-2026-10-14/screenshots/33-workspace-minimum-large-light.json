@@ -1,0 +1,265 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "is-active",
+      "label": "Explorer",
+      "rect": {
+        "bottom": 84,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 48
+      }
+    },
+    {
+      "className": "",
+      "label": "Search",
+      "rect": {
+        "bottom": 123,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 87
+      }
+    },
+    {
+      "className": "",
+      "label": "Source Control, 9 changes",
+      "rect": {
+        "bottom": 162,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 126
+      }
+    },
+    {
+      "className": "",
+      "label": "Run and Test",
+      "rect": {
+        "bottom": 201,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 165
+      }
+    },
+    {
+      "className": "",
+      "label": "AI",
+      "rect": {
+        "bottom": 240,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 204
+      }
+    },
+    {
+      "className": "",
+      "label": "Settings",
+      "rect": {
+        "bottom": 614,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 578
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 136,
+        "width": 44,
+        "x": 92,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 180,
+        "width": 44,
+        "x": 136,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "",
+      "label": "Add folder to workspace",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 94.515625,
+        "width": 25.296875,
+        "x": 69.21875,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "New file",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 119.8125,
+        "width": 25.296875,
+        "x": 94.515625,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "New folder",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 145.109375,
+        "width": 25.296875,
+        "x": 119.8125,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Rename selected path",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 170.40625,
+        "width": 25.296875,
+        "x": 145.109375,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Delete selected path",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 195.703125,
+        "width": 25.296875,
+        "x": 170.40625,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Refresh workspace files",
+      "rect": {
+        "bottom": 106.703125,
+        "height": 25.296875,
+        "right": 221,
+        "width": 25.296875,
+        "x": 195.703125,
+        "y": 81.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-row gyro-sidebar-explorer-row",
+      "label": "Folder /Users/dev/Projects/aurora",
+      "rect": {
+        "bottom": 136.296875,
+        "height": 27.59375,
+        "right": 210,
+        "width": 154,
+        "x": 56,
+        "y": 108.703125
+      }
+    },
+    {
+      "className": "gyro-sidebar-row gyro-sidebar-explorer-row",
+      "label": "Folder /Users/dev/Projects/aurora/src",
+      "rect": {
+        "bottom": 163.890625,
+        "height": 27.59375,
+        "right": 210,
+        "width": 154,
+        "x": 56,
+        "y": 136.296875
+      }
+    },
+    {
+      "className": "gyro-sidebar-row gyro-sidebar-explorer-row",
+      "label": "File /Users/dev/Projects/aurora/package.json",
+      "rect": {
+        "bottom": 191.484375,
+        "height": 27.59375,
+        "right": 210,
+        "width": 154,
+        "x": 56,
+        "y": 163.890625
+      }
+    },
+    {
+      "className": "gyro-sidebar-row gyro-sidebar-explorer-row",
+      "label": "File /Users/dev/Projects/aurora/README.md",
+      "rect": {
+        "bottom": 219.078125,
+        "height": 27.59375,
+        "right": 210,
+        "width": 154,
+        "x": 56,
+        "y": 191.484375
+      }
+    },
+    {
+      "className": "is-empty",
+      "label": "No file selected",
+      "rect": {
+        "bottom": 33.5,
+        "height": 33.5,
+        "right": 372.390625,
+        "width": 138.390625,
+        "x": 234,
+        "y": 0
+      }
+    },
+    {
+      "className": "gyro-scm-branch-trigger",
+      "label": "main",
+      "rect": {
+        "bottom": 615.546875,
+        "height": 20,
+        "right": 314.75,
+        "width": 74.75,
+        "x": 240,
+        "y": 595.546875
+      }
+    },
+    {
+      "className": "gyro-editor-statusbar-panel-toggle",
+      "label": "Open the workspace panel",
+      "rect": {
+        "bottom": 615.890625,
+        "height": 20.6875,
+        "right": 850,
+        "width": 25.296875,
+        "x": 824.703125,
+        "y": 595.203125
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

@@ -88,13 +88,19 @@ export function clampChatPanelWidth(width: number, available?: number) {
   });
 }
 
-/** The transcript remains the primary work surface for compact tools. */
+/**
+ * Every dock tab drags between the same two limits. The ceiling only stops a
+ * drag from swallowing the window; what actually keeps the conversation
+ * readable is the transcript reserve inside `clampCompanionWidth`. Giving the
+ * Browser a higher ceiling than the compact tools made the same gesture stop in
+ * a different place depending on which tab happened to be open.
+ */
 export const CHAT_COMPANION_MIN_WIDTH = 320;
-export const CHAT_COMPANION_MAX_WIDTH = 720;
+export const CHAT_COMPANION_MAX_WIDTH = 1_040;
+/** Compact tools open narrow; the Browser opens wide enough to read a page. */
 export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
-/** Leave room to read the conversation while inspecting the page. */
-export const BROWSER_COMPANION_MIN_WIDTH = 440;
-export const BROWSER_COMPANION_MAX_WIDTH = 1_040;
+export const BROWSER_COMPANION_MIN_WIDTH = CHAT_COMPANION_MIN_WIDTH;
+export const BROWSER_COMPANION_MAX_WIDTH = CHAT_COMPANION_MAX_WIDTH;
 export const BROWSER_COMPANION_DEFAULT_WIDTH = 720;
 /** One deliberate keyboard nudge, large enough to be useful without jumping. */
 export const CHAT_COMPANION_KEYBOARD_STEP = 24;

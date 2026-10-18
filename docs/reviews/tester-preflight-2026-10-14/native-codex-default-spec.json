@@ -1,0 +1,14 @@
+{
+  "providers": [
+    {
+      "id": "openai",
+      "model": "gpt-5.6-sol",
+      "effort": "low"
+    }
+  ],
+  "trials": 1,
+  "timeoutSeconds": 90,
+  "tasks": [
+    "code"
+  ]
+}

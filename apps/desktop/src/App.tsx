@@ -68,6 +68,10 @@ import {
   THEME_STORAGE_KEY,
 } from "./use-workbench-appearance";
 import {
+  createIdeEvidenceScheduler,
+  type IdeEvidenceScheduler,
+} from "./ide-evidence-push";
+import {
   turnIdFromSessionEvent,
   chatModeEventMessage,
   createChatModeSessionEvent,
@@ -93,6 +97,7 @@ import {
 } from "@gyro-dev/ui";
 import {
   isSplitChatLayout,
+  registerExternalLinkOpener,
   restoreCompanionPanes,
   PullRequestForm,
   type PullRequestDraft,
@@ -214,6 +219,7 @@ import {
   createInitialChatCompanionState,
   createInitialChatGridState,
   createInitialWorkbenchState,
+  applyLaunchView,
   type WorkbenchAction,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
@@ -289,6 +295,7 @@ import {
   type SideChatState,
   type ChatSidePanelId,
   type CliLaunchPreset,
+  type LaunchView,
   type CommandProfile,
   type DebugSessionState,
   type EditorBuffer,
@@ -948,6 +955,15 @@ export function App() {
   >(() => loadChatDraftModes());
   const chatDraftModesRef = useRef(chatDraftModes);
   const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
+  /**
+   * Goal mode is a selection, not a one-shot editor: it outlives the message
+   * that sets the goal, so the chip stays with the chat until removed.
+   */
+  const [chatDraftGoalModes, setChatDraftGoalModes] = useState<
+    Record<string, boolean>
+  >({});
+  /** Draft key whose Goal mode should follow a newly started goal chat. */
+  const goalModeCarryRef = useRef<string>();
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -1926,6 +1942,31 @@ export function App() {
   // The chip describes the next message. Historical mode events describe
   // submitted turns and must never select a mode for an unsent draft.
   const selectedDraftMode = chatDraftModes[activeDraftKey] ?? "normal";
+  // A goal outlives the message that set it: a chat with a goal starts with
+  // Goal mode selected, and a dismissal stays off for that draft. The editor
+  // itself also reads as selected, so opening Goal always shows the chip.
+  const activeGoalMode =
+    isGoalComposerActive ||
+    (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text));
+  const closeGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    // Saving or starting a goal selects Goal mode again, even if the user had
+    // dismissed it earlier; the goal is what the chat is now working toward.
+    // A draft has no chat key yet, so its new session picks the mode up from
+    // the goal itself rather than leaving a stale entry on the draft.
+    if (activeDraftKey === NEW_CHAT_DRAFT_KEY) return;
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: true,
+    }));
+  }, [activeDraftKey]);
+  const dismissGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: false,
+    }));
+  }, [activeDraftKey]);
   const activeChatMode =
     COUNCIL_COMING_SOON && selectedDraftMode === "council"
       ? "normal"
@@ -1937,6 +1978,16 @@ export function App() {
     : [];
   useEffect(() => {
     setIsGoalComposerActive(false);
+    // Starting a goal creates its chat a moment later. Carry the selection
+    // onto that chat so the chip never blinks off while its first events load.
+    const carriedDraftKey = goalModeCarryRef.current;
+    if (!activeSessionId || !carriedDraftKey) return;
+    goalModeCarryRef.current = undefined;
+    setChatDraftGoalModes((current) => {
+      const next = { ...current, [activeSessionId]: true };
+      delete next[carriedDraftKey];
+      return next;
+    });
   }, [activeSessionId]);
   const derivedActiveTurn = useMemo(
     () =>
@@ -2403,7 +2454,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "usage-limits" ||
+      workbench.preferences.lastSettingsSection !== "providers" ||
       !selectedUsageProviderId
     ) {
       return undefined;
@@ -4792,20 +4843,33 @@ export function App() {
     ],
   );
 
+  // The snapshot is rebuilt on every keystroke and cursor move and carries the
+  // text of every open buffer, so pushes are coalesced: the first change of a
+  // burst goes out at once, sustained editing is throttled to one update a
+  // second, and the last change lands shortly after typing pauses. Sending a
+  // turn still awaits its own push, so a turn never reads stale editor text.
+  const ideEvidenceScheduler = useMemo<IdeEvidenceScheduler<WorkspaceContextSnapshot>>(
+    () =>
+      createIdeEvidenceScheduler<WorkspaceContextSnapshot>((evidence) => {
+        void invoke("update_capability_ide_evidence", {
+          request: {
+            workspacePath: evidence.workspaceKey,
+            diagnostics: evidence.diagnostics ?? [],
+            context: evidence,
+          },
+        }).catch(() => {
+          // A background evidence refresh must not produce an unhandled
+          // rejection. Sending a turn awaits this same update and exposes any
+          // persistent error.
+        });
+      }),
+    [],
+  );
+
   useEffect(() => {
-    const root = liveEditorEvidence?.workspaceKey;
-    if (!root || !isTauriRuntime()) return;
-    void invoke("update_capability_ide_evidence", {
-      request: {
-        workspacePath: root,
-        diagnostics: liveEditorEvidence?.diagnostics ?? [],
-        context: liveEditorEvidence,
-      },
-    }).catch(() => {
-      // A background evidence refresh must not produce an unhandled rejection.
-      // Sending a turn awaits this same update and exposes any persistent error.
-    });
-  }, [liveEditorEvidence]);
+    if (!liveEditorEvidence || !isTauriRuntime()) return;
+    ideEvidenceScheduler.schedule(liveEditorEvidence);
+  }, [ideEvidenceScheduler, liveEditorEvidence]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -6434,6 +6498,22 @@ export function App() {
     },
     [notify],
   );
+
+  // Reply links open in Gyro Browser by default; a ⌘/Ctrl-click hands the URL
+  // to the device's own browser through this registration, so reply surfaces
+  // need no extra callback of their own.
+  useEffect(() => {
+    registerExternalLinkOpener((url) => {
+      if (isTauriRuntime()) {
+        void openUrl(url).catch((error) =>
+          notify("command-failed", "Could not open link", String(error)),
+        );
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+    return () => registerExternalLinkOpener();
+  }, [notify]);
 
   /**
    * Run one of the diff-review git actions for real.
@@ -11328,14 +11408,17 @@ export function App() {
   const startNewGoalChat = useCallback(
     (goal: string) => {
       // A new goal is the message already in the composer, same as Plan, so
-      // sending it consumes that draft instead of leaving a second copy.
+      // sending it consumes that draft instead of leaving a second copy. Only
+      // a fresh chat needs the selection carried; an existing chat picks it up
+      // from the goal it is about to gain.
+      if (!activeSessionId) goalModeCarryRef.current = activeDraftKey;
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
         preserveDraft: false,
         consumeDraftMode: true,
       });
     },
-    [sendDraft],
+    [activeDraftKey, activeSessionId, sendDraft],
   );
 
   useEffect(() => {
@@ -16367,6 +16450,7 @@ export function App() {
         branchCatalog={branchCatalog}
         isEnvironmentRailOpen={panePanel === "environment"}
         isGoalComposerActive={isFocused && isGoalComposerActive}
+        isGoalModeActive={isFocused && activeGoalMode}
         isComposerSending={
           pane.kind === "session"
             ? sendingSessionIds.includes(pane.sessionId)
@@ -16479,7 +16563,8 @@ export function App() {
             consumeDraftMode: true,
           })
         }
-        onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        onCancelGoalComposer={dismissGoalComposer}
+        onCloseGoalComposer={closeGoalComposer}
         fileReview={
           // The summaries and the Keep both belong to the focused session, so a
           // background pane keeps the plain summary card rather than showing
@@ -16735,6 +16820,7 @@ export function App() {
       branchCatalog={branchCatalog}
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
+      isGoalModeActive={activeGoalMode}
       isComposerSending={isActiveSessionSending}
       isCliUpdating={activeComposerCliUpdating}
       shellReady={!isShellOptimizing}
@@ -16763,7 +16849,8 @@ export function App() {
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
       onStartGoalChat={startNewGoalChat}
-      onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      onCancelGoalComposer={dismissGoalComposer}
+      onCloseGoalComposer={closeGoalComposer}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
       onLoadComparisonDiff={loadComparisonDiff}
@@ -17214,6 +17301,7 @@ export function App() {
                     branchCatalog={branchCatalog}
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
+                    isGoalModeActive={activeGoalMode}
                     isComposerSending={isActiveSessionSending}
                     isCliUpdating={activeComposerCliUpdating}
                     shellReady={!isShellOptimizing}
@@ -17251,7 +17339,8 @@ export function App() {
                     }
                     onGoalAction={changeGoal}
                     onStartGoalChat={startNewGoalChat}
-                    onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    onCancelGoalComposer={dismissGoalComposer}
+                    onCloseGoalComposer={closeGoalComposer}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
                     onLoadComparisonDiff={loadComparisonDiff}
@@ -17634,6 +17723,7 @@ export function App() {
           density={workbench.preferences.density}
           interfaceSize={workbench.preferences.interfaceSize}
           motionSpeed={workbench.preferences.motionSpeed}
+          launchView={workbench.preferences.launchView}
           reduceMotion={reduceMotion}
           appearanceSaveStatus={appearanceSaveStatus}
           onRetryAppearanceSave={() => {
@@ -17646,6 +17736,9 @@ export function App() {
           }
           onMotionSpeedChange={(motionSpeed) =>
             dispatchWorkbench({ type: "set-motion-speed", motionSpeed })
+          }
+          onLaunchViewChange={(view) =>
+            dispatchWorkbench({ type: "set-launch-view", view })
           }
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
@@ -18020,6 +18113,7 @@ export function App() {
           }
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
+          isGoalModeActive={activeGoalMode}
           isComposerSending={isActiveSessionSending}
           isCliUpdating={activeComposerCliUpdating}
           shellReady={!isShellOptimizing}
@@ -18048,7 +18142,8 @@ export function App() {
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
           onStartGoalChat={startNewGoalChat}
-          onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+          onCancelGoalComposer={dismissGoalComposer}
+          onCloseGoalComposer={closeGoalComposer}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
@@ -18255,10 +18350,12 @@ const chatCitedImageCache = new Map<string, Promise<string | undefined>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const stored = loadStoredWorkbenchState();
-  return recoverWorkspaceBuffers({
-    ...stored,
-    preferences: { ...stored.preferences, ...readStoredAppearance() },
-  });
+  return applyLaunchView(
+    recoverWorkspaceBuffers({
+      ...stored,
+      preferences: { ...stored.preferences, ...readStoredAppearance() },
+    }),
+  );
 }
 
 function loadStoredWorkbenchState(): WorkbenchState {
@@ -18999,6 +19096,9 @@ function shouldSuggestSessionTitle(
   return !hasTranscriptEvents;
 }
 
+// Keep in step with `is_generic_session_title` in the desktop backend. A
+// placeholder this list misses is treated as a real title, so the first turn
+// skips its rename and the chat keeps the placeholder forever.
 function isGenericSessionTitle(title: string) {
   return [
     "Desktop session",
@@ -19008,6 +19108,10 @@ function isGenericSessionTitle(title: string) {
     "CLI workspace",
     "Worktree CLI workspace",
     "Agent workspace CLI",
+    "Provider session",
+    "Chat handoff",
+    "Gyro session",
+    "Untitled chat",
   ].includes(title.trim());
 }
 

@@ -1,0 +1,230 @@
+[
+  {
+    "file": "apps/desktop/src-tauri/src/bin/chat-drag-smoke.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/browser_knowledge.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/browser_smoke.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/codex_turn_completion.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/conversation_history.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/delegated_agents.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/git_status_cache.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/lib.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/live_model_context.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/ollama_runner.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/openai_compatible_runner.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/performance_benchmark.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/provider_accounting.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/provider_api_keys.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/provider_context.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/provider_spend_guard.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/provider_tool_batch.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/session_browser.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/session_goal.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/subagent_capability.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/terminal_capability.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "apps/desktop/src-tauri/src/workspace_edit_capability.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-cli/src/main.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/acp_usage.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/capabilities.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/config.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/kimi_acp.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/lib.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/ollama.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/openai_compatible.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/provider_health.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/provider_observation.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/provider_registry.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/provider_retry.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/sessions.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/timing.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/usage.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  },
+  {
+    "file": "crates/gyro-core/src/usage_receipts.rs",
+    "head_retrieved": true,
+    "head_rustfmt_success": true,
+    "head_already_unformatted": true
+  }
+]

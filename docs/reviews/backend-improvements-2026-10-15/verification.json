@@ -1,0 +1,19 @@
+{
+  "command": "CARGO_INCREMENTAL=0 cargo test --workspace --locked --no-fail-fast -- --test-threads=4",
+  "exit_code": 0,
+  "totals": {
+    "passed": 1357,
+    "failed": 0,
+    "ignored": 7
+  },
+  "test_targets": 11,
+  "initial_dirty_files_verified": 43,
+  "initial_dirty_files_changed": [],
+  "verified_source_sha256": {
+    "crates/gyro-core/src/execution.rs": "fb16e2daade2bc67e1f3a5e29f5a24c736c2ce5e1d51990650c907c4883703a0",
+    "crates/gyro-core/src/provider_retry.rs": "924f31c29dc9d92741d14027f109de7a9264722c899da617ade3cce38c33da5c",
+    "crates/gyro-core/src/sessions.rs": "00f8cba6dcee029b375468491355a1face75976f5c518355d11c33dec593b075",
+    "apps/desktop/src-tauri/src/provider_retry_recovery.rs": "e14c94ed9c3369d8572529f6235a576c23993a3524fd0370300ba1bc7e466f3d",
+    "apps/desktop/src-tauri/src/terminal_process.rs": "b92055691436d0dbf94747acad68b6d5724d920d5a5f3561b8853176279f8052"
+  }
+}

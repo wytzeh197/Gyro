@@ -20,6 +20,7 @@ import {
   isCustomProviderId,
   type DesktopNotificationPreferences,
   type GyroConfig,
+  type LaunchView,
   type ProviderId,
   type SettingsSectionId,
   type UpdateState,
@@ -181,20 +182,31 @@ function Preview() {
   const [defaultWorkspaceMode, setDefaultWorkspaceMode] = useState<
     "local" | "worktree"
   >("local");
+  const [launchView, setLaunchView] = useState<LaunchView>(
+    () => (params.get("launch") as LaunchView | null) ?? "last",
+  );
   const [failSave, setFailSave] = useState(params.has("failSave"));
   const failSaveRef = useRef(failSave);
   failSaveRef.current = failSave;
   const [scene] = useState(() =>
     new URLSearchParams(location.search).get("scene"),
   );
+
   const [section, setSection] = useState<SettingsSectionId>(
-    scene === "providers"
-      ? "providers"
-      : scene === "updates"
-        ? "updates"
-        : scene === "import"
-          ? "import-projects"
-          : "appearance",
+    (new URLSearchParams(location.search).get("section") as
+      | SettingsSectionId
+      | null) ??
+      (scene === "providers"
+        ? "providers"
+        : scene === "efficiency"
+          ? "efficiency"
+          : scene === "updates"
+          ? "updates"
+          : scene === "import"
+            ? "import-projects"
+            : scene === "general"
+              ? "general"
+              : "appearance"),
   );
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
@@ -423,6 +435,11 @@ function Preview() {
           onSectionChange={setSection}
           defaultWorkspaceMode={defaultWorkspaceMode}
           onDefaultWorkspaceModeChange={setDefaultWorkspaceMode}
+          launchView={launchView}
+          onLaunchViewChange={(next) => {
+            setLaunchView(next);
+            setResult(`Open on launch: ${next}`);
+          }}
           appearanceSaveStatus={appearanceSaveStatus}
           onRetryAppearanceSave={() => {
             retryAppearanceSave();

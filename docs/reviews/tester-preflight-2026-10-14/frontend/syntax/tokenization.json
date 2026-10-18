@@ -1,0 +1,1255 @@
+[
+  {
+    "path": "/syntax/Welcome.vue",
+    "content": "<script setup lang=\"ts\">\n/* Vue comment starts here\n   and continues here */\nconst title: string = `Hello 🚀\n  Workspace`;\n</script>\n<template><h1>{{ title }}</h1></template>\n<style lang=\"scss\">\n$accent: #7c3aed;\nh1 {\n  color: $accent;\n}\n</style>",
+    "language": "gyro-tm-vue",
+    "available": true,
+    "lines": [
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 8,
+          "type": "htmlAttribute",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 13,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 14,
+          "type": "htmlAttribute",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 18,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 19,
+          "type": "string",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 23,
+          "type": "",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "storageKeyword",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 5,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 6,
+          "type": "variable",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 11,
+          "type": "operator",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 12,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 13,
+          "type": "type",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 19,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 20,
+          "type": "operator",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 21,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 22,
+          "type": "string",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 23,
+          "type": "templateString",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "templateString",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 11,
+          "type": "string",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 12,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 2,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 8,
+          "type": "",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 9,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 11,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 13,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 17,
+          "type": "variable",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 22,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 27,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 29,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 32,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 40,
+          "type": "",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 6,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 7,
+          "type": "htmlAttribute",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 11,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 12,
+          "type": "string",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 18,
+          "type": "",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "variable",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 7,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 8,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 9,
+          "type": "cssValue",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 16,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "cssSelector",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 2,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 3,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 2,
+          "type": "cssProperty",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 7,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 8,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 9,
+          "type": "variable",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 16,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "punctuation",
+          "language": "gyro-tm-vue"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 2,
+          "type": "tag",
+          "language": "gyro-tm-vue"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-vue"
+        }
+      ]
+    ]
+  },
+  {
+    "path": "/syntax/Welcome.svelte",
+    "content": "<script lang=\"ts\">\n/* Svelte comment starts here\n   and continues here */\nconst title: string = `Hello 🚀\n  Workspace`;\n</script>\n<h1>{title}</h1>\n<style>\n/* Embedded CSS comment\n   continues here */\nh1 { color: rebeccapurple; }\n</style>",
+    "language": "gyro-tm-svelte",
+    "available": true,
+    "lines": [
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 8,
+          "type": "htmlAttribute",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 12,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 13,
+          "type": "string",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 17,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "storageKeyword",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 5,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 6,
+          "type": "variable",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 11,
+          "type": "operator",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 12,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 13,
+          "type": "type",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 19,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 20,
+          "type": "operator",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 21,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 22,
+          "type": "string",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 23,
+          "type": "templateString",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "templateString",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 11,
+          "type": "string",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 12,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 2,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 8,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 3,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 4,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 5,
+          "type": "variable",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 10,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 11,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 13,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 15,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 6,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "cssSelector",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 2,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 3,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 4,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 5,
+          "type": "cssProperty",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 10,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 11,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 12,
+          "type": "cssValue",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 25,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 26,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 27,
+          "type": "punctuation",
+          "language": "gyro-tm-svelte"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 2,
+          "type": "tag",
+          "language": "gyro-tm-svelte"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-svelte"
+        }
+      ]
+    ]
+  },
+  {
+    "path": "/syntax/Welcome.astro",
+    "content": "---\n/* Astro comment starts here\n   and continues here */\nconst title: string = `Hello 🚀\n  Workspace`;\n---\n<h1>{title}</h1>\n<script>const icon = \"🚀\"; const ready: boolean = true;</script>\n<style>\n/* Embedded CSS comment\n   continues here */\nh1 { color: rebeccapurple; }\n</style>",
+    "language": "gyro-tm-astro",
+    "available": true,
+    "lines": [
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "storageKeyword",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 5,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 6,
+          "type": "variable",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 11,
+          "type": "operator",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 12,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 13,
+          "type": "type",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 19,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 20,
+          "type": "operator",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 21,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 22,
+          "type": "string",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 23,
+          "type": "templateString",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "templateString",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 11,
+          "type": "string",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 12,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 3,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 4,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 5,
+          "type": "variable",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 10,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 11,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 13,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 15,
+          "type": "",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 8,
+          "type": "storageKeyword",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 13,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 14,
+          "type": "variable",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 18,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 19,
+          "type": "operator",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 20,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 21,
+          "type": "string",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 25,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 26,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 27,
+          "type": "storageKeyword",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 32,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 33,
+          "type": "variable",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 38,
+          "type": "operator",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 39,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 40,
+          "type": "type",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 47,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 48,
+          "type": "operator",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 49,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 50,
+          "type": "boolean",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 54,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 55,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 57,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 63,
+          "type": "",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 1,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 6,
+          "type": "",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "cssSelector",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 2,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 3,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 4,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 5,
+          "type": "cssProperty",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 10,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 11,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 12,
+          "type": "cssValue",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 25,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 26,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 27,
+          "type": "punctuation",
+          "language": "gyro-tm-astro"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 2,
+          "type": "tag",
+          "language": "gyro-tm-astro"
+        },
+        {
+          "offset": 7,
+          "type": "",
+          "language": "gyro-tm-astro"
+        }
+      ]
+    ]
+  },
+  {
+    "path": "/syntax/theme.sass",
+    "content": "// Indentation based Sass\n$accent: #7c3aed\n$title: \"Workspace\"\n/* Sass comment starts here\n   and continues here */\n.welcome\n  color: $accent\n  content: $title\n  &:hover\n    color: lighten($accent, 12%)",
+    "language": "gyro-tm-sass",
+    "available": true,
+    "lines": [
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 1,
+          "type": "variable",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 7,
+          "type": "punctuation",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 8,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 1,
+          "type": "variable",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 6,
+          "type": "punctuation",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 7,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 8,
+          "type": "string",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "comment",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "cssSelector",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 2,
+          "type": "cssProperty",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 7,
+          "type": "punctuation",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 8,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 9,
+          "type": "variable",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 2,
+          "type": "cssProperty",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 9,
+          "type": "punctuation",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 10,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 11,
+          "type": "variable",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 2,
+          "type": "keyword",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 3,
+          "type": "htmlAttribute",
+          "language": "gyro-tm-sass"
+        }
+      ],
+      [
+        {
+          "offset": 0,
+          "type": "",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 4,
+          "type": "cssProperty",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 9,
+          "type": "punctuation",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 10,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 19,
+          "type": "variable",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 26,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 28,
+          "type": "number",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 30,
+          "type": "cssUnit",
+          "language": "gyro-tm-sass"
+        },
+        {
+          "offset": 31,
+          "type": "cssValue",
+          "language": "gyro-tm-sass"
+        }
+      ]
+    ]
+  }
+]

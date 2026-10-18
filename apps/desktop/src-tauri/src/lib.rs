@@ -1,3 +1,4 @@
+mod agent_session_worker;
 mod automation_scheduler;
 mod canvas_preview;
 mod chat_images;
@@ -8,6 +9,7 @@ use conversation_history::{acp_conversation_history_text_for_session, local_comp
 mod agent_reports;
 mod efficiency;
 mod git_read;
+mod ide_evidence;
 mod live_model_context;
 mod model_catalog;
 mod provider_accounting;
@@ -339,8 +341,31 @@ struct ProviderCapabilityResourceManager {
 
 #[derive(Default)]
 struct CapabilityIdeEvidenceManager {
-    by_workspace: Mutex<HashMap<String, WorkspaceContextSnapshot>>,
+    /// One live snapshot per recently used project; see `ide_evidence`.
+    evidence: Mutex<ide_evidence::IdeEvidenceCache>,
     task_outputs: terminal_capability::RetainedTaskOutputs,
+}
+
+/// Runs `reader` over the live IDE evidence for this turn's workspace.
+///
+/// A snapshot carries the text of every open buffer, so capability paths that
+/// only need to look something up borrow it under the cache lock instead of
+/// cloning the whole workspace's editor text first.
+fn with_ide_evidence<T>(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    reader: impl FnOnce(&WorkspaceContextSnapshot) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let manager = app.state::<CapabilityIdeEvidenceManager>();
+    let evidence = manager
+        .evidence
+        .lock()
+        .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?;
+    match evidence.get(&bound.workspace_key) {
+        // The shell has pushed newer evidence than the turn started with.
+        Some(snapshot) => reader(snapshot),
+        None => reader(&bound.workspace_context),
+    }
 }
 
 static ATTACHMENT_SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
@@ -702,10 +727,11 @@ const PROVIDER_INTERRUPTED_MARKER: &str =
 const PROVIDER_TOOL_BUDGET_NOTICE: &str =
     "Gyro stopped offering tools at this turn's round budget.";
 
-/// The notice attached to a turn whose answer was kept after the provider
-/// exited with an error before finishing it. Matched by its stable phrase.
+/// The notice attached to a turn whose answer was kept even though the provider
+/// did not get to finish it: it exited early, or it ran out of room at the
+/// model's own output limit. Matched by its stable phrase.
 const PROVIDER_CUT_OFF_NOTICE: &str =
-    "The provider exited before it finished, so this answer may be cut off.";
+    "The provider stopped before it finished, so this answer may be cut off.";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderStopReason {
@@ -2144,6 +2170,8 @@ enum ProviderAdapterKind {
     OpenAiCodex,
     AnthropicClaude,
     KimiAcp,
+    /// Google Antigravity's official CLI (`agy`) in headless stream-json mode.
+    AntigravityCli,
     Ollama,
     /// Straight HTTPS to an OpenAI-compatible endpoint: the providers Gyro
     /// ships API-key presets for, and any endpoint the user defines.
@@ -4673,7 +4701,16 @@ fn run_provider_chat_blocking_in_lease(
         *control.request.lock().map_err(to_string)? = Some(request.clone());
     }
     let _agent_scope = delegated_agents::ParentRunScope::new(&app, &request.session_id);
-    bind_provider_capability_context(&app, &store, &request, run_id, load_persisted_context)?;
+    // The session row read at turn start is this turn's authority for the
+    // workspace identity; re-reading it here could straddle a roots update.
+    let context_already_persisted = bind_provider_capability_context(
+        &app,
+        &store,
+        &request,
+        run_id,
+        load_persisted_context,
+        &session,
+    )?;
     timing::mark(TimingStage::WorkspaceReady);
     let bound_context =
         active_provider_capability_context(&app, &request.session_id).map_err(to_string)?;
@@ -4697,23 +4734,8 @@ fn run_provider_chat_blocking_in_lease(
         )),
         None,
     );
-    // A turn that has never reported a status has never run, so it cannot have
-    // persisted context yet. That is every ordinary send, and it used to pay
-    // for a tail read and 256 event parses to be told so; only a retry of an
-    // existing turn actually has something to find.
-    let context_already_persisted = load_persisted_context
-        && store
-            .read_recent_events(session_id, 256)
-            .map_err(to_string)?
-            .iter()
-            .any(|event| {
-                event.turn_id == Some(run_id)
-                    && event
-                        .payload
-                        .get("kind")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("workspace-context")
-            });
+    // The binding above already found any snapshot this turn persisted, so a
+    // retry never rescans the transcript to decide whether to write it again.
     if !context_already_persisted {
         store
             .append_event_with_turn_id(
@@ -5333,6 +5355,14 @@ fn compact_provider_chat_blocking(
         };
     emit_provider_activity_event(&app, &request, &completed, Some(0));
     let mut entry = provider_activity_event_entry(&request, run_id, 0, &completed);
+    if let Some(payload) = entry.1.as_object_mut() {
+        // Codex compacts inside its own resumed session, so this one really is
+        // a model summary of the earlier conversation.
+        payload.insert(
+            "compactionMode".into(),
+            serde_json::Value::String("summarized".into()),
+        );
+    }
     // The compacted thread's own measurement supersedes every earlier reading.
     if let (Some(usage), Some(payload)) = (context_usage, entry.1.as_object_mut()) {
         payload.insert(
@@ -5355,11 +5385,15 @@ fn compact_local_provider_chat(
 ) -> Result<ProviderContextCompactionResponse, String> {
     let events = store.read_events(session_id).map_err(to_string)?;
     let _ = efficiency::save_checkpoint(app, store, request);
-    let summary = local_compaction_summary(&events).ok_or_else(|| {
+    let compaction = local_compaction_summary(&events).ok_or_else(|| {
         "this chat needs a completed reply before context can be compacted".to_string()
     })?;
+    let mode = compaction.mode();
+    let condensed_turns = compaction.condensed_turns;
     let params = serde_json::json!({ "turnId": run_id.to_string() });
-    let running = context_compaction::codex_context_compaction_activity(&params, "running");
+    let mut running = context_compaction::codex_context_compaction_activity(&params, "running");
+    // This path rewrites the transcript locally; nothing is being summarized.
+    running.detail = Some("Making room for the next turn.".into());
     emit_provider_activity_event(app, request, &running, Some(0));
 
     // A new provider session starts from the saved checkpoint on the next
@@ -5369,11 +5403,24 @@ fn compact_local_provider_chat(
         .clear_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
     let mut completed = context_compaction::codex_context_compaction_activity(&params, "done");
-    completed.detail =
-        Some("Condensed the local chat history for this provider's next turn.".into());
+    completed.detail = Some(context_compaction::local_compaction_detail(&compaction));
     let mut entry = provider_activity_event_entry(request, run_id, 0, &completed);
     if let Some(payload) = entry.1.as_object_mut() {
-        payload.insert("contextSummary".into(), serde_json::Value::String(summary));
+        payload.insert(
+            "contextSummary".into(),
+            serde_json::Value::String(compaction.text),
+        );
+        // What every surface may claim. This path rewrites the transcript
+        // locally, so the two outcomes are "kept" and "condensed"; neither is
+        // a model summary, and the card is not allowed to say it is.
+        payload.insert(
+            "compactionMode".into(),
+            serde_json::Value::String(mode.into()),
+        );
+        payload.insert(
+            "condensedTurns".into(),
+            serde_json::json!(condensed_turns),
+        );
     }
     let activity_events = store
         .append_system_events_with_turn_id(session_id, vec![entry])
@@ -5495,7 +5542,8 @@ fn bind_provider_capability_context(
     request: &ProviderChatRequest,
     run_id: Uuid,
     load_persisted_context: bool,
-) -> Result<(), String> {
+    session: &Session,
+) -> Result<bool, String> {
     let workspace_path = request
         .workspace_path
         .as_deref()
@@ -5504,9 +5552,11 @@ fn bind_provider_capability_context(
     if workspace_check.is_unavailable() {
         return Err(WORKSPACE_UNAVAILABLE_MESSAGE.into());
     }
-    let workspace = PathBuf::from(workspace_path)
-        .canonicalize()
-        .map_err(|_| WORKSPACE_UNAVAILABLE_MESSAGE.to_string())?;
+    // The check already resolved this root and keyed its report by the result,
+    // so the turn reuses that path instead of canonicalizing a second time.
+    let workspace = workspace_check
+        .canonical_workspace()
+        .ok_or_else(|| WORKSPACE_UNAVAILABLE_MESSAGE.to_string())?;
     let workspace_key = workspace.display().to_string();
     let policy = store
         .get_project_capability_policy(&workspace_key)
@@ -5514,21 +5564,11 @@ fn bind_provider_capability_context(
     let mode = capability_run_mode_for_chat(request.mode);
     let persisted_context = if load_persisted_context {
         store
-            .read_recent_events(
+            .latest_workspace_context_event(
                 Uuid::parse_str(&request.session_id).map_err(to_string)?,
-                256,
+                run_id,
             )
             .map_err(to_string)?
-            .into_iter()
-            .rev()
-            .find(|event| {
-                event.turn_id == Some(run_id)
-                    && event
-                        .payload
-                        .get("kind")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("workspace-context")
-            })
             .and_then(|event| {
                 event
                     .payload
@@ -5539,11 +5579,12 @@ fn bind_provider_capability_context(
     } else {
         None
     };
+    let context_already_persisted = persisted_context.is_some();
     let workspace_context = if let Some(context) = persisted_context {
         context
     } else {
         app.state::<CapabilityIdeEvidenceManager>()
-            .by_workspace
+            .evidence
             .lock()
             .map_err(|_| "IDE evidence state is unavailable".to_string())?
             .get(&workspace_key)
@@ -5556,12 +5597,7 @@ fn bind_provider_capability_context(
         provider_id: request.provider_id.clone(),
         workspace,
         workspace_key,
-        workspace_identity_revision: store
-            .get_session(Uuid::parse_str(&request.session_id).map_err(to_string)?)
-            .map_err(to_string)?
-            .ok_or_else(|| "owning session was deleted".to_string())?
-            .workspace_identity
-            .revision,
+        workspace_identity_revision: session.workspace_identity.revision,
         allow_delegation: delegated_agents::request_allows_delegation(request)
             && delegated_agents::can_delegate(&request.session_id),
         policy: CapabilityPolicySnapshot::from_policy(&policy, mode),
@@ -5581,7 +5617,7 @@ fn bind_provider_capability_context(
         .capability_context
         .lock()
         .map_err(|_| "provider capability context is unavailable".to_string())? = Some(context);
-    Ok(())
+    Ok(context_already_persisted)
 }
 
 fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
@@ -5937,6 +5973,16 @@ fn provider_context_message_with_capabilities_for_turn(
     turn: PromptTurn,
 ) -> String {
     let mut context = Vec::new();
+    // Title every chat from the model itself, on the turn that opens it, so
+    // naming does not depend on which provider the user picked. Later turns
+    // skip it: the marker is read once and the opening turn already asked.
+    if request.suggest_title {
+        context.push(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end().to_string());
+    }
+    // Every provider also learns how to show an image it already holds.
+    if !turn.resumed {
+        context.push(CHAT_IMAGE_REPLY_INSTRUCTION.trim_end().to_string());
+    }
     // The full guide and contract cost ~3K tokens, so they travel with an
     // actual browse request or captured page, not every mention of "browser".
     let browser_task =
@@ -6030,6 +6076,7 @@ fn provider_context_message_with_capabilities_for_turn(
             context.push(
                 "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
             );
+            context.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
         }
     }
     // Any mode can ask. Gyro shows these as a one-at-a-time question card and
@@ -7247,10 +7294,10 @@ async fn update_capability_ide_evidence(
         .task_outputs
         .restore_context(&workspace_key, &mut context);
     manager
-        .by_workspace
+        .evidence
         .lock()
         .map_err(|_| "IDE evidence state is unavailable".to_string())?
-        .insert(workspace_key, context);
+        .store(workspace_key, context);
     Ok(())
 }
 
@@ -7863,6 +7910,24 @@ fn prepare_workspace_impl(
             Vec::new()
         }
     };
+    // Share the pane's fresh Git view with the next workspace check, so the
+    // first chat turn in this workspace reuses it instead of probing again.
+    if let Some(status) = source_control
+        .as_ref()
+        .filter(|status| status.available && status.error.is_none())
+    {
+        let _ = gyro_core::record_prepared_workspace(
+            root,
+            gyro_core::WorkspaceGitBrief {
+                available: true,
+                branch: status.branch.clone(),
+                ahead: u32::try_from(status.ahead).unwrap_or(u32::MAX),
+                behind: u32::try_from(status.behind).unwrap_or(u32::MAX),
+                dirty_count: u32::try_from(status.files.len()).unwrap_or(u32::MAX),
+                conflicted: status.files.iter().any(|file| file.state == "conflicted"),
+            },
+        );
+    }
     emit_workspace_preparation(
         app,
         request,
@@ -13058,6 +13123,9 @@ fn run_provider_chat_once(
             run_anthropic_claude_chat(app, request, resume_cursor, attempt)
         }
         ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor, attempt),
+        ProviderAdapterKind::AntigravityCli => {
+            run_antigravity_chat(app, request, resume_cursor, attempt)
+        }
         ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
         ProviderAdapterKind::OpenAiCompatible => {
             openai_compatible_runner::run_openai_compatible_chat(app, request)
@@ -13117,15 +13185,6 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             cursor_kind: "gemini-acp-session",
             default_model: "gemini-default",
             runner: "gemini-acp",
-        }),
-        "antigravity" => Some(AcpProviderRuntime {
-            label: "Google Antigravity",
-            program: "agy_acp_server.par",
-            args: &[],
-            auth_methods: &["gemini-api-key"],
-            cursor_kind: "antigravity-acp-session",
-            default_model: "antigravity-default",
-            runner: "antigravity-acp",
         }),
         "cursor" => Some(AcpProviderRuntime {
             label: "Cursor",
@@ -13363,6 +13422,9 @@ fn run_kimi_acp_chat(
             } else {
                 KimiAcpMode::Normal
             },
+            // Full access answers permission requests inside the core, so a card
+            // that cannot be shown can never become a declined tool.
+            auto_allow_permissions: approval_posture == gyro_core::ApprovalPosture::FullAccess,
             resume_session_id,
             // Wall clock is the 24h chat max, not the 30m quiet-period constant.
             // Mis-wiring both to inactivity killed healthy Grok/Kimi/Gemini turns
@@ -13544,7 +13606,9 @@ fn run_kimi_acp_chat(
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
         paused_at_tool_budget: false,
-        answer_cut_off: false,
+        // An agent that ran out of room kept its streamed text: the turn is
+        // done, but the answer is not finished, and the transcript says so.
+        answer_cut_off: output.truncated,
         response: response.clone(),
         resume_cursor: Some(ProviderResumeCursor {
             kind: runtime.cursor_kind.into(),
@@ -15541,6 +15605,179 @@ fn claude_multimodal_input(
     Ok(serde_json::json!({"type": "user", "message": {"role": "user", "content": content}}))
 }
 
+/// Conversation cursor kind for `agy`'s `--conversation` id.
+const ANTIGRAVITY_CURSOR_KIND: &str = "antigravity-conversation";
+
+/// Shown when the official CLI is missing from this machine.
+const ANTIGRAVITY_INSTALL_DETAIL: &str = "The Antigravity CLI (`agy`) is not installed. Add Google's official CLI with `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once to sign in with your Google account.";
+
+/// Google Antigravity through Google's official CLI (`agy`).
+///
+/// One process per turn. `agy -p <prompt> --output-format stream-json` writes
+/// `step_update` frames while it works and a `result` frame when it stops, and
+/// the conversation id those frames carry is what the next turn resumes with
+/// `--conversation`, so an Antigravity thread keeps its context without Gyro
+/// replaying the transcript.
+///
+/// Headless runs have no approval channel, so Gyro's posture maps onto the
+/// CLI's own `--sandbox` / `--mode` / `--dangerously-skip-permissions` flags
+/// rather than a per-call dialog. That is why the provider descriptor reports
+/// no approval support.
+fn run_antigravity_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == ANTIGRAVITY_CURSOR_KIND);
+    let history = if can_resume {
+        None
+    } else {
+        local_conversation_history_for_request(request)
+    };
+    let prompt = provider_context_message_for_turn(
+        request,
+        history.as_deref(),
+        PromptTurn {
+            resumed: can_resume,
+            approvals_sent_separately: false,
+        },
+    );
+    gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
+
+    // A headless run cannot ask, so the posture has to be decided up front:
+    // only an unconditional full-access send gets the CLI's permission bypass.
+    let full_access = request.full_access
+        && !request.require_command_approval
+        && !request.require_file_edit_approval;
+    let mode = if request.mode == ChatMode::Plan {
+        gyro_core::antigravity_cli::AntigravityMode::Plan
+    } else {
+        gyro_core::antigravity_cli::AntigravityMode::AcceptEdits
+    };
+    let conversation_id = resume_cursor
+        .and_then(|cursor| (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str()));
+    let args = gyro_core::antigravity_cli::chat_args(
+        request.model_id.as_deref(),
+        request.reasoning_effort.as_deref(),
+        mode,
+        full_access,
+        conversation_id,
+        &prompt,
+    );
+    audit_provider_chat_args(&request.provider_id, &args)?;
+
+    let mut process = command_for_provider(gyro_core::antigravity_cli::PROGRAM, &request.provider_id)?;
+    project_import_continuation::apply_data_home(&mut process, request)?;
+    process.current_dir(cwd);
+    process.args(args);
+
+    let mut observed_session_id = None;
+    let output = run_streaming_command(
+        process,
+        None,
+        Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+        Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+        app,
+        request,
+        &mut observed_session_id,
+    )
+    .map_err(|error| {
+        // Only a missing binary earns the install instructions; every other
+        // failure already says what went wrong.
+        let detail = error.to_string();
+        if detail.contains("No such file") || detail.contains("not found") {
+            anyhow::anyhow!("{ANTIGRAVITY_INSTALL_DETAIL}")
+        } else {
+            error
+        }
+    })?;
+
+    // Recorded before any failure propagates: a stopped or failed turn still
+    // leaves a conversation the next message can continue.
+    if let Some(conversation_id) = observed_session_id.clone() {
+        attempt.resume_cursor = Some(ProviderResumeCursor {
+            kind: ANTIGRAVITY_CURSOR_KIND.into(),
+            session_id: conversation_id,
+        });
+    }
+    let provider_session_id = observed_session_id.clone().unwrap_or_default();
+    let accounted_usage = antigravity_accounted_usage(&output.stdout);
+
+    let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
+    let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
+    if gyro_core::antigravity_cli::needs_sign_in(&format!("{stdout}{stderr}")) {
+        anyhow::bail!("{}", gyro_core::antigravity_cli::SIGN_IN_HINT);
+    }
+    if let Some(detail) = antigravity_stream_failure(&stdout) {
+        attempt.activities = output.activities.clone();
+        anyhow::bail!("{detail}");
+    }
+
+    if let Some(response) = recover_streamed_provider_answer(&output, "") {
+        let response_chars = response.chars().count();
+        let answer_cut_off = !output.status_success;
+        return Ok(ProviderRunnerOutput {
+            accounted_usage,
+            activities: provider_activities_for_response(output.activities, &response),
+            context_usage: output.context_usage,
+            billed_usage: output.billed_usage,
+            rate_limits: output.rate_limits,
+            paused_at_tool_budget: false,
+            answer_cut_off,
+            response,
+            resume_cursor: Some(ProviderResumeCursor {
+                kind: ANTIGRAVITY_CURSOR_KIND.into(),
+                session_id: provider_session_id.clone(),
+            }),
+            retry_count: 0,
+            resumed: resume_cursor.is_some(),
+            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
+                text,
+                blocks: output.text_blocks.clone(),
+            }),
+            output_summary: Some(provider_output_summary(
+                "agy",
+                output.status_label.as_str(),
+                Some(provider_session_id.as_str()),
+                response_chars,
+            )),
+        });
+    }
+    if stdout.is_empty() && stderr.is_empty() {
+        anyhow::bail!("Antigravity exited with {}", output.status_label);
+    }
+    anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
+}
+
+/// The cumulative token count a run reported, for Gyro's accounting.
+fn antigravity_accounted_usage(stdout: &str) -> Option<gyro_core::UsageTokens> {
+    let usage = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .filter_map(|value| gyro_core::antigravity_cli::usage(&value))
+        .max_by_key(|usage| usage.total_tokens)?;
+    Some(gyro_core::UsageTokens {
+        input_tokens: usage.input_tokens,
+        cached_input_tokens: usage.cache_read_tokens,
+        cache_write_tokens: 0,
+        output_tokens: usage.output_tokens,
+        reasoning_output_tokens: usage.thinking_tokens,
+        total_tokens: usage.total_tokens,
+        measured: true,
+        accounting: None,
+    })
+}
+
+/// The `result` frame's own failure detail, if the turn did not succeed.
+fn antigravity_stream_failure(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .find_map(|value| gyro_core::antigravity_cli::failure_detail(&value))
+}
+
 fn run_anthropic_claude_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -16285,7 +16522,7 @@ fn resolve_pane_governance(
         ),
         workspace_context: app
             .state::<CapabilityIdeEvidenceManager>()
-            .by_workspace
+            .evidence
             .lock()
             .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
             .get(&workspace_key)
@@ -16400,12 +16637,30 @@ fn is_generic_session_title(title: &str) -> bool {
     )
 }
 
-/// Title every chat the same way, from the user's message, with no model call.
+/// The first-turn title line. Gyro reads this marker once, on the turn that
+/// opens a chat, so every provider names the session from the same
+/// instruction instead of depending on the local heuristic alone.
+const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. Write it only in this first reply; later replies in this chat must not include it.\n";
+const SESSION_TITLE_LATER_TURN_INSTRUCTION: &str = "This is not the first turn of this chat. Do not write a GYRO_SESSION_TITLE line; Gyro only reads it on a chat's first turn.\n";
+
+fn session_title_instruction(suggest_title: bool) -> &'static str {
+    if suggest_title {
+        SESSION_TITLE_FIRST_TURN_INSTRUCTION
+    } else {
+        SESSION_TITLE_LATER_TURN_INSTRUCTION
+    }
+}
+
+/// Models can put an image they already hold into a final message by citing
+/// its local path on its own line. Only these roots resolve to a preview.
+const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you already have (a screenshot you captured, a workspace image, or an attachment), put it in your reply as a standalone line: ![short description](/absolute/path.png). Only PNG, JPEG, or WebP files inside the selected workspace, the session's attachments, or Gyro's browser-captures directory are rendered; any other path stays as plain text. Never invent a path, and do not claim an image is shown unless you wrote that line.\n";
+
+/// Title each chat from the user's message, with no model call.
 ///
 /// The desktop composer uses the same rules in `sessionTitleFromMessage` so
 /// the sidebar can update before this turn reaches the provider. Keep the two
-/// in step: asking the selected model to write `GYRO_SESSION_TITLE` billed
-/// that model's usage and only reached the providers whose prompts included it.
+/// in step. This local title is the instant provisional one; the model's
+/// `GYRO_SESSION_TITLE` line replaces it when the first turn finishes.
 fn session_title_from_message(message: &str) -> Option<String> {
     let without_fences = strip_fenced_code_blocks(&message.replace('\0', ""));
     let without_inline = strip_inline_code_markers(&without_fences);
@@ -16536,7 +16791,7 @@ fn openai_codex_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
     model_label: Option<&str>,
-    _suggest_title: bool,
+    suggest_title: bool,
     allow_mutations: bool,
     resumed: bool,
 ) -> String {
@@ -16554,11 +16809,25 @@ fn openai_codex_chat_prompt(
     } else {
         "Do not edit files, start servers, commit, push, or make destructive changes in this chat run."
     };
+    // The shared provider context may already carry these. Skip our copy when
+    // it does so a provider never reads the same contract twice.
+    let title_instruction = if message.contains("GYRO_SESSION_TITLE") {
+        ""
+    } else {
+        session_title_instruction(suggest_title)
+    };
+    let image_instruction = if message.contains("![short description](/absolute/path.png)") {
+        ""
+    } else {
+        CHAT_IMAGE_REPLY_INSTRUCTION
+    };
     if resumed {
         // The resumed thread already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
         return format!(
             "Your selected model label is: {model_label}.\n\
+             {title_instruction}\n\
+             {image_instruction}\n\
              {mutation_instruction}\n\
              {workspace_instruction}\n\n\
              User message:\n{message}"
@@ -16578,6 +16847,8 @@ fn openai_codex_chat_prompt(
          Your selected model label is: {model_label}.\n\
          If the user asks what model you are, answer with exactly that selected model label only.\n\
          {artifact_instruction}\n\
+         {title_instruction}\n\
+         {image_instruction}\n\
          {mutation_instruction}\n\
          {workspace_instruction}\n\n\
          User message:\n{message}"
@@ -16587,7 +16858,7 @@ fn openai_codex_chat_prompt(
 fn claude_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
-    _suggest_title: bool,
+    suggest_title: bool,
     allow_actions: bool,
     resumed: bool,
 ) -> String {
@@ -16601,10 +16872,22 @@ fn claude_chat_prompt(
     } else {
         "Stay in planning mode. Do not edit files, run mutating commands, start servers, commit, push, or make destructive changes.\n"
     };
+    let title_instruction = if message.contains("GYRO_SESSION_TITLE") {
+        ""
+    } else {
+        session_title_instruction(suggest_title)
+    };
+    let image_instruction = if message.contains("![short description](/absolute/path.png)") {
+        ""
+    } else {
+        CHAT_IMAGE_REPLY_INSTRUCTION
+    };
     if resumed {
         // The resumed session already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
-        return format!("{action_instruction}{workspace_instruction}\n\nUser message:\n{message}");
+        return format!(
+            "{title_instruction}{image_instruction}{action_instruction}{workspace_instruction}\n\nUser message:\n{message}"
+        );
     }
     // The shared provider context may already carry this exact guide.
     // Keep one full copy; never shorten it or remove any tool declarations.
@@ -16619,6 +16902,8 @@ fn claude_chat_prompt(
          Do not describe the local Claude Code runner, authentication, system prompts, or implementation details unless asked.\n\
          If the user asks what model you are, answer with the model label only.\n\
          {artifact_instruction}\n\
+         {title_instruction}\n\
+         {image_instruction}\n\
          {action_instruction}\
          {workspace_instruction}\n\n\
          User message:\n{message}"
@@ -19257,6 +19542,7 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
         ProviderExecutionKind::CodexCli => ProviderAdapterKind::OpenAiCodex,
         ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
         ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
+        ProviderExecutionKind::AntigravityCli => ProviderAdapterKind::AntigravityCli,
         ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::OllamaApi => ProviderAdapterKind::Ollama,
         ProviderExecutionKind::OpenAiCompatibleApi => ProviderAdapterKind::OpenAiCompatible,
@@ -20103,7 +20389,7 @@ fn wait_for_capability_approval(
             .unwrap_or(false);
         let latest = app
             .state::<CapabilityIdeEvidenceManager>()
-            .by_workspace
+            .evidence
             .lock()
             .ok()
             .and_then(|contexts| contexts.get(&bound.workspace_key).cloned())
@@ -20263,39 +20549,37 @@ fn editor_approval_fingerprint(
         .get("selectionOnly")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let latest = app
-        .state::<CapabilityIdeEvidenceManager>()
-        .by_workspace
-        .lock()
-        .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-        .get(&bound.workspace_key)
-        .cloned()
-        .unwrap_or_else(|| bound.workspace_context.clone());
-    let source = if selection_only {
-        latest.selection.as_ref()
-    } else {
-        latest.buffers.iter().find(|buffer| {
-            buffer.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
+    // The live buffer is the thing being approved, so read it under the cache
+    // lock instead of copying every open buffer in the workspace first.
+    with_ide_evidence(app, bound, |latest| {
+        let source = if selection_only {
+            latest.selection.as_ref()
+        } else {
+            latest.buffers.iter().find(|buffer| {
+                buffer.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
+            })
+        }
+        .filter(|source| {
+            source.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
         })
-    }
-    .filter(|source| source.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str()))
-    .ok_or_else(|| anyhow::anyhow!("requested live editor text is unavailable"))?;
-    anyhow::ensure!(
-        !source
-            .get("truncated")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        "live editor text exceeds the approval limit; select a smaller range"
-    );
-    let text_key = if selection_only { "text" } else { "content" };
-    anyhow::ensure!(
-        source
-            .get(text_key)
-            .and_then(serde_json::Value::as_str)
-            .is_some(),
-        "requested live editor text is unavailable"
-    );
-    Ok(content_hash(&serde_json::to_vec(source)?))
+        .ok_or_else(|| anyhow::anyhow!("requested live editor text is unavailable"))?;
+        anyhow::ensure!(
+            !source
+                .get("truncated")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            "live editor text exceeds the approval limit; select a smaller range"
+        );
+        let text_key = if selection_only { "text" } else { "content" };
+        anyhow::ensure!(
+            source
+                .get(text_key)
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
+            "requested live editor text is unavailable"
+        );
+        Ok(content_hash(&serde_json::to_vec(source)?))
+    })
 }
 
 fn persist_capability_grant(
@@ -20398,30 +20682,27 @@ fn execute_provider_capability(
             efficiency::execute(app, bound, request)?
         }
         CapabilityId::WorkspaceContext => {
-            let context = app
-                .state::<CapabilityIdeEvidenceManager>()
-                .by_workspace
-                .lock()
-                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-                .get(&bound.workspace_key)
-                .cloned()
-                .unwrap_or_else(|| bound.workspace_context.clone());
             let identity = open_store()
                 .map_err(anyhow::Error::msg)?
                 .get_session(Uuid::parse_str(&bound.session_id)?)?
                 .map(|session| serde_json::to_value(session.workspace_identity))
                 .transpose()?;
-            let data = workspace_context_capability::result(
-                &context,
-                bound.workspace_context.revision,
-                identity,
-                arguments,
-            )?;
-            let stale = context.revision != bound.workspace_context.revision;
+            // Borrow the live snapshot; copying it would duplicate every open
+            // buffer just to read a page of it.
+            let (data, revision) = with_ide_evidence(app, bound, |context| {
+                let data = workspace_context_capability::result(
+                    context,
+                    bound.workspace_context.revision,
+                    identity,
+                    arguments,
+                )?;
+                Ok((data, context.revision))
+            })?;
+            let stale = revision != bound.workspace_context.revision;
             (
                 format!(
                     "Inspected Workspace context revision {}{}",
-                    context.revision,
+                    revision,
                     if stale {
                         " (changed since turn start)"
                     } else {
@@ -20503,19 +20784,13 @@ fn execute_provider_capability(
         | CapabilityId::CodeHover
         | CapabilityId::CodeSymbols => lsp_capability::execute(app, bound, request)?,
         CapabilityId::WorkspaceDiagnostics => {
-            let context = app
-                .state::<CapabilityIdeEvidenceManager>()
-                .by_workspace
-                .lock()
-                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-                .get(&bound.workspace_key)
-                .cloned()
-                .unwrap_or_else(|| bound.workspace_context.clone());
-            let diagnostics = workspace_context_capability::diagnostics(
-                &context,
-                bound.workspace_context.revision,
-                arguments,
-            )?;
+            let diagnostics = with_ide_evidence(app, bound, |context| {
+                workspace_context_capability::diagnostics(
+                    context,
+                    bound.workspace_context.revision,
+                    arguments,
+                )
+            })?;
             let count = diagnostics["returned"].as_u64().unwrap_or(0);
             (
                 format!("Inspected {count} workspace diagnostics"),
@@ -20702,14 +20977,11 @@ fn execute_provider_capability(
                 app.state::<CapabilityIdeEvidenceManager>()
                     .task_outputs
                     .remember(&bound.workspace_key, &bound.session_id, output_data.clone());
-                if let Ok(mut contexts) = app
-                    .state::<CapabilityIdeEvidenceManager>()
-                    .by_workspace
-                    .lock()
+                if let Ok(mut evidence) =
+                    app.state::<CapabilityIdeEvidenceManager>().evidence.lock()
                 {
-                    let context = contexts
-                        .entry(bound.workspace_key.clone())
-                        .or_insert_with(|| bound.workspace_context.clone());
+                    let context = evidence
+                        .entry_mut(&bound.workspace_key, || bound.workspace_context.clone());
                     context.revision = context.revision.saturating_add(1);
                     context.captured_at = chrono::Utc::now();
                     context.active_output = Some(output_data.clone());
@@ -21680,10 +21952,10 @@ fn handle_desktop_provider_capability_request_inner(
         selected.policy = CapabilityPolicySnapshot::from_policy(&root_policy, bound.policy.mode);
         selected.workspace_context = app
             .state::<CapabilityIdeEvidenceManager>()
-            .by_workspace
+            .evidence
             .lock()
             .ok()
-            .and_then(|contexts| contexts.get(&key).cloned())
+            .and_then(|evidence| evidence.get(&key).cloned())
             .unwrap_or_else(|| WorkspaceContextSnapshot::empty(key));
         // Readiness is a turn-start briefing, not an execution dependency.
         // Re-running Git status here can add hundreds of milliseconds to
@@ -22684,6 +22956,7 @@ pub fn run() {
             }
             start_cli_ipc_listener(app.handle().clone());
             start_automation_scheduler(app.handle().clone());
+            agent_session_worker::start(app.handle().clone());
             goal_runner::recover(app.handle().clone());
             Ok(())
         })
@@ -26456,7 +26729,8 @@ while True:
         assert!(prompt.contains("selected model label is: GPT-5.6 Sol"));
         assert!(prompt.contains("exactly that selected model label only"));
         assert!(prompt.contains("Do not describe the local Codex runner"));
-        assert!(!prompt.contains("GYRO_SESSION_TITLE"));
+        assert!(prompt.contains("GYRO_SESSION_TITLE: <2-6 word title>"));
+        assert!(prompt.contains("name the session immediately"));
         assert!(prompt.contains("GYRO_ARTIFACTS:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
         assert!(prompt.contains("Do not edit files"));
@@ -26496,7 +26770,8 @@ while True:
         for prompt in [&codex, &claude] {
             assert_eq!(prompt.matches(guide).count(), 1);
             assert!(prompt.contains(&context));
-            assert!(!prompt.contains("GYRO_SESSION_TITLE"));
+            // Exactly one naming contract, whichever path supplied it.
+            assert_eq!(prompt.matches("GYRO_SESSION_TITLE").count(), 1);
         }
         assert!(openai_codex_chat_prompt("hello", None, None, true, true, false).contains(guide));
         assert!(claude_chat_prompt("hello", None, true, true, false).contains(guide));
@@ -26671,12 +26946,13 @@ while True:
 
         let claude_resumed = claude_chat_prompt("next", Some("/tmp/project"), false, true, true);
         assert!(!claude_resumed.contains("GYRO_ARTIFACTS:"));
-        // Titles are local. Neither turn asks the model to spend usage on one.
-        assert!(!claude_resumed.contains("GYRO_SESSION_TITLE"));
+        // A resumed turn is never asked to name the session again; the opening
+        // turn is, so every provider titles the chat it starts.
+        assert!(claude_resumed.contains("Do not write a GYRO_SESSION_TITLE line"));
         assert!(!claude_resumed.contains("name the session immediately"));
         let claude_opening = claude_chat_prompt("start", Some("/tmp/project"), true, true, false);
-        assert!(!claude_opening.contains("GYRO_SESSION_TITLE"));
-        assert!(!claude_opening.contains("name the session immediately"));
+        assert!(claude_opening.contains("GYRO_SESSION_TITLE: <2-6 word title>"));
+        assert!(claude_opening.contains("name the session immediately"));
         assert!(claude_resumed.contains("must follow Gyro's permission decisions"));
         let codex_resumed =
             openai_codex_chat_prompt("next", Some("/workspace"), Some("GPT"), false, false, true);

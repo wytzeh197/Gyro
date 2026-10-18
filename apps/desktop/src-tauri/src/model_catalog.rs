@@ -82,6 +82,29 @@ pub(crate) fn catalog_reasoning_efforts(
     catalog_model_profile(provider_id, model_id)?.supported_reasoning_efforts
 }
 
+/// Models the installed catalog can run, for the external-agent choice list.
+pub(crate) fn catalog_choice_models() -> Vec<(String, String, Vec<String>)> {
+    profiles()
+        .read()
+        .ok()
+        .map(|guard| {
+            guard
+                .iter()
+                .map(|((provider_id, model_id), profile)| {
+                    (
+                        provider_id.clone(),
+                        model_id.clone(),
+                        profile
+                            .supported_reasoning_efforts
+                            .clone()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn profiles() -> &'static RwLock<Profiles> {
     static PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
     PROFILES.get_or_init(|| {

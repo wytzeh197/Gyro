@@ -72,7 +72,7 @@ pub fn provider_id_from_program(program: &str) -> Option<&'static str> {
         "claude" => Some("anthropic"),
         "grok" => Some("xai"),
         "gemini" => Some("gemini"),
-        "agy_acp_server.par" | "agy_acp_server.exe" => Some("antigravity"),
+        "agy" | "agy_acp_server.par" | "agy_acp_server.exe" => Some("antigravity"),
         "kimi" => Some("kimi"),
         "cursor-agent" => Some("cursor"),
         _ => None,
@@ -410,11 +410,52 @@ const CREDENTIAL_STORE_DIRS: &[&str] = &[
 /// Relevant when the workspace itself is the home directory: `.config/gh` is
 /// then an ordinary relative path, and nothing about its file names marks it.
 pub fn relative_path_is_in_credential_store(path: &str) -> bool {
+    const CREDENTIAL_STORE_FILES: &[&str] = &[
+        ".git-credentials",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        ".pgpass",
+        ".claude.json",
+        "credentials",
+        "credentials.json",
+        "credentials.toml",
+    ];
+    // Plaintext token files that live under a non-secret directory name. The
+    // segment list above cannot see them: `.cargo` and `.config/git` are
+    // ordinary names, while the token is in the file.
+    const CREDENTIAL_STORE_PATHS: &[&str] = &[
+        ".cargo/credentials",
+        ".cargo/credentials.toml",
+        ".config/git/credentials",
+        ".config/op",
+        ".codex/auth.json",
+        ".gemini/oauth_creds.json",
+        ".local/share/opencode/auth.json",
+    ];
+
     let normalized = path.trim().replace('\\', "/").to_ascii_lowercase();
-    normalized
+    let segments: Vec<&str> = normalized
         .split('/')
-        .filter(|segment| !segment.is_empty() && *segment != ".")
-        .any(|segment| CREDENTIAL_STORE_DIRS.contains(&segment))
+        .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
+        .collect();
+    if segments
+        .iter()
+        .any(|segment| CREDENTIAL_STORE_DIRS.contains(segment))
+    {
+        return true;
+    }
+    let trimmed = normalized.trim_matches('/');
+    let file_name = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    if CREDENTIAL_STORE_FILES.contains(&file_name) {
+        return true;
+    }
+    CREDENTIAL_STORE_PATHS.iter().any(|store| {
+        trimmed == *store
+            || trimmed
+                .strip_prefix(store)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn normalize_for_compare(path: &Path) -> String {
@@ -427,6 +468,40 @@ fn normalize_for_compare(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_credential_stores_cover_plaintext_token_files() {
+        for path in [
+            ".git-credentials",
+            ".config/git/credentials",
+            ".cargo/credentials",
+            ".cargo/credentials.toml",
+            ".codex/auth.json",
+            ".gemini/oauth_creds.json",
+            ".local/share/opencode/auth.json",
+            ".config/op",
+            ".claude.json",
+            "nested/.pgpass",
+            "./.netrc",
+        ] {
+            assert!(
+                relative_path_is_in_credential_store(path),
+                "{path} should be denied"
+            );
+        }
+        for path in [
+            "src/main.rs",
+            ".github/workflows/ci.yml",
+            "docs/cargo/credentials.md",
+            ".config/blender/config.json",
+            "notes/.claude.json.md",
+        ] {
+            assert!(
+                !relative_path_is_in_credential_store(path),
+                "{path} should be allowed"
+            );
+        }
+    }
 
     #[test]
     fn codex_authentication_uses_the_same_credential_selection_as_injection() {

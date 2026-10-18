@@ -1170,16 +1170,33 @@ pub fn capability_path_is_sensitive(path: &str) -> bool {
         || matches!(
             file_name,
             "id_rsa"
+                | "id_ecdsa"
+                | "id_dsa"
                 | "id_ed25519"
+                | "id_ecdsa_sk"
+                | "id_ed25519_sk"
                 | "credentials"
                 | "credentials.json"
+                | "credentials.toml"
                 | "secrets.json"
+                | "secrets.yaml"
+                | "secrets.yml"
                 | ".npmrc"
                 | ".pypirc"
                 | ".netrc"
+                | ".pgpass"
+                | ".git-credentials"
+                | ".claude.json"
         )
         || file_name.ends_with(".pem")
         || file_name.ends_with(".key")
+        || file_name.ends_with(".p12")
+        || file_name.ends_with(".pfx")
+        || file_name.ends_with(".keystore")
+        // The git directory itself (its hooks run code, its config can rewrite
+        // remotes and fsmonitor commands), not only the files beneath it.
+        || normalized == ".git"
+        || normalized.ends_with("/.git")
         || normalized.starts_with(".git/")
         || normalized.contains("/.git/")
         // Covers credential stores whose file names give nothing away, which
@@ -1482,6 +1499,16 @@ mod tests {
         assert!(capability_path_is_sensitive(".config/gh/hosts.yml"));
         assert!(capability_path_is_sensitive(".ssh/config"));
         assert!(capability_path_is_sensitive("config/private.pem"));
+        assert!(capability_path_is_sensitive("deploy/server.p12"));
+        assert!(capability_path_is_sensitive("keys/id_ecdsa"));
+        assert!(capability_path_is_sensitive(".git"));
+        assert!(capability_path_is_sensitive("vendor/module/.git"));
+        assert!(capability_path_is_sensitive(".git-credentials"));
+        assert!(capability_path_is_sensitive(".cargo/credentials.toml"));
+        assert!(capability_path_is_sensitive(".codex/auth.json"));
+        assert!(capability_path_is_sensitive("config/secrets.yaml"));
         assert!(!capability_path_is_sensitive("src/main.rs"));
+        assert!(!capability_path_is_sensitive("src/git/commit.rs"));
+        assert!(!capability_path_is_sensitive("docs/main.git"));
     }
 }

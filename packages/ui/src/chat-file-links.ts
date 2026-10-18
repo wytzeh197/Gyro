@@ -9,6 +9,62 @@ export type ChatFileLink = {
 export const chatInlineTokenPattern =
   /(`[^`]+`|\*\*[^*]+\*\*|!?\[[^\]]*\]\((?:<[^>]+>|(?:[^()\n]|\([^()\n]*\))+)\))/g;
 
+/**
+ * A web URL the model wrote without markdown brackets. Models often end a
+ * reply with a bare `https://…`, which would otherwise stay grey text the user
+ * has to copy; splitting on this pattern lets every reply URL become a link.
+ */
+export const chatBareUrlPattern = /(https?:\/\/[^\s<>"'`]+)/g;
+
+/**
+ * Trim what a sentence glued onto a URL: closing punctuation, and a closing
+ * bracket that the URL itself never opened. `(see https://gyro.dev).` keeps the
+ * full stop out of the href while `https://x.dev/a_(b)` keeps its own pair.
+ */
+export function trimBareUrlToken(token: string) {
+  let url = token;
+  for (;;) {
+    const last = url.slice(-1);
+    if (last && /[.,;:!?]/.test(last)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    if (
+      (last === ")" && countChar(url, "(") < countChar(url, ")")) ||
+      (last === "]" && countChar(url, "[") < countChar(url, "]")) ||
+      (last === "}" && countChar(url, "{") < countChar(url, "}"))
+    ) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    break;
+  }
+  return url;
+}
+
+function countChar(value: string, char: string) {
+  let total = 0;
+  for (const current of value) if (current === char) total += 1;
+  return total;
+}
+
+/**
+ * A bare token as a safe href: only http(s) with a host, so `javascript:` and
+ * `data:` can never reach an anchor even when they follow "https" in prose.
+ */
+export function bareChatUrl(token: string) {
+  const trimmed = trimBareUrlToken(token);
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (!url.hostname) return undefined;
+    return trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
+
 export function parseChatMarkdownLink(value: string) {
   const match = value.match(/^(!?)\[([^\]]*)\]\(([\s\S]+)\)$/);
   if (!match) return undefined;

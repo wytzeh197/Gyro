@@ -1,0 +1,13 @@
+import {chromium} from '/Users/wytze/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import {execFileSync} from 'node:child_process';
+const output='/Users/wytze/Gyro/docs/design/frontend-polish-2026-10-15/surfaces';
+const browser=await chromium.launch({headless:true,executablePath:'/Users/wytze/Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell'});
+const page=await browser.newPage({viewport:{width:860,height:620},reducedMotion:'reduce'});
+await page.goto('http://127.0.0.1:1420/settings-preview.html?theme=dark');await page.locator('.gyro-settings-row').first().waitFor();
+await page.evaluate(async()=>{const {PullRequestForm}=await import('/@fs/Users/wytze/Gyro/packages/ui/src/pull-request-form.tsx');const {default:React}=await import('/node_modules/.vite/deps/react.js');const {default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js');const root=document.createElement('div');document.body.append(root);ReactDOM.createRoot(root).render(React.createElement(PullRequestForm,{initial:{title:'  Refine the workspace experience  ',body:'Make the next step clear and keep controls aligned.',base:'main',head:'polish-workspace',draft:true},onClose:()=>{}}));});
+await page.locator('.gyro-workflow-form').waitFor();
+const beforeCss=execFileSync('git',['show','HEAD:packages/ui/src/workflow-forms.css'],{cwd:'/Users/wytze/Gyro',encoding:'utf8'});
+await page.evaluate(css=>{const stylesheet=[...document.querySelectorAll('style[data-vite-dev-id]')].find(s=>s.dataset.viteDevId.endsWith('/workflow-forms.css'));if(!stylesheet)throw Error('Workflow stylesheet not found');stylesheet.textContent=css;},beforeCss);
+await page.screenshot({path:`${output}/workflow-before-dark.png`});
+await page.setViewportSize({width:1280,height:900});await page.goto('http://127.0.0.1:1420/automations-preview.html?theme=dark');await page.locator('.gyro-scheduled-item').click();await page.locator('.gyro-automation-detail').waitFor();await page.screenshot({path:`${output}/automation-after-dark.png`});
+await browser.close();

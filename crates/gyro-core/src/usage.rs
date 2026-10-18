@@ -43,6 +43,8 @@ pub enum UsageOrigin {
     /// A read-only research sub-agent started by a chat turn.
     SubAgent,
     Optimization,
+    /// A session an external agent started on this Mac.
+    AgentSession,
 }
 
 impl UsageOrigin {
@@ -56,6 +58,7 @@ impl UsageOrigin {
             Self::ChangeSummary => "change-summary",
             Self::SubAgent => "sub-agent",
             Self::Optimization => "optimization",
+            Self::AgentSession => "agent-session",
         }
     }
 
@@ -68,6 +71,7 @@ impl UsageOrigin {
             "change-summary" => Self::ChangeSummary,
             "sub-agent" => Self::SubAgent,
             "optimization" => Self::Optimization,
+            "agent-session" => Self::AgentSession,
             _ => Self::Chat,
         }
     }
@@ -83,6 +87,7 @@ impl UsageOrigin {
             Self::ChangeSummary => "Change summaries",
             Self::SubAgent => "Sub-agents",
             Self::Optimization => "Optimization",
+            Self::AgentSession => "Agent sessions",
         }
     }
 }
@@ -729,7 +734,9 @@ impl PauseState {
     pub fn covers(&self, origin: UsageOrigin) -> bool {
         match self.scope {
             PauseScope::All => true,
-            PauseScope::Automations => origin == UsageOrigin::Automation,
+            PauseScope::Automations => {
+                matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession)
+            }
         }
     }
 
@@ -1032,7 +1039,7 @@ pub fn recent_usage(conn: &Connection, since: DateTime<Utc>) -> Result<RecentUsa
         let count = count.max(0) as u32;
         recent.calls += count;
         match UsageOrigin::from_storage_value(&origin) {
-            UsageOrigin::Automation => recent.unattended_calls += count,
+            UsageOrigin::Automation | UsageOrigin::AgentSession => recent.unattended_calls += count,
             UsageOrigin::CouncilResynthesis => recent.resynthesis_calls += count,
             _ => {}
         }

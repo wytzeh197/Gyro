@@ -70,7 +70,7 @@ function Fixture() {
     <main style={{ maxWidth: 1000, margin: "24px auto", padding: "0 20px" }}>
       <SettingsSurface
         config={config}
-        activeSection="usage-limits"
+        activeSection="efficiency"
         themeMode={theme}
         onThemeChange={setTheme}
         onEfficiencyChange={async (efficiency) =>

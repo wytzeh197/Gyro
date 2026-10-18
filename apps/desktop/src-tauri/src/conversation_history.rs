@@ -58,7 +58,33 @@ fn local_context_checkpoint(event: &SessionEvent) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
-pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<String> {
+/// What a manual `/compact` did to the handoff history without a model call.
+///
+/// Every provider without a resumable compacted session (everything except a
+/// Codex session) rewrites the transcript here. The rewrite is local, so the
+/// two honest outcomes are `kept` (the history already fit) and `condensed`
+/// (full turns were replaced by a digest). Neither is a summary, and callers
+/// must not describe it as one.
+pub(super) struct LocalCompaction {
+    /// The text stored as the checkpoint and sent as the next turn's context.
+    pub(super) text: String,
+    /// Turns whose full text was replaced by the digest. Zero when the history
+    /// already fit the window.
+    pub(super) condensed_turns: usize,
+}
+
+impl LocalCompaction {
+    /// The word the activity row and the transcript card may use.
+    pub(super) fn mode(&self) -> &'static str {
+        if self.condensed_turns == 0 {
+            "kept"
+        } else {
+            "condensed"
+        }
+    }
+}
+
+pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalCompaction> {
     let since = events
         .iter()
         .rposition(|event| local_context_checkpoint(event).is_some())
@@ -68,30 +94,119 @@ pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<String
     }) {
         return None;
     }
-    let history = conversation_history_from_events(events.to_vec())?;
+    let lines = history_lines(events.to_vec());
+    let history = join_history(&lines)?;
     const MAX_CHARS: usize = 8_000;
-    const PREFIX_CHARS: usize = 1_500;
     if history.chars().count() <= MAX_CHARS {
-        return Some(history);
+        return Some(LocalCompaction {
+            text: history,
+            condensed_turns: 0,
+        });
     }
-    let prefix = history.chars().take(PREFIX_CHARS).collect::<String>();
-    let tail = history
-        .chars()
-        .rev()
-        .take(MAX_CHARS - PREFIX_CHARS - 30)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
-    Some(format!("{prefix}\n\n[Earlier detail omitted]\n\n{tail}"))
+    let (prefix, condensed, tail) = split_compacted_history(lines);
+    let digest = condensed_turns_digest(&condensed);
+    Some(LocalCompaction {
+        text: format!(
+            "{prefix}\n\n[Earlier turns condensed — full text no longer sent]\n{digest}\n\n{tail}"
+        ),
+        condensed_turns: condensed.len(),
+    })
 }
 
-fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
-    let mut lines = Vec::new();
+/// Split a tapered history into the head, the middle, and the tail.
+///
+/// The head is background, the tail is the thread being continued, and the
+/// middle is what a character cap cannot carry whole. It is returned rather
+/// than dropped so the checkpoint can describe it turn by turn instead of
+/// leaving a hole where the conversation used to be.
+fn split_compacted_history(
+    lines: Vec<(String, String)>,
+) -> (String, Vec<(String, String)>, String) {
+    const PREFIX_CHARS: usize = 1_500;
+    const TAIL_CHARS: usize = 4_800;
+
+    let mut prefix = String::new();
+    let mut head = 0;
+    while head < lines.len() {
+        let line = history_line(&lines[head]);
+        if prefix.chars().count() + line.chars().count() + 2 > PREFIX_CHARS {
+            break;
+        }
+        if !prefix.is_empty() {
+            prefix.push_str("\n\n");
+        }
+        prefix.push_str(&line);
+        head += 1;
+    }
+
+    let mut tail_parts: Vec<String> = Vec::new();
+    let mut tail_chars = 0;
+    let mut end = lines.len();
+    while end > head {
+        let line = history_line(&lines[end - 1]);
+        if tail_chars + line.chars().count() + 2 > TAIL_CHARS {
+            break;
+        }
+        tail_chars += line.chars().count() + 2;
+        tail_parts.push(line);
+        end -= 1;
+    }
+    tail_parts.reverse();
+
+    // Keep at least one turn in the middle when there is more history than the
+    // head and tail budgets can hold, so a checkpoint always describes what it
+    // took out instead of cutting silently.
+    if end <= head && head < lines.len() {
+        end = head + 1;
+    }
+
+    (prefix, lines[head..end].to_vec(), tail_parts.join("\n\n"))
+}
+
+/// One line per condensed turn: who spoke and what the turn was about.
+///
+/// The full text is gone either way; this keeps the decisions and the subject
+/// so the next prompt is not starting from a blank where forty turns used to
+/// be. No paraphrase is attempted, because that would need a model call and
+/// this path deliberately does not make one.
+fn condensed_turns_digest(condensed: &[(String, String)]) -> String {
+    const DIGEST_TURN_CHARS: usize = 200;
+    const DIGEST_CHARS: usize = 1_600;
+
+    let mut digest = Vec::new();
+    let mut used = 0;
+    for (role, text) in condensed {
+        let first = text
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or(text.as_str());
+        let clipped: String = first.chars().take(DIGEST_TURN_CHARS).collect();
+        let elided = first.chars().count() > DIGEST_TURN_CHARS;
+        let line = format!("- {role}: {clipped}{}", if elided { "…" } else { "" });
+        // The digest rides in front of the tail inside the same 8,000-character
+        // checkpoint budget, so it stops before it can refill the window it is
+        // meant to shrink.
+        if used + line.chars().count() + 1 > DIGEST_CHARS && !digest.is_empty() {
+            break;
+        }
+        used += line.chars().count() + 1;
+        digest.push(line);
+    }
+    let hidden = condensed.len().saturating_sub(digest.len());
+    if hidden > 0 {
+        digest.push(format!("- …and {hidden} more turns"));
+    }
+    digest.join("\n")
+}
+
+/// The handoff history as message lines: role plus text, already tapered.
+fn history_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
+    let mut lines: Vec<(String, String)> = Vec::new();
     for event in events {
         if let Some(summary) = local_context_checkpoint(&event) {
             lines.clear();
-            lines.push(("Context summary", summary.to_string()));
+            lines.push(("Context summary".to_string(), summary.to_string()));
             continue;
         }
         let role = match event.kind {
@@ -103,18 +218,18 @@ fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String>
         if text.is_empty() || (role == "User" && text == "/compact") {
             continue;
         }
-        lines.push((role, text.to_string()));
+        lines.push((role.to_string(), text.to_string()));
     }
     // Drop the trailing user line — it is the message currently being sent and
     // already lives in the main prompt. Dropped before the taper so it does not
     // spend one of the full-length slots on text the prompt already carries.
-    if lines.last().is_some_and(|(role, _)| *role == "User") {
+    if lines.last().is_some_and(|(role, _)| role == "User") {
         lines.pop();
     }
     if lines.len() > 40 {
         let summary = lines
             .first()
-            .filter(|(role, _)| *role == "Context summary")
+            .filter(|(role, _)| role.as_str() == "Context summary")
             .cloned();
         lines.drain(..lines.len() - if summary.is_some() { 39 } else { 40 });
         if let Some(summary) = summary {
@@ -124,7 +239,7 @@ fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String>
     // Clip from the far end: the tail is the thread being continued, the head
     // is background.
     let recent_from = lines.len().saturating_sub(HISTORY_RECENT_TURNS);
-    let joined = lines
+    lines
         .into_iter()
         .enumerate()
         .map(|(index, (role, text))| {
@@ -137,8 +252,28 @@ fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String>
             };
             let clipped: String = text.chars().take(budget).collect();
             let elided = text.chars().nth(budget).is_some();
-            format!("{role}: {clipped}{}", if elided { " […]" } else { "" })
+            (
+                role,
+                format!("{clipped}{}", if elided { " […]" } else { "" }),
+            )
         })
+        .collect()
+}
+
+/// The handoff history as one string: what the model is given when Gyro has to
+/// reconstruct the conversation instead of resuming a provider session.
+fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
+    join_history(&history_lines(events))
+}
+
+fn history_line((role, text): &(String, String)) -> String {
+    format!("{role}: {text}")
+}
+
+fn join_history(lines: &[(String, String)]) -> Option<String> {
+    let joined = lines
+        .iter()
+        .map(history_line)
         .collect::<Vec<_>>()
         .join("\n\n");
     (!joined.trim().is_empty()).then_some(joined)
@@ -180,13 +315,17 @@ mod tests {
             event(SessionEventKind::UserMessage, "/compact"),
         ];
         let summary = local_compaction_summary(&events).unwrap();
-        assert!(summary.contains("Keep the design blue"));
-        assert!(!summary.contains("/compact"));
+        assert!(summary.text.contains("Keep the design blue"));
+        assert!(!summary.text.contains("/compact"));
+        // A short chat is kept whole; calling that a summary is the bug this
+        // mode exists to prevent.
+        assert_eq!(summary.condensed_turns, 0);
+        assert_eq!(summary.mode(), "kept");
         let checkpoint = SessionEvent::new(
             session,
             SessionEventKind::SystemEvent,
             "Compacted context",
-            serde_json::json!({ "contextSummary": summary }),
+            serde_json::json!({ "contextSummary": summary.text }),
         );
         events.push(checkpoint);
         events.push(event(SessionEventKind::UserMessage, "Use green instead"));
@@ -250,13 +389,15 @@ mod tests {
             ));
         }
         let summary = local_compaction_summary(&events).unwrap();
-        assert!(summary.chars().count() <= 8_000);
-        assert!(summary.contains("[Earlier detail omitted]"));
+        assert!(summary.text.chars().count() <= 8_000);
+        assert!(summary.text.contains("[Earlier turns condensed"));
+        assert!(summary.condensed_turns > 0);
+        assert_eq!(summary.mode(), "condensed");
         events.push(SessionEvent::new(
             session,
             SessionEventKind::SystemEvent,
             "Compacted context",
-            serde_json::json!({ "contextSummary": summary }),
+            serde_json::json!({ "contextSummary": summary.text }),
         ));
         assert!(local_compaction_summary(&events).is_none());
     }

@@ -199,6 +199,52 @@ export function isManualCompaction(
   );
 }
 
+/**
+ * What a finished `/compact` may claim it did.
+ *
+ * A Codex session compacts itself, so its earlier conversation really is
+ * summarized. Every other provider rewrites the transcript locally, where the
+ * only honest outcomes are "condensed" (full turns replaced by a digest) and
+ * "kept" (the history already fit). Events recorded before the marker existed
+ * are read from the checkpoint payload: only the local path ever wrote one.
+ */
+export type ManualCompactionMode = "summarized" | "condensed" | "kept";
+
+export function manualCompactionMode(
+  events: SessionEvent[],
+  event: SessionEvent,
+): ManualCompactionMode | null {
+  if (!isManualCompaction(events, event)) return null;
+  const payload = eventPayload(event);
+  const mode = stringValue(payload, "compactionMode");
+  if (mode === "summarized" || mode === "condensed" || mode === "kept") {
+    return mode;
+  }
+  return stringValue(payload, "contextSummary") ? "condensed" : "summarized";
+}
+
+/**
+ * The sentence a finished `/compact` turn shows in the transcript.
+ *
+ * Each mode says only what happened: a model summary, a local digest, or a
+ * history that already fit. An unmarked event is described without claiming
+ * either, so a turn recorded by an older build cannot assert a summary.
+ */
+export function manualCompactionResultText(
+  mode: ManualCompactionMode | null,
+): string {
+  switch (mode) {
+    case "summarized":
+      return "Context compacted. Earlier conversation was summarized so this chat has room to continue.";
+    case "condensed":
+      return "Context compacted. Earlier turns were condensed into a short digest \u2014 their full text is no longer sent, so this chat has room to continue.";
+    case "kept":
+      return "Context compacted. This chat already fit its window, so no earlier turn was dropped.";
+    default:
+      return "Context compacted.";
+  }
+}
+
 export function estimateComposerContextUsage(
   events: SessionEvent[],
   draft: string,

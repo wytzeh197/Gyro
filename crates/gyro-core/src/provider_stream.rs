@@ -43,6 +43,18 @@ pub fn extract_provider_text_chunk(value: &Value) -> Option<ProviderTextChunk> {
     if let Some(event) = stream_event_payload(value) {
         return extract_provider_text_chunk(event);
     }
+    // `agy` wraps every frame as `{"event":"step_update","step_update":{…}}`, so
+    // the documented `text_delta` sits one level below the envelope. The
+    // `result` frame repeats the whole answer as `response`, which lands here as
+    // the same backstop the other CLIs use.
+    if crate::antigravity_cli::frame(value).is_some() {
+        if let Some(delta) = crate::antigravity_cli::text_delta(value) {
+            return Some(ProviderTextChunk::Delta(delta.to_string()));
+        }
+        if let Some(text) = crate::antigravity_cli::final_text(value) {
+            return Some(ProviderTextChunk::Final(text.to_string()));
+        }
+    }
     if let Some(delta) = value.pointer("/delta/text").and_then(Value::as_str) {
         return Some(ProviderTextChunk::Delta(delta.to_string()));
     }

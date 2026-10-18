@@ -1,4 +1,10 @@
-import { ProviderApiKeySection, CustomProviderSection, ProviderDetailsMenu, ProviderRemoveControl, RemovedProvidersSection } from "./provider-settings-fields";
+import {
+  ProviderApiKeySection,
+  CustomProviderSection,
+  ProviderDetailsMenu,
+  ProviderRemoveControl,
+  RemovedProvidersSection,
+} from "./provider-settings-fields";
 import { AntigravityMark } from "./antigravity-mark";
 import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import { CodeModeActivityCard } from "./code-mode-card";
@@ -34,12 +40,16 @@ import {
   chatFileKind,
 } from "./chat-file-card";
 import {
+  bareChatUrl,
+  chatBareUrlPattern,
   chatInlineTokenPattern,
   isCitedImageTarget,
   linkedChatFile,
   markdownImageTargets,
   parseChatMarkdownLink,
 } from "./chat-file-links";
+import { openReplyLink, replyLinkHint, replyLinkMark } from "./external-links";
+import type { ReplyLinkMark } from "./external-links";
 import { SubagentPanel, SubagentMark, SubagentStrip } from "./subagents-view";
 import { SubagentsEnvironment } from "./subagents-environment";
 import {
@@ -47,8 +57,18 @@ import {
   type SubagentSurfaceState,
 } from "./subagents";
 import { AppearanceSettings } from "./appearance-settings";
-import { ProjectImportSettings, type ProjectImportSettingsProps } from "./project-import-settings";
-import { SettingsSection, SettingsStatus, UsageCard, budgetOptions, formatUsageReset, usagePauseDetail } from "./settings-presentation";
+import {
+  ProjectImportSettings,
+  type ProjectImportSettingsProps,
+} from "./project-import-settings";
+import {
+  SettingsSection,
+  SettingsStatus,
+  UsageCard,
+  budgetOptions,
+  formatUsageReset,
+  usagePauseDetail,
+} from "./settings-presentation";
 import { providerAllowance } from "./provider-allowance";
 import "./provider-allowance.css";
 import { SettingsSegmented } from "./settings-controls";
@@ -64,8 +84,15 @@ import {
 } from "./composer-context.ts";
 import { turnReviewPatches } from "./file-review.ts";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
-import { BrowserViewportControls, FittedBrowserFrame } from "./browser-viewport-controls";
-import { CompanionMotionContext, useCompanionMotion, useCompanionPresence } from "./use-companion-motion";
+import {
+  BrowserViewportControls,
+  FittedBrowserFrame,
+} from "./browser-viewport-controls";
+import {
+  CompanionMotionContext,
+  useCompanionMotion,
+  useCompanionPresence,
+} from "./use-companion-motion";
 import "./companion-motion.css";
 import {
   BrowserCaptureView,
@@ -115,7 +142,11 @@ import { WorkspaceDefaultSettings } from "./settings-workspace-defaults";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
-import { composerFastMode, pickerModelId, pickerModelLabel } from "./provider-fast-mode";
+import {
+  composerFastMode,
+  pickerModelId,
+  pickerModelLabel,
+} from "./provider-fast-mode";
 import { ComposerModelRail } from "./composer-model-rail";
 import { ComposerCompletionMenu } from "./composer-completion-menu";
 import { clippingBounds } from "./composer-popover-bounds";
@@ -128,7 +159,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ArrowUpDown,
   ArrowUpRight,
   Box,
   Blocks,
@@ -247,14 +277,23 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
-import { browserDictation, dictationDraft, type DictationController } from "./dictation";
+import {
+  browserDictation,
+  dictationDraft,
+  type DictationController,
+} from "./dictation";
 import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
 import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
 import {
   finalAssistantResponseText,
   stripHiddenControlMarkers,
 } from "./chat-commentary";
-import { buildRunModel, elapsedMsBetween, formatRunDuration, runNeedsFinalResponse } from "./chat-run";
+import {
+  buildRunModel,
+  elapsedMsBetween,
+  formatRunDuration,
+  runNeedsFinalResponse,
+} from "./chat-run";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
@@ -314,6 +353,8 @@ import {
   estimateComposerContextUsage,
   holdContextOccupancyPeak,
   isManualCompaction,
+  manualCompactionMode,
+  manualCompactionResultText,
   type ComposerContextUsage,
   type ComposerLimitWindow,
   type ContextOccupancyPeak,
@@ -430,6 +471,7 @@ import type {
   ProjectCapabilityPolicy,
   ReasoningEffort,
   SettingsSectionId,
+  LaunchView,
   Session,
   SessionEvent,
   SessionGoal,
@@ -897,15 +939,15 @@ const settingsSidebarItems: Array<{
     group: "Preferences",
   },
   {
-    id: "usage-limits",
-    label: "Usage & Limits",
+    id: "providers",
+    label: "Models, Accounts & Limits",
     icon: Gauge,
     group: "AI & Agents",
   },
   {
-    id: "providers",
-    label: "Models & Accounts",
-    icon: KeyRound,
+    id: "efficiency",
+    label: "Efficiency",
+    icon: Sparkles,
     group: "AI & Agents",
   },
   {
@@ -932,7 +974,12 @@ const settingsSidebarItems: Array<{
     icon: Blocks,
     group: "Workspace",
   },
-  { id: "import-projects", label: "Import projects", icon: Folder, group: "Workspace" },
+  {
+    id: "import-projects",
+    label: "Import projects",
+    icon: Folder,
+    group: "Workspace",
+  },
   { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "advanced", label: "Advanced", icon: Settings, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
@@ -946,7 +993,12 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
-  { section: "import-projects", label: "Import projects", detail: "Bring Claude Code and Codex projects and chats into Gyro", keywords: "import migrate history sessions conversations" },
+  {
+    section: "import-projects",
+    label: "Import projects",
+    detail: "Bring Claude Code and Codex projects and chats into Gyro",
+    keywords: "import migrate history sessions conversations",
+  },
   {
     section: "general",
     label: "Menu bar",
@@ -966,7 +1018,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     keywords: "model activity preview follow",
   },
   {
-    section: "usage-limits",
+    section: "providers",
     label: "Pause provider runs",
     detail: "Pause all provider runs, including automations",
     keywords: "stop resume",
@@ -987,7 +1039,8 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     section: "editor-workspace",
     label: "Workspace",
     detail: "New chat defaults, editor, Explorer, and search behavior",
-    keywords: "editor search workspace folder minimap exclude maximum results default worktree",
+    keywords:
+      "editor search workspace folder minimap exclude maximum results default worktree",
   },
   {
     section: "tools-contributions",
@@ -1048,37 +1101,50 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     keywords: "default palette reset colors",
   },
   {
-    section: "usage-limits",
-    label: "Usage & Limits",
+    section: "providers",
+    label: "Usage limits",
     detail: "Provider allowance, spend, and local guardrails",
     keywords: "usage limits daily budget cap tokens",
   },
   {
-    section: "usage-limits",
+    section: "providers",
     label: "Provider spend",
     detail: "Provider-owned billing and allowance controls",
     keywords: "cost budget billing usage",
   },
   {
-    section: "usage-limits",
+    section: "providers",
     label: "Daily pace warning",
     detail: "Warn when a day's spend reaches ~14% of the weekly/100% limit",
     keywords: "daily pace warning 14 percent weekly budget",
   },
   {
-    section: "usage-limits",
+    section: "efficiency",
+    label: "Context efficiency",
+    detail: "Validated context improvements, with experiments kept separate",
+    keywords: "efficiency context improvements compress tokens",
+  },
+  {
+    section: "efficiency",
+    label: "Auto-compact context",
+    detail:
+      "Replace the oldest tool results once a share of the window is full",
+    keywords: "auto compact context threshold oldest tool results window",
+  },
+  {
+    section: "efficiency",
     label: "Parallel agents",
     detail: "Read about parallel CLI agents",
     keywords: "concurrency",
   },
   {
-    section: "usage-limits",
+    section: "efficiency",
     label: "Command output",
     detail: "Bound and summarize large terminal output",
     keywords: "limit logs truncation",
   },
   {
-    section: "usage-limits",
+    section: "efficiency",
     label: "Approval budget",
     detail: "Guard file edits and command escalation",
     keywords: "permissions strict",
@@ -1091,9 +1157,10 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "providers",
-    label: "Models & Accounts",
+    label: "Accounts and models",
     detail: "Connect accounts and choose models",
-    keywords: "providers model api key authentication credentials openai anthropic antigravity google xai",
+    keywords:
+      "providers model api key authentication credentials openai anthropic antigravity google xai",
   },
   {
     section: "cli-profiles",
@@ -3816,7 +3883,8 @@ function WorkspaceSidebarContent({
   const sidebarSessions = sessions.filter(
     (session) =>
       session.origin !== "cli" &&
-      (session.importSource || !isTransientWorkspacePath(session.workspacePath)),
+      (session.importSource ||
+        !isTransientWorkspacePath(session.workspacePath)),
   );
   const pinnedSessions = sidebarSessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
@@ -3858,13 +3926,17 @@ function WorkspaceSidebarContent({
     });
     return () => {
       unsubscribe();
-      if (sidebarDragId.current !== undefined) endChatDrag(sidebarDragId.current);
+      if (sidebarDragId.current !== undefined)
+        endChatDrag(sidebarDragId.current);
     };
   }, []);
   useEffect(() => {
     const drag = currentChatDrag();
-    if (drag?.kind === "session" && drag.dragId === sidebarDragId.current &&
-        !sessions.some((session) => session.id === drag.sessionId)) {
+    if (
+      drag?.kind === "session" &&
+      drag.dragId === sidebarDragId.current &&
+      !sessions.some((session) => session.id === drag.sessionId)
+    ) {
       endChatDrag(drag.dragId);
     }
   }, [sessions]);
@@ -4456,7 +4528,10 @@ function WorkspaceSidebarContent({
           sessionId: session.id,
           projectKey: normalizeSidebarPath(session.workspacePath),
         };
-        sidebarDragId.current = beginChatSessionDrag(payload, event.dataTransfer)?.dragId;
+        sidebarDragId.current = beginChatSessionDrag(
+          payload,
+          event.dataTransfer,
+        )?.dragId;
         // Chat IDs are internal data, never text to insert into a composer.
         guardChatDragsOutsideGrid();
         setDraggedSessionId(session.id);
@@ -4465,7 +4540,8 @@ function WorkspaceSidebarContent({
         if (
           !(event.target instanceof Element) ||
           !event.target.closest(".gyro-sidebar-thread-main")
-        ) return;
+        )
+          return;
         startChatPointerDrag(event.nativeEvent, event.currentTarget, {
           kind: "session",
           sessionId: session.id,
@@ -5535,7 +5611,9 @@ function WorkspaceSidebarContent({
                   </summary>
                   <div className="gyro-scm-history-list">
                     {scmHistoryMessage ? (
-                      <p className="gyro-sidebar-mini-copy">{scmHistoryMessage}</p>
+                      <p className="gyro-sidebar-mini-copy">
+                        {scmHistoryMessage}
+                      </p>
                     ) : (
                       ide?.sourceControl.history?.map((commit, index) => {
                         const row = scmHistoryGraph[index];
@@ -6123,7 +6201,10 @@ function WorkspaceSidebarContent({
                       >
                         <Box size={16} />
                         <strong>More tools</strong>
-                        <small aria-hidden="true" title={`${blockedCommandProfiles.length} tools need setup`}>
+                        <small
+                          aria-hidden="true"
+                          title={`${blockedCommandProfiles.length} tools need setup`}
+                        >
                           {blockedCommandProfiles.length}
                         </small>
                         {newSessionMenuView === "more" ? (
@@ -6204,12 +6285,17 @@ function WorkspaceSidebarContent({
                 )?.providerId;
                 return {
                   pane,
-                  status: pane.attention ??
-                    (pane.status === "running" && !terminalPaneHasActiveWork(pane)
-                      ? "idle" : pane.status),
-                  icon: providerId
-                    ? <ProviderLogo providerId={providerId as ProviderId} />
-                    : <Terminal size={16} />,
+                  status:
+                    pane.attention ??
+                    (pane.status === "running" &&
+                    !terminalPaneHasActiveWork(pane)
+                      ? "idle"
+                      : pane.status),
+                  icon: providerId ? (
+                    <ProviderLogo providerId={providerId as ProviderId} />
+                  ) : (
+                    <Terminal size={16} />
+                  ),
                 };
               })}
             />
@@ -6226,8 +6312,7 @@ function WorkspaceSidebarContent({
               ) : null}
               {projectGroups.map((project, projectIndex) => {
                 const isCollapsed = collapsedProjectIds.includes(project.key);
-                const projectDrafts =
-                  draftsByProjectKey.get(project.key) ?? [];
+                const projectDrafts = draftsByProjectKey.get(project.key) ?? [];
                 const projectVisibleCount =
                   projectVisibleCounts[project.key] ??
                   SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
@@ -6786,18 +6871,20 @@ function SessionSidebarRow({
               ? "Chat needs approval"
               : isAwaitingQuestion
                 ? "Chat needs input"
-              : isSending
-              ? "Chat working"
-              : isUnreadComplete
-                ? "Chat completed, unread"
-                : undefined
+                : isSending
+                  ? "Chat working"
+                  : isUnreadComplete
+                    ? "Chat completed, unread"
+                    : undefined
           }
           className={[
             "gyro-session-time",
             approvalCount > 0 ? "is-approval" : "",
             isAwaitingQuestion ? "is-question" : "",
             !isAwaitingInput && isSending ? "is-working" : "",
-            !isAwaitingInput && !isSending && isUnreadComplete ? "is-complete" : "",
+            !isAwaitingInput && !isSending && isUnreadComplete
+              ? "is-complete"
+              : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -6806,11 +6893,11 @@ function SessionSidebarRow({
               ? `${approvalCount} ${approvalCount === 1 ? "approval" : "approvals"} required — open this chat to review`
               : isAwaitingQuestion
                 ? `${questionCount} ${questionCount === 1 ? "question" : "questions"} — open this chat to answer`
-              : isSending
-              ? "Chat working in the background"
-              : isUnreadComplete
-                ? "Chat completed — open to view"
-                : undefined
+                : isSending
+                  ? "Chat working in the background"
+                  : isUnreadComplete
+                    ? "Chat completed — open to view"
+                    : undefined
           }
         >
           {approvalCount > 0 ? (
@@ -7357,8 +7444,16 @@ function WorkspaceExplorerRow({
     >
       {kind === "directory" ? (
         <>
-          <ChevronRight aria-hidden="true" className="gyro-explorer-chevron" size={12} />
-          <FolderIcon aria-hidden="true" className="gyro-explorer-folder-icon" size={14} />
+          <ChevronRight
+            aria-hidden="true"
+            className="gyro-explorer-chevron"
+            size={12}
+          />
+          <FolderIcon
+            aria-hidden="true"
+            className="gyro-explorer-folder-icon"
+            size={14}
+          />
         </>
       ) : (
         <FileIcon
@@ -7603,12 +7698,14 @@ export function ChatGridSurface({
       identity?.kind === "session" &&
       chatProjectKey(identity.projectKey) !== chatProjectKey(layout.projectKey)
     ) {
-      return [{
-        id: "project",
-        label: "Open in its project",
-        position: "full",
-        slotIndex: 0,
-      }];
+      return [
+        {
+          id: "project",
+          label: "Open in its project",
+          position: "full",
+          slotIndex: 0,
+        },
+      ];
     }
     const sourceSlotIndex = slots.findIndex(
       (pane) =>
@@ -7674,15 +7771,18 @@ export function ChatGridSurface({
     setDropTargetId(undefined);
   }, []);
 
-  const sourceSlotForDrag = (
-    identity: ReturnType<typeof readChatDrag>,
-  ) => slots.findIndex((pane) =>
-    pane && (identity?.kind === "pane"
-      ? pane.paneId === identity.paneId
-      : identity?.kind === "session" &&
-        chatProjectKey(identity.projectKey) === chatProjectKey(layout.projectKey) &&
-        pane.kind === "session" && pane.sessionId === identity.sessionId),
-  );
+  const sourceSlotForDrag = (identity: ReturnType<typeof readChatDrag>) =>
+    slots.findIndex(
+      (pane) =>
+        pane &&
+        (identity?.kind === "pane"
+          ? pane.paneId === identity.paneId
+          : identity?.kind === "session" &&
+            chatProjectKey(identity.projectKey) ===
+              chatProjectKey(layout.projectKey) &&
+            pane.kind === "session" &&
+            pane.sessionId === identity.sessionId),
+    );
 
   // Hover preview and drop share one resolution so the lit tile is always the
   // tile a release would use — including the gaps and padding between tiles,
@@ -7703,7 +7803,11 @@ export function ChatGridSurface({
         sourceSlotForDrag(dragIdentity),
       ) ??
       chatGridDropZoneBeforePaint(
-        zones, bounds, pointer.x, pointer.y, sourceSlotForDrag(dragIdentity),
+        zones,
+        bounds,
+        pointer.x,
+        pointer.y,
+        sourceSlotForDrag(dragIdentity),
       );
     setDropTargetId((current) => (current === zone?.id ? current : zone?.id));
   }, [dropZones, dragIdentity, layout.projectKey, layout.slots]);
@@ -7833,7 +7937,11 @@ export function ChatGridSurface({
         sourceSlotForDrag(identity),
       ) ??
       chatGridDropZoneBeforePaint(
-        zones, bounds, point.x, point.y, sourceSlotForDrag(identity),
+        zones,
+        bounds,
+        point.x,
+        point.y,
+        sourceSlotForDrag(identity),
       )
     );
   };
@@ -7914,7 +8022,8 @@ export function ChatGridSurface({
       },
       onPanePointerDown: (event) => {
         startChatPointerDrag(event.nativeEvent, event.currentTarget, {
-          kind: "pane", paneId: pane.paneId,
+          kind: "pane",
+          paneId: pane.paneId,
         });
       },
     });
@@ -7970,7 +8079,10 @@ export function ChatGridSurface({
           event.dataTransfer.dropEffect = "none";
           return;
         }
-        const zones = zonesForDrag(identity, { x: event.clientX, y: event.clientY });
+        const zones = zonesForDrag(identity, {
+          x: event.clientX,
+          y: event.clientY,
+        });
         const validPane =
           source !== "pane" ||
           (identity?.kind === "pane" &&
@@ -8016,7 +8128,10 @@ export function ChatGridSurface({
         event.stopPropagation();
         const identity = readChatDrag(event.dataTransfer);
         if (!identity && currentChatDrag()) return;
-        const zones = zonesForDrag(identity, { x: event.clientX, y: event.clientY });
+        const zones = zonesForDrag(identity, {
+          x: event.clientX,
+          y: event.clientY,
+        });
         const bounds = event.currentTarget.getBoundingClientRect();
         const zone =
           nearestChatGridDropZone(
@@ -8098,7 +8213,11 @@ export function ChatGridSurface({
             data-drag-source={dragSource}
             data-layout={dropLayout}
             data-zone-count={dropZones.length}
-            style={{ "--gyro-chat-drop-zone-count": dropZones.length } as CSSProperties}
+            style={
+              {
+                "--gyro-chat-drop-zone-count": dropZones.length,
+              } as CSSProperties
+            }
           >
             {dropZones.map((zone) => (
               <div
@@ -8150,7 +8269,10 @@ function guardChatDragsOutsideGrid() {
     }
     event.preventDefault();
     if (event.type === "dragover") event.dataTransfer.dropEffect = "none";
-    else { event.stopPropagation(); endChatDragForTransfer(event.dataTransfer); }
+    else {
+      event.stopPropagation();
+      endChatDragForTransfer(event.dataTransfer);
+    }
   };
   window.addEventListener("dragover", block, true);
   window.addEventListener("drop", block, true);
@@ -8386,6 +8508,8 @@ type ChatSurfaceProps = {
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
   isGoalComposerActive?: boolean;
+  /** Goal mode stays selected after the goal is saved, like Plan. */
+  isGoalModeActive?: boolean;
   /** Starts a new goal-backed chat instead of only saving goal metadata. */
   onStartGoalChat?: (goal: string) => void;
   promptHistory?: string[];
@@ -8529,6 +8653,8 @@ type ChatSurfaceProps = {
     value?: string,
   ) => boolean | void | Promise<boolean | void>;
   onCancelGoalComposer?: () => void;
+  /** Closes the goal editor but leaves Goal mode selected. */
+  onCloseGoalComposer?: () => void;
   /** Local speech-to-text. Omitted composers use the browser microphone. */
   dictation?: DictationController;
   onAgentAction?: (action: string) => void;
@@ -8687,6 +8813,7 @@ export function ChatSurface({
   sessionPlan,
   sessionGoal,
   isGoalComposerActive = false,
+  isGoalModeActive = false,
   promptHistory = [],
   chatMode = "normal",
   submittedChatMode = chatMode,
@@ -8764,6 +8891,7 @@ export function ChatSurface({
   onGoalAction,
   onStartGoalChat,
   onCancelGoalComposer,
+  onCloseGoalComposer,
   dictation,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
@@ -8822,6 +8950,11 @@ export function ChatSurface({
   const cancelGoalComposer = useCallback(() => {
     onCancelGoalComposer?.();
   }, [onCancelGoalComposer]);
+  // Saving a goal closes its editor but leaves Goal mode selected. Only the
+  // chip's remove action (or Escape) clears the mode itself.
+  const closeGoalComposer = useCallback(() => {
+    (onCloseGoalComposer ?? onCancelGoalComposer)?.();
+  }, [onCloseGoalComposer, onCancelGoalComposer]);
   const handleSend = useCallback(async () => {
     if (composerBlockedReason) return;
     if (isGoalComposerActive) {
@@ -8832,7 +8965,7 @@ export function ChatSurface({
       if (onStartGoalChat && !sessionGoal?.text) {
         onStartGoalChat(goal);
         setGoalDraft(undefined);
-        cancelGoalComposer();
+        closeGoalComposer();
         return;
       }
       if (goalSavePendingRef.current) return;
@@ -8849,7 +8982,7 @@ export function ChatSurface({
         if (result === false) throw new Error("Goal was not saved");
         setGoalDraft(undefined);
         setGoalSaveNotice("");
-        cancelGoalComposer();
+        closeGoalComposer();
       } catch {
         setGoalSaveNotice(
           "Could not save the goal. Your draft is preserved; try again.",
@@ -8861,7 +8994,7 @@ export function ChatSurface({
     }
     onSend(localDraft);
   }, [
-    cancelGoalComposer,
+    closeGoalComposer,
     composerBlockedReason,
     composerDraft,
     isGoalComposerActive,
@@ -8877,7 +9010,11 @@ export function ChatSurface({
   // drop reachable from anywhere and names the chat surface it landed on.
   useEffect(() => {
     const onDragOver = (event: DragEvent) => {
-      if (chatDragSource(event.dataTransfer) || !isMediaDrag(event.dataTransfer)) return;
+      if (
+        chatDragSource(event.dataTransfer) ||
+        !isMediaDrag(event.dataTransfer)
+      )
+        return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
       const point = { x: event.clientX, y: event.clientY };
@@ -8886,7 +9023,11 @@ export function ChatSurface({
     };
     const onDrop = (event: DragEvent) => {
       if (handledMediaDrops.has(event)) return;
-      if (chatDragSource(event.dataTransfer) || !isMediaDrag(event.dataTransfer)) return;
+      if (
+        chatDragSource(event.dataTransfer) ||
+        !isMediaDrag(event.dataTransfer)
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       const point = { x: event.clientX, y: event.clientY };
@@ -8944,7 +9085,11 @@ export function ChatSurface({
   // that never becomes a drop, which reads as the app ignoring the image.
   const handleMediaDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      if (chatDragSource(event.dataTransfer) || !isMediaDrag(event.dataTransfer)) return;
+      if (
+        chatDragSource(event.dataTransfer) ||
+        !isMediaDrag(event.dataTransfer)
+      )
+        return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "copy";
     },
@@ -8955,7 +9100,11 @@ export function ChatSurface({
       // The window listener runs first and owns routing; it marks the event so
       // this pass does not attach the same image twice.
       if (handledMediaDrops.has(event.nativeEvent)) return;
-      if (chatDragSource(event.dataTransfer) || !isMediaDrag(event.dataTransfer)) return;
+      if (
+        chatDragSource(event.dataTransfer) ||
+        !isMediaDrag(event.dataTransfer)
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       void chatMediaFilesFromDrop(event.dataTransfer).then(
@@ -9022,7 +9171,8 @@ export function ChatSurface({
     setReviewTurnFiles(undefined);
   }, [transcriptSessionId]);
   const defaultReview = useMemo(
-    () => defaultChatReview(transcriptEvents, Boolean(diffReview?.files.length)),
+    () =>
+      defaultChatReview(transcriptEvents, Boolean(diffReview?.files.length)),
     [transcriptEvents, diffReview?.files.length],
   );
   const canvasArtifacts = useMemo(
@@ -9418,7 +9568,8 @@ export function ChatSurface({
   // The Environment is a transient context popover. The persistent right-hand
   // surface is reserved for companion tabs and the plan document.
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
-  const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools";
+  const isCompanionPanel =
+    isChatCompanionTab(railPanel) || railPanel === "tools";
   const companionPresence = useCompanionPresence(
     isCompanionPanel ? railPanel : undefined,
     !activeRailPanel,
@@ -9452,9 +9603,13 @@ export function ChatSurface({
   const isEnvironmentPopoverOpen =
     !isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel;
   const legacySidePanel =
-    (activeRailPanel || hasCompanion) && displayedRailPanel !== "tools" && displayedRailPanel !== "environment" ? (
+    (activeRailPanel || hasCompanion) &&
+    displayedRailPanel !== "tools" &&
+    displayedRailPanel !== "environment" ? (
       <ChatSidePanel
-        activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}
+        activePanel={
+          displayedRailPanel === "review" ? "changes" : displayedRailPanel
+        }
         chromeless={hasCompanion}
         browserPreview={browserPreview}
         browserNativeHost={browserNativeHost}
@@ -9508,130 +9663,129 @@ export function ChatSurface({
         worktreeName={worktreeName}
       />
     ) : null;
-  const sidePanel =
-    hasCompanion ? (
-      <ChatCompanionDock
-        open={isCompanionPanel}
-        onExitComplete={companionPresence.finishExit}
-        activeTab={activeCompanionTab}
-        subagents={subagents}
-        onClose={closeCompanion}
-        onCloseTab={onCloseCompanionTab}
-        onOpenTab={(tab) => {
-          if (tab === "review") {
-            setReviewScope({ kind: "proposed" });
-            setReviewTurnFiles(undefined);
+  const sidePanel = hasCompanion ? (
+    <ChatCompanionDock
+      open={isCompanionPanel}
+      onExitComplete={companionPresence.finishExit}
+      activeTab={activeCompanionTab}
+      subagents={subagents}
+      onClose={closeCompanion}
+      onCloseTab={onCloseCompanionTab}
+      onOpenTab={(tab) => {
+        if (tab === "review") {
+          setReviewScope({ kind: "proposed" });
+          setReviewTurnFiles(undefined);
+        }
+        (onOpenCompanionTab ?? onSelectChatPanel)?.(tab);
+      }}
+      onSelectTab={onSelectChatPanel}
+      onShowLauncher={onShowCompanionLauncher}
+      onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
+      isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
+      isTiled={isTiled}
+      onWidthChange={onCompanionWidthChange}
+      openTabs={openTabs}
+      browserTabLabel={
+        browserPreview?.title?.trim() ||
+        (browserPreview?.status === "idle"
+          ? "New tab"
+          : browserPreviewHostLabel(browserPreview?.url) || "Browser")
+      }
+      width={
+        activeCompanionTab === "browser"
+          ? (browserCompanionWidth ?? BROWSER_COMPANION_DEFAULT_WIDTH)
+          : companionWidth
+      }
+    >
+      {displayedRailPanel === "canvas" ? (
+        <ChatCanvas
+          key={transcriptSessionId ?? "draft"}
+          artifacts={canvasArtifacts}
+          selectedId={selectedCanvasId}
+          onSelect={setSelectedCanvasId}
+          onSendPrompt={handleArtifactPrompt}
+          drafts={canvasDraftsBySession[transcriptSessionId ?? "draft"] ?? {}}
+          setDrafts={(update) =>
+            setCanvasDraftsBySession((current) => ({
+              ...current,
+              [transcriptSessionId ?? "draft"]: update(
+                current[transcriptSessionId ?? "draft"] ?? {},
+              ),
+            }))
           }
-          (onOpenCompanionTab ?? onSelectChatPanel)?.(tab);
-        }}
-        onSelectTab={onSelectChatPanel}
-        onShowLauncher={onShowCompanionLauncher}
-        onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
-        isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
-        isTiled={isTiled}
-        onWidthChange={onCompanionWidthChange}
-        openTabs={openTabs}
-        browserTabLabel={
-          browserPreview?.title?.trim() ||
-          (browserPreview?.status === "idle"
-            ? "New tab"
-            : browserPreviewHostLabel(browserPreview?.url) || "Browser")
-        }
-        width={
-          activeCompanionTab === "browser"
-            ? (browserCompanionWidth ?? BROWSER_COMPANION_DEFAULT_WIDTH)
-            : companionWidth
-        }
-      >
-        {displayedRailPanel === "canvas" ? (
-          <ChatCanvas
-            key={transcriptSessionId ?? "draft"}
-            artifacts={canvasArtifacts}
-            selectedId={selectedCanvasId}
-            onSelect={setSelectedCanvasId}
-            onSendPrompt={handleArtifactPrompt}
-            drafts={canvasDraftsBySession[transcriptSessionId ?? "draft"] ?? {}}
-            setDrafts={(update) =>
-              setCanvasDraftsBySession((current) => ({
-                ...current,
-                [transcriptSessionId ?? "draft"]: update(
-                  current[transcriptSessionId ?? "draft"] ?? {},
-                ),
-              }))
-            }
-          />
-        ) : displayedRailPanel === "files" ? (
-          <CompanionFiles
-            files={files}
-            onOpenFile={onOpenCompanionFile}
-            workspacePath={workspacePath}
-          />
-        ) : displayedRailPanel === "agents" ? (
-          <SubagentPanel
-            key={subagents?.selectedAgentId}
-            state={subagents}
-            renderAsk={(event) => (
-              <ChatEvent
-                event={event}
-                onMutationApprovalAction={onMutationApprovalAction}
-                onProviderApprovalAction={onProviderApprovalAction}
-                onProviderStatusAction={onProviderStatusAction}
-              />
-            )}
-            renderSay={(text) =>
-              renderAssistantInlineContent(text, onBrowserNavigate)
-            }
-            renderResponse={(text) => (
-              <ChatImageHintContext.Provider
-                value={{ markdownImages: markdownImageTargets(text) }}
-              >
-                {assistantResponseBlocks(text).map((block, index) => (
-                  <AssistantResponseBlockView
-                    block={block}
-                    key={`${block.kind}-${index}`}
-                    onOpenBrowserUrl={onBrowserNavigate}
-                  />
-                ))}
-              </ChatImageHintContext.Provider>
-            )}
-          />
-        ) : displayedRailPanel === "side-chat" ? (
-          <SideChatPanel
-            onOpenBrowserUrl={onBrowserNavigate}
-            sideChat={sideChat}
-            workspacePath={workspacePath}
-            renderComposer={({ draft, onDraftChange, onSend, isSending }) => (
-              <Composer
-                config={config}
-                draft={draft}
-                onDraftChange={onDraftChange}
-                onSend={onSend}
-                isSending={isSending}
-                onStop={sideChat?.onStop}
-                canAttachEditorSnapshot={canAttachEditorSnapshot}
-                constrainToParent
-                variant="hero"
-                sessionModel={sessionModel}
-                providerReadiness={providerReadiness}
-                providerStatuses={providerStatuses}
-                onComposerAction={onComposerAction}
-                workspacePath={workspacePath}
-                workspaceMode={workspaceMode}
-                branchName={branchName}
-                shellReady={shellReady && Boolean(sideChat?.onSend)}
-                isCliUpdating={isCliUpdating}
-                dictation={dictation}
-                showContextRow={false}
-              />
-            )}
-          />
-        ) : (
-          legacySidePanel
-        )}
-      </ChatCompanionDock>
-    ) : !activeRailPanel || isEnvironmentPopoverOpen ? null : (
-      legacySidePanel
-    );
+        />
+      ) : displayedRailPanel === "files" ? (
+        <CompanionFiles
+          files={files}
+          onOpenFile={onOpenCompanionFile}
+          workspacePath={workspacePath}
+        />
+      ) : displayedRailPanel === "agents" ? (
+        <SubagentPanel
+          key={subagents?.selectedAgentId}
+          state={subagents}
+          renderAsk={(event) => (
+            <ChatEvent
+              event={event}
+              onMutationApprovalAction={onMutationApprovalAction}
+              onProviderApprovalAction={onProviderApprovalAction}
+              onProviderStatusAction={onProviderStatusAction}
+            />
+          )}
+          renderSay={(text) =>
+            renderAssistantInlineContent(text, onBrowserNavigate)
+          }
+          renderResponse={(text) => (
+            <ChatImageHintContext.Provider
+              value={{ markdownImages: markdownImageTargets(text) }}
+            >
+              {assistantResponseBlocks(text).map((block, index) => (
+                <AssistantResponseBlockView
+                  block={block}
+                  key={`${block.kind}-${index}`}
+                  onOpenBrowserUrl={onBrowserNavigate}
+                />
+              ))}
+            </ChatImageHintContext.Provider>
+          )}
+        />
+      ) : displayedRailPanel === "side-chat" ? (
+        <SideChatPanel
+          onOpenBrowserUrl={onBrowserNavigate}
+          sideChat={sideChat}
+          workspacePath={workspacePath}
+          renderComposer={({ draft, onDraftChange, onSend, isSending }) => (
+            <Composer
+              config={config}
+              draft={draft}
+              onDraftChange={onDraftChange}
+              onSend={onSend}
+              isSending={isSending}
+              onStop={sideChat?.onStop}
+              canAttachEditorSnapshot={canAttachEditorSnapshot}
+              constrainToParent
+              variant="hero"
+              sessionModel={sessionModel}
+              providerReadiness={providerReadiness}
+              providerStatuses={providerStatuses}
+              onComposerAction={onComposerAction}
+              workspacePath={workspacePath}
+              workspaceMode={workspaceMode}
+              branchName={branchName}
+              shellReady={shellReady && Boolean(sideChat?.onSend)}
+              isCliUpdating={isCliUpdating}
+              dictation={dictation}
+              showContextRow={false}
+            />
+          )}
+        />
+      ) : (
+        legacySidePanel
+      )}
+    </ChatCompanionDock>
+  ) : !activeRailPanel || isEnvironmentPopoverOpen ? null : (
+    legacySidePanel
+  );
   const environmentPopover = isEnvironmentPopoverOpen ? (
     <ChatEnvironmentPopover
       attachments={attachments}
@@ -9701,7 +9855,9 @@ export function ChatSurface({
                 onDragEnd={onPaneDragEnd}
                 onPointerDown={onPanePointerDown}
                 title={onPaneDragStart ? "Drag to rearrange chats" : "New chat"}
-              >New chat</strong>
+              >
+                New chat
+              </strong>
             </div>
             <div className="gyro-thread-topbar-actions">
               <ChatSurfaceControls
@@ -9815,6 +9971,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
+            isGoalModeActive={isGoalModeActive}
             startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
             dictation={dictation}
@@ -9866,7 +10023,11 @@ export function ChatSurface({
             onDragStart={onPaneDragStart}
             onDragEnd={onPaneDragEnd}
             onPointerDown={onPanePointerDown}
-            title={onPaneDragStart ? `${sessionTitle ?? "Chat"} · Drag to rearrange chats` : sessionTitle ?? "Gyro session"}
+            title={
+              onPaneDragStart
+                ? `${sessionTitle ?? "Chat"} · Drag to rearrange chats`
+                : (sessionTitle ?? "Gyro session")
+            }
           >
             {sessionTitle ?? "Gyro session"}
           </strong>
@@ -9965,7 +10126,12 @@ export function ChatSurface({
             className="gyro-composer-live-changes"
             ref={setLiveChangesTarget}
           />
-          {subagents ? <SubagentStrip state={subagents} turnId={activeTurnId ?? turns.at(-1)?.id} /> : null}
+          {subagents ? (
+            <SubagentStrip
+              state={subagents}
+              turnId={activeTurnId ?? turns.at(-1)?.id}
+            />
+          ) : null}
           {isTranscriptAwayFromBottom ? (
             <button
               aria-label="Jump to latest message"
@@ -10059,6 +10225,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
+            isGoalModeActive={isGoalModeActive}
             startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}
             onCancelGoalComposer={cancelGoalComposer}
             dictation={dictation}
@@ -10111,7 +10278,9 @@ function PlanDocument({
   return (
     <ChatImageHintContext.Provider value={imageHint}>
       <article className="gyro-plan-document">
-        {firstHeadingIndex < 0 ? <h1>{title || "Implementation plan"}</h1> : null}
+        {firstHeadingIndex < 0 ? (
+          <h1>{title || "Implementation plan"}</h1>
+        ) : null}
         {blocks.map((block, index) =>
           block.kind === "heading" ? (
             index === firstHeadingIndex ? (
@@ -10362,11 +10531,11 @@ function ChatSurfaceControls({
   const showPlanInOverflow = planItemCount > 0 && Boolean(onTogglePlanPanel);
   const hasOverflowActions = Boolean(
     showPlanInOverflow ||
-      (compactOverflowActions &&
-        (onToggleEnvironmentRail ||
-          (!isDockOpen && (onToggleToolPanel || onToggleDock)))) ||
-      (showToolPanelInOverflow && onToggleToolPanel) ||
-      (showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail),
+    (compactOverflowActions &&
+      (onToggleEnvironmentRail ||
+        (!isDockOpen && (onToggleToolPanel || onToggleDock)))) ||
+    (showToolPanelInOverflow && onToggleToolPanel) ||
+    (showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail),
   );
 
   useEffect(() => {
@@ -11359,11 +11528,28 @@ function ChatCompanionDock({
     resizeWidth,
     resizeWithKeyboard,
   } = useCompanionResize(dockRef, width, onWidthChange, widthMode, open);
+  // Cursors are hit-tested per element, so the col-resize cursor is lost the
+  // moment the drag carries the pointer off the 8px handle and onto the
+  // transcript or the docked page. Mark the whole chat surface for the gesture,
+  // the way the IDE sidebar marks the app shell, so the cursor holds.
+  useEffect(() => {
+    if (!isResizing) return;
+    const surface = dockRef.current?.parentElement;
+    if (!surface) return;
+    surface.classList.add("is-companion-resizing");
+    return () => surface.classList.remove("is-companion-resizing");
+  }, [dockRef, isResizing]);
   const overlay = shouldOverlayChatCompanion(availableWidth);
   const fillSurface = isExpanded || overlay;
   const cannotExpand = overlay && !isTiled && !isExpanded;
   const targetWidth = fillSurface ? "100%" : `${resizeWidth}px`;
-  const companionMoving = useCompanionMotion(dockRef, open, targetWidth, isResizing, onExitComplete);
+  const companionMoving = useCompanionMotion(
+    dockRef,
+    open,
+    targetWidth,
+    isResizing,
+    onExitComplete,
+  );
   const activeAgent = subagents?.agents.find(
     (agent) => agent.agentId === subagents.selectedAgentId,
   );
@@ -11431,7 +11617,8 @@ function ChatCompanionDock({
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       const surface = dockRef.current?.parentElement;
-      if (!open || !surface || !surface.contains(document.activeElement)) return;
+      if (!open || !surface || !surface.contains(document.activeElement))
+        return;
       const tab =
         event.metaKey && !event.altKey && event.key.toLowerCase() === "t"
           ? "browser"
@@ -11621,31 +11808,34 @@ function ChatCompanionDock({
         role="tabpanel"
       >
         <CompanionMotionContext.Provider value={companionMoving}>
-        {activeTab ? (
-          children
-        ) : (
-          <nav className="gyro-companion-launcher" aria-label="Companion tools">
-            {chatCompanionTabs.map(({ icon: Icon, id, label }) => (
-              <button key={id} onClick={() => onOpenTab?.(id)} type="button">
-                <Icon aria-hidden="true" size={15} />
-                <span>{label}</span>
-                <kbd>
-                  {
+          {activeTab ? (
+            children
+          ) : (
+            <nav
+              className="gyro-companion-launcher"
+              aria-label="Companion tools"
+            >
+              {chatCompanionTabs.map(({ icon: Icon, id, label }) => (
+                <button key={id} onClick={() => onOpenTab?.(id)} type="button">
+                  <Icon aria-hidden="true" size={15} />
+                  <span>{label}</span>
+                  <kbd>
                     {
-                      review: "⌃⇧G",
-                      canvas: "",
-                      terminal: "⌃`",
-                      browser: "⌘T",
-                      files: "⌘P",
-                      "side-chat": "⌥⌘S",
-                      agents: "",
-                    }[id]
-                  }
-                </kbd>
-              </button>
-            ))}
-          </nav>
-        )}
+                      {
+                        review: "⌃⇧G",
+                        canvas: "",
+                        terminal: "⌃`",
+                        browser: "⌘T",
+                        files: "⌘P",
+                        "side-chat": "⌥⌘S",
+                        agents: "",
+                      }[id]
+                    }
+                  </kbd>
+                </button>
+              ))}
+            </nav>
+          )}
         </CompanionMotionContext.Provider>
       </section>
     </aside>
@@ -11902,7 +12092,9 @@ function SideChatPanel({
               >
                 {message.role === "assistant" ? (
                   <ChatImageHintContext.Provider
-                    value={{ markdownImages: markdownImageTargets(message.text) }}
+                    value={{
+                      markdownImages: markdownImageTargets(message.text),
+                    }}
                   >
                     <div className="gyro-response-body">
                       {assistantResponseBlocks(message.text).map(
@@ -12196,6 +12388,11 @@ function ChatContextSection({
   );
 }
 
+/** 358444 is unreadable at a glance; 358,444 is not. */
+function formatEnvironmentCount(value: number) {
+  return value.toLocaleString("en-US");
+}
+
 export function ChatEnvironmentPopover({
   attachments,
   branchLabel,
@@ -12241,6 +12438,10 @@ export function ChatEnvironmentPopover({
     plan?.items.filter((item) => item.status === "complete").length ?? 0;
   const isPlanWorking =
     plan?.items.some((item) => item.status === "in-progress") ?? false;
+  // The row says what is happening; the section header already says how far.
+  const currentPlanStep = plan?.items.find(
+    (item) => item.status === "in-progress",
+  );
   const hasPlan = planSteps > 0 || Boolean(plan?.content);
   // The steps unfold in place; they start open while the model works on one.
   const [showPlan, setShowPlan] = useState(isPlanWorking);
@@ -12288,11 +12489,19 @@ export function ChatEnvironmentPopover({
   const changesDetail = hasChangeTotals
     ? `+${changeTotals.additions} −${changeTotals.deletions}`
     : sourceControlTotalsLabel(changeTotals);
+  const repoName = workspaceName(workspacePath);
+  // Files drive the count in the working-tree heading; a status read that has
+  // not landed yet must not claim the tree is clean.
+  const changedFileCount =
+    sourceControl?.detailsLoaded === false
+      ? 0
+      : (sourceControl?.files?.length ?? 0);
+  const changeScope = sourceControlTotalsScope(changeTotals);
 
   return (
     <aside aria-label="Environment" className="gyro-chat-environment-popover">
       <header>
-        <strong>Environment</strong>
+        <span className="gyro-environment-overline">Environment</span>
         <button
           aria-label="Close environment"
           onClick={onClose}
@@ -12313,63 +12522,199 @@ export function ChatEnvironmentPopover({
           <span>{notice}</span>
         </button>
       ) : null}
-      <div className="gyro-chat-environment-popover-rows">
+      <div className="gyro-environment-identity">
         <button
-          aria-label={`Switch branch, ${branchLabel}`}
-          aria-controls={showBranches ? branchMenuId : undefined}
-          aria-expanded={showBranches}
-          onClick={() => {
-            setShowBranches((open) => !open);
-            onSelectBranch?.();
-          }}
+          aria-label={`Open files for ${repoName}`}
+          className="gyro-environment-repo"
+          onClick={() => openCompanionTab("files")}
+          title={workspacePath ?? repoName}
           type="button"
         >
-          <GitBranch size={14} />
-          <span>Branch</span>
-          <strong title={branchLabel}>{middleTruncate(branchLabel, 24)}</strong>
-          <ChevronRight aria-hidden="true" size={13} />
-        </button>
-        {showBranches ? (
-          <ComposerPopover
-            id={branchMenuId}
-            className="gyro-environment-branch-menu"
-            items={branchItems}
-            title="Branch"
-            onAction={(action) => {
-              setShowBranches(false);
-              if (action) onBranchAction?.(action);
-            }}
+          <span>{repoName}</span>
+          <ChevronRight
+            aria-hidden="true"
+            className="gyro-environment-trail"
+            size={13}
           />
-        ) : null}
+        </button>
         {sync ? (
           <button
             aria-label={`Open changes, sync ${sync.detail}`}
+            className={`gyro-environment-sync is-${sync.tone}`}
             onClick={openReview}
             title={sync.detail}
             type="button"
           >
-            <ArrowUpDown size={14} />
-            <span>Sync</span>
-            <strong className={`is-${sync.tone}`}>{sync.label}</strong>
-            <ChevronRight aria-hidden="true" size={13} />
+            {sync.label}
           </button>
         ) : null}
-        <button
-          aria-label={`Open files for ${workspaceName(workspacePath)}`}
-          onClick={() => openCompanionTab("files")}
-          type="button"
-        >
-          <Folder size={14} />
-          <span>Location</span>
-          <strong title={workspacePath}>{workspaceName(workspacePath)}</strong>
-          <ChevronRight aria-hidden="true" size={13} />
-        </button>
-        {hasPlan && plan ? (
+        <div className="gyro-environment-sub">
+          <button
+            aria-controls={showBranches ? branchMenuId : undefined}
+            aria-expanded={showBranches}
+            aria-haspopup="menu"
+            aria-label={`Switch branch, ${branchLabel}`}
+            className="gyro-environment-chip"
+            onClick={() => {
+              setShowBranches((open) => !open);
+              onSelectBranch?.();
+            }}
+            title={branchLabel}
+            type="button"
+          >
+            <GitBranch aria-hidden="true" size={12} />
+            <span>{middleTruncate(branchLabel, 22)}</span>
+            <ChevronDown aria-hidden="true" size={12} />
+          </button>
+          {sourceControl?.available ? (
+            <span
+              className={`gyro-environment-state${changedFileCount ? "" : " is-clean"}`}
+            >
+              <span aria-hidden="true" className="gyro-environment-state-dot" />
+              {changedFileCount ? "uncommitted" : "clean"}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {showBranches ? (
+        <ComposerPopover
+          className="gyro-environment-branch-menu"
+          id={branchMenuId}
+          items={branchItems}
+          onAction={(action) => {
+            setShowBranches(false);
+            if (action) onBranchAction?.(action);
+          }}
+          title="Branch"
+        />
+      ) : null}
+      <section className="gyro-environment-section">
+        <header>
+          <span>Working tree</span>
+          <small>
+            {changedFileCount
+              ? `${formatEnvironmentCount(changedFileCount)} ${changedFileCount === 1 ? "file" : "files"}`
+              : "clean"}
+          </small>
+        </header>
+        <div className="gyro-chat-environment-popover-rows">
+          <button
+            aria-label={`Open changes, ${changesDetail}, ${changeScope}`}
+            className="gyro-environment-row"
+            onClick={openReview}
+            title={changeScope}
+            type="button"
+          >
+            <FileDiff aria-hidden="true" size={14} />
+            <span className="gyro-environment-label">Changes</span>
+            <span className="gyro-environment-value is-changed">
+              {hasChangeTotals ? (
+                <>
+                  <span className="is-added">
+                    +{formatEnvironmentCount(changeTotals.additions)}
+                  </span>
+                  <span className="is-removed">
+                    −{formatEnvironmentCount(changeTotals.deletions)}
+                  </span>
+                </>
+              ) : (
+                <span className="is-quiet">
+                  {sourceControlTotalsLabel(changeTotals)}
+                </span>
+              )}
+            </span>
+            <ChevronRight
+              aria-hidden="true"
+              className="gyro-environment-trail"
+              size={13}
+            />
+          </button>
+          {stashCount > 0 ? (
+            <button
+              aria-label={`Open stashes, ${stashCount} saved`}
+              className="gyro-environment-row"
+              onClick={openReview}
+              type="button"
+            >
+              <Archive aria-hidden="true" size={14} />
+              <span className="gyro-environment-label">Stashes</span>
+              <span className="gyro-environment-value">
+                {stashCount} {stashCount === 1 ? "stash" : "stashes"}
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+          {lastCommit ? (
+            <button
+              aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
+              className="gyro-environment-row"
+              onClick={openReview}
+              title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
+              type="button"
+            >
+              <History aria-hidden="true" size={14} />
+              <span className="gyro-environment-label">Last commit</span>
+              <span className="gyro-environment-value">
+                <span className="gyro-environment-value-text">
+                  {lastCommit.subject}
+                </span>
+                <span className="is-quiet">· {lastCommit.relativeDate}</span>
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+          {runningProcesses > 0 ? (
+            <button
+              aria-label={`Open terminal, ${runningProcesses} running process${runningProcesses === 1 ? "" : "es"}`}
+              className="gyro-environment-row"
+              onClick={() => openCompanionTab("terminal")}
+              type="button"
+            >
+              <SquareTerminal aria-hidden="true" size={14} />
+              <span className="gyro-environment-label">Processes</span>
+              <span className="gyro-environment-value">
+                {runningProcesses} running
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+        </div>
+      </section>
+      {hasPlan && plan ? (
+        <section className="gyro-environment-section">
+          <header>
+            <span>Plan</span>
+            <small>
+              {planSteps ? `${planDone} / ${planSteps}` : "Document"}
+            </small>
+          </header>
+          {planSteps ? (
+            <span aria-hidden="true" className="gyro-environment-plan-bar">
+              <span
+                className="gyro-environment-plan-fill"
+                style={{
+                  width: `${Math.round((planDone / planSteps) * 100)}%`,
+                }}
+              />
+            </span>
+          ) : null}
           <button
             aria-controls={showPlan ? planStepsId : undefined}
             aria-expanded={planSteps ? showPlan : undefined}
             aria-label={`Plan, ${planSteps ? `${planDone} of ${planSteps} steps done` : "plan document"}`}
-            className="gyro-chat-environment-plan-row"
+            className="gyro-environment-row"
             onClick={() => {
               if (planSteps) {
                 setShowPlan((open) => !open);
@@ -12383,88 +12728,44 @@ export function ChatEnvironmentPopover({
             {isPlanWorking ? (
               <PlanStepStatus status="in-progress" />
             ) : (
-              <ListChecks size={14} />
+              <ListChecks aria-hidden="true" size={14} />
             )}
-            <span>Plan</span>
-            <strong>
-              {planSteps ? `${planDone} of ${planSteps} done` : "Document"}
-            </strong>
-            <ChevronRight aria-hidden="true" size={13} />
-          </button>
-        ) : null}
-        {hasPlan && plan && planSteps && showPlan ? (
-          <div id={planStepsId}>
-            <EnvironmentPlanSteps
-              onOpen={
-                onOpenPlan
-                  ? () => {
-                      onClose?.();
-                      onOpenPlan();
-                    }
-                  : undefined
-              }
-              onStatusChange={onPlanItemStatusChange}
-              plan={plan}
+            <span className="gyro-environment-label">Plan</span>
+            <span className="gyro-environment-value">
+              {currentPlanStep ? (
+                <span className="gyro-environment-value-text">
+                  {currentPlanStep.title}
+                </span>
+              ) : planSteps ? (
+                `${planDone} of ${planSteps} done`
+              ) : (
+                "Document"
+              )}
+            </span>
+            <ChevronRight
+              aria-hidden="true"
+              className="gyro-environment-trail"
+              size={13}
             />
-          </div>
-        ) : null}
-        <button
-          aria-label={`Open changes, ${changesDetail}, ${sourceControlTotalsScope(changeTotals)}`}
-          onClick={openReview}
-          title={sourceControlTotalsScope(changeTotals)}
-          type="button"
-        >
-          <FileDiff size={14} />
-          <span>Changes</span>
-          <strong className={hasChangeTotals ? "is-changed" : undefined}>
-            {hasChangeTotals ? (
-              <>
-                <span className="is-added">+{changeTotals.additions}</span>{" "}
-                <span className="is-removed">−{changeTotals.deletions}</span>
-              </>
-            ) : (
-              changesDetail
-            )}
-            {changeTotals.kind === "working-tree" ? (
-              <small> {sourceControlTotalsBadge(changeTotals)}</small>
-            ) : null}
-          </strong>
-          <ChevronRight aria-hidden="true" size={13} />
-        </button>
-        {stashCount > 0 ? (
-          <button onClick={openReview} type="button">
-            <Archive size={14} />
-            <span>Stashes</span>
-            <strong>{stashCount} stashed</strong>
-            <ChevronRight aria-hidden="true" size={13} />
           </button>
-        ) : null}
-        {lastCommit ? (
-          <button
-            aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
-            onClick={openReview}
-            title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
-            type="button"
-          >
-            <History size={14} />
-            <span>Last commit</span>
-            <strong>{lastCommit.relativeDate}</strong>
-            <ChevronRight aria-hidden="true" size={13} />
-          </button>
-        ) : null}
-        <button
-          aria-label={`Open terminal, ${runningProcesses} running process${runningProcesses === 1 ? "" : "es"}`}
-          onClick={() => openCompanionTab("terminal")}
-          type="button"
-        >
-          <SquareTerminal size={14} />
-          <span>Processes</span>
-          <strong>
-            {runningProcesses ? `${runningProcesses} running` : "None"}
-          </strong>
-          <ChevronRight aria-hidden="true" size={13} />
-        </button>
-      </div>
+          {planSteps && showPlan ? (
+            <div id={planStepsId}>
+              <EnvironmentPlanSteps
+                onOpen={
+                  onOpenPlan
+                    ? () => {
+                        onClose?.();
+                        onOpenPlan();
+                      }
+                    : undefined
+                }
+                onStatusChange={onPlanItemStatusChange}
+                plan={plan}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <div className="gyro-chat-environment-popover-actions">
         {environmentActions(sourceControl).map((action) => {
           const Icon =
@@ -12488,17 +12789,15 @@ export function ChatEnvironmentPopover({
               type="button"
             >
               <Icon aria-hidden="true" size={14} />
-              <span>
-                {action.label}
-                <small>{action.detail}</small>
-              </span>
+              <span>{action.label}</span>
+              <small>{action.detail}</small>
             </button>
           );
         })}
       </div>
       {subagents ? <SubagentsEnvironment state={subagents} /> : null}
       {sourceItems.length ? (
-        <section className="gyro-chat-environment-popover-sources">
+        <section className="gyro-environment-section gyro-chat-environment-popover-sources">
           <header>
             <span>Sources</span>
             <small>{attachments.length}</small>
@@ -13210,7 +13509,9 @@ function WorkspaceSettingsEditor({
     <section
       aria-labelledby="gyro-workspace-settings-title"
       className="gyro-workspace-settings-editor"
-      data-setting-key={settingsSearchKey(view === "editor" ? "Workspace" : "Tools")}
+      data-setting-key={settingsSearchKey(
+        view === "editor" ? "Workspace" : "Tools",
+      )}
       tabIndex={-1}
     >
       <header>
@@ -13231,7 +13532,8 @@ function WorkspaceSettingsEditor({
         <>
           <h2 className="gyro-workspace-scope-heading">Editor & search</h2>
           <p className="gyro-workspace-scope-description">
-            Choose where these settings apply. Project and folder settings override your app-wide defaults.
+            Choose where these settings apply. Project and folder settings
+            override your app-wide defaults.
           </p>
           <div
             aria-label="Settings scope"
@@ -13252,7 +13554,11 @@ function WorkspaceSettingsEditor({
                   }
                   type="button"
                 >
-                  {item === "user" ? "Across Gyro" : item === "workspace" ? "This project" : "This folder"}
+                  {item === "user"
+                    ? "Across Gyro"
+                    : item === "workspace"
+                      ? "This project"
+                      : "This folder"}
                 </button>
               ),
             )}
@@ -13955,7 +14261,9 @@ export function IdeSurface({
                   group={group}
                   groupCount={editorGroups.length}
                   isActive={group.id === activeGroupId}
-                  editorNavigation={group.id === activeGroupId ? editorNavigation : undefined}
+                  editorNavigation={
+                    group.id === activeGroupId ? editorNavigation : undefined
+                  }
                   key={group.id}
                   minimapEnabled={
                     effectiveMinimapEnabled ??
@@ -14526,7 +14834,8 @@ function EditorGroupPane({
           <span className="gyro-preview-tag">{group.title}</span>
         ) : null}
         <div className="gyro-editor-tab-actions">
-          {editorNavigation && (editorNavigation.canBack || editorNavigation.canForward) ? (
+          {editorNavigation &&
+          (editorNavigation.canBack || editorNavigation.canForward) ? (
             <>
               <button
                 aria-label="Go back in editor"
@@ -14792,40 +15101,46 @@ export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
             const badge = scmFileBadge(file.path);
             const FileIcon = badge.icon;
             return (
-            <button
-              className={
-                file.path === selectedPath
-                  ? "gyro-file-row is-active"
-                  : "gyro-file-row"
-              }
-              key={file.path}
-              title={file.path}
-              aria-label={fileLabel(file)}
-              aria-description={file.path}
-              aria-expanded={
-                file.kind === "directory" ? expanded.has(file.path) : undefined
-              }
-              onClick={() =>
-                file.kind === "directory"
-                  ? toggleDirectory(file.path)
-                  : onSelectFile(file.path)
-              }
-              style={{
-                paddingLeft: `${Math.max(file.depth ?? (file.workspacePath ? file.path.slice(file.workspacePath.length).split("/").filter(Boolean).length : 0), 0) * 12 + 10}px`,
-              }}
-              type="button"
-            >
-              {file.kind === "directory" ? (
-                expanded.has(file.path) ? (
-                  <ChevronDown size={14} />
+              <button
+                className={
+                  file.path === selectedPath
+                    ? "gyro-file-row is-active"
+                    : "gyro-file-row"
+                }
+                key={file.path}
+                title={file.path}
+                aria-label={fileLabel(file)}
+                aria-description={file.path}
+                aria-expanded={
+                  file.kind === "directory"
+                    ? expanded.has(file.path)
+                    : undefined
+                }
+                onClick={() =>
+                  file.kind === "directory"
+                    ? toggleDirectory(file.path)
+                    : onSelectFile(file.path)
+                }
+                style={{
+                  paddingLeft: `${Math.max(file.depth ?? (file.workspacePath ? file.path.slice(file.workspacePath.length).split("/").filter(Boolean).length : 0), 0) * 12 + 10}px`,
+                }}
+                type="button"
+              >
+                {file.kind === "directory" ? (
+                  expanded.has(file.path) ? (
+                    <ChevronDown size={14} />
+                  ) : (
+                    <ChevronRight size={14} />
+                  )
                 ) : (
-                  <ChevronRight size={14} />
-                )
-              ) : (
-                <FileIcon aria-hidden="true" size={14} style={{ color: `var(--gyro-file-${badge.tone})` }} />
-              )}
-              <span>{fileLabel(file)}</span>
-            </button>
+                  <FileIcon
+                    aria-hidden="true"
+                    size={14}
+                    style={{ color: `var(--gyro-file-${badge.tone})` }}
+                  />
+                )}
+                <span>{fileLabel(file)}</span>
+              </button>
             );
           })
         )}
@@ -15893,27 +16208,34 @@ function WorkbenchPaneTabs({
   isLauncherOpen?: boolean;
 }) {
   return (
-    <div className="gyro-pane-tabs" role="tablist" aria-label="Workbench panes" onKeyDown={navigateTabList}>
-      {paneTabs.filter((tab) => !compact || tab.id === activeTab).map((tab) => {
-        const Icon = tab.icon;
-        const isActive = tab.id === activeTab;
-        const label =
-          tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
-        return (
-          <button
-            aria-selected={isActive && !isLauncherOpen}
-            tabIndex={isActive ? 0 : -1}
-            className={isActive ? "is-active" : ""}
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            role="tab"
-            type="button"
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        );
-      })}
+    <div
+      className="gyro-pane-tabs"
+      role="tablist"
+      aria-label="Workbench panes"
+      onKeyDown={navigateTabList}
+    >
+      {paneTabs
+        .filter((tab) => !compact || tab.id === activeTab)
+        .map((tab) => {
+          const Icon = tab.icon;
+          const isActive = tab.id === activeTab;
+          const label =
+            tab.id === "terminal" && terminalTitle ? terminalTitle : tab.label;
+          return (
+            <button
+              aria-selected={isActive && !isLauncherOpen}
+              tabIndex={isActive ? 0 : -1}
+              className={isActive ? "is-active" : ""}
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              role="tab"
+              type="button"
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          );
+        })}
       {(compact || activeTab === "terminal") && onAddPane ? (
         <button
           aria-label={compact ? "Add drawer tab" : "New terminal"}
@@ -16841,7 +17163,9 @@ export function WorkspaceToolPanel({
             setIsLauncherOpen(false);
             event.currentTarget
               .closest(".gyro-workspace-tool-panel")
-              ?.querySelector<HTMLButtonElement>('[aria-label="Add drawer tab"]')
+              ?.querySelector<HTMLButtonElement>(
+                '[aria-label="Add drawer tab"]',
+              )
               ?.focus();
           }}
         >
@@ -16864,7 +17188,11 @@ export function WorkspaceToolPanel({
               >
                 <Icon aria-hidden="true" size={15} />
                 <span>
-                  {id === "terminal" ? "New shell" : id === "diff" ? "Review" : label}
+                  {id === "terminal"
+                    ? "New shell"
+                    : id === "diff"
+                      ? "Review"
+                      : label}
                 </span>
               </button>
             ))}
@@ -19555,7 +19883,10 @@ export function BrowserPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <BrowserViewportControls preview={preview} onChange={onDeviceChange} />
+            <BrowserViewportControls
+              preview={preview}
+              onChange={onDeviceChange}
+            />
             <button
               aria-label="Capture browser screenshot"
               className={`gyro-browser-capture-button${
@@ -19635,7 +19966,7 @@ export function BrowserPreviewSurface({
             >
               {showPlaceholder ? (
                 <BrowserFramePlaceholder
-                compactLoading={isChat}
+                  compactLoading={isChat}
                   captureSrc={showCaptureBackdrop ? captureSrc : undefined}
                   hostLabel={hostLabel}
                   isLoading={isLoading}
@@ -19675,7 +20006,11 @@ export function BrowserPreviewSurface({
                 suggestedUrl={frameUrl}
               />
             ) : (
-              <FittedBrowserFrame key={`${frameUrl}:${frameRevision}`} preview={preview} url={frameUrl} />
+              <FittedBrowserFrame
+                key={`${frameUrl}:${frameRevision}`}
+                preview={preview}
+                url={frameUrl}
+              />
             )
           ) : null}
           {!isChat && (isLoading || isCapturing) ? (
@@ -19692,7 +20027,9 @@ export function BrowserPreviewSurface({
           ) : null}
         </div>
       </div>
-      <div className={`gyro-browser-statusbar${isChat && !showingCapture && preview.captureStatus === "idle" && !hasDiagnostics ? " is-hidden" : ""}`}>
+      <div
+        className={`gyro-browser-statusbar${isChat && !showingCapture && preview.captureStatus === "idle" && !hasDiagnostics ? " is-hidden" : ""}`}
+      >
         <div>
           <span className={statusRingClass} />
           <span>
@@ -19859,7 +20196,10 @@ function BrowserFramePlaceholder({
       ) : null}
       <div className="gyro-browser-placeholder-body">
         {isLoading && compactLoading ? (
-          <span aria-hidden="true" className="gyro-ring is-running gyro-browser-loading-mark" />
+          <span
+            aria-hidden="true"
+            className="gyro-ring is-running gyro-browser-loading-mark"
+          />
         ) : isLoading ? (
           <div className="gyro-browser-skeleton" aria-hidden="true">
             <span />
@@ -21178,6 +21518,9 @@ export type SettingsSurfaceProps = {
   defaultWorkspaceMode?: WorkbenchMode;
   onModelFollowChange?: (mode: ModelFollowMode) => void;
   onDefaultWorkspaceModeChange?: (mode: WorkbenchMode) => void;
+  /** Where Gyro lands on launch; `last` restores the previous view. */
+  launchView?: LaunchView;
+  onLaunchViewChange?: (view: LaunchView) => void;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onUseProvider?: (providerId: ProviderId, modelId: string) => void;
@@ -21190,7 +21533,9 @@ export type SettingsSurfaceProps = {
   onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
-  onEfficiencyChange?: (value: import("./types").EfficiencyConfig) => Promise<void>;
+  onEfficiencyChange?: (
+    value: import("./types").EfficiencyConfig,
+  ) => Promise<void>;
   onEfficiencyRoute?: (phase: string, escalate: boolean) => Promise<void>;
   onCheckForUpdates?: () => void;
   /** Runs the updater's next step (download, install, or retry) from Settings. */
@@ -21431,8 +21776,10 @@ export function SettingsSurface({
   onDesktopNotificationsChange,
   modelFollow = "peek",
   defaultWorkspaceMode = "local",
+  launchView = "last",
   onModelFollowChange,
   onDefaultWorkspaceModeChange,
+  onLaunchViewChange,
   activeSection = "general",
   onThemeChange,
   onAppearanceColorsChange,
@@ -21521,12 +21868,13 @@ export function SettingsSurface({
     enabledProviders[0] ??
     providerConfigs[0];
   const localUsageWindows = ledgerWindows(providerLedger, usageProvider?.id);
-  const hasUsageVisualization =
-    (providerUsage?.status === "available" &&
-      providerUsage.windows.length > 0) ||
-    (providerUsage?.status !== "loading" &&
-      providerUsage?.status !== "error" &&
-      localUsageWindows.length > 0);
+  /**
+   * Bars/wheels is a preference for provider-reported plan windows. The local
+   * ledger fallback is not a plan window, so it always renders as bars and the
+   * toggle stays hidden instead of offering a choice Gyro cannot honour.
+   */
+  const hasProviderUsageWindows =
+    providerUsage?.status === "available" && providerUsage.windows.length > 0;
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -21607,7 +21955,11 @@ export function SettingsSurface({
         data-settings-page={activeSection}
       >
         {activeSection === "import-projects" && projectImport ? (
-          <SettingsSection icon={Folder} title="Import projects" description="Bring your Claude Code and Codex chats into Gyro.">
+          <SettingsSection
+            icon={Folder}
+            title="Import projects"
+            description="Bring your Claude Code and Codex chats into Gyro."
+          >
             <ProjectImportSettings {...projectImport} />
           </SettingsSection>
         ) : null}
@@ -21618,6 +21970,23 @@ export function SettingsSurface({
             description="Choose how Gyro stays available and responds to model activity."
           >
             <SettingsGroup label="App behavior">
+              <SettingsRow
+                label="Open on launch"
+                detail="Choose what Gyro shows when it starts. Applies the next time Gyro opens."
+              >
+                <SettingsSelect
+                  aria-label="Open on launch"
+                  onChange={(event) =>
+                    onLaunchViewChange?.(event.target.value as LaunchView)
+                  }
+                  value={launchView}
+                >
+                  <option value="last">Where you left off</option>
+                  <option value="workspace">Workspace</option>
+                  <option value="sessions">Sessions</option>
+                  <option value="terminals">CLI terminals</option>
+                </SettingsSelect>
+              </SettingsRow>
               <SettingsRow
                 label="Menu bar"
                 detail="Show Gyro in the macOS menu bar for quick access to running work."
@@ -21639,11 +22008,13 @@ export function SettingsSurface({
             <SettingsGroup label="Model activity">
               <SettingsRow
                 label="Model activity previews"
-                detail={modelFollow === "off"
-                  ? "Keep your current view. Model activity previews are hidden."
-                  : modelFollow === "follow"
-                    ? "Switch to the editor, terminal, or browser as the model works."
-                    : "Preview model activity above the composer and keep your current view."}
+                detail={
+                  modelFollow === "off"
+                    ? "Keep your current view. Model activity previews are hidden."
+                    : modelFollow === "follow"
+                      ? "Switch to the editor, terminal, or browser as the model works."
+                      : "Preview model activity above the composer and keep your current view."
+                }
               >
                 <SettingsSegmented
                   label="Model activity behavior"
@@ -21665,7 +22036,10 @@ export function SettingsSurface({
                   disabled={!onConfigChange}
                   checked={Boolean(config.changeSummariesEnabled)}
                   onChange={(checked) =>
-                    onConfigChange?.({ ...config, changeSummariesEnabled: checked })
+                    onConfigChange?.({
+                      ...config,
+                      changeSummariesEnabled: checked,
+                    })
                   }
                 />
               </SettingsRow>
@@ -21737,257 +22111,17 @@ export function SettingsSurface({
           />
         ) : null}
 
-        {activeSection === "usage-limits" ? (
+        {activeSection === "efficiency" ? (
           <SettingsSection
-            icon={Gauge}
-            title="Usage & Limits"
-            description="Local guardrails for agent runs, command output, and provider spend."
+            icon={Sparkles}
+            title="Efficiency"
+            description="Decide how hard Gyro works: context handling, experiments, and agent concurrency."
           >
-            {usageProvider ? (
-              <div className="gyro-usage-dashboard">
-                <label className="gyro-usage-provider-select">
-                  <span>Provider</span>
-                  <SettingsSelect
-                    aria-label="Usage provider"
-                    value={usageProvider.id}
-                    onChange={(event) =>
-                      onUsageProviderChange?.(event.target.value as ProviderId)
-                    }
-                  >
-                    {providerConfigs.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.displayName} ·{" "}
-                        {providerConnectionLabel(
-                          provider,
-                          providerStatuses?.find(
-                            (status) => status.id === provider.id,
-                          ),
-                        )}
-                      </option>
-                    ))}
-                  </SettingsSelect>
-                </label>
-                <div className="gyro-usage-toolbar">
-                  <div>
-                    <strong>
-                      {usageProvider.id === "openai" ||
-                      usageProvider.id === "anthropic" ||
-                      usageProvider.id === "xai" ||
-                      usageProvider.id === "kimi"
-                        ? `${usageProvider.displayName} plan windows`
-                        : `${usageProvider.displayName} spend`}
-                    </strong>
-                    <span>
-                      {providerUsage?.status === "available" &&
-                      providerUsage.windows.length > 0
-                        ? providerUsage.fetchedAt
-                          ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
-                          : "Percent of each plan window spent"
-                        : providerUsage?.status === "loading"
-                          ? "Checking with the provider…"
-                          : usageProvider.id === "openai" ||
-                              usageProvider.id === "anthropic" ||
-                              usageProvider.id === "xai" ||
-                              usageProvider.id === "kimi"
-                            ? usageProvider.id === "xai"
-                              ? "Refresh to load Grok Build weekly credit usage"
-                              : "Plan windows appear after the first chat or refresh"
-                            : "No plan window API on this provider — local spend measured by Gyro is below"}
-                    </span>
-                  </div>
-                  <div className="gyro-usage-toolbar-actions">
-                    {hasUsageVisualization ? (
-                      <SettingsSegmented
-                        label="Usage visualization"
-                        value={usageVisualization}
-                        options={[
-                          { label: "Bars", value: "bars" },
-                          { label: "Wheels", value: "wheels" },
-                        ]}
-                        onChange={(value) =>
-                          onUsageVisualizationChange?.(value)
-                        }
-                      />
-                    ) : null}
-                    <button
-                      aria-label="Refresh provider usage"
-                      className="gyro-icon-button is-subtle"
-                      disabled={providerUsage?.status === "loading"}
-                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
-                      title="Refresh provider usage"
-                      type="button"
-                    >
-                      <RefreshCw
-                        className={
-                          providerUsage?.status === "loading"
-                            ? "is-spinning"
-                            : ""
-                        }
-                        size={14}
-                      />
-                    </button>
-                  </div>
-                </div>
-                {providerUsage?.status === "available" &&
-                providerUsage.stale &&
-                providerUsage.error ? (
-                  <p className="gyro-usage-stale-note" role="status">
-                    {providerUsage.error}
-                  </p>
-                ) : null}
-                {providerUsage?.status === "available" &&
-                providerUsage.windows.length > 0 ? (
-                  <div className="gyro-usage-cards">
-                    {/* Show every window the provider (or ledger) reported —
-                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
-                    {[...providerUsage.windows]
-                      .sort((left, right) => {
-                        const order = ["five-hour", "weekly"];
-                        const leftRank = order.indexOf(left.id);
-                        const rightRank = order.indexOf(right.id);
-                        return (
-                          (leftRank === -1 ? order.length : leftRank) -
-                          (rightRank === -1 ? order.length : rightRank)
-                        );
-                      })
-                      .map((window) => (
-                        <UsageCard
-                          key={window.id}
-                          visualization={usageVisualization}
-                          window={window}
-                        />
-                      ))}
-                  </div>
-                ) : providerUsage?.status === "loading" ||
-                  providerUsage?.status === "error" ? (
-                  <div className="gyro-usage-empty" role="status">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>
-                        {providerUsage.status === "loading"
-                          ? "Loading provider allowance…"
-                          : "Provider allowance could not be loaded"}
-                      </strong>
-                      <span>
-                        {providerUsage.error ??
-                          "Connect or refresh this provider to load plan usage."}
-                      </span>
-                    </div>
-                    <button
-                      className="gyro-secondary-button"
-                      disabled={providerUsage.status === "loading"}
-                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
-                      type="button"
-                    >
-                      <RefreshCw size={14} />
-                      Refresh
-                    </button>
-                  </div>
-                ) : /* No plan windows to show — fall back to what Gyro measured
-                     itself. This is the only usage view Gemini has, and the
-                     fallback for every provider whose live read failed. */
-                localUsageWindows.length > 0 ? (
-                  <div className="gyro-usage-cards">
-                    {localUsageWindows.map((window) => (
-                      <UsageCard
-                        key={window.id}
-                        resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
-                        visualization={usageVisualization}
-                        window={{
-                          id: window.id,
-                          label: `${window.id === "five-hour" ? "5-hour" : "Weekly"} ${window.hasBudget ? "budget" : "reference"} · local`,
-                          usedPercent: window.percent,
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="gyro-usage-empty" role="status">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>No usage recorded yet</strong>
-                      <span>
-                        Start a chat or refresh to check provider usage.
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="gyro-usage-empty">
-                <Gauge size={22} />
-                <div>
-                  <strong>No providers configured</strong>
-                  <span>Connect a provider to inspect reported usage.</span>
-                </div>
-              </div>
-            )}
-            <SettingsGroup label="Spend limits">
-              <SettingsRow
-                label={
-                  usageProvider
-                    ? `${usageProvider.displayName} daily budget`
-                    : "Daily budget"
-                }
-                detail={
-                  providerLedger?.budget
-                    ? "Holds council runs and automations at 10% left, and stops this provider at 0% left."
-                    : "Set a cap and Gyro measures against it instead of the default reference."
-                }
-              >
-                <SettingsSelect
-                  aria-label="Daily token budget"
-                  className="gyro-settings-select"
-                  disabled={!usageProvider}
-                  onChange={(event) =>
-                    usageProvider &&
-                    onProviderBudgetChange?.(
-                      usageProvider.id,
-                      Number(event.target.value),
-                    )
-                  }
-                  value={String(providerLedger?.budget?.maxTokens ?? 0)}
-                >
-                  {budgetOptions(providerLedger?.budget?.maxTokens).map(
-                    (option) => (
-                      <option key={option.value} value={String(option.value)}>
-                        {option.label}
-                      </option>
-                    ),
-                  )}
-                </SettingsSelect>
-              </SettingsRow>
-              <SettingsRow
-                label="Daily pace warning"
-                detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
-              >
-                <SettingsSwitch
-                  checked={dailyPaceWarning}
-                  label="Daily pace warning"
-                  onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Pause provider runs"
-                detail={
-                  usageSafety?.pause.active
-                    ? usagePauseDetail(usageSafety)
-                    : "Hold every provider run until you resume. Automations included."
-                }
-              >
-                <SettingsSwitch
-                  checked={Boolean(usageSafety?.pause.active)}
-                  label="Pause provider runs"
-                  onChange={(checked) => onUsagePauseChange?.(checked)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Provider spend"
-                value="Manual"
-                detail="Provider billing and allowance controls remain provider-owned."
-              />
-            </SettingsGroup>
-            <EfficiencySettings config={config} onChange={onEfficiencyChange} onRoute={onEfficiencyRoute} />
+            <EfficiencySettings
+              config={config}
+              onChange={onEfficiencyChange}
+              onRoute={onEfficiencyRoute}
+            />
             <SettingsGroup label="Auto Context Compact">
               <SettingsRow
                 label="Auto-compact context"
@@ -22009,6 +22143,8 @@ export function SettingsSurface({
                   ))}
                 </SettingsSelect>
               </SettingsRow>
+            </SettingsGroup>
+            <SettingsGroup label="Runs">
               <SettingsRow
                 label="Command output"
                 value="Bounded"
@@ -22030,12 +22166,13 @@ export function SettingsSurface({
           </SettingsSection>
         ) : null}
 
-        {activeSection === "providers" ? (
+        {activeSection === "providers" || activeSection === "usage-limits" ? (
           <SettingsSection
-            icon={KeyRound}
-            title="Models & Accounts"
-            description="Connect accounts, check their status, and choose your models."
+            icon={Gauge}
+            title="Models, Accounts & Limits"
+            description="Connect accounts, choose models, and set local guardrails for spend and runs."
           >
+            <h2 className="gyro-settings-subheading">Accounts & models</h2>
             <ConnectedProviderAllowances
               providers={enabledProviders.filter(
                 (provider) =>
@@ -22043,7 +22180,9 @@ export function SettingsSurface({
                   provider.id !== "ollama" &&
                   !providerNeedsSignInRepair(
                     provider,
-                    providerStatuses?.find((status) => status.id === provider.id),
+                    providerStatuses?.find(
+                      (status) => status.id === provider.id,
+                    ),
                   ),
               )}
               usageByProvider={providerUsageByProvider}
@@ -22096,14 +22235,12 @@ export function SettingsSurface({
               tabIndex={-1}
             >
               <h2>
-                {enabledProviders.length
-                  ? "Accounts & models"
-                  : "Connect an account"}
+                {enabledProviders.length ? "Providers" : "Connect an account"}
               </h2>
               {enabledProviders.length === 0 ? (
                 <p>
-                  Complete sign-in in your terminal or browser, then choose “Use in
-                  chat”.
+                  Complete sign-in in your terminal or browser, then choose “Use
+                  in chat”.
                 </p>
               ) : null}
             </div>
@@ -22458,6 +22595,11 @@ export function SettingsSurface({
                 config={config}
                 providerApiKeyConfigured={providerApiKeyConfigured}
                 savingProviderApiKeyId={savingProviderApiKeyId}
+                renderProviderMark={(id) => (
+                  <span aria-hidden="true">
+                    <ProviderLogo providerId={id} />
+                  </span>
+                )}
                 onSaveProviderApiKey={onSaveProviderApiKey}
                 onClearProviderApiKey={onClearProviderApiKey}
               />
@@ -22473,6 +22615,251 @@ export function SettingsSurface({
               config={config}
               onRestoreProvider={onRestoreProvider}
             />
+            <h2 className="gyro-settings-subheading">Usage & limits</h2>
+            {usageProvider ? (
+              <div className="gyro-usage-dashboard">
+                <label className="gyro-usage-provider-select">
+                  <span>Provider</span>
+                  <SettingsSelect
+                    aria-label="Usage provider"
+                    value={usageProvider.id}
+                    onChange={(event) =>
+                      onUsageProviderChange?.(event.target.value as ProviderId)
+                    }
+                  >
+                    {providerConfigs.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.displayName} ·{" "}
+                        {providerConnectionLabel(
+                          provider,
+                          providerStatuses?.find(
+                            (status) => status.id === provider.id,
+                          ),
+                        )}
+                      </option>
+                    ))}
+                  </SettingsSelect>
+                </label>
+                <div className="gyro-usage-toolbar">
+                  <div>
+                    <strong>
+                      {usageProvider.id === "openai" ||
+                      usageProvider.id === "anthropic" ||
+                      usageProvider.id === "xai" ||
+                      usageProvider.id === "kimi"
+                        ? `${usageProvider.displayName} plan windows`
+                        : `${usageProvider.displayName} spend`}
+                    </strong>
+                    <span>
+                      {providerUsage?.status === "available" &&
+                      providerUsage.windows.length > 0
+                        ? providerUsage.fetchedAt
+                          ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
+                          : "Percent of each plan window spent"
+                        : providerUsage?.status === "loading"
+                          ? "Checking with the provider…"
+                          : usageProvider.id === "openai" ||
+                              usageProvider.id === "anthropic" ||
+                              usageProvider.id === "xai" ||
+                              usageProvider.id === "kimi"
+                            ? usageProvider.id === "xai"
+                              ? "Refresh to load Grok Build weekly credit usage"
+                              : "Plan windows appear after the first chat or refresh"
+                            : "No plan window API on this provider — local spend measured by Gyro is below"}
+                    </span>
+                  </div>
+                  <div className="gyro-usage-toolbar-actions">
+                    {hasProviderUsageWindows ? (
+                      <SettingsSegmented
+                        label="Usage visualization"
+                        value={usageVisualization}
+                        options={[
+                          { label: "Bars", value: "bars" },
+                          { label: "Wheels", value: "wheels" },
+                        ]}
+                        onChange={(value) =>
+                          onUsageVisualizationChange?.(value)
+                        }
+                      />
+                    ) : null}
+                    <button
+                      aria-label="Refresh provider usage"
+                      className="gyro-icon-button is-subtle"
+                      disabled={providerUsage?.status === "loading"}
+                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
+                      title="Refresh provider usage"
+                      type="button"
+                    >
+                      <RefreshCw
+                        className={
+                          providerUsage?.status === "loading"
+                            ? "is-spinning"
+                            : ""
+                        }
+                        size={14}
+                      />
+                    </button>
+                  </div>
+                </div>
+                {providerUsage?.status === "available" &&
+                providerUsage.stale &&
+                providerUsage.error ? (
+                  <p className="gyro-usage-stale-note" role="status">
+                    {providerUsage.error}
+                  </p>
+                ) : null}
+                {providerUsage?.status === "available" &&
+                providerUsage.windows.length > 0 ? (
+                  <div className="gyro-usage-cards">
+                    {/* Show every window the provider (or ledger) reported —
+                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
+                    {[...providerUsage.windows]
+                      .sort((left, right) => {
+                        const order = ["five-hour", "weekly"];
+                        const leftRank = order.indexOf(left.id);
+                        const rightRank = order.indexOf(right.id);
+                        return (
+                          (leftRank === -1 ? order.length : leftRank) -
+                          (rightRank === -1 ? order.length : rightRank)
+                        );
+                      })
+                      .map((window) => (
+                        <UsageCard
+                          key={window.id}
+                          visualization={usageVisualization}
+                          window={window}
+                        />
+                      ))}
+                  </div>
+                ) : providerUsage?.status === "loading" ||
+                  providerUsage?.status === "error" ? (
+                  <div className="gyro-usage-empty" role="status">
+                    <Gauge size={22} />
+                    <div>
+                      <strong>
+                        {providerUsage.status === "loading"
+                          ? "Loading provider allowance…"
+                          : "Provider allowance could not be loaded"}
+                      </strong>
+                      <span>
+                        {providerUsage.error ??
+                          "Connect or refresh this provider to load plan usage."}
+                      </span>
+                    </div>
+                    <button
+                      className="gyro-secondary-button"
+                      disabled={providerUsage.status === "loading"}
+                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
+                      type="button"
+                    >
+                      <RefreshCw size={14} />
+                      Refresh
+                    </button>
+                  </div>
+                ) : /* No plan windows to show — fall back to what Gyro measured
+                     itself. This is the only usage view Gemini has, and the
+                     fallback for every provider whose live read failed. */
+                localUsageWindows.length > 0 ? (
+                  <div className="gyro-usage-cards">
+                    {localUsageWindows.map((window) => (
+                      <UsageCard
+                        key={window.id}
+                        resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
+                        visualization="bars"
+                        window={{
+                          id: window.id,
+                          label: `${window.id === "five-hour" ? "5-hour" : "Weekly"} ${window.hasBudget ? "budget" : "reference"} · local`,
+                          usedPercent: window.percent,
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="gyro-usage-empty" role="status">
+                    <Gauge size={22} />
+                    <div>
+                      <strong>No usage recorded yet</strong>
+                      <span>
+                        Start a chat or refresh to check provider usage.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="gyro-usage-empty">
+                <Gauge size={22} />
+                <div>
+                  <strong>No providers configured</strong>
+                  <span>Connect a provider to inspect reported usage.</span>
+                </div>
+              </div>
+            )}
+            <SettingsGroup label="Spend limits">
+              <SettingsRow
+                label={
+                  usageProvider
+                    ? `${usageProvider.displayName} daily budget`
+                    : "Daily budget"
+                }
+                detail={
+                  providerLedger?.budget
+                    ? "Holds council runs and automations at 10% left, and stops this provider at 0% left."
+                    : "Set a cap and Gyro measures against it instead of the default reference."
+                }
+              >
+                <SettingsSelect
+                  aria-label="Daily token budget"
+                  className="gyro-settings-select"
+                  disabled={!usageProvider}
+                  onChange={(event) =>
+                    usageProvider &&
+                    onProviderBudgetChange?.(
+                      usageProvider.id,
+                      Number(event.target.value),
+                    )
+                  }
+                  value={String(providerLedger?.budget?.maxTokens ?? 0)}
+                >
+                  {budgetOptions(providerLedger?.budget?.maxTokens).map(
+                    (option) => (
+                      <option key={option.value} value={String(option.value)}>
+                        {option.label}
+                      </option>
+                    ),
+                  )}
+                </SettingsSelect>
+              </SettingsRow>
+              <SettingsRow
+                label="Daily pace warning"
+                detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
+              >
+                <SettingsSwitch
+                  checked={dailyPaceWarning}
+                  label="Daily pace warning"
+                  onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Pause provider runs"
+                detail={
+                  usageSafety?.pause.active
+                    ? usagePauseDetail(usageSafety)
+                    : "Hold every provider run until you resume. Automations included."
+                }
+              >
+                <SettingsSwitch
+                  checked={Boolean(usageSafety?.pause.active)}
+                  label="Pause provider runs"
+                  onChange={(checked) => onUsagePauseChange?.(checked)}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Provider spend"
+                value="Manual"
+                detail="Provider billing and allowance controls remain provider-owned."
+              />
+            </SettingsGroup>
           </SettingsSection>
         ) : null}
 
@@ -23163,7 +23550,9 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
       </div>
       <div
         aria-label={`${window.label}: ${
-          measured ? `${window.remainingPercentLabel} left` : "level not reported"
+          measured
+            ? `${window.remainingPercentLabel} left`
+            : "level not reported"
         }`}
         aria-valuemax={100}
         aria-valuemin={0}
@@ -23171,7 +23560,9 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
         className={`gyro-composer-limit-bar${measured ? "" : " is-unmeasured"}`}
         role="progressbar"
       >
-        {measured ? <span style={{ width: `${window.remainingPercent}%` }} /> : null}
+        {measured ? (
+          <span style={{ width: `${window.remainingPercent}%` }} />
+        ) : null}
       </div>
       {window.resetsLabel ? (
         <em className="gyro-composer-limit-reset">{window.resetsLabel}</em>
@@ -23608,7 +23999,8 @@ function ComposerPopover({
       const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
       const preferred = placement === "up" ? above : below;
       const opposite = placement === "up" ? below : above;
-      const flip = panel.offsetHeight * scaleY > preferred && opposite > preferred;
+      const flip =
+        panel.offsetHeight * scaleY > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
       panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
       panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
@@ -24361,6 +24753,15 @@ function composerModelPickerItem(
 type SessionGoalAction =
   "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume";
 
+/**
+ * The composer renders from three sibling branches (start screen, thread dock,
+ * side-chat dock), so a branch flip unmounts the textarea and focus falls to
+ * <body>: keystrokes then vanish with nothing on screen to explain it. A removed
+ * element does not fire `blur`, so this module flag survives the swap and the
+ * replacement composer reclaims the caret.
+ */
+let composerWantsFocus = false;
+
 function Composer({
   attachments = [],
   chatMode = "normal",
@@ -24401,6 +24802,7 @@ function Composer({
   usageSafety,
   onResumeUsage,
   isGoalComposerActive = false,
+  isGoalModeActive = false,
   startsGoalSession = false,
   savedProjects = [],
   surfaceControls,
@@ -24476,6 +24878,8 @@ function Composer({
   usageSafety?: UsageSafetySnapshot;
   onResumeUsage?: () => void;
   isGoalComposerActive?: boolean;
+  /** Goal mode stays selected after the goal is saved, like Plan. */
+  isGoalModeActive?: boolean;
   /** The Goal chip will create a new chat and send the same text. */
   startsGoalSession?: boolean;
   savedProjects?: Array<{
@@ -24501,6 +24905,17 @@ function Composer({
     null,
   );
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    // Reclaim the caret after a branch swap removed the focused textarea.
+    const textarea = composerTextareaRef.current;
+    if (!composerWantsFocus || !textarea) return;
+    composerWantsFocus = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== textarea) return;
+    textarea.focus({ preventScroll: true });
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  }, []);
   const dictationAnchorRef = useRef<{ base: string; caret: number } | null>(
     null,
   );
@@ -24509,13 +24924,19 @@ function Composer({
   /** Caret the user last placed. Unset means dictation appends. */
   const dictationCaretChoiceRef = useRef<number | null>(null);
   const dictationSessionRef = useRef<AbortController | null>(null);
-  const [dictationPhase, setDictationPhase] = useState<"idle" | "listening">(
-    "idle",
-  );
+  /** Pending settle timer: a stop shows the processing ring, then clears. */
+  const dictationSettleRef = useRef<number | null>(null);
+  const [dictationPhase, setDictationPhase] = useState<
+    "idle" | "listening" | "processing"
+  >("idle");
   const [dictationNotice, setDictationNotice] = useState("");
   const releaseDictation = useCallback(
     (restoreBase: boolean) => {
       const anchor = dictationAnchorRef.current;
+      if (dictationSettleRef.current !== null) {
+        window.clearTimeout(dictationSettleRef.current);
+        dictationSettleRef.current = null;
+      }
       dictationSessionRef.current?.abort();
       dictationSessionRef.current = null;
       dictationAnchorRef.current = null;
@@ -24535,10 +24956,32 @@ function Composer({
     },
     [dictation, onDraftChange],
   );
+  /**
+   * Stop from the mic: keep the words already applied to the draft, show the
+   * processing ring, and clear the badge once the session settles.
+   */
+  const settleDictation = useCallback(() => {
+    const session = dictationSessionRef.current;
+    setDictationPhase("processing");
+    dictation?.stop();
+    if (dictationSettleRef.current !== null) {
+      window.clearTimeout(dictationSettleRef.current);
+    }
+    // A late final still lands in the draft, so hold the session open briefly.
+    dictationSettleRef.current = window.setTimeout(() => {
+      dictationSettleRef.current = null;
+      session?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      dictationCaretRef.current = null;
+      setDictationPhase("idle");
+    }, 900);
+  }, [dictation]);
   const toggleDictation = useCallback(() => {
     if (!dictation) return;
+    if (dictationPhase === "processing") return;
     if (dictationAnchorRef.current) {
-      releaseDictation(true);
+      settleDictation();
       return;
     }
     const textarea = composerTextareaRef.current;
@@ -24567,6 +25010,10 @@ function Composer({
       onFinal: (utterance) => {
         if (session.signal.aborted) return;
         applyUtterance(utterance);
+        if (dictationSettleRef.current !== null) {
+          window.clearTimeout(dictationSettleRef.current);
+          dictationSettleRef.current = null;
+        }
         dictationAnchorRef.current = null;
         dictationSessionRef.current = null;
         setDictationPhase("idle");
@@ -24595,10 +25042,14 @@ function Composer({
     isGoalComposerActive,
     maxDraftLength,
     onDraftChange,
-    releaseDictation,
+    settleDictation,
   ]);
   useEffect(() => {
     return () => {
+      if (dictationSettleRef.current !== null) {
+        window.clearTimeout(dictationSettleRef.current);
+        dictationSettleRef.current = null;
+      }
       dictationSessionRef.current?.abort();
       dictationSessionRef.current = null;
       dictationAnchorRef.current = null;
@@ -24750,12 +25201,11 @@ function Composer({
   const selectedProvider = providerConfigs.find(
     (provider) => provider.id === effectiveProviderId,
   );
-  const sessionProvider =
-    sessionModel?.providerId
-      ? providerConfigs.find(
-          (provider) => provider.id === sessionModel.providerId,
-        )
-      : undefined;
+  const sessionProvider = sessionModel?.providerId
+    ? providerConfigs.find(
+        (provider) => provider.id === sessionModel.providerId,
+      )
+    : undefined;
   const displayProvider = selectedProvider ?? sessionProvider;
   const [previewedAttachmentId, setPreviewedAttachmentId] = useState<string>();
   const previewedTerminalAttachment = attachments.find(
@@ -25340,7 +25790,9 @@ function Composer({
     setModelMenuPane(pane);
     setIsModelMenuAdvancedOpen(false);
     setActivePopover(
-      activePopover === "provider" && modelMenuPane === pane ? null : "provider",
+      activePopover === "provider" && modelMenuPane === pane
+        ? null
+        : "provider",
     );
   };
   // Navigation inside the chip's menu must not reach the composer's action
@@ -25583,7 +26035,9 @@ function Composer({
           }
           onEdit={() => onComposerAction?.("add-goal")}
           onPause={onGoalAction ? () => void onGoalAction("pause") : undefined}
-          onResume={onGoalAction ? () => void onGoalAction("resume") : undefined}
+          onResume={
+            onGoalAction ? () => void onGoalAction("resume") : undefined
+          }
         />
       ) : null}
       {attachments.length > 0 ? (
@@ -25803,10 +26257,15 @@ function Composer({
           </div>
           <footer className="gyro-composer-slash-footer" role="presentation">
             <span>
-              <kbd>↑</kbd><kbd>↓</kbd> Navigate
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> Navigate
             </span>
-            <span><kbd>↵</kbd> Select</span>
-            <span><kbd>esc</kbd> Close</span>
+            <span>
+              <kbd>↵</kbd> Select
+            </span>
+            <span>
+              <kbd>esc</kbd> Close
+            </span>
           </footer>
         </ComposerCompletionMenu>
       ) : null}
@@ -25901,8 +26360,16 @@ function Composer({
           }
         }}
         onFocus={() => {
+          composerWantsFocus = true;
           setActivePopover(null);
           setIsSlashMenuDismissed(false);
+        }}
+        onBlur={(event) => {
+          // A detached node means a branch swap removed the textarea rather
+          // than the user moving on: keep the flag so the composer replacing
+          // this one reclaims the caret.
+          if (!event.currentTarget.isConnected) return;
+          composerWantsFocus = false;
         }}
         maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
         onSelect={(event) => {
@@ -26207,12 +26674,21 @@ function Composer({
             />
           </button>
         ) : null}
-        {isGoalComposerActive ? (
+        {isGoalModeActive || isGoalComposerActive ? (
           <button
-            aria-label="Close goal editor — draft is kept"
+            aria-label={
+              sessionGoal?.text
+                ? "Remove Goal mode — the goal stays on this chat"
+                : "Close goal editor — draft is kept"
+            }
             aria-pressed="true"
             className="gyro-composer-chip is-goal"
             onClick={onCancelGoalComposer}
+            title={
+              sessionGoal?.text
+                ? "Remove Goal mode — the goal stays on this chat"
+                : "Close goal editor — draft is kept"
+            }
             type="button"
           >
             <Goal size={13} />
@@ -26257,7 +26733,12 @@ function Composer({
               role="progressbar"
               tabIndex={0}
             >
-              <svg aria-hidden="true" height="18" viewBox="0 0 18 18" width="18">
+              <svg
+                aria-hidden="true"
+                height="18"
+                viewBox="0 0 18 18"
+                width="18"
+              >
                 <circle
                   className="gyro-composer-context-track"
                   cx="9"
@@ -26522,13 +27003,18 @@ function Composer({
         {dictation ? (
           <button
             aria-label={
-              dictationPhase === "listening" ? "Stop dictation" : "Dictate"
+              dictationPhase === "listening"
+                ? "Stop dictation"
+                : dictationPhase === "processing"
+                  ? "Transcribing your words"
+                  : "Dictate"
             }
             aria-pressed={dictationPhase === "listening"}
             className={[
               "gyro-composer-tool",
               "gyro-dictation-button",
               dictationPhase === "listening" ? "is-listening" : "",
+              dictationPhase === "processing" ? "is-processing" : "",
             ]
               .filter(Boolean)
               .join(" ")}
@@ -26537,10 +27023,30 @@ function Composer({
               setActivePopover(null);
               toggleDictation();
             }}
-            title={dictationPhase === "listening" ? "Stop dictation" : "Dictate"}
+            title={
+              dictationPhase === "listening"
+                ? "Stop dictation"
+                : dictationPhase === "processing"
+                  ? "Transcribing your words"
+                  : "Dictate"
+            }
             type="button"
           >
             <Mic aria-hidden="true" size={17} />
+            <span aria-hidden="true" className="gyro-dictation-badge">
+              <span className="gyro-dictation-wave">
+                <span />
+                <span />
+                <span />
+              </span>
+              <Square
+                className="gyro-dictation-stop"
+                fill="currentColor"
+                size={7}
+                strokeWidth={0}
+              />
+              <span className="gyro-dictation-spinner" />
+            </span>
           </button>
         ) : null}
         <button
@@ -26622,21 +27128,21 @@ function Composer({
               ? "Stop response"
               : sendDisabledReason
                 ? sendDisabledReason
-              : isGoalComposerActive
-                ? startsGoalSession
-                  ? "Set goal and send"
-                  : "Save goal"
-                : isCliUpdating
-                  ? "Wait for the CLI update to finish"
-                  : !hasReadyProvider
-                    ? "Connect a provider before sending"
-                    : chatMode === "council" && !hasUserWorkspace
-                      ? "Choose a folder for Council"
-                      : isBranchLoading
-                        ? "Wait for the branch switch to finish"
-                        : isSending
-                          ? "Queue message"
-                          : "Send"
+                : isGoalComposerActive
+                  ? startsGoalSession
+                    ? "Set goal and send"
+                    : "Save goal"
+                  : isCliUpdating
+                    ? "Wait for the CLI update to finish"
+                    : !hasReadyProvider
+                      ? "Connect a provider before sending"
+                      : chatMode === "council" && !hasUserWorkspace
+                        ? "Choose a folder for Council"
+                        : isBranchLoading
+                          ? "Wait for the branch switch to finish"
+                          : isSending
+                            ? "Queue message"
+                            : "Send"
           }
           type="button"
         >
@@ -26649,9 +27155,9 @@ function Composer({
           )}
         </button>
       </div>
-      {dictation && (dictationPhase === "listening" || dictationNotice) ? (
+      {dictation && dictationNotice ? (
         <p className="gyro-dictation-status" role="status">
-          {dictationPhase === "listening" ? "Listening" : dictationNotice}
+          {dictationNotice}
         </p>
       ) : null}
       {shouldShowContextRow ? (
@@ -26714,13 +27220,18 @@ export function ModelSwitchMarker({ event }: { event: SessionEvent }) {
     payload.previousProviderId,
     payload.previousModelId,
   );
-  const nextProvider = modelSwitchLogoProvider(payload.providerId, payload.modelId);
+  const nextProvider = modelSwitchLogoProvider(
+    payload.providerId,
+    payload.modelId,
+  );
   const previousLabel =
     typeof payload.previousModelId === "string"
       ? payload.previousModelId
       : previousProvider;
   const nextLabel =
-    typeof payload.modelLabel === "string" ? payload.modelLabel : payload.modelId;
+    typeof payload.modelLabel === "string"
+      ? payload.modelLabel
+      : payload.modelId;
   return (
     <div
       className="gyro-model-switch-marker"
@@ -26875,7 +27386,9 @@ const ChatEvent = memo(function ChatEvent({
   }
   const capabilityCall = capabilityCallFromEvent(event);
   if (capabilityCall && workflowDetails(event)) {
-    return <CodeModeActivityCard event={event} onAction={onProviderStatusAction} />;
+    return (
+      <CodeModeActivityCard event={event} onAction={onProviderStatusAction} />
+    );
   }
   if (capabilityCall) {
     return (
@@ -27184,7 +27697,11 @@ function CapabilityActivityCard({
     >
       <span className="gyro-capability-activity-icon">{icon}</span>
       <div>
-        <strong>{activity.capabilityId === "code-mode-discover" ? "Finding available workspace actions" : activity.capabilityId.replaceAll("-", " ")}</strong>
+        <strong>
+          {activity.capabilityId === "code-mode-discover"
+            ? "Finding available workspace actions"
+            : activity.capabilityId.replaceAll("-", " ")}
+        </strong>
         <span>{activity.summary}</span>
         {activity.resource ? <small>{activity.resource.label}</small> : null}
       </div>
@@ -27248,10 +27765,18 @@ type ChatTranscriptTurn = {
 };
 
 function TranscriptAttachments({ event }: { event: SessionEvent }) {
-  return <TranscriptAttachmentsView payload={eventPayloadRecord(event) ?? {}} formatSize={formatAttachmentSize} />;
+  return (
+    <TranscriptAttachmentsView
+      payload={eventPayloadRecord(event) ?? {}}
+      formatSize={formatAttachmentSize}
+    />
+  );
 }
 
-function deriveTranscriptState(events: SessionEvent[], turnCache?: ReturnType<typeof createTranscriptTurnCache<ChatTranscriptTurn>>) {
+function deriveTranscriptState(
+  events: SessionEvent[],
+  turnCache?: ReturnType<typeof createTranscriptTurnCache<ChatTranscriptTurn>>,
+) {
   const turnTokenReadings = turnTokensFromEvents(events);
   const mutationDecisions = new Map<string, Record<string, unknown>>();
   const providerApprovalDecisions = new Map<string, Record<string, unknown>>();
@@ -27661,7 +28186,10 @@ function ChatTurn({
         // Native capacity recovery owns its wait while this invoke stays alive;
         // otherwise transport loss uses the existing reconnect beat.
         retry: nativeRetry
-          ? { reason: "Model is temporarily busy", attempt: nativeRetry.attempt }
+          ? {
+              reason: "Model is temporarily busy",
+              attempt: nativeRetry.attempt,
+            }
           : !isOnline
             ? { reason: "Waiting for the network" }
             : providerIsUnreachable(providerStatus)
@@ -27736,6 +28264,14 @@ function ChatTurn({
     turn.timelineEvents.some((event) =>
       isManualCompaction(turn.timelineEvents, event),
     );
+  // What the finished compaction may claim. A Codex session summarizes; every
+  // other provider condenses or keeps the transcript, and the card has to say
+  // which one happened rather than always calling it a summary.
+  const compactionMode = isCompactionResult
+    ? (turn.timelineEvents
+        .map((event) => manualCompactionMode(turn.timelineEvents, event))
+        .find((mode) => mode !== null) ?? null)
+    : null;
   // A completed run needs a conclusion as well as its evidence. The work
   // summary and file review answer "what changed"; the final response answers
   // whether the request is actually done and names any remaining caveat.
@@ -27799,14 +28335,21 @@ function ChatTurn({
           headerActions={
             <>
               {(isRunning || !responseEvent) && turn.turnTokens ? (
-                <span className="gyro-run-token-count" title={turnTokensDetail(turn.turnTokens)}>
+                <span
+                  className="gyro-run-token-count"
+                  title={turnTokensDetail(turn.turnTokens)}
+                >
                   {turnTokensLabel(turn.turnTokens)}
                 </span>
               ) : null}
               {!isRunning && canContinue && !missingFinalResponse ? (
                 <button
                   onClick={onContinueChat}
-                  title={hasResponse ? "Continue this chat" : "Resume this turn from where it left off"}
+                  title={
+                    hasResponse
+                      ? "Continue this chat"
+                      : "Resume this turn from where it left off"
+                  }
                   type="button"
                 >
                   Continue
@@ -27820,7 +28363,10 @@ function ChatTurn({
           onCancelNativeRetry={
             nativeRetry && turn.statusEvent
               ? () =>
-                  onProviderStatusAction?.("cancel-retry", turn.statusEvent as SessionEvent)
+                  onProviderStatusAction?.(
+                    "cancel-retry",
+                    turn.statusEvent as SessionEvent,
+                  )
               : undefined
           }
           onOpenChanges={openTurnChanges}
@@ -27923,10 +28469,7 @@ function ChatTurn({
             <div className="gyro-chat-run-timeline is-final-response">
               <article className="gyro-message is-assistant">
                 <div>
-                  <p>
-                    Context compacted. Earlier conversation was summarized so
-                    this chat has room to continue.
-                  </p>
+                  <p>{manualCompactionResultText(compactionMode)}</p>
                 </div>
               </article>
             </div>
@@ -29096,9 +29639,7 @@ function assistantTableCells(line: string): string[] {
   return cells;
 }
 
-function assistantTableAlignments(
-  line: string,
-): AssistantResponseTableAlign[] {
+function assistantTableAlignments(line: string): AssistantResponseTableAlign[] {
   return assistantTableCells(line).map((cell) => {
     if (!ASSISTANT_TABLE_DELIMITER_CELL.test(cell)) {
       return null;
@@ -29150,10 +29691,7 @@ function parseAssistantTable(
   const padCells = (values: string[]) =>
     Array.from({ length: columnCount }, (_, index) => values[index] ?? "");
   const padAlign = (values: AssistantResponseTableAlign[]) =>
-    Array.from(
-      { length: columnCount },
-      (_, index) => values[index] ?? null,
-    );
+    Array.from({ length: columnCount }, (_, index) => values[index] ?? null);
   const rows: string[][] = [];
   let nextIndex = startIndex + 2;
   while (nextIndex < lines.length) {
@@ -29374,25 +29912,99 @@ function renderAssistantInlineContent(
         if (!href) {
           return <span key={`${part}-${index}`}>{link.label}</span>;
         }
-        return (
-          <a
-            className="gyro-response-link"
-            href={href}
-            key={`${part}-${index}`}
-            onClick={(event) => {
-              if (!onOpenBrowserUrl) return;
-              event.preventDefault();
-              onOpenBrowserUrl(href);
-            }}
-            rel="noreferrer"
-            target={onOpenBrowserUrl ? undefined : "_blank"}
-          >
-            {link.label}
-          </a>
+        return replyLinkNode(
+          href,
+          link.label,
+          `${part}-${index}`,
+          onOpenBrowserUrl,
         );
       }
-      return <span key={`${part}-${index}`}>{part}</span>;
+      return (
+        <span key={`${part}-${index}`}>
+          {renderBareReplyUrls(part, onOpenBrowserUrl)}
+        </span>
+      );
     });
+}
+
+/**
+ * A URL the model wrote without brackets still becomes a reply link, so a bare
+ * `https://…` in the end message is as usable as a markdown link.
+ */
+function renderBareReplyUrls(
+  value: string,
+  onOpenBrowserUrl?: (url: string) => void,
+): ReactNode[] {
+  if (!value.includes("://")) return [value];
+  return value
+    .split(chatBareUrlPattern)
+    .filter(Boolean)
+    .map((piece, index) => {
+      const href = bareChatUrl(piece);
+      if (!href) return piece;
+      const trailing = piece.slice(href.length);
+      return (
+        <span key={`${piece}-${index}`}>
+          {replyLinkNode(href, href, `${piece}-${index}`, onOpenBrowserUrl)}
+          {trailing}
+        </span>
+      );
+    });
+}
+
+/**
+ * One anchor shape for markdown links and bare URLs alike: blue, and routed
+ * through the reply-link opener so a plain click stays in Gyro Browser while a
+ * ⌘/Ctrl-click reaches the device browser. A recognised host (GitHub) also
+ * carries its mark, so the reader knows where the link goes before hovering.
+ */
+function replyLinkNode(
+  href: string,
+  label: ReactNode,
+  key: string,
+  onOpenBrowserUrl?: (url: string) => void,
+) {
+  const mark = replyLinkMark(href);
+  return (
+    <a
+      className={
+        mark ? `gyro-response-link gyro-response-link--${mark}` : "gyro-response-link"
+      }
+      href={href}
+      key={key}
+      onClick={(event) => {
+        event.preventDefault();
+        openReplyLink(event, href, onOpenBrowserUrl);
+      }}
+      rel="noreferrer"
+      title={replyLinkHint}
+    >
+      {mark ? <ReplyLinkGlyph mark={mark} /> : null}
+      {label}
+    </a>
+  );
+}
+
+/**
+ * The host mark drawn inline before a reply link's label. Filled with
+ * `currentColor`, so it follows the link's blue and brightens on hover without
+ * a second colour rule.
+ */
+function ReplyLinkGlyph({ mark }: { mark: ReplyLinkMark }) {
+  if (mark !== "github") return null;
+  return (
+    <svg
+      aria-hidden="true"
+      className="gyro-response-link-mark"
+      focusable="false"
+      viewBox="0 0 16 16"
+    >
+      <path
+        d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
 }
 
 /** Model output may include arbitrary URLs; only web links belong in Browser. */
@@ -29487,9 +30099,10 @@ function providerStatusFromEvent(event: SessionEvent) {
     return undefined;
   }
   const status = stringFromEventPayload(payload, "status") ?? "queued";
-  const nativeRetryAt = payload?.nativeRetry === true
-    ? Date.parse(stringFromEventPayload(payload, "retryAt") ?? "")
-    : NaN;
+  const nativeRetryAt =
+    payload?.nativeRetry === true
+      ? Date.parse(stringFromEventPayload(payload, "retryAt") ?? "")
+      : NaN;
   return {
     nativeRetry: Number.isFinite(nativeRetryAt)
       ? {
@@ -30182,16 +30795,28 @@ function IdeRailTabs({
   ];
 
   return (
-    <div className="gyro-pane-tabs" role="tablist" aria-label="Workspace rail" onKeyDown={navigateTabList}>
+    <div
+      className="gyro-pane-tabs"
+      role="tablist"
+      aria-label="Workspace rail"
+      onKeyDown={navigateTabList}
+    >
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = tab.id === activeTab;
-        const available = tab.id === "diff" || tab.id === "terminal" || tab.id === "browser";
+        const available =
+          tab.id === "diff" || tab.id === "terminal" || tab.id === "browser";
         return (
           <button
             aria-selected={isActive}
             disabled={!available}
-            tabIndex={isActive || (!["diff", "terminal", "browser"].includes(activeTab) && tab.id === "diff") ? 0 : -1}
+            tabIndex={
+              isActive ||
+              (!["diff", "terminal", "browser"].includes(activeTab) &&
+                tab.id === "diff")
+                ? 0
+                : -1
+            }
             className={isActive ? "is-active" : ""}
             key={tab.id}
             onClick={() => {

@@ -255,6 +255,15 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "A tool was declined, so the provider ended the turn. Send again to continue.",
         );
     }
+    // The same stop without a decline behind it. The runner already asked the
+    // session once to carry on, so this is the agent's final word on the turn;
+    // the reply above it is saved and nothing here was a crash.
+    if normalized.contains("ended the turn without finishing") {
+        return (
+            "turn-stopped",
+            "The provider stopped its own turn. Send again to continue from here.",
+        );
+    }
     if error.contains(PROVIDER_STOP_MARKER) {
         return if normalized.contains("per-call ceiling") {
             (

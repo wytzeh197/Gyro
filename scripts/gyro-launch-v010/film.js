@@ -1,140 +1,253 @@
-// Gyro v0.1.0 launch film (dark). Deterministic: renderAt(t) fully defines each frame.
+// Gyro v0.1.0 launch film. Orbital motion system: every actor lives in 3D world space,
+// moves along continuous parametric paths, and is projected with perspective + depth of field.
+// renderAt(t) is pure: the same t always gives the same frame.
+
+const DEG = Math.PI / 180;
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, p) => a + (b - a) * p;
 const E = {
   lin: p => p,
   io: p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
   out: p => 1 - Math.pow(1 - p, 4),
+  out5: p => 1 - Math.pow(1 - p, 5),
   in: p => p * p * p,
+  sine: p => 0.5 - 0.5 * Math.cos(Math.PI * p),
 };
-const DEF = { x: 960, y: 540, s: 1, o: 1, r: 0, ry: 0, b: 0 };
-const K = (t, p = {}, e = 'io') => ({ t, e, ...p });
-const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const seg = (t, a, b, e = 'out') => E[e](clamp((t - a) / (b - a)));
-
-const stmt = a => [K(a, { x: 200, y: 580, o: 0, b: 10 }), K(a + 0.5, { y: 540, o: 1, b: 0 }, 'out'), K(a + 1.35, { y: 532 }, 'lin'), K(a + 1.75, { y: 490, o: 0, b: 8 }, 'in')];
-
-const SPEC = [
-  ['rings', 560, 560, 'c', [K(0, { y: 520, s: 0.85, o: 0 }), K(1.2, { s: 1, o: 0.55 }, 'out'), K(2.9, { s: 1.06 }, 'lin'), K(3.6, { s: 2.8, o: 0 }, 'in')]],
-  ['term', null, null, 'c', [K(0.2, { o: 0, y: 560 }), K(0.6, { o: 1, y: 540 }, 'out'), K(3.0), K(3.5, { o: 0, y: 515, b: 6 }, 'in')]],
-
-  ['wChat', null, null, 'c', [K(3.7, { x: 530, y: 520, o: 0, b: 10, s: 1.08 }), K(4.2, { y: 470, o: 1, b: 0, s: 1 }, 'out'), K(6.9, { y: 462 }, 'lin'), K(7.45, { y: 420, o: 0, b: 8 }, 'in')]],
-  ['wCli', null, null, 'c', [K(4.3, { x: 975, y: 520, o: 0, b: 10, s: 1.08 }), K(4.8, { y: 470, o: 1, b: 0, s: 1 }, 'out'), K(6.95, { y: 462 }, 'lin'), K(7.5, { y: 420, o: 0, b: 8 }, 'in')]],
-  ['wIde', null, null, 'c', [K(4.9, { x: 1405, y: 520, o: 0, b: 10, s: 1.08 }), K(5.4, { y: 470, o: 1, b: 0, s: 1 }, 'out'), K(7.0, { y: 462 }, 'lin'), K(7.55, { y: 420, o: 0, b: 8 }, 'in')]],
-  ['inone', null, null, 'c', [K(5.8, { y: 680, o: 0, b: 8 }), K(6.4, { y: 660, o: 1, b: 0 }, 'out'), K(7.0), K(7.5, { o: 0, y: 630 }, 'in')]],
-
-  ['sChat', 1152, 720, 'c', [K(7.6, { y: 600, s: 0.8, o: 0 }), K(8.4, { y: 520, s: 0.85, o: 1 }, 'out'), K(9.6, { s: 0.875 }, 'lin'), K(10.25, { x: 470, y: 520, s: 0.55, ry: 32, o: 0.45 }),
-    K(12.9, { x: 480 }, 'lin'), K(13.4, { x: 470, s: 0.55, o: 1 }), K(13.9), K(14.4, { y: 470, o: 0, s: 0.5 }, 'in')]],
-  ['sWork', 1152, 720, 'c', [K(9.6, { x: 1560, y: 520, s: 0.7, ry: -34, o: 0 }), K(10.3, { x: 960, s: 0.85, ry: 0, o: 1 }), K(11.3, { s: 0.875 }, 'lin'), K(11.9, { x: 1450, s: 0.55, ry: -32, o: 0.45 }),
-    K(12.9, { x: 1440 }, 'lin'), K(13.4, { x: 1450, o: 1 }), K(13.9), K(14.4, { y: 470, o: 0, s: 0.5 }, 'in')]],
-  ['sRev', 1152, 720, 'c', [K(11.3, { y: 700, s: 0.78, o: 0 }), K(11.95, { y: 520, s: 0.85, o: 1 }, 'out'), K(12.9, { s: 0.875 }, 'lin'), K(13.4, { s: 0.62 }), K(13.9), K(14.4, { y: 470, o: 0, s: 0.56 }, 'in')]],
-  ['tChat', null, null, 'c', [K(8.2, { y: 870, o: 0 }), K(8.7, { y: 860, o: 1 }, 'out'), K(9.35), K(9.7, { o: 0 })]],
-  ['tWork', null, null, 'c', [K(10.3, { y: 870, o: 0 }), K(10.7, { y: 860, o: 1 }, 'out'), K(11.05), K(11.35, { o: 0 })]],
-  ['tRev', null, null, 'c', [K(11.95, { y: 870, o: 0 }), K(12.35, { y: 860, o: 1 }, 'out'), K(12.7), K(12.95, { o: 0 })]],
-
-  ['agentsT', null, null, 'c', [K(14.3, { y: 205, o: 0, b: 8 }), K(15.0, { y: 190, o: 1, b: 0 }, 'out'), K(18.2, { y: 184 }, 'lin'), K(18.7, { y: 150, o: 0, b: 6 }, 'in')]],
-  ['orbit', 1000, 360, 'c', [K(14.5, { y: 650, s: 0.8, o: 0 }), K(15.3, { s: 1, o: 1 }, 'out'), K(18.2), K(18.7, { s: 1.12, o: 0 })]],
-  ['hub', 170, 170, 'c', [K(14.5, { y: 650, s: 0.6, o: 0 }), K(15.2, { s: 1, o: 1 }, 'out'), K(18.2), K(18.7, { s: 0.85, o: 0 }, 'in')]],
-
-  ['st1', null, null, 'l', stmt(18.7)],
-  ['st2', null, null, 'l', stmt(20.45)],
-  ['st3', null, null, 'l', stmt(22.2)],
-
-  ['logo', 150, 150, 'c', [K(24.1, { y: 405, s: 0.6, o: 0, b: 8 }), K(24.9, { s: 1, o: 1, b: 0 }, 'out'), K(27.3, { s: 1.03 }, 'io')]],
-  ['wordmark', null, null, 'c', [K(25.0, { y: 625, o: 0, b: 8 }), K(25.65, { y: 605, o: 1, b: 0 }, 'out')]],
-  ['cta', null, null, 'c', [K(25.8, { y: 725, o: 0 }), K(26.45, { y: 715, o: 1 }, 'out')]],
-];
-
-const els = [];
-function prep() {
-  for (const [id, w, h, anchor, keys] of SPEC) {
-    const el = document.getElementById(id);
-    let W = w, H = h;
-    if (w != null) { el.style.width = w + 'px'; el.style.height = h + 'px'; }
-    else { W = el.offsetWidth; H = el.offsetHeight; }
-    let prev = { ...DEF };
-    const ks = keys.map(k => { const n = { ...prev, ...k }; prev = n; return n; });
-    els.push({ el, W, H, anchor, ks });
+// Piecewise keyed scalar: keys = [[t, v, ease], ...]
+function kv(keys, t) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [ta, va] = keys[i], [tb, vb, e = 'io'] = keys[i + 1];
+    if (t < tb) return lerp(va, vb, E[e]((t - ta) / (tb - ta)));
   }
+  return keys[keys.length - 1][1];
 }
-function sample(ks, t) {
-  if (t <= ks[0].t) return ks[0];
-  const last = ks[ks.length - 1];
-  if (t >= last.t) return last;
-  let i = 0;
-  while (ks[i + 1].t <= t) i++;
-  const a = ks[i], b = ks[i + 1];
-  const p = E[b.e]((t - a.t) / (b.t - a.t));
-  const o = {};
-  for (const k of Object.keys(DEF)) o[k] = a[k] + (b[k] - a[k]) * p;
-  return o;
+// Damped spring 0 -> 1 with a gentle overshoot.
+const spring = u => (u <= 0 ? 0 : 1 - Math.exp(-6.5 * u) * Math.cos(10 * u));
+
+// Integrate an angular-speed function into an angle table (deterministic).
+function integrate(speed, T = 30, dt = 1 / 600) {
+  const n = Math.ceil(T / dt) + 1, a = new Float64Array(n);
+  for (let i = 1; i < n; i++) a[i] = a[i - 1] + speed((i - 0.5) * dt) * dt;
+  return t => { const x = clamp(t, 0, T) / dt, i = Math.floor(x); return i >= n - 1 ? a[n - 1] : a[i] + (a[i + 1] - a[i]) * (x - i); };
 }
-function place(el, W, H, anchor, v) {
-  if (v.o <= 0.002) { el.style.visibility = 'hidden'; return; }
+
+// ---------- Camera ----------
+const F = 2400, CX = 960, CY = 560;
+const FREEZE = 26.6; // everything is still from here to 30s
+// Slow global time that decelerates to a stop at FREEZE (for drifts).
+const slow = integrate(t => (t < FREEZE - 2.2 ? 1 : clamp((FREEZE - t) / 2.2)));
+function cam(t) {
+  const s = slow(t);
+  return { yaw: 5 * Math.sin(0.23 * s) * DEG + kv([[0, 0], [16.2, 0], [17.4, 6 * DEG], [20.4, -4 * DEG, 'sine'], [22.4, 0]], t), pitch: 0 };
+}
+function project(p, c) {
+  const cy = Math.cos(c.yaw), sy = Math.sin(c.yaw);
+  const x = p.x * cy - p.z * sy, z = p.x * sy + p.z * cy, y = p.y;
+  const k = F / (F + z);
+  return { sx: CX + x * k, sy: CY + y * k, k, z };
+}
+// Orbit in the XZ plane, tilted toward camera by alpha, optionally rolled on screen by gamma.
+function orbit(theta, R, alpha, gamma = 0) {
+  const x0 = R * Math.cos(theta), s = Math.sin(theta);
+  let x = x0, y = -R * s * Math.sin(alpha), z = R * s * Math.cos(alpha);
+  if (gamma) { const cg = Math.cos(gamma), sg = Math.sin(gamma); [x, y] = [x * cg - y * sg, x * sg + y * cg]; }
+  return { x, y, z };
+}
+const mix = (a, b, p) => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), z: lerp(a.z, b.z, p) });
+const dof = z => clamp((Math.abs(z) - 260) / 700) * 5.5;
+
+function put(el, pr, { w, h, s = 1, o = 1, blur = null, ry = 0, zi = null, focus = 0 }) {
+  if (o <= 0.003 || pr.k <= 0) { el.style.visibility = 'hidden'; return; }
   el.style.visibility = 'visible';
-  const tx = anchor === 'l' ? v.x : v.x - W / 2, ty = v.y - H / 2;
-  el.style.transform = `translate(${tx}px,${ty}px) perspective(1800px) rotateY(${v.ry}deg) rotate(${v.r}deg) scale(${v.s})`;
-  el.style.opacity = v.o;
-  el.style.filter = v.b > 0.05 ? `blur(${v.b}px)` : 'none';
+  const sc = pr.k * s, b = blur == null ? dof(pr.z - focus) : blur;
+  el.style.transform = `translate(${pr.sx - w / 2}px,${pr.sy - h / 2}px) perspective(1600px) rotateY(${ry}deg) scale(${sc})`;
+  el.style.opacity = o;
+  el.style.filter = b > 0.08 ? `blur(${b.toFixed(2)}px)` : 'none';
+  el.style.zIndex = zi == null ? String(2000 - Math.round(pr.z)) : String(zi);
 }
 
-// Ring spin: constant, then decelerates to a full stop before the final hold.
-function phase(t) {
-  const V = 46, T0 = 25.4, D = 1.9;
-  if (t <= T0) return V * t;
-  const u = Math.min(t, T0 + D) - T0;
-  return V * T0 + V * (u - (u * u) / (2 * D));
-}
-
-const provs = [];
-function renderAt(t) {
-  for (const { el, W, H, anchor, ks } of els) place(el, W, H, anchor, sample(ks, t));
-
-  // Rings
-  const ph = phase(t);
-  const r = document.querySelectorAll('.ring');
-  r[0].style.transform = `rotateX(68deg) rotateZ(${ph}deg)`;
-  r[1].style.transform = `rotateY(${ph * 0.8}deg) rotateX(18deg)`;
-  r[2].style.transform = `rotateY(40deg) rotateX(${ph * 0.6}deg)`;
-
-  // Terminal typing
-  const cmd = 'gyro --version';
-  const n = Math.floor(clamp((t - 0.75) / 1.0) * cmd.length);
-  document.getElementById('typed').textContent = cmd.slice(0, n);
-  const typing = t > 0.75 && t < 1.75;
-  const caretOn = t < 2.1 && (typing || Math.floor(t * 2.4) % 2 === 0);
-  document.getElementById('caret').style.opacity = caretOn ? 1 : 0;
-  document.getElementById('out').style.opacity = seg(t, 2.1, 2.3);
-
-  // Provider orbit
-  const appearAll = seg(t, 18.1, 18.6, 'in');
-  for (let i = 0; i < 6; i++) {
-    const el = provs[i];
-    const ap = seg(t, 14.8 + i * 0.1, 15.5 + i * 0.1) * (1 - appearAll);
-    if (ap <= 0.002) { el.style.visibility = 'hidden'; continue; }
-    el.style.visibility = 'visible';
-    const th = ((i * 60 + 18 * (t - 14.3)) * Math.PI) / 180 + (1 - ap) * 0.6;
-    const rad = 0.55 + 0.45 * ap;
-    const z = Math.sin(th);
-    const x = 960 + 500 * rad * Math.cos(th), y = 650 + 180 * rad * z;
-    const s = (0.78 + 0.22 * (z + 1) / 2) * (0.8 + 0.2 * ap);
-    el.style.transform = `translate(${x - 64}px,${y - 64}px) scale(${s})`;
-    el.style.opacity = ap * (0.5 + 0.5 * (z + 1) / 2);
-    el.style.zIndex = z > 0 ? 5 : 1;
+// ---------- Providers ----------
+const SCATTER = [
+  { x: -660, y: -290, z: 150 }, { x: 640, y: -300, z: -160 }, { x: -700, y: 250, z: -200 },
+  { x: 700, y: 260, z: 300 }, { x: -260, y: 380, z: 520 }, { x: 300, y: -400, z: 650 },
+];
+const provSpin = integrate(t => {
+  // fast swirl as they are captured, settling to a calm orbit; spin-up again for the final collapse
+  const capture = 95 * Math.exp(-Math.max(0, t - 4.0) * 1.6) * (t > 3.9 ? 1 : 0);
+  const collapse = t > 20.4 ? 40 + 420 * E.in(clamp((t - 20.4) / 2.0)) : 0;
+  return (t > 20.4 ? collapse : 17 + capture) * DEG;
+});
+function provPos(i, t) {
+  const s = slow(t);
+  const base = SCATTER[i];
+  const drift = { x: base.x + 46 * Math.sin(0.55 * s + i * 1.7), y: base.y + 34 * Math.cos(0.47 * s + i * 2.3), z: base.z + 90 * Math.sin(0.33 * s + i) };
+  const R = kv([[4.0, 980], [6.0, 500, 'out'], [7.7, 500], [9.3, 800, 'io'], [10.4, 800], [11.3, 1500, 'in']], t);
+  const alpha = kv([[7.7, 21 * DEG], [9.3, 12 * DEG]], t) ;
+  const th = provSpin(t) + i * 60 * DEG - 30 * DEG;
+  const orb = orbit(th, R, alpha);
+  orb.y += kv([[7.7, 40], [9.3, 30]], t);
+  const w = E.io(clamp((t - 4.05 - i * 0.11) / 1.35));
+  let p = mix(drift, orb, w), o, s2 = lerp(1.18, 1, w), label = 1 - clamp((t - 3.9) / 0.4);
+  o = seg(t, 0.15 + i * 0.16, 0.95 + i * 0.16) * (1 - seg(t, 10.5, 11.2, 'in'));
+  if (t >= 20.3) {
+    // return for the collapse: come in from wide, spiral into the core
+    const Rc = kv([[20.3, 1250], [22.3, 0, 'in']], t);
+    const q = orbit(provSpin(t) + i * 60 * DEG, Rc, 24 * DEG);
+    p = q; o = seg(t, 20.3, 20.9) * (1 - seg(t, 21.95, 22.35, 'lin')); s2 = lerp(1, 0.35, seg(t, 21.2, 22.35, 'in')); label = 0;
   }
-  document.getElementById('hub').style.zIndex = 3;
+  return { p, o, s: s2, label };
+}
 
-  // Glow breath, frozen for the final hold
-  const g = document.getElementById('glow');
-  const d = clamp(t / 27.3);
-  g.style.transform = `scale(${1 + 0.06 * Math.sin(d * Math.PI * 3)})`;
-  g.style.opacity = 0.7 + 0.3 * seg(t, 23.8, 25.5, 'io');
+// ---------- Product carousel ----------
+const CARDS = [{ w: 1100, h: 607, s: 0.56 }, { w: 560, h: 792, s: 0.6 }, { w: 960, h: 358, s: 0.56 }];
+const STEPS = [12.45, 13.95];
+function carouselStep(t) { return STEPS.reduce((a, ts) => a + E.io(clamp((t - ts) / 0.75)), 0); }
+function cardPos(j, t) {
+  const emerge = E.out(clamp((t - 10.6 - j * 0.12) / 1.1));
+  const leave = E.in(clamp((t - 15.75 - (2 - j) * 0.06) / 0.85));
+  const R = 760 * emerge + 900 * leave;
+  const th = (-90 + 120 * j - 120 * carouselStep(t) + 3 * Math.sin(slow(t) * 0.8)) * DEG - (1 - emerge) * 70 * DEG;
+  const p = orbit(th, R, 7 * DEG);
+  p.y += -105 - 260 * leave; p.z += 500 * leave;
+  const ry = -34 * Math.cos(th);
+  const front = Math.max(0, -Math.sin(th));
+  const o = clamp(emerge * 1.6) * (1 - leave) * (0.72 + 0.28 * front);
+  return { p, o, ry, s: CARDS[j].s * lerp(0.35, 1, emerge) };
+}
+
+// ---------- Trust chips ----------
+const CH = [
+  { R: 560, a: 16, g: -18, ph: 0 }, { R: 640, a: -22, g: 24, ph: 55 }, { R: 600, a: 30, g: 2, ph: 120 },
+  { R: 690, a: -14, g: -32, ph: 185 }, { R: 620, a: 24, g: 34, ph: 245 }, { R: 700, a: -28, g: 12, ph: 300 },
+];
+const chipSpin = integrate(t => (t > 20.3 ? 30 + 460 * E.in(clamp((t - 20.3) / 2.0)) : 30 + 70 * Math.exp(-Math.max(0, t - 16.6) * 1.4)) * DEG);
+function chipPos(k, t) {
+  const c = CH[k];
+  const enter = E.out(clamp((t - 16.6 - k * 0.1) / 1.2));
+  const col = E.in(clamp((t - 20.5) / 1.85));
+  const R = c.R * enter * (1 - col);
+  const p = orbit(chipSpin(t) + c.ph * DEG, R, c.a * DEG, c.g * DEG);
+  const o = clamp(enter * 1.5) * (1 - seg(t, 21.9, 22.3, 'lin'));
+  return { p, o, s: lerp(0.5, 1, enter) * lerp(1, 0.4, col) };
+}
+
+// ---------- Typography ----------
+const TXT = {
+  t1: { x: 960, y: 540, in: 0.35, out: 3.55 },
+  t2: { x: 960, y: 175, in: 5.0, out: 7.45, st: 0.06 },
+  t3: { x: 960, y: 170, in: 8.85, out: 10.45 },
+  q0: { x: 960, y: 985, in: 11.55, out: 12.35 },
+  q1: { x: 960, y: 985, in: 13.15, out: 13.85 },
+  q2: { x: 960, y: 985, in: 14.65, out: 15.7 },
+  t4: { x: 960, y: 560, in: 16.75, out: 20.35, zi: 2000 },
+  wordmark: { x: 960, y: 610, in: 23.75, out: 99, st: 0.12 },
+  cta: { x: 960, y: 725, in: 24.35, out: 99, st: 0.1 },
+};
+function renderText(t) {
+  for (const id in TXT) {
+    const d = TXT[id], el = d.el;
+    const q = E.in(clamp((t - d.out) / 0.45));
+    if (t < d.in - 0.01 || q >= 1) { el.style.visibility = 'hidden'; continue; }
+    el.style.visibility = 'visible';
+    el.style.zIndex = d.zi || 5000;
+    el.style.transform = `translate(${d.x - d.W / 2}px,${d.y - d.H / 2 - q * 34}px)`;
+    el.style.opacity = 1 - q;
+    el.style.filter = q > 0.02 ? `blur(${q * 7}px)` : 'none';
+    d.words.forEach((w, i) => {
+      const p = E.out5(clamp((t - d.in - i * (d.st || 0.075)) / 0.7));
+      w.style.opacity = p;
+      w.style.transform = `translateY(${(1 - p) * 0.42}em)`;
+      w.style.filter = p < 0.98 ? `blur(${(1 - p) * 9}px)` : 'none';
+    });
+  }
+}
+
+// ---------- Frame ----------
+const $ = id => document.getElementById(id);
+let P, C, K, APP, APPLOGO, APPSHOT, BLOOM, ENDLOGO, DOTS;
+
+function renderAt(t) {
+  const c = cam(t);
+
+  // Providers
+  for (let i = 0; i < 6; i++) {
+    const v = provPos(i, t), pr = project(v.p, c);
+    put(P[i], pr, { w: 124, h: 124, s: v.s, o: v.o });
+    P[i].lastChild.style.opacity = v.label;
+  }
+
+  // Hub -> app window
+  {
+    const pop = spring(clamp((t - 3.95) / 1.1) * 1.1);
+    const grow = E.out5(clamp((t - 7.7) / 1.45));
+    const recede = E.in(clamp((t - 10.35) / 1.0));
+    const W = lerp(170, 1280 * 0.72, grow), H = lerp(170, 720 * 0.72, grow);
+    APP.style.width = W + 'px'; APP.style.height = H + 'px';
+    APP.style.borderRadius = lerp(42, 12, grow) + 'px';
+    APPLOGO.style.opacity = 1 - clamp(grow * 2.2);
+    APPSHOT.style.opacity = clamp(grow * 2 - 0.5);
+    const pos = { x: 0, y: lerp(40, 30, grow), z: 1700 * recede };
+    const pr = project(pos, c);
+    put(APP, pr, { w: W, h: H, s: pop, o: clamp(pop * 3) * (1 - recede), ry: -c.yaw / DEG * 0.8, blur: recede * 6 });
+  }
+
+  // Carousel
+  for (let j = 0; j < 3; j++) {
+    const v = cardPos(j, t), pr = project(v.p, c);
+    put(C[j], pr, { w: CARDS[j].w, h: CARDS[j].h, s: v.s, o: v.o, ry: v.ry, focus: -700 });
+  }
+
+  // Chips
+  for (let k = 0; k < 6; k++) {
+    const v = chipPos(k, t), pr = project(v.p, c);
+    const el = K[k];
+    put(el, pr, { w: el._w, h: el._h, s: v.s, o: v.o });
+  }
+
+  // Core bloom + end logo
+  {
+    const pop = spring(clamp((t - 22.3) / 1.2) * 1.15);
+    const up = E.io(clamp((t - 23.1) / 1.15));
+    const y = lerp(540, 405, up);
+    const flash = Math.exp(-Math.max(0, t - 22.35) * 2.2) * (t > 22.1 ? 1 : 0);
+    const bl = 0.8 * seg(t, 21.2, 22.35, 'in') * (0.55 + 0.45 * flash) * (1 - 0.35 * up);
+    BLOOM.style.visibility = bl > 0.003 ? 'visible' : 'hidden';
+    BLOOM.style.transform = `translate(${960 - 450}px,${y - 450}px) scale(${0.6 + 0.5 * bl})`;
+    BLOOM.style.opacity = bl; BLOOM.style.zIndex = 10;
+    if (pop <= 0.001) ENDLOGO.style.visibility = 'hidden';
+    else {
+      ENDLOGO.style.visibility = 'visible';
+      ENDLOGO.style.transform = `translate(${960 - 75}px,${y - 75}px) scale(${pop}) rotate(${(1 - clamp(pop)) * -90}deg)`;
+      ENDLOGO.style.opacity = clamp(pop * 2); ENDLOGO.style.zIndex = 4000;
+    }
+  }
+
+  // Background parallax
+  DOTS.style.transform = `translate(${-c.yaw / DEG * 14 - 30 * slow(t) / 26}px,${-12 * slow(t) / 26}px)`;
+
+  renderText(t);
 }
 
 window.renderAt = renderAt;
 window.filmReady = (async () => {
   await document.fonts.ready;
   await Promise.all([...document.images].map(i => i.decode().catch(() => {})));
-  for (let i = 0; i < 6; i++) provs.push(document.getElementById('p' + i));
-  prep();
+  P = [0, 1, 2, 3, 4, 5].map(i => $('p' + i));
+  C = [0, 1, 2].map(i => $('c' + i));
+  K = [0, 1, 2, 3, 4, 5].map(i => $('k' + i));
+  CARDS.forEach((d, j) => { C[j].style.width = d.w + 'px'; C[j].style.height = d.h + 'px'; });
+  K.forEach(el => { el._w = el.offsetWidth; el._h = el.offsetHeight; });
+  APP = $('app'); APPLOGO = APP.querySelector('.logo'); APPSHOT = APP.querySelector('.shot');
+  BLOOM = $('bloom'); ENDLOGO = $('endLogo'); DOTS = $('dots');
+  for (const id in TXT) {
+    const d = TXT[id]; d.el = $(id); d.el.style.visibility = 'visible';
+    d.W = d.el.offsetWidth; d.H = d.el.offsetHeight; d.words = [...d.el.querySelectorAll('.w')];
+    d.el.style.visibility = 'hidden';
+  }
   renderAt(0);
+  const q = new URLSearchParams(location.search);
+  if (q.has('play')) { const t0 = performance.now(); const loop = () => { renderAt(((performance.now() - t0) / 1000) % 30); requestAnimationFrame(loop); }; loop(); }
   return true;
 })();

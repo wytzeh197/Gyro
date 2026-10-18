@@ -4662,7 +4662,7 @@ summary:focus-visible {
 
 .agent-mark.is-opencode {
   --agent-opencode-block: #4b4646;
-  color: #f1ecec;
+  color: #ffffff;
 }
 
 :root[data-theme="light"] .agent-mark.is-opencode {

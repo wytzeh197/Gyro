@@ -752,3 +752,937 @@
     align-items: flex-start;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Sub page polish
+   The provider page sets the tone for Settings: one page header, quiet group
+   cards, a right-aligned control lane and consistent control heights. These
+   rules give General, Appearance, Efficiency, CLI Profiles, Permissions,
+   Updates, Keyboard, Advanced, Import and Help that same rhythm. Everything
+   stays scoped to .gyro-settings-surface so chat, browser and editor surfaces
+   keep their own presentation.
+   --------------------------------------------------------------------------- */
+
+/* -- Page header ---------------------------------------------------------- */
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding-bottom: 20px;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header
+  h1 {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: calc(22px * var(--gyro-ui-scale, 1));
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* The icon is part of the section contract; render it as a quiet chip instead
+   of dropping it, so every page opens with the same anchor. */
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header
+  h1
+  svg {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 6px;
+  box-sizing: content-box;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-section > header span,
+    .gyro-workspace-settings-editor > header p
+  ) {
+  margin-top: 9px;
+  max-width: 58ch;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  line-height: 1.55;
+}
+
+/* -- Group cards ---------------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-settings-group > h2 {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-group-rows,
+    .gyro-workspace-settings-list,
+    .gyro-cli-profile-list
+  ) {
+  background: var(--gyro-settings-card);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* -- Rows ---------------------------------------------------------------- */
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-row, .gyro-workspace-settings-list > label) {
+  min-height: var(--gyro-settings-row-height);
+  padding: calc(14px * var(--gyro-ui-scale, 1))
+    calc(16px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-row > div:first-child > span,
+    .gyro-workspace-settings-list small
+  ) {
+  max-width: 56ch;
+}
+
+/* Give every row the provider page's control lane: the label flexes and the
+   controls sit on one right edge. Flex wrapping reacts to the row's real
+   width, so the layout does not depend on the legacy grid breakpoints or on
+   container-query support. */
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-row, .gyro-workspace-settings-list > label) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--gyro-ui-scale, 1))
+    calc(24px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row
+  > div:first-child {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row
+  > .gyro-settings-control-column {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  padding-left: 0;
+  border-left: 0;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row
+  > .gyro-settings-control-column
+  > * {
+  text-align: inherit;
+}
+
+/* -- Controls ------------------------------------------------------------ */
+:root[data-theme] .gyro-settings-surface .gyro-settings-select-field {
+  min-width: min(168px, 100%);
+}
+
+/* Selects own their box: height auto plus padding keeps the label inside the
+   control at every interface size, and the chevron keeps its own room. The
+   selector mirrors the field rule above so it wins on specificity. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-select-field
+  > select.gyro-settings-select {
+  height: auto;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: calc(4px * var(--gyro-ui-scale, 1))
+    calc(28px * var(--gyro-ui-scale, 1)) calc(4px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
+  border-radius: var(--gyro-radius-sm);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  line-height: 1.3;
+  text-align: left;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-segmented {
+  min-height: calc(34px * var(--gyro-ui-scale, 1));
+  padding: 3px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-segmented button {
+  min-height: calc(26px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(11px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-secondary-button, .gyro-danger-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(6px * var(--gyro-ui-scale, 1));
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
+  border-radius: var(--gyro-radius-sm);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-info-value {
+  color: var(--gyro-muted);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-key {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(7px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-mono);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-copy-value code {
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-mono);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -- Appearance ---------------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-appearance-settings {
+  gap: 22px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-appearance-scope {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  margin: 0;
+  padding: 4px 0 6px;
+  border: 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--gyro-pane) 92%, transparent);
+  backdrop-filter: blur(10px);
+  text-align: left;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-appearance-scope
+  > span:first-child {
+  color: var(--gyro-text);
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-appearance-save-status {
+  margin-left: auto;
+}
+
+/* -- CLI Profiles -------------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-preset {
+  padding: 16px 18px;
+  gap: 14px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-preset > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-preset
+  > header
+  strong {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-preset
+  > header
+  span {
+  display: block;
+  margin-top: 2px;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-preset
+  > header
+  small {
+  color: var(--gyro-muted);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-preset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-preset
+  .gyro-settings-select-field {
+  width: 100%;
+}
+
+/* Stepper reads as one control instead of three loose boxes. */
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-pane));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-stepper button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(24px * var(--gyro-ui-scale, 1));
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  border: 0;
+  border-radius: calc(var(--gyro-radius-sm) - 2px);
+  background: transparent;
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-stepper
+  button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-stepper
+  button:disabled {
+  color: var(--gyro-faint);
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-stepper span {
+  min-width: calc(18px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-preset > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-focus > span {
+  margin-right: 4px;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-launch-focus button {
+  min-height: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(10px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: calc(var(--gyro-radius-sm) - 1px);
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-focus
+  button:hover {
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-focus
+  button.is-active {
+  background: var(--gyro-pane);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 22%, transparent);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-profile-list
+  .gyro-provider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 18px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-profile-list
+  .gyro-provider-row:last-child {
+  border-bottom: 0;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-cli-profile-list code {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-mono);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -- Updates ------------------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-update-card {
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-settings-card);
+  box-shadow: none;
+}
+
+/* The head is a flex row so the copy keeps a readable measure and the two
+   actions drop below it instead of squeezing the version onto two lines. */
+:root[data-theme] .gyro-settings-surface .gyro-update-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 16px;
+  padding: 18px 20px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-mark {
+  flex: none;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-copy {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-version {
+  white-space: nowrap;
+}
+
+/* Facts settle on two lines at most: smaller type and tighter cell padding
+   keep version strings and timestamps inside their own column. */
+:root[data-theme] .gyro-settings-surface .gyro-update-facts {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-facts > div {
+  padding: 12px 14px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-facts dt {
+  margin: 0 0 3px;
+  color: var(--gyro-muted);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-update-facts dd {
+  margin: 0;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- Settings sidebar ----------------------------------------------------- */
+/* Group labels read as quiet section markers above the page names, not as
+   louder siblings of them. */
+:root[data-theme] .gyro-settings-sidebar-group > span {
+  padding: 0 calc(8px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-muted);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* -- Workspace editor pages ---------------------------------------------- */
+/* Scope switcher reads as one control instead of three boxed words. */
+:root[data-theme] .gyro-settings-surface .gyro-workspace-settings-scopes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-pane));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-scopes
+  button {
+  min-height: calc(26px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
+  border: 0;
+  border-radius: calc(var(--gyro-radius-sm) - 1px);
+  background: transparent;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-scopes
+  button:hover {
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-scopes
+  button.is-active {
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 22%, transparent);
+}
+
+/* Editor rows keep the same inset and control height as the rest of Settings. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-list
+  input {
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  border-color: var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+/* Workspace and Tools carry the same page title and rule as every other sub
+   page, so switching between them does not resize the header. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-editor
+  > header
+  h1 {
+  font-size: calc(22px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+/* The editor pages used a larger type scale than the rest of Settings; bring
+   their group labels, rows and body copy onto the same scale. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-editor
+  :is(h2) {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-editor
+  :is(p, small) {
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-list
+  strong {
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-workspace-services > div > p,
+:root[data-theme] .gyro-settings-surface .gyro-workspace-services article,
+:root[data-theme] .gyro-settings-surface .gyro-workspace-contributions article {
+  border-color: var(--gyro-border-soft);
+  border-style: dashed;
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-settings-card);
+  color: var(--gyro-muted);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface :is(.gyro-secondary-button) {
+  border-color: var(--gyro-border-soft);
+}
+
+/* -- Help ---------------------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-help {
+  gap: 18px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-search {
+  height: calc(40px * var(--gyro-ui-scale, 1));
+  border-color: var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-settings-card);
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-search input {
+  height: 100%;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-shortcuts {
+  gap: 10px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-shortcuts button {
+  min-height: calc(52px * var(--gyro-ui-scale, 1));
+  padding: 10px 12px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-settings-card);
+  color: var(--gyro-text);
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  text-align: left;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-help-shortcuts
+  button:hover {
+  border-color: var(--gyro-border-strong);
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-shortcuts button svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+
+/* Topic filters read as one pill row instead of loose text with one boxed
+   exception. */
+:root[data-theme] .gyro-settings-surface .gyro-help-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-topics button {
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(12px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-topics button:hover {
+  color: var(--gyro-text);
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-help-topics
+  button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border-color: var(--gyro-border-strong);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-answers {
+  gap: 16px;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-topic {
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-settings-card);
+  padding: 2px 14px;
+  overflow: hidden;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-topic h2 {
+  margin: 12px 0 2px;
+  color: var(--gyro-muted);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-help-topic
+  details:last-child {
+  border-bottom: 0;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-topic summary {
+  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-help-footer {
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-top: 16px;
+}
+
+/* -- Keyboard shortcuts --------------------------------------------------- */
+:root[data-theme] .gyro-settings-surface .gyro-workspace-keybindings {
+  display: grid;
+  gap: 12px;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > header
+  > div
+  > h2 {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > header
+  p {
+  margin: 4px 0 0;
+  max-width: 56ch;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > header
+  kbd {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(26px * var(--gyro-ui-scale, 1));
+  min-height: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(7px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-mono);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+
+/* One row rhythm for every shortcut: description left, key field right. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--gyro-ui-scale, 1))
+    calc(24px * var(--gyro-ui-scale, 1));
+  min-height: var(--gyro-settings-row-height);
+  padding: calc(12px * var(--gyro-ui-scale, 1))
+    calc(16px * var(--gyro-ui-scale, 1));
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label:last-child {
+  border-bottom: 0;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label
+  > span {
+  display: grid;
+  flex: 1 1 300px;
+  gap: 2px;
+  min-width: 0;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label
+  > span
+  > strong {
+  color: var(--gyro-text);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label
+  small {
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.45;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label
+  input {
+  flex: 0 0 calc(180px * var(--gyro-ui-scale, 1));
+  width: calc(180px * var(--gyro-ui-scale, 1));
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(10px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  text-align: center;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-keybindings
+  > div
+  > label
+  input.is-conflict {
+  border-color: var(--gyro-danger);
+  color: var(--gyro-danger);
+}
+
+/* -- Spacing rhythm ------------------------------------------------------
+   Settings read cramped: a group label sat ~10px above its card, a row title
+   ~4px above its detail, and the title block only ~21px above the first
+   group. One 4px-based scale now sets the page's whole vertical rhythm:
+   title block 32px to the first group, 32px between groups, 14px from a
+   label to its card, and 7px from a row title to its detail. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-section > header {
+  padding: 0 0 calc(32px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-section-body {
+  gap: calc(32px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-group {
+  gap: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-group-description {
+  margin: calc(-8px * var(--gyro-ui-scale, 1)) 0 0;
+  max-width: 62ch;
+}
+
+:root[data-theme] .gyro-settings-surface .gyro-settings-row {
+  padding: calc(18px * var(--gyro-ui-scale, 1))
+    calc(18px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row
+  > div:first-child
+  > span {
+  margin-top: calc(7px * var(--gyro-ui-scale, 1));
+  max-width: 62ch;
+}
+
+/* Rows go full-bleed in one column on narrow windows, so keep their side
+   padding off there while the added vertical air still applies. */
+@media (max-width: 760px) {
+  :root[data-theme] .gyro-settings-surface .gyro-settings-row {
+    padding-inline: 0;
+  }
+}

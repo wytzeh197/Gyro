@@ -77,13 +77,40 @@ function hasValidDeveloperIdSignature(appPath) {
   );
 }
 
+/** Whether the copied bundle's code signature carries one entitlement key. */
+function embeddedEntitlement(appPath, key) {
+  const display = spawnSync(
+    "codesign",
+    ["--display", "--entitlements", ":-", appPath],
+    { encoding: "utf8" },
+  );
+  return `${display.stdout ?? ""}${display.stderr ?? ""}`.includes(key);
+}
+
 if (hasValidDeveloperIdSignature(destinationApp)) {
   console.log("Keeping the existing Developer ID signature.");
 } else if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
-  // Match release builds, which always run with the hardened runtime.
+  // Match release builds, which always run with the hardened runtime. The
+  // hardened runtime gates audio input on the audio-input entitlement, so a
+  // signature without Entitlements.plist is denied the microphone before TCC
+  // can even show its sheet.
+  const entitlements = resolve(
+    repoRoot,
+    "apps/desktop/src-tauri/Entitlements.plist",
+  );
   const sign = spawnSync(
     "codesign",
-    ["--force", "--deep", "--options", "runtime", "--sign", "-", destinationApp],
+    [
+      "--force",
+      "--deep",
+      "--options",
+      "runtime",
+      "--entitlements",
+      entitlements,
+      "--sign",
+      "-",
+      destinationApp,
+    ],
     { stdio: "inherit" },
   );
 
@@ -91,6 +118,11 @@ if (hasValidDeveloperIdSignature(destinationApp)) {
     console.warn(
       "Ad-hoc signing failed; continuing with the copied local app bundle.",
     );
+  } else if (!embeddedEntitlement(destinationApp, "com.apple.security.device.audio-input")) {
+    console.error(
+      "The ad-hoc signature is missing com.apple.security.device.audio-input, so the hardened runtime blocks the microphone and macOS never shows a permission sheet.",
+    );
+    process.exit(1);
   }
 }
 

@@ -1,0 +1,500 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 119.890625,
+        "width": 29.890625,
+        "x": 90,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 153.4375,
+        "width": 23.546875,
+        "x": 129.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 177,
+        "width": 23.5625,
+        "x": 153.4375,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "New Session",
+      "rect": {
+        "bottom": 82.5,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 48
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Search⌘K",
+      "rect": {
+        "bottom": 119,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 84.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Automations",
+      "rect": {
+        "bottom": 155.5,
+        "height": 34.5,
+        "right": 180,
+        "width": 171,
+        "x": 9,
+        "y": 121
+      }
+    },
+    {
+      "className": "gyro-sidebar-project-toggle",
+      "label": "Collapse aurora",
+      "rect": {
+        "bottom": 225.15625,
+        "height": 26,
+        "right": 170.8125,
+        "width": 152.625,
+        "x": 18.1875,
+        "y": 199.15625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Bound the sync queue retries",
+      "rect": {
+        "bottom": 264.59375,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 232.40625
+      }
+    },
+    {
+      "className": "gyro-session-action",
+      "label": "Pin chat",
+      "rect": {
+        "bottom": 262.296875,
+        "height": 27.59375,
+        "right": 150.40625,
+        "width": 27.59375,
+        "x": 122.8125,
+        "y": 234.703125
+      }
+    },
+    {
+      "className": "gyro-session-action is-more",
+      "label": "Chat options",
+      "rect": {
+        "bottom": 262.296875,
+        "height": 27.59375,
+        "right": 180,
+        "width": 27.59375,
+        "x": 152.40625,
+        "y": 234.703125
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Fix flaky editor file tree",
+      "rect": {
+        "bottom": 297.78125,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 265.59375
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main",
+      "label": "Audit provider argument contracts",
+      "rect": {
+        "bottom": 330.96875,
+        "height": 32.1875,
+        "right": 181,
+        "width": 163,
+        "x": 18,
+        "y": 298.78125
+      }
+    },
+    {
+      "className": "gyro-account-button",
+      "label": "Settings",
+      "rect": {
+        "bottom": 608,
+        "height": 30,
+        "right": 107.34375,
+        "width": 99.34375,
+        "x": 8,
+        "y": 578
+      }
+    },
+    {
+      "className": "gyro-chat-surface-button is-active",
+      "label": "Environment",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 812.109375,
+        "width": 29.890625,
+        "x": 782.21875,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-chat-surface-button",
+      "label": "Show companion",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 845,
+        "width": 29.890625,
+        "x": 815.109375,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-run-header-toggle",
+      "label": "Worked for 6m 1s",
+      "rect": {
+        "bottom": 118.78125,
+        "height": 24,
+        "right": 347.34375,
+        "width": 129.625,
+        "x": 217.71875,
+        "y": 94.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "Continue",
+      "rect": {
+        "bottom": 121.125,
+        "height": 28.6875,
+        "right": 832.28125,
+        "width": 79.421875,
+        "x": 752.859375,
+        "y": 92.4375
+      }
+    },
+    {
+      "className": "",
+      "label": "Copy response",
+      "rect": {
+        "bottom": 224.96875,
+        "height": 28,
+        "right": 239.71875,
+        "width": 28,
+        "x": 211.71875,
+        "y": 196.96875
+      }
+    },
+    {
+      "className": "is-undo",
+      "label": "Undo",
+      "rect": {
+        "bottom": 291.8125,
+        "height": 28,
+        "right": 746.796875,
+        "width": 76.84375,
+        "x": 669.953125,
+        "y": 263.8125
+      }
+    },
+    {
+      "className": "",
+      "label": "Review",
+      "rect": {
+        "bottom": 291.8125,
+        "height": 28,
+        "right": 821.28125,
+        "width": 70.484375,
+        "x": 750.796875,
+        "y": 263.8125
+      }
+    },
+    {
+      "className": "",
+      "label": "src/sync.jsLine counts unavailable",
+      "rect": {
+        "bottom": 332.671875,
+        "height": 28,
+        "right": 819.28125,
+        "width": 600.5625,
+        "x": 218.71875,
+        "y": 304.671875
+      }
+    },
+    {
+      "className": "",
+      "label": "src/sync.test.jsLine counts unavailable",
+      "rect": {
+        "bottom": 361.671875,
+        "height": 28,
+        "right": 819.28125,
+        "width": 600.5625,
+        "x": 218.71875,
+        "y": 333.671875
+      }
+    },
+    {
+      "className": "",
+      "label": "src/queue/backoff.jsLine counts unavailable",
+      "rect": {
+        "bottom": 390.671875,
+        "height": 28,
+        "right": 819.28125,
+        "width": 600.5625,
+        "x": 218.71875,
+        "y": 362.671875
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 558.5,
+        "height": 49.390625,
+        "right": 831.28125,
+        "width": 612.5625,
+        "x": 218.71875,
+        "y": 509.109375
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 591.25,
+        "height": 30.578125,
+        "right": 254.046875,
+        "width": 26.59375,
+        "x": 227.453125,
+        "y": 560.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 591.25,
+        "height": 30.578125,
+        "right": 418.03125,
+        "width": 156.34375,
+        "x": 261.6875,
+        "y": 560.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: Claude Opus 5",
+      "rect": {
+        "bottom": 591.25,
+        "height": 30.578125,
+        "right": 711.578125,
+        "width": 155.34375,
+        "x": 556.234375,
+        "y": 560.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: High",
+      "rect": {
+        "bottom": 591.25,
+        "height": 30.578125,
+        "right": 788.3125,
+        "width": 69.09375,
+        "x": 719.21875,
+        "y": 560.671875
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 591.25,
+        "height": 30.578125,
+        "right": 822.546875,
+        "width": 26.59375,
+        "x": 795.953125,
+        "y": 560.671875
+      }
+    },
+    {
+      "className": "",
+      "label": "Close environment",
+      "rect": {
+        "bottom": 88,
+        "height": 24,
+        "right": 834,
+        "width": 24,
+        "x": 810,
+        "y": 64
+      }
+    },
+    {
+      "className": "",
+      "label": "Switch branch, main",
+      "rect": {
+        "bottom": 120,
+        "height": 28,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 92
+      }
+    },
+    {
+      "className": "",
+      "label": "Open changes, sync 1 commit ahead of origin/main",
+      "rect": {
+        "bottom": 149,
+        "height": 28,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 121
+      }
+    },
+    {
+      "className": "",
+      "label": "Open files for aurora",
+      "rect": {
+        "bottom": 178,
+        "height": 28,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 150
+      }
+    },
+    {
+      "className": "",
+      "label": "Open changes, +73 −6, Compared to main",
+      "rect": {
+        "bottom": 207,
+        "height": 28,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 179
+      }
+    },
+    {
+      "className": "",
+      "label": "Open terminal, 0 running processes",
+      "rect": {
+        "bottom": 236,
+        "height": 28,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 208
+      }
+    },
+    {
+      "className": "",
+      "label": "Commit or push. 9 files to commit",
+      "rect": {
+        "bottom": 292.078125,
+        "height": 45.078125,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 247
+      }
+    },
+    {
+      "className": "",
+      "label": "Create pull request. 1 commit not pushed yet",
+      "rect": {
+        "bottom": 338.15625,
+        "height": 45.078125,
+        "right": 838,
+        "width": 286,
+        "x": 552,
+        "y": 293.078125
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "Bound the sync queue retries",
+      "b": "Pin chat",
+      "height": 27.59375,
+      "width": 27.59375
+    },
+    {
+      "a": "Bound the sync queue retries",
+      "b": "Chat options",
+      "height": 27.59375,
+      "width": 27.59375
+    },
+    {
+      "a": "Continue",
+      "b": "Switch branch, main",
+      "height": 27.5625,
+      "width": 79.421875
+    },
+    {
+      "a": "Undo",
+      "b": "Commit or push. 9 files to commit",
+      "height": 28,
+      "width": 76.84375
+    },
+    {
+      "a": "Review",
+      "b": "Commit or push. 9 files to commit",
+      "height": 28,
+      "width": 70.484375
+    },
+    {
+      "a": "src/sync.jsLine counts unavailable",
+      "b": "Create pull request. 1 commit not pushed yet",
+      "height": 28,
+      "width": 267.28125
+    },
+    {
+      "a": "src/sync.test.jsLine counts unavailable",
+      "b": "Create pull request. 1 commit not pushed yet",
+      "height": 4.484375,
+      "width": 267.28125
+    }
+  ],
+  "popovers": [],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

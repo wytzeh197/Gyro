@@ -335,21 +335,16 @@ pub(super) fn assert_no_unsaved_editor_changes(
     bound: &BoundProviderCapabilityContext,
     path: &str,
 ) -> anyhow::Result<()> {
-    let latest_context = app
-        .state::<CapabilityIdeEvidenceManager>()
-        .by_workspace
-        .lock()
-        .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-        .get(&bound.workspace_key)
-        .cloned()
-        .unwrap_or_else(|| bound.workspace_context.clone());
-    if latest_context.buffers.iter().any(|buffer| {
-        buffer.get("path").and_then(Value::as_str) == Some(path)
-            && buffer
-                .get("dirty")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-    }) {
+    let dirty = with_ide_evidence(app, bound, |latest| {
+        Ok(latest.buffers.iter().any(|buffer| {
+            buffer.get("path").and_then(Value::as_str) == Some(path)
+                && buffer
+                    .get("dirty")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        }))
+    })?;
+    if dirty {
         anyhow::bail!(
             "the target has unsaved editor changes; save or revert it before proposing an edit"
         );
@@ -369,16 +364,11 @@ fn assert_editor_document_version(
     let expected = expected
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("documentVersion must be text"))?;
-    let latest = app
-        .state::<CapabilityIdeEvidenceManager>()
-        .by_workspace
-        .lock()
-        .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-        .get(&bound.workspace_key)
-        .cloned()
-        .unwrap_or_else(|| bound.workspace_context.clone());
+    let matches = with_ide_evidence(app, bound, |latest| {
+        Ok(editor_document_version_matches(latest, path, expected))
+    })?;
     anyhow::ensure!(
-        editor_document_version_matches(&latest, path, expected),
+        matches,
         "editor document version changed; review the current buffer and retry"
     );
     Ok(())

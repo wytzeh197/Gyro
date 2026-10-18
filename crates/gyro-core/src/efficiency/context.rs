@@ -568,8 +568,13 @@ mod tests {
         assert_eq!(first["callId"], "read-1");
         assert_eq!(first["status"], "completed");
         assert_eq!(first["result"]["summary"], "Read src/a.rs");
-        let preview = first["result"]["data"]["content"].as_str().unwrap_or_default();
-        assert!(!preview.is_empty(), "retired evidence keeps a bounded preview");
+        let preview = first["result"]["data"]["content"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            !preview.is_empty(),
+            "retired evidence keeps a bounded preview"
+        );
         assert!(preview.len() < 2_400, "retired evidence stays bounded");
         assert!(
             preview.contains("spill://"),
@@ -656,7 +661,9 @@ mod tests {
         let edited = parsed(&messages[4]);
         assert_eq!(edited["status"], "completed");
         assert_eq!(edited["result"]["summary"], "Replaced the timeout");
-        let preview = edited["result"]["data"]["content"].as_str().unwrap_or_default();
+        let preview = edited["result"]["data"]["content"]
+            .as_str()
+            .unwrap_or_default();
         assert!(preview.len() < 2_400, "retired evidence stays bounded");
         assert!(
             preview.contains("spill://"),
@@ -672,10 +679,7 @@ mod tests {
         let retired_stdout = error["result"]["data"]["stdout"]
             .as_str()
             .unwrap_or_default();
-        assert!(
-            retired_stdout.len() < 2_400,
-            "retired output stays bounded"
-        );
+        assert!(retired_stdout.len() < 2_400, "retired output stays bounded");
         assert!(
             retired_stdout.contains("spill://"),
             "retired output names its full copy"

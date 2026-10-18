@@ -143,8 +143,7 @@ mod tests {
         };
         let json = serde_json::to_string(&attribution).unwrap();
         assert!(json.contains("\"retiredBytes\":2048"));
-        let parsed: crate::efficiency::context::Attribution =
-            serde_json::from_str(&json).unwrap();
+        let parsed: crate::efficiency::context::Attribution = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.retired_bytes, 2_048);
         // Rows written before the field existed must still parse and sum as zero.
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();

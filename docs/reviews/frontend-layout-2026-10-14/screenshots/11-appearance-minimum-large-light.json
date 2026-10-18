@@ -1,0 +1,301 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.890625,
+        "height": 29.890625,
+        "right": 121.890625,
+        "width": 29.890625,
+        "x": 92,
+        "y": 10
+      }
+    },
+    {
+      "className": "gyro-settings-back-button has-label",
+      "label": "Back to Sessions",
+      "rect": {
+        "bottom": 86,
+        "height": 34,
+        "right": 133.53125,
+        "width": 115.53125,
+        "x": 18,
+        "y": 52
+      }
+    },
+    {
+      "className": "",
+      "label": "Search settings",
+      "rect": {
+        "bottom": 128,
+        "height": 30,
+        "right": 134,
+        "width": 81,
+        "x": 53,
+        "y": 98
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "General",
+      "rect": {
+        "bottom": 202.1875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 170
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-active is-settings-page",
+      "label": "Appearance",
+      "rect": {
+        "bottom": 237.375,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 205.1875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Keyboard Shortcuts",
+      "rect": {
+        "bottom": 272.5625,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 240.375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Usage & Limits",
+      "rect": {
+        "bottom": 336.75,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 304.5625
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Models & Accounts",
+      "rect": {
+        "bottom": 371.9375,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 339.75
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "CLI Profiles",
+      "rect": {
+        "bottom": 407.125,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 374.9375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Permissions",
+      "rect": {
+        "bottom": 442.3125,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 410.125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 506.5,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 474.3125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Tools",
+      "rect": {
+        "bottom": 541.6875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 509.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 576.875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 544.6875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Updates",
+      "rect": {
+        "bottom": 641.0625,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 608.875
+      }
+    },
+    {
+      "className": "gyro-settings-group-reset",
+      "label": "Reset theme",
+      "rect": {
+        "bottom": 215.03125,
+        "height": 30,
+        "right": 814.609375,
+        "width": 109.125,
+        "x": 705.484375,
+        "y": 185.03125
+      }
+    },
+    {
+      "className": "is-system",
+      "label": "System theme",
+      "rect": {
+        "bottom": 367.75,
+        "height": 115.03125,
+        "right": 413.125,
+        "width": 188.734375,
+        "x": 224.390625,
+        "y": 252.71875
+      }
+    },
+    {
+      "className": "is-light is-active",
+      "label": "Light theme",
+      "rect": {
+        "bottom": 367.75,
+        "height": 115.03125,
+        "right": 613.859375,
+        "width": 188.734375,
+        "x": 425.125,
+        "y": 252.71875
+      }
+    },
+    {
+      "className": "is-dark",
+      "label": "Dark theme",
+      "rect": {
+        "bottom": 367.75,
+        "height": 115.03125,
+        "right": 814.59375,
+        "width": 188.734375,
+        "x": 625.859375,
+        "y": 252.71875
+      }
+    },
+    {
+      "className": "gyro-settings-group-reset",
+      "label": "Reset text & layout",
+      "rect": {
+        "bottom": 421.75,
+        "height": 30,
+        "right": 814.609375,
+        "width": 148.78125,
+        "x": 665.828125,
+        "y": 391.75
+      }
+    },
+    {
+      "className": "",
+      "label": "Small",
+      "rect": {
+        "bottom": 494.984375,
+        "height": 34.5,
+        "right": 667.453125,
+        "width": 54.734375,
+        "x": 612.71875,
+        "y": 460.484375
+      }
+    },
+    {
+      "className": "",
+      "label": "Default",
+      "rect": {
+        "bottom": 494.984375,
+        "height": 34.5,
+        "right": 735.390625,
+        "width": 65.9375,
+        "x": 669.453125,
+        "y": 460.484375
+      }
+    },
+    {
+      "className": "is-active",
+      "label": "Large",
+      "rect": {
+        "bottom": 494.984375,
+        "height": 34.5,
+        "right": 793.515625,
+        "width": 56.125,
+        "x": 737.390625,
+        "y": 460.484375
+      }
+    },
+    {
+      "className": "",
+      "label": "Compact",
+      "rect": {
+        "bottom": 584.65625,
+        "height": 34.5,
+        "right": 692.234375,
+        "width": 78.015625,
+        "x": 614.21875,
+        "y": 550.15625
+      }
+    },
+    {
+      "className": "is-active",
+      "label": "Comfortable",
+      "rect": {
+        "bottom": 584.65625,
+        "height": 34.5,
+        "right": 793.515625,
+        "width": 99.28125,
+        "x": 694.234375,
+        "y": 550.15625
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

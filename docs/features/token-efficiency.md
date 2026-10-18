@@ -48,6 +48,12 @@ and the auto-compaction threshold remain independent.
   attachments stay. The transcript is unchanged. Auto-compact remains the
   window backstop. Resumed Codex, Claude, and ACP threads keep their own
   history and their own compaction.
+- `/compact` reports what it actually did. A resumed Codex thread compacts
+  inside its own session, which is a model summary of the earlier conversation.
+  Every other provider is rewritten locally: the checkpoint either keeps the
+  history whole because nothing needed dropping, or replaces the middle turns
+  with a one-line digest each. The activity row and the transcript card say
+  "condensed" or "kept" for those, never "summarized".
 - Three consecutive identical Gyro tool calls with unchanged state/results
   produce a correction notice. Six pause the turn with a checkpoint. Polling and
   waits are exempt; native internal loops are not claimed as visible.

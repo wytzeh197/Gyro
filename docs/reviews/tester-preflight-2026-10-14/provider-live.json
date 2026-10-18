@@ -1,0 +1,119 @@
+{
+  "schema": "gyro.provider-verification.v1",
+  "checkedAt": "2026-10-14T06:58:40.678Z",
+  "temporaryRoot": "/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-provider-verification-mMBWId",
+  "live": true,
+  "scope": "Shipped providers; readiness is distinct from generation. CLI live probes do not validate desktop rendering or every listed model.",
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "executionKind": "codex-cli",
+      "model": "gpt-5.6-sol",
+      "readiness": "ready",
+      "summary": "Logged in using ChatGPT",
+      "live": {
+        "status": "passed",
+        "code": 0,
+        "signal": null,
+        "durationMs": 4753,
+        "result": {
+          "schema": "gyro.cli.v1",
+          "status": "done",
+          "sessionId": "3c9d0f29-c0d3-4608-b48b-bbcc29c2f90a",
+          "title": "Reply exactly GYRO_OK. Do not use tools, access",
+          "workspace": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-provider-verification-mMBWId/workspaces/openai",
+          "workspaceMode": "local",
+          "branch": "main",
+          "worktreeName": null,
+          "profileId": "codex",
+          "profileLabel": "Codex CLI",
+          "model": "gpt-5.6-sol",
+          "approvalRequired": true,
+          "appHandoff": {
+            "requested": false,
+            "opened": false,
+            "message": "app handoff skipped; resume available with `gyro resume 3c9d0f29-c0d3-4608-b48b-bbcc29c2f90a`"
+          },
+          "resumeCommand": "gyro resume 3c9d0f29-c0d3-4608-b48b-bbcc29c2f90a",
+          "nextCommand": null,
+          "message": "trusted provider run completed and was saved to the shared session",
+          "run": {
+            "runId": "1a05b1c7-b8bc-41c5-8075-3e99d779ab26",
+            "attemptId": "956ca1c7-6ee9-4ecd-b327-c32f32600ab9",
+            "providerId": "openai",
+            "durationMs": 4684,
+            "exitCode": 0,
+            "resumed": false,
+            "response": "GYRO_OK"
+          }
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "executionKind": "claude-code",
+      "model": "claude-sonnet-5",
+      "readiness": "ready",
+      "summary": "Claude CLI reports a stored login; generation must verify account access.",
+      "live": {
+        "status": "failed",
+        "code": 3,
+        "signal": null,
+        "durationMs": 3480,
+        "result": {
+          "stdout": ""
+        },
+        "stderr": "{\n  \"schema\": \"gyro.cli.v1\",\n  \"status\": \"failed\",\n  \"error\": {\n    \"category\": \"provider-unavailable\",\n    \"code\": 3,\n    \"message\": \"Your organization has disabled Claude subscription access for Claude Code. Ask your organization administrator to enable access, or explicitly configure API-key access in Settings > Providers.. The Gyro session was saved; retry with `gyro resume 2915afe8-0175-4d45-a397-0d67eabe1e9f` after access is restored.\"\n  }\n}\n"
+      }
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "executionKind": "ollama-api",
+      "model": "qwen3:0.6b",
+      "readiness": "ready",
+      "summary": "Ollama is running at http://localhost:11434/api; 1 local model discovered.",
+      "live": {
+        "status": "incorrect-response",
+        "code": 0,
+        "signal": null,
+        "durationMs": 2570,
+        "result": {
+          "schema": "gyro.cli.v1",
+          "status": "done",
+          "sessionId": "2a4eb567-977b-48eb-96f5-13e3c1d6ffab",
+          "title": "Reply exactly GYRO_OK. Do not use tools, access",
+          "workspace": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-provider-verification-mMBWId/workspaces/ollama",
+          "workspaceMode": "local",
+          "branch": "main",
+          "worktreeName": null,
+          "profileId": "ollama",
+          "profileLabel": "Ollama (local)",
+          "model": "qwen3:0.6b",
+          "approvalRequired": true,
+          "appHandoff": {
+            "requested": false,
+            "opened": false,
+            "message": "app handoff skipped; resume available with `gyro resume 2a4eb567-977b-48eb-96f5-13e3c1d6ffab`"
+          },
+          "resumeCommand": "gyro resume 2a4eb567-977b-48eb-96f5-13e3c1d6ffab",
+          "nextCommand": null,
+          "message": "trusted provider run completed and was saved to the shared session",
+          "run": {
+            "runId": "7ffcd423-36c0-4f5a-b877-0e1ee01b18d8",
+            "attemptId": "d8a57667-6b35-4557-87ab-6e304ed12fa5",
+            "providerId": "ollama",
+            "durationMs": 2526,
+            "exitCode": 0,
+            "resumed": false,
+            "response": "```markdown\nGYRO_OK\n```"
+          }
+        },
+        "stderr": ""
+      }
+    }
+  ]
+}

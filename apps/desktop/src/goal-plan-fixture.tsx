@@ -97,6 +97,9 @@ function Fixture() {
   const [goalEditorOpen, setGoalEditorOpen] = useState(
     new URLSearchParams(location.search).get("editor") === "goal",
   );
+  // Goal mode is a selection like Plan, so the fixture keeps it after the
+  // editor closes and lets the chip remove it explicitly.
+  const [goalMode, setGoalMode] = useState(true);
   const [mode, setMode] = useState<"normal" | "plan">(
     new URLSearchParams(location.search).get("mode") === "plan"
       ? "plan"
@@ -248,10 +251,18 @@ function Fixture() {
           sessionPlan={plan}
           isComposerSending={running}
           isGoalComposerActive={goalEditorOpen}
+          isGoalModeActive={goalMode || goalEditorOpen}
           chatMode={mode}
-          onCancelGoalComposer={() => setGoalEditorOpen(false)}
+          onCancelGoalComposer={() => {
+            setGoalEditorOpen(false);
+            setGoalMode(false);
+          }}
+          onCloseGoalComposer={() => setGoalMode(true)}
           onComposerAction={(action) => {
-            if (action === "add-goal") setGoalEditorOpen(true);
+            if (action === "add-goal") {
+              setGoalEditorOpen(true);
+              setGoalMode(true);
+            }
             if (action === "set-chat-mode-normal") setMode("normal");
           }}
           activeChatPanel={panel}

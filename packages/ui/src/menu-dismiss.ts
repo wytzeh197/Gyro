@@ -55,11 +55,21 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
     };
     const handleFocusIn = (event: FocusEvent) => {
       const path = event.composedPath();
+      const focused = event.target;
       if (
-        !path.includes(element) &&
-        !(triggerRef?.current && path.includes(triggerRef.current))
+        path.includes(element) ||
+        (triggerRef?.current && path.includes(triggerRef.current)) ||
+        // WebKit does not focus a button inside <details>. The press focuses
+        // the nearest tabIndex ancestor, which still contains this menu.
+        // Treating that as "outside" closes the menu before click, so
+        // Remove from Gyro never runs.
+        (focused instanceof Element &&
+          focused !== document.body &&
+          focused !== document.documentElement &&
+          focused.contains(element))
       )
-        menu.dismiss();
+        return;
+      menu.dismiss();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || openMenus.at(-1) !== menu) return;

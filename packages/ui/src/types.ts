@@ -9,6 +9,14 @@ export type WorkspaceLayoutId = "thread" | "terminal-grid" | "code";
 
 export type SessionsLayoutId = Exclude<WorkspaceLayoutId, "code">;
 
+/**
+ * Where Gyro lands when it launches.
+ *
+ * `last` restores whatever was on screen at the previous exit; the other three
+ * name a view the app opens on every time, whatever it was showing before.
+ */
+export type LaunchView = "last" | "workspace" | "sessions" | "terminals";
+
 export type AppDestination =
   | "workspace"
   | "tools"
@@ -415,6 +423,7 @@ export type SettingsSectionId =
   | "tools-contributions"
   | "providers"
   | "usage-limits"
+  | "efficiency"
   | "cli-profiles"
   | "appearance"
   | "permissions"
@@ -1280,6 +1289,8 @@ export type WorkbenchPreferences = {
   interfaceSize: InterfaceSize;
   motionSpeed: MotionSpeed;
   lastSettingsSection: SettingsSectionId;
+  /** Where Gyro lands on launch; `last` restores the previous view. */
+  launchView: LaunchView;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
   chatEnvironmentRailOpen: boolean;
@@ -1389,7 +1400,8 @@ export type UsageOrigin =
   | "council-seat"
   | "council-synthesis"
   | "council-resynthesis"
-  | "optimization";
+  | "optimization"
+  | "agent-session";
 
 export type UsageOriginTotals = {
   origin: UsageOrigin;

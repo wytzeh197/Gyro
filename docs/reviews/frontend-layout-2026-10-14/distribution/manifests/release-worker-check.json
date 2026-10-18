@@ -1,0 +1,19 @@
+{
+  "executable": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode",
+  "exitCode": 0,
+  "records": [
+    {
+      "type": "result",
+      "outcome": {
+        "ok": true,
+        "value": [
+          2,
+          4,
+          6
+        ]
+      },
+      "calls": 0
+    }
+  ],
+  "stderr": ""
+}

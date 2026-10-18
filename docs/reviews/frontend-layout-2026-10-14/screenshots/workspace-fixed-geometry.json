@@ -1,0 +1,9 @@
+{
+  "gridRows": "69.0156px 521.094px 29.8906px",
+  "limit": "calc(\n    100vh - calc(30px * 1.15) -\n      calc(30px * 1.15) - calc(26px * 1.15)\n  )",
+  "panel": {
+    "bottom": 590.109375,
+    "height": 521.09375,
+    "top": 69.015625
+  }
+}

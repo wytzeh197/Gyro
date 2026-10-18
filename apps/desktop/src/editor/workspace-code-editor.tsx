@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   useAppearance,
+  userIsTypingElsewhere,
   type EditorBuffer,
   type EditorRevealTarget,
   type EditorSelection,
@@ -411,7 +412,9 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
       };
       editor.setPosition(position);
       editor.revealPositionInCenter(position);
-      editor.focus();
+      // Reveals come from agent edits and diff navigation as well as from the
+      // user's own clicks, so keep the caret where the user left it.
+      if (!userIsTypingElsewhere(editor.getDomNode())) editor.focus();
     },
     [],
   );

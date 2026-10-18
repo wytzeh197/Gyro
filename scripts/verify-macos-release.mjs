@@ -288,12 +288,22 @@ function verifyDeveloperIdBundle(appPath, signatureDetails, signing) {
     "--xml",
     appPath,
   ]);
-  if (
-    `${entitlements.stdout}\n${entitlements.stderr}`.includes(
-      "com.apple.security.get-task-allow",
-    )
-  ) {
+  const entitlementText = `${entitlements.stdout}\n${entitlements.stderr}`;
+  if (entitlementText.includes("com.apple.security.get-task-allow")) {
     throw new Error("bundle is signed with the debugging get-task-allow entitlement");
+  }
+  // The hardened runtime gates audio input and speech recognition on these
+  // entitlements. Without them macOS denies the microphone before any sheet is
+  // presented, so dictation fails with no prompt to accept.
+  for (const key of [
+    "com.apple.security.device.audio-input",
+    "com.apple.security.personal-information.speech-recognition",
+  ]) {
+    if (!entitlementText.includes(key)) {
+      throw new Error(
+        `bundle signature is missing ${key}; sign with --entitlements apps/desktop/src-tauri/Entitlements.plist`,
+      );
+    }
   }
   run("xcrun", ["stapler", "validate", appPath]);
   const assessment = run("spctl", [

@@ -50,8 +50,8 @@ owner's current brand source in September 2026:
   icon set. The accent dot is Kimi's `#1783ff`.
 - **Cursor**: the cube from Simple Icons 16.33.0, matching cursor.com/brand.
   Monochrome.
-- **OpenCode**: the two-tone frame from opencode.ai/brand. The dark variant is
-  `#f1ecec` on `#4b4646`; the light variant is `#211e1e` on `#cfcecd`.
+- **OpenCode**: the two-tone square mark. The dark frame is `#ffffff` and the
+  block is `#4b4646`; the light frame is `#211e1e` and the block is `#cfcecd`.
 - **Ollama**: the llama from Simple Icons 16.33.0, matching ollama.com.
   Monochrome.
 - **OpenRouter**: the glyph from openrouter.ai/brand (the July 2026 refresh).
