@@ -622,8 +622,10 @@ fn real_binary_retires_legacy_gemini_without_transferring_authentication() {
 #[test]
 fn real_binary_preserves_acp_cancellation_and_refusal_for_every_acp_provider() {
     for provider_id in ["kimi", "xai", "cursor", "opencode"] {
+        // An agent stopReason of cancelled ends the turn. A person stopping
+        // Gyro still cancels the shared token and exits 130.
         for (reason, code, category, status) in [
-            ("cancelled", 130, "cancelled", "cancelled"),
+            ("cancelled", 5, "execution-failed", "failed"),
             ("refusal", 5, "execution-failed", "failed"),
         ] {
             let root = PathBuf::from("/tmp").join(format!(
@@ -665,6 +667,15 @@ done
                 .output()
                 .unwrap();
             assert_failure(&output, code, category);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if reason == "cancelled" {
+                assert!(
+                    stderr.contains("ended the turn without finishing"),
+                    "{stderr}"
+                );
+            } else {
+                assert!(stderr.contains("refused to continue"), "{stderr}");
+            }
             let store = SessionStore::open(GyroPaths::from_base_dir(data_base(&home))).unwrap();
             let session = store.latest_session().unwrap().unwrap();
             let events = store.read_events(session.id).unwrap();

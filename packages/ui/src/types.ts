@@ -1053,7 +1053,7 @@ export type ProviderChatStreamEvent = {
     outputTokens?: number;
     totalTokens?: number;
     modelContextWindow?: number;
-    /** Traffic lower bound. The provider did not measure the window. */
+    /** True when this count was not measured by the provider. The meter ignores it. */
     estimated?: boolean;
   } | null;
   /**

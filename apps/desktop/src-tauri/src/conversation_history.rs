@@ -10,12 +10,22 @@ const HISTORY_RECENT_CHARS: usize = 2_000;
 const HISTORY_OLDER_CHARS: usize = 400;
 
 /// Load the local Gyro transcript for any model handoff or failed resume.
+///
+/// A failed resume stays on the tapered window. The first turn after a model
+/// switch does not: that model has no provider session, so it gets every user
+/// and assistant message still stored for the chat.
 pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
     let store = open_store().ok()?;
     // Scan the existing bounded event window before selecting conversation.
     // Tool activity must not consume the 40-message history allowance.
     let events = store.read_events(session_uuid).ok()?;
+    if model_switch_awaits_first_reply(&events) {
+        let transcript = store
+            .read_transcript_events(session_uuid)
+            .unwrap_or(events);
+        return conversation_history_from_events_full(transcript);
+    }
     if super::efficiency::config().policies() && super::efficiency::config().task_state {
         let context = store.read_efficiency_context_events(session_uuid).ok()?;
         if let Some(record) = context
@@ -200,8 +210,34 @@ fn condensed_turns_digest(condensed: &[(String, String)]) -> String {
     digest.join("\n")
 }
 
+fn is_model_switch(event: &SessionEvent) -> bool {
+    event.kind == SessionEventKind::SystemEvent
+        && event.payload.get("kind").and_then(serde_json::Value::as_str) == Some("model-switch")
+}
+
+/// True when the latest model switch has not yet received an assistant reply.
+///
+/// That turn opens a fresh provider session, so the prompt has to carry the
+/// chat the previous model already had.
+fn model_switch_awaits_first_reply(events: &[SessionEvent]) -> bool {
+    let Some(switch_at) = events.iter().rposition(is_model_switch) else {
+        return false;
+    };
+    !events[switch_at + 1..].iter().any(|event| {
+        event.kind == SessionEventKind::AssistantMessage && !event.message.trim().is_empty()
+    })
+}
+
 /// The handoff history as message lines: role plus text, already tapered.
 fn history_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
+    collect_history_lines(events, true)
+}
+
+fn history_lines_full(events: Vec<SessionEvent>) -> Vec<(String, String)> {
+    collect_history_lines(events, false)
+}
+
+fn collect_history_lines(events: Vec<SessionEvent>, taper: bool) -> Vec<(String, String)> {
     let mut lines: Vec<(String, String)> = Vec::new();
     for event in events {
         if let Some(summary) = local_context_checkpoint(&event) {
@@ -225,6 +261,9 @@ fn history_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
     // spend one of the full-length slots on text the prompt already carries.
     if lines.last().is_some_and(|(role, _)| role == "User") {
         lines.pop();
+    }
+    if !taper {
+        return lines;
     }
     if lines.len() > 40 {
         let summary = lines
@@ -264,6 +303,10 @@ fn history_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
 /// reconstruct the conversation instead of resuming a provider session.
 fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
     join_history(&history_lines(events))
+}
+
+fn conversation_history_from_events_full(events: Vec<SessionEvent>) -> Option<String> {
+    join_history(&history_lines_full(events))
 }
 
 fn history_line((role, text): &(String, String)) -> String {
@@ -423,5 +466,68 @@ mod tests {
         assert!(messages[0].chars().count() < 450);
         assert!(messages[39].chars().count() > 2_000);
         assert!(messages[39].chars().count() < 2_050);
+    }
+
+    #[test]
+    fn model_switch_handoff_sends_every_message_unclipped() {
+        let session = Uuid::new_v4();
+        let mut events: Vec<_> = (0..45)
+            .map(|index| {
+                SessionEvent::new(
+                    session,
+                    SessionEventKind::AssistantMessage,
+                    format!("message-{index:02} {}", "x".repeat(3_000)),
+                    serde_json::json!({}),
+                )
+            })
+            .collect();
+        events.push(SessionEvent::new(
+            session,
+            SessionEventKind::SystemEvent,
+            "Switched to Grok 4.7",
+            serde_json::json!({"kind": "model-switch", "modelId": "grok-4"}),
+        ));
+        events.push(SessionEvent::new(
+            session,
+            SessionEventKind::UserMessage,
+            "Current request",
+            serde_json::json!({}),
+        ));
+        assert!(model_switch_awaits_first_reply(&events));
+        let history = conversation_history_from_events_full(events).unwrap();
+        let messages: Vec<_> = history.split("\n\n").collect();
+        assert_eq!(messages.len(), 45);
+        assert!(messages[0].starts_with("Assistant: message-00"));
+        assert!(messages[0].contains(&"x".repeat(3_000)));
+        assert!(!messages[0].contains("[…]"));
+        assert!(messages[44].starts_with("Assistant: message-44"));
+        assert!(!history.contains("Current request"));
+        assert!(!history.contains("Switched to Grok"));
+    }
+
+    #[test]
+    fn model_switch_after_a_reply_is_no_longer_the_handoff_turn() {
+        let session = Uuid::new_v4();
+        let events = vec![
+            SessionEvent::new(
+                session,
+                SessionEventKind::SystemEvent,
+                "Switched to Grok 4.7",
+                serde_json::json!({"kind": "model-switch"}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::AssistantMessage,
+                "Picked up the thread",
+                serde_json::json!({}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::UserMessage,
+                "Next request",
+                serde_json::json!({}),
+            ),
+        ];
+        assert!(!model_switch_awaits_first_reply(&events));
     }
 }

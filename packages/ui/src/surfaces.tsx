@@ -12490,13 +12490,20 @@ export function ChatEnvironmentPopover({
     ? `+${changeTotals.additions} −${changeTotals.deletions}`
     : sourceControlTotalsLabel(changeTotals);
   const repoName = workspaceName(workspacePath);
-  // Files drive the count in the working-tree heading; a status read that has
-  // not landed yet must not claim the tree is clean.
-  const changedFileCount =
-    sourceControl?.detailsLoaded === false
-      ? 0
-      : (sourceControl?.files?.length ?? 0);
+  // A status read that has not landed yet must not claim the tree is clean.
+  const treeKnown =
+    Boolean(sourceControl?.available) &&
+    sourceControl?.detailsLoaded !== false;
+  const changedFileCount = treeKnown ? (sourceControl?.files?.length ?? 0) : 0;
   const changeScope = sourceControlTotalsScope(changeTotals);
+  // Branch totals answer "how far from main", not "what is uncommitted".
+  // Labelling both "Changes" made a clean tree look like it held the diff.
+  const changesLabel =
+    changeTotals.kind === "branch"
+      ? "Vs main"
+      : changeTotals.kind === "working-tree"
+        ? "Uncommitted"
+        : "Changes";
 
   return (
     <aside aria-label="Environment" className="gyro-chat-environment-popover">
@@ -12566,7 +12573,7 @@ export function ChatEnvironmentPopover({
             <span>{middleTruncate(branchLabel, 22)}</span>
             <ChevronDown aria-hidden="true" size={12} />
           </button>
-          {sourceControl?.available ? (
+          {treeKnown ? (
             <span
               className={`gyro-environment-state${changedFileCount ? "" : " is-clean"}`}
             >
@@ -12591,11 +12598,12 @@ export function ChatEnvironmentPopover({
       <section className="gyro-environment-section">
         <header>
           <span>Working tree</span>
-          <small>
-            {changedFileCount
-              ? `${formatEnvironmentCount(changedFileCount)} ${changedFileCount === 1 ? "file" : "files"}`
-              : "clean"}
-          </small>
+          {treeKnown && changedFileCount ? (
+            <small>
+              {formatEnvironmentCount(changedFileCount)}{" "}
+              {changedFileCount === 1 ? "file" : "files"}
+            </small>
+          ) : null}
         </header>
         <div className="gyro-chat-environment-popover-rows">
           <button
@@ -12606,7 +12614,7 @@ export function ChatEnvironmentPopover({
             type="button"
           >
             <FileDiff aria-hidden="true" size={14} />
-            <span className="gyro-environment-label">Changes</span>
+            <span className="gyro-environment-label">{changesLabel}</span>
             <span className="gyro-environment-value is-changed">
               {hasChangeTotals ? (
                 <>
@@ -12651,18 +12659,17 @@ export function ChatEnvironmentPopover({
           {lastCommit ? (
             <button
               aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
-              className="gyro-environment-row"
+              className="gyro-environment-row is-commit"
               onClick={openReview}
               title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
               type="button"
             >
               <History aria-hidden="true" size={14} />
-              <span className="gyro-environment-label">Last commit</span>
-              <span className="gyro-environment-value">
+              <span className="gyro-environment-commit">
                 <span className="gyro-environment-value-text">
                   {lastCommit.subject}
                 </span>
-                <span className="is-quiet">· {lastCommit.relativeDate}</span>
+                <span className="is-quiet">{lastCommit.relativeDate}</span>
               </span>
               <ChevronRight
                 aria-hidden="true"
@@ -25225,6 +25232,13 @@ function Composer({
       : contextUsage.usedTokens > 0
         ? "estimated"
         : "empty";
+  // The meter shows a provider measurement or nothing. The tilde caption
+  // stays only for a positive count that is still marked estimated.
+  const providerMeasured = Boolean(
+    contextUsage &&
+      (contextUsage.detail.startsWith("Latest context usage") ||
+        contextUsage.detail.startsWith("Provider-reported")),
+  );
   const contextSeverity = contextMeterSeverity(contextUsage, contextSource);
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
@@ -26787,7 +26801,7 @@ function Composer({
                   <strong>
                     {contextSource === "empty"
                       ? "—"
-                      : `${contextSource === "estimated" ? "~" : ""}${contextUsage.usedLabel}`}
+                      : `${contextSource === "estimated" && !providerMeasured ? "~" : ""}${contextUsage.usedLabel}`}
                   </strong>
                   {contextSource !== "empty" &&
                   contextUsage.contextWindowTokens > 0 ? (
@@ -26803,7 +26817,7 @@ function Composer({
                     ? "Measured once the model replies"
                     : contextUsage.contextWindowTokens <= 0
                       ? "Window unknown"
-                      : contextSource === "estimated"
+                      : contextSource === "estimated" && !providerMeasured
                         ? "Estimated from this thread"
                         : "Reported by the provider"}
                 </p>

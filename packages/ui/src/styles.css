@@ -29917,6 +29917,53 @@ button.gyro-account-menu-row:hover,
   pointer-events: none;
 }
 
+/* Cover the gap under the card, and dissolve the transcript above it, so a
+   line cannot be read through the dock. The empty hero stays clear. */
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock {
+  --gyro-composer-scrim: var(--gyro-pane);
+  --gyro-composer-dock-fade: 64px;
+  background: var(--gyro-composer-scrim);
+  padding-bottom: 10px;
+}
+
+:root[data-theme="dark"]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock {
+  --gyro-composer-scrim: var(--gyro-app);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--gyro-composer-dock-fade);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--gyro-composer-scrim) 68%
+  );
+  pointer-events: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock
+  > .gyro-composer-shell {
+  position: relative;
+  z-index: 1;
+}
+
 .gyro-chat-thread-canvas > .gyro-chat-composer-dock > * {
   pointer-events: auto;
 }
@@ -34731,7 +34778,7 @@ button.gyro-account-menu-row:hover,
   display: grid;
   gap: 9px;
   grid-template-columns:
-    15px calc(84px * var(--gyro-ui-scale, 1)) minmax(0, 1fr)
+    15px calc(96px * var(--gyro-ui-scale, 1)) minmax(0, 1fr)
     13px;
   min-width: 0;
   padding: 5px 6px;
@@ -34764,6 +34811,7 @@ button.gyro-account-menu-row:hover,
   font-size: calc(12.5px * var(--gyro-ui-scale, 1));
   font-variant-numeric: tabular-nums;
   gap: 7px;
+  justify-content: flex-end;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -34790,6 +34838,25 @@ button.gyro-account-menu-row:hover,
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The subject keeps the line. A fixed "Last commit" label plus the date
+   beside it left about six characters ("Polish the…"). */
+.gyro-chat-environment-popover .gyro-environment-row.is-commit {
+  grid-template-columns: 15px minmax(0, 1fr) 13px;
+}
+
+.gyro-environment-commit {
+  display: grid;
+  min-width: 0;
+  row-gap: 1px;
+}
+
+.gyro-environment-commit > .is-quiet {
+  color: var(--gyro-faint);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  white-space: nowrap;
 }
 
 .gyro-environment-trail {
@@ -34811,38 +34878,53 @@ button.gyro-account-menu-row:hover,
   }
 }
 
-/* The two rows that act rather than report share the status rows' icon gutter
-   and lose their stacked subtitle, so the card keeps one grid to the end. */
+/* The reason sits under the label. Beside it, "Open a request for this
+   branch" was cut to "Open a request for this bra…". */
 .gyro-chat-environment-popover .gyro-chat-environment-popover-actions > button {
   align-items: center;
   box-sizing: border-box;
+  column-gap: 9px;
   display: grid;
-  gap: 9px;
-  grid-template-columns: 15px max-content minmax(0, 1fr);
+  grid-template-columns: 15px minmax(0, 1fr);
   padding: 5px 6px;
+  row-gap: 1px;
   text-align: left;
 }
 
 .gyro-chat-environment-popover-actions > button > svg {
+  align-self: center;
   color: var(--gyro-muted);
+  grid-row: 1 / span 2;
+  margin-top: 0;
 }
 
 .gyro-chat-environment-popover-actions > button > span {
   color: var(--gyro-text);
   font-size: calc(12px * var(--gyro-ui-scale, 1));
+  grid-column: 2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-chat-environment-popover-actions > button > small {
+.gyro-chat-environment-popover-actions > button:disabled > span {
   color: var(--gyro-faint);
+}
+
+.gyro-chat-environment-popover-actions > button > small {
+  color: var(--gyro-muted);
   font-size: calc(11px * var(--gyro-ui-scale, 1));
-  justify-self: end;
+  grid-column: 2;
+  justify-self: start;
+  line-height: 1.35;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gyro-chat-environment-popover-actions > button:disabled > small {
+  color: var(--gyro-faint);
 }
 
 /* Sources are chips on one wrapping line: a handful of names is a glance, not
