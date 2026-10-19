@@ -1,78 +1,114 @@
+/* Same overlay language as the branch and model prompts: shared radii,
+   scrim, and type scale. The Esc hint sits on a chip so it stays muted
+   without dropping below readable contrast. */
 .gyro-quit-dialog {
   appearance: none;
   box-sizing: border-box;
-  width: min(544px, calc(100vw - 40px));
+  width: min(420px, calc(100vw - 40px));
   max-height: calc(100dvh - 32px);
   margin: auto;
   padding: 0;
   overflow: auto;
   border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border));
-  border-radius: 18px;
-  background: var(--gyro-premium-panel, var(--gyro-surface-raised));
-  color: var(--gyro-text);
+  border-radius: var(--gyro-radius-md, 6px);
+  background: var(--gyro-premium-panel, var(--gyro-surface));
+  color: var(--gyro-premium-text, var(--gyro-text));
   color-scheme: inherit;
   font-family: var(--gyro-font-sans);
-  font-size: 13px;
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  box-shadow:
+    0 28px 88px var(--gyro-premium-shadow, rgba(0, 0, 0, 0.44)),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight, rgba(255, 255, 255, 0.04));
 }
 
 .gyro-quit-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.68);
+  background: var(--gyro-scrim, rgba(0, 0, 0, 0.58));
 }
+
 .gyro-quit-dialog-body {
-  padding: 16px 18px;
+  display: grid;
+  gap: 8px;
+  padding: 16px 16px 14px;
 }
+
 .gyro-quit-dialog h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.5;
+  font-size: calc(18px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.2;
 }
+
 .gyro-quit-dialog p {
-  margin: 6px 0 0;
-  color: var(--gyro-muted);
+  margin: 0;
+  color: var(--gyro-premium-muted, var(--gyro-muted));
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
   line-height: 1.5;
 }
+
+.gyro-quit-dialog .gyro-quit-error {
+  color: var(--gyro-danger);
+}
+
 .gyro-quit-dialog footer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 12px;
-  padding: 9px 13px;
+  gap: 8px;
+  padding: 12px 16px;
   border-top: 1px solid var(--gyro-premium-line-soft, var(--gyro-border));
 }
+
 .gyro-quit-dialog button {
   appearance: none;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 0 12px;
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--gyro-radius-sm, 4px);
   font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
   cursor: pointer;
 }
+
 .gyro-quit-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
-  color: var(--gyro-muted);
+  color: var(--gyro-premium-text, var(--gyro-text));
 }
+
 .gyro-quit-cancel kbd {
-  margin-left: 3px;
+  padding: 1px 5px;
+  border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border-soft));
+  border-radius: var(--gyro-radius-sm, 4px);
+  background: var(--gyro-premium-control, var(--gyro-surface-soft));
+  color: var(--gyro-premium-muted, var(--gyro-muted));
   font: inherit;
-  opacity: 0.55;
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-weight: 650;
+  line-height: 1.4;
 }
-.gyro-quit-cancel:hover {
+
+.gyro-quit-cancel:hover:not(:disabled) {
   background: var(--gyro-surface-soft);
 }
+
 .gyro-quit-dialog .gyro-quit-confirm {
   background: var(--gyro-text);
   color: var(--gyro-surface-raised);
-  font-weight: 600;
 }
-.gyro-quit-confirm:hover {
-  opacity: 0.9;
+
+.gyro-quit-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 88%, var(--gyro-surface));
 }
+
 .gyro-quit-dialog button:focus-visible {
   outline: 2px solid var(--gyro-focus-ring, var(--gyro-accent));
   outline-offset: 3px;
 }
+
 .gyro-quit-dialog button:disabled {
   cursor: default;
   opacity: 0.5;
