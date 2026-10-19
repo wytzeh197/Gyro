@@ -408,6 +408,7 @@ pub(super) fn execute(
         .transpose()?
         .unwrap_or_default();
     anyhow::ensure!(signals.len() <= 100, "At most 100 relevance signals");
+    let mut saved_signals = Vec::new();
     if let Ok(store) = open_store() {
         if let Ok(record) = checkpoint(
             &store,
@@ -415,10 +416,10 @@ pub(super) fn execute(
             &bound.workspace_key,
             bound.workspace_context.revision,
         ) {
-            signals.extend(record.repository_signals);
+            saved_signals = record.repository_signals;
         }
     }
-
+    let mut pending_signals = Vec::new();
     if let Some(control) = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -432,26 +433,26 @@ pub(super) fn execute(
             .ok()
             .and_then(|p| p.clone())
         {
-            signals.extend(pending.repository_signals);
+            pending_signals = pending.repository_signals;
         }
     }
+    // save_checkpoint copies pending signals onto the saved record and keeps
+    // that copy in memory. Merge once so rank does not sum both.
+    signals.extend(
+        gyro_core::efficiency::retrieval::merge_repository_signals(
+            &saved_signals,
+            &pending_signals,
+        ),
+    );
     signals.retain(|signal| signal.root_id.is_empty() || signal.root_id == bound.workspace_key);
-    let mut candidates = Vec::new();
-    for entry in listing["entries"].as_array().into_iter().flatten() {
-        if let Some(path) = entry["path"].as_str() {
-            if gyro_core::capability_path_is_sensitive(path) {
-                continue;
-            }
-            let mut candidate = signals
-                .iter()
-                .find(|s| s.path == path)
-                .cloned()
-                .unwrap_or_default();
-            candidate.path = path.into();
-            candidate.test |= path.contains("test") || path.contains("spec");
-            candidates.push(candidate);
-        }
-    }
+    let listed_paths = listing["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry["path"].as_str())
+        .filter(|path| !gyro_core::capability_path_is_sensitive(path));
+    let mut candidates =
+        gyro_core::efficiency::retrieval::outline_candidates(listed_paths, &signals);
     for signal in &signals {
         if signal.explicit
             && !candidates.iter().any(|c| c.path == signal.path)
