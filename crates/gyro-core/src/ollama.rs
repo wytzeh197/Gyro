@@ -428,9 +428,9 @@ where
             });
         }
         if frame.done_reason.as_deref() == Some("length") {
-            // A capped generation still carries usable text, so keep it rather
-            // than failing the turn. Tool calls from that answer are unsafe:
-            // later arguments may have been cut off.
+            // The cap can fall between tool calls. Drop every call from this
+            // answer; the finished response fails below even when some text
+            // already arrived.
             truncated = true;
             tool_calls.clear();
         }
@@ -503,14 +503,15 @@ where
     if let Some(error) = terminal_error {
         return Err(error);
     }
+    // An output cap is an incomplete answer. Returning the partial text would
+    // let a later tool round treat it as the model's finished decision.
+    if truncated {
+        return Err(anyhow!(
+            "Ollama reached its output token limit; no tool calls from this response were executed"
+        ));
+    }
     if content.is_empty() && tool_calls.is_empty() {
-        return Err(if truncated {
-            anyhow!(
-                "Ollama reached its output token limit before producing any text; no tool calls from this response were executed"
-            )
-        } else {
-            anyhow!("Ollama finished without a text response")
-        });
+        return Err(anyhow!("Ollama finished without a text response"));
     }
     Ok(OllamaChatResponse {
         content,

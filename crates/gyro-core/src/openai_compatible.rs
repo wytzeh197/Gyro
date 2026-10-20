@@ -618,15 +618,16 @@ where
         return Err(error);
     }
     let truncated = state.truncated;
+    // An output cap is an incomplete answer. Returning the partial text would
+    // let a later tool round treat it as the model's finished decision.
+    if truncated {
+        return Err(anyhow!(
+            "the provider reached its output token limit; no tool calls from this response were executed"
+        ));
+    }
     let tool_calls = state.tool_calls()?;
     if content.is_empty() && tool_calls.is_empty() {
-        return Err(if truncated {
-            anyhow!(
-                "the provider reached its output token limit before producing any text; no tool calls from this response were executed"
-            )
-        } else {
-            anyhow!("the provider finished without a text response")
-        });
+        return Err(anyhow!("the provider finished without a text response"));
     }
     Ok(OpenAiCompatChatResponse {
         content,
@@ -953,9 +954,9 @@ impl ChatAccumulator {
             // execute: later tool calls or parameters may have been cut off.
             match choice.finish_reason.as_deref() {
                 Some("length") => {
-                    // A capped generation still carries usable text, so keep it
-                    // rather than failing the turn. Tool calls from that answer
-                    // are unsafe: later arguments may have been cut off.
+                    // The cap can fall between tool calls. Drop every call from
+                    // this answer; the finished response fails below even when
+                    // some text already arrived.
                     self.truncated = true;
                     self.tool_calls.clear();
                 },
