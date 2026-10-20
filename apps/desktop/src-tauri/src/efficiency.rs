@@ -438,12 +438,10 @@ pub(super) fn execute(
     }
     // save_checkpoint copies pending signals onto the saved record and keeps
     // that copy in memory. Merge once so rank does not sum both.
-    signals.extend(
-        gyro_core::efficiency::retrieval::merge_repository_signals(
-            &saved_signals,
-            &pending_signals,
-        ),
-    );
+    signals.extend(gyro_core::efficiency::retrieval::merge_repository_signals(
+        &saved_signals,
+        &pending_signals,
+    ));
     signals.retain(|signal| signal.root_id.is_empty() || signal.root_id == bound.workspace_key);
     let listed_paths = listing["entries"]
         .as_array()
@@ -479,8 +477,8 @@ fn revalidate_outputs(
     bound: &BoundProviderCapabilityContext,
     record: &mut TaskCheckpoint,
 ) {
-    // Copy only the buffers this checkpoint references: the full snapshot
-    // carries the text of every open buffer in the IDE.
+    // Copy only the buffers this checkpoint references. The snapshot can hold
+    // unsaved text for every open buffer that fits in the evidence limit.
     let Ok((context_revision, buffers)) = with_ide_evidence(app, bound, |latest| {
         let buffers = record
             .files

@@ -30,10 +30,15 @@ uses its own project trust and approval policy. Pending edit proposals retain
 the selected root through review and application.
 
 Ordinary Workspace context lists editor metadata without selection text or
-unsaved buffer content. `gyro_workspace_read_editor` requests live text for a
-specific path and always opens a one-time approval card with the requested
-text. The preview is delivered only to the running UI, not saved in Session
-events. If the text changes before approval completes, Gyro rejects the read.
+unsaved buffer content. The in-memory bridge also lists every open tab. It
+holds the complete text of the active buffer, the active selection, and other
+dirty buffers when that text fits in the capability result limit. Other clean
+open files are left as metadata; read those with `gyro_workspace_read_range`.
+`gyro_workspace_read_editor` requests live text for one open path and always
+opens a one-time approval card with the requested text. The preview is
+delivered only to the running UI, not saved in Session events. If the text
+changes before approval completes, Gyro rejects the read. A dirty buffer whose
+text did not fit is refused instead of returned as a clipped document.
 The returned `documentVersion` can be passed to a Workspace edit to reject a
 changed editor document; an unsaved buffer also blocks file proposals.
 

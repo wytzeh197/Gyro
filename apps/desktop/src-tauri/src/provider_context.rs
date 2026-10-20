@@ -374,12 +374,8 @@ pub(super) fn occupancy_from_request(
     Some(ProviderContextUsage {
         input_tokens: Some(input_tokens),
         output_tokens,
-        cached_input_tokens: known
-            .cache_read
-            .then_some(accounted.cached_input_tokens),
-        reasoning_output_tokens: known
-            .reasoning
-            .then_some(accounted.reasoning_output_tokens),
+        cached_input_tokens: known.cache_read.then_some(accounted.cached_input_tokens),
+        reasoning_output_tokens: known.reasoning.then_some(accounted.reasoning_output_tokens),
         total_tokens: output_tokens.map(|output| input_tokens.saturating_add(output)),
         model_context_window: model_context_window.filter(|window| *window > 0),
         ..ProviderContextUsage::default()

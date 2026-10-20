@@ -72,6 +72,10 @@ import {
   type IdeEvidenceScheduler,
 } from "./ide-evidence-push";
 import {
+  workspaceContextRelativePath,
+  workspaceContextWithLiveEditor,
+} from "./workspace-context-bridge";
+import {
   turnIdFromSessionEvent,
   chatModeEventMessage,
   createChatModeSessionEvent,
@@ -4829,7 +4833,7 @@ export function App() {
         ? workspaceContextWithLiveEditor(
             workspaceContextSnapshot,
             selectedFile,
-            workbench.ide.buffers[selectedFile ?? ""],
+            workbench.ide.buffers,
             workbench.ide.selection,
             workbench.ide.tabs.map((tab) => tab.path),
           )
@@ -4843,11 +4847,12 @@ export function App() {
     ],
   );
 
-  // The snapshot is rebuilt on every keystroke and cursor move and carries the
-  // text of every open buffer, so pushes are coalesced: the first change of a
-  // burst goes out at once, sustained editing is throttled to one update a
-  // second, and the last change lands shortly after typing pauses. Sending a
-  // turn still awaits its own push, so a turn never reads stale editor text.
+  // The snapshot is rebuilt on editor changes. It lists every open tab and
+  // holds unsaved text that fits in the evidence limit, so pushes are
+  // coalesced. The first change of a burst goes out at once, sustained
+  // editing is throttled to one update a second, and the last change lands
+  // shortly after typing pauses. Sending a turn still awaits its own push,
+  // so a turn never reads stale editor text.
   const ideEvidenceScheduler = useMemo<IdeEvidenceScheduler<WorkspaceContextSnapshot>>(
     () =>
       createIdeEvidenceScheduler<WorkspaceContextSnapshot>((evidence) => {
@@ -19926,62 +19931,6 @@ function relativeFilePath(path: string, parent: string) {
   return normalizedPath.startsWith(prefix)
     ? normalizedPath.slice(prefix.length)
     : workspaceName(normalizedPath);
-}
-
-function workspaceContextRelativePath(path: string, root: string) {
-  const normalizedPath = path.replaceAll("\\", "/").replace(/^\.\//, "");
-  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
-  if (normalizedPath === normalizedRoot) return ".";
-  const prefix = `${normalizedRoot}/`;
-  return normalizedPath.startsWith(prefix)
-    ? normalizedPath.slice(prefix.length)
-    : normalizedPath;
-}
-
-function workspaceContextWithLiveEditor(
-  context: WorkspaceContextSnapshot,
-  activePath: string | undefined,
-  buffer: EditorBuffer | undefined,
-  selection: EditorSelection | undefined,
-  tabs: string[],
-): WorkspaceContextSnapshot {
-  const root = context.workspaceKey.replace(/\/+$/, "");
-  const belongsToRoot = (path: string) => path.startsWith(`${root}/`);
-  const visibleTabs = tabs
-    .filter(belongsToRoot)
-    .slice(0, 64)
-    .map((path) => workspaceContextRelativePath(path, root));
-  if (!activePath || !belongsToRoot(activePath) || !buffer) {
-    return { ...context, visibleTabs };
-  }
-  const path = workspaceContextRelativePath(activePath, root);
-  const maxText = 48_000;
-  const clipped = (value: string) => value.slice(0, maxText);
-  return {
-    ...context,
-    revision: Date.now(),
-    activePath: path,
-    visibleTabs,
-    selection:
-      selection?.path === activePath
-        ? {
-            ...selection,
-            path,
-            text: clipped(selection.text),
-            truncated: selection.text.length > maxText,
-          }
-        : undefined,
-    buffers: [
-      {
-        path,
-        dirty: buffer.content !== buffer.savedContent,
-        content: clipped(buffer.content),
-        truncated: buffer.content.length > maxText,
-        diskHash: buffer.contentHash,
-        documentVersion: buffer.updatedAt,
-      },
-    ],
-  };
 }
 
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {

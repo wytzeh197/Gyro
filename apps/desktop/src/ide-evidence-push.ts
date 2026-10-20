@@ -1,7 +1,7 @@
 // Coalesces live IDE evidence pushes to the native capability bridge.
 //
-// The snapshot the shell derives is rebuilt on every keystroke and cursor
-// move, and it carries the text of every open buffer, so pushing it verbatim
+// The snapshot the shell derives is rebuilt on editor changes and can carry
+// unsaved text for every open buffer that fits, so pushing it verbatim
 // meant one full IPC update — plus a redaction and validation pass on the
 // native side — per character typed. A scheduler keeps the bridge fresh
 // without paying that: the first change goes out immediately, sustained

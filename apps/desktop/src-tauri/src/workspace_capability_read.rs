@@ -31,17 +31,14 @@ pub(super) fn execute(
     let data = if !ranged {
         read_disk_file_data(&workspace, &path)?
     } else {
-        // Copy only the buffer and selection this read needs; a snapshot holds
-        // the text of every open buffer, so cloning it copies the whole IDE.
+        // Copy only the buffer and selection this read needs. The snapshot lists
+        // every open tab and can hold unsaved text for more than the active file.
         let (buffer, context_selection, context_revision) =
             with_ide_evidence(app, bound, |context| {
                 let buffer = context
                     .buffers
                     .iter()
-                    .find(|buffer| {
-                        buffer.get("path").and_then(Value::as_str) == Some(&path)
-                            && buffer.get("content").and_then(Value::as_str).is_some()
-                    })
+                    .find(|buffer| buffer.get("path").and_then(Value::as_str) == Some(&path))
                     .cloned();
                 let selection = context
                     .selection
@@ -76,14 +73,12 @@ pub(super) fn execute(
             )
         } else if editor_read && buffer.is_some() {
             let buffer = buffer.as_ref().expect("checked above");
-            if buffer["truncated"].as_bool().unwrap_or(false) {
-                anyhow::bail!("Editor buffer exceeds the live-text limit; select a smaller range and use selectionOnly");
-            }
+            let held = held_editor_text(buffer)?;
             (
-                buffer["content"].as_str().unwrap().to_owned(),
-                buffer["contentHash"].clone(),
-                buffer["diskHash"].clone(),
-                buffer["dirty"].as_bool().unwrap_or(false),
+                held.content.to_owned(),
+                held.hash,
+                held.disk_hash,
+                held.dirty,
                 "editor-buffer",
             )
         } else if editor_read {
@@ -155,10 +150,7 @@ fn read_spill(
     address: &str,
     max_bytes: usize,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
-    let offset = arguments
-        .get("offset")
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as usize;
+    let offset = arguments.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
     let limit = max_bytes
         .saturating_sub(SPILL_RESULT_OVERHEAD)
         .clamp(1, SPILL_TOOL_WINDOW);
@@ -284,6 +276,44 @@ fn apply_known_content_hash(data: &mut Value, arguments: &Value) -> anyhow::Resu
         data["contentOmitted"] = json!(true);
     }
     Ok(())
+}
+
+/// Text the bridge is actually holding for one open buffer.
+///
+/// Complete unsaved text is disclosed. A clean buffer with no copied text is
+/// not live editor text. A dirty buffer that did not fit in the evidence
+/// snapshot is refused rather than returned as a prefix.
+#[derive(Debug)]
+pub(super) struct HeldEditorText<'a> {
+    pub content: &'a str,
+    pub hash: Value,
+    pub disk_hash: Value,
+    pub dirty: bool,
+}
+
+pub(super) fn held_editor_text(buffer: &Value) -> anyhow::Result<HeldEditorText<'_>> {
+    if buffer["truncated"].as_bool().unwrap_or(false) {
+        anyhow::bail!(
+            "Editor buffer exceeds the live-text limit; select a smaller range and use selectionOnly"
+        );
+    }
+    let dirty = buffer["dirty"].as_bool().unwrap_or(false);
+    if let Some(content) = buffer.get("content").and_then(Value::as_str) {
+        return Ok(HeldEditorText {
+            content,
+            hash: buffer["contentHash"].clone(),
+            disk_hash: buffer["diskHash"].clone(),
+            dirty,
+        });
+    }
+    if dirty {
+        anyhow::bail!(
+            "Unsaved editor text did not fit in the workspace evidence budget; save the file or read the selection with selectionOnly"
+        );
+    }
+    anyhow::bail!(
+        "This open file has no unsaved editor text; read it with gyro_workspace_read_range"
+    );
 }
 
 fn read_disk_file_data(workspace: &str, path: &str) -> anyhow::Result<Value> {
@@ -479,6 +509,33 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_editor_text_accepts_only_complete_live_buffers() {
+        let buffer = json!({"path":"a.ts","content":"let x = 1\n","dirty":true,"diskHash":"abc"});
+        let held = held_editor_text(&buffer).unwrap();
+        assert_eq!(held.content, "let x = 1\n");
+        assert!(held.dirty);
+        assert_eq!(held.disk_hash, json!("abc"));
+
+        let over_budget = json!({"path":"a.ts","dirty":true});
+        assert!(held_editor_text(&over_budget)
+            .unwrap_err()
+            .to_string()
+            .contains("evidence budget"));
+
+        let clean = json!({"path":"a.ts","dirty":false});
+        assert!(held_editor_text(&clean)
+            .unwrap_err()
+            .to_string()
+            .contains("gyro_workspace_read_range"));
+
+        let truncated = json!({"path":"a.ts","content":"partial","truncated":true,"dirty":true});
+        assert!(held_editor_text(&truncated)
+            .unwrap_err()
+            .to_string()
+            .contains("live-text limit"));
+    }
 
     #[test]
     fn conditional_reads_use_a_fresh_full_file_hash() {

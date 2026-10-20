@@ -21,9 +21,7 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
     // Tool activity must not consume the 40-message history allowance.
     let events = store.read_events(session_uuid).ok()?;
     if model_switch_awaits_first_reply(&events) {
-        let transcript = store
-            .read_transcript_events(session_uuid)
-            .unwrap_or(events);
+        let transcript = store.read_transcript_events(session_uuid).unwrap_or(events);
         return conversation_history_from_events_full(transcript);
     }
     if super::efficiency::config().policies() && super::efficiency::config().task_state {
@@ -212,7 +210,11 @@ fn condensed_turns_digest(condensed: &[(String, String)]) -> String {
 
 fn is_model_switch(event: &SessionEvent) -> bool {
     event.kind == SessionEventKind::SystemEvent
-        && event.payload.get("kind").and_then(serde_json::Value::as_str) == Some("model-switch")
+        && event
+            .payload
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("model-switch")
 }
 
 /// True when the latest model switch has not yet received an assistant reply.

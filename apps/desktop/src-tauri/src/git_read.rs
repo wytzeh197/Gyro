@@ -187,9 +187,10 @@ mod tests {
             started.elapsed()
         );
         assert!(read.error.is_none(), "{:?}", read.error);
-        assert!(read.files.iter().any(|file| {
-            file.path == "tracked.txt" && file.state == "modified"
-        }));
+        assert!(read
+            .files
+            .iter()
+            .any(|file| { file.path == "tracked.txt" && file.state == "modified" }));
         git(&["config", "--unset", "core.fsmonitor"]);
         let recovered = git_status_for_preparation(path).unwrap();
         assert!(recovered.available);

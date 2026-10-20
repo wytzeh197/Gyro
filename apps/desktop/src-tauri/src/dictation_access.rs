@@ -11,8 +11,8 @@
 
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -439,15 +439,11 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
 
     let request_class = unsafe { &*std::ptr::addr_of!(SF_SPEECH_REQUEST) };
     let request = owned_new(request_class)?;
-    let _: () = unsafe {
-        msg_send![&*request, setShouldReportPartialResults: Bool::YES]
-    };
+    let _: () = unsafe { msg_send![&*request, setShouldReportPartialResults: Bool::YES] };
     // Pin the request to on-device recognition only when the offline model is
     // installed; otherwise let Apple's dictation service transcribe the audio.
     let requires_on_device = if on_device { Bool::YES } else { Bool::NO };
-    let _: () = unsafe {
-        msg_send![&*request, setRequiresOnDeviceRecognition: requires_on_device]
-    };
+    let _: () = unsafe { msg_send![&*request, setRequiresOnDeviceRecognition: requires_on_device] };
 
     let engine_class = unsafe { &*std::ptr::addr_of!(AV_AUDIO_ENGINE) };
     let engine = owned_new(engine_class)?;
@@ -647,10 +643,7 @@ fn transcription(result: *mut objc2::runtime::AnyObject) -> String {
 
 #[cfg(target_os = "macos")]
 fn emit_update(app: &AppHandle, kind: &'static str, text: String) {
-    let _ = app.emit(
-        DICTATION_EVENT,
-        DictationUpdate { kind, text },
-    );
+    let _ = app.emit(DICTATION_EVENT, DictationUpdate { kind, text });
 }
 
 #[cfg(test)]
