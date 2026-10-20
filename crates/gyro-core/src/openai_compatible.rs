@@ -1806,6 +1806,10 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // macOS copies the listening socket's nonblocking flag onto the
+                // accepted connection. The request is not written yet, so a
+                // nonblocking read returns WouldBlock instead of waiting.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
                     .unwrap();
