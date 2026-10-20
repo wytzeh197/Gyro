@@ -228,6 +228,7 @@ export function PlanCard({
     return (
       <section aria-label="Plan" className="gyro-plan-card is-folded">
         <button
+          aria-label={`${title}, showing in the panel. Show it in the chat instead.`}
           className="gyro-plan-card-fold"
           onClick={onOpenInPanel}
           title="Show the plan here instead"
