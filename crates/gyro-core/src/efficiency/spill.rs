@@ -2,7 +2,8 @@
 //! Pure local computation — no model call, no extra round trip, no per-model price table.
 use serde::{Deserialize, Serialize};
 use std::{
-    fs, io,
+    fs,
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -317,8 +318,9 @@ pub fn read(address: &str) -> io::Result<Option<SpillRead>> {
 
 /// Read one window of a spilled copy, starting `offset` bytes in.
 ///
-/// The file is loaded whole to answer this — local disk, no tokens — but only the window is
-/// returned: an address lets a reader pay for the bytes it needs, not for the copy.
+/// The copy can be much larger than one window. This reads the requested span plus at most three
+/// bytes on either side, which is enough to land on UTF-8 boundaries, and leaves the rest of the
+/// file on disk. `total_bytes` still reports the whole copy.
 pub fn read_window(address: &str, offset: usize, limit: usize) -> io::Result<Option<SpillRead>> {
     check_address(address)?;
     let Some(store) = session_store() else {
@@ -333,18 +335,79 @@ fn read_window_from(
     offset: usize,
     limit: usize,
 ) -> io::Result<Option<SpillRead>> {
-    let Some(text) = store.load(address)? else {
-        return Ok(None);
+    let mut file = match fs::File::open(store.path_for(address)) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
     };
-    let total_bytes = text.len();
-    let start = floor_bound(&text, offset);
-    let end = ceil_bound(&text, start.saturating_add(limit)).max(start);
+    let total_bytes = usize::try_from(file.metadata()?.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "spill copy is larger than this process can address",
+        )
+    })?;
+    let (start, text) = read_aligned_window(&mut file, total_bytes, offset, limit)?;
     Ok(Some(SpillRead {
         address: address.to_owned(),
-        text: text[start..end].to_owned(),
+        text,
         offset: start,
         total_bytes,
     }))
+}
+
+/// Bytes to keep around a requested cut so a 4-byte UTF-8 character is never split.
+const UTF8_CHAR_SLACK: usize = 3;
+
+fn read_aligned_window(
+    file: &mut fs::File,
+    total_bytes: usize,
+    offset: usize,
+    limit: usize,
+) -> io::Result<(usize, String)> {
+    let offset = offset.min(total_bytes);
+    let back = offset.min(UTF8_CHAR_SLACK);
+    let read_at = offset - back;
+    let read_end = offset
+        .saturating_add(limit)
+        .saturating_add(UTF8_CHAR_SLACK)
+        .min(total_bytes);
+    let mut buf = vec![0u8; read_end - read_at];
+    if !buf.is_empty() {
+        file.seek(SeekFrom::Start(read_at as u64))?;
+        file.read_exact(&mut buf)?;
+    }
+    let start_rel = floor_byte(&buf, offset - read_at);
+    let end_limit = start_rel.saturating_add(limit).min(buf.len());
+    let end_rel = ceil_byte(&buf, end_limit);
+    let text = std::str::from_utf8(&buf[start_rel..end_rel]).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("spill copy is not valid UTF-8: {error}"),
+        )
+    })?;
+    Ok((read_at + start_rel, text.to_owned()))
+}
+
+fn is_utf8_continuation(byte: u8) -> bool {
+    byte & 0b1100_0000 == 0b1000_0000
+}
+
+/// Same cut as [`floor_bound`], over a byte slice that may begin mid-character.
+fn floor_byte(bytes: &[u8], mut index: usize) -> usize {
+    index = index.min(bytes.len());
+    while index > 0 && index < bytes.len() && is_utf8_continuation(bytes[index]) {
+        index -= 1;
+    }
+    index
+}
+
+/// Same cut as [`ceil_bound`], over a byte slice that may end mid-character.
+fn ceil_byte(bytes: &[u8], mut index: usize) -> usize {
+    index = index.min(bytes.len());
+    while index < bytes.len() && is_utf8_continuation(bytes[index]) {
+        index += 1;
+    }
+    index
 }
 
 /// The address is the only thing a reader supplies, so it is the only thing worth validating. The
@@ -529,6 +592,38 @@ mod tests {
             .expect("copy exists");
         assert_eq!(window.offset, 2);
         assert_eq!(window.text, "éé");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_window_matches_the_full_copy_slice_without_reading_past_its_slack() {
+        let root = scratch();
+        let store = SpillStore::new(&root);
+        let text = format!("a{}b{}c", "é".repeat(32), "🦀".repeat(32));
+        let spill_address = address("workspace-read", "read", &text);
+        store.save(&spill_address, &text).expect("save spill");
+        let limits = [0, 1, 2, 3, 4, 7, 64, text.len()];
+        for offset in 0..text.len() + 4 {
+            for limit in limits {
+                let window = read_window_from(&store, &spill_address, offset, limit)
+                    .expect("read")
+                    .expect("copy exists");
+                let start = floor_bound(&text, offset);
+                let end = ceil_bound(&text, start.saturating_add(limit)).max(start);
+                assert_eq!(window.offset, start, "offset {offset} limit {limit}");
+                assert_eq!(window.text, text[start..end], "offset {offset} limit {limit}");
+                assert_eq!(window.total_bytes, text.len());
+                assert_eq!(window.truncated(), end < text.len());
+            }
+        }
+        let empty = address("workspace-read", "read", "");
+        store.save(&empty, "").expect("save empty");
+        let window = read_window_from(&store, &empty, 0, 8)
+            .expect("read")
+            .expect("empty copy exists");
+        assert_eq!(window.text, "");
+        assert_eq!(window.total_bytes, 0);
+        assert!(!window.truncated());
         let _ = fs::remove_dir_all(&root);
     }
 
