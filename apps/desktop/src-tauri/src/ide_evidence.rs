@@ -4,11 +4,11 @@
 //! selection, diagnostics, test failures and the active output channel — so a
 //! model-facing capability can answer without an editor round trip.
 //!
-//! A snapshot carries the text of every open buffer, which makes it expensive
-//! to copy and cheap to borrow. This cache therefore owns one snapshot per
-//! project and hands out references under its lock, and it caps how many
-//! projects it keeps: opening a project used to leave every earlier project's
-//! buffer text alive for the life of the process.
+//! A snapshot can carry unsaved text for every open buffer that fits, which
+//! makes it expensive to copy and cheap to borrow. This cache therefore owns
+//! one snapshot per project and hands out references under its lock, and it
+//! caps how many projects it keeps: opening a project used to leave every
+//! earlier project's buffer text alive for the life of the process.
 
 use std::collections::{HashMap, VecDeque};
 

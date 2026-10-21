@@ -729,7 +729,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadEditor,
         class: CapabilityClass::WorkspaceSensitiveRead,
-        description: "Read the current editor selection or unsaved buffer for one workspace file. Gyro asks the user to approve this live-text disclosure every time; pass path and optionally selectionOnly.",
+        description: "Read the current editor selection or an open buffer. The bridge holds the active buffer and every dirty buffer whose full text fits. Gyro asks the user to approve this live-text disclosure every time; pass path and optionally selectionOnly. If the file has no held editor text, read the saved file with gyro_workspace_read_range.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiagnostics,

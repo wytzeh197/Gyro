@@ -348,9 +348,9 @@ struct CapabilityIdeEvidenceManager {
 
 /// Runs `reader` over the live IDE evidence for this turn's workspace.
 ///
-/// A snapshot carries the text of every open buffer, so capability paths that
-/// only need to look something up borrow it under the cache lock instead of
-/// cloning the whole workspace's editor text first.
+/// A snapshot can carry unsaved text for every open buffer that fits, so
+/// capability paths that only need to look something up borrow it under the
+/// cache lock instead of cloning the whole workspace's editor text first.
 fn with_ide_evidence<T>(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
@@ -5417,10 +5417,7 @@ fn compact_local_provider_chat(
             "compactionMode".into(),
             serde_json::Value::String(mode.into()),
         );
-        payload.insert(
-            "condensedTurns".into(),
-            serde_json::json!(condensed_turns),
-        );
+        payload.insert("condensedTurns".into(), serde_json::json!(condensed_turns));
     }
     let activity_events = store
         .append_system_events_with_turn_id(session_id, vec![entry])
@@ -15656,8 +15653,9 @@ fn run_antigravity_chat(
     } else {
         gyro_core::antigravity_cli::AntigravityMode::AcceptEdits
     };
-    let conversation_id = resume_cursor
-        .and_then(|cursor| (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str()));
+    let conversation_id = resume_cursor.and_then(|cursor| {
+        (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str())
+    });
     let args = gyro_core::antigravity_cli::chat_args(
         request.model_id.as_deref(),
         request.reasoning_effort.as_deref(),
@@ -15668,7 +15666,8 @@ fn run_antigravity_chat(
     );
     audit_provider_chat_args(&request.provider_id, &args)?;
 
-    let mut process = command_for_provider(gyro_core::antigravity_cli::PROGRAM, &request.provider_id)?;
+    let mut process =
+        command_for_provider(gyro_core::antigravity_cli::PROGRAM, &request.provider_id)?;
     project_import_continuation::apply_data_home(&mut process, request)?;
     process.current_dir(cwd);
     process.args(args);
@@ -20563,21 +20562,24 @@ fn editor_approval_fingerprint(
             source.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
         })
         .ok_or_else(|| anyhow::anyhow!("requested live editor text is unavailable"))?;
-        anyhow::ensure!(
-            !source
-                .get("truncated")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            "live editor text exceeds the approval limit; select a smaller range"
-        );
-        let text_key = if selection_only { "text" } else { "content" };
-        anyhow::ensure!(
-            source
-                .get(text_key)
-                .and_then(serde_json::Value::as_str)
-                .is_some(),
-            "requested live editor text is unavailable"
-        );
+        if selection_only {
+            anyhow::ensure!(
+                !source
+                    .get("truncated")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                "live editor text exceeds the approval limit; select a smaller range"
+            );
+            anyhow::ensure!(
+                source
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some(),
+                "requested live editor text is unavailable"
+            );
+        } else {
+            workspace_capability_read::held_editor_text(source)?;
+        }
         Ok(content_hash(&serde_json::to_vec(source)?))
     })
 }

@@ -207,18 +207,65 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" "$DMG_PATH"
           NOTARY_AUTH=(--key "$GYRO_APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
           SUBMISSION="$RUNNER_TEMP/gyro-dmg-notarization.json"
+          SUBMIT_LOG="$RUNNER_TEMP/gyro-dmg-notarization-submit.log"
+          : > "$SUBMISSION"
+          : > "$SUBMIT_LOG"
+          # --wait can drop the runner network after Apple has accepted the
+          # upload. Keep going so a missing status can be re-queried below.
+          # Stderr is a file, not a process substitution, so the submission id
+          # is on disk before we parse it.
           xcrun notarytool submit "$DMG_PATH" "${NOTARY_AUTH[@]}" \
-            --wait --timeout 2h --output-format json > "$SUBMISSION" || true
-          STATUS="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).status ?? ""' "$SUBMISSION" 2>/dev/null || true)"
+            --wait --timeout 2h --output-format json > "$SUBMISSION" 2> "$SUBMIT_LOG" || true
+          cat "$SUBMIT_LOG" >&2 || true
+          notary_status() {
+            node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).status ?? ""' "$1" 2>/dev/null || true
+          }
+          STATUS="$(notary_status "$SUBMISSION")"
+          SUBMISSION_ID="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).id ?? ""' "$SUBMISSION" 2>/dev/null || true)"
+          if [ -z "$SUBMISSION_ID" ]; then
+            SUBMISSION_ID="$(grep -h -oE -m 1 'submissions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$SUBMIT_LOG" "$SUBMISSION" | head -n 1 | cut -d/ -f2 || true)"
+          fi
+          # A dropped --wait leaves status empty even though the submission
+          # exists. Re-query that id. Invalid and Rejected stop here. Anything
+          # still in progress, or a network error, is polled again. Staple
+          # runs only after status is Accepted.
+          if [ "$STATUS" != "Accepted" ] && [ -n "$SUBMISSION_ID" ]; then
+            echo "DMG notarization wait returned status '${STATUS:-missing}' for ${SUBMISSION_ID}; re-querying." >&2
+            INFO="$RUNNER_TEMP/gyro-dmg-notarization-info.json"
+            DEADLINE=$((SECONDS + 5400))
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
+              if xcrun notarytool info "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" \
+                --output-format json > "$INFO" 2>>"$SUBMIT_LOG"; then
+                STATUS="$(notary_status "$INFO")"
+                if [ -n "$STATUS" ]; then
+                  echo "DMG notarization status: ${STATUS}" >&2
+                fi
+                if [ "$STATUS" = "Accepted" ]; then
+                  break
+                fi
+                case "$STATUS" in
+                  Invalid|Rejected)
+                    xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
+                    echo "DMG notarization finished with status '${STATUS}'." >&2
+                    exit 1
+                    ;;
+                esac
+              else
+                echo "notarytool info failed for ${SUBMISSION_ID}; retrying." >&2
+              fi
+              sleep 30
+            done
+          fi
           if [ "$STATUS" != "Accepted" ]; then
             echo "DMG notarization finished with status '${STATUS:-unknown}'." >&2
             cat "$SUBMISSION" >&2 || true
-            SUBMISSION_ID="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).id ?? ""' "$SUBMISSION" 2>/dev/null || true)"
-            if [ -n "$SUBMISSION_ID" ]; then
+            cat "$SUBMIT_LOG" >&2 || true
+            if [ -n "${SUBMISSION_ID:-}" ]; then
               xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
             fi
             exit 1
           fi
+          echo "DMG notarization status: Accepted"
           xcrun stapler staple "$DMG_PATH"
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

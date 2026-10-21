@@ -19,8 +19,8 @@ pub(super) struct ProviderContextUsage {
     pub(super) total_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) model_context_window: Option<u64>,
-    /// Lower bound counted from traffic Gyro saw. Not a provider measurement,
-    /// so the composer keeps the estimate mark.
+    /// True when the count was inferred from text, not reported by the provider.
+    /// That count is dropped before it is published as occupancy.
     #[serde(default, skip_serializing_if = "skip_false")]
     pub(super) estimated: bool,
 }
@@ -374,12 +374,8 @@ pub(super) fn occupancy_from_request(
     Some(ProviderContextUsage {
         input_tokens: Some(input_tokens),
         output_tokens,
-        cached_input_tokens: known
-            .cache_read
-            .then_some(accounted.cached_input_tokens),
-        reasoning_output_tokens: known
-            .reasoning
-            .then_some(accounted.reasoning_output_tokens),
+        cached_input_tokens: known.cache_read.then_some(accounted.cached_input_tokens),
+        reasoning_output_tokens: known.reasoning.then_some(accounted.reasoning_output_tokens),
         total_tokens: output_tokens.map(|output| input_tokens.saturating_add(output)),
         model_context_window: model_context_window.filter(|window| *window > 0),
         ..ProviderContextUsage::default()
@@ -635,11 +631,11 @@ pub(super) fn provider_context_usage_with_window(
             if usage.model_context_window.is_none() {
                 usage.model_context_window = catalog_window;
             }
-            if exceeds_context_window(&usage) {
-                // A count past the window is not occupancy. A traffic sum and a
-                // multi-call bill both grow without a bound, and neither says
-                // how full the window is. Keep the window and drop the count
-                // instead of painting the meter as exactly full.
+            if usage.estimated || exceeds_context_window(&usage) {
+                // A character estimate, a traffic sum, and a multi-call bill
+                // are not occupancy. Keep the window and drop the count
+                // instead of painting the meter from a number the provider
+                // did not report as the window fill.
                 usage = ProviderContextUsage {
                     model_context_window: usage.model_context_window,
                     ..ProviderContextUsage::default()
@@ -1103,9 +1099,9 @@ mod tests {
             Some("grok-4.7"),
         )
         .unwrap();
-        assert_eq!(within.input_tokens, Some(180_000));
-        assert_eq!(within.total_tokens, Some(180_000));
-        assert!(within.estimated);
+        assert_eq!(within.input_tokens, None);
+        assert_eq!(within.total_tokens, None);
+        assert!(!within.estimated);
         assert_eq!(within.model_context_window, Some(500_000));
 
         let billed = provider_context_usage_with_window(

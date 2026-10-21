@@ -321,9 +321,8 @@ fn commit_string_edit(
             }
         }
     }
-    Err(last_error.unwrap_or_else(|| {
-        anyhow::anyhow!("file changed on disk; re-read it before editing")
-    }))
+    Err(last_error
+        .unwrap_or_else(|| anyhow::anyhow!("file changed on disk; re-read it before editing")))
 }
 
 /// A proposed edit is meaningless while the user has unsaved changes in the
@@ -641,8 +640,7 @@ mod tests {
     }
 
     fn session_for(dir: &std::path::Path) -> (SessionStore, String) {
-        let store =
-            SessionStore::open(GyroPaths::from_base_dir(dir.join("Gyro"))).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(dir.join("Gyro"))).unwrap();
         let session = store
             .create_session(dir, SessionOrigin::Desktop, "edit")
             .unwrap();

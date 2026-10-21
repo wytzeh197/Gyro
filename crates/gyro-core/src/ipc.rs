@@ -515,7 +515,16 @@ fn connect_running_app(paths: &GyroPaths) -> Result<Option<std::os::unix::net::U
     }
 
     match UnixStream::connect(&paths.socket_path) {
-        Ok(stream) => Ok(Some(stream)),
+        Ok(stream) => {
+            // The socket file can outlive the process that listened on it.
+            // A handshake whose peer has already closed is not a running app.
+            if connected_app_socket_is_dead(&stream) {
+                remove_stale_app_socket(&paths.socket_path, metadata.dev(), metadata.ino())?;
+                Ok(None)
+            } else {
+                Ok(Some(stream))
+            }
+        }
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
             remove_stale_app_socket(&paths.socket_path, metadata.dev(), metadata.ino())?;
@@ -523,6 +532,43 @@ fn connect_running_app(paths: &GyroPaths) -> Result<Option<std::os::unix::net::U
         }
         Err(error) => Err(error)
             .with_context(|| format!("connect to Gyro.app at {}", paths.socket_path.display())),
+    }
+}
+
+#[cfg(unix)]
+fn connected_app_socket_is_dead(stream: &std::os::unix::net::UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+
+    let mut buf = [0u8; 1];
+    loop {
+        let read = unsafe {
+            libc::recv(
+                stream.as_raw_fd(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                libc::MSG_PEEK | libc::MSG_DONTWAIT,
+            )
+        };
+        if read == 0 {
+            return true;
+        }
+        if read > 0 {
+            return false;
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        // EAGAIN means a live listener accepted or queued this connection and
+        // has not written yet. Only a peer that already reset the handshake
+        // is stale. An unread live app must keep its socket file.
+        return matches!(
+            error.raw_os_error(),
+            Some(libc::ECONNRESET)
+                | Some(libc::ECONNABORTED)
+                | Some(libc::EPIPE)
+                | Some(libc::ECONNREFUSED)
+        );
     }
 }
 

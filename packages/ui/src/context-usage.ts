@@ -87,10 +87,6 @@ export function estimatedEventCharacters(event: SessionEvent) {
     : event.message.length;
 }
 
-function estimateTokens(characters: number) {
-  return Math.ceil(Math.max(0, characters) / 4);
-}
-
 function tokenCount(record: Record<string, unknown> | undefined, key: string) {
   const value = record?.[key];
   return isTokenCount(value) ? value : undefined;
@@ -150,28 +146,16 @@ function occupiedTokens(usage: Record<string, unknown>) {
   return total ?? sum;
 }
 
-function usableOccupancy(
-  usage: Record<string, unknown>,
-  payload: Record<string, unknown> | undefined,
-  model: ContextModelSelection,
-) {
+function usableOccupancy(usage: Record<string, unknown>) {
   const occupancy = occupiedTokens(usage);
   if (occupancy === undefined) return undefined;
-  const providerId = stringValue(payload, "providerId") as
-    ProviderId | undefined;
-  const modelId = stringValue(payload, "modelId");
-  const matchesModel =
-    (!model.providerId || providerId === model.providerId) &&
-    (!model.modelId || modelId === model.modelId);
-  const observationWindow =
-    tokenCount(usage, "modelContextWindow") ||
-    resolveContextWindow(
-      undefined,
-      matchesModel ? model : { providerId, modelId },
-    );
-  // Switching to a smaller model does not empty the previous model's context.
-  // Reject impossible observations against the window that produced them.
-  return occupancy <= (observationWindow ?? Infinity) ? occupancy : undefined;
+  const namedWindow = tokenCount(usage, "modelContextWindow");
+  // The count belongs to the thread, whichever model or provider measured it.
+  // Only the window on this same reading can show the count is a bill. The
+  // model selected in the composer never discards it.
+  return namedWindow === undefined || occupancy <= namedWindow
+    ? occupancy
+    : undefined;
 }
 
 /**
@@ -250,16 +234,13 @@ export function estimateComposerContextUsage(
   draft: string,
   model: ContextModelSelection,
 ): ComposerContextUsage {
-  let reportedEventIndex = -1;
+  // A draft and stored message text are not token counts. The meter shows a
+  // provider measurement or nothing.
+  void draft;
   let reportedUsage: Record<string, unknown> | undefined;
-  let reportedModelId: string | undefined;
-  let reportedProviderId: string | undefined;
-  // The window and the token counts come from different places. Every provider
-  // reports the window Gyro resolved for its model, but only some report what
-  // the turn spent, so a run that carries a window and no counts still has to
-  // size the meter correctly while the estimate fills in the usage.
+  // The window and the token counts come from different places. A run can
+  // name its window without naming what the conversation occupies.
   let reportedContextWindow: number | undefined;
-  let compactedSummaryCharacters = 0;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -267,15 +248,11 @@ export function estimateComposerContextUsage(
     const payload = eventPayload(event);
     const usage = recordFromUnknown(payload?.contextUsage);
     // A manual compaction replaced the thread's history. Any reading taken
-    // before it measures a conversation the provider no longer holds, so when
-    // the compaction did not report its own, the estimate starts over here.
+    // before it measures a conversation the provider no longer holds.
     if (!usage && !reportedUsage && isManualCompaction(events, event)) {
-      reportedEventIndex = index;
-      compactedSummaryCharacters =
-        stringValue(payload, "contextSummary")?.length ?? 0;
       break;
     }
-    if (!usage) continue;
+    if (!usage || usage.estimated === true) continue;
     // A completed response replaces the live checkpoint only when it contains
     // a usable observation. Some runtimes publish occupancy in a stream frame
     // but omit it from the closing response.
@@ -288,8 +265,6 @@ export function estimateComposerContextUsage(
           eventPayload(item)?.kind === "provider-response" &&
           usableOccupancy(
             recordFromUnknown(eventPayload(item)?.contextUsage) ?? {},
-            eventPayload(item),
-            model,
           ) !== undefined,
       )
     )
@@ -309,86 +284,35 @@ export function estimateComposerContextUsage(
       reportedContextWindow = tokenCount(usage, "modelContextWindow");
     }
     if (reportedUsage) continue;
-    const occupancy = usableOccupancy(usage, payload, model);
+    const occupancy = usableOccupancy(usage);
     if (occupancy === undefined) continue;
     // A run that used tools bills the re-sent conversation once per request, so
-    // some CLIs report a turn total several times the window. Nothing can
-    // occupy more of the window than it holds, so a reading that large is
-    // ignored and the thread estimate stands in — including for turns recorded
-    // before Gyro stopped storing those totals.
-    // How full the thread is belongs to the conversation, not to the model that
-    // last read it: switching model or provider mid-chat does not empty it. The
-    // newest reading therefore stands even when another model produced it,
-    // rather than dropping the meter back to an estimate that counts only the
-    // text Gyro stored and reads as near-empty.
-    reportedEventIndex = index;
+    // some CLIs report a turn total several times the window on that reading.
+    // That count is dropped. How full the thread is belongs to the conversation:
+    // switching model or provider mid-chat does not empty it.
     reportedUsage = usage;
-    reportedModelId = eventModelId;
-    reportedProviderId = stringValue(payload, "providerId");
     if (matchesModel) break;
   }
 
   const reportedInputTokens = tokenCount(reportedUsage, "inputTokens");
   const reportedOutputTokens = tokenCount(reportedUsage, "outputTokens") ?? 0;
   const reportedTotalTokens = tokenCount(reportedUsage, "totalTokens");
-  const occupancyEstimated = reportedUsage?.estimated === true;
   const contextWindowTokens =
     resolveContextWindow(reportedContextWindow, model) ?? 0;
-
-  const checkpoint =
-    reportedEventIndex >= 0 && reportedUsage
-      ? recordFromUnknown(
-          eventPayload(events[reportedEventIndex]!)?.contextCharacterBaseline,
-        )
-      : undefined;
-  let estimatedCharacters = draft.length + compactedSummaryCharacters;
-  for (
-    let index = checkpoint
-      ? 0
-      : reportedEventIndex >= 0
-        ? reportedEventIndex + 1
-        : 0;
-    index < events.length;
-    index += 1
-  ) {
-    const event = events[index];
-    if (event) {
-      const previous = checkpoint ? (tokenCount(checkpoint, event.id) ?? 0) : 0;
-      estimatedCharacters += Math.max(
-        0,
-        estimatedEventCharacters(event) - previous,
-      );
-    }
-  }
-  const liveEstimatedTokens = estimateTokens(estimatedCharacters);
-  const reportedTokens =
+  const usedTokens =
     reportedInputTokens === undefined
       ? 0
       : Math.max(
           reportedInputTokens + reportedOutputTokens,
           reportedTotalTokens ?? 0,
         );
-  const usedTokens = Math.max(0, reportedTokens + liveEstimatedTokens);
   const isReported = reportedInputTokens !== undefined;
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
-  const isOtherModelReading = Boolean(
-    isReported &&
-    ((reportedModelId && model.modelId && reportedModelId !== model.modelId) ||
-      (reportedProviderId &&
-        model.providerId &&
-        reportedProviderId !== model.providerId)),
-  );
-  const detail = occupancyEstimated
-    ? liveEstimatedTokens > 0
-      ? "Estimated from prompt and tool traffic seen so far, plus newer thread content and this draft. The provider has not reported window occupancy."
-      : "Estimated from prompt and tool traffic seen so far. The provider has not reported window occupancy."
-    : isReported
-      ? isOtherModelReading
-        ? `The last turn ran on ${reportedModelId ?? reportedProviderId}; its token count is an estimate for this model. Newer thread content and this draft are estimated too.`
-        : liveEstimatedTokens > 0
-          ? "Provider-reported usage plus an estimate for newer thread content and this draft."
-          : "Latest context usage reported by the provider."
-      : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
+  // The count is the conversation's, whichever model or provider measured it.
+  // The selected model only chooses the window shown beside it.
+  const detail = isReported
+    ? "Latest context usage reported by the provider."
+    : "The provider has not reported window occupancy.";
 
   return finishComposerContextUsage({
     providerId: model.providerId,
@@ -397,13 +321,7 @@ export function estimateComposerContextUsage(
     contextWindowTokens,
     detail,
     modelLabel,
-    source:
-      isReported &&
-      liveEstimatedTokens === 0 &&
-      !isOtherModelReading &&
-      !occupancyEstimated
-        ? "reported"
-        : "estimated",
+    source: isReported ? "reported" : "estimated",
     usedTokens,
   });
 }
@@ -447,7 +365,7 @@ export function composerContextUsageForModel(
     contextWindowTokens,
     detail: `Thread occupancy shown against ${modelLabel}'s context window.`,
     modelLabel,
-    source: matchesModel ? usage.source : "estimated",
+    source: usage.source,
     usedTokens: usage.usedTokens,
   });
 }

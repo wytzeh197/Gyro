@@ -32,8 +32,8 @@
   --gyro-chat-dock-solid: var(--gyro-app);
 }
 
-/* The composer card is the only solid surface. The dock stays clear so
-   transcript text meets the card without a fade. */
+/* The empty hero dock stays clear. A thread paints a scrim over this
+   in styles.css so transcript text does not show under the card. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-composer-dock {

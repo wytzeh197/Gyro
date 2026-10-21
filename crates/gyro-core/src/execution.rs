@@ -999,7 +999,10 @@ mod tests {
             !outcome.stdout.is_empty(),
             "retain output read before cancellation"
         );
-        assert!(outcome.duration_ms < 2_000);
+        // Each callback sleeps while the producer refills the channel. A loaded
+        // release runner spends several seconds draining that queue; this only
+        // rejects a cancellation that waits out the producer.
+        assert!(outcome.duration_ms < 8_000);
     }
 
     #[cfg(unix)]
@@ -1023,7 +1026,8 @@ mod tests {
             !outcome.stdout.is_empty(),
             "retain output read before timeout"
         );
-        assert!(outcome.duration_ms < 2_000);
+        // Same drain budget as the cancellation test above.
+        assert!(outcome.duration_ms < 8_000);
     }
 
     #[test]

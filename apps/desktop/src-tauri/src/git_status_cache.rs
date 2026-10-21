@@ -506,24 +506,9 @@ pub(super) fn git_repository_state(repo_root: &Path) -> GitRepositoryState {
 }
 
 pub(super) fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
-    let mut command = git_command();
-    command
-        .arg("-C")
-        .arg(workspace)
-        .args(["rev-parse", "--show-toplevel"]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(10),
-        None,
-        64 * 1024,
-        64 * 1024,
-    )
-    .ok()?;
-    if !output.succeeded() || output.stdout_truncated {
-        return None;
-    }
-    let path = output.stdout.trim().to_string();
-    (!path.is_empty()).then(|| PathBuf::from(path))
+    // Same filesystem walk as status reads. `rev-parse --show-toplevel` waits
+    // on fsmonitor and used to spend its own 10s budget before any Git action.
+    git_read::discover_repository(workspace).map(|(root, _)| root)
 }
 
 /// Decorates workspace-relative `status.files` with line counts. Every Git
@@ -941,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn git_status_shares_one_deadline_and_never_caches_a_partial_read() {
+    fn git_status_ignores_a_stuck_fsmonitor_and_keeps_line_stats() {
         use std::os::unix::fs::PermissionsExt;
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
@@ -950,8 +935,8 @@ mod tests {
         run_git(root, &["add", "."]);
         run_git(root, &["commit", "-m", "base"]);
         fs::write(root.join("tracked.txt"), "alpha\nbeta\n").unwrap();
-        // The status read's own hook calls are quick; every later one — the
-        // line-stat diffs — stalls well past the whole budget.
+        // Sleeps after two calls, which is enough to stall the line-stat diffs
+        // once status itself has queried the hook. Background reads disable it.
         let monitor = root.join(".git/slow-diff-monitor");
         fs::write(
             &monitor,
@@ -968,20 +953,22 @@ mod tests {
         let path = root.to_str().unwrap();
 
         let started = Instant::now();
-        let stalled =
+        let read =
             inspect_git_status_before(path, true, started + Duration::from_millis(1500)).unwrap();
         assert!(
-            started.elapsed() < Duration::from_secs(4),
+            started.elapsed() < Duration::from_secs(2),
             "took {:?}",
             started.elapsed()
         );
-        assert!(stalled.available);
-        assert!(stalled.stats_partial);
+        assert!(read.available);
+        assert!(!read.stats_partial, "{:?}", read.error);
+        assert_eq!(file(&read, "tracked.txt").additions, 1);
+        assert!(!root.join(".git/monitor-calls").exists());
 
         run_git(root, &["config", "--unset", "core.fsmonitor"]);
-        let recovered = git_status_impl(path).unwrap();
-        assert!(!recovered.stats_partial);
-        assert_eq!(file(&recovered, "tracked.txt").additions, 1);
+        let again = git_status_impl(path).unwrap();
+        assert!(!again.stats_partial);
+        assert_eq!(file(&again, "tracked.txt").additions, 1);
     }
 
     #[test]

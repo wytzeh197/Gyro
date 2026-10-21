@@ -195,8 +195,8 @@ pub(crate) fn kimi_code_037_usage_delta(
 pub struct AcpContextUsage {
     pub used: u64,
     pub size: u64,
-    /// `used` is a lower bound counted from traffic Gyro saw, not a provider
-    /// measurement. A later wire reading clears it.
+    /// True when `used` was inferred from text Gyro saw. Live frames leave
+    /// this false. The desktop meter drops a reading with it set.
     #[serde(default, skip_serializing_if = "skip_false")]
     pub estimated: bool,
 }
@@ -326,8 +326,31 @@ pub fn opencode_prompt_context(result: &Value) -> Option<AcpContextUsage> {
 /// `_meta.usage`. When several calls were billed, a flat total at least as
 /// large as that sum is the bill and is rejected.
 pub fn grok_prompt_context(result: &Value) -> Option<AcpContextUsage> {
-    let meta = result.get("_meta")?;
+    grok_meta_context(result.get("_meta")?)
+}
+
+/// Occupancy stamped on a live Grok session update.
+///
+/// Each `session/update` carries `_meta.totalTokens`: the tokens in the prompt
+/// the model just counted. That is the window occupancy. A turn bill lives on
+/// `turn_completed`, not here, and the same bill-shaped `_meta` is rejected.
+pub fn grok_frame_context(params: &Value) -> Option<AcpContextUsage> {
+    [
+        params.get("_meta"),
+        params
+            .get("update")
+            .and_then(|update| update.get("_meta")),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(grok_meta_context)
+}
+
+fn grok_meta_context(meta: &Value) -> Option<AcpContextUsage> {
     let used = meta.get("totalTokens").and_then(Value::as_u64)?;
+    if used == 0 {
+        return None;
+    }
     if let Some(usage) = meta.get("usage").filter(|usage| usage.is_object()) {
         let calls = usage.get("modelCalls").and_then(Value::as_u64);
         let turn_input = usage.get("inputTokens").and_then(Value::as_u64);
@@ -993,6 +1016,44 @@ mod tests {
             }})),
             None
         );
+    }
+
+    #[test]
+    fn grok_frame_context_reads_the_live_prompt_total() {
+        assert_eq!(
+            grok_frame_context(&json!({
+                "_meta": {"totalTokens": 136243, "requestTrimmedTokens": 0},
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "rawOutput": "x".repeat(8_000)
+                }
+            })),
+            Some(AcpContextUsage {
+                used: 136_243,
+                size: 0,
+                estimated: false,
+            })
+        );
+        assert_eq!(
+            grok_frame_context(&json!({
+                "update": {"_meta": {"totalTokens": 110275}, "sessionUpdate": "agent_thought_chunk"}
+            })),
+            Some(AcpContextUsage {
+                used: 110_275,
+                size: 0,
+                estimated: false,
+            })
+        );
+        assert_eq!(
+            grok_frame_context(&json!({
+                "_meta": {
+                    "totalTokens": 7_554_536,
+                    "usage": {"inputTokens": 7_515_785, "modelCalls": 67, "totalTokens": 7_554_536}
+                }
+            })),
+            None
+        );
+        assert_eq!(grok_frame_context(&json!({"_meta": {"totalTokens": 0}})), None);
     }
 
     #[test]

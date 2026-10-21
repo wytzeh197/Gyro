@@ -10,6 +10,7 @@ export function QuitConfirmDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<"quit" | "cancel" | null>(null);
   const [error, setError] = useState<string>();
   useEffect(() => {
     const previousFocus = document.activeElement;
@@ -27,13 +28,19 @@ export function QuitConfirmDialog({
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    setPending(quit ? "quit" : "cancel");
     setError(undefined);
     try {
       await onResolve(quit);
     } catch {
       busyRef.current = false;
       setBusy(false);
-      setError("Could not complete the request. Please try again.");
+      setPending(null);
+      setError(
+        quit
+          ? "Gyro could not close. Try again."
+          : "Gyro could not dismiss this prompt. Try again.",
+      );
     }
   }
 
@@ -52,8 +59,12 @@ export function QuitConfirmDialog({
     >
       <div className="gyro-quit-dialog-body">
         <h2 id="gyro-quit-title">Quit Gyro?</h2>
-        <p id="gyro-quit-description">Are you sure you want to quit?</p>
-        {error ? <p role="alert">{error}</p> : null}
+        <p id="gyro-quit-description">Gyro will close.</p>
+        {error ? (
+          <p className="gyro-quit-error" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
       <footer>
         <button
@@ -61,15 +72,18 @@ export function QuitConfirmDialog({
           className="gyro-quit-cancel"
           disabled={busy}
           onClick={() => void resolve(false)}
+          type="button"
         >
-          Cancel <kbd aria-hidden="true">Esc</kbd>
+          {pending === "cancel" ? "Cancelling…" : "Cancel"}
+          {pending ? null : <kbd aria-hidden="true">Esc</kbd>}
         </button>
         <button
           className="gyro-quit-confirm"
           disabled={busy}
           onClick={() => void resolve(true)}
+          type="button"
         >
-          Quit
+          {pending === "quit" ? "Quitting…" : "Quit"}
         </button>
       </footer>
     </dialog>

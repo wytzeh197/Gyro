@@ -57,6 +57,30 @@ const fixtures: Record<string, SourceControlState> = {
     statsPartial: true,
     comparedToMain: { additions: 4, deletions: 0, partial: true },
   },
+  // Matches a published, clean checkout whose branch still differs from main:
+  // the diff must read as "vs main", and the commit subject must stay readable.
+  "Clean published": {
+    ...base,
+    branch: "v0.1.0",
+    upstream: "origin/v0.1.0",
+    ahead: 0,
+    behind: 0,
+    additions: 0,
+    deletions: 0,
+    files: [],
+    stashCount: 5,
+    comparedToMain: { additions: 300719, deletions: 16883, partial: false },
+    history: [
+      {
+        hash: "def456",
+        shortHash: "def456",
+        subject: "Polish the environment popover",
+        author: "Fixture",
+        relativeDate: "10 hours ago",
+        refs: "",
+      },
+    ],
+  },
 };
 function Fixture() {
   const [fixture, setFixture] = useState("Branch total");
@@ -162,7 +186,7 @@ function Fixture() {
                   }
                 : undefined
             }
-            branchLabel={base.branch!}
+            branchLabel={fixtures[fixture]?.branch ?? base.branch!}
             branchItems={[]}
             sourceControl={fixtures[fixture]}
             workspacePath="/fixture/Gyro"

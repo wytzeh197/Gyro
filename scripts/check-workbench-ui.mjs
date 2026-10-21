@@ -161,6 +161,16 @@ function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
+// Formatter wrapping should not fail a lock that is about the same code.
+function sourceIncludesNormalized(source, snippet) {
+  const pattern = snippet
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s*");
+  return new RegExp(pattern).test(source);
+}
+
 // Some docs are deliberately kept out of the repo. Their checks still run for
 // the working copies that have them, and skip everywhere else rather than
 // taking the whole suite down with an ENOENT.
@@ -5934,8 +5944,9 @@ expect(
       "isGoalComposerActive && sessionGoal?.text\n      ? (goalDraft ?? sessionGoal.text)\n      : localDraft",
     ) &&
     chatSurfaceSource.includes("draft={composerDraft}") &&
-    chatSurfaceSource.includes(
-      "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel,",
+    sourceIncludesNormalized(
+      chatSurfaceSource,
+      "estimateComposerContextUsage( transcriptEvents, composerDraft, contextModel,",
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
@@ -5992,11 +6003,13 @@ expect(
 const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
   surfaceSource.includes('aria-label="Chat companion"') &&
-    surfaceSource.includes(
+    sourceIncludesNormalized(
+      surfaceSource,
       'const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools"',
     ) &&
-    surfaceSource.includes(
-      'activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}',
+    sourceIncludesNormalized(
+      surfaceSource,
+      'activePanel={ displayedRailPanel === "review" ? "changes" : displayedRailPanel }',
     ) &&
     surfaceSource.includes("chromeless={hasCompanion}") &&
     surfaceSource.includes('displayedRailPanel === "files" ? (') &&
@@ -6988,7 +7001,10 @@ expect(
 // draft must not rewrite the model chip on every other open pane.
 expect(
   surfaceSource.includes("const boundToSession = Boolean(") &&
-    surfaceSource.includes("const effectiveModelId = boundToSession") &&
+    surfaceSource.includes("const rawModelId = boundToSession") &&
+    surfaceSource.includes(
+      "const effectiveModelId = pickerModelId(modelProviderId, rawModelId)",
+    ) &&
     surfaceSource.includes("const providerModelLabel = boundToSession") &&
     appSource.includes("chatDraftModels") &&
     appSource.includes("setChatDraftModels") &&
@@ -7063,7 +7079,7 @@ expect(
 );
 // Model and effort have independent composer chips with direct menu access.
 expect(
-  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
+  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*\(\s*pickerModelLabel\(\s*modelProviderId\s*,\s*rawModelId\s*,\s*providerModelLabel\s*\)\s*\?\?\s*providerModelLabel\s*\)\s*:\s*"Choose model"/.test(
     surfaceSource,
   ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
@@ -7384,7 +7400,7 @@ expect(
     /\.gyro-composer-context-wheel\s*>\s*svg\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    surfaceSource.includes('r="7.5"') &&
+    surfaceSource.includes('r="6.5"') &&
     surfaceSource.includes('pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
@@ -7573,7 +7589,9 @@ expect(
     appSource.includes("fullAccess: true") &&
     desktopRustSource.includes("request.full_access = config.full_access") &&
     desktopRustSource.includes('"danger-full-access"') &&
-    desktopRustSource.includes('"type": "dangerFullAccess"') &&
+    readRepoFile("crates/gyro-core/src/provider_permissions.rs").includes(
+      '"type": "dangerFullAccess"',
+    ) &&
     desktopRustSource.includes('"on-request"'),
   "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
 );
@@ -8636,15 +8654,15 @@ expect(
     !surfaceSource.includes("previewComposerContextModel") &&
     !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
+    // Draft text is not a token count. The meter is provider-reported or
+    // explicitly unreported.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedModelId !== model.modelId",
+      "eventModelId === model.modelId",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "const matchesModel =",
+      'source: isReported ? "reported" : "estimated"',
     ) &&
-    readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedTokens + liveEstimatedTokens",
-    ) &&
+    readRepoFile("packages/ui/src/context-usage.ts").includes("void draft;") &&
     surfaceSource.includes("gyro-composer-context-bar") &&
     styleSource.includes(
       ':root[data-theme="light"] .gyro-composer-context-tooltip',
