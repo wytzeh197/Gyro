@@ -8,6 +8,7 @@ use std::{
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[path = "../window_controls.rs"]
+#[allow(dead_code)] // The smoke bin borrows the chrome helper, not the dots.
 mod window_controls;
 
 const MAX_REPORT_BYTES: usize = 1024 * 1024;
@@ -135,7 +136,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .build()?;
             #[cfg(target_os = "macos")]
-            window_controls::apply_macos_traffic_light_position(&window);
+            window_controls::apply_macos_window_chrome(&window);
             Ok(())
         })
         .build(context)?;

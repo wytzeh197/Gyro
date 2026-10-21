@@ -669,6 +669,15 @@ const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
 ].join("\n");
+const windowControlsRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/window_controls.rs",
+);
+const windowControlsSource = readRepoFile(
+  "apps/desktop/src/window-controls.tsx",
+);
+const windowControlsStyleSource = readRepoFile(
+  "apps/desktop/src/window-controls.css",
+);
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
   // them; the point of the check is that the two still agree, so it asserts
@@ -5295,27 +5304,29 @@ expect(
     ) &&
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
-    tauriConfigSource.includes('"trafficLightPosition"') &&
-    tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 17 &&
-    desktopRustSource.includes("apply_macos_traffic_light_position") &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
-      "inset_macos_traffic_lights",
-    ) &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
-      "standardWindowButton",
-    ) &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
-      "MAIN_TRAFFIC_LIGHT_X",
-    ) &&
-    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
-      "MAIN_TRAFFIC_LIGHT_Y",
-    ) &&
-    desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
-    desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
+    !tauriConfigSource.includes('"trafficLightPosition"') &&
+    windowControlsRustSource.includes("sync_native_traffic_lights") &&
+    windowControlsRustSource.includes("standardWindowButton") &&
+    windowControlsRustSource.includes("button.setHidden(hidden)") &&
+    windowControlsRustSource.includes("fn main_window_action") &&
+    windowControlsRustSource.includes("fn main_window_is_fullscreen") &&
+    desktopRustSource.includes("apply_macos_window_chrome(&window)") &&
+    desktopRustSource.includes("apply_macos_window_chrome(&main)") &&
+    desktopRustSource.includes("window_controls::main_window_action,") &&
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
-      "crate::apply_macos_traffic_light_position(&main)",
+      "crate::apply_macos_window_chrome(&main)",
     ) &&
+    windowControlsSource.includes("export function WindowControls") &&
+    windowControlsSource.includes(
+      'invoke("main_window_action", { action })',
+    ) &&
+    windowControlsStyleSource.includes(".gyro-window-controls {") &&
+    windowControlsStyleSource.includes("height: 15px;") &&
+    windowControlsStyleSource.includes("width: 15px;") &&
+    windowControlsStyleSource.includes("gap: 5px;") &&
+    windowControlsStyleSource.includes("left: 16px;") &&
+    windowControlsStyleSource.includes("height: 48px;") &&
+    desktopMainSource.includes("<WindowControls />") &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&

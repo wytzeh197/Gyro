@@ -47,7 +47,7 @@ use command_execution::*;
 mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
-pub(crate) use window_controls::apply_macos_traffic_light_position;
+pub(crate) use window_controls::apply_macos_window_chrome;
 #[cfg(debug_assertions)]
 mod efficiency_benchmark;
 mod goal_runner;
@@ -22972,7 +22972,7 @@ pub fn run() {
                 )
             {
                 if let Some(main) = window.app_handle().get_webview_window("main") {
-                    apply_macos_traffic_light_position(&main);
+                    apply_macos_window_chrome(&main);
                 }
             }
             #[cfg(target_os = "macos")]
@@ -22992,6 +22992,8 @@ pub fn run() {
             efficiency::route_efficiency_phase,
             quit_confirmation::get_quit_confirmation,
             quit_confirmation::resolve_quit_confirmation,
+            window_controls::main_window_action,
+            window_controls::main_window_is_fullscreen,
             project_import::get_project_import_sources,
             project_import::scan_project_imports,
             project_import::start_project_import,
@@ -23317,7 +23319,7 @@ fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
 #[cfg(target_os = "macos")]
 pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
-        apply_macos_traffic_light_position(&window);
+        apply_macos_window_chrome(&window);
         window.unminimize()?;
         window.show()?;
         window.set_focus()?;
@@ -23331,7 +23333,7 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
         .first()
         .context("Gyro has no configured main window")?;
     let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
-    apply_macos_traffic_light_position(&window);
+    apply_macos_window_chrome(&window);
     window.show()?;
     window.set_focus()?;
     Ok(())

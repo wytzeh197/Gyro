@@ -1,0 +1,86 @@
+/* The window's own traffic lights.
+   macOS paints a fixed 12px dot and ignores the button frame it sits in, so the
+   15px dots are laid out here instead: 16px from the window edge on a 20px
+   pitch, centred in the same 48px row as the header buttons beside them. The
+   native controls are hidden in `window_controls.rs`. */
+.gyro-window-controls {
+  -webkit-app-region: no-drag;
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  height: 48px;
+  left: 16px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  user-select: none;
+  /* Window chrome, so it stays above page content and dialogs (1000), the way
+     the native controls did; later portal order wins the tie. */
+  z-index: 1000;
+}
+
+.gyro-window-controls button {
+  align-items: center;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 14%);
+  cursor: default;
+  display: flex;
+  height: 15px;
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+  transition: filter 120ms ease;
+  width: 15px;
+}
+
+.gyro-window-controls button.is-close {
+  background-color: #ff5f57;
+}
+
+.gyro-window-controls button.is-minimize {
+  background-color: #febc2e;
+}
+
+.gyro-window-controls button.is-zoom {
+  background-color: #28c840;
+}
+
+.gyro-window-controls button:active {
+  filter: brightness(0.85);
+}
+
+.gyro-window-controls button:focus-visible {
+  outline: 2px solid #4c8dff;
+  outline-offset: 1px;
+}
+
+.gyro-window-controls svg {
+  fill: none;
+  height: 9px;
+  opacity: 0;
+  stroke: rgb(0 0 0 / 52%);
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  transition: opacity 90ms ease;
+  width: 9px;
+}
+
+.gyro-window-controls svg .gyro-window-control-fill {
+  fill: rgb(0 0 0 / 52%);
+  stroke: none;
+}
+
+.gyro-window-controls:hover svg,
+.gyro-window-controls button:focus-visible svg {
+  opacity: 1;
+}
+
+/* macOS greys the lights out while another window is key. */
+.gyro-window-controls.is-inactive button {
+  background-color: #c8c8c8;
+}
+
+.gyro-window-controls.is-inactive svg {
+  opacity: 0;
+}
