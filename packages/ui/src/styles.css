@@ -9935,6 +9935,50 @@ textarea:focus-visible {
   transform: none;
 }
 
+/* Inline creation row. It sits in the file list like any other entry and shows
+   the file type that the typed extension resolves to. */
+.gyro-explorer-draft {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-height: 24px;
+  padding-bottom: 1px;
+  padding-right: 6px;
+  padding-top: 1px;
+}
+
+.gyro-explorer-draft > input {
+  background: var(--gyro-app);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  min-height: 20px;
+  min-width: 0;
+  outline: 0;
+  padding: 0 6px;
+}
+
+.gyro-explorer-draft > input:focus {
+  border-color: var(--gyro-accent, var(--gyro-muted));
+}
+
+.gyro-explorer-draft > input::placeholder {
+  color: var(--gyro-faint);
+}
+
+.gyro-explorer-draft > small {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gyro-sidebar-explorer-row:hover,
 .gyro-sidebar-explorer-row.is-active {
   transform: none;

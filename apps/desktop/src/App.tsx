@@ -5575,17 +5575,24 @@ export function App() {
   }, [refreshWorkspaceTree, workspaceRoots.length]);
 
   const createWorkspacePath = useCallback(
-    async (kind: "file" | "directory", parentPath?: string) => {
+    async (
+      kind: "file" | "directory",
+      parentPath?: string,
+      namedPath?: string,
+    ) => {
       const root =
         workspaceRootForPath(workspaceRoots, parentPath) ?? workspaceRoots[0];
       if (!root) {
         notify("command-failed", "Create blocked", "Open a workspace first");
         return;
       }
-      const entered = window.prompt(
-        kind === "directory" ? "New folder path" : "New file path",
-        parentPath ? `${parentPath}/` : "",
-      );
+      /* The Explorer's inline row already names the entry, so skip the dialog. */
+      const entered =
+        namedPath ??
+        window.prompt(
+          kind === "directory" ? "New folder path" : "New file path",
+          parentPath ? `${parentPath}/` : "",
+        );
       const enteredPath = entered?.trim();
       if (!enteredPath) {
         return;

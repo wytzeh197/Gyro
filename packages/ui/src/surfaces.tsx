@@ -152,6 +152,7 @@ import { ComposerCompletionMenu } from "./composer-completion-menu";
 import { clippingBounds } from "./composer-popover-bounds";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import { LanguagePicker } from "./editor/languages/language-picker";
+import { resolveLanguage } from "./editor/languages/registry";
 import {
   Activity,
   Archive,
@@ -833,6 +834,7 @@ type AppChromeProps = {
   onCreateWorkspacePath?: (
     kind: "file" | "directory",
     parentPath?: string,
+    path?: string,
   ) => void;
   onRenameWorkspacePath?: (path: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
@@ -3816,6 +3818,7 @@ function WorkspaceSidebarContent({
   onCreateWorkspacePath?: (
     kind: "file" | "directory",
     parentPath?: string,
+    path?: string,
   ) => void;
   onRenameWorkspacePath?: (path: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
@@ -4068,6 +4071,38 @@ function WorkspaceSidebarContent({
     Boolean(explorerContextMenu),
     () => setExplorerContextMenu(undefined),
   );
+  /* VS Code-style creation: the toolbar and the context menu open one row in
+     the tree, and whatever is typed there names the new entry. The extension is
+     part of the name, so "notes.txt" becomes a text file. */
+  const [explorerDraft, setExplorerDraft] = useState<{
+    kind: "file" | "directory";
+    parentPath?: string;
+    value: string;
+  }>();
+  const startExplorerDraft = (
+    kind: "file" | "directory",
+    parentPath?: string,
+  ) => {
+    setExplorerContextMenu(undefined);
+    if (parentPath) {
+      setExpandedWorkspaceDirectories((current) =>
+        current.has(parentPath) ? current : new Set(current).add(parentPath),
+      );
+    }
+    setExplorerDraft({ kind, parentPath, value: "" });
+  };
+  const commitExplorerDraft = () => {
+    const draft = explorerDraft;
+    setExplorerDraft(undefined);
+    const name = draft?.value.trim().replace(/^\/+/, "");
+    if (!draft || !name) return;
+    const parentPath = draft.parentPath?.replace(/\/+$/, "");
+    onCreateWorkspacePath?.(
+      draft.kind,
+      parentPath || undefined,
+      parentPath ? `${parentPath}/${name}` : name,
+    );
+  };
   const selectedExplorerFile = files.find(
     (file) => file.path === selectedExplorerPath,
   );
@@ -4649,7 +4684,7 @@ function WorkspaceSidebarContent({
                     </button>
                     <button
                       aria-label="New file"
-                      onClick={() => onCreateWorkspacePath?.("file")}
+                      onClick={() => startExplorerDraft("file")}
                       title="New file"
                       type="button"
                     >
@@ -4658,7 +4693,7 @@ function WorkspaceSidebarContent({
                     </button>
                     <button
                       aria-label="New folder"
-                      onClick={() => onCreateWorkspacePath?.("directory")}
+                      onClick={() => startExplorerDraft("directory")}
                       title="New folder"
                       type="button"
                     >
@@ -4728,7 +4763,7 @@ function WorkspaceSidebarContent({
                       onClick={onOpenWorkspace}
                     />
                   )}
-                  {visibleFiles.length > 0 ? (
+                  {visibleFiles.length > 0 || explorerDraft ? (
                     <div
                       aria-label="Workspace files"
                       className="gyro-sidebar-explorer-tree"
@@ -4862,6 +4897,18 @@ function WorkspaceSidebarContent({
                           />
                         );
                       })}
+                      {explorerDraft ? (
+                        <ExplorerDraftRow
+                          draft={explorerDraft}
+                          onCancel={() => setExplorerDraft(undefined)}
+                          onChange={(value) =>
+                            setExplorerDraft((current) =>
+                              current ? { ...current, value } : current,
+                            )
+                          }
+                          onCommit={commitExplorerDraft}
+                        />
+                      ) : null}
                     </div>
                   ) : (
                     <div className="gyro-sidebar-mini-copy">
@@ -4892,7 +4939,7 @@ function WorkspaceSidebarContent({
                       if (file?.kind === "file") {
                         onOpenWorkspaceFile?.(file.path);
                       } else {
-                        onCreateWorkspacePath?.("file", file?.path);
+                        startExplorerDraft("file", file?.path);
                       }
                       setExplorerContextMenu(undefined);
                     }}
@@ -4905,6 +4952,22 @@ function WorkspaceSidebarContent({
                       ? "Open"
                       : "New File"}
                   </button>
+                  {files.find(
+                    (item) => item.path === explorerContextMenu.path,
+                  )?.kind === "directory" ? (
+                    <button
+                      onClick={() =>
+                        startExplorerDraft(
+                          "directory",
+                          explorerContextMenu.path,
+                        )
+                      }
+                      role="menuitem"
+                      type="button"
+                    >
+                      New Folder
+                    </button>
+                  ) : null}
                   <button
                     onClick={() => {
                       onRenameWorkspacePath?.(explorerContextMenu.path);
@@ -7467,6 +7530,75 @@ function WorkspaceExplorerRow({
         <small className="gyro-explorer-decoration">{decoration.badge}</small>
       ) : null}
     </button>
+  );
+}
+
+/* Inline naming row for Explorer creation. The typed extension is what decides
+   the file type, so the row previews the detected language and icon live. */
+function ExplorerDraftRow({
+  draft,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  draft: { kind: "file" | "directory"; parentPath?: string; value: string };
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  const depth = draft.parentPath
+    ? draft.parentPath.split("/").filter(Boolean).length + 2
+    : 2;
+  const name = draft.value.trim();
+  const typeLabel =
+    draft.kind === "directory"
+      ? "Folder"
+      : name.includes(".")
+        ? resolveLanguage({ path: name }).name
+        : "Plain Text";
+  const DraftFileIcon = workspaceFileBadge(name || "untitled").icon;
+  return (
+    <div
+      className="gyro-explorer-draft"
+      style={{ paddingLeft: `${Math.max(8, Math.min(depth, 8) * 11)}px` }}
+    >
+      {draft.kind === "directory" ? (
+        <Folder
+          aria-hidden="true"
+          className="gyro-explorer-folder-icon"
+          size={14}
+        />
+      ) : (
+        <DraftFileIcon
+          aria-hidden="true"
+          className="gyro-explorer-file-icon"
+          size={14}
+        />
+      )}
+      <input
+        aria-label={
+          draft.kind === "directory" ? "New folder name" : "New file name"
+        }
+        autoFocus
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            onCommit();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onCancel();
+          }
+        }}
+        onBlur={onCommit}
+        placeholder={draft.kind === "directory" ? "folder name" : "name.ext"}
+        spellCheck={false}
+        value={draft.value}
+      />
+      <small>{typeLabel}</small>
+    </div>
   );
 }
 
