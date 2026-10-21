@@ -2414,6 +2414,16 @@ fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
         Some(gyro_core::ProviderExecutionKind::KimiAcp) => Ok(CliProviderKind::Kimi),
         Some(gyro_core::ProviderExecutionKind::AcpCli) => Ok(CliProviderKind::Acp),
         Some(gyro_core::ProviderExecutionKind::OllamaApi) => Ok(CliProviderKind::Ollama),
+        // The `agy` runner lives in the desktop app; the CLI chat loop has no
+        // Antigravity bridge yet, so say so rather than reporting the provider
+        // as unconfigured.
+        Some(gyro_core::ProviderExecutionKind::AntigravityCli) => Err(cli_failure(
+            CliErrorCategory::ProviderUnavailable,
+            format!(
+                "provider `{}` runs through the Antigravity CLI (`agy`) inside the Gyro desktop app; the CLI chat runner does not support it yet",
+                profile.provider_id.as_deref().unwrap_or("unknown")
+            ),
+        )),
         // The HTTPS runner exists in gyro-core, but wiring it into the CLI chat
         // loop needs its own approval bridge. Until then, say so rather than
         // reporting the provider as unconfigured.
