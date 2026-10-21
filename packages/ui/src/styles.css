@@ -37637,38 +37637,54 @@ textarea:focus-visible,
   position: relative;
 }
 .gyro-language-picker > button {
+  display: inline-flex;
+  align-items: center;
+  height: calc(18px * var(--gyro-ui-scale, 1));
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
   color: inherit;
   font: inherit;
-  border: 0;
-  background: transparent;
+  line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
 }
-.gyro-language-picker > button:hover {
-  background: var(--gyro-hover, #8882);
+.gyro-language-picker > button:hover,
+.gyro-language-picker > button:focus-visible,
+.gyro-language-picker > button[aria-expanded="true"] {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 .gyro-language-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 100;
+  position: fixed;
+  z-index: 2000;
+  box-sizing: border-box;
   width: 310px;
+  max-width: calc(100vw - 16px);
   padding: 8px;
-  background: var(--gyro-panel, #1b1b1b);
-  color: var(--gyro-text, #d7d9de);
-  border: 1px solid var(--gyro-border, #444);
-  border-radius: var(--gyro-radius-sm);
-  box-shadow: 0 8px 32px #0005;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  box-shadow: 0 16px 40px var(--gyro-shadow);
 }
 .gyro-language-menu input {
   width: 100%;
   box-sizing: border-box;
-  padding: 8px;
-  font: inherit;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xs);
+  background: var(--gyro-pane);
   color: inherit;
-  background: transparent;
-  border: 1px solid var(--gyro-border, #666);
-  border-radius: 3px;
+  font: inherit;
+  font-size: inherit;
+}
+.gyro-language-menu input:focus-visible {
+  border-color: var(--gyro-accent);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
 }
 .gyro-language-menu [role="listbox"] {
   max-height: 300px;
@@ -37677,40 +37693,51 @@ textarea:focus-visible,
 }
 .gyro-language-menu [role="option"] {
   display: flex;
+  align-items: center;
   width: 100%;
   justify-content: space-between;
   gap: 10px;
-  padding: 6px;
-  color: inherit;
-  background: transparent;
+  min-height: 28px;
+  padding: 6px 8px;
   border: 0;
-  text-align: left;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  color: inherit;
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
-.gyro-language-menu [role="option"]:hover,
+.gyro-language-menu [role="option"]:hover {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+}
 .gyro-language-menu [role="option"]:focus-visible {
-  background: #8883;
-  outline: 1px solid var(--gyro-accent, #79c0ff);
-  outline-offset: -1px;
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
 }
 .gyro-language-menu [aria-selected="true"] {
-  background: #8882;
+  background: var(--gyro-accent-soft);
+}
+.gyro-language-menu [role="option"][aria-selected="true"]:hover,
+.gyro-language-menu [role="option"][aria-selected="true"]:focus-visible {
+  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
 }
 .gyro-language-menu small {
-  opacity: 0.65;
+  min-width: 0;
   overflow: hidden;
+  color: var(--gyro-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gyro-language-menu p {
-  margin: 6px;
+.gyro-language-menu p,
+.gyro-language-menu .gyro-language-menu-empty {
+  margin: 8px 6px 2px;
+  color: var(--gyro-muted);
   font-size: calc(11px * var(--gyro-ui-scale, 1));
-  opacity: 0.75;
 }
-[data-theme="light"] .gyro-language-menu {
-  background: #fff;
-  color: #24272d;
+.gyro-language-menu .gyro-language-menu-empty {
+  color: var(--gyro-text);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 .gyro-syntax-editor {
   display: flex;
@@ -37729,11 +37756,6 @@ textarea:focus-visible,
   opacity: 0.8;
   font-size: calc(11px * var(--gyro-ui-scale, 1));
   border-bottom: 1px solid #8883;
-}
-.gyro-language-menu {
-  z-index: 2000;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  max-width: calc(100vw - 16px);
 }
 
 /* Explorer file types retain their palette over the shell's neutral SVG rule. */

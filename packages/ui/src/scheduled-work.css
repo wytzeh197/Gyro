@@ -393,8 +393,8 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 .gyro-scheduled-page :is(button, input, select, textarea):focus-visible {
-  outline: 2px solid var(--gyro-muted);
-  outline-offset: 3px;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
 }
 @media (max-width: 850px) {
   .gyro-scheduled-page.has-detail .gyro-scheduled-body {
@@ -928,14 +928,29 @@
   color: var(--gyro-accent);
 }
 
-.gyro-automation-choice-option:hover,
+.gyro-automation-choice-option:hover {
+  background: var(--gyro-surface-soft);
+}
+
+/* The menu is portaled to the document body, so the page focus ring never
+   reaches it. A selected row's fill would otherwise hide keyboard focus. */
 .gyro-automation-choice-option:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
   background: var(--gyro-surface-soft);
 }
 
 .gyro-automation-choice-option.is-selected {
   background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+}
+
+.gyro-automation-choice-option.is-selected:hover,
+.gyro-automation-choice-option.is-selected:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 18%,
+    var(--gyro-surface-soft)
+  );
 }
 
 .gyro-automation-choice-empty {
@@ -1003,9 +1018,14 @@
   display: none;
 }
 
-.gyro-scheduled-advanced summary:hover,
+.gyro-scheduled-advanced summary:hover {
+  background: var(--gyro-surface-soft);
+}
+
 .gyro-scheduled-advanced summary:focus-visible {
   background: var(--gyro-surface-soft);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
 }
 
 .gyro-scheduled-advanced summary small {

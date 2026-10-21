@@ -83,6 +83,11 @@ export function LanguagePicker({
         disabled={!onChange}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={
+          override
+            ? `${language.name}, manual language override. Change language mode.`
+            : `${language.name}, detected automatically. Change language mode.`
+        }
         title={`${language.name}${override ? " (manual override)" : " (auto detected)"}. Change language mode.`}
         onClick={() => {
           const rect = button.current?.getBoundingClientRect();
@@ -154,8 +159,12 @@ export function LanguagePicker({
                     <small>{choice.extensions?.slice(0, 3).join(" ")}</small>
                   </button>
                 ))}
-              {!choices.length && <p>No matching languages.</p>}
             </div>
+            {!choices.length ? (
+              <p className="gyro-language-menu-empty" role="status">
+                No languages match that search.
+              </p>
+            ) : null}
             <p>Applies to this file for this session.</p>
           </div>,
           document.body,
