@@ -20,11 +20,7 @@
         "decorations": true,
         "dragDropEnabled": false,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 16,
-          "y": 17
-        }
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -57,7 +53,13 @@
       "signingIdentity": "-",
       "hardenedRuntime": true,
       "entitlements": "Entitlements.plist",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 190 },
+        "applicationFolderPosition": { "x": 480, "y": 190 }
+      }
     }
   },
   "plugins": {

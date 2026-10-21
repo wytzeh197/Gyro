@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=720">
+<title>Gyro — install window, as shipped</title>
+<style>
+  :root{
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#111114;color:#e9e9ef;font-family:var(--sans);
+    padding:26px;display:flex;flex-direction:column;gap:24px;align-items:center;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1{width:660px;display:flex;justify-content:space-between;align-items:baseline;
+     font-size:12px;font-weight:600;letter-spacing:.01em}
+  h1 span{font:9.5px/1 var(--mono);color:#75757f;letter-spacing:.08em;text-transform:uppercase}
+
+  .win{width:660px;border-radius:10px;overflow:hidden;position:relative;
+       box-shadow:0 20px 54px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
+  .bar{height:28px;display:flex;align-items:center;justify-content:center;position:relative;
+       font-size:12px;font-weight:600}
+  .light .bar{background:#e9e9e7;color:#3a3a3c;border-bottom:1px solid #d6d6d3}
+  .dark .bar{background:#2a2a2c;color:#d6d6d8;border-bottom:1px solid #1b1b1c}
+  .lights{position:absolute;left:10px;display:flex;gap:6px}
+  .lights i{width:11px;height:11px;border-radius:50%;display:block}
+
+  .art{position:relative;width:660px;height:400px;background:#f7f7f5}
+  .art .paper{position:absolute;inset:0;width:660px;height:400px;display:block}
+  .icon{position:absolute;top:126px;width:128px}
+  .icon.a{left:116px}
+  .icon.b{left:416px}
+  .icon img{width:128px;height:128px;border-radius:29px;display:block}
+  .folder{width:128px;height:128px;display:block}
+
+  .names{position:absolute;top:262px;left:0;width:660px;height:18px;font-size:11.5px;text-align:center}
+  .names span{position:absolute;width:136px}
+  .names .n1{left:112px}
+  .names .n2{left:412px}
+  .light .names{color:#2b2b2e}
+  .dark .names{color:#e8e8ea;text-shadow:0 1px 2px rgba(0,0,0,.8)}
+
+  .raw{width:660px}
+  .raw img{width:660px;height:400px;display:block;border-radius:4px;
+           box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+  p.note{width:660px;font:10.5px/1.65 var(--mono);color:#7a7a86;letter-spacing:.02em}
+</style>
+</head>
+<body>
+
+  <h1>1 · light Finder <span>background.png · 1320 × 800 @2x</span></h1>
+  <div class="win light">
+    <div class="bar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>Gyro</div>
+    <div class="art">
+      <img class="paper" src="../../apps/desktop/src-tauri/dmg/background.png" alt="">
+      <div class="icon a"><img src="../../apps/desktop/src-tauri/icons/128x128@2x.png" alt="Gyro"></div>
+      <div class="icon b">
+        <svg class="folder" viewBox="0 0 128 128" fill="none">
+          <defs>
+            <linearGradient id="folderFace" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#a8d4f7"/><stop offset="1" stop-color="#5aa3e2"/>
+            </linearGradient>
+          </defs>
+          <path d="M8 32c0-7 5-12 12-12h32l11 11h45c7 0 12 5 12 12v63c0 7-5 12-12 12H20c-7 0-12-5-12-12V32Z" fill="url(#folderFace)"/>
+          <path d="M8 52h112v54c0 7-5 12-12 12H20c-7 0-12-5-12-12V52Z" fill="#ffffff" opacity=".16"/>
+        </svg>
+      </div>
+      <div class="names"><span class="n1">Gyro</span><span class="n2">Applications</span></div>
+    </div>
+  </div>
+
+  <h1>2 · dark Finder <span>same png, no second asset</span></h1>
+  <div class="win dark">
+    <div class="bar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>Gyro</div>
+    <div class="art">
+      <img class="paper" src="../../apps/desktop/src-tauri/dmg/background.png" alt="">
+      <div class="icon a"><img src="../../apps/desktop/src-tauri/icons/128x128@2x.png" alt="Gyro"></div>
+      <div class="icon b">
+        <svg class="folder" viewBox="0 0 128 128" fill="none">
+          <path d="M8 32c0-7 5-12 12-12h32l11 11h45c7 0 12 5 12 12v63c0 7-5 12-12 12H20c-7 0-12-5-12-12V32Z" fill="url(#folderFace)"/>
+          <path d="M8 52h112v54c0 7-5 12-12 12H20c-7 0-12-5-12-12V52Z" fill="#ffffff" opacity=".16"/>
+        </svg>
+      </div>
+      <div class="names"><span class="n1">Gyro</span><span class="n2">Applications</span></div>
+    </div>
+  </div>
+
+  <h1>3 · the asset alone <span>shadow-free, 1:1</span></h1>
+  <div class="raw"><img src="../../apps/desktop/src-tauri/dmg/background.png" alt="Gyro DMG background"></div>
+
+  <p class="note">
+    icon names are drawn by Finder, not by the artwork — approximated here at 11.5 pt.<br>
+    geometry: window 660 × 400 pt · icons at 180 / 480 · names 256–292 · rule 328 · captions 347.<br>
+    no version string by design — a static PNG cannot follow the next tag; the only caption is macOS 14+.
+  </p>
+
+</body>
+</html>

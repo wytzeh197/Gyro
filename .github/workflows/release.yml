@@ -181,6 +181,12 @@ jobs:
           fi
           pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
         env:
+          # bundle_dmg drives Finder through osascript to paint the background
+          # and place the two icons, and passes --skip-jenkins whenever CI is
+          # set - which silently produces an unstyled DMG. Ignore CI for this
+          # step only; verify-macos-release.mjs fails the release if the
+          # artwork still did not land.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GYRO_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

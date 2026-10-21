@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gyro — poster, cut back</title>
+<style>
+  :root{
+    --page:#050507; --text:#e9e9ef; --muted:#84848f; --hair:rgba(255,255,255,.08);
+    --ink:#f2f2f5; --dim:rgba(255,255,255,.38); --hairink:rgba(255,255,255,.14);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--page);color:var(--text);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden;
+  }
+
+  header{
+    flex:none;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    padding:12px 20px;border-bottom:1px solid var(--hair);
+  }
+  .brand{display:flex;align-items:baseline;gap:9px;margin-right:auto}
+  .brand b{font-size:13px;font-weight:600}
+  .brand span{font-size:11px;color:var(--muted)}
+
+  .seg{display:flex;gap:2px;padding:2px;border:1px solid var(--hair);border-radius:8px;background:#101014}
+  .seg button{
+    appearance:none;border:0;background:transparent;color:var(--muted);font:500 11px/1 var(--sans);
+    padding:6px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;
+  }
+  .seg button:hover{color:var(--text)}
+  .seg button[aria-pressed="true"]{background:#26262e;color:#fff}
+  .seg button:focus-visible{outline:1px solid #78a9ff;outline-offset:1px}
+
+  main{flex:1;min-height:0;overflow:auto;padding:22px 20px 8px;display:flex;flex-direction:column;align-items:center}
+  .stage{flex:none;width:660px}
+
+  /* ---------- finder window ---------- */
+  .win{width:660px;border-radius:10px;overflow:hidden;background:#1c1c1e;
+       box-shadow:0 28px 70px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.08)}
+  .titlebar{height:28px;display:flex;align-items:center;padding:0 10px;position:relative;font-size:12px;font-weight:600}
+  .lights{display:flex;gap:6px}
+  .lights i{width:11px;height:11px;border-radius:50%;display:block}
+  .lights i:nth-child(1){background:#ff5f57}
+  .lights i:nth-child(2){background:#febc2e}
+  .lights i:nth-child(3){background:#28c840}
+  .titlebar .t{position:absolute;left:0;right:0;text-align:center;pointer-events:none;opacity:.85}
+  .theme-dark .titlebar{background:#2a2a2c;color:#d6d6d8;border-bottom:1px solid #1b1b1c}
+  .theme-light .titlebar{background:#e6e6e6;color:#3a3a3c;border-bottom:1px solid #d2d2d2}
+
+  /* ---------- 660 x 400 art surface ---------- */
+  .art{position:relative;width:660px;height:400px;overflow:hidden;display:block}
+  .theme-dark .art{background:#26262a}
+  .theme-light .art{background:#f2f2f3}
+  .art.flat{background:#0a0a0c}
+
+  .card{
+    position:absolute;left:16px;top:16px;width:628px;height:368px;border-radius:14px;
+    background:#0d0d10;border:1px solid rgba(255,255,255,.1);
+    box-shadow:0 12px 34px rgba(0,0,0,.45);
+  }
+  body[data-ground="flat"] .card{display:none}
+
+  .icon{position:absolute;top:126px;width:128px;height:128px}
+  .icon.gyro{left:106px}
+  .icon.apps{left:426px}
+  .icon img{width:128px;height:128px;display:block;border-radius:29px}
+  .folder{width:128px;height:128px;display:block}
+
+  .labels{position:absolute;left:0;top:262px;width:660px;height:18px;font-size:11.5px;text-align:center}
+  .labels span{position:absolute;width:132px}
+  .labels .l1{left:104px}
+  .labels .l2{left:424px}
+  body[data-labels="off"] .labels{display:none}
+  .theme-dark .labels{color:#e8e8ea;text-shadow:0 1px 2px rgba(0,0,0,.75)}
+  .theme-light .labels{color:#2b2b2e}
+
+  .arrow{position:absolute;left:274px;top:184px;width:112px;height:12px}
+
+  /* poster band */
+  .wordmark{position:absolute;left:40px;color:var(--ink);font-weight:600;line-height:1}
+  .wordmark.trim{font-size:40px;letter-spacing:-.028em;bottom:46px}
+  .wordmark.mark{font-size:132px;font-weight:700;letter-spacing:-.05em;left:34px;bottom:-26px;color:rgba(255,255,255,.08)}
+  .ver{position:absolute;right:40px;bottom:48px;font:400 9.5px/1 var(--mono);letter-spacing:.14em;color:rgba(255,255,255,.52);
+       white-space:nowrap}
+  .rule{position:absolute;left:40px;right:40px;bottom:72px;height:1px;background:rgba(255,255,255,.19)}
+  .microlabel{position:absolute;left:40px;bottom:47px;font:500 10px/1 var(--sans);letter-spacing:.34em;color:var(--dim)}
+  body[data-cut="trim"] .rule,body[data-cut="trim"] .microlabel{display:none}
+  body[data-cut="mark"] .rule,body[data-cut="mark"] .microlabel{display:none}
+  body[data-cut="rule"] .wordmark{display:none}
+  body[data-cut="trim"] .wordmark.mark{display:none}
+  body[data-cut="mark"] .wordmark.trim{display:none}
+
+  /* geometry */
+  .geo{position:absolute;inset:0;display:none}
+  body[data-geo="on"] .geo{display:block}
+  .geo .band{position:absolute;left:50px;width:560px;bottom:106px;height:30px;
+    background:rgba(255,90,90,.14);border-top:1px dashed rgba(255,90,90,.55);border-bottom:1px dashed rgba(255,90,90,.55)}
+  .geo .safe{position:absolute;left:32px;top:32px;width:596px;height:336px;border:1px dashed rgba(120,169,255,.4);border-radius:4px}
+  .geo .box{position:absolute;top:126px;width:128px;height:128px;border:1px solid rgba(120,169,255,.6)}
+  .geo .box.a{left:106px}.geo .box.b{left:426px}
+  .geo .cross{position:absolute;width:9px;height:9px;border-left:1px solid rgba(255,150,150,.95);border-top:1px solid rgba(255,150,150,.95)}
+  .geo .tick{position:absolute;font:9px/1 var(--mono);color:rgba(255,175,175,.9);letter-spacing:.05em}
+
+  /* readout */
+  .readout{flex:none;width:660px;margin-top:20px;padding-top:14px;border-top:1px solid var(--hair)}
+  .readout h2{margin:0;font-size:12px;font-weight:600}
+  .readout h2 em{font-style:normal;color:var(--muted);font-weight:400}
+  .readout p{margin:6px 0 0;font-size:12px;line-height:1.6;color:#a9a9b4;max-width:62ch}
+  .facts{display:flex;gap:26px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.05)}
+  .fact{display:flex;align-items:baseline;gap:7px;font:8.5px/1 var(--mono);color:#5f5f6b;
+        letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+  .fact b{color:#cfcfd7;font-weight:500;font-size:10px;letter-spacing:.02em}
+  .verdict{margin-top:12px;font:11px/1.55 var(--mono);color:#82828d}
+  .verdict.warn{color:#ffb454}
+  .verdict.ok{color:#79c99a}
+
+  footer{flex:none;display:flex;justify-content:space-between;gap:16px;padding:10px 20px;
+         border-top:1px solid var(--hair);font:10px/1 var(--mono);color:#727280;letter-spacing:.05em}
+</style>
+</head>
+<body data-cut="trim" data-ground="card" data-labels="on" data-geo="off">
+
+<header>
+  <div class="brand"><b>Gyro · install window</b><span>poster, cut back</span></div>
+  <div class="seg" id="cut">
+    <button data-v="trim" aria-pressed="true">1 · Trim</button>
+    <button data-v="rule">2 · Rule</button>
+    <button data-v="mark">3 · Mark</button>
+  </div>
+  <div class="seg" id="ground">
+    <button data-v="card" aria-pressed="true">Card</button>
+    <button data-v="flat">Flat</button>
+  </div>
+  <div class="seg" id="theme">
+    <button data-v="dark" aria-pressed="true">Dark Finder</button>
+    <button data-v="light">Light Finder</button>
+  </div>
+  <div class="seg" id="extras">
+    <button data-v="labels" aria-pressed="true">Labels</button>
+    <button data-v="geo">Geometry</button>
+    <button data-v="adhoc">Ad-hoc</button>
+  </div>
+</header>
+
+<main>
+  <div class="stage">
+    <div class="win theme-dark" id="win">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="t">Gyro</div></div>
+      <div class="art card" id="art">
+        <div class="card"></div>
+
+        <div class="icon gyro"><img src="../../apps/desktop/src-tauri/icons/128x128@2x.png" alt=""></div>
+        <div class="icon apps">
+          <svg class="folder" viewBox="0 0 128 128" aria-hidden="true">
+            <defs>
+              <linearGradient id="fb" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#6ec1ff"/><stop offset=".55" stop-color="#4a97fb"/><stop offset="1" stop-color="#2f77ef"/>
+              </linearGradient>
+              <linearGradient id="ff" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#d9ecff"/><stop offset="1" stop-color="#a6cbfa"/>
+              </linearGradient>
+            </defs>
+            <rect width="128" height="128" rx="29" fill="url(#fb)"/>
+            <path d="M14 36c0-4.4 3.6-8 8-8h32c2.7 0 5.2 1.4 6.7 3.6l3.6 5.4H22c-4.4 0-8 3.6-8 8z" fill="#b7dfff"/>
+            <rect x="14" y="42" width="100" height="72" rx="9" fill="url(#ff)"/>
+          </svg>
+        </div>
+
+        <div class="labels"><span class="l1">Gyro</span><span class="l2">Applications</span></div>
+
+        <svg class="arrow" viewBox="0 0 112 12" fill="none">
+          <path d="M0 6h101" stroke="rgba(255,255,255,.32)" stroke-width="1"/>
+          <path d="M97 1.8 104.6 6 97 10.2" stroke="rgba(255,255,255,.44)" stroke-width="1"/>
+        </svg>
+
+        <div class="rule"></div>
+        <div class="microlabel">GYRO</div>
+        <div class="wordmark trim">Gyro</div>
+        <div class="wordmark mark">Gyro</div>
+        <div class="ver">macOS 14+</div>
+
+        <div class="geo">
+          <div class="safe"></div>
+          <div class="band"></div>
+          <div class="box a"></div><div class="box b"></div>
+          <div class="cross" style="left:165px;top:185px"></div>
+          <div class="cross" style="left:485px;top:185px"></div>
+          <div class="tick" style="left:56px;top:40px">poster zone — everything above the names</div>
+          <div class="tick" style="left:252px;bottom:114px">finder draws the names here</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="readout">
+      <h2 id="rTitle">1 · Trim <em>— the poster with everything non-load-bearing removed</em></h2>
+      <p id="rBody">Wordmark at 40 pt, sharing a baseline with the minimum-OS caption — one line instead of two ranks. Three dotted chevrons become a single 1 pt rule. No pill, no gradient.</p>
+      <div class="facts">
+        <div class="fact"><b>1320 × 800</b>png @2x</div>
+        <div class="fact"><b>660 × 400 pt</b>layout</div>
+        <div class="fact"><b>y 300–400</b>free band</div>
+      </div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>1–3 cuts · C card/flat · D finder · G geometry · A ad-hoc</span>
+  <span>bundle → macOS → dmg → background</span>
+</footer>
+
+<script>
+const state = { cut:'rule', ground:'flat', theme:'light', labels:'on', geo:'off', adhoc:'off' };
+const body = document.body;
+new URLSearchParams(location.search).forEach((v,k)=>{ if(k in state) state[k]=v; });
+
+const COPY = {
+  trim:{ title:'1 · Trim', sub:'the poster with everything non-load-bearing removed',
+    body:'Wordmark at 40 pt, sharing a baseline with the minimum-OS caption \u2014 one line instead of two ranks. Three dotted chevrons become a single 1 pt rule. No pill, no gradient.' },
+  rule:{ title:'2 · Rule', sub:'no wordmark at all',
+    body:'One hairline, GYRO small under its left end, the minimum-OS caption under its right. The quietest option that still reads as a product and not a file browser.' },
+  mark:{ title:'3 · Mark', sub:'the wordmark as a watermark',
+    body:'One wordmark at 132 pt, dropped 26 pt below the window edge so Finder crops it, at 8% white. It reads as texture at arm\u2019s length and vanishes at thumbnail size. The caption stays tiny and alone on the right.' }
+};
+
+function paint(){
+  body.dataset.cut = state.cut;
+  body.dataset.ground = state.ground;
+  body.dataset.labels = state.labels;
+  body.dataset.geo = state.geo;
+  document.getElementById('win').className = 'win theme-' + state.theme;
+  document.getElementById('art').className = 'art' + (state.ground === 'flat' ? ' flat' : '');
+
+
+  document.querySelectorAll('#cut button').forEach(b=>b.setAttribute('aria-pressed', b.dataset.v===state.cut));
+  document.querySelectorAll('#ground button').forEach(b=>b.setAttribute('aria-pressed', b.dataset.v===state.ground));
+  document.querySelectorAll('#theme button').forEach(b=>b.setAttribute('aria-pressed', b.dataset.v===state.theme));
+  document.querySelector('#extras button[data-v="labels"]').setAttribute('aria-pressed', state.labels==='on');
+  document.querySelector('#extras button[data-v="geo"]').setAttribute('aria-pressed', state.geo==='on');
+  document.querySelector('#extras button[data-v="adhoc"]').setAttribute('aria-pressed', state.adhoc==='on');
+
+  document.querySelector('.ver').textContent = state.adhoc==='on'
+    ? 'ad-hoc \u2014 right-click \u2192 open'
+    : 'macOS 14+';
+
+  document.getElementById('rTitle').innerHTML = COPY[state.cut].title + ' <em>\u2014 ' + COPY[state.cut].sub + '</em>';
+  document.getElementById('rBody').textContent = COPY[state.cut].body;
+
+  const v = document.getElementById('verdict');
+  if(state.ground==='flat' && state.theme==='light'){
+    v.className='verdict warn';
+    v.textContent='flat + light Finder \u2192 the whole window goes black. Fine, if you also never ship a light appearance.';
+  } else if(state.ground==='card'){
+    v.className='verdict ok';
+    v.textContent='card \u2192 one PNG, sane in both appearances. The dark panel is the design; the 16 pt margin is Finder\u2019s.';
+  } else {
+    v.className='verdict';
+    v.textContent='flat \u2192 one appearance only. Honest in dark Finder, a black slab in light.';
+  }
+}
+
+document.getElementById('cut').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return; state.cut=b.dataset.v; paint();
+});
+document.getElementById('ground').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return; state.ground=b.dataset.v; paint();
+});
+document.getElementById('theme').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return; state.theme=b.dataset.v; paint();
+});
+document.getElementById('extras').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.v==='labels') state.labels = state.labels==='on'?'off':'on';
+  if(b.dataset.v==='geo') state.geo = state.geo==='on'?'off':'on';
+  if(b.dataset.v==='adhoc') state.adhoc = state.adhoc==='on'?'off':'on';
+  paint();
+});
+
+addEventListener('keydown', e=>{
+  const k=e.key.toLowerCase();
+  if(k==='1') state.cut='trim';
+  else if(k==='2') state.cut='rule';
+  else if(k==='3') state.cut='mark';
+  else if(k==='c') state.ground = state.ground==='card'?'flat':'card';
+  else if(k==='d') state.theme = state.theme==='dark'?'light':'dark';
+  else if(k==='g') state.geo = state.geo==='on'?'off':'on';
+  else if(k==='a') state.adhoc = state.adhoc==='on'?'off':'on';
+  else return;
+  paint();
+});
+
+paint();
+</script>
+</body>
+</html>

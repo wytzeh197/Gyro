@@ -14,6 +14,7 @@ import {
   readdirSync,
   readlinkSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -369,6 +370,54 @@ function verifyUpdaterArchive(archivePath, config, target, signing) {
   }
 }
 
+function pngSize(path) {
+  const header = readFileSync(path).subarray(0, 24);
+  return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+}
+
+// Finder styles a DMG only through its own view options: the picture lives in
+// .background, the window size and icon geometry in .DS_Store. Tauri's bundler
+// skips both steps when it detects CI, so a finished-looking build can still
+// ship the unstyled fallback. Check the artwork rather than trusting the build.
+function verifyDmgArtwork(mountPath, config) {
+  const dmg = config.bundle?.macOS?.dmg;
+  if (!dmg?.background || !dmg.windowSize) {
+    throw new Error(
+      "bundle.macOS.dmg is not configured, so the DMG cannot carry artwork",
+    );
+  }
+  const backgroundDirectory = join(mountPath, ".background");
+  if (
+    !existsSync(backgroundDirectory) ||
+    !lstatSync(backgroundDirectory).isDirectory()
+  ) {
+    throw new Error(
+      "DMG has no .background directory: the Finder layout step was skipped",
+    );
+  }
+  const images = readdirSync(backgroundDirectory).filter((name) =>
+    name.toLowerCase().endsWith(".png"),
+  );
+  if (images.length === 0) {
+    throw new Error("DMG .background directory holds no background PNG");
+  }
+  const expected = `${dmg.windowSize.width * 2}x${dmg.windowSize.height * 2}`;
+  for (const image of images) {
+    const size = pngSize(join(backgroundDirectory, image));
+    requireEqual(
+      `${size.width}x${size.height}`,
+      expected,
+      `.background/${image} pixel size`,
+    );
+  }
+  const dsStore = join(mountPath, ".DS_Store");
+  if (!existsSync(dsStore) || statSync(dsStore).size === 0) {
+    throw new Error(
+      "DMG has no .DS_Store: window size and icon positions were not written",
+    );
+  }
+}
+
 function attachAndVerifyDmg(dmgPath, config, target, signing) {
   run("hdiutil", ["verify", dmgPath]);
   if (signing.mode === "developer-id") verifyDeveloperIdDmg(dmgPath, signing);
@@ -391,6 +440,7 @@ function attachAndVerifyDmg(dmgPath, config, target, signing) {
     attached = true;
 
     verifyApplicationsShortcut(mountPath);
+    verifyDmgArtwork(mountPath, config);
     const appName = `${config.productName}.app`;
     const appEntries = readdirSync(mountPath).filter((name) =>
       name.endsWith(".app"),

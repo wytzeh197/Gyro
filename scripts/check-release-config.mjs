@@ -55,6 +55,67 @@ const homebrewFormula = readFileSync(
 
 const pubkey = config.plugins?.updater?.pubkey;
 const failures = [];
+
+// The DMG is the first thing a new user meets, and Tauri does not fail when
+// bundle.macOS.dmg is missing or its background is off-size: Finder simply
+// falls back to an auto-arranged, unstyled window. Catch that here, where it
+// costs seconds instead of a release.
+{
+  const dmg = config.bundle?.macOS?.dmg;
+  const backgroundPath = dmg?.background
+    ? resolve(dirname(configPath), dmg.background)
+    : undefined;
+  if (!dmg) {
+    failures.push(
+      "bundle.macOS.dmg is missing, so the DMG ships Finder's unstyled icon layout.",
+    );
+  } else if (!backgroundPath) {
+    failures.push("bundle.macOS.dmg.background is missing.");
+  } else if (!existsSync(backgroundPath)) {
+    failures.push(
+      `bundle.macOS.dmg.background points at ${dmg.background}, which does not exist. Run: swift scripts/render-dmg-background.swift`,
+    );
+  } else {
+    const header = readFileSync(backgroundPath).subarray(0, 24);
+    const isPng =
+      header.length === 24 &&
+      header.readUInt32BE(0) === 0x89504e47 &&
+      header.readUInt32BE(4) === 0x0d0a1a0a;
+    const width = isPng ? header.readUInt32BE(16) : 0;
+    const height = isPng ? header.readUInt32BE(20) : 0;
+    const windowWidth = dmg.windowSize?.width;
+    const windowHeight = dmg.windowSize?.height;
+    if (!isPng) {
+      failures.push(
+        "bundle.macOS.dmg.background must be a PNG; the DMG bundler cannot place an SVG.",
+      );
+    } else if (
+      width !== windowWidth * 2 ||
+      height !== windowHeight * 2
+    ) {
+      failures.push(
+        `bundle.macOS.dmg.background is ${width}×${height}, but a ${windowWidth}×${windowHeight} pt window needs ${windowWidth * 2}×${windowHeight * 2} at 2x. Run: swift scripts/render-dmg-background.swift`,
+      );
+    }
+    for (const key of ["appPosition", "applicationFolderPosition"]) {
+      const point = dmg[key];
+      if (
+        !point ||
+        !Number.isFinite(point.x) ||
+        !Number.isFinite(point.y) ||
+        point.x <= 0 ||
+        point.x >= windowWidth ||
+        point.y <= 0 ||
+        point.y >= windowHeight
+      ) {
+        failures.push(
+          `bundle.macOS.dmg.${key} is missing or outside the ${windowWidth}×${windowHeight} window; Finder would auto-arrange the icons.`,
+        );
+      }
+    }
+  }
+}
+
 const githubLatestEndpoint =
   "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json";
 
