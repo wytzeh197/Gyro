@@ -87,6 +87,38 @@ function embeddedEntitlement(appPath, key) {
   return `${display.stdout ?? ""}${display.stderr ?? ""}`.includes(key);
 }
 
+/**
+ * Pick a stable code-signing identity.
+ *
+ * macOS guards every saved API key with an access list naming the exact
+ * certificate and bundle identifier that wrote it, so an ad-hoc signature —
+ * a brand-new identity on every single build — can never match, and macOS asks
+ * for the login password again. Any real identity already on this machine is
+ * stable across rebuilds, so "Always Allow" sticks for good. Prefer a
+ * Developer ID that is already installed for releases, then a locally created
+ * dev identity, and only then ad-hoc.
+ */
+function resolveSigningIdentity() {
+  const explicit = process.env.GYRO_CODESIGN_IDENTITY;
+  if (explicit) return explicit;
+
+  const listed = spawnSync(
+    "security",
+    ["find-identity", "-p", "codesigning"],
+    { encoding: "utf8" },
+  );
+  const names = `${listed.stdout ?? ""}`
+    .split("\n")
+    .map((line) => line.match(/"([^"]+)"/)?.[1])
+    .filter(Boolean);
+
+  return (
+    names.find((name) => name.startsWith("Developer ID Application: ")) ??
+    names.find((name) => name === "Gyro Dev") ??
+    null
+  );
+}
+
 if (hasValidDeveloperIdSignature(destinationApp)) {
   console.log("Keeping the existing Developer ID signature.");
 } else if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
@@ -98,21 +130,39 @@ if (hasValidDeveloperIdSignature(destinationApp)) {
     repoRoot,
     "apps/desktop/src-tauri/Entitlements.plist",
   );
-  const sign = spawnSync(
-    "codesign",
-    [
-      "--force",
-      "--deep",
-      "--options",
-      "runtime",
-      "--entitlements",
-      entitlements,
-      "--sign",
-      "-",
-      destinationApp,
-    ],
-    { stdio: "inherit" },
-  );
+  const signs = (signer) =>
+    spawnSync(
+      "codesign",
+      [
+        "--force",
+        "--deep",
+        "--options",
+        "runtime",
+        "--entitlements",
+        entitlements,
+        "--sign",
+        signer,
+        destinationApp,
+      ],
+      { stdio: "inherit" },
+    );
+
+  const identity = resolveSigningIdentity();
+  let sign = identity ? signs(identity) : null;
+  if (sign && sign.status !== 0) {
+    console.warn(
+      `Signing with "${identity}" failed; falling back to an ad-hoc signature.`,
+    );
+    sign = null;
+  }
+  if (!sign) {
+    if (!identity) {
+      console.log(
+        "No signing identity found, so this build is ad-hoc signed: macOS will ask for the login Keychain again after the next rebuild. Run scripts/setup-dev-signing.sh once to stop that.",
+      );
+    }
+    sign = signs("-");
+  }
 
   if (sign.status !== 0) {
     console.warn(

@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -42,20 +43,91 @@ extern "C" {
     fn SecKeychainSetUserInteractionAllowed(state: u8) -> i32;
 }
 
+/// One answer per account is kept for the rest of the process. Every read can
+/// reopen the macOS access dialog, and the same credential is asked for again
+/// by the account probe, the provider check and each send.
+#[derive(Clone)]
+enum CachedRead {
+    Value(Option<String>),
+    Refused(Instant),
+}
+
+fn read_cache() -> &'static std::sync::Mutex<HashMap<String, CachedRead>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, CachedRead>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Reads are serialized so two callers cannot open one dialog each.
+#[cfg(not(test))]
+fn read_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// A dismissed dialog stays dismissed long enough to swallow a burst of
+/// callers, while an explicit retry a moment later can still ask again.
+const REFUSAL_MEMORY: Duration = Duration::from_secs(20);
+
+fn cached_read(account: &str) -> Option<Result<Option<String>>> {
+    let mut cache = read_cache().lock().ok()?;
+    match cache.get(account)? {
+        CachedRead::Value(value) => Some(Ok(value.clone())),
+        CachedRead::Refused(at) if at.elapsed() < REFUSAL_MEMORY => {
+            Some(Err(anyhow::Error::new(InteractionRequired)))
+        }
+        CachedRead::Refused(_) => {
+            cache.remove(account);
+            None
+        }
+    }
+}
+
+fn remember(account: &str, entry: CachedRead) {
+    if let Ok(mut cache) = read_cache().lock() {
+        cache.insert(account.to_string(), entry);
+    }
+}
+
+/// Storing or deleting a credential makes its cached copy wrong.
+pub(super) fn forget(account: &str) {
+    if let Ok(mut cache) = read_cache().lock() {
+        cache.remove(account);
+    }
+}
+
 #[cfg(not(test))]
 pub(super) fn get(account: &str) -> Result<Option<String>> {
+    if let Some(cached) = cached_read(account) {
+        return cached;
+    }
+    let _serialized = read_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cached) = cached_read(account) {
+        return cached;
+    }
     let silent = read_with_command(reader_command()?, account, READ_DEADLINE);
     // A rebuilt local app has a new ad-hoc signature. The saved item stays
     // locked to the previous one until the user allows this binary.
-    if silent
+    let read = if silent
         .as_ref()
         .is_err_and(|error| error.is::<InteractionRequired>())
     {
         let mut command = reader_command()?;
         command.env(INTERACTIVE_ENV, "1");
-        return read_with_command(command, account, INTERACTIVE_READ_DEADLINE);
+        read_with_command(command, account, INTERACTIVE_READ_DEADLINE)
+    } else {
+        silent
+    };
+    match &read {
+        Ok(value) => remember(account, CachedRead::Value(value.clone())),
+        Err(error) if error.is::<InteractionRequired>() => {
+            remember(account, CachedRead::Refused(Instant::now()))
+        }
+        Err(_) => {}
     }
-    silent
+    read
 }
 
 #[cfg(not(test))]
@@ -272,6 +344,27 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", script]);
         command
+    }
+
+    #[test]
+    fn a_read_is_served_from_memory_instead_of_asking_again() {
+        remember("fixture-cache-value", CachedRead::Value(Some("k".into())));
+        assert_eq!(
+            cached_read("fixture-cache-value").unwrap().unwrap().as_deref(),
+            Some("k")
+        );
+        // Storing or deleting the credential drops the copy.
+        forget("fixture-cache-value");
+        assert!(cached_read("fixture-cache-value").is_none());
+    }
+
+    #[test]
+    fn a_refused_prompt_is_not_shown_twice_in_a_burst() {
+        remember("fixture-cache-refused", CachedRead::Refused(Instant::now()));
+        let error = cached_read("fixture-cache-refused").unwrap().unwrap_err();
+        assert!(error.is::<InteractionRequired>());
+        forget("fixture-cache-refused");
+        assert!(cached_read("fixture-cache-refused").is_none());
     }
 
     #[test]

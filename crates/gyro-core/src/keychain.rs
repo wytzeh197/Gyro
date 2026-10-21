@@ -6,7 +6,10 @@ pub fn set_api_key(account: &str, value: &str) -> Result<()> {
     keyring::Entry::new(SERVICE_NAME, account)
         .context("open macOS keychain entry")?
         .set_password(value)
-        .context("store provider API key in keychain")
+        .context("store provider API key in keychain")?;
+    #[cfg(target_os = "macos")]
+    macos_read::forget(account);
+    Ok(())
 }
 
 pub fn get_api_key(account: &str) -> Result<Option<String>> {
@@ -101,6 +104,8 @@ pub fn run_read_helper() -> Option<i32> {
 }
 
 pub fn delete_api_key(account: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    macos_read::forget(account);
     match keyring::Entry::new(SERVICE_NAME, account)
         .context("open macOS keychain entry")?
         .delete_credential()
