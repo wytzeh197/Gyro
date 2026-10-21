@@ -38,6 +38,37 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 
 # Dependencies (SQLite, serde_json, walkdir, notify) run unoptimized in
 # `tauri dev` otherwise, which makes the dev app feel far slower than release.
-# Gyro's own crates stay at opt-level 0 so incremental rebuilds stay quick.
+# Note: `"*"` matches Gyro's own crates too, so those are pinned to a cheaper
+# level in the next block instead of silently inheriting -O2.
 [profile.dev.package."*"]
 opt-level = 2
+# ...but dependencies carry no debug info. With ~474 crates in the graph, full
+# DWARF for every optimized dependency was the largest single cost of a cold
+# build and most of `target/debug/deps` on disk. Symbols survive, so backtraces
+# still name dependency frames; only their file:line is lost.
+debug = false
+
+[profile.dev]
+# Gyro's own crates keep line tables, so breakpoints and backtraces still land
+# on real lines, without the type/variable info that triples object size.
+debug = 1
+
+# Gyro's own crates: no optimization in dev. Measured on `gyro-core`, clean
+# rebuild of the crate alone: opt-level 0 = 5.8 s wall / 5.3 s CPU,
+# opt-level 1 = 28.9 s wall / 96.5 s CPU. Optimizer passes also run for
+# `cargo check`, so anything above 0 costs ~5x on the loop you use all day.
+# If `tauri dev` ever feels sluggish, raise only this crate to 1 - never the
+# `"*"` block, which also covers 474 dependencies.
+[profile.dev.package.gyro-core]
+opt-level = 0
+
+[profile.dev.package.gyro-cli]
+opt-level = 0
+
+[profile.dev.package.gyro-desktop]
+opt-level = 0
+
+# Shipping builds trade a longer (CI-only) link for a leaner, faster binary.
+[profile.release]
+lto = "thin"
+codegen-units = 1
