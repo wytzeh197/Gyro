@@ -160,6 +160,9 @@
   "check-dev-env.mjs": {
     "kind": "behavioral"
   },
+  "check-dmg-notarization-retry.mjs": {
+    "kind": "behavioral"
+  },
   "check-download-site-build.mjs": {
     "kind": "behavioral"
   },
