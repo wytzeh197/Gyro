@@ -12,7 +12,8 @@ Three providers ship as presets, and you can add your own endpoint.
 | Mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
 | OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
-These are **experimental** in this release.
+These providers run in the desktop app. The standalone CLI can configure them
+while its chat loop still runs only the subprocess adapters.
 
 ## Add a key to a preset
 
