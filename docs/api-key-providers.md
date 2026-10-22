@@ -13,7 +13,8 @@ Three providers ship as presets, and you can add your own endpoint.
 | OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
 These providers run in the desktop app. The standalone CLI can configure them
-while its chat loop still runs only the subprocess adapters.
+while its chat loop runs subprocess adapters and Ollama, not OpenAI-compatible
+API providers yet.
 
 ## Add a key to a preset
 
