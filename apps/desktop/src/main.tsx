@@ -6,10 +6,8 @@ import { EarlyShell } from "./early-shell";
 import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
 import { readStoredAppearance } from "./ui-storage";
-import { WindowControls } from "./window-controls";
 import "./early-shell.css";
 import "./theme.css";
-import "./window-controls.css";
 
 const bootSurface = resolveBootSurface({
   browserAgent: "__gyroBrowserAgentInstalled" in window,
@@ -17,7 +15,6 @@ const bootSurface = resolveBootSurface({
   surface: new URLSearchParams(window.location.search).get("surface"),
 });
 const isMenuBarSurface = bootSurface === "menu-bar";
-const isMainSurface = bootSurface === "main";
 document.documentElement.dataset.surface = bootSurface;
 // The macOS main window owns a native Sidebar material; embedded pages and
 // auxiliary windows retain their normal opaque backgrounds.
@@ -117,7 +114,6 @@ if (bootSurface === "embedded") {
 } else {
   root.render(
     <React.StrictMode>
-      {isMainSurface ? <WindowControls /> : null}
       <AppErrorBoundary>
         <EarlyShell />
       </AppErrorBoundary>
@@ -133,7 +129,6 @@ if (bootSurface === "embedded") {
     .then(([{ App }]) => {
       root.render(
         <React.StrictMode>
-          {isMainSurface ? <WindowControls /> : null}
           <AppErrorBoundary>
             <App />
           </AppErrorBoundary>

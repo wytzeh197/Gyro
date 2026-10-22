@@ -1253,7 +1253,7 @@ pub fn open_session_browser<R: Runtime>(
     // controls at (0, 0). Re-apply the overlay inset on the parent window.
     #[cfg(target_os = "macos")]
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        crate::apply_macos_window_chrome(&main);
+        crate::apply_macos_traffic_light_position(&main);
     }
 
     if !visible {
