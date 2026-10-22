@@ -9,6 +9,23 @@ import type { SessionEvent } from "./types";
 import { workflowDetails, workflowChildren, workflowState } from "./code-mode";
 import "./code-mode.css";
 
+const ACTIVITY_STATUS_LABELS: Record<string, string> = {
+  completed: "Completed",
+  failed: "Failed",
+  denied: "Denied",
+  running: "Running",
+  waiting: "Waiting",
+  requested: "Requested",
+  cancelled: "Cancelled",
+  canceled: "Cancelled",
+  inactive: "Interrupted",
+};
+
+function activityStatusLabel(status: unknown) {
+  if (typeof status !== "string" || !status) return "";
+  return ACTIVITY_STATUS_LABELS[status] ?? status;
+}
+
 export function CodeModeActivityCard({
   event,
   onAction,
@@ -73,8 +90,15 @@ export function CodeModeActivityCard({
                       </strong>
                       {resource?.label ? <small>{resource.label}</small> : null}
                     </span>
-                    <small>
-                      {String(activity.status ?? "")}
+                    <small
+                      className={
+                        activity.status === "failed" ||
+                        activity.status === "denied"
+                          ? "is-alert"
+                          : undefined
+                      }
+                    >
+                      {activityStatusLabel(activity.status)}
                       {typeof activity.durationMs === "number"
                         ? ` · ${(activity.durationMs / 1000).toFixed(1)} s`
                         : ""}
@@ -82,6 +106,11 @@ export function CodeModeActivityCard({
                     {resource ? (
                       <button
                         type="button"
+                        aria-label={
+                          resource.label
+                            ? `Show ${resource.label}`
+                            : "Show details"
+                        }
                         disabled={!onAction}
                         onClick={() => onAction?.("show-capability", child)}
                       >
@@ -93,15 +122,15 @@ export function CodeModeActivityCard({
               })}
             </ol>
           ) : (
-            <p>No workspace actions recorded.</p>
+            <p role="status">No workspace actions recorded.</p>
           )}
           {state.outcome?.error ? (
-            <p className="gyro-workflow-notice">
+            <p className="gyro-workflow-notice is-error" role="alert">
               {state.outcome.error.message ?? state.outcome.error.kind}
             </p>
           ) : null}
           {state.outcome?.warnings?.length ? (
-            <p className="gyro-workflow-notice">
+            <p className="gyro-workflow-notice is-warning">
               Some work returned warnings. Review the details before continuing.
             </p>
           ) : null}

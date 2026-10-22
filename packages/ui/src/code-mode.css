@@ -1,17 +1,17 @@
 .gyro-workflow {
-  border: 1px solid var(--gyro-border, #333);
-  border-radius: var(--gyro-radius-md, 10px);
-  color: var(--gyro-text, #eee);
-  background: var(--gyro-panel, #191919);
-  font-size: 13px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  background: var(--gyro-surface);
+  font-size: calc(13px * var(--gyro-ui-scale, 1));
   margin: 8px 0;
   min-width: 0;
 }
 .gyro-workflow-disclosure > summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 13px 14px;
+  gap: var(--gyro-space-group);
+  padding: var(--gyro-space-card) var(--gyro-space-panel);
   cursor: pointer;
   list-style: none;
 }
@@ -20,14 +20,33 @@
 }
 .gyro-workflow summary:focus-visible,
 .gyro-workflow button:focus-visible {
-  outline: 2px solid var(--gyro-accent, #b9a0ed);
-  outline-offset: 3px;
-  border-radius: 4px;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--gyro-radius-sm);
 }
 .gyro-workflow-icon {
   display: flex;
-  color: var(--gyro-muted, #aaa);
+  color: var(--gyro-muted);
   flex-shrink: 0;
+}
+.gyro-workflow.is-working .gyro-workflow-icon {
+  color: var(--gyro-status-running);
+}
+.gyro-workflow.is-waiting-for-approval .gyro-workflow-icon {
+  color: var(--gyro-status-waiting);
+}
+.gyro-workflow.is-done .gyro-workflow-icon {
+  color: var(--gyro-success);
+}
+.gyro-workflow.is-partial .gyro-workflow-icon,
+.gyro-workflow.is-partial .gyro-workflow-status {
+  color: var(--gyro-warn);
+}
+.gyro-workflow.is-failed .gyro-workflow-icon,
+.gyro-workflow.is-denied .gyro-workflow-icon,
+.gyro-workflow.is-failed .gyro-workflow-status,
+.gyro-workflow.is-denied .gyro-workflow-status {
+  color: var(--gyro-danger);
 }
 .gyro-workflow-heading {
   display: grid;
@@ -38,35 +57,38 @@
 }
 .gyro-workflow .gyro-workflow-heading strong {
   font-weight: 550;
-  color: var(--gyro-text, #eee);
+  color: var(--gyro-text);
 }
 :root[data-theme] .gyro-workflow .gyro-workflow-steps button {
   transition: none;
-  color: var(--gyro-text, #eee);
+  color: var(--gyro-text);
 }
 .gyro-workflow-heading > span,
 .gyro-workflow-status,
 .gyro-workflow-steps small {
-  color: var(--gyro-muted, #aaa);
-  font-size: 12px;
+  color: var(--gyro-muted);
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+.gyro-workflow-steps small.is-alert {
+  color: var(--gyro-danger);
 }
 .gyro-workflow-status {
   text-align: right;
   max-width: 120px;
 }
 .gyro-workflow-chevron {
-  transition: transform 0.15s;
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
   flex-shrink: 0;
-  color: var(--gyro-muted, #aaa);
+  color: var(--gyro-muted);
 }
 .gyro-workflow-disclosure[open] > summary .gyro-workflow-chevron {
   transform: rotate(90deg);
 }
 .gyro-workflow-body {
-  border-top: 1px solid var(--gyro-border, #333);
-  padding: 12px 14px;
+  border-top: 1px solid var(--gyro-border);
+  padding: var(--gyro-space-card) var(--gyro-space-panel);
   display: grid;
-  gap: 12px;
+  gap: var(--gyro-space-card);
   min-width: 0;
 }
 .gyro-workflow-steps {
@@ -74,11 +96,11 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: var(--gyro-space-card);
 }
 .gyro-workflow-steps li {
   display: flex;
-  gap: 10px;
+  gap: var(--gyro-space-group);
   align-items: start;
 }
 .gyro-workflow-steps li > span {
@@ -89,17 +111,21 @@
   overflow-wrap: anywhere;
 }
 .gyro-workflow-steps strong {
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   font-weight: 450;
 }
 .gyro-workflow button {
   transition: none;
-  color: var(--gyro-text, #eee);
+  color: var(--gyro-text);
   background: transparent;
-  border: 1px solid var(--gyro-border, #333);
-  border-radius: 5px;
-  padding: 3px 7px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding: 3px 8px;
   cursor: pointer;
+}
+.gyro-workflow button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
 }
 .gyro-workflow button:disabled {
   opacity: 0.5;
@@ -108,37 +134,46 @@
 :root[data-theme] .gyro-workflow .gyro-workflow-body summary {
   transition: none;
   cursor: pointer;
-  color: var(--gyro-muted, #aaa);
+  color: var(--gyro-muted);
   display: flex;
   align-items: center;
   gap: 6px;
+}
+:root[data-theme] .gyro-workflow .gyro-workflow-body summary:focus-visible {
+  color: var(--gyro-text);
 }
 .gyro-workflow pre {
   max-height: 260px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
-  margin: 10px 0 0;
-  padding: 10px;
-  background: var(--gyro-app, #111);
-  border-radius: 6px;
+  font-family: var(--gyro-font-mono);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  line-height: 1.5;
+  margin: 8px 0 0;
+  padding: var(--gyro-space-group);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
 }
 .gyro-workflow-notice,
 .gyro-workflow-body p {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   line-height: 1.5;
-  color: var(--gyro-muted, #aaa);
+  color: var(--gyro-muted);
 }
-.gyro-workflow.is-partial .gyro-workflow-icon,
-.gyro-workflow.is-failed .gyro-workflow-icon {
-  color: var(--gyro-warning, #d6b773);
+.gyro-workflow-notice.is-warning {
+  color: var(--gyro-warn);
+}
+.gyro-workflow-notice.is-error {
+  color: var(--gyro-danger);
 }
 @media (max-width: 400px) {
   .gyro-workflow-disclosure > summary {
-    gap: 7px;
-    padding: 11px;
+    gap: 8px;
+    padding: var(--gyro-space-group) var(--gyro-space-card);
   }
   .gyro-workflow-status {
     max-width: 80px;
