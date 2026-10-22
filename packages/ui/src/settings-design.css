@@ -1262,13 +1262,31 @@
 
 /* -- Settings sidebar ----------------------------------------------------- */
 /* Group labels read as quiet section markers above the page names, not as
-   louder siblings of them. */
+   louder siblings of them. The chat shell's session list is a 3px stack of
+   28px rows, and those rules also match this nav, so the headings were
+   sitting on the page names. These selectors win that cascade: rows stay a
+   list, and each heading gets a pause above it plus a short lead-in. */
+:root[data-theme] .gyro-app-shell .gyro-sidebar-actions.is-settings-pages {
+  gap: calc(16px * var(--gyro-ui-scale, 1));
+  padding-top: calc(8px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-app-shell .gyro-settings-sidebar-group {
+  gap: calc(2px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page {
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+}
+
 :root[data-theme] .gyro-settings-sidebar-group > span {
-  padding: 0 calc(8px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(8px * var(--gyro-ui-scale, 1))
+    calc(4px * var(--gyro-ui-scale, 1));
   color: var(--gyro-muted);
   font-size: calc(11.5px * var(--gyro-ui-scale, 1));
   font-weight: 600;
   letter-spacing: 0.05em;
+  line-height: 1.2;
   text-transform: uppercase;
 }
 
