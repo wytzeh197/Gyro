@@ -117,14 +117,96 @@ cache.reconcile([], prepare);
 prepares = 0;
 cache.reconcile(turns.slice(0, 1), prepare);
 assert.equal(prepares, 1, "retired rows are not retained in the cache");
+const output = "x".repeat(20_000);
+const heavyHistory = Array.from({ length: 40 }, (_, i) =>
+  event(i, { stdout: output, exitCode: 0, nested: { ok: true } }),
+);
+const reordered = heavyHistory.map((row) => ({
+  payload: { nested: { ok: true }, exitCode: 0, stdout: output },
+  createdAt: row.createdAt,
+  message: row.message,
+  sessionId: row.sessionId,
+  kind: row.kind,
+  id: row.id,
+  turnId: row.turnId,
+}));
+assert.notEqual(
+  JSON.stringify(heavyHistory[0]),
+  JSON.stringify(reordered[0]),
+  "fixture key order must differ, or the copy-avoidance check is vacuous",
+);
+assert.equal(
+  mergeSessionHistoryPages(heavyHistory, reordered),
+  heavyHistory,
+  "key order alone does not copy a page of command output",
+);
+let stdoutReads = 0;
+const sourcePayload = heavyHistory[39].payload;
+const trackedPayload = {
+  exitCode: sourcePayload.exitCode,
+  nested: sourcePayload.nested,
+};
+Object.defineProperty(trackedPayload, "stdout", {
+  enumerable: true,
+  get() {
+    stdoutReads += 1;
+    return sourcePayload.stdout;
+  },
+});
+const edited = {
+  ...heavyHistory[39],
+  message: "changed",
+  payload: trackedPayload,
+};
+const editedPage = mergeSessionHistoryPages(heavyHistory, [edited]);
+assert.equal(
+  stdoutReads,
+  0,
+  "a message edit does not read the previous command output",
+);
+assert.equal(editedPage.at(-1).message, "changed");
+assert.equal(editedPage[0], heavyHistory[0]);
+const payloadEdited = {
+  ...heavyHistory[10],
+  payload: { stdout: output, exitCode: 1, nested: { ok: true } },
+};
+const replaced = mergeSessionHistoryPages(heavyHistory, [payloadEdited]);
+assert.equal(replaced[10], payloadEdited);
+assert.equal(replaced[9], heavyHistory[9]);
+function nest(value, depth) {
+  let node = value;
+  for (let level = 0; level < depth; level += 1) node = { child: node };
+  return node;
+}
+const deepSame = event(0, nest("same", 40));
+const deepCopy = { ...deepSame, payload: nest("same", 40) };
+assert.equal(mergeSessionHistoryPages([deepSame], [deepCopy])[0], deepSame);
+const deepDifferent = { ...deepSame, payload: nest("different", 40) };
+assert.equal(
+  mergeSessionHistoryPages([deepSame], [deepDifferent])[0],
+  deepDifferent,
+);
 const start = performance.now();
 for (let i = 0; i < 30; i++)
   assert.equal(mergeSessionHistoryPages(history, page), history);
+const smallMs = performance.now() - start;
+const largeStarted = performance.now();
+for (let i = 0; i < 10; i++)
+  assert.equal(
+    mergeSessionHistoryPages(heavyHistory, reordered),
+    heavyHistory,
+  );
+const largeMs = performance.now() - largeStarted;
 console.log(
-  "History efficiency passed: 20,000-event unchanged identity, linear complete merges, randomized ordering, imported records, 1/1,550 rebuilt turns, late approvals, retry metadata and cache retirement.",
+  "History efficiency passed: 20,000-event unchanged identity, linear complete merges, randomized ordering, imported records, 1/1,550 rebuilt turns, late approvals, retry metadata, cache retirement, and in-place command-output compares.",
 );
 console.log(
   "30 unchanged history merges: " +
-    (performance.now() - start).toFixed(1) +
+    smallMs.toFixed(1) +
+    " ms (fixture measurement).",
+);
+console.log(
+  "10 reordered 20 KB command-output page merges: " +
+    largeMs.toFixed(1) +
     " ms (fixture measurement).",
 );

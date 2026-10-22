@@ -21,6 +21,61 @@ function indexHistory(events: SessionEvent[]) {
   return entry;
 }
 
+// Compare values in place. A refresh parses new objects, and stringifying
+// each row copied command output before it could tell that nothing changed.
+// Key order is not a change. Header fields reject a streaming edit before
+// the payload is walked. Past a modest depth, fall back so a hostile
+// payload cannot overflow the stack.
+function sameJsonValue(left: unknown, right: unknown, depth = 0): boolean {
+  if (left === right) return true;
+  if (depth > 32) return JSON.stringify(left) === JSON.stringify(right);
+  if (
+    typeof left !== "object" ||
+    typeof right !== "object" ||
+    left === null ||
+    right === null
+  )
+    return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (
+      !Array.isArray(left) ||
+      !Array.isArray(right) ||
+      left.length !== right.length
+    )
+      return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (!sameJsonValue(left[index], right[index], depth + 1)) return false;
+    }
+    return true;
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = Object.keys(leftRecord);
+  if (keys.length !== Object.keys(rightRecord).length) return false;
+  for (const key of keys) {
+    if (
+      !Object.hasOwn(rightRecord, key) ||
+      !sameJsonValue(leftRecord[key], rightRecord[key], depth + 1)
+    )
+      return false;
+  }
+  return true;
+}
+
+function sameStoredEvent(existing: SessionEvent, event: SessionEvent) {
+  if (existing === event) return true;
+  if (
+    existing.message !== event.message ||
+    existing.createdAt !== event.createdAt ||
+    existing.kind !== event.kind ||
+    existing.turnId !== event.turnId ||
+    existing.id !== event.id ||
+    existing.sessionId !== event.sessionId
+  )
+    return false;
+  return sameJsonValue(existing, event);
+}
+
 /** Replace durable records and retain every older event. Sort the small incoming
  * page and merge it with ordered history, instead of sorting the entire chat. */
 export function mergeSessionHistoryPages(
@@ -33,10 +88,8 @@ export function mergeSessionHistoryPages(
   let changed = !index.sorted;
   for (const event of page) {
     const existing = index.byId.get(event.id);
-    const same =
-      existing === event ||
-      (existing && JSON.stringify(existing) === JSON.stringify(event));
-    updates.set(event.id, same ? existing! : event);
+    const same = existing !== undefined && sameStoredEvent(existing, event);
+    updates.set(event.id, same ? existing : event);
     if (!same) changed = true;
   }
   if (!changed) return current;
