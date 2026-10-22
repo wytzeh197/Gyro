@@ -166,9 +166,9 @@ for loopback hosts (LM Studio, vLLM, llama.cpp), every other host must be HTTPS,
 and a redirect is refused so a Bearer token cannot be walked to a host the user
 did not configure. Tool calls made through this runner cross the same capability
 broker, approval policy, and audit path as a local model's, and stream through
-the same events. These providers run in the desktop app. The standalone CLI
-can configure them while its chat loop runs subprocess adapters and Ollama, not
-OpenAI-compatible API providers yet.
+the same events. These providers are experimental in this release. They run in
+the desktop app. The standalone CLI can configure them while its chat loop runs
+subprocess adapters and Ollama, not OpenAI-compatible API providers yet.
 See `docs/api-key-providers.md`.
 
 Provider diagnostics are redacted and metadata-only: provider id, model id,
