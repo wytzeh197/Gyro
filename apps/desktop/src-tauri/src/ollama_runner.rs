@@ -243,19 +243,26 @@ pub(super) fn run_ollama_chat(
     let run_mode = capability_run_mode_for_chat(request.mode);
     let compatibility = !discovered.supports_tools && request.mode != ChatMode::Council;
     let identity = provider_model_identity(request, "and run locally through Ollama");
-    let system = if request.mode == ChatMode::Council {
+    let mut system = if request.mode == ChatMode::Council {
         format!("{identity} Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits.")
     } else if discovered.supports_tools {
         format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     } else {
         ollama_compatibility_system(&identity)
     };
-    let mut user = provider_context_message_with_capabilities(
-        request,
-        local_conversation_history_for_request(request).as_deref(),
-        discovered.supports_tools || compatibility,
-        discovered.supports_images,
-    );
+    let (stable, dynamic) = efficiency::capture_prompt(|| {
+        provider_context_message_with_capabilities(
+            request,
+            local_conversation_history_for_request(request).as_deref(),
+            discovered.supports_tools || compatibility,
+            discovered.supports_images,
+        )
+    });
+    if !stable.is_empty() {
+        system.push('\n');
+        system.push_str(&stable);
+    }
+    let mut user = dynamic;
     let mut browser_images = request
         .attachments
         .iter()

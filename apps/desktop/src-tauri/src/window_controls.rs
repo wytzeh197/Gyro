@@ -1,8 +1,9 @@
 /// Overlay traffic-light origin matching `tauri.conf.json` and the sidebar
-/// titlebar CSS. Native 14px controls at this inset share the 48px chat
-/// header's centreline with the 28px window-navigation buttons.
+/// titlebar CSS. The 48px window bar centres its 20px buttons on y=24, but a
+/// native 14px control draws its circle a couple of px below the frame origin,
+/// so y=16 lands the visible dots on that same centreline instead of below it.
 const MAIN_TRAFFIC_LIGHT_X: f64 = 16.0;
-const MAIN_TRAFFIC_LIGHT_Y: f64 = 17.0;
+const MAIN_TRAFFIC_LIGHT_Y: f64 = 16.0;
 
 /// Tauri's `unstable` feature hosts the main webview as a child, which leaves
 /// `trafficLightPosition` stuck at (0, 0) (tauri-apps/tauri#14072). Tauri 2.11
@@ -158,6 +159,6 @@ mod tests {
     #[test]
     fn main_window_traffic_lights_use_overlay_inset() {
         assert_eq!(MAIN_TRAFFIC_LIGHT_X, 16.0);
-        assert_eq!(MAIN_TRAFFIC_LIGHT_Y, 17.0);
+        assert_eq!(MAIN_TRAFFIC_LIGHT_Y, 16.0);
     }
 }

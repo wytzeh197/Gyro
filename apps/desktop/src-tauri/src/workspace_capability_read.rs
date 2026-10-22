@@ -352,29 +352,40 @@ fn read_range_source(workspace: &str, path: &str) -> anyhow::Result<WorkspaceFil
 
 fn select_range(content: &str, arguments: &Value) -> anyhow::Result<Value> {
     let line = capability_positive_position(arguments, "line")?.unwrap_or(1);
-    let end =
+    let requested_end =
         capability_positive_position(arguments, "endLine")?.unwrap_or(line.saturating_add(199));
     let column = capability_positive_position(arguments, "column")?.unwrap_or(1);
     let end_column = capability_positive_position(arguments, "endColumn")?;
-    if end < line || end - line > 1_999 {
-        anyhow::bail!("Workspace range must contain at most 2,000 ordered lines");
+    if requested_end < line {
+        anyhow::bail!("Workspace range endLine must not precede line");
     }
-    if end == line && end_column.is_some_and(|end| end < column) {
+    if requested_end == line && end_column.is_some_and(|end| end < column) {
         anyhow::bail!("Workspace range endColumn must not precede column");
     }
+    // Copy at most 2,000 lines. A longer ask is the next page, not a failed read:
+    // the serialized budget cannot return more, and the continuation covers it.
+    let end = requested_end.min(line.saturating_add(1_999));
+    let line_limited = end < requested_end;
     let mut actual_end = 0;
     let mut text = String::new();
-    // Iterate instead of indexing a vector containing every line of the file.
-    // A range near the top of a large file need not enumerate its entire tail.
-    for (index, source) in content.split('\n').enumerate().take(end as usize) {
+    let mut omitted_a_line = false;
+    // Stop at the first line past the window so a range near the top of a large
+    // file does not walk its tail. One extra line tells a clamped window from EOF.
+    for (index, source) in content.split('\n').enumerate() {
         let number = index as u64 + 1;
+        if number > end {
+            omitted_a_line = true;
+            break;
+        }
         actual_end = number;
         if number >= line {
             if number > line {
                 text.push('\n');
             }
             let start = if number == line { column - 1 } else { 0 } as usize;
-            let stop = if number == end {
+            // endColumn applies to the requested end line. A clamped window keeps
+            // its last line whole so the next page starts at the omitted line.
+            let stop = if number == requested_end {
                 end_column.map(|c| (c - 1) as usize)
             } else {
                 None
@@ -389,7 +400,7 @@ fn select_range(content: &str, arguments: &Value) -> anyhow::Result<Value> {
     }
     Ok(
         json!({"line": line, "startLine": line, "endLine": actual_end, "column": column,
-        "content": text, "truncated": false}),
+        "content": text, "truncated": line_limited && omitted_a_line}),
     )
 }
 
@@ -634,7 +645,9 @@ mod tests {
     fn workspace_read_ranges_validate_positions_and_columns() {
         assert!(select_range("text", &json!({"line":2,"endLine":1})).is_err());
         assert!(select_range("text", &json!({"line":0})).is_err());
-        assert!(select_range("text", &json!({"line":1,"endLine":2001})).is_err());
+        let short = select_range("text", &json!({"line":1,"endLine":2001})).unwrap();
+        assert_eq!(short["content"], "text");
+        assert_eq!(short["truncated"], false);
         let data = select_range(
             "aébc\nnext",
             &json!({"line":1,"endLine":1,"column":2,"endColumn":4}),
@@ -644,6 +657,51 @@ mod tests {
         assert_eq!(
             select_range("text", &json!({"line":3})).unwrap()["content"],
             ""
+        );
+    }
+
+    #[test]
+    fn workspace_read_clamps_a_span_over_two_thousand_lines() {
+        let inside = select_range("L1\nL2\nL3", &json!({"line":1,"endLine":2})).unwrap();
+        assert_eq!(inside["truncated"], false);
+        assert_eq!(inside["content"], "L1\nL2");
+
+        let exact: String = (1..=2_000)
+            .map(|n| format!("L{n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let boundary = select_range(&exact, &json!({"line":1,"endLine":9_000})).unwrap();
+        assert_eq!(boundary["truncated"], false);
+        assert_eq!(boundary["endLine"], 2_000);
+
+        let lines: String = (1..=2_002)
+            .map(|n| format!("L{n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let capped =
+            select_range(&lines, &json!({"line":1,"endLine":2_002,"endColumn":2})).unwrap();
+        assert_eq!(capped["truncated"], true);
+        assert_eq!(capped["endLine"], 2_000);
+        let capped_text = capped["content"].as_str().unwrap();
+        assert_eq!(capped_text.lines().count(), 2_000);
+        assert!(capped_text.ends_with("L2000"));
+        let page = bound_read_result(capped, DEFAULT_WORKSPACE_RESULT_BYTES).unwrap();
+        let rest = select_range(
+            &lines,
+            &json!({
+                "line": page["nextLine"],
+                "column": page["nextColumn"],
+                "endLine": 2_002
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            format!(
+                "{}{}",
+                page["content"].as_str().unwrap(),
+                rest["content"].as_str().unwrap()
+            ),
+            lines
         );
     }
 

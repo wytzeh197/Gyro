@@ -65,12 +65,26 @@ pub(super) fn codex_context_compaction_activity(
 /// What a manual `/compact` on a provider without a resumable compacted
 /// session actually did to the transcript.
 ///
-/// That rewrite is local: it either kept the history whole or replaced turns
-/// with a digest. It never paraphrased anything, so the row must not borrow the
-/// wording of the model compaction above.
-pub(super) fn local_compaction_detail(
+/// Two shapes reach here. A model summary is what a provider wrote from the
+/// transcript; the local rewrite either kept the history whole or replaced
+/// turns with a digest and never paraphrased anything. Each row says only what
+/// happened, so neither path borrows the other's wording.
+pub(super) fn manual_compaction_detail(
     compaction: &super::conversation_history::LocalCompaction,
+    summary: Option<&CompactionSummary<'_>>,
 ) -> String {
+    if compaction.summarized {
+        let label = summary.map_or("the model", |report| report.label);
+        let elapsed = summary.map_or(0, |report| report.elapsed_ms);
+        let tokens = summary
+            .and_then(|report| report.input_tokens)
+            .map(|tokens| format!(", {tokens} input tokens"))
+            .unwrap_or_default();
+        return format!(
+            "Summarized the earlier conversation with {label} in {elapsed}{tokens}; those turns are no longer sent in full.",
+            elapsed = elapsed_label(elapsed)
+        );
+    }
     if compaction.condensed_turns == 0 {
         "This chat already fit the model window, so no earlier message was dropped.".into()
     } else {
@@ -78,6 +92,23 @@ pub(super) fn local_compaction_detail(
             "Condensed {} earlier messages into a short digest; their full text is no longer sent.",
             compaction.condensed_turns
         )
+    }
+}
+
+/// What the model call behind a summary cost, for the row that reports it.
+pub(super) struct CompactionSummary<'a> {
+    /// The model that wrote the checkpoint, or its provider when unnamed.
+    pub(super) label: &'a str,
+    pub(super) elapsed_ms: u64,
+    /// Measured input tokens, when the provider reported them.
+    pub(super) input_tokens: Option<u64>,
+}
+
+fn elapsed_label(elapsed_ms: u64) -> String {
+    if elapsed_ms < 1_000 {
+        format!("{elapsed_ms}ms")
+    } else {
+        format!("{:.1}s", elapsed_ms as f64 / 1_000.0)
     }
 }
 
@@ -100,4 +131,47 @@ pub async fn set_auto_compact_percent(percent: u32) -> Result<u32, String> {
     })
     .await
     .map_err(|error| format!("auto-compaction worker failed: {error}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conversation_history::LocalCompaction;
+
+    #[test]
+    fn a_summarized_row_names_the_model_the_time_and_the_tokens() {
+        let detail = manual_compaction_detail(
+            &LocalCompaction::summarized("checkpoint".into()),
+            Some(&CompactionSummary {
+                label: "Grok 4.7",
+                elapsed_ms: 12_400,
+                input_tokens: Some(9_300),
+            }),
+        );
+        assert_eq!(
+            detail,
+            "Summarized the earlier conversation with Grok 4.7 in 12.4s, 9300 input tokens; those turns are no longer sent in full."
+        );
+    }
+
+    #[test]
+    fn a_local_rewrite_is_never_worded_as_a_summary() {
+        let kept = LocalCompaction {
+            text: "history".into(),
+            condensed_turns: 0,
+            summarized: false,
+        };
+        assert!(!manual_compaction_detail(&kept, None)
+            .to_lowercase()
+            .contains("summar"));
+        let condensed = LocalCompaction {
+            text: "digest".into(),
+            condensed_turns: 7,
+            summarized: false,
+        };
+        assert_eq!(
+            manual_compaction_detail(&condensed, None),
+            "Condensed 7 earlier messages into a short digest; their full text is no longer sent."
+        );
+    }
 }

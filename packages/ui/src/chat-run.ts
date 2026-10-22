@@ -974,16 +974,21 @@ function partitionClosingResponse(
 
 /**
  * True when nothing in an assistant message reads as an answer — every block is
- * a plan line, a status line, or a stray fragment. A message left with no usable
- * blocks at all counts, since what it held was dropped as noise.
+ * a plan line, a status line, or a stray fragment. An empty non-durable message
+ * counts, since what it held was dropped as noise. An empty durable reply does
+ * not: a symbol or digit is still the answer.
  */
 function isNarrationOnly(event: SessionEvent): boolean {
-  if (isDurableAssistantResponse(event)) {
-    return false;
+  const blocks = structuredCommentaryBlocks(event.message);
+  // A durable stamp means the provider saved the reply, not that this sentence
+  // is the answer. While the run is live, a reply that only promises the next
+  // step still belongs on the rail. A symbol or digit that commentary
+  // stripping drops is still an answer, so an empty durable block is not
+  // narration.
+  if (blocks.length === 0) {
+    return !isDurableAssistantResponse(event);
   }
-  return structuredCommentaryBlocks(event.message).every(
-    isAssistantPreambleBlock,
-  );
+  return blocks.every(isAssistantPreambleBlock);
 }
 
 function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
@@ -1630,9 +1635,9 @@ export function runRowText(step: RunStep): RunRowText {
     case "memory":
       return { label: "Edited memory" };
     case "context": {
-      // Only a Codex session summarizes. Every other provider rewrites the
-      // transcript locally, so the row names the digest or says nothing was
-      // dropped rather than repeating "summarized" over a truncation.
+      // Codex compacts inside its own session; every other provider spends one
+      // real summarization call. Only a failed call falls back to the local
+      // digest, and the stored mode already says which of the two happened.
       const described =
         item.compaction === "condensed"
           ? "Earlier turns condensed into a digest"
@@ -1648,7 +1653,7 @@ export function runRowText(step: RunStep): RunRowText {
             : "Compacted context",
         description:
           item.status === "running"
-            ? "Making room for the next turn"
+            ? "Summarizing the earlier conversation"
             : described,
       };
     }

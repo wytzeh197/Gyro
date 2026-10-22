@@ -224,7 +224,16 @@ export function isAssistantPreambleBlock(value: string): boolean {
   if (OWN_NEXT_STEP_EXCEPTION.test(trimmed)) {
     return false;
   }
-  if (announcesOwnNextStep(trimmed)) {
+  // The closing sentence can commit to more work after an observation
+  // ("The prefix split is in place. Next I'll …"). That check has to run
+  // before the multi-sentence bail, which would otherwise treat the block as
+  // the answer, paint the live run as finalizing, and draw the line under the
+  // working process. The 400-character ceiling matches announcesOwnNextStep
+  // so a long answer is not pulled onto the rail.
+  if (
+    announcesOwnNextStep(trimmed) ||
+    (trimmed.length <= 400 && closingSentenceIntroducesWork(trimmed))
+  ) {
     return true;
   }
   if (trimmed.length > 220) {
@@ -238,9 +247,7 @@ export function isAssistantPreambleBlock(value: string): boolean {
     return false;
   }
   return (
-    PREAMBLE_BLOCK.test(trimmed) ||
-    INTRODUCES_WORK_WITH_COLON.test(trimmed) ||
-    closingSentenceIntroducesWork(trimmed)
+    PREAMBLE_BLOCK.test(trimmed) || INTRODUCES_WORK_WITH_COLON.test(trimmed)
   );
 }
 

@@ -11,9 +11,9 @@ const HISTORY_OLDER_CHARS: usize = 400;
 
 /// Load the local Gyro transcript for any model handoff or failed resume.
 ///
-/// A failed resume stays on the tapered window. The first turn after a model
-/// switch does not: that model has no provider session, so it gets every user
-/// and assistant message still stored for the chat.
+/// A failed resume and the first turn after a model switch both use the tapered
+/// window: six recent turns stay at 2,000 characters and older turns clip to
+/// 400. The current user request is not repeated here.
 pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
     let store = open_store().ok()?;
@@ -22,7 +22,7 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
     let events = store.read_events(session_uuid).ok()?;
     if model_switch_awaits_first_reply(&events) {
         let transcript = store.read_transcript_events(session_uuid).unwrap_or(events);
-        return conversation_history_from_events_full(transcript);
+        return conversation_history_from_events(transcript);
     }
     if super::efficiency::config().policies() && super::efficiency::config().task_state {
         let context = store.read_efficiency_context_events(session_uuid).ok()?;
@@ -79,12 +79,26 @@ pub(super) struct LocalCompaction {
     /// Turns whose full text was replaced by the digest. Zero when the history
     /// already fit the window.
     pub(super) condensed_turns: usize,
+    /// A provider wrote this text from the transcript. The local rewrite leaves
+    /// it false, so nothing but a real model call is ever called a summary.
+    pub(super) summarized: bool,
 }
 
 impl LocalCompaction {
+    /// A checkpoint a provider wrote, rather than a rewrite of the transcript.
+    pub(super) fn summarized(text: String) -> Self {
+        Self {
+            text,
+            condensed_turns: 0,
+            summarized: true,
+        }
+    }
+
     /// The word the activity row and the transcript card may use.
     pub(super) fn mode(&self) -> &'static str {
-        if self.condensed_turns == 0 {
+        if self.summarized {
+            "summarized"
+        } else if self.condensed_turns == 0 {
             "kept"
         } else {
             "condensed"
@@ -109,6 +123,7 @@ pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalC
         return Some(LocalCompaction {
             text: history,
             condensed_turns: 0,
+            summarized: false,
         });
     }
     let (prefix, condensed, tail) = split_compacted_history(lines);
@@ -118,6 +133,7 @@ pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalC
             "{prefix}\n\n[Earlier turns condensed — full text no longer sent]\n{digest}\n\n{tail}"
         ),
         condensed_turns: condensed.len(),
+        summarized: false,
     })
 }
 
@@ -324,6 +340,79 @@ fn join_history(lines: &[(String, String)]) -> Option<String> {
     (!joined.trim().is_empty()).then_some(joined)
 }
 
+/// How much transcript one compaction call reads.
+///
+/// The summary replaces the turns it describes, so the call has to see more
+/// than the handoff window does -- but not the whole chat a second time. An
+/// over-budget transcript keeps its opening and its newest lines: background
+/// plus the thread being continued.
+const COMPACTION_TRANSCRIPT_CHARS: usize = 24_000;
+
+/// The longest checkpoint a summary may become.
+///
+/// The checkpoint rides in front of every following prompt, so a model that
+/// answers with an essay is cut here instead of refilling the window it was
+/// asked to make room in.
+const COMPACTION_SUMMARY_CHARS: usize = 8_000;
+
+/// What the summarizer is asked for when `/compact` has no provider-side
+/// compaction to call.
+pub(super) const COMPACTION_PROMPT: &str = "You are compacting a chat so it \
+can continue with less context. Rewrite the conversation below as the \
+checkpoint the next turn starts from. Keep: what the user asked for, decisions \
+and their reasons, files and symbols touched, commands and their outcomes, and \
+the next step that is still open. Drop greetings, repeated tool output, and \
+anything the next turn can read from the workspace again. Do not use tools. \
+Reply with the checkpoint only: Markdown bullets, at most 400 words, no \
+preamble.";
+
+/// The transcript a compaction call reads, from the saved events.
+///
+/// This is the untapered history: the summarizer is the one reader that has to
+/// see whole turns, because its reply is what later prompts get instead of
+/// them.
+pub(super) fn compaction_transcript_for_session(session_id: &str) -> Option<String> {
+    let session_uuid = parse_uuid(session_id).ok()?;
+    let store = open_store().ok()?;
+    let events = store.read_transcript_events(session_uuid).ok()?;
+    conversation_history_from_events_full(events).map(|text| bounded_transcript(&text))
+}
+
+fn bounded_transcript(transcript: &str) -> String {
+    let total = transcript.chars().count();
+    if total <= COMPACTION_TRANSCRIPT_CHARS {
+        return transcript.to_string();
+    }
+    let head_chars = COMPACTION_TRANSCRIPT_CHARS / 3;
+    let tail_chars = COMPACTION_TRANSCRIPT_CHARS - head_chars;
+    let head: String = transcript.chars().take(head_chars).collect();
+    let tail: String = transcript.chars().skip(total - tail_chars).collect();
+    format!("{head}\n\n[middle of this conversation omitted]\n\n{tail}")
+}
+
+/// A provider's reply, accepted as the checkpoint or refused.
+///
+/// Refusing is the honest outcome for an empty reply: the caller falls back to
+/// the local rewrite and says so, rather than storing nothing and calling the
+/// chat compacted.
+pub(super) fn summarized_compaction(reply: &str) -> Option<LocalCompaction> {
+    let text = strip_code_fence(reply.trim()).trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(LocalCompaction::summarized(
+        text.chars().take(COMPACTION_SUMMARY_CHARS).collect(),
+    ))
+}
+
+fn strip_code_fence(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("```") else {
+        return text;
+    };
+    let body = rest.split_once('\n').map_or("", |(_, body)| body);
+    body.trim_end().strip_suffix("```").unwrap_or(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn model_switch_handoff_sends_every_message_unclipped() {
+    fn model_switch_handoff_keeps_the_latest_turn_and_clips_older_ones() {
         let session = Uuid::new_v4();
         let mut events: Vec<_> = (0..45)
             .map(|index| {
@@ -496,13 +585,15 @@ mod tests {
             serde_json::json!({}),
         ));
         assert!(model_switch_awaits_first_reply(&events));
-        let history = conversation_history_from_events_full(events).unwrap();
+        let history = conversation_history_from_events(events).unwrap();
         let messages: Vec<_> = history.split("\n\n").collect();
-        assert_eq!(messages.len(), 45);
-        assert!(messages[0].starts_with("Assistant: message-00"));
-        assert!(messages[0].contains(&"x".repeat(3_000)));
-        assert!(!messages[0].contains("[…]"));
-        assert!(messages[44].starts_with("Assistant: message-44"));
+        assert_eq!(messages.len(), 40);
+        assert!(messages[0].starts_with("Assistant: message-05"));
+        assert!(messages[0].contains("[…]"));
+        assert!(messages[0].chars().count() < 450);
+        assert!(messages[39].starts_with("Assistant: message-44"));
+        assert!(messages[39].chars().count() > 2_000);
+        assert!(messages[39].chars().count() < 2_050);
         assert!(!history.contains("Current request"));
         assert!(!history.contains("Switched to Grok"));
     }
@@ -531,5 +622,41 @@ mod tests {
             ),
         ];
         assert!(!model_switch_awaits_first_reply(&events));
+    }
+
+    #[test]
+    fn summarized_compaction_accepts_a_reply_and_names_itself_summarized() {
+        let compaction =
+            summarized_compaction("  - Fixed the retry loop\n- Tests green  ").unwrap();
+        assert_eq!(compaction.text, "- Fixed the retry loop\n- Tests green");
+        assert_eq!(compaction.mode(), "summarized");
+        assert_eq!(compaction.condensed_turns, 0);
+    }
+
+    #[test]
+    fn summarized_compaction_strips_one_code_fence_and_refuses_empty_replies() {
+        let fenced = summarized_compaction("```markdown\n- Kept the API stable\n```").unwrap();
+        assert_eq!(fenced.text, "- Kept the API stable");
+        assert!(summarized_compaction("   \n  ").is_none());
+        assert!(summarized_compaction("```\n\n```").is_none());
+    }
+
+    #[test]
+    fn summarized_compaction_is_cut_to_the_checkpoint_budget() {
+        let long = "x".repeat(COMPACTION_SUMMARY_CHARS + 500);
+        let compaction = summarized_compaction(&long).unwrap();
+        assert_eq!(compaction.text.chars().count(), COMPACTION_SUMMARY_CHARS);
+    }
+
+    #[test]
+    fn compaction_transcript_keeps_both_ends_of_an_over_budget_chat() {
+        let mut transcript = String::from("Assistant: opening state\n\n");
+        transcript.push_str(&"middle line\n\n".repeat(4_000));
+        transcript.push_str("User: the newest request");
+        let bounded = bounded_transcript(&transcript);
+        assert!(bounded.chars().count() <= COMPACTION_TRANSCRIPT_CHARS + 60);
+        assert!(bounded.starts_with("Assistant: opening state"));
+        assert!(bounded.ends_with("User: the newest request"));
+        assert!(bounded.contains("[middle of this conversation omitted]"));
     }
 }

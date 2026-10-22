@@ -5297,7 +5297,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 17 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
       "inset_macos_traffic_lights",

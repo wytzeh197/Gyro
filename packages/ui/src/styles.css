@@ -34085,7 +34085,12 @@ button.gyro-account-menu-row:hover,
   > .gyro-composer-shell.is-hero.has-provider:not(
     .is-provider-collapsed
   ):focus-within {
-  border-color: var(--gyro-border-strong);
+  /* A focused field keeps a readable rim without the bright #707070 ring. */
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-border-strong) 40%,
+    var(--gyro-border)
+  );
   box-shadow: var(--gyro-hero-shadow-focus);
 }
 

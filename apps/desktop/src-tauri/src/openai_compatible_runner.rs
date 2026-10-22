@@ -262,15 +262,12 @@ pub(super) fn run_openai_compatible_chat(
             supports_images,
         )
     };
-    let cfg = efficiency::config();
-    let user = if cfg.policies() && cfg.cache_assembly {
-        let (stable, dynamic) = efficiency::capture_prompt(build);
+    let (stable, dynamic) = efficiency::capture_prompt(build);
+    if !stable.is_empty() {
         system.push('\n');
         system.push_str(&stable);
-        dynamic
-    } else {
-        build()
-    };
+    }
+    let user = dynamic;
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),

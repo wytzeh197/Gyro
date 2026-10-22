@@ -42,6 +42,7 @@ pub mod provider_stream;
 pub mod security;
 pub mod sessions;
 pub mod sqlite;
+pub mod text_stream;
 pub mod timing;
 pub mod usage;
 pub mod usage_receipts;

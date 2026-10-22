@@ -40,6 +40,10 @@ pub enum UsageOrigin {
     /// so a user can see what the review card costs rather than finding it
     /// folded into their chat total.
     ChangeSummary,
+    /// The one model call a manual `/compact` spends on a provider that has no
+    /// compact command of its own, to write the checkpoint the next turn
+    /// starts from.
+    ContextCompaction,
     /// A read-only research sub-agent started by a chat turn.
     SubAgent,
     Optimization,
@@ -56,6 +60,7 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
+            Self::ContextCompaction => "context-compaction",
             Self::SubAgent => "sub-agent",
             Self::Optimization => "optimization",
             Self::AgentSession => "agent-session",
@@ -69,6 +74,7 @@ impl UsageOrigin {
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
+            "context-compaction" => Self::ContextCompaction,
             "sub-agent" => Self::SubAgent,
             "optimization" => Self::Optimization,
             "agent-session" => Self::AgentSession,
@@ -85,6 +91,7 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
+            Self::ContextCompaction => "Context compaction",
             Self::SubAgent => "Sub-agents",
             Self::Optimization => "Optimization",
             Self::AgentSession => "Agent sessions",

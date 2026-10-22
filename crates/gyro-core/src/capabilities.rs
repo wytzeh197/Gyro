@@ -83,6 +83,7 @@ pub enum CapabilityId {
     GithubCreatePullRequest,
     GithubRerunWorkflow,
     GithubPush,
+    ToolCatalog,
 }
 
 impl CapabilityId {
@@ -155,6 +156,7 @@ impl CapabilityId {
             Self::GithubCreatePullRequest => "github.create_pull_request",
             Self::GithubRerunWorkflow => "github.rerun_workflow",
             Self::GithubPush => "github.push",
+            Self::ToolCatalog => "tool.catalog",
         }
     }
 
@@ -227,6 +229,7 @@ impl CapabilityId {
             Self::GithubCreatePullRequest => "gyro_github_create_pull_request",
             Self::GithubRerunWorkflow => "gyro_github_rerun_workflow",
             Self::GithubPush => "gyro_github_push",
+            Self::ToolCatalog => "gyro_tool_catalog",
         }
     }
 
@@ -719,12 +722,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits. A spill:// path names a retired copy quoted by a preview: pass its offset and read one window instead of the whole copy.",
+        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). A line span longer than 2,000 lines is clamped and marked truncated. When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits. A spill:// path names a retired copy quoted by a preview: pass its offset and read one window instead of the whole copy.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadRange,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read a bounded saved-file range. Lines and columns are 1-based; columns use UTF-16 units. Narrow line/endLine and maxBytes to the needed code. Follow nextLine/nextColumn when truncated; contentHash identifies the saved file for guarded edits.",
+        description: "Read a bounded saved-file range. Lines and columns are 1-based; columns use UTF-16 units. Narrow line/endLine and maxBytes to the needed code. A span longer than 2,000 lines is clamped and marked truncated. Follow nextLine/nextColumn when truncated; contentHash identifies the saved file for guarded edits.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadEditor,
@@ -1010,6 +1013,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::GithubPush,
         class: CapabilityClass::GithubWrite,
         description: "Push the current branch to its remote. Publishes local commits to GitHub.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::ToolCatalog,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Return one page of full Gyro tool schemas. Pass a domain prefix such as gyro_browser_ or gyro_github_, and offset for the next page.",
     },
 ];
 
@@ -1419,6 +1427,7 @@ mod tests {
         // Reading memory is inspection; writing it is writing.
         assert!(plan.contains(&CapabilityId::MemoryRead));
         assert!(!plan.contains(&CapabilityId::MemoryWrite));
+        assert!(plan.contains(&CapabilityId::ToolCatalog));
         // Plan advertises delegation; the broker enforces read-only child runs.
         assert!(plan.contains(&CapabilityId::ResearchRun));
         assert!(plan.contains(&CapabilityId::AgentSpawn));

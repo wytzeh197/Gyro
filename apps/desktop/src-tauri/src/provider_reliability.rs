@@ -421,7 +421,19 @@ pub(super) fn validate_tool_call(
         return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
     validate_compatibility_schema_value(arguments, &desktop_capability_tool_schema(id), "arguments")
-        .map_err(|error| format!("Invalid Gyro tool arguments: {error}. Correct the arguments and try again. No action was executed."))?;
+        .map_err(|error| {
+            let catalog = if provider_tool_batch::inline_tool_schema(id) {
+                String::new()
+            } else {
+                format!(
+                    " Call gyro_tool_catalog with prefix {} for the full schema.",
+                    provider_tool_batch::catalog_prefix(id)
+                )
+            };
+            format!(
+                "Invalid Gyro tool arguments: {error}.{catalog} Correct the arguments and try again. No action was executed."
+            )
+        })?;
     Ok(id)
 }
 

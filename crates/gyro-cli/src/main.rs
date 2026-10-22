@@ -2103,6 +2103,8 @@ struct CliProviderFailure {
 #[derive(Default)]
 struct CliStreamDecoder {
     line_buffer: String,
+    /// The provider's own copy of the message, reconciled frame by frame.
+    text: gyro_core::text_stream::TextStreamAssembler,
     response: String,
     provider_session_id: Option<String>,
     provider_failure: Option<CliProviderFailure>,
@@ -2146,32 +2148,20 @@ impl CliStreamDecoder {
         let Some(chunk) = gyro_core::extract_provider_text_chunk(&value) else {
             return;
         };
-        let delta = match chunk {
-            ProviderTextChunk::Delta(delta) => delta,
-            ProviderTextChunk::Snapshot(snapshot) => {
-                if self.response.is_empty() {
-                    snapshot
-                } else {
-                    snapshot
-                        .strip_prefix(&self.response)
-                        .unwrap_or_default()
-                        .to_string()
-                }
-            }
-            ProviderTextChunk::Final(final_text) => {
-                if self.response.is_empty() {
-                    final_text
-                } else {
-                    final_text
-                        .strip_prefix(&self.response)
-                        .unwrap_or_default()
-                        .to_string()
-                }
-            }
+        // Reconcile against the assembler rather than the accumulated string.
+        // A cumulative frame that did not literally extend `response` used to
+        // become "" through `unwrap_or_default`, so the rest of the answer was
+        // silently dropped instead of appended.
+        let advance = match chunk {
+            ProviderTextChunk::Delta(delta) => self.text.push_delta(&delta),
+            ProviderTextChunk::Snapshot(snapshot) => self.text.push_snapshot(&snapshot),
+            ProviderTextChunk::Final(final_text) => self.text.finish(&final_text),
         };
-        if !delta.is_empty() {
-            self.response.push_str(&delta);
-            deltas.push(delta);
+        if let Some(advance) = advance {
+            if !advance.text.is_empty() {
+                self.response.push_str(&advance.text);
+                deltas.push(advance.text);
+            }
         }
     }
 

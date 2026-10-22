@@ -136,10 +136,7 @@ impl WorkspaceCheckReport {
             WorkspaceCheckStatus::Degraded => "ready with warnings",
             WorkspaceCheckStatus::Unavailable => "unavailable",
         };
-        lines.push(format!(
-            "Workspace check: {status} ({} ms).",
-            self.duration_ms
-        ));
+        lines.push(format!("Workspace check: {status}."));
         if let Some(kind) = self.project_kind.as_deref() {
             let markers = if self.markers.is_empty() {
                 String::new()

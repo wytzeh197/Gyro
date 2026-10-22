@@ -851,6 +851,87 @@ for (const narration of [
     `progress narration is a preamble: ${narration}`,
   );
 }
+// Two sentences over 100 characters used to miss the closing-sentence check:
+// the multi-sentence bail returned first, so "Next I'll …" left the rail,
+// the live phase became finalizing, and the line drew under the working process.
+const nextStepNarration =
+  "The prefix split is in place. Next I'll spill large results, add the tool catalog, and taper history after a model switch.";
+assert.equal(
+  isAssistantPreambleBlock(nextStepNarration),
+  true,
+  "an observation that closes with Next I'll stays narration",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    "The prefix split is in place. The byte budget is unchanged.",
+  ),
+  false,
+  "two sentences that do not promise more work stay the answer",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    `${"The measured result holds. ".repeat(20)}Next I'll stop here.`,
+  ),
+  false,
+  "a long answer is not pulled onto the rail because its last clause says Next I'll",
+);
+for (const [label, messageEvent] of [
+  ["plain", say(nextStepNarration, 1)],
+  [
+    "durable",
+    event(
+      "assistant-message",
+      nextStepNarration,
+      { kind: "provider-response", status: "done" },
+      1,
+    ),
+  ],
+]) {
+  const liveNarration = buildRunModel(
+    [activity("tool", "Used tool", { tool: "Read" }, 0), messageEvent],
+    { isRunning: true },
+  );
+  assert.equal(
+    liveNarration.response,
+    undefined,
+    `${label}: live narration stays out of the answer body`,
+  );
+  assert.deepEqual(
+    liveNarration.phase,
+    { name: "working" },
+    `${label}: a run still promising its next step is working, not finalizing`,
+  );
+  assert.equal(
+    liveNarration.steps.at(-1)?.kind,
+    "say",
+    `${label}: the narration stays inside the working rail`,
+  );
+  assert.equal(liveNarration.steps.at(-1)?.text, nextStepNarration);
+}
+assert.equal(
+  buildRunModel(
+    [
+      activity("tool", "Used tool", { tool: "Read" }, 0),
+      event(
+        "assistant-message",
+        "Yes. The diff does what we intended, and the tests passed.",
+        { kind: "provider-response", status: "done" },
+        1,
+      ),
+    ],
+    { isRunning: true },
+  ).phase.name,
+  "finalizing",
+  "a durable answer still finalizes a live run",
+);
+assert.equal(
+  buildRunModel([
+    activity("tool", "Used tool", { tool: "Read" }, 0),
+    say(nextStepNarration, 1),
+  ]).response?.message,
+  nextStepNarration,
+  "a settled turn still answers with its last narration block",
+);
 
 // A real preamble event that trails the last tool (so it is peeled from the
 // closing answer) must not be drawn twice — once in the main pass and once

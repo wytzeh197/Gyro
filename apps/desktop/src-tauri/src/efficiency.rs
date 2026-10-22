@@ -17,61 +17,23 @@ pub(super) fn capture_prompt(build: impl FnOnce() -> String) -> (String, String)
         .filter(|(_, dynamic)| !dynamic.is_empty())
         .unwrap_or((String::new(), original))
 }
-fn stable_instruction(part: &str) -> bool {
-    [
-        "Council seat mode:",
-        "Work efficiently:",
-        "Reuse current evidence,",
-        "Use the selected workspace to carry out workspace requests.",
-        "Paths are workspace-relative.",
-        "Finish requested implementation with authorized edits",
-        "When the user requests implementation, carry it through",
-        "Gyro Workspace tools are available,",
-        "For long-running builds or release checks,",
-        "Plan mode is read-only.",
-        "When you create or revise the checklist,",
-        "When the plan is ready for implementation,",
-        "The Gyro plan below is live while you work.",
-    ]
-    .iter()
-    .any(|prefix| part.starts_with(prefix))
-}
-
-pub(super) fn record_prompt_parts(parts: &[String], message: &str) {
+/// Record the prompt split the builder already chose.
+///
+/// The stable block is byte-identical across turns of an owned thread. History,
+/// the workspace path, the check, mode, and the user message stay in the tail.
+/// No-ops unless [`capture_prompt`] armed the thread-local.
+pub(super) fn record_prompt_sections(stable: &[String], tail: &[String], message: &str) {
     PROMPT_SECTIONS.with(|slot| {
         if slot.borrow().is_none() {
             return;
         }
-        let mut stable = Vec::new();
-        let mut dynamic = Vec::new();
-        let mut attribution = gyro_core::efficiency::context::Attribution::default();
-        for part in parts {
-            if part.starts_with("Prior conversation in this Gyro chat") {
-                attribution.history += part.chars().count() as u64;
-                dynamic.push(part.as_str());
-            } else if part.starts_with("Explicit user attachments:") {
-                attribution.source_excerpts += part.chars().count() as u64;
-                dynamic.push(part.as_str());
-            } else if part.starts_with("Selected workspace:")
-                || part.starts_with("Gyro chat mode:")
-                || part.starts_with("Goal")
-                || part.starts_with("Plan")
-                || part.starts_with("Workspace")
-                || part.starts_with("[gyro.")
-            {
-                attribution.task_state += part.chars().count() as u64;
-                dynamic.push(part.as_str());
-            } else if stable_instruction(part) {
-                stable.push(part.as_str());
-            } else {
-                dynamic.push(part.as_str());
-            }
-        }
-        gyro_core::provider_observation::prepared_context(attribution);
-        *slot.borrow_mut() = Some((
-            stable.join("\n"),
-            format!("{}\n\nUser message:\n{}", dynamic.join("\n"), message),
-        ));
+        let tail_text = tail.join("\n");
+        let dynamic = if tail_text.is_empty() {
+            format!("User message:\n{message}")
+        } else {
+            format!("{tail_text}\n\nUser message:\n{message}")
+        };
+        *slot.borrow_mut() = Some((stable.join("\n"), dynamic));
     });
 }
 

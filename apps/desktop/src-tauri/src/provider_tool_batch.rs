@@ -24,7 +24,7 @@ pub(super) fn model_tools(
                 "function": {
                     "name": descriptor.id.provider_tool_name(),
                     "description": descriptor.description,
-                    "parameters": desktop_capability_tool_schema(descriptor.id),
+                    "parameters": advertised_tool_parameters(descriptor.id),
                 }
             })
         })
@@ -33,6 +33,87 @@ pub(super) fn model_tools(
         gyro_core::efficiency::context::stable_tools(&mut tools);
     }
     tools
+}
+
+pub(super) fn inline_tool_schema(id: CapabilityId) -> bool {
+    matches!(
+        id,
+        CapabilityId::WorkspaceList
+            | CapabilityId::WorkspaceSearch
+            | CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::WorkspaceEdit
+            | CapabilityId::WorkspaceProposeEdit
+            | CapabilityId::TerminalOpen
+            | CapabilityId::TerminalRead
+            | CapabilityId::TerminalWait
+            | CapabilityId::WebFetch
+            | CapabilityId::ToolCatalog
+    )
+}
+
+pub(super) fn catalog_prefix(id: CapabilityId) -> &'static str {
+    let name = id.provider_tool_name();
+    [
+        "gyro_workspace_",
+        "gyro_code_",
+        "gyro_terminal_",
+        "gyro_browser_",
+        "gyro_git_",
+        "gyro_ide_",
+        "gyro_github_",
+        "gyro_memory_",
+        "gyro_research_",
+        "gyro_agent_",
+    ]
+    .into_iter()
+    .find(|prefix| name.starts_with(prefix))
+    .unwrap_or("gyro_")
+}
+
+pub(super) fn advertised_tool_parameters(id: CapabilityId) -> serde_json::Value {
+    if inline_tool_schema(id) {
+        desktop_capability_tool_schema(id)
+    } else {
+        let prefix = catalog_prefix(id);
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "description": format!("Call gyro_tool_catalog with prefix {prefix} before using this tool. Execution still checks the full schema."),
+            "properties": {}
+        })
+    }
+}
+
+const SPILL_TEXT_FIELDS: &[&str] = &["content", "stdout", "stderr", "output", "text"];
+
+/// Replace oversized string fields with a head/tail preview and a spill:// address.
+/// A failed persist keeps the original text. Errors and image bytes are not passed here.
+pub(super) fn spill_result_data(capability: &str, tool: &str, data: &mut serde_json::Value) {
+    let Some(object) = data.as_object() else {
+        return;
+    };
+    let pending: Vec<(String, String)> = SPILL_TEXT_FIELDS
+        .iter()
+        .filter_map(|field| {
+            let text = object.get(*field).and_then(serde_json::Value::as_str)?;
+            if text.len() < gyro_core::efficiency::spill::SPILL_MIN_BYTES {
+                return None;
+            }
+            Some(((*field).to_string(), text.to_string()))
+        })
+        .collect();
+    for (field, text) in pending {
+        let preview = gyro_core::efficiency::spill::preview(capability, tool, &text);
+        if preview.address.is_empty()
+            || !gyro_core::efficiency::spill::persist(&preview.address, &text)
+        {
+            continue;
+        }
+        if let Some(object) = data.as_object_mut() {
+            object.insert(field, serde_json::Value::String(preview.text));
+        }
+    }
 }
 
 /// Native tools get the same single corrective retry as the JSON bridge.
@@ -62,7 +143,7 @@ pub(super) fn model_response_text(response: &CapabilityResponse) -> anyhow::Resu
     struct Evidence<'a> {
         capability_id: CapabilityId,
         summary: &'a str,
-        data: &'a serde_json::Value,
+        data: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         resource: Option<&'a CapabilityResourceRef>,
     }
@@ -86,11 +167,19 @@ pub(super) fn model_response_text(response: &CapabilityResponse) -> anyhow::Resu
     let payload = Payload {
         status: response.status,
         call_id: response.call_id,
-        result: response.result.as_ref().map(|result| Evidence {
-            capability_id: result.capability_id,
-            summary: &result.summary,
-            data: &result.data,
-            resource: result.resource.as_ref(),
+        result: response.result.as_ref().map(|result| {
+            let mut data = result.data.clone();
+            spill_result_data(
+                result.capability_id.as_str(),
+                result.capability_id.provider_tool_name(),
+                &mut data,
+            );
+            Evidence {
+                capability_id: result.capability_id,
+                summary: &result.summary,
+                data,
+                resource: result.resource.as_ref(),
+            }
         }),
         error: response.error.as_ref(),
         compatible: (!response.compatible).then_some(false),
@@ -253,10 +342,26 @@ mod tests {
             assert_eq!(current_tools.len(), descriptors.len());
             for (tool, descriptor) in current_tools.iter().zip(descriptors) {
                 assert_eq!(tool["function"]["name"], descriptor.id.provider_tool_name());
-                assert_eq!(
-                    tool["function"]["parameters"],
-                    desktop_capability_tool_schema(descriptor.id)
-                );
+                if inline_tool_schema(descriptor.id) {
+                    assert_eq!(
+                        tool["function"]["parameters"],
+                        desktop_capability_tool_schema(descriptor.id)
+                    );
+                } else {
+                    let parameters = &tool["function"]["parameters"];
+                    assert!(
+                        parameters["description"]
+                            .as_str()
+                            .unwrap()
+                            .contains("gyro_tool_catalog"),
+                        "{}",
+                        descriptor.id.provider_tool_name()
+                    );
+                    assert_ne!(
+                        parameters,
+                        &desktop_capability_tool_schema(descriptor.id)
+                    );
+                }
             }
             let current = serde_json::Value::Array(current_tools);
             let mut legacy = current.clone();
@@ -319,6 +424,73 @@ mod tests {
         }
         assert!(payload["result"].get("callId").is_none());
         assert!(compact.len() + 100 < serde_json::to_string(&response).unwrap().len());
+    }
+
+    #[test]
+    fn large_tool_text_becomes_a_preview_and_a_readable_spill_address() {
+        let body = "y".repeat(gyro_core::efficiency::spill::SPILL_MIN_BYTES + 80);
+        let response = CapabilityResponse::completed(
+            "test-version",
+            CapabilityResult {
+                call_id: Uuid::new_v4(),
+                capability_id: CapabilityId::TerminalRead,
+                summary: "Read terminal".into(),
+                data: serde_json::json!({
+                    "text": body,
+                    "path": "pane.log",
+                    "exitCode": 0
+                }),
+                resource: None,
+            },
+        );
+        let compact = model_response_text(&response).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&compact).unwrap();
+        let text = payload["result"]["data"]["text"].as_str().unwrap();
+        assert!(text.contains("spill://"), "{text}");
+        assert!(text.contains("bytes elided"));
+        assert!(text.len() < body.len());
+        assert_eq!(payload["result"]["data"]["path"], "pane.log");
+        assert_eq!(payload["result"]["data"]["exitCode"], 0);
+        let address = format!(
+            "spill://{}",
+            text.split("spill://").nth(1).unwrap().split([' ', '·']).next().unwrap()
+        );
+        let window = gyro_core::efficiency::spill::read(address.trim()).unwrap();
+        let window = window.expect("spill copy");
+        assert!(window.text.contains('y'));
+        assert_eq!(window.total_bytes, body.len());
+    }
+
+    #[test]
+    fn catalog_page_schema_still_validates_a_real_call() {
+        let page = super::super::ollama_runner::ollama_compatibility_catalog(
+            CapabilityRunMode::Normal,
+            Some("gyro_browser_"),
+            0,
+            true,
+        );
+        let open = page["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "gyro_browser_open")
+            .unwrap();
+        assert_eq!(
+            open["parameters"],
+            desktop_capability_tool_schema(CapabilityId::BrowserOpen)
+        );
+        assert!(provider_reliability::validate_tool_call(
+            "gyro_browser_open",
+            &serde_json::json!({"url": "https://example.com"})
+        )
+        .is_ok());
+        let missing = provider_reliability::validate_tool_call(
+            "gyro_browser_click",
+            &serde_json::json!({})
+        )
+        .unwrap_err();
+        assert!(missing.contains("gyro_browser_"));
+        assert!(missing.contains("gyro_tool_catalog"));
     }
 
     #[test]

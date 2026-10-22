@@ -114,4 +114,18 @@ mod tests {
         assert!(p.get("prompt_cache_key").is_none());
         assert!(p.get("prompt_cache_options").is_none());
     }
+
+    #[test]
+    fn compatible_hosts_gain_no_cache_field() {
+        for host in [
+            "https://api.deepseek.com/v1",
+            "https://api.mistral.ai/v1",
+            "https://openrouter.ai/api/v1",
+        ] {
+            let mut p = json!({"messages": [{"role": "system", "content": "stable"}]});
+            apply(&mut p, &url::Url::parse(host).unwrap(), "gpt-6", true);
+            assert!(p.get("prompt_cache_key").is_none(), "{host}");
+            assert!(p.get("prompt_cache_options").is_none(), "{host}");
+        }
+    }
 }

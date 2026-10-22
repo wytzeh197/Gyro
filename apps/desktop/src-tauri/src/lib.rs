@@ -47,7 +47,7 @@ use command_execution::*;
 mod provider_api_keys;
 mod window_controls;
 #[cfg(target_os = "macos")]
-pub(crate) use window_controls::apply_macos_window_chrome;
+pub(crate) use window_controls::apply_macos_traffic_light_position;
 #[cfg(debug_assertions)]
 mod efficiency_benchmark;
 mod goal_runner;
@@ -217,6 +217,11 @@ const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
 const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+// The live transcript is not the stored message: it grows while the model
+// writes, and only the finished message is persisted. Bounding it separately
+// keeps a long answer from being cut mid-word while it streams, without
+// widening what a session row holds.
+const MAX_LIVE_RESPONSE_CHARS: usize = 256_000;
 const MAX_PROVIDER_STDOUT_FRAME_BYTES: usize = 48 * 1024 * 1024;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
@@ -4511,6 +4516,61 @@ fn run_change_summary_call(
     result
 }
 
+/// One metered provider call that turns this chat's transcript into the
+/// checkpoint a manual `/compact` stores.
+///
+/// A provider with a compaction command of its own never reaches this: it
+/// compacts inside its own session. Every other provider gets a real
+/// summarization request, so what the transcript shows is work a model
+/// actually did, and its reply is what the next turn starts from.
+fn run_compaction_summary_call(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> Result<(String, Option<ProviderContextUsage>), String> {
+    let transcript = conversation_history::compaction_transcript_for_session(&request.session_id)
+        .ok_or_else(|| "this chat has no transcript to summarize".to_string())?;
+    // Reads text and writes text, and touches nothing else. Council mode is
+    // Gyro's existing shape for exactly that -- deny-all at the capability
+    // gate, no tools, no approvals -- so this borrows it rather than inventing
+    // a weaker policy of its own.
+    let summary_request = ProviderChatRequest {
+        session_id: request.session_id.clone(),
+        message: format!(
+            "{}\n\n---\n\n{transcript}",
+            conversation_history::COMPACTION_PROMPT
+        ),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        provider_label: request.provider_label.clone(),
+        model_id: request.model_id.clone(),
+        model_label: request.model_label.clone(),
+        reasoning_effort: request.reasoning_effort.clone(),
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: request.workspace_path.clone(),
+        mode: ChatMode::Council,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+        workspace_check: None,
+    };
+    // The caller already holds this session's cancellation flag for the whole
+    // compaction, so Stop ends the summarizer like it ends any other turn.
+    run_provider_chat_with_retry(
+        store,
+        app,
+        &summary_request,
+        None,
+        UsageContext::new(UsageOrigin::ContextCompaction),
+    )
+    .map(|output| (output.response, output.billed_usage))
+    .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+}
+
 /// What the user did with one file on the review card.
 ///
 /// Keeping is a reading record, not an apply step: the change is already on
@@ -4604,6 +4664,24 @@ fn run_provider_chat_blocking_in_lease(
     // a completion made elsewhere; the window's copy covers a failed save.
     let events = store.read_context_events(session_id).map_err(to_string)?;
     request.goal = session_goal::stored_or_unsaved_goal(&events, request.goal.take());
+    request.message = validate_chat_message(&request.message)?;
+    // The title from the user's message is instant, so the sidebar is readable
+    // while the first reply streams. It is only provisional: on the turn that
+    // opens the chat the model names it, and its GYRO_SESSION_TITLE line
+    // replaces this title on every provider. The expected title below is
+    // whatever Gyro itself just stored, so a rename the user made by hand is
+    // still detected and never overwritten.
+    let mut title_before_turn = session.title.clone();
+    if request.suggest_title && is_generic_session_title(&session.title) {
+        if let Some(title) = session_title_from_message(&request.message) {
+            if title != session.title {
+                if let Ok(Some(renamed)) = store.rename_session(session_id, title) {
+                    title_before_turn = renamed.title.clone();
+                    let _ = app.emit("gyro://session-title-updated", renamed);
+                }
+            }
+        }
+    }
     if request.suggest_title {
         if let Some(control) = app
             .state::<ProviderCancellationManager>()
@@ -4613,19 +4691,10 @@ fn run_provider_chat_blocking_in_lease(
             .and_then(|flags| flags.get(&request.session_id).cloned())
         {
             if let Ok(mut state) = control.suggested_title.lock() {
-                // Closed before the model runs. A stray marker cannot replace
-                // the shared title or bill this model for writing one.
-                *state = (Some(session.title.clone()), true);
-            }
-        }
-    }
-    request.message = validate_chat_message(&request.message)?;
-    if request.suggest_title && is_generic_session_title(&session.title) {
-        if let Some(title) = session_title_from_message(&request.message) {
-            if title != session.title {
-                if let Ok(Some(renamed)) = store.rename_session(session_id, title) {
-                    let _ = app.emit("gyro://session-title-updated", renamed);
-                }
+                // Open, not closed: the model may replace the provisional
+                // title for this run. `publish_streamed_session_title` renames
+                // once and closes the control again.
+                *state = suggested_title_for_turn(&title_before_turn);
             }
         }
     }
@@ -5077,9 +5146,18 @@ fn run_provider_chat_blocking_in_lease(
     let plan_events: Vec<_> = plan_payloads
         .into_iter()
         .filter_map(|mut payload| {
+            // The document belongs to the plan event. The assistant message is
+            // only the fallback for providers that emit a checklist without
+            // one, and a blank copy must not shadow the real text.
+            let has_document = ["content", "markdown"].iter().any(|key| {
+                payload
+                    .get(*key)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|content| !content.trim().is_empty())
+            });
             if request.mode == ChatMode::Plan
-                && payload.get("content").is_none()
-                && payload.get("markdown").is_none()
+                && !has_document
+                && !assistant_event.message.trim().is_empty()
             {
                 let mut with_content = payload.clone();
                 if let Some(object) = with_content.as_object_mut() {
@@ -5385,15 +5463,23 @@ fn compact_local_provider_chat(
 ) -> Result<ProviderContextCompactionResponse, String> {
     let events = store.read_events(session_id).map_err(to_string)?;
     let _ = efficiency::save_checkpoint(app, store, request);
-    let compaction = local_compaction_summary(&events).ok_or_else(|| {
+    // Refuse before spending a call: with no completed reply in the window
+    // there is nothing a model could summarize.
+    let fallback = local_compaction_summary(&events).ok_or_else(|| {
         "this chat needs a completed reply before context can be compacted".to_string()
     })?;
-    let mode = compaction.mode();
-    let condensed_turns = compaction.condensed_turns;
     let params = serde_json::json!({ "turnId": run_id.to_string() });
+    let label = request
+        .model_label
+        .as_deref()
+        .or(request.provider_label.as_deref())
+        .unwrap_or(request.provider_id.as_str());
+    // Emitted before the request leaves, so a compaction that takes a while is
+    // visible as work instead of as a turn that already finished.
     let mut running = context_compaction::codex_context_compaction_activity(&params, "running");
-    // This path rewrites the transcript locally; nothing is being summarized.
-    running.detail = Some("Making room for the next turn.".into());
+    running.detail = Some(format!(
+        "Summarizing the earlier conversation with {label}."
+    ));
     emit_provider_activity_event(app, request, &running, Some(0));
 
     // A new provider session starts from the saved checkpoint on the next
@@ -5402,22 +5488,59 @@ fn compact_local_provider_chat(
     store
         .clear_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
+
+    let started = Instant::now();
+    let (compaction, usage, failure) = match run_compaction_summary_call(store, app, request) {
+        Ok((reply, usage)) => match conversation_history::summarized_compaction(&reply) {
+            Some(compaction) => (compaction, usage, None),
+            None => (
+                fallback,
+                None,
+                Some("the provider returned an empty summary".to_string()),
+            ),
+        },
+        // A provider that cannot answer -- offline, out of quota, a CLI that
+        // refused the prompt -- still leaves a usable checkpoint: the local
+        // rewrite, worded as the rewrite it is.
+        Err(error) => (fallback, None, Some(error)),
+    };
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let report = context_compaction::CompactionSummary {
+        label,
+        elapsed_ms,
+        input_tokens: usage.as_ref().and_then(|usage| usage.input_tokens),
+    };
     let mut completed = context_compaction::codex_context_compaction_activity(&params, "done");
-    completed.detail = Some(context_compaction::local_compaction_detail(&compaction));
+    completed.detail = Some(match failure.as_deref() {
+        Some(error) => format!(
+            "Could not summarize this chat ({error}). {}",
+            context_compaction::manual_compaction_detail(&compaction, None)
+        ),
+        None => context_compaction::manual_compaction_detail(&compaction, Some(&report)),
+    });
     let mut entry = provider_activity_event_entry(request, run_id, 0, &completed);
     if let Some(payload) = entry.1.as_object_mut() {
         payload.insert(
             "contextSummary".into(),
-            serde_json::Value::String(compaction.text),
+            serde_json::Value::String(compaction.text.clone()),
         );
-        // What every surface may claim. This path rewrites the transcript
-        // locally, so the two outcomes are "kept" and "condensed"; neither is
-        // a model summary, and the card is not allowed to say it is.
+        // What every surface may claim. A provider reply is "summarized"; the
+        // local fallback keeps its own two words, so the card never reports
+        // work no model did.
         payload.insert(
             "compactionMode".into(),
-            serde_json::Value::String(mode.into()),
+            serde_json::Value::String(compaction.mode().into()),
         );
-        payload.insert("condensedTurns".into(), serde_json::json!(condensed_turns));
+        if compaction.condensed_turns > 0 {
+            payload.insert(
+                "condensedTurns".into(),
+                serde_json::json!(compaction.condensed_turns),
+            );
+        }
+        payload.insert("compactionElapsedMs".into(), serde_json::json!(elapsed_ms));
+        if let Some(error) = failure {
+            payload.insert("compactionError".into(), serde_json::Value::String(error));
+        }
     }
     let activity_events = store
         .append_system_events_with_turn_id(session_id, vec![entry])
@@ -5969,47 +6092,48 @@ fn provider_context_message_with_capabilities_for_turn(
     supports_images: bool,
     turn: PromptTurn,
 ) -> String {
+    // `stable` is the byte-identical prefix owned runners cache. `context` is
+    // the per-turn tail (mode, history, path, check, goal, plan, attachments).
+    let mut stable = Vec::new();
     let mut context = Vec::new();
+    let mode_name = match request.mode {
+        ChatMode::Plan => "plan",
+        ChatMode::Council => "council",
+        ChatMode::Normal => "normal",
+    };
     // Title every chat from the model itself, on the turn that opens it, so
     // naming does not depend on which provider the user picked. Later turns
     // skip it: the marker is read once and the opening turn already asked.
     if request.suggest_title {
         context.push(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end().to_string());
     }
-    // Every provider also learns how to show an image it already holds.
+    // Owned runners always pass resumed: false, so this line stays in the prefix.
     if !turn.resumed {
-        context.push(CHAT_IMAGE_REPLY_INSTRUCTION.trim_end().to_string());
+        stable.push(CHAT_IMAGE_REPLY_INSTRUCTION.trim_end().to_string());
     }
-    // The full guide and contract cost ~3K tokens, so they travel with an
-    // actual browse request or captured page, not every mention of "browser".
+    // The full guide and contract cost ~3K tokens, so they travel in the tail
+    // with an actual browse, canvas, URL, or preview, not every turn.
     let browser_task =
         user_requests_gyro_browser(delegated_agents::browser_task_message(&request.message))
             || request
                 .attachments
                 .iter()
                 .any(|item| item.kind == "browser-snapshot");
-    if browser_task || !turn.resumed {
+    let surface_needed =
+        browser_task || browser_knowledge::needs_surface_guide(&request.message);
+    if surface_needed {
         context.push(browser_knowledge::context(
             supports_tools,
             supports_images,
-            match request.mode {
-                ChatMode::Plan => "plan",
-                ChatMode::Council => "council",
-                ChatMode::Normal => "normal",
-            },
-            browser_task,
+            mode_name,
+            true,
         ));
-    } else {
+    } else if turn.resumed {
         context.push(browser_knowledge::RESUMED_REVEAL_GUIDANCE.into());
+    } else {
+        stable.push(browser_knowledge::ORDINARY_SURFACE_HINT.into());
     }
-    context.push(format!(
-        "Gyro chat mode: {}.",
-        match request.mode {
-            ChatMode::Plan => "plan",
-            ChatMode::Council => "council",
-            ChatMode::Normal => "normal",
-        }
-    ));
+    context.push(format!("Gyro chat mode: {mode_name}."));
     if let Some(history) = conversation_history
         .map(str::trim)
         .filter(|text| !text.is_empty())
@@ -6023,25 +6147,33 @@ fn provider_context_message_with_capabilities_for_turn(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if supports_tools {
-        context.push(if turn.resumed {
-            "Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments."
+        if turn.resumed {
+            context.push(
+                "Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.".into(),
+            );
         } else {
-            "Work efficiently: reuse current evidence instead of repeating unchanged reads or checks. Narrow searches and file ranges to what the task needs; batch independent reads, and prefer exact edits when authorized. Verify proportionately to the change's risk while completing required checks and respecting approvals. Preserve user constraints and explicit attachments."
-        }.into());
+            stable.push(
+                "Work efficiently: reuse current evidence instead of repeating unchanged reads or checks. Narrow searches and file ranges to what the task needs; batch independent reads, and prefer exact edits when authorized. Verify proportionately to the change's risk while completing required checks and respecting approvals. Preserve user constraints and explicit attachments.".into(),
+            );
+        }
         context.push(delegated_agents::prompt_guidance(request, turn.resumed).into());
         if let Some(workspace) = request.workspace_path.as_deref() {
             context.push(format!("Selected workspace: {workspace}"));
         }
-        // Send this on resume too: older provider sessions may still carry the
-        // former instruction to treat the workspace as optional context.
-        context.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls.".into());
-        context.push("Paths are workspace-relative. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
+        // The path stays in the tail. These rules are the same on every turn,
+        // including resume, so they stay in the stable prefix.
+        stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls.".into());
+        stable.push("Paths are workspace-relative. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
         if request.mode == ChatMode::Normal {
-            context.push(if turn.resumed {
-                "Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results."
+            if turn.resumed {
+                context.push(
+                    "Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes by passing knownContentHash from the prior read. Read the body again only when the hash differs or that range was never loaded, and confirm with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results.".into(),
+                );
             } else {
-                "When the user requests implementation, carry it through authorized edits and relevant verification. Use gyro_workspace_list or gyro_workspace_search to locate files, gyro_workspace_read or gyro_workspace_read_range to inspect them, gyro_workspace_edit for exact replacements, and gyro_workspace_propose_edit for whole-file changes. Paths are relative to the selected workspace. A completed tool call is not proof that a proposed edit was applied: inspect its status, report pending review when applicable, and verify applied changes with a fresh read or diff. Never claim an action succeeded without a confirming tool result. If a tool fails, use its error to correct the request; report an unavailable bridge rather than inventing workspace results."
-            }.into());
+                stable.push(
+                    "When the user requests implementation, carry it through authorized edits and relevant verification. Use gyro_workspace_list or gyro_workspace_search to locate files, gyro_workspace_read or gyro_workspace_read_range to inspect them, gyro_workspace_edit for exact replacements, and gyro_workspace_propose_edit for whole-file changes. Paths are relative to the selected workspace. Verify applied changes by passing knownContentHash from the prior read; read the body again only when the hash differs or that range was never loaded. A completed tool call is not proof that a proposed edit was applied: inspect its status, report pending review when applicable, and verify with a fresh read or diff when the hash differs. Never claim an action succeeded without a confirming tool result. If a tool fails, use its error to correct the request; report an unavailable bridge rather than inventing workspace results.".into(),
+                );
+            }
         }
         if let Some(check) = request.workspace_check.as_ref() {
             let diagnostics = request
@@ -6060,8 +6192,8 @@ fn provider_context_message_with_capabilities_for_turn(
             // Stated once per provider thread. Telling the model to refresh the
             // attached check made Codex open every turn with tool discovery and
             // context calls, roughly doubling model calls per turn.
-            context.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
-            context.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later — stay in the turn, prefer one long wait over many short ones, and reply once the result is in. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
+            stable.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
+            stable.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later — stay in the turn, prefer one long wait over many short ones, and reply once the result is in. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
         }
         if user_requests_gyro_browser(&request.message) {
             context.push("Requested surface: Gyro Browser. Follow the shared browser guide and current capability contract for this live task.".into());
@@ -6070,19 +6202,19 @@ fn provider_context_message_with_capabilities_for_turn(
         // Only what the user attaches from the composer, or names in the
         // message, puts a file in front of the model.
         if !turn.resumed {
-            context.push(
+            stable.push(
                 "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
             );
-            context.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
+            stable.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
         }
+        stable.push(
+            "Call gyro_tool_catalog with the tool's domain prefix (gyro_workspace_, gyro_code_, gyro_terminal_, gyro_browser_, gyro_git_, gyro_ide_, gyro_github_, gyro_memory_, gyro_research_, or gyro_agent_) before using a tool whose schema was not inlined.".into(),
+        );
     }
-    // Any mode can ask. Gyro shows these as a one-at-a-time question card and
-    // sends every answer back in a single message.
-    context.push(if turn.resumed {
-        "Ask only for a user decision that changes your action and cannot be settled by project reads; otherwise keep working. Write one short sentence, then one hidden JSON line: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Decision?\",\"options\":[{\"label\":\"A\",\"detail\":\"Effect\",\"recommended\":true},{\"label\":\"B\",\"detail\":\"Effect\"}]}]}. At most 3 questions, 2–4 options each, at most one recommended option per question. Do not repeat questions in prose; end the turn and wait for answers."
-    } else {
-        "When you need a decision only the user can make, one that would change what you do and that reading the project cannot settle, ask before acting: write one short sentence, then one hidden line in this exact form: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Which release should this target?\",\"options\":[{\"label\":\"v0.1.0 stable\",\"detail\":\"First signed public release\",\"recommended\":true},{\"label\":\"Next Alpha\",\"detail\":\"Incremental release on the Alpha channel\"}]}]}. Ask at most 3 questions with 2 to 4 options each, mark at most one option per question as recommended, keep the JSON on one line, do not repeat the questions as prose, and end the turn to wait for the answers. When nothing needs the user, keep working without asking."
-    }.into());
+    // Any mode can ask. The short form stays in the stable prefix.
+    stable.push(
+        "Ask only for a user decision that changes your action and cannot be settled by project reads; otherwise keep working. Write one short sentence, then one hidden JSON line: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Decision?\",\"options\":[{\"label\":\"A\",\"detail\":\"Effect\",\"recommended\":true},{\"label\":\"B\",\"detail\":\"Effect\"}]}]}. At most 3 questions, 2–4 options each, at most one recommended option per question. Do not repeat questions in prose; end the turn and wait for answers.".into(),
+    );
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -6172,7 +6304,7 @@ fn provider_context_message_with_capabilities_for_turn(
         ));
     }
     let mut attribution = gyro_core::efficiency::context::Attribution::default();
-    for part in &context {
+    for part in stable.iter().chain(context.iter()) {
         let chars = part.chars().count() as u64;
         if part.starts_with("Prior conversation in this Gyro chat") {
             if conversation_history.is_some_and(|h| h.starts_with("Gyro task state")) {
@@ -6189,10 +6321,12 @@ fn provider_context_message_with_capabilities_for_turn(
         }
     }
     gyro_core::provider_observation::prepared_context(attribution);
-    efficiency::record_prompt_parts(&context, &request.message);
+    efficiency::record_prompt_sections(&stable, &context, &request.message);
+    let mut ordered = stable;
+    ordered.extend(context);
     format!(
         "{}\n\nUser message:\n{}",
-        context.join("\n"),
+        ordered.join("\n"),
         request.message
     )
 }
@@ -16786,6 +16920,23 @@ fn provider_workspace_prompt_line(message: &str, workspace: &str) -> String {
     }
 }
 
+/// Inject the side-panel guide only when this turn's user text needs a surface.
+/// The stable prefix's example link must not count: only text after `User message:`.
+fn cli_surface_guide<'a>(message: &str, guide: &'a str) -> &'a str {
+    let user_text = message
+        .rsplit_once("User message:\n")
+        .map(|(_, user)| user)
+        .unwrap_or(message);
+    let wants_surface = browser_knowledge::needs_surface_guide(user_text)
+        || message.contains("<gyro-browser-snapshot>")
+        || message.contains("Requested surface: Gyro Browser");
+    if wants_surface && !message.contains(guide) {
+        guide
+    } else {
+        ""
+    }
+}
+
 fn openai_codex_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
@@ -16835,7 +16986,7 @@ fn openai_codex_chat_prompt(
     // The shared provider context may already carry this exact guide.
     // Keep one full copy; never shorten it or remove any tool declarations.
     let guide = browser_knowledge::SIDE_PANEL_GUIDE;
-    let artifact_instruction = if message.contains(guide) { "" } else { guide };
+    let artifact_instruction = cli_surface_guide(message, guide);
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -16891,7 +17042,7 @@ fn claude_chat_prompt(
     // The shared provider context may already carry this exact guide.
     // Keep one full copy; never shorten it or remove any tool declarations.
     let guide = browser_knowledge::SIDE_PANEL_GUIDE;
-    let artifact_instruction = if message.contains(guide) { "" } else { guide };
+    let artifact_instruction = cli_surface_guide(message, guide);
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -17069,6 +17220,39 @@ fn completed_stream_title(text: &str, message_complete: bool) -> Option<String> 
     sanitize_session_title_candidate(&line[..end.unwrap_or(line.len())])
 }
 
+/// The title control a turn starts with: open, expecting the title Gyro just
+/// stored, so the model's own `GYRO_SESSION_TITLE` line may replace it once.
+fn suggested_title_for_turn(title: &str) -> (Option<String>, bool) {
+    (Some(title.to_string()), false)
+}
+
+/// Whether the model's title may replace the stored title right now.
+///
+/// Closed control, no opening turn, and a title that changed under the model
+/// all refuse. A rename the user made by hand wins and closes the control for
+/// the rest of the run, so a later stream tick cannot overwrite it either.
+fn streamed_title_replacement(
+    state: &mut (Option<String>, bool),
+    stored_title: &str,
+    text: &str,
+    message_complete: bool,
+) -> Option<String> {
+    if state.1 {
+        return None;
+    }
+    let Some(expected_title) = state.0.as_deref() else {
+        return None;
+    };
+    let Some(title) = completed_stream_title(text, message_complete) else {
+        return None;
+    };
+    if stored_title != expected_title {
+        state.1 = true;
+        return None;
+    }
+    Some(title)
+}
+
 fn publish_streamed_session_title(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -17078,9 +17262,6 @@ fn publish_streamed_session_title(
     if !request.suggest_title {
         return;
     }
-    let Some(title) = completed_stream_title(text, message_complete) else {
-        return;
-    };
     let Some(control) = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -17093,12 +17274,6 @@ fn publish_streamed_session_title(
     let Ok(mut state) = control.suggested_title.lock() else {
         return;
     };
-    if state.1 {
-        return;
-    }
-    let Some(expected_title) = state.0.as_deref() else {
-        return;
-    };
     let Ok(store) = open_store() else {
         return;
     };
@@ -17108,11 +17283,10 @@ fn publish_streamed_session_title(
     let Ok(Some(session)) = store.get_session(session_id) else {
         return;
     };
-    // Respect a title the user changed while the model was working.
-    if session.title != expected_title {
-        state.1 = true;
+    let Some(title) = streamed_title_replacement(&mut state, &session.title, text, message_complete)
+    else {
         return;
-    }
+    };
     if let Ok(Some(session)) = store.rename_session(session_id, title) {
         state.1 = true;
         let _ = app.emit("gyro://session-title-updated", session);
@@ -17886,8 +18060,10 @@ fn sanitize_provider_chat_response(response: &str) -> String {
 }
 
 fn sanitize_provider_text_delta(delta: &str) -> String {
-    let redacted = gyro_core::security::redact_secrets(delta);
-    truncate_chars(&redacted, MAX_CHAT_RESPONSE_CHARS)
+    // A delta is redacted but never clipped: chunk boundaries are arbitrary, so
+    // a per-chunk limit cuts mid-sentence and, at 64k, silently truncated any
+    // long answer long before the accumulator saw it.
+    gyro_core::security::redact_secrets(delta)
 }
 
 fn truncate_error_detail(value: &str) -> String {
@@ -17921,6 +18097,17 @@ fn push_bounded(
         return BoundedPushResult::default();
     }
     let remaining_chars = max_chars.saturating_sub(*target_chars);
+    if remaining_chars == 0 {
+        // One ellipsis marks the cut; appending it on every later delta would
+        // bury the message under its own suffix.
+        if !target.ends_with(TEXT_TRUNCATION_SUFFIX) {
+            target.push_str(TEXT_TRUNCATION_SUFFIX);
+        }
+        return BoundedPushResult {
+            accepted_chars: 0,
+            truncated: true,
+        };
+    }
     let value_chars = value.chars().count();
     if value_chars <= remaining_chars {
         target.push_str(value);
@@ -17989,6 +18176,13 @@ struct StreamingCommandState {
     stdout_text: String,
     stdout_text_chars: usize,
     stdout_text_truncated: bool,
+    /// The provider's own copy of the message, in its own coordinate system.
+    ///
+    /// `assistant_text` is what the transcript shows: decorated with paragraph
+    /// breaks between blocks and bounded for the UI. Snapshot and completed
+    /// frames describe the former, so reconciling them against the decorated
+    /// buffer froze the message at the first break.
+    text_stream: gyro_core::text_stream::TextStreamAssembler,
     assistant_text: String,
     assistant_text_chars: usize,
     assistant_text_truncated: bool,
@@ -18033,6 +18227,7 @@ impl StreamingCommandState {
             stdout_text_chars: 0,
             stdout_text_truncated: false,
             assistant_text: String::new(),
+            text_stream: gyro_core::text_stream::TextStreamAssembler::new(),
             assistant_text_chars: 0,
             assistant_text_truncated: false,
             text_block_separator_pending: false,
@@ -18052,12 +18247,17 @@ impl StreamingCommandState {
         if !self.assistant_text.is_empty() {
             self.text_block_separator_pending = true;
         }
+        // A tool call ends the message the provider was writing: what follows
+        // describes a new one, so snapshots for it must not be reconciled
+        // against the previous block.
+        self.text_stream.start_block();
     }
 
     fn note_new_text_content_block(&mut self) {
         if !self.assistant_text.is_empty() {
             self.text_block_separator_pending = true;
         }
+        self.text_stream.start_block();
     }
 
     /// Fold a Claude Code usage reading into what the meter will report.
@@ -18306,10 +18506,15 @@ impl StreamingCommandState {
         (!self.stdout_line_buffer.is_empty()).then(|| std::mem::take(&mut self.stdout_line_buffer))
     }
 
-    fn push_assistant_delta(&mut self, delta: &str) {
+    /// Show text the provider reported, in the display's own coordinate system.
+    fn push_assistant_text(&mut self, advance: gyro_core::text_stream::TextStreamAdvance) {
         if self.assistant_text_truncated {
             return;
         }
+        if advance.starts_block && !self.assistant_text.is_empty() {
+            self.text_block_separator_pending = true;
+        }
+        let delta = advance.text.as_str();
         if self.assistant_text.is_empty() || self.text_block_separator_pending {
             self.text_blocks.push(StreamedTextBlock {
                 start: self.assistant_text.len(),
@@ -18327,7 +18532,7 @@ impl StreamingCommandState {
             &mut self.assistant_text,
             &mut self.assistant_text_chars,
             delta,
-            MAX_CHAT_RESPONSE_CHARS,
+            MAX_LIVE_RESPONSE_CHARS,
         );
         self.assistant_text_truncated = result.truncated;
         if result.truncated {
@@ -18342,21 +18547,37 @@ impl StreamingCommandState {
         }
     }
 
+    /// Append an append-only text delta.
+    fn push_assistant_delta(&mut self, delta: &str) {
+        if let Some(advance) = self.text_stream.push_delta(delta) {
+            self.push_assistant_text(advance);
+        }
+    }
+
+    /// Reconcile a cumulative snapshot of the message being written.
+    ///
+    /// The comparison runs against the provider's own text, so a paragraph
+    /// break the display inserted no longer stops every later snapshot from
+    /// matching and freezing the message.
     fn push_assistant_snapshot(&mut self, snapshot: &str) {
-        if snapshot.is_empty() {
-            return;
+        if let Some(advance) = self.text_stream.push_snapshot(snapshot) {
+            self.push_assistant_text(advance);
         }
-        if self.assistant_text.is_empty() {
-            self.push_assistant_delta(snapshot);
-            return;
-        }
-        if let Some(delta) = snapshot.strip_prefix(&self.assistant_text) {
-            self.push_assistant_delta(delta);
+    }
+
+    /// Apply the provider's completed message.
+    ///
+    /// This used to be discarded whenever any text had streamed, which threw
+    /// away the one frame that carries the whole answer exactly when the live
+    /// stream had stopped short.
+    fn push_assistant_final(&mut self, message: &str) {
+        if let Some(advance) = self.text_stream.finish(message) {
+            self.push_assistant_text(advance);
         }
     }
 
     fn push_pending_delta(&mut self, delta: &str) {
-        let max_pending_chars = MAX_CHAT_RESPONSE_CHARS + TEXT_TRUNCATION_SUFFIX.len();
+        let max_pending_chars = MAX_LIVE_RESPONSE_CHARS + TEXT_TRUNCATION_SUFFIX.len();
         if delta.is_empty() || self.pending_delta_chars >= max_pending_chars {
             return;
         }
@@ -18933,14 +19154,14 @@ fn handle_provider_stdout_value(
                 stream_state.push_assistant_snapshot(&snapshot);
             }
             ProviderTextChunk::Final(text) => {
-                if !stream_state.assistant_text.trim().is_empty() {
-                    return;
-                }
+                // The completed message is the answer of record: apply it even
+                // when text has already streamed, so a short stream is repaired
+                // rather than persisted as the whole reply.
                 let text = sanitize_provider_text_delta(&text);
                 if text.is_empty() {
                     return;
                 }
-                stream_state.push_assistant_delta(&text);
+                stream_state.push_assistant_final(&text);
             }
         }
         if let Some(delta) = stream_state
@@ -21747,6 +21968,30 @@ fn execute_provider_capability(
                 None,
             )
         }
+        CapabilityId::ToolCatalog => {
+            let prefix = arguments
+                .get("prefix")
+                .and_then(serde_json::Value::as_str)
+                .filter(|prefix| !prefix.is_empty());
+            let offset = arguments
+                .get("offset")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
+            let page = ollama_compatibility_catalog(
+                request.context.mode,
+                prefix,
+                offset,
+                bound.allow_delegation,
+            );
+            (
+                format!(
+                    "Listed tools for {}",
+                    prefix.unwrap_or("gyro_")
+                ),
+                page,
+                None,
+            )
+        }
     };
     let data = gyro_core::validate_capability_result_data(redact_workspace_capability_result(
         request.capability_id,
@@ -22619,6 +22864,14 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
             "base": { "type": "string" },
             "draft": { "type": "boolean" }
         }),
+        CapabilityId::ToolCatalog => serde_json::json!({
+            "prefix": {
+                "type": "string",
+                "default": "gyro_",
+                "description": "Domain prefix such as gyro_browser_ or gyro_github_."
+            },
+            "offset": { "type": "integer", "minimum": 0 }
+        }),
         _ => serde_json::json!({}),
     };
     let required = match id {
@@ -22756,7 +23009,12 @@ fn capability_mcp_response(
         mark_browser_image_attached(&mut response);
     }
     let is_error = response.status != CapabilityStatus::Completed;
-    let text = if let Some(result) = response.result {
+    let text = if let Some(mut result) = response.result {
+        provider_tool_batch::spill_result_data(
+            result.capability_id.as_str(),
+            result.capability_id.provider_tool_name(),
+            &mut result.data,
+        );
         serde_json::to_string(&serde_json::json!({
             "callId": result.call_id,
             "capabilityId": result.capability_id,
@@ -22830,7 +23088,7 @@ pub fn run_provider_capability_server() -> anyhow::Result<()> {
                 serde_json::json!({
                     "name": descriptor.id.provider_tool_name(),
                     "description": descriptor.description,
-                    "inputSchema": desktop_capability_tool_schema(descriptor.id),
+                    "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
                 })
             })
             .collect(),
@@ -22974,7 +23232,7 @@ pub fn run() {
                 )
             {
                 if let Some(main) = window.app_handle().get_webview_window("main") {
-                    apply_macos_window_chrome(&main);
+                    apply_macos_traffic_light_position(&main);
                 }
             }
             #[cfg(target_os = "macos")]
@@ -22994,8 +23252,6 @@ pub fn run() {
             efficiency::route_efficiency_phase,
             quit_confirmation::get_quit_confirmation,
             quit_confirmation::resolve_quit_confirmation,
-            window_controls::main_window_action,
-            window_controls::main_window_is_fullscreen,
             project_import::get_project_import_sources,
             project_import::scan_project_imports,
             project_import::start_project_import,
@@ -23321,7 +23577,7 @@ fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
 #[cfg(target_os = "macos")]
 pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
-        apply_macos_window_chrome(&window);
+        apply_macos_traffic_light_position(&window);
         window.unminimize()?;
         window.show()?;
         window.set_focus()?;
@@ -23335,7 +23591,7 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
         .first()
         .context("Gyro has no configured main window")?;
     let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
-    apply_macos_window_chrome(&window);
+    apply_macos_traffic_light_position(&window);
     window.show()?;
     window.set_focus()?;
     Ok(())
@@ -24542,6 +24798,36 @@ mod tests {
     }
 
     #[test]
+    fn owned_turns_share_one_stable_block_across_history_and_check_duration() {
+        let mut first = anthropic_provider_request();
+        let mut check = WorkspaceCheckReport::placeholder("/tmp/gyro-workspace");
+        check.duration_ms = 12;
+        first.workspace_check = Some(check);
+        let mut second = first.clone();
+        second.workspace_check.as_mut().unwrap().duration_ms = 4_000;
+        second.message = "edit it again".into();
+        let build = |request: &ProviderChatRequest, history: &str| {
+            provider_context_message_with_capabilities(request, Some(history), true, false)
+        };
+        let (stable_a, dynamic_a) =
+            efficiency::capture_prompt(|| build(&first, "User: one\n\nAssistant: first answer"));
+        let (stable_b, dynamic_b) = efficiency::capture_prompt(|| {
+            build(&second, "User: one\n\nAssistant: a different and longer answer")
+        });
+        assert!(!stable_a.is_empty());
+        assert_eq!(stable_a, stable_b);
+        assert_ne!(dynamic_a, dynamic_b);
+        assert!(!stable_a.contains("Prior conversation"));
+        assert!(!stable_a.contains("Workspace check:"));
+        assert!(!stable_a.contains("/tmp/gyro-workspace"));
+        assert!(dynamic_a.contains("Workspace check: ready."));
+        assert!(dynamic_b.contains("Workspace check: ready."));
+        assert!(!dynamic_a.contains(" ms"));
+        assert!(dynamic_a.contains("first answer"));
+        assert!(dynamic_b.contains("different and longer answer"));
+    }
+
+    #[test]
     fn workspace_guidance_survives_resume_and_respects_tool_access() {
         let mut request = anthropic_provider_request();
         for resumed in [false, true] {
@@ -24750,7 +25036,7 @@ mod tests {
         let actionable = claude_chat_prompt("edit it", Some("/tmp/project"), false, true, false);
         assert!(actionable.contains("must follow Gyro's permission decisions"));
         assert!(actionable.contains("do not retry the write"));
-        assert!(actionable.contains("GYRO_ARTIFACTS:"));
+        assert!(!actionable.contains(browser_knowledge::SIDE_PANEL_GUIDE));
         assert!(!actionable.contains("Stay in planning mode"));
 
         let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false, false);
@@ -26735,7 +27021,7 @@ while True:
         assert!(prompt.contains("Do not describe the local Codex runner"));
         assert!(prompt.contains("GYRO_SESSION_TITLE: <2-6 word title>"));
         assert!(prompt.contains("name the session immediately"));
-        assert!(prompt.contains("GYRO_ARTIFACTS:"));
+        assert!(!prompt.contains(browser_knowledge::SIDE_PANEL_GUIDE));
         assert!(prompt.contains("Selected workspace: /workspace"));
         assert!(prompt.contains("Do not edit files"));
 
@@ -26764,21 +27050,34 @@ while True:
     }
 
     #[test]
-    fn opening_prompts_include_one_complete_side_panel_guide() {
+    fn opening_prompts_include_the_side_panel_only_for_a_surface_turn() {
         let request = anthropic_provider_request();
-        let context = provider_context_message_for_turn(&request, None, PromptTurn::default());
+        let ordinary = provider_context_message_for_turn(&request, None, PromptTurn::default());
         let guide = browser_knowledge::SIDE_PANEL_GUIDE;
+        assert_eq!(ordinary.matches(guide).count(), 0);
+        assert!(ordinary.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
+        let mut surface = request.clone();
+        surface.message = "Check the dev server at https://example.com".into();
+        let context = provider_context_message_for_turn(&surface, None, PromptTurn::default());
         assert_eq!(context.matches(guide).count(), 1);
         let codex = openai_codex_chat_prompt(&context, None, None, true, true, false);
         let claude = claude_chat_prompt(&context, None, true, true, false);
         for prompt in [&codex, &claude] {
             assert_eq!(prompt.matches(guide).count(), 1);
             assert!(prompt.contains(&context));
-            // Exactly one naming contract, whichever path supplied it.
             assert_eq!(prompt.matches("GYRO_SESSION_TITLE").count(), 1);
         }
-        assert!(openai_codex_chat_prompt("hello", None, None, true, true, false).contains(guide));
-        assert!(claude_chat_prompt("hello", None, true, true, false).contains(guide));
+        assert!(!openai_codex_chat_prompt("hello", None, None, true, true, false).contains(guide));
+        assert!(!claude_chat_prompt("hello", None, true, true, false).contains(guide));
+        assert!(openai_codex_chat_prompt(
+            "open https://example.com",
+            None,
+            None,
+            true,
+            true,
+            false
+        )
+        .contains(guide));
     }
 
     #[test]
@@ -26929,8 +27228,9 @@ while True:
             },
         );
         assert!(opening.len() > resumed.len());
-        assert!(opening.contains("Gyro Browser is chat-owned"));
-        assert!(!resumed.contains("Gyro Browser is chat-owned"));
+        assert!(opening.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
+        assert!(!opening.contains(browser_knowledge::SIDE_PANEL_GUIDE));
+        assert!(!resumed.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
         assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
         assert!(!resumed.contains("For long-running builds"));
         assert!(resumed.contains("configured approval policy"));
@@ -27928,6 +28228,60 @@ while True:
     }
 
     #[test]
+    fn streaming_state_keeps_plan_text_after_a_tool_block() {
+        // The regression: the first text block after a tool call was separated
+        // by the display, and every later snapshot then failed to line up with
+        // the decorated buffer, freezing the message where a plan document
+        // starts.
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("Let me look at the code.");
+        state.note_intervening_work();
+        state.push_assistant_delta("# Plan\n\nStep one");
+        state.push_assistant_snapshot("# Plan\n\nStep one\n\nStep two");
+
+        assert_eq!(
+            state.assistant_text,
+            "Let me look at the code.\n\n# Plan\n\nStep one\n\nStep two"
+        );
+    }
+
+    #[test]
+    fn streaming_state_ignores_the_completed_message_of_an_earlier_block() {
+        // The tool call opens a new block, then the provider reports the
+        // message it just finished. That repeat must not be appended again.
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("Let me look at the code.");
+        state.note_intervening_work();
+        state.push_assistant_final("Let me look at the code.");
+
+        assert_eq!(state.assistant_text, "Let me look at the code.");
+    }
+
+    #[test]
+    fn streaming_state_applies_the_completed_message_to_a_short_stream() {
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("The plan starts here and stops");
+        state.push_assistant_final(
+            "The plan starts here and stops only when every step is listed.",
+        );
+
+        assert_eq!(
+            state.assistant_text,
+            "The plan starts here and stops only when every step is listed."
+        );
+    }
+
+    #[test]
+    fn streaming_state_does_not_clip_a_long_answer_at_the_stored_limit() {
+        let mut state = StreamingCommandState::new();
+        let body = "a".repeat(MAX_CHAT_RESPONSE_CHARS + 1_000);
+        state.push_assistant_delta(&body);
+
+        assert_eq!(state.assistant_text.chars().count(), body.chars().count());
+        assert!(!state.assistant_text_truncated);
+    }
+
+    #[test]
     fn streaming_state_splits_large_stdout_batches_without_losing_the_tail() {
         let mut state = StreamingCommandState::new();
         let batch = (0..2_048)
@@ -27964,7 +28318,9 @@ while True:
     #[test]
     fn streaming_state_stops_emitting_after_response_cap() {
         let mut state = StreamingCommandState::new();
-        state.push_assistant_delta(&"a".repeat(MAX_CHAT_RESPONSE_CHARS + 32));
+        // The live transcript is bounded separately from the stored message, so
+        // the cap that stops the rail is the streaming bound, not 64k.
+        state.push_assistant_delta(&"a".repeat(MAX_LIVE_RESPONSE_CHARS + 32));
 
         assert!(state.assistant_text_truncated);
         assert!(state.has_pending_delta());
@@ -29529,6 +29885,121 @@ while True:
         assert_eq!(
             completed_stream_title("Working without a marker", true),
             None
+        );
+    }
+
+    /// The provisional title from the user's message is not the last word: the
+    /// model names the chat on the turn that opens it, and its own title line
+    /// replaces the provisional one.
+    #[test]
+    fn the_model_title_replaces_the_provisional_title() {
+        let mut state = suggested_title_for_turn("We Drew Our Own Traffic Lights");
+        assert!(
+            !state.1,
+            "the control must be open or the model can never name the chat"
+        );
+        assert_eq!(
+            streamed_title_replacement(
+                &mut state,
+                "We Drew Our Own Traffic Lights",
+                "GYRO_SESSION_TITLE: Traffic Light Bug\nLet me find the drawing code.",
+                true,
+            )
+            .as_deref(),
+            Some("Traffic Light Bug")
+        );
+    }
+
+    #[test]
+    fn a_title_the_user_renamed_survives_the_model_marker() {
+        let mut state = suggested_title_for_turn("We Drew Our Own Traffic Lights");
+        assert!(
+            streamed_title_replacement(
+                &mut state,
+                "My Own Name",
+                "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
+                true,
+            )
+            .is_none()
+        );
+        assert!(
+            state.1,
+            "a hand rename closes the control for the rest of the run"
+        );
+        assert!(
+            streamed_title_replacement(
+                &mut state,
+                "My Own Name",
+                "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
+                true,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_closed_title_control_ignores_later_markers() {
+        let mut state = (Some("Kept".to_string()), true);
+        assert!(
+            streamed_title_replacement(&mut state, "Kept", "GYRO_SESSION_TITLE: Late\n", true)
+                .is_none()
+        );
+    }
+
+    /// Every provider is asked for a title on the turn that opens the chat, so
+    /// naming does not depend on which model the user picked.
+    #[test]
+    fn every_provider_is_asked_for_a_title_on_the_first_turn() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
+            .unwrap();
+        for provider in [
+            "openai",
+            "anthropic",
+            "xai",
+            "gemini",
+            "kimi",
+            "cursor",
+            "opencode",
+            "antigravity",
+            "deepseek",
+            "ollama",
+        ] {
+            let mut request = provider_chat_request_for(&session, temp.path(), provider);
+            request.suggest_title = true;
+            let context = provider_context_message(&request);
+            assert_eq!(
+                context.matches("GYRO_SESSION_TITLE").count(),
+                1,
+                "{provider} must be asked for exactly one title"
+            );
+        }
+    }
+
+    #[test]
+    fn the_title_instruction_is_asked_once_per_turn_not_twice() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
+            .unwrap();
+        let mut request = provider_chat_request_for(&session, temp.path(), "anthropic");
+        request.suggest_title = true;
+        let context = provider_context_message(&request);
+        assert_eq!(context.matches("GYRO_SESSION_TITLE").count(), 1);
+        assert_eq!(
+            claude_chat_prompt(&context, None, true, true, false)
+                .matches("GYRO_SESSION_TITLE")
+                .count(),
+            1
+        );
+        assert_eq!(
+            openai_codex_chat_prompt(&context, None, None, true, true, false)
+                .matches("GYRO_SESSION_TITLE")
+                .count(),
+            1
         );
     }
 

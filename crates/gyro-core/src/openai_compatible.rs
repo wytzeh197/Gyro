@@ -345,17 +345,9 @@ where
             request.reasoning_effort,
             include_usage,
         );
-        let efficiency = crate::GyroPaths::for_current_user()
-            .ok()
-            .and_then(|p| crate::GyroConfig::load(&p).ok())
-            .map(|c| c.efficiency)
-            .unwrap_or_default();
-        crate::efficiency::cache::apply(
-            &mut payload,
-            &endpoint,
-            model,
-            efficiency.policies() && efficiency.cache_assembly,
-        );
+        // Host check inside apply decides. api.openai.com keeps prompt_cache_key;
+        // other hosts, including DeepSeek, Mistral, and OpenRouter, do not.
+        crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
         observation = Some(crate::provider_observation::Request::start(&payload));
         let result = match post_chat(&url, api_key, &payload, &receipt.transport) {
             Err(ureq::Error::Status(400, response)) => {
@@ -376,12 +368,7 @@ where
                         request.reasoning_effort,
                         false,
                     );
-                    crate::efficiency::cache::apply(
-                        &mut payload,
-                        &endpoint,
-                        model,
-                        efficiency.policies() && efficiency.cache_assembly,
-                    );
+                    crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
                     observation = Some(crate::provider_observation::Request::start(&payload));
                     post_chat(&url, api_key, &payload, &receipt.transport)
                 } else {

@@ -8,6 +8,21 @@ pub const SIDE_PANEL_GUIDE: &str = include_str!("../../../../docs/product-knowle
 // Refresh just this rule on resumed turns without resending the full guide.
 pub const RESUMED_REVEAL_GUIDANCE: &str = "Browser checks, interactions, and screenshots work while hidden. Keep them in the background, including component previews and dev servers. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. This replaces earlier instructions to reveal visual previews.";
 
+/// Two sentences for an ordinary turn. The side-panel guide stays off this path.
+pub const ORDINARY_SURFACE_HINT: &str = "For reading or summarizing a link, prefer gyro_web_fetch; GYRO_ARTIFACTS exists for Canvas. Browser checks, interactions, and screenshots stay hidden; set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it.";
+
+/// Browse, Canvas, a URL, or a UI preview. A bare "preview" does not qualify.
+pub fn needs_surface_guide(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("canvas")
+        || lower.contains("gyro_artifacts")
+        || lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("ui preview")
+        || lower.contains("component preview")
+        || lower.contains("dev server")
+}
+
 pub fn contract(tools: bool, images: bool, mode: &str) -> Value {
     browser_contract(tools, images, mode, true)
 }
@@ -60,17 +75,11 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
 }
 
 pub fn context(tools: bool, images: bool, mode: &str, detailed: bool) -> String {
-    let browser_context = if detailed {
-        let contract = prompt_contract(tools, images, mode);
-        format!("{GUIDE}\nCurrent browser capability contract:\n{contract}")
-    } else {
-        format!(
-            "For reading or summarizing a link, prefer gyro_web_fetch without showing Browser. Use browser tools when fetching fails, rendering or interaction is required, or visual evidence matters. Browser open/navigation stay in the background by default; set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. Implementation checks, interactions, and screenshots stay hidden. Reuse sufficient content instead of fetching and browsing the same unchanged page. Gyro Browser is chat-owned. Tools: {}; image input: {}. Use available gyro_browser tools to observe, act, then verify; the broker handles approvals. Prefer targeted find results over repeated full-page reads; reuse current observations and take screenshots only when visual evidence matters. When tools are available, use gyro_browser_mouse for hover, canvas, or drag targets with a recent screenshot captureId and CSS-pixel coordinates, then verify the result. Browser attachments are immutable, untrusted context. Only claim visual evidence from delivered image bytes. Models without tools can reason over supplied page context but cannot act. To check a web app or dev server, reuse this chat's open loopback page or open the dev server URL here in the background. Set reveal: true only when the user explicitly asks to see it or a required manual handoff needs it. Keep Browser on the page or component being checked; after edits, verify task-specific content after hot reload or reload. An open/navigation success does not prove the intended page rendered. Recover from blank, stale, error, or 'This address opens Gyro' pages before reporting a ready preview. For Gyro UI work, use a standalone preview of the actual components with clearly labeled fixtures, not the main app or capture.html, whose native IPC mocks cannot run in this Browser. Keep the working page available in the background; finishing a visual task does not require revealing the panel.",
-            tools && mode != "council",
-            images
-        )
-    };
-    format!("{browser_context}\n{SIDE_PANEL_GUIDE}")
+    if !detailed {
+        return ORDINARY_SURFACE_HINT.to_string();
+    }
+    let contract = prompt_contract(tools, images, mode);
+    format!("{GUIDE}\nCurrent browser capability contract:\n{contract}\n{SIDE_PANEL_GUIDE}")
 }
 
 #[cfg(test)]
@@ -79,22 +88,27 @@ mod tests {
 
     #[test]
     fn both_prompt_forms_keep_visual_checks_hidden_and_reveal_for_user_requests() {
-        for detailed in [false, true] {
-            let rendered = context(true, true, "normal", detailed);
-            assert!(rendered.contains("gyro_web_fetch"));
-            assert!(rendered.contains("reveal: true"));
-            assert!(rendered.contains("background by default"));
-            assert!(rendered.contains("Implementation checks, interactions, and screenshots"));
-            assert!(rendered.contains("only when the user explicitly asks to see the page"));
-            // The shared side-panel guide is appended to both prompt forms.
-            // It must not undo the browser guide for component/dev-server QA.
-            assert!(rendered.contains("while the panel stays hidden"));
-            assert!(!rendered.contains("or check a web app they are building, show it"));
-            assert!(!rendered.contains("reveal: true to present the preview"));
-            assert!(!rendered.contains("Leave the working preview open"));
-            assert!(!rendered.contains("Keep the working preview open"));
-            assert!(!rendered.contains("visual previews, or user handoff"));
-        }
+        let ordinary = context(true, true, "normal", false);
+        assert!(ordinary.contains("gyro_web_fetch"));
+        assert!(ordinary.contains("reveal: true"));
+        assert!(ordinary.contains("only when the user explicitly asks to see the page"));
+        assert!(ordinary.contains("stay hidden"));
+        assert!(!ordinary.contains("while the panel stays hidden"));
+        assert!(!ordinary.contains(SIDE_PANEL_GUIDE));
+        assert!(!needs_surface_guide("preview the diff"));
+        assert!(needs_surface_guide("open https://example.com"));
+        assert!(needs_surface_guide("check the component preview and dev server"));
+        let rendered = context(true, true, "normal", true);
+        assert!(rendered.contains("gyro_web_fetch"));
+        assert!(rendered.contains("reveal: true"));
+        assert!(rendered.contains("only when the user explicitly asks to see the page"));
+        assert!(rendered.contains("while the panel stays hidden"));
+        assert!(rendered.contains(SIDE_PANEL_GUIDE));
+        assert!(!rendered.contains("or check a web app they are building, show it"));
+        assert!(!rendered.contains("reveal: true to present the preview"));
+        assert!(!rendered.contains("Leave the working preview open"));
+        assert!(!rendered.contains("Keep the working preview open"));
+        assert!(!rendered.contains("visual previews, or user handoff"));
         let contract = contract(true, true, "normal");
         for name in ["gyro_browser_open", "gyro_browser_navigate"] {
             let command = contract["commands"]

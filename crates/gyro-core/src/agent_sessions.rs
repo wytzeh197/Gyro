@@ -13,7 +13,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -21,7 +21,11 @@ use uuid::Uuid;
 
 use crate::paths::{secure_private_file, GyroPaths};
 use crate::security::redact_secrets;
-use crate::sessions::{CreateSessionContext, SessionOrigin, SessionStore, SessionWorkspaceMode};
+use crate::mutations::{decide_mutation_proposal, MutationDecision};
+use crate::sessions::{
+    CreateSessionContext, MutationProposalOperation, SessionOrigin, SessionStore,
+    SessionWorkspaceMode,
+};
 
 const TOKEN_FILE: &str = "agent-session.token";
 const ENDPOINT_FILE: &str = "agent-session-endpoint.json";
@@ -173,6 +177,18 @@ pub struct AgentSessionReport {
     pub reasoning_effort: Option<String>,
     pub summary: Option<String>,
     pub error: Option<String>,
+    /// What a running session is blocked on, so the caller can hand it to a person.
+    pub pending_approval: Option<AgentPendingApproval>,
+}
+
+/// One approval a session is waiting for, named so the calling agent can report it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPendingApproval {
+    pub proposal_id: Uuid,
+    pub tool: String,
+    pub summary: String,
+    pub requested_at: DateTime<Utc>,
 }
 
 /// A Mac that dials a public relay. The credential itself stays in the keychain.
@@ -422,14 +438,26 @@ impl AgentSessionStore {
             AgentSessionState::Done => AgentReportStatus::Done,
             AgentSessionState::Failed => AgentReportStatus::Failed,
         };
+        let mut pending_approval = None;
         if status == AgentReportStatus::Running {
             if let Some(session_id) = row.session_id {
                 let sessions = SessionStore::open(self.paths.clone())?;
-                if !sessions
+                if let Some(proposal) = sessions
                     .list_pending_mutation_proposals(session_id)?
-                    .is_empty()
+                    .into_iter()
+                    .next()
                 {
+                    let verb = match proposal.operation {
+                        MutationProposalOperation::Create => "create",
+                        MutationProposalOperation::Update => "update",
+                    };
                     status = AgentReportStatus::WaitingForApproval;
+                    pending_approval = Some(AgentPendingApproval {
+                        proposal_id: proposal.id,
+                        tool: verb.to_string(),
+                        summary: format!("{verb} {}", proposal.path),
+                        requested_at: proposal.created_at,
+                    });
                 }
             }
         }
@@ -444,6 +472,7 @@ impl AgentSessionStore {
             reasoning_effort: row.reasoning_effort,
             summary: row.summary,
             error: row.error,
+            pending_approval,
         })
     }
 
@@ -528,6 +557,27 @@ impl AgentSessionStore {
             .conn
             .execute("delete from agent_sessions where status = 'queued'", [])?;
         Ok(deleted)
+    }
+
+    /// Withdraw one session the desktop has not started yet.
+    ///
+    /// A session Gyro already claimed belongs to the desktop, so stopping that
+    /// one is the window's job, not the calling agent's.
+    pub fn cancel(&self, id: Uuid) -> Result<()> {
+        let row = self
+            .get(id)?
+            .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
+        if row.state != AgentSessionState::Queued {
+            anyhow::bail!("Gyro already started this session; stop it in Gyro");
+        }
+        let removed = self.conn.execute(
+            "delete from agent_sessions where id = ?1 and status = 'queued'",
+            params![row.id.to_string()],
+        )?;
+        if removed == 0 {
+            anyhow::bail!("Gyro already started this session; stop it in Gyro");
+        }
+        Ok(())
     }
 
     pub fn pairing(&self) -> Result<Option<AgentPairing>> {
@@ -939,19 +989,64 @@ impl Drop for AgentSessionListener {
     }
 }
 
+/// A local client that stalls must not hold the inbox for every other caller.
+const MAX_CONCURRENT_CONNECTIONS: usize = 8;
+
+struct InflightGuard(Arc<AtomicUsize>);
+
+impl InflightGuard {
+    fn enter(counter: &Arc<AtomicUsize>) -> Option<Self> {
+        let mut current = counter.load(Ordering::Relaxed);
+        loop {
+            if current >= MAX_CONCURRENT_CONNECTIONS {
+                return None;
+            }
+            match counter.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self(Arc::clone(counter))),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, paths: GyroPaths) {
+    let inflight = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((stream, peer)) => {
+            Ok((mut stream, peer)) => {
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
                 if !peer.ip().is_loopback() {
                     continue;
                 }
-                if let Ok(store) = AgentSessionStore::open(paths.clone()) {
-                    let _ = handle_connection(stream, &store, &paths);
-                }
+                let guard = match InflightGuard::enter(&inflight) {
+                    Some(guard) => guard,
+                    // Answering at once beats queueing: the caller learns the inbox
+                    // is busy instead of waiting behind a client that stalled.
+                    None => {
+                        let _ = write_http(&mut stream, 503, br#"{"error":"busy"}"#);
+                        continue;
+                    }
+                };
+                let paths = paths.clone();
+                thread::spawn(move || {
+                    let _guard = guard;
+                    if let Ok(store) = AgentSessionStore::open(paths.clone()) {
+                        let _ = handle_connection(stream, &store, &paths);
+                    }
+                });
             }
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock
@@ -959,7 +1054,11 @@ fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, paths: GyroPath
             {
                 thread::sleep(Duration::from_millis(20));
             }
-            Err(_) => break,
+            Err(_) => {
+                // A transient accept failure (out of descriptors, aborted handshake)
+                // must not retire an endpoint the desktop still advertises as live.
+                thread::sleep(Duration::from_millis(50));
+            }
         }
     }
 }
@@ -1044,14 +1143,23 @@ fn mcp_response(store: &AgentSessionStore, request: &Value) -> String {
                     },
                     "required": ["workspace", "prompt"]
                 })),
-                tool_def("session_status", "Read one session by the sessionId or inboxId returned from start_session.", json!({
+                tool_def("session_status", "Read one session by the sessionId or inboxId returned from start_session. A blocked session names the approval in pendingApproval.", json!({
                     "type": "object",
                     "properties": { "sessionId": { "type": "string" } },
                     "required": ["sessionId"]
                 })),
-                tool_def("resolve_approval", "Resolve a Gyro approval. Not available to the calling agent yet.", json!({
+                tool_def("cancel_session", "Withdraw a session that has not started yet. A session Gyro already started must be stopped in Gyro.", json!({
                     "type": "object",
-                    "properties": { "proposalId": { "type": "string" } }
+                    "properties": { "sessionId": { "type": "string" } },
+                    "required": ["sessionId"]
+                })),
+                tool_def("resolve_approval", "Deny an approval that is blocking a session. Approving stays with the person using Gyro.", json!({
+                    "type": "object",
+                    "properties": {
+                        "proposalId": { "type": "string" },
+                        "decision": { "type": "string", "enum": ["deny", "allow"] }
+                    },
+                    "required": ["proposalId", "decision"]
                 }))
             ]
         })),
@@ -1133,7 +1241,25 @@ fn call_tool(store: &AgentSessionStore, name: &str, arguments: &Value) -> Result
                 .map_err(|_| "unknown session".to_string())?;
             Ok(serde_json::to_value(report).map_err(|error| error.to_string())?)
         }
-        "resolve_approval" => Err("Approval from the calling agent is not available yet.".into()),
+        "cancel_session" => {
+            let id = argument_uuid(arguments, "sessionId")?;
+            store.cancel(id).map_err(|error| error.to_string())?;
+            Ok(json!({ "sessionId": id, "status": "cancelled" }))
+        }
+        "resolve_approval" => {
+            let proposal_id = argument_uuid(arguments, "proposalId")?;
+            match argument_string(arguments, "decision")?.as_str() {
+                "deny" => {
+                    let sessions =
+                        SessionStore::open(store.paths().clone()).map_err(|error| error.to_string())?;
+                    decide_mutation_proposal(&sessions, proposal_id, MutationDecision::Reject)
+                        .map_err(|error| error.to_string())?;
+                    Ok(json!({ "proposalId": proposal_id, "decision": "denied" }))
+                }
+                "allow" => Err("Only the person using Gyro can approve. Deny it here, or approve it in Gyro.".into()),
+                other => Err(format!("decision must be deny or allow, not {other}")),
+            }
+        }
         _ => Err(format!("unknown tool {name}")),
     }
 }
@@ -1146,6 +1272,11 @@ fn argument_string(arguments: &Value, key: &str) -> Result<String, String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .ok_or_else(|| format!("{key} is required"))
+}
+
+fn argument_uuid(arguments: &Value, key: &str) -> Result<Uuid, String> {
+    let value = argument_string(arguments, key)?;
+    Uuid::parse_str(&value).map_err(|_| format!("{key} must be a UUID"))
 }
 
 fn optional_argument(arguments: &Value, key: &str) -> Option<String> {
@@ -1689,6 +1820,129 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_session_never_reaches_the_desktop() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Run the suite", ChoiceRequest::default())
+            .unwrap();
+
+        store.cancel(row.id).unwrap();
+
+        assert!(store.get(row.id).unwrap().is_none());
+        assert!(store.claim_next().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_session_gyro_already_started_cannot_be_cancelled_from_the_inbox() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Run the suite", ChoiceRequest::default())
+            .unwrap();
+        assert_eq!(store.claim_next().unwrap().unwrap().id, row.id);
+
+        let error = store.cancel(row.id).unwrap_err().to_string();
+
+        assert!(error.contains("stop it in Gyro"), "{error}");
+        assert_eq!(
+            store.get(row.id).unwrap().unwrap().state,
+            AgentSessionState::Running
+        );
+    }
+
+    #[test]
+    fn a_blocked_session_names_the_approval_in_its_report() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Edit the readme", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let sessions = SessionStore::open(store.paths().clone()).unwrap();
+        let proposal = sessions
+            .create_mutation_proposal(
+                row.session_id.expect("session id"),
+                None,
+                "README.md",
+                "the new readme",
+                None,
+                false,
+            )
+            .unwrap();
+
+        let report = store.report(row.id).unwrap();
+
+        assert_eq!(report.status, "waiting-for-approval");
+        let pending = report.pending_approval.expect("pending approval");
+        assert_eq!(pending.proposal_id, proposal.id);
+        assert_eq!(pending.tool, "create");
+        assert_eq!(pending.summary, "create README.md");
+    }
+
+    #[test]
+    fn the_calling_agent_can_deny_the_approval_that_blocks_it() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Edit the readme", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let sessions = SessionStore::open(store.paths().clone()).unwrap();
+        let proposal = sessions
+            .create_mutation_proposal(
+                row.session_id.expect("session id"),
+                None,
+                "README.md",
+                "the new readme",
+                None,
+                false,
+            )
+            .unwrap();
+
+        let payload = call_tool(
+            &store,
+            "resolve_approval",
+            &json!({ "proposalId": proposal.id.to_string(), "decision": "deny" }),
+        )
+        .unwrap();
+
+        assert_eq!(payload["decision"], "denied");
+        assert_eq!(
+            sessions.get_mutation_proposal(proposal.id).unwrap().unwrap().status,
+            crate::sessions::MutationProposalStatus::Rejected
+        );
+    }
+
+    #[test]
+    fn approving_stays_with_the_person_using_gyro() {
+        let (_temp, store, _workspace) = fixture();
+
+        let error = call_tool(
+            &store,
+            "resolve_approval",
+            &json!({ "proposalId": Uuid::new_v4().to_string(), "decision": "allow" }),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.contains("Only the person using Gyro can approve"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_inbox_serves_a_bounded_number_of_connections_at_once() {
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONCURRENT_CONNECTIONS {
+            held.push(InflightGuard::enter(&inflight).expect("a slot"));
+        }
+
+        // Past the cap the caller is answered instead of queued behind a stall.
+        assert!(InflightGuard::enter(&inflight).is_none());
+
+        drop(held.pop());
+        assert!(InflightGuard::enter(&inflight).is_some());
+    }
+
+    #[test]
     fn start_session_returns_before_a_provider_would_run() {
         let (_temp, store, workspace) = fixture();
         let row = store
@@ -1836,7 +2090,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"resolve_approval","arguments":{}}}"#,
         );
         assert_eq!(status, 200);
-        assert!(body.contains("not available yet"));
+        assert!(body.contains("proposalId is required"));
         revoke_local_link(store.paths()).unwrap();
         assert!(store.get(row.id).unwrap().is_none());
         let rotated = ensure_local_token(store.paths()).unwrap();

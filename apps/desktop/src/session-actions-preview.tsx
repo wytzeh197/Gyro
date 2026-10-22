@@ -29,7 +29,7 @@ function Preview() {
     onSelectSessions={() => undefined} onSelectWorkspaceLayout={() => undefined}
     onPinSession={(id) => setPinned((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id])}>
     <main style={{ padding: 32, color: "var(--gyro-text)" }}>
-      {createPortal(<div aria-label="Traffic lights: screenshot reference fixture" style={{ position: "fixed", left: 16, top: 18, display: "flex", gap: 9, pointerEvents: "none", zIndex: 10000 }}>
+      {createPortal(<div aria-label="Traffic lights: screenshot reference fixture" style={{ position: "fixed", left: 16, top: 16, display: "flex", gap: 9, pointerEvents: "none", zIndex: 10000 }}>
         {["#ff5f57", "#febc2e", "#28c840"].map((color) => <span key={color} style={{ width: 14, height: 14, borderRadius: "50%", background: color }} />)}
       </div>, document.body)}
       <h1>Session actions fixture</h1>
