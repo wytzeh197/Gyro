@@ -28,13 +28,13 @@ const row = (providerId, modelId, tokens, source = "provider", timestamp = check
 });
 let updated = applyModelContextWindows(config, [
   row("xai", "grok-4.7", 128_000, "runtime"),
-  row("xai", "grok-4.3", 1_000_000),
+  row("xai", "grok-4.5", 200_000),
   row("openrouter", "x-ai/grok-4.7", 256_000),
   row("cursor", "cursor-default", 64_000, "runtime"),
 ], now);
 const find = (saved, p, m) => providersForConfig(saved).find(provider => provider.id === p).models.find(model => model.id === m);
 assert.equal(find(updated, "xai", "grok-4.7").contextWindowTokens, 128_000);
-assert.equal(find(updated, "xai", "grok-4.3").contextWindowTokens, 1_000_000);
+assert.equal(find(updated, "xai", "grok-4.5").contextWindowTokens, 200_000);
 assert.equal(find(updated, "openrouter", "x-ai/grok-4.7").contextWindowTokens, 256_000);
 assert.equal(find(updated, "cursor", "cursor-default").contextWindowTokens, 64_000);
 assert.equal(find(config, "xai", "grok-4.7").contextWindowTokens, 128_000,

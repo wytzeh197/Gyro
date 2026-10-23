@@ -556,6 +556,8 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let window = match provider_id {
         // Codex defaults differ from the API maxima. Runtime reports win.
+        // Signed-in catalogs serve 500K for GPT-6.1 Sol. The logged-out
+        // bundled catalog still lists 272K for that slug.
         "openai" => match model_id {
             "gpt-6.1-sol" => 500_000,
             "gpt-5.4-mini" => 400_000,
@@ -575,9 +577,11 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
         // until the runtime reports the session's provisioned window.
         "kimi" if model_id.is_empty() || model_id == "k3" => 262_144,
         "gemini" if matches!(model_id, "" | "gemini-default" | "gemini-3.8-flash") => 1_048_576,
+        // Grok Build's served context_window is 256K. 500K is the optional
+        // larger window on that CLI, not this baseline. The public API is a
+        // different connection and is not this table.
         "xai" => match model_id {
-            "grok-4.3" => 1_000_000,
-            "" | "grok-4.7" | "grok-4.7-build-fast" | "grok-4.6" | "grok-4.5" => 500_000,
+            "" | "grok-4.7" | "grok-4.7-build-fast" | "grok-4.6" | "grok-4.5" => 256_000,
             _ => return None,
         },
         "deepseek" => match model_id {
@@ -1086,7 +1090,7 @@ mod tests {
         assert_eq!(usage.output_tokens, None);
         assert_eq!(usage.total_tokens, None);
         assert!(!usage.estimated);
-        assert_eq!(usage.model_context_window, Some(500_000));
+        assert_eq!(usage.model_context_window, Some(256_000));
 
         let within = provider_context_usage_with_window(
             Some(ProviderContextUsage {
@@ -1102,7 +1106,7 @@ mod tests {
         assert_eq!(within.input_tokens, None);
         assert_eq!(within.total_tokens, None);
         assert!(!within.estimated);
-        assert_eq!(within.model_context_window, Some(500_000));
+        assert_eq!(within.model_context_window, Some(256_000));
 
         let billed = provider_context_usage_with_window(
             Some(ProviderContextUsage {
@@ -1116,7 +1120,7 @@ mod tests {
         .unwrap();
         assert_eq!(billed.input_tokens, None);
         assert!(!billed.estimated);
-        assert_eq!(billed.model_context_window, Some(500_000));
+        assert_eq!(billed.model_context_window, Some(256_000));
     }
 
     #[test]

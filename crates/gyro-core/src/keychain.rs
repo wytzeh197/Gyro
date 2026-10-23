@@ -3,13 +3,19 @@ use anyhow::{Context, Result};
 const SERVICE_NAME: &str = "Gyro";
 
 pub fn set_api_key(account: &str, value: &str) -> Result<()> {
-    keyring::Entry::new(SERVICE_NAME, account)
-        .context("open macOS keychain entry")?
-        .set_password(value)
-        .context("store provider API key in keychain")?;
-    #[cfg(target_os = "macos")]
-    macos_read::forget(account);
-    Ok(())
+    // Unit tests must not write the user's credential file.
+    #[cfg(test)]
+    {
+        let _ = (account, value);
+        return Ok(());
+    }
+    #[cfg(not(test))]
+    {
+        local_secrets::set(account, value).context("store credential on this Mac")?;
+        #[cfg(target_os = "macos")]
+        macos_read::forget(account);
+        Ok(())
+    }
 }
 
 pub fn get_api_key(account: &str) -> Result<Option<String>> {
@@ -28,10 +34,30 @@ pub fn get_api_key(account: &str) -> Result<Option<String>> {
     }
     #[cfg(not(test))]
     {
+        if let Some(value) = local_secrets::get(account).context("read credential on this Mac")? {
+            return Ok(Some(value));
+        }
+        // A key saved by an older build still sits in the login keychain.
+        // Copy it only when macOS can hand it over without a password sheet.
+        // A sheet is never requested; the person pastes the key once instead.
         #[cfg(target_os = "macos")]
-        return macos_read::get(account);
+        {
+            match macos_read::get(account) {
+                Ok(Some(value)) => {
+                    if local_secrets::set(account, &value).is_ok() {
+                        macos_read::forget(account);
+                    }
+                    return Ok(Some(value));
+                }
+                Ok(None) => return Ok(None),
+                Err(error) if macos_read::access_needs_user_interaction(&error) => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         #[cfg(not(target_os = "macos"))]
-        get_api_key_direct(account)
+        Ok(None)
     }
 }
 
@@ -91,6 +117,7 @@ fn get_api_key_direct(account: &str) -> Result<Option<String>> {
     }
 }
 
+mod local_secrets;
 #[cfg(target_os = "macos")]
 mod macos_read;
 
@@ -104,13 +131,15 @@ pub fn run_read_helper() -> Option<i32> {
 }
 
 pub fn delete_api_key(account: &str) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    macos_read::forget(account);
-    match keyring::Entry::new(SERVICE_NAME, account)
-        .context("open macOS keychain entry")?
-        .delete_credential()
+    #[cfg(test)]
     {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error).context("delete provider API key from keychain"),
+        let _ = account;
+        return Ok(());
+    }
+    #[cfg(not(test))]
+    {
+        #[cfg(target_os = "macos")]
+        macos_read::forget(account);
+        local_secrets::delete(account).context("delete credential on this Mac")
     }
 }

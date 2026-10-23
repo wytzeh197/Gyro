@@ -129,7 +129,7 @@ impl GyroPaths {
     }
 }
 
-fn ensure_private_directory(path: &Path) -> Result<()> {
+pub(crate) fn ensure_private_directory(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
     let metadata =
         std::fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;

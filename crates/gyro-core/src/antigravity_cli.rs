@@ -75,11 +75,7 @@ pub fn posture_flags(full_access: bool, mode: AntigravityMode) -> Vec<String> {
     if full_access {
         return vec!["--dangerously-skip-permissions".into()];
     }
-    vec![
-        "--sandbox".into(),
-        "--mode".into(),
-        mode.as_str().into(),
-    ]
+    vec!["--sandbox".into(), "--mode".into(), mode.as_str().into()]
 }
 
 /// Normalize a requested effort to a value the CLI accepts.
@@ -119,10 +115,7 @@ pub fn chat_args(
         args.push(effort.into());
     }
     args.extend(posture_flags(full_access, mode));
-    if let Some(conversation_id) = conversation_id
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
+    if let Some(conversation_id) = conversation_id.map(str::trim).filter(|id| !id.is_empty()) {
         args.push("--conversation".into());
         args.push(conversation_id.into());
     }
@@ -333,7 +326,10 @@ mod tests {
             "event": "result",
             "result": { "status": "ERROR", "error": "model unavailable" }
         });
-        assert_eq!(failure_detail(&failed).as_deref(), Some("model unavailable"));
+        assert_eq!(
+            failure_detail(&failed).as_deref(),
+            Some("model unavailable")
+        );
         let bare = json!({ "event": "result", "result": { "status": "TIMEOUT" } });
         assert_eq!(
             failure_detail(&bare).as_deref(),
@@ -391,7 +387,14 @@ mod tests {
     fn unknown_effort_is_dropped_instead_of_rejected() {
         assert_eq!(effort_arg(Some("turbo")), None);
         assert_eq!(effort_arg(Some("HIGH")), Some("high"));
-        let args = chat_args(None, Some("turbo"), AntigravityMode::Plan, false, None, "hi");
+        let args = chat_args(
+            None,
+            Some("turbo"),
+            AntigravityMode::Plan,
+            false,
+            None,
+            "hi",
+        );
         assert!(!args.iter().any(|arg| arg == "--effort"));
     }
 

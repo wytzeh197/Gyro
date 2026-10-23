@@ -177,10 +177,12 @@ model's choices and default under `reasoning` in its public models endpoint,
 so routed models must not share an assumed universal ramp.
 
 Context limits already match the checked integrations. Runtime reports still
-override the catalog: Kimi's 256K baseline can become 1M on an eligible plan,
-and providers can reserve or allocate a smaller working window. Cursor and
-OpenCode leave fixed limits unspecified because their model is configured
-externally. Ollama obtains its models and allocations from the local runtime.
+override the catalog: Kimi's 262,144 baseline becomes 1,048,576 on Pro and
+Allegretto, and providers can reserve or allocate a smaller working window.
+Cursor and OpenCode leave fixed limits unspecified because their model is
+configured externally. Ollama obtains its models and allocations from the
+local runtime.
+
 Gyro's effort vocabulary excludes none/minimal and thinking toggles; the audit
 covers the positive effort levels the current control can represent.
 
@@ -192,6 +194,47 @@ with labeled fixtures. Browser checks confirm Sol's 500K picker label,
 Luna's five effort positions, Haiku 4.5's missing effort control, and routed
 DeepSeek's three positions. Four unrelated workbench smoke assertions also
 fail against the pre-change source; the model assertions pass.
+
+## Context recheck (2026-10-23)
+
+Every picker window was checked again against the window the launched tool
+serves, not the API maximum.
+
+Grok Build 1.0.67 serves `context_window` 256,000 for Grok 4.7, 4.6, 4.5, and
+4.7 Fast. 500,000 is only the optional larger window. Gyro had stored 500,000.
+The xAI baselines for those four ids are now 256,000. Grok 4.3 is not in the
+Grok Build model list, so it is not on the xAI CLI connection. The public API
+is a different connection. OpenRouter's `x-ai/grok-4.7` and `x-ai/grok-4.6`
+stay at 500,000.
+
+CLI and API connections are separate catalog rows for every picker model.
+Each row keeps the window that connection serves. The products listed on two
+connections are Grok 4.7 (Grok Build 256K, OpenRouter 500K), Grok 4.6 (Grok
+Build 256K, OpenRouter 500K), GPT-6 Astra (Codex 272K, OpenRouter 1.05M),
+Kimi K3 (Kimi Code 262,144, OpenRouter 1,048,576), Claude Sonnet 5 (Claude
+Code 1M, OpenRouter 1M), Claude Opus 5 (Claude Code 1M, OpenRouter 1M), and
+DeepSeek V4.1 Flash (DeepSeek API 1M, OpenRouter 1,048,576). Matching numbers
+stay when both sources serve them. Every other picker model exists on one
+connection and keeps that connection's window.
+
+Codex 0.163.0's logged-out bundled catalog lists 272K for GPT-6.1 Sol. Signed-in
+catalogs through 22 October still serve 500K, which is 475K after Codex's 95%
+reserve. That 272K print is a logged-out stub, so Gyro keeps 500K. The other
+current Codex models stay at 272K. The API maximum remains 1.05M and is not the
+Codex baseline.
+
+Claude Code 2.1.308 serves 1M by default for Fable 5.1, Fable 5, Opus 5.5,
+Opus 5, Opus 4.8, Sonnet 5.5, Sonnet 5, and Haiku 5.5. Haiku 4.5 stays at 200K.
+`CLAUDE_CODE_DISABLE_1M_CONTEXT` holds a session at 200K and is not the catalog
+baseline. Kimi's model page publishes exact ceilings: `k3` is 262,144 on Plus
+and Moderato, and 1,048,576 on Pro and Allegretto. The offline baseline stays
+at the lower ceiling, and a session's runtime window still wins. DeepSeek still
+publishes 1M for Flash and V4 Pro. Mistral still publishes 256K for Medium 3.5,
+Large 3 (`mistral-large-latest`), and Small 4, and 128K for Codestral. Large 4
+is a separate 1M model and is not in the picker. OpenRouter's public models
+endpoint on 23 October matches all 11 curated windows on both `context_length`
+and `top_provider.context_length`. Antigravity, Cursor, and OpenCode still
+have no fixed window.
 
 ## Provider retirement audit (2026-10-13)
 

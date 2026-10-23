@@ -194,7 +194,7 @@ impl WorkspaceCheckReport {
         }
         if self.status != WorkspaceCheckStatus::Unavailable {
             lines.push(
-                "Use gyro_workspace_check to refresh this snapshot, gyro_workspace_get_context for live diagnostics and tests, and the other Workspace tools for file contents, search, and diffs. Do not guess missing files."
+                "This check is already attached and current. Call gyro_workspace_check or gyro_workspace_get_context only for a newer reading; use other Workspace tools for file contents. Do not guess missing files."
                     .into(),
             );
         }
@@ -802,6 +802,8 @@ mod tests {
         let briefing = report.briefing();
         assert!(briefing.contains("Project: rust"));
         assert!(briefing.contains("gyro_workspace_check"));
+        assert!(briefing.contains("already attached and current"));
+        assert!(!briefing.contains("to refresh this snapshot"));
     }
 
     #[test]

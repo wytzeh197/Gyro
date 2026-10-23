@@ -41,7 +41,7 @@ pub fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str
     }
 }
 
-/// Stable Keychain account for a provider API key saved in Gyro Settings.
+/// Stable account name for a provider API key saved in Gyro Settings.
 pub fn provider_api_key_account(provider_id: &str) -> String {
     format!("provider:{provider_id}")
 }
@@ -55,7 +55,7 @@ pub fn provider_api_key_env_name(provider_id: &str) -> Option<&'static str> {
 ///
 /// A provider with a known environment variable accepts one, and so does any
 /// user-defined `custom:` provider: there is no vendor env var to name, so its
-/// key lives in the Keychain alone and only the HTTPS runner reads it.
+/// key lives in the private store on this Mac and only the HTTPS runner reads it.
 pub fn provider_supports_api_key(provider_id: &str) -> bool {
     provider_api_key_env_name(provider_id).is_some() || is_custom_provider_id(provider_id)
 }
@@ -89,14 +89,14 @@ pub fn stored_provider_api_key(provider_id: &str) -> Result<Option<String>> {
 
 /// The API key to use in-process, rather than to hand to a child process.
 ///
-/// The process environment wins over the Keychain, matching what
+/// The process environment wins over the saved key, matching what
 /// [`stored_provider_api_key_env`] does for CLI injection, so a run uses the
 /// same key the user would expect Gyro to be using.
 pub fn provider_api_key_value(provider_id: &str) -> Option<String> {
     try_provider_api_key_value(provider_id).ok().flatten()
 }
 
-/// Sending a request must preserve a Keychain access failure rather than
+/// Sending a request must preserve a credential-store failure rather than
 /// reporting a saved but inaccessible credential as absent.
 pub fn try_provider_api_key_value(provider_id: &str) -> Result<Option<String>> {
     if let Some(env_name) = provider_api_key_env_name(provider_id) {
@@ -128,7 +128,7 @@ pub fn clear_stored_provider_api_key(provider_id: &str) -> Result<()> {
     crate::keychain::delete_api_key(&provider_api_key_account(provider_id))
 }
 
-/// True when the process environment or Gyro's Keychain already holds a key.
+/// True when the process environment or Gyro's private store already holds a key.
 pub fn provider_has_api_key(provider_id: &str) -> bool {
     if let Some(env_name) = provider_api_key_env_name(provider_id) {
         if std::env::var_os(env_name).is_some() {
@@ -141,7 +141,7 @@ pub fn provider_has_api_key(provider_id: &str) -> bool {
         .is_some()
 }
 
-/// Copy a Keychain-stored provider key into a child command when the process
+/// Copy a saved provider key into a child command when the process
 /// environment does not already provide one. Process env always wins.
 pub fn apply_stored_provider_api_key(command: &mut Command, provider_id: &str) {
     let _ = try_apply_stored_provider_api_key(command, provider_id);

@@ -20350,6 +20350,36 @@ button.gyro-settings-row em::after {
   max-width: 620px;
 }
 
+.gyro-provider-api-key-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gyro-provider-api-key-choices button {
+  align-items: center;
+  background: transparent;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px 0 6px;
+}
+
+.gyro-provider-api-key-choices button.is-selected {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-provider-api-key-choices .gyro-provider-logo {
+  border-radius: 4px;
+  height: 16px;
+  width: 16px;
+}
+
 /* Picker, key and action read as one sentence, so they share one line and the
    consequence sits under it rather than between the controls. */
 .gyro-provider-api-key {
@@ -44063,43 +44093,44 @@ textarea:focus-visible,
   width: 22px !important;
 }
 
-/* ...and its name is a quiet value beside that mark, like the model column
-   in the list, rather than a bordered native <select> stretched across it. */
-:root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field {
-  flex: 0 1 auto;
-  max-width: 46%;
+/* Every provider that can take a key is visible. A native select here only
+   showed the selected name, which read as OpenAI being the only choice. */
+:root[data-theme] .gyro-provider-api-key-choices {
+  gap: 6px;
+  padding: 12px 14px 2px;
 }
 
-:root[data-theme]
-  .gyro-provider-api-key-row
-  .gyro-settings-select-field
-  > select.gyro-settings-select {
+:root[data-theme] .gyro-provider-api-key-choices button {
   background: transparent !important;
-  border: 0 !important;
-  color: var(--gyro-text) !important;
-  field-sizing: content;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
   font-size: calc(12px * var(--gyro-ui-scale, 1)) !important;
   font-weight: 500 !important;
-  height: 24px !important;
-  max-width: 100%;
+  height: 28px !important;
   min-height: 0 !important;
-  padding: 0 20px 0 1px !important;
-  width: auto;
+  padding: 0 10px 0 6px !important;
 }
 
-:root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field > svg {
-  height: 12px;
-  right: 3px;
-  width: 12px;
+:root[data-theme] .gyro-provider-api-key-choices button.is-selected {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-text) 28%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  color: var(--gyro-text) !important;
 }
 
-:root[data-theme]
-  .gyro-provider-api-key-row
-  .gyro-settings-select-field
-  > select.gyro-settings-select:focus-visible {
-  border-radius: 5px;
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 2px;
+:root[data-theme] .gyro-provider-api-key-choices button:disabled {
+  opacity: 0.6;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices .gyro-provider-logo {
+  border-radius: 4px !important;
+  height: 16px !important;
+  width: 16px !important;
 }
 
 :root[data-theme] .gyro-provider-api-key-row > input {
@@ -44389,8 +44420,8 @@ textarea:focus-visible,
     padding-bottom: 0 !important;
   }
 
-  :root[data-theme] .gyro-provider-api-key-row .gyro-settings-select-field {
-    max-width: none;
+  :root[data-theme] .gyro-provider-api-key-choices {
+    padding-right: 12px;
   }
 }
 

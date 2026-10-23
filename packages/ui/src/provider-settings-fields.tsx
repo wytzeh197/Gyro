@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { MoreHorizontal, Plus, RefreshCw } from "lucide-react";
-import { SettingsGroup, SettingsSelect } from "./settings-controls";
+import { SettingsGroup } from "./settings-controls";
 import { useOutsidePointerDismiss } from "./menu-dismiss";
 import { clippingBounds } from "./composer-popover-bounds";
 import { providerDetailsPosition } from "./provider-details-position";
@@ -14,8 +14,35 @@ import {
   isCustomProviderId,
   getProviderCatalogEntry,
 } from "./provider-catalog";
-import type { ProviderId } from "./types";
+import type { GyroConfig, ProviderId } from "./types";
 import type { SettingsSurfaceProps } from "./surfaces";
+
+/** HTTPS presets first, then the CLIs that can also take a pasted key. */
+const API_KEY_CHOICE_ORDER = [
+  "deepseek",
+  "mistral",
+  "openrouter",
+  "openai",
+  "anthropic",
+  "xai",
+  "kimi",
+  "antigravity",
+  "cursor",
+];
+
+function apiKeyProviders(config: GyroConfig) {
+  const rank = (id: string) => {
+    const index = API_KEY_CHOICE_ORDER.indexOf(id);
+    return index === -1 ? API_KEY_CHOICE_ORDER.length : index;
+  };
+  return providersForConfig(config)
+    .filter((provider) => providerSupportsApiKey(provider.id))
+    .sort((left, right) => {
+      const byRank = rank(left.id) - rank(right.id);
+      if (byRank !== 0) return byRank;
+      return left.displayName.localeCompare(right.displayName);
+    });
+}
 
 export function ProviderApiKeySection({
   config,
@@ -45,10 +72,10 @@ export function ProviderApiKeySection({
   /** The provider's own mark, so the picker reads like a row in the list. */
   renderProviderMark?: (id: ProviderId) => ReactNode;
 }) {
-  const providers = providersForConfig(config).filter((provider) =>
-    providerSupportsApiKey(provider.id),
+  const providers = apiKeyProviders(config);
+  const [selectedId, setSelectedId] = useState(
+    () => selectedProviderId ?? providers[0]?.id ?? "deepseek",
   );
-  const [selectedId, setSelectedId] = useState("openai");
   const provider =
     providers.find((item) => item.id === (selectedProviderId ?? selectedId)) ??
     providers[0];
@@ -67,6 +94,32 @@ export function ProviderApiKeySection({
   return (
     <SettingsGroup label="Connect with an API key">
       <div className="gyro-provider-api-key-section">
+        <div
+          aria-label="API key provider"
+          className="gyro-provider-api-key-choices"
+          role="listbox"
+        >
+          {providers.map((item) => {
+            const selected = item.id === provider.id;
+            return (
+              <button
+                aria-selected={selected}
+                className={selected ? "is-selected" : undefined}
+                disabled={Boolean(savingProviderApiKeyId)}
+                key={item.id}
+                onClick={() => {
+                  setSelectedId(item.id);
+                  onSelectedProviderChange?.(item.id as ProviderId);
+                }}
+                role="option"
+                type="button"
+              >
+                {renderProviderMark?.(item.id as ProviderId)}
+                <span>{item.displayName}</span>
+              </button>
+            );
+          })}
+        </div>
         <ProviderApiKeyField
           key={provider.id}
           configured={Boolean(providerApiKeyConfigured?.[provider.id])}
@@ -89,24 +142,7 @@ export function ProviderApiKeySection({
               </button>
             ) : null
           }
-        >
-          {renderProviderMark?.(provider.id)}
-          <SettingsSelect
-            aria-label="API key provider"
-            disabled={Boolean(savingProviderApiKeyId)}
-            onChange={(event) => {
-              setSelectedId(event.target.value);
-              onSelectedProviderChange?.(event.target.value as ProviderId);
-            }}
-            value={provider.id}
-          >
-            {providers.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.displayName}
-              </option>
-            ))}
-          </SettingsSelect>
-        </ProviderApiKeyField>
+        />
       </div>
     </SettingsGroup>
   );
@@ -130,8 +166,8 @@ function ProviderApiKeyField({
 }: {
   /** The row's last action, so the band stays one line. */
   action?: ReactNode;
-  /** The provider picker, laid out inline with the key field. */
-  children: ReactNode;
+  /** Optional mark or picker, laid out inline with the key field. */
+  children?: ReactNode;
   configured: boolean;
   envName?: string;
   onClear?: () => void;
@@ -178,7 +214,7 @@ function ProviderApiKeyField({
         {action}
       </div>
       <span>
-        Kept in the macOS Keychain.
+        Kept on this Mac.
         {envName ? (
           <>
             {" "}
@@ -193,7 +229,7 @@ function ProviderApiKeyField({
 /**
  * Add or remove an endpoint the user defines.
  *
- * A custom provider is a config entry plus a Keychain key. The form collects
+ * A custom provider is a config entry plus a key kept on this Mac. The form collects
  * the endpoint and its model ids; the id itself is derived by the desktop layer
  * so the `custom:` prefix stays an implementation detail the user never types.
  */

@@ -219,7 +219,7 @@ impl fmt::Display for TextStreamAssembler {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextStreamAssembler, TextStreamAdvance};
+    use super::{TextStreamAdvance, TextStreamAssembler};
 
     fn advance(text: &str, starts_block: bool) -> Option<TextStreamAdvance> {
         Some(TextStreamAdvance {
@@ -248,7 +248,10 @@ mod tests {
             assembler.push_snapshot("# Plan\n\nStep one\n\nStep two"),
             advance("\n\nStep two", false)
         );
-        assert_eq!(assembler.text(), "Let me look.# Plan\n\nStep one\n\nStep two");
+        assert_eq!(
+            assembler.text(),
+            "Let me look.# Plan\n\nStep one\n\nStep two"
+        );
     }
 
     #[test]
@@ -310,10 +313,7 @@ mod tests {
         let mut assembler = TextStreamAssembler::new();
         assembler.push_delta("Intro.");
         assembler.start_block();
-        assert_eq!(
-            assembler.push_snapshot("Zebra"),
-            advance("\n\nZebra", true)
-        );
+        assert_eq!(assembler.push_snapshot("Zebra"), advance("\n\nZebra", true));
         assert_eq!(assembler.text(), "Intro.Zebra");
         assert_eq!(assembler.decorated, "Intro.\n\nZebra");
     }

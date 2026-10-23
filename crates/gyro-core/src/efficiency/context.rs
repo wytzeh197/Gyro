@@ -197,7 +197,8 @@ pub fn prepare_owned_model_request(messages: &mut [Value]) -> usize {
 
 /// Replace tool results older than the newest assistant exchange once they
 /// reach 2 KB. The message and its call id stay, so the provider can still
-/// pair the result with the call. A second pass saves nothing.
+/// pair the result with the call. A catalog page stays whole: dropping a schema
+/// makes the next call load it again. A second pass saves nothing.
 pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
     let newest = messages
         .iter()
@@ -217,12 +218,15 @@ pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
             continue;
         }
         let role = message["role"].as_str().unwrap_or_default();
-        let replaced = if role == "tool" {
+        // A catalog page is the schema for the next call. Replacing it with a
+        // stub makes the model request the same page again, which resends the
+        // whole conversation. Tool output can be spilled; a schema cannot.
+        let replaced = if role == "user" && text.starts_with(COMPAT_CATALOG_PREFIX) {
+            None
+        } else if role == "tool" {
             stub_tool_content(text)
         } else if role == "user" && text.starts_with(COMPAT_TOOL_PREFIX) {
             stub_compat_content(text)
-        } else if role == "user" && text.starts_with(COMPAT_CATALOG_PREFIX) {
-            stub_catalog_content()
         } else {
             None
         };
@@ -301,6 +305,13 @@ fn append_image_note(message: &mut Value) {
 
 fn stub_tool_content(text: &str) -> Option<String> {
     let mut payload: Value = serde_json::from_str(text).ok()?;
+    if payload
+        .pointer("/result/capabilityId")
+        .and_then(Value::as_str)
+        == Some("tool-catalog")
+    {
+        return None;
+    }
     apply_stub(&mut payload)?;
     serde_json::to_string(&payload).ok()
 }
@@ -311,16 +322,6 @@ fn stub_compat_content(text: &str) -> Option<String> {
     let mut payload: Value = serde_json::from_str(json.trim()).ok()?;
     apply_stub(&mut payload)?;
     Some(format!("{prefix}{}", serde_json::to_string(&payload).ok()?))
-}
-
-fn stub_catalog_content() -> Option<String> {
-    Some(format!(
-        "{COMPAT_CATALOG_PREFIX}{}",
-        serde_json::json!({
-            "evidenceOmitted": true,
-            "note": "This catalog page was omitted. Request it again with the same prefix and offset if you still need a schema."
-        })
-    ))
 }
 
 fn already_omitted(payload: &Value) -> bool {
@@ -340,26 +341,19 @@ fn apply_stub(payload: &mut Value) -> Option<()> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let note = if matches!(
-        capability.as_str(),
-        "workspace-read" | "workspace-read-range"
-    ) {
-        "Re-read with gyro_workspace_read_range if you still need this text."
-    } else {
-        "Call the same tool again with the same arguments if you still need this output."
-    };
     let data = payload
         .pointer("/result/data")
         .cloned()
         .unwrap_or(Value::Null);
-    payload["result"]["data"] = slim_data(&data, note);
+    payload["result"]["data"] = slim_data(&data, &capability);
     cap_text_field(payload, "/result/summary");
     cap_error_message(payload);
     Some(())
 }
 
-fn slim_data(data: &Value, note: &str) -> Value {
+fn slim_data(data: &Value, capability: &str) -> Value {
     let mut kept = serde_json::Map::new();
+    let mut spilled_address = None;
     if let Some(object) = data.as_object() {
         for key in [
             "path",
@@ -393,15 +387,16 @@ fn slim_data(data: &Value, note: &str) -> Value {
         }
         // Spill instead of retire: keep a head/tail preview plus an addressable full copy, so a
         // retired payload never costs a second full read to recover.
-        let capability = object
-            .get("capabilityId")
-            .and_then(Value::as_str)
-            .unwrap_or("tool");
+        let label = if capability.is_empty() {
+            "tool"
+        } else {
+            capability
+        };
         for key in ["content", "stdout", "stderr", "output", "text"] {
             let Some(text) = object.get(key).and_then(Value::as_str) else {
                 continue;
             };
-            let preview = super::spill::preview(capability, key, text);
+            let preview = super::spill::preview(label, key, text);
             if !preview.spilled() {
                 continue;
             }
@@ -411,13 +406,26 @@ fn slim_data(data: &Value, note: &str) -> Value {
             super::spill::persist(&preview.address, text);
             kept.insert(key.to_owned(), Value::String(preview.text));
             kept.insert("elidedBytes".into(), Value::Number(elided.into()));
-            kept.insert("spill".into(), Value::String(preview.address));
-            if let Some(hint) = super::spill::retrieval_hint(data) {
-                kept.insert("retrievalHint".into(), Value::String(hint));
-            }
+            kept.insert("spill".into(), Value::String(preview.address.clone()));
+            spilled_address = Some(preview.address);
             break;
         }
     }
+    // Point at the spill copy. Telling the model to call the original tool
+    // again sends the same bytes back into the next request.
+    let note = if let Some(address) = spilled_address {
+        kept.insert(
+            "retrievalHint".into(),
+            Value::String(format!(
+                "Read {address} with gyro_workspace_read and offset for the next window of this same copy. Repeat the original call only for a newer observation."
+            )),
+        );
+        "Same copy is at the spill address. Pass it to gyro_workspace_read with offset. Repeat the original call only for a newer observation."
+    } else if matches!(capability, "workspace-read" | "workspace-read-range") {
+        "Re-read with gyro_workspace_read_range if you still need this text."
+    } else {
+        "Call the same tool again with the same arguments if you still need this output."
+    };
     kept.insert("evidenceOmitted".into(), Value::Bool(true));
     kept.insert("note".into(), Value::String(note.to_owned()));
     Value::Object(kept)
@@ -583,10 +591,12 @@ mod tests {
         assert_eq!(first["result"]["data"]["path"], "src/a.rs");
         assert_eq!(first["result"]["data"]["contentHash"], "abc");
         assert_eq!(first["result"]["data"]["evidenceOmitted"], true);
-        assert!(first["result"]["data"]["note"]
-            .as_str()
-            .unwrap()
-            .contains("gyro_workspace_read_range"));
+        let note = first["result"]["data"]["note"].as_str().unwrap();
+        assert!(note.contains("spill address"), "{note}");
+        assert!(note.contains("gyro_workspace_read"), "{note}");
+        let hint = first["result"]["data"]["retrievalHint"].as_str().unwrap();
+        assert!(hint.contains("spill://"), "{hint}");
+        assert!(!hint.contains("re-read path="), "{hint}");
         let ran = parsed(&messages[5]);
         assert_eq!(ran["result"]["summary"], "Ran tests");
         assert_eq!(ran["status"], "completed");
@@ -601,10 +611,12 @@ mod tests {
         assert!(ran["result"]["data"]["stdoutWindow"]
             .get("stdout")
             .is_none());
-        assert!(ran["result"]["data"]["note"]
+        let command_note = ran["result"]["data"]["note"].as_str().unwrap();
+        assert!(command_note.contains("spill address"), "{command_note}");
+        assert!(ran["result"]["data"]["retrievalHint"]
             .as_str()
             .unwrap()
-            .contains("same tool"));
+            .contains("spill://"));
         assert_eq!(retire_stale_tool_results(&mut messages), 0);
     }
 
@@ -746,8 +758,11 @@ mod tests {
         assert!(!stripped.to_string().contains("data:image/png"));
         let catalog_text = messages[5]["content"].as_str().unwrap();
         assert!(catalog_text.starts_with("Gyro tool catalog (local capability definitions): "));
-        assert!(catalog_text.contains("evidenceOmitted"));
-        assert!(!catalog_text.contains(&"s".repeat(3000)));
+        assert!(
+            catalog_text.contains(&"s".repeat(3000)),
+            "a catalog page stays, so the next call does not load the schema again"
+        );
+        assert!(!catalog_text.contains("evidenceOmitted"));
         assert!(messages[5].get("images").is_none());
         assert!(messages[5]["content"]
             .as_str()
@@ -756,6 +771,36 @@ mod tests {
         assert_eq!(messages[6], pointer);
         assert_eq!(messages[8], newest_image);
         assert_eq!(retire_stale_tool_results(&mut messages), 0);
+    }
+
+    #[test]
+    fn native_catalog_pages_stay_in_the_request() {
+        let page = "schema ".repeat(800);
+        let catalog = tool_body(
+            "cat-1",
+            "tool-catalog",
+            "Listed browser tools",
+            serde_json::json!({"tools":[{"name":"gyro_browser_open","description": page}]}),
+        );
+        let stale = tool_body(
+            "read-1",
+            "workspace-read",
+            "Read",
+            serde_json::json!({"content":"y".repeat(3000)}),
+        );
+        let stale_before = stale["content"].as_str().unwrap().len();
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"briefing"}),
+            serde_json::json!({"role":"assistant","content":"read"}),
+            stale,
+            serde_json::json!({"role":"assistant","content":"catalog"}),
+            catalog.clone(),
+            serde_json::json!({"role":"assistant","content":"open"}),
+        ];
+        assert!(retire_stale_tool_results(&mut messages) > 0);
+        assert_eq!(messages[5], catalog);
+        assert!(messages[3]["content"].as_str().unwrap().len() < stale_before);
     }
 
     #[test]

@@ -6874,7 +6874,7 @@ expect(
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
     surfaceSource.includes("function ProviderApiKeyField") &&
     surfaceSource.includes("Paste API key") &&
-    surfaceSource.includes("Kept in the macOS Keychain") &&
+    surfaceSource.includes("Kept on this Mac.") &&
     providerApiKeysSource.includes("set_provider_api_key") &&
     providerApiKeysSource.includes("clear_provider_api_key") &&
     providerApiKeysSource.includes("provider_api_key_status") &&

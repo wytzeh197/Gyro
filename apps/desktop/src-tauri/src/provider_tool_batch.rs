@@ -23,7 +23,7 @@ pub(super) fn model_tools(
                 "type": "function",
                 "function": {
                     "name": descriptor.id.provider_tool_name(),
-                    "description": descriptor.description,
+                    "description": advertised_description(descriptor.id, descriptor.description),
                     "parameters": advertised_tool_parameters(descriptor.id),
                 }
             })
@@ -69,6 +69,41 @@ pub(super) fn catalog_prefix(id: CapabilityId) -> &'static str {
     .into_iter()
     .find(|prefix| name.starts_with(prefix))
     .unwrap_or("gyro_")
+}
+
+/// What the always-on tool list says.
+///
+/// Inlined tools keep their full description, because the model calls them
+/// without a catalog page. Deferred tools keep the first sentence: enough to
+/// choose the tool. The catalog page still carries the rest, and that page is
+/// left in the request so the model does not pay a round trip to load it again.
+pub(super) fn advertised_description(id: CapabilityId, full: &'static str) -> &'static str {
+    if inline_tool_schema(id) {
+        full
+    } else {
+        first_sentence(full)
+    }
+}
+
+/// The first sentence, so a deferred tool does not carry its whole manual on
+/// every request. Abbreviations such as "e.g." are not sentence ends.
+fn first_sentence(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    while let Some(relative) = text[start..].find(['.', '!', '?']) {
+        let index = start + relative;
+        let next = bytes.get(index + 1).copied();
+        let boundary = next.is_none_or(|byte| byte.is_ascii_whitespace());
+        let previous_word_short = text[..index]
+            .rsplit(|character: char| character.is_whitespace())
+            .next()
+            .is_some_and(|word| word.len() <= 2);
+        if boundary && !previous_word_short {
+            return &text[..=index];
+        }
+        start = index + 1;
+    }
+    text
 }
 
 pub(super) fn advertised_tool_parameters(id: CapabilityId) -> serde_json::Value {
@@ -459,6 +494,49 @@ mod tests {
         let window = window.expect("spill copy");
         assert!(window.text.contains('y'));
         assert_eq!(window.total_bytes, body.len());
+    }
+
+    #[test]
+    fn deferred_tool_lists_keep_a_sentence_and_the_catalog_keeps_the_detail() {
+        let mut full = 0usize;
+        let mut shown = 0usize;
+        for descriptor in advertised_capability_descriptors(CapabilityRunMode::Normal) {
+            let advertised = advertised_description(descriptor.id, descriptor.description);
+            full += descriptor.description.len();
+            shown += advertised.len();
+            assert!(
+                descriptor.description.starts_with(advertised),
+                "{}",
+                descriptor.id.provider_tool_name()
+            );
+            if inline_tool_schema(descriptor.id) {
+                assert_eq!(advertised, descriptor.description);
+            }
+        }
+        assert!(
+            full > shown + 2_500,
+            "always-on tool text {shown} should be well under the full descriptions {full}"
+        );
+        let page = super::super::ollama_runner::ollama_compatibility_catalog(
+            CapabilityRunMode::Normal,
+            Some("gyro_browser_"),
+            0,
+            true,
+        );
+        let browser = advertised_capability_descriptors(CapabilityRunMode::Normal)
+            .find(|descriptor| descriptor.id == CapabilityId::BrowserOpen)
+            .unwrap();
+        let open = page["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "gyro_browser_open")
+            .unwrap();
+        assert_eq!(open["description"], browser.description);
+        assert!(
+            advertised_description(browser.id, browser.description).len()
+                < browser.description.len()
+        );
     }
 
     #[test]

@@ -90,11 +90,9 @@ function embeddedEntitlement(appPath, key) {
 /**
  * Pick a stable code-signing identity.
  *
- * macOS guards every saved API key with an access list naming the exact
- * certificate and bundle identifier that wrote it, so an ad-hoc signature —
- * a brand-new identity on every single build — can never match, and macOS asks
- * for the login password again. Any real identity already on this machine is
- * stable across rebuilds, so "Always Allow" sticks for good. Prefer a
+ * The microphone grant is tied to the signature. An ad-hoc signature is a new
+ * identity on every build, so macOS asks again after each rebuild. Any real
+ * identity already on this machine is stable across rebuilds. Prefer a
  * Developer ID that is already installed for releases, then a locally created
  * dev identity, and only then ad-hoc.
  */
@@ -158,7 +156,7 @@ if (hasValidDeveloperIdSignature(destinationApp)) {
   if (!sign) {
     if (!identity) {
       console.log(
-        "No signing identity found, so this build is ad-hoc signed: macOS will ask for the login Keychain again after the next rebuild. Run scripts/setup-dev-signing.sh once to stop that.",
+        "No signing identity found, so this build is ad-hoc signed. macOS will ask for the microphone again after the next rebuild. Run scripts/setup-dev-signing.sh once to stop that.",
       );
     }
     sign = signs("-");

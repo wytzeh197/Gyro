@@ -337,9 +337,7 @@ pub fn grok_prompt_context(result: &Value) -> Option<AcpContextUsage> {
 pub fn grok_frame_context(params: &Value) -> Option<AcpContextUsage> {
     [
         params.get("_meta"),
-        params
-            .get("update")
-            .and_then(|update| update.get("_meta")),
+        params.get("update").and_then(|update| update.get("_meta")),
     ]
     .into_iter()
     .flatten()
@@ -1053,7 +1051,10 @@ mod tests {
             })),
             None
         );
-        assert_eq!(grok_frame_context(&json!({"_meta": {"totalTokens": 0}})), None);
+        assert_eq!(
+            grok_frame_context(&json!({"_meta": {"totalTokens": 0}})),
+            None
+        );
     }
 
     #[test]

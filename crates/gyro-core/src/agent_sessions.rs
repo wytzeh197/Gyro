@@ -19,9 +19,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::mutations::{decide_mutation_proposal, MutationDecision};
 use crate::paths::{secure_private_file, GyroPaths};
 use crate::security::redact_secrets;
-use crate::mutations::{decide_mutation_proposal, MutationDecision};
 use crate::sessions::{
     CreateSessionContext, MutationProposalOperation, SessionOrigin, SessionStore,
     SessionWorkspaceMode,
@@ -1250,13 +1250,16 @@ fn call_tool(store: &AgentSessionStore, name: &str, arguments: &Value) -> Result
             let proposal_id = argument_uuid(arguments, "proposalId")?;
             match argument_string(arguments, "decision")?.as_str() {
                 "deny" => {
-                    let sessions =
-                        SessionStore::open(store.paths().clone()).map_err(|error| error.to_string())?;
+                    let sessions = SessionStore::open(store.paths().clone())
+                        .map_err(|error| error.to_string())?;
                     decide_mutation_proposal(&sessions, proposal_id, MutationDecision::Reject)
                         .map_err(|error| error.to_string())?;
                     Ok(json!({ "proposalId": proposal_id, "decision": "denied" }))
                 }
-                "allow" => Err("Only the person using Gyro can approve. Deny it here, or approve it in Gyro.".into()),
+                "allow" => Err(
+                    "Only the person using Gyro can approve. Deny it here, or approve it in Gyro."
+                        .into(),
+                ),
                 other => Err(format!("decision must be deny or allow, not {other}")),
             }
         }
@@ -1905,7 +1908,11 @@ mod tests {
 
         assert_eq!(payload["decision"], "denied");
         assert_eq!(
-            sessions.get_mutation_proposal(proposal.id).unwrap().unwrap().status,
+            sessions
+                .get_mutation_proposal(proposal.id)
+                .unwrap()
+                .unwrap()
+                .status,
             crate::sessions::MutationProposalStatus::Rejected
         );
     }

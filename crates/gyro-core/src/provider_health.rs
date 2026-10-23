@@ -445,7 +445,7 @@ fn openai_compatible_provider_health(
         account_label: None,
         subscription_label: None,
         provider_mode: Some("OpenAI-compatible HTTPS".into()),
-        secret_storage: "macOS Keychain, or the provider's environment variable".into(),
+        secret_storage: "On this Mac, or the provider's environment variable".into(),
         privacy_note:
             "Gyro sends prompts straight to the endpoint you configured; no vendor CLI is involved."
                 .into(),
@@ -676,15 +676,15 @@ fn env_provider_health(
         .iter()
         .find(|env_name| std::env::var_os(env_name.as_str()).is_some())
         .cloned();
-    let keychain_key = provider_has_api_key(provider_id) && present_env.is_none();
+    let saved_key = provider_has_api_key(provider_id) && present_env.is_none();
     let output = if let Some(env_name) = present_env.as_deref() {
         format!(
             "{provider_id} provider-env auth available; {env_name} is set; value not read by Gyro."
         )
-    } else if keychain_key {
+    } else if saved_key {
         let env_name = env_names.first().map(String::as_str).unwrap_or("API_KEY");
         format!(
-            "{provider_id} provider-env auth available; {env_name} is stored in macOS Keychain; key value omitted."
+            "{provider_id} provider-env auth available; {env_name} is stored on this Mac; key value omitted."
         )
     } else {
         format!(
@@ -695,7 +695,7 @@ fn env_provider_health(
 
     ProviderHealthCheck {
         provider_id: provider_id.into(),
-        runtime_status: if present_env.is_some() || keychain_key {
+        runtime_status: if present_env.is_some() || saved_key {
             "ready".into()
         } else {
             "not-logged-in".into()
@@ -705,13 +705,13 @@ fn env_provider_health(
         login_command: None,
         account_label: None,
         subscription_label: None,
-        provider_mode: Some(if keychain_key {
-            "keychain-owned auth".into()
+        provider_mode: Some(if saved_key {
+            "saved on this Mac".into()
         } else {
             "environment-owned auth".into()
         }),
-        secret_storage: if keychain_key {
-            "macOS Keychain".into()
+        secret_storage: if saved_key {
+            "On this Mac".into()
         } else {
             "Environment variable or provider SDK store".into()
         },

@@ -21986,8 +21986,11 @@ export function SettingsSurface({
   onToggleWorkspaceContribution,
   onRemoveWorkspaceContribution,
 }: SettingsSurfaceProps) {
-  const [apiKeyProviderId, setApiKeyProviderId] =
-    useState<ProviderId>("openai");
+  const [apiKeyProviderId, setApiKeyProviderId] = useState<ProviderId>(() => {
+    const selected = config.selectedProviderId;
+    if (selected && providerSupportsApiKey(selected)) return selected;
+    return "deepseek";
+  });
   const settingsScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (settingsScrollRef.current) settingsScrollRef.current.scrollTop = 0;
@@ -24469,6 +24472,15 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
   return "Provider-owned credentials were verified on this Mac.";
 }
 
+/** CLI, API, and local runtimes are separate catalog connections. */
+function providerConnectionKind(
+  executionKind: string | undefined,
+): "CLI" | "API" | "Local" {
+  if (executionKind === "openai-compatible-api") return "API";
+  if (executionKind === "ollama-api") return "Local";
+  return "CLI";
+}
+
 function providerPrimaryActionLabel(provider: {
   authMode: string;
   authStatus: string;
@@ -25521,6 +25533,7 @@ function Composer({
     .map((provider) => ({
       id: provider.id,
       label: provider.displayName,
+      connection: providerConnectionKind(provider.capabilities?.executionKind),
       connected: provider.authStatus === "connected",
       models: provider.models,
     }))

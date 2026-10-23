@@ -384,7 +384,7 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Store a provider API key in macOS Keychain.
+    /// Store a provider API key on this Mac.
     SetProviderKey {
         provider_id: String,
         /// API key value. Prefer --env for shell-history safety.
@@ -5993,14 +5993,14 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(|error| {
                 cli_failure(
                     CliErrorCategory::ExecutionFailed,
-                    format!("store provider key in macOS Keychain: {error}"),
+                    format!("store provider key on this Mac: {error}"),
                 )
             })?;
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "set-provider-key",
                 target: provider_id,
-                message: format!("stored {} API key in macOS Keychain", provider.display_name),
+                message: format!("stored {} API key on this Mac", provider.display_name),
             };
             if json {
                 print_json(&output)?;
@@ -6523,7 +6523,7 @@ done
             status: CliStatus::Done,
             action: "set-provider-key",
             target: "openai".into(),
-            message: "stored OpenAI API key in macOS Keychain".into(),
+            message: "stored OpenAI API key on this Mac".into(),
         };
         let mutation_value = serde_json::to_value(CliJsonEnvelope {
             schema: CLI_JSON_SCHEMA_V1,

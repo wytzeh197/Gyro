@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Create one stable local code-signing identity so macOS stops asking for the
-# login Keychain (and stops re-asking for the microphone) after every rebuild.
+# Create one stable local code-signing identity so macOS stops re-asking for
+# the microphone after every rebuild.
 #
-# Why this is the whole fix: saved API keys sit in the login Keychain behind an
-# access list naming the certificate that wrote them, and the microphone grant
-# is keyed the same way. An ad-hoc build is a brand-new identity on every
-# compile, so "Always Allow" can never stick. A certificate that survives
-# rebuilds makes the grant permanent.
+# The microphone grant is keyed to the code signature. An ad-hoc build is a
+# brand-new identity on every compile, so the grant cannot stick. A certificate
+# that survives rebuilds makes it permanent. API keys are not stored in the
+# login Keychain.
 #
 # Run once. Safe to re-run: it exits early if the identity already exists.
 set -euo pipefail
@@ -76,7 +75,7 @@ unset login_password
 
 if security find-identity -p codesigning "${KEYCHAIN}" | grep -q "\"${IDENTITY}\""; then
   echo "Created \"${IDENTITY}\". Local builds are signed with it from now on,"
-  echo "so the Keychain prompt does not come back after rebuilds."
+  echo "so the microphone permission survives rebuilds."
 else
   echo "Imported \"${IDENTITY}\", but it cannot sign yet." >&2
   echo "Open Keychain Access, select \"${IDENTITY}\", open Trust, set" >&2

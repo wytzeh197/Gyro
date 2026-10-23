@@ -2370,7 +2370,7 @@ export type ModelProviderConfig = {
 export type CustomProviderDraft = {
   displayName: string;
   baseUrl: string;
-  /** Sent only to the Keychain; it is never written into the config file. */
+  /** Kept in the private store on this Mac; it is never written into the config file. */
   apiKey?: string;
   modelIds: string[];
 };

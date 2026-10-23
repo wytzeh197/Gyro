@@ -117,7 +117,9 @@ pub fn preview(capability: &str, tool: &str, text: &str) -> Preview {
     let address = address(capability, tool, text);
     if tail <= head {
         return Preview {
-            text: format!("[{original} bytes elided · {address} · re-read it if needed]"),
+            text: format!(
+                "[{original} bytes elided · {address} · read that address for the full copy]"
+            ),
             address,
             original_bytes: original,
             kept_bytes: 0,
@@ -126,7 +128,7 @@ pub fn preview(capability: &str, tool: &str, text: &str) -> Preview {
     let elided = tail.saturating_sub(head);
     Preview {
         text: format!(
-            "{}\n\n[{elided} bytes elided · full copy at {address} · re-read only the range you need, not the whole file]\n\n{}",
+            "{}\n\n[{elided} bytes elided · full copy at {address} · read that address for the omitted middle]\n\n{}",
             &text[..head],
             &text[tail..]
         ),
@@ -136,8 +138,8 @@ pub fn preview(capability: &str, tool: &str, text: &str) -> Preview {
     }
 }
 
-/// Retrieval hint built from the payload itself, so retirement never leaves the model without a
-/// next step: the same tool can be re-issued against a narrow range.
+/// A path and line range taken from a payload. Spill retirement points at the
+/// spill address instead of asking for this re-read.
 pub fn retrieval_hint(data: &serde_json::Value) -> Option<String> {
     let object = data.as_object()?;
     let path = object.get("path").and_then(|value| value.as_str())?;
@@ -611,7 +613,11 @@ mod tests {
                 let start = floor_bound(&text, offset);
                 let end = ceil_bound(&text, start.saturating_add(limit)).max(start);
                 assert_eq!(window.offset, start, "offset {offset} limit {limit}");
-                assert_eq!(window.text, text[start..end], "offset {offset} limit {limit}");
+                assert_eq!(
+                    window.text,
+                    text[start..end],
+                    "offset {offset} limit {limit}"
+                );
                 assert_eq!(window.total_bytes, text.len());
                 assert_eq!(window.truncated(), end < text.len());
             }

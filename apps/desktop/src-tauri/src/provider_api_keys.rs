@@ -34,6 +34,12 @@ pub(crate) async fn set_provider_api_key(
 ) -> Result<ProviderApiKeyStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(to_string)?;
+        let stored = gyro_core::stored_provider_api_key(&provider_id)
+            .map_err(to_string)?
+            .filter(|item| item == value.trim());
+        if stored.is_none() {
+            return Err("the API key was not saved".into());
+        }
         // A cached probe was taken before this key existed, so it must not keep
         // answering "not signed in" now that Gyro holds one.
         gyro_core::invalidate_provider_health_cache();

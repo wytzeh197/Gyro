@@ -43,7 +43,7 @@ export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
  *
  * The CLI's flag parser accepts more words than this, but each model publishes
  * its own selectable set and rejects the rest at turn time. This is the set
- * for Grok 4.5; Grok 4.3, 4.6, and 4.7 expose xhigh below.
+ * for Grok 4.5; Grok 4.6 and 4.7 expose xhigh below.
  */
 export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
@@ -51,7 +51,7 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
-/** Grok 4.3, 4.6, and 4.7 expose xhigh. Grok 4.5 stops at high. Fast is a mode, not a model. */
+/** Grok 4.6 and 4.7 expose xhigh. Grok 4.5 stops at high. Fast is a mode, not a model. */
 export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
   ...GROK_REASONING_EFFORTS,
   "xhigh",
@@ -123,7 +123,7 @@ export function isPickerHiddenModel(providerId: string, modelId: string) {
   );
 }
 
-/** Providers that can authenticate with a pasted API key stored in Keychain. */
+/** Providers that can authenticate with a pasted API key kept on this Mac. */
 export function providerSupportsApiKey(providerId: string) {
   return (
     providerId === "openai" ||
@@ -136,7 +136,7 @@ export function providerSupportsApiKey(providerId: string) {
     providerId === "mistral" ||
     providerId === "openrouter" ||
     // A custom endpoint has no vendor environment variable to name, so its key
-    // lives in the Keychain alone and only the HTTPS runner reads it.
+    // lives in the private store on this Mac and only the HTTPS runner reads it.
     isCustomProviderId(providerId)
   );
 }
@@ -191,8 +191,11 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-6.1-sol",
         displayName: "GPT-6.1 Sol",
-        description: "Near-Astra performance for coding and professional work.",
-        // Codex 0.162.1 reports 500K; the API's 1.05M is a separate limit.
+        description:
+          "Codex CLI. Near-Astra performance for coding and professional work.",
+        // Signed-in Codex serves 500K (475K after its 95% reserve). The API
+        // maximum is 1.05M. A logged-out `codex debug models` prints the
+        // bundled 272K stub and is not this baseline.
         contextWindowTokens: 500_000,
         defaultReasoningEffort: "low",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
@@ -200,7 +203,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-6-astra",
         displayName: "GPT-6 Astra",
-        description: "Complex reasoning, coding, and long-running work.",
+        description:
+          "Codex CLI. Complex reasoning, coding, and long-running work. OpenRouter's API row serves 1.05M.",
         // Codex CLI's default window; the API offers a different limit.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -209,7 +213,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.6-sol",
         displayName: "GPT-5.6 Sol",
-        description: "Frontier model for complex professional work.",
+        description:
+          "Codex CLI. Frontier model for complex professional work.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "low",
@@ -218,7 +223,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.6-terra",
         displayName: "GPT-5.6 Terra",
-        description: "Balances intelligence and cost for everyday work.",
+        description:
+          "Codex CLI. Balances intelligence and cost for everyday work.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -227,7 +233,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.6-luna",
         displayName: "GPT-5.6 Luna",
-        description: "Fast, cost-sensitive model for lighter workloads.",
+        description:
+          "Codex CLI. Fast, cost-sensitive model for lighter workloads.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -236,7 +243,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.5",
         displayName: "GPT-5.5",
-        description: "Flagship model for complex reasoning and coding.",
+        description:
+          "Codex CLI. Flagship model for complex reasoning and coding.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -271,7 +279,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-fable-5-1",
         displayName: "Claude Fable 5.1",
-        description: "Demanding reasoning and long-running agentic work.",
+        description:
+          "Claude Code. Demanding reasoning and long-running agentic work.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -279,7 +288,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-fable-5",
         displayName: "Claude Fable 5",
-        description: "Previous-generation Fable model for complex work.",
+        description:
+          "Claude Code. Previous-generation Fable model for complex work.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -288,7 +298,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "claude-opus-5",
         displayName: "Claude Opus 5",
         description:
-          "Frontier model for complex agentic coding and long-horizon work.",
+          "Claude Code. Frontier model for complex agentic coding and long-horizon work. OpenRouter's API row also serves 1M.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -296,7 +306,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
-        description: "Strong model for complex agentic coding.",
+        description: "Claude Code. Strong model for complex agentic coding.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -304,7 +314,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-sonnet-5",
         displayName: "Claude Sonnet 5",
-        description: "Best speed and intelligence balance.",
+        description:
+          "Claude Code. Best speed and intelligence balance. OpenRouter's API row also serves 1M.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -312,7 +323,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-haiku-5-5",
         displayName: "Claude Haiku 5.5",
-        description: "Fast model for lighter coding and high-volume tasks.",
+        description:
+          "Claude Code. Fast model for lighter coding and high-volume tasks.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -320,7 +332,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-haiku-4-5",
         displayName: "Claude Haiku 4.5",
-        description: "Fastest option for lighter work.",
+        description: "Claude Code. Fastest option for lighter work.",
         contextWindowTokens: 200_000,
       },
     ],
@@ -354,9 +366,9 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "k3",
         displayName: "Kimi K3",
         description:
-          "Flagship coding model. Up to 1M context on eligible Kimi Code plans.",
-        // Offline baseline for Plus plans; Pro and above can receive 1M.
-        // A session's runtime-reported window takes precedence over this value.
+          "Kimi Code. Flagship coding model. Up to 1M context on eligible plans. The OpenRouter API row is a separate 1,048,576.",
+        // Plus and Moderato are capped at 262,144. Pro and Allegretto receive
+        // 1,048,576. A session's runtime-reported window takes precedence.
         contextWindowTokens: 262_144,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
@@ -391,8 +403,10 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.7",
         displayName: "Grok 4.7",
         description:
-          "xAI's frontier model for coding, agentic tasks, and knowledge work.",
-        contextWindowTokens: 500_000,
+          "Grok Build CLI model for coding, agentic tasks, and knowledge work.",
+        // Grok Build's served context_window (grok 1.0.67, 2026-10-23).
+        // 500K is the optional larger window, not the one the product shows.
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
@@ -400,8 +414,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.6",
         displayName: "Grok 4.6",
         description:
-          "Previous xAI frontier model for coding, agentic tasks, and knowledge work.",
-        contextWindowTokens: 500_000,
+          "Previous Grok Build CLI model for coding and knowledge work.",
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
@@ -409,17 +423,9 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.5",
         displayName: "Grok 4.5",
         description: "xAI's coding-capable model through Grok Build.",
-        contextWindowTokens: 500_000,
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_REASONING_EFFORTS,
-      },
-      {
-        id: "grok-4.3",
-        displayName: "Grok 4.3",
-        description: "General xAI model for chat and reasoning.",
-        contextWindowTokens: 1_000_000,
-        defaultReasoningEffort: "low",
-        supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
     ],
     effort: "medium",
@@ -542,7 +548,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "deepseek-flash",
         displayName: "DeepSeek V4.1 Flash",
-        description: "Fast general coding model, and the cheaper of the two.",
+        description:
+          "DeepSeek API. Fast general coding model, and the cheaper of the two. OpenRouter serves 1,048,576 on a separate route.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
@@ -550,7 +557,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "deepseek-v4-pro",
         displayName: "DeepSeek V4 Pro",
-        description: "Deeper reasoning for harder problems, at a higher price.",
+        description:
+          "DeepSeek API. Deeper reasoning for harder problems, at a higher price.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
@@ -587,25 +595,28 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "mistral-medium-latest",
         displayName: "Mistral Medium 3.5",
-        description: "Frontier-class model tuned for agentic and coding work.",
+        description:
+          "Mistral API. Frontier-class model tuned for agentic and coding work.",
         contextWindowTokens: 256_000,
       },
       {
         id: "mistral-large-latest",
         displayName: "Mistral Large 3",
-        description: "Open-weight flagship for general multimodal work.",
+        description:
+          "Mistral API. Open-weight flagship for general multimodal work.",
         contextWindowTokens: 256_000,
       },
       {
         id: "mistral-small-latest",
         displayName: "Mistral Small 4",
-        description: "Cheapest of the three, and the fastest to first token.",
+        description:
+          "Mistral API. Cheapest of the three, and the fastest to first token.",
         contextWindowTokens: 256_000,
       },
       {
         id: "codestral-latest",
         displayName: "Codestral",
-        description: "Tuned for code completion and editing.",
+        description: "Mistral API. Tuned for code completion and editing.",
         contextWindowTokens: 128_000,
       },
     ],
@@ -638,7 +649,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "anthropic/claude-sonnet-5",
         displayName: "Claude Sonnet 5",
-        description: "Strong general coding model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Strong general coding model. Claude Code also serves 1M on its own connection.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
@@ -646,7 +658,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "anthropic/claude-opus-5",
         displayName: "Claude Opus 5",
-        description: "Anthropic's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Anthropic's frontier model. Claude Code also serves 1M on its own connection.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
@@ -654,7 +667,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "openai/gpt-6-astra",
         displayName: "GPT-6 Astra",
-        description: "OpenAI's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. OpenAI's frontier model. Codex CLI serves 272K on its own connection.",
         contextWindowTokens: 1_050_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
@@ -662,7 +676,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "google/gemini-3.8-flash",
         displayName: "Gemini 3.8 Flash",
-        description: "Long-context reasoning, routed by OpenRouter.",
+        description: "OpenRouter API. Long-context reasoning.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: ["low", "medium", "high"],
@@ -670,7 +684,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "x-ai/grok-4.7",
         displayName: "Grok 4.7",
-        description: "xAI's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
         contextWindowTokens: 500_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -678,7 +693,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "x-ai/grok-4.6",
         displayName: "Grok 4.6",
-        description: "xAI's coding model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
         contextWindowTokens: 500_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -686,7 +702,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "deepseek/deepseek-v4.1-flash",
         displayName: "DeepSeek V4.1 Flash",
-        description: "Low-cost general model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Low-cost general model. DeepSeek's own API serves 1M.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: ["low", "high", "max"],
@@ -694,7 +711,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "moonshotai/kimi-k3",
         displayName: "Kimi K3",
-        description: "Open-weights agentic model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Open-weights agentic model. Kimi Code's offline baseline is 262,144.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "max",
         supportedReasoningEfforts: ["low", "high", "max"],
@@ -702,7 +720,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "z-ai/glm-5.3",
         displayName: "GLM 5.3",
-        description: "Open-weights coding model, routed by OpenRouter.",
+        description: "OpenRouter API. Open-weights coding model.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "max",
         supportedReasoningEfforts: ["low", "high", "max"],
@@ -710,7 +728,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "qwen/qwen3.8-max-0902",
         displayName: "Qwen3.8 Max",
-        description: "Qwen's frontier model, routed by OpenRouter.",
+        description: "OpenRouter API. Qwen's frontier model.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "xhigh",
         supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -719,7 +737,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "meta-llama/llama-3.3-70b-instruct",
         displayName: "Llama 3.3 70B",
         // The one model here that does not reason, so it carries no effort.
-        description: "Open-weights general model, routed by OpenRouter.",
+        description: "OpenRouter API. Open-weights general model.",
         contextWindowTokens: 131_072,
       },
     ],

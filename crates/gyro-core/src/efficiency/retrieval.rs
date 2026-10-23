@@ -67,8 +67,12 @@ pub fn rank(candidates: Vec<Candidate>, limit: usize) -> Vec<Candidate> {
 
 fn merge_evidence(entry: &mut Candidate, candidate: &Candidate) {
     entry.explicit |= candidate.explicit;
-    entry.search_matches = entry.search_matches.saturating_add(candidate.search_matches);
-    entry.symbol_matches = entry.symbol_matches.saturating_add(candidate.symbol_matches);
+    entry.search_matches = entry
+        .search_matches
+        .saturating_add(candidate.search_matches);
+    entry.symbol_matches = entry
+        .symbol_matches
+        .saturating_add(candidate.symbol_matches);
     entry.referenced |= candidate.referenced;
     entry.test |= candidate.test;
     entry.changed |= candidate.changed;
@@ -138,7 +142,10 @@ pub fn outline_candidates(
 ) -> Vec<Candidate> {
     let mut by_path = std::collections::BTreeMap::<&str, Vec<&Candidate>>::new();
     for signal in signals {
-        by_path.entry(signal.path.as_str()).or_default().push(signal);
+        by_path
+            .entry(signal.path.as_str())
+            .or_default()
+            .push(signal);
     }
     let mut seen = std::collections::BTreeSet::<String>::new();
     let mut candidates = Vec::new();
@@ -233,7 +240,9 @@ mod tests {
             ["src/b.rs", "src/a.rs", "src/a.rs", "src/tests/a.rs"],
             &signals,
         );
-        assert!(listed.iter().all(|candidate| candidate.path != "outside.rs"));
+        assert!(listed
+            .iter()
+            .all(|candidate| candidate.path != "outside.rs"));
         assert_eq!(
             listed
                 .iter()

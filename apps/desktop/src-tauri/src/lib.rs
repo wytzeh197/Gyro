@@ -6147,14 +6147,13 @@ fn provider_context_message_with_capabilities_for_turn(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if supports_tools {
+        // The tool list already names each call. This line only stops the model
+        // from repeating work it already has; the longer form said the same thing.
+        let efficiency = "Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.";
         if turn.resumed {
-            context.push(
-                "Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.".into(),
-            );
+            context.push(efficiency.into());
         } else {
-            stable.push(
-                "Work efficiently: reuse current evidence instead of repeating unchanged reads or checks. Narrow searches and file ranges to what the task needs; batch independent reads, and prefer exact edits when authorized. Verify proportionately to the change's risk while completing required checks and respecting approvals. Preserve user constraints and explicit attachments.".into(),
-            );
+            stable.push(efficiency.into());
         }
         context.push(delegated_agents::prompt_guidance(request, turn.resumed).into());
         if let Some(workspace) = request.workspace_path.as_deref() {
@@ -6165,14 +6164,14 @@ fn provider_context_message_with_capabilities_for_turn(
         stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls.".into());
         stable.push("Paths are workspace-relative. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
         if request.mode == ChatMode::Normal {
+            // Tool descriptions already name list, search, read, and edit.
+            // Repeating that tutorial on every fresh session was paid again
+            // on each request and did not add a rule the short form lacks.
+            let implementation = "Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes by passing knownContentHash from the prior read. Read the body again only when the hash differs or that range was never loaded, and confirm with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results.";
             if turn.resumed {
-                context.push(
-                    "Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes by passing knownContentHash from the prior read. Read the body again only when the hash differs or that range was never loaded, and confirm with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results.".into(),
-                );
+                context.push(implementation.into());
             } else {
-                stable.push(
-                    "When the user requests implementation, carry it through authorized edits and relevant verification. Use gyro_workspace_list or gyro_workspace_search to locate files, gyro_workspace_read or gyro_workspace_read_range to inspect them, gyro_workspace_edit for exact replacements, and gyro_workspace_propose_edit for whole-file changes. Paths are relative to the selected workspace. Verify applied changes by passing knownContentHash from the prior read; read the body again only when the hash differs or that range was never loaded. A completed tool call is not proof that a proposed edit was applied: inspect its status, report pending review when applicable, and verify with a fresh read or diff when the hash differs. Never claim an action succeeded without a confirming tool result. If a tool fails, use its error to correct the request; report an unavailable bridge rather than inventing workspace results.".into(),
-                );
+                stable.push(implementation.into());
             }
         }
         if let Some(check) = request.workspace_check.as_ref() {
@@ -6193,7 +6192,10 @@ fn provider_context_message_with_capabilities_for_turn(
             // attached check made Codex open every turn with tool discovery and
             // context calls, roughly doubling model calls per turn.
             stable.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
-            stable.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later — stay in the turn, prefer one long wait over many short ones, and reply once the result is in. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
+            // gyro_terminal_wait's own description already covers the wait loop
+            // and remote CI. This line is the part that description cannot say:
+            // ending the turn drops the work, and waiting is not permission.
+            stable.push("Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later. For a long command, stay in the turn and call gyro_terminal_wait once for a long wait. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
         }
         if user_requests_gyro_browser(&request.message) {
             context.push("Requested surface: Gyro Browser. Follow the shared browser guide and current capability contract for this live task.".into());
@@ -23087,7 +23089,10 @@ pub fn run_provider_capability_server() -> anyhow::Result<()> {
             .map(|descriptor| {
                 serde_json::json!({
                     "name": descriptor.id.provider_tool_name(),
-                    "description": descriptor.description,
+                    "description": provider_tool_batch::advertised_description(
+                        descriptor.id,
+                        descriptor.description,
+                    ),
                     "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
                 })
             })
@@ -24795,6 +24800,22 @@ mod tests {
         assert!(text.contains("1 diagnostic"));
         assert!(text.contains("gyro_workspace_check"));
         assert!(text.contains("compact workspace check is attached"));
+        assert!(text.contains("already attached and current"));
+        assert!(!text.contains("to refresh this snapshot"));
+    }
+
+    #[test]
+    fn opening_prompt_does_not_repeat_inlined_tool_instructions() {
+        let request = anthropic_provider_request();
+        let opening = provider_context_message(&request);
+        assert!(!opening.contains("Use gyro_workspace_list or gyro_workspace_search"));
+        assert!(!opening.contains("gh run watch"));
+        assert!(!opening.contains("carry it through authorized edits"));
+        assert!(opening.contains("never end with a promise to report later"));
+        assert!(opening.contains("gyro_terminal_wait"));
+        assert!(opening.contains("gyro_workspace_edit"));
+        assert!(opening.contains("knownContentHash"));
+        assert!(opening.contains("Reuse current evidence"));
     }
 
     #[test]
@@ -27232,7 +27253,7 @@ while True:
         assert!(!opening.contains(browser_knowledge::SIDE_PANEL_GUIDE));
         assert!(!resumed.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
         assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
-        assert!(!resumed.contains("For long-running builds"));
+        assert!(!resumed.contains("never end with a promise to report later"));
         assert!(resumed.contains("configured approval policy"));
         assert!(resumed.ends_with("User message:\nRename the browser module"));
         // Naming browser code is not a browse request.
@@ -28809,19 +28830,19 @@ while True:
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.7")),
-            Some(500_000)
+            Some(256_000)
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.7-build-fast")),
-            Some(500_000)
+            Some(256_000)
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.6")),
-            Some(500_000)
+            Some(256_000)
         );
         assert_eq!(
             provider_model_context_window("xai", Some("grok-4.5")),
-            Some(500_000)
+            Some(256_000)
         );
         assert_eq!(
             provider_model_context_window("openai", Some("gpt-5.6-sol")),
@@ -28851,7 +28872,7 @@ while True:
             Some("grok-4.5"),
         )
         .unwrap();
-        assert_eq!(reported.model_context_window, Some(500_000));
+        assert_eq!(reported.model_context_window, Some(256_000));
         assert_eq!(reported.input_tokens, Some(1_000));
     }
 

@@ -41,9 +41,11 @@ and the auto-compaction threshold remain independent.
   search, range reads, and language-server tools expand the evidence. File and
   buffer identities are revalidated; older summaries are not authoritative.
 - OpenAI-compatible and Ollama runners, for every model id they serve, replace
-  a tool result or compatibility catalog older than the newest exchange once it
-  is at least 2 KB. The live request keeps the call id, status, summary, and
-  file or window identity, and tells the model how to read it again. Pixels
+  a tool result older than the newest exchange once it is at least 2 KB.
+  Catalog pages stay, because dropping a schema makes the next call load it
+  again. The live request keeps the call id, status, summary, and file or
+  window identity, and points at the spilled copy instead of asking for the
+  same read again. Pixels
   from an earlier screenshot are dropped; the newest image and the user's
   attachments stay. The transcript is unchanged. Auto-compact remains the
   window backstop. Resumed Codex, Claude, and ACP threads keep their own

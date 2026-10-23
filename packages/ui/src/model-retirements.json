@@ -50,6 +50,14 @@
       "source": "https://ai.google.dev/gemini-api/docs/deprecations"
     },
     {
+      "providerId": "xai",
+      "modelIds": ["grok-4.3"],
+      "scope": "provider",
+      "retiredAt": "2026-10-23",
+      "replacement": "grok-4.7",
+      "source": "Grok Build 1.0.67 model list. grok-4.3 is not a CLI model; the public API is a separate connection."
+    },
+    {
       "providerId": "openrouter",
       "modelIds": ["google/gemini-3-pro-preview"],
       "scope": "provider",

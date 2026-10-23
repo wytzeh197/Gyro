@@ -649,6 +649,195 @@ assert.equal(
   "A removed provider must stay out of the picker",
 );
 
+// Every picker model belongs to one connection. A product listed on two
+// connections is two rows, and each row keeps the window that connection
+// serves. Equal numbers stay when both sources agree (Claude Code and
+// OpenRouter both serve 1M). A model with no twin stays on its one connection.
+{
+  const connection = {
+    openai: "cli",
+    anthropic: "cli",
+    kimi: "cli",
+    xai: "cli",
+    antigravity: "cli",
+    cursor: "cli",
+    opencode: "cli",
+    deepseek: "api",
+    mistral: "api",
+    openrouter: "api",
+    ollama: "local",
+  };
+  const connectionLabel = {
+    openai: "Codex CLI",
+    anthropic: "Claude Code",
+    kimi: "Kimi Code",
+    xai: "Grok Build",
+    antigravity: "Antigravity",
+    cursor: "Cursor CLI",
+    opencode: "OpenCode CLI",
+    deepseek: "DeepSeek API",
+    mistral: "Mistral API",
+    openrouter: "OpenRouter API",
+  };
+  for (const provider of providerCatalog) {
+    const kind = connection[provider.id];
+    assert.ok(kind, `${provider.id} has no catalog connection`);
+    if (kind === "api") {
+      assert.equal(provider.capabilities.executionKind, "openai-compatible-api");
+      assert.equal(provider.authMode, "env");
+    } else if (kind === "local") {
+      assert.equal(provider.capabilities.executionKind, "ollama-api");
+    } else {
+      assert.notEqual(
+        provider.capabilities.executionKind,
+        "openai-compatible-api",
+        `${provider.id} is a CLI connection`,
+      );
+    }
+  }
+  const published = parseModelCatalog(
+    readFileSync(
+      new URL("../site/model-catalog.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  applyModelCatalog(published, 0);
+  const rows = providerCatalog.flatMap((provider) =>
+    provider.models.map((model) => ({
+      providerId: provider.id,
+      id: model.id,
+      name: model.displayName,
+      kind: connection[provider.id],
+      window: model.contextWindowTokens ?? null,
+      description: model.description ?? "",
+    })),
+  );
+  reset();
+  const facts = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/model-metadata.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const identity = (providerId, id) => providerId + "/" + id;
+  assert.deepEqual(
+    rows.map((row) => identity(row.providerId, row.id)).sort(),
+    facts.models.map(([providerId, id]) => identity(providerId, id)).sort(),
+    "Every picker model is checked on its own connection",
+  );
+  for (const row of rows) {
+    const label = connectionLabel[row.providerId];
+    assert.ok(label, `${row.providerId}/${row.id} has no connection label`);
+    assert.ok(
+      row.description.includes(label),
+      `${row.providerId}/${row.id} must name its ${row.kind} connection`,
+    );
+  }
+  // Each product's rows are pinned independently. The numbers are the
+  // window that connection serves, not a copy of the other row.
+  const shared = [
+    {
+      name: "Grok 4.7",
+      rows: [
+        ["xai", "grok-4.7", "cli", 256_000],
+        ["openrouter", "x-ai/grok-4.7", "api", 500_000],
+      ],
+    },
+    {
+      name: "Grok 4.6",
+      rows: [
+        ["xai", "grok-4.6", "cli", 256_000],
+        ["openrouter", "x-ai/grok-4.6", "api", 500_000],
+      ],
+    },
+    {
+      name: "GPT-6 Astra",
+      rows: [
+        ["openai", "gpt-6-astra", "cli", 272_000],
+        ["openrouter", "openai/gpt-6-astra", "api", 1_050_000],
+      ],
+    },
+    {
+      name: "Kimi K3",
+      rows: [
+        ["kimi", "k3", "cli", 262_144],
+        ["openrouter", "moonshotai/kimi-k3", "api", 1_048_576],
+      ],
+    },
+    {
+      name: "Claude Sonnet 5",
+      rows: [
+        ["anthropic", "claude-sonnet-5", "cli", 1_000_000],
+        ["openrouter", "anthropic/claude-sonnet-5", "api", 1_000_000],
+      ],
+    },
+    {
+      name: "Claude Opus 5",
+      rows: [
+        ["anthropic", "claude-opus-5", "cli", 1_000_000],
+        ["openrouter", "anthropic/claude-opus-5", "api", 1_000_000],
+      ],
+    },
+    {
+      name: "DeepSeek V4.1 Flash",
+      rows: [
+        ["deepseek", "deepseek-flash", "api", 1_000_000],
+        ["openrouter", "deepseek/deepseek-v4.1-flash", "api", 1_048_576],
+      ],
+    },
+  ];
+  const byName = new Map();
+  for (const row of rows) {
+    const group = byName.get(row.name) ?? [];
+    group.push(row);
+    byName.set(row.name, group);
+  }
+  const pinnedNames = new Set();
+  for (const product of shared) {
+    pinnedNames.add(product.name);
+    const matched = product.rows.map(([providerId, id, kind, window]) => {
+      const row = rows.find(
+        (item) => item.providerId === providerId && item.id === id,
+      );
+      assert.ok(row, `${providerId}/${id} is missing`);
+      assert.equal(row.name, product.name, `${providerId}/${id}`);
+      assert.equal(row.kind, kind, `${providerId}/${id}`);
+      assert.equal(
+        row.window,
+        window,
+        `${providerId}/${id} keeps the window its own connection serves`,
+      );
+      return row;
+    });
+    assert.equal(
+      new Set(matched.map((row) => row.providerId)).size,
+      matched.length,
+      `${product.name} must be a separate row on each connection`,
+    );
+    assert.deepEqual(
+      byName
+        .get(product.name)
+        .map((row) => identity(row.providerId, row.id))
+        .sort(),
+      matched.map((row) => identity(row.providerId, row.id)).sort(),
+      `${product.name} has an unexpected extra connection`,
+    );
+  }
+  for (const [name, group] of byName) {
+    if (pinnedNames.has(name)) continue;
+    assert.equal(
+      new Set(group.map((row) => row.providerId)).size,
+      1,
+      `${name} is on more than one connection and needs its own window pin`,
+    );
+  }
+  assert.equal(
+    rows.some((row) => row.providerId === "xai" && row.id === "grok-4.3"),
+    false,
+    "Grok 4.3 is not a Grok Build CLI model",
+  );
+}
+
 console.log(
   "Model catalog parsing, picker merge/order, rollback, rollout, offline, announcements, and model metadata checks passed.",
 );

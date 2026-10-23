@@ -214,7 +214,7 @@ assert.equal(
 
 for (const [providerId, modelId, window] of [
   ["openai", "gpt-6.1-sol", 500_000],
-  ["xai", "grok-4.3", 1_000_000],
+  ["xai", "grok-4.7", 256_000],
   ["antigravity", "antigravity-default", 0],
   ["openrouter", "z-ai/glm-5.3", 1_048_576],
 ]) {
@@ -525,13 +525,13 @@ const grok46Fallback = estimateComposerContextUsage([], "hello", {
   modelId: "grok-4.6",
   modelLabel: "Grok 4.6",
 });
-assert.equal(grok46Fallback.windowLabel, "500K");
+assert.equal(grok46Fallback.windowLabel, "256K");
 const grok47Fallback = estimateComposerContextUsage([], "hello", {
   providerId: "xai",
   modelId: "grok-4.7",
   modelLabel: "Grok 4.7",
 });
-assert.equal(grok47Fallback.windowLabel, "500K");
+assert.equal(grok47Fallback.windowLabel, "256K");
 
 // Browsing another model must rescale the same occupancy against that
 // model's window immediately, rather than keep the previous model's remaining.
@@ -558,7 +558,7 @@ assert.equal(
     providerId: "xai",
     modelId: "grok-4.6",
     modelLabel: "Grok 4.6",
-    contextWindowTokens: 500_000,
+    contextWindowTokens: 256_000,
   }),
   grok46Fallback,
 );

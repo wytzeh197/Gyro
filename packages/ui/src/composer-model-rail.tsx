@@ -13,6 +13,8 @@ import { clippingBounds } from "./composer-popover-bounds";
 export type ModelRailProvider = {
   id: string;
   label: string;
+  /** The connection this catalog entry launches. CLI and API are not one list. */
+  connection: "CLI" | "API" | "Local";
   connected: boolean;
   models: {
     id: string;
@@ -319,6 +321,8 @@ export function ComposerModelRail({
             <header className="gyro-model-rail-head">
               <strong id={`${id}-heading`}>{preview.label}</strong>
               <small>
+                {preview.connection}
+                {" · "}
                 {!preview.connected
                   ? "Not connected"
                   : isPreviewInUse

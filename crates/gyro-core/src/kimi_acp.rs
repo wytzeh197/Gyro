@@ -2967,9 +2967,7 @@ done
         assert_eq!(output.context_usage, Some(measured));
         assert_eq!(live_context.last().copied(), Some(measured));
         assert!(live_context.iter().all(|reading| !reading.estimated));
-        assert!(live_context
-            .iter()
-            .all(|reading| reading.used != 7_554_536));
+        assert!(live_context.iter().all(|reading| reading.used != 7_554_536));
         assert_eq!(
             live_context
                 .iter()

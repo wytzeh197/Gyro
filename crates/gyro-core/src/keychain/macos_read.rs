@@ -14,12 +14,12 @@ const PARENT_CHANNEL_FD: i32 = 3;
 const MAX_ACCOUNT_BYTES: usize = 4096;
 const MAX_REPLY_BYTES: u64 = 1024 * 1024;
 const READ_DEADLINE: Duration = Duration::from_secs(3);
-/// Long enough to click Always Allow. A silent denial is the usual result of
-/// an ad-hoc reinstall: the new signature is not on the item's access list.
-#[cfg(not(test))]
-const INTERACTIVE_READ_DEADLINE: Duration = Duration::from_secs(90);
-const INTERACTIVE_ENV: &str = "GYRO_KEYCHAIN_ALLOW_PROMPT";
 const ACCESS_DETAIL: &str = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
+
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn access_needs_user_interaction(error: &anyhow::Error) -> bool {
+    error.is::<InteractionRequired>()
+}
 
 /// The silent reader was refused. The user-facing text stays the same, but
 /// only this error is retried with the macOS prompt.
@@ -107,19 +107,9 @@ pub(super) fn get(account: &str) -> Result<Option<String>> {
     if let Some(cached) = cached_read(account) {
         return cached;
     }
-    let silent = read_with_command(reader_command()?, account, READ_DEADLINE);
-    // A rebuilt local app has a new ad-hoc signature. The saved item stays
-    // locked to the previous one until the user allows this binary.
-    let read = if silent
-        .as_ref()
-        .is_err_and(|error| error.is::<InteractionRequired>())
-    {
-        let mut command = reader_command()?;
-        command.env(INTERACTIVE_ENV, "1");
-        read_with_command(command, account, INTERACTIVE_READ_DEADLINE)
-    } else {
-        silent
-    };
+    // Never retry with the login-password sheet. A signature macOS will not
+    // trust stays unread, and the caller treats that as "no saved key".
+    let read = read_with_command(reader_command()?, account, READ_DEADLINE);
     match &read {
         Ok(value) => remember(account, CachedRead::Value(value.clone())),
         Err(error) if error.is::<InteractionRequired>() => {
@@ -134,7 +124,6 @@ pub(super) fn get(account: &str) -> Result<Option<String>> {
 fn reader_command() -> Result<Command> {
     let mut command = Command::new(std::env::current_exe().context("locate credential reader")?);
     command.arg(HELPER_ARG);
-    command.env_remove(INTERACTIVE_ENV);
     Ok(command)
 }
 
@@ -256,14 +245,9 @@ pub(super) fn run_helper() -> Option<i32> {
         _ => return Some(2),
     };
     // Per-query no-auth flags do not suppress UI for the file-based Keychain
-    // used by keyring. Set the legacy policy ONLY inside this disposable child.
-    // The parent retains its normal policy for explicit Settings writes.
-    // A prompt is enabled only for the retry after a silent denial, so an
-    // ordinary turn still cannot hang on a dialog.
-    let allow_prompt = std::env::var_os(INTERACTIVE_ENV).is_some();
-    if allow_prompt {
-        unsafe { SecKeychainSetUserInteractionAllowed(1) };
-    } else if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
+    // used by keyring. Set the legacy policy ONLY inside this disposable child,
+    // and never allow the login-password sheet. The parent keeps its own policy.
+    if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
         return Some(3);
     }
     let reply = match super::get_api_key_direct(&account) {
@@ -350,7 +334,10 @@ mod tests {
     fn a_read_is_served_from_memory_instead_of_asking_again() {
         remember("fixture-cache-value", CachedRead::Value(Some("k".into())));
         assert_eq!(
-            cached_read("fixture-cache-value").unwrap().unwrap().as_deref(),
+            cached_read("fixture-cache-value")
+                .unwrap()
+                .unwrap()
+                .as_deref(),
             Some("k")
         );
         // Storing or deleting the credential drops the copy.
