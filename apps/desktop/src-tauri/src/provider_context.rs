@@ -573,9 +573,14 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
             }
             _ => return None,
         },
-        // K3's 1M entitlement depends on the plan; retain the Plus baseline
-        // until the runtime reports the session's provisioned window.
-        "kimi" if model_id.is_empty() || model_id == "k3" => 262_144,
+        // K3 and K3.1 Pro entitlements depend on the plan; retain the Plus
+        // baseline until the runtime reports the session's provisioned window.
+        // Highspeed is offered only on Pro and Allegretto, at 1,048,576.
+        "kimi" => match model_id {
+            "" | "k3" | "k3.1-pro" => 262_144,
+            "k3.1-pro-highspeed" => 1_048_576,
+            _ => return None,
+        },
         "gemini" if matches!(model_id, "" | "gemini-default" | "gemini-3.8-flash") => 1_048_576,
         // Grok Build's served context_window is 256K. 500K is the optional
         // larger window on that CLI, not this baseline. The public API is a
@@ -601,6 +606,7 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
             "google/gemini-3.8-flash"
             | "deepseek/deepseek-v4.1-flash"
             | "moonshotai/kimi-k3"
+            | "moonshotai/kimi-k3.1-pro"
             | "z-ai/glm-5.3" => 1_048_576,
             "x-ai/grok-4.7" | "x-ai/grok-4.6" => 500_000,
             "meta-llama/llama-3.3-70b-instruct" => 131_072,
@@ -675,6 +681,9 @@ mod tests {
             ("openrouter", "x-ai/grok-4.6", 500_000),
             ("openrouter", "deepseek/deepseek-v4.1-flash", 1_048_576),
             ("openrouter", "moonshotai/kimi-k3", 1_048_576),
+            ("openrouter", "moonshotai/kimi-k3.1-pro", 1_048_576),
+            ("kimi", "k3.1-pro", 262_144),
+            ("kimi", "k3.1-pro-highspeed", 1_048_576),
             ("openrouter", "z-ai/glm-5.3", 1_048_576),
             ("openrouter", "qwen/qwen3.8-max-0902", 1_000_000),
             ("openrouter", "meta-llama/llama-3.3-70b-instruct", 131_072),

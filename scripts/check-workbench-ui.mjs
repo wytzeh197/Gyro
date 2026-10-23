@@ -1668,14 +1668,17 @@ expect(
   "A restored config with an enabled provider should select it for new chats instead of falsely blocking the composer.",
 );
 const kimiCatalog = providerCatalog.find((provider) => provider.id === "kimi");
+const kimiK3 = kimiCatalog?.models.find((model) => model.id === "k3");
 expect(
   // The Kimi Code service provisions k3 with low/high/max thinking efforts
-  // (default high); anything else is rejected at turn time.
+  // (default high); anything else is rejected at turn time. K3.1 is listed
+  // above it, and the default stays k3.
   KIMI_K3_REASONING_EFFORTS.join(",") === "low,high,max" &&
+    kimiCatalog?.defaultModelId === "k3" &&
     kimiCatalog?.selectedModelId === "k3" &&
-    kimiCatalog.models[0]?.displayName === "Kimi K3" &&
-    kimiCatalog.models[0]?.defaultReasoningEffort === "high" &&
-    kimiCatalog.models[0]?.supportedReasoningEfforts?.join(",") ===
+    kimiK3?.displayName === "Kimi K3" &&
+    kimiK3?.defaultReasoningEffort === "high" &&
+    kimiK3?.supportedReasoningEfforts?.join(",") ===
       KIMI_K3_REASONING_EFFORTS.join(",") &&
     isProviderExecutable("kimi"),
   "Kimi should default to K3 with the low/high/max effort levels it accepts.",

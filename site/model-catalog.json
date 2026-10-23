@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-10-23.2",
+  "revision": "2026-10-23.3",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -199,6 +199,39 @@
       "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "kimi",
+      "id": "k3.1-pro",
+      "displayName": "Kimi K3.1 Pro",
+      "description": "Kimi Code. Flagship of the K3.1 series. Up to 1M context on Pro and Allegretto; Plus and Moderato stay at 262,144. Thinking is required.",
+      "minClientRevision": 2,
+      "insertBefore": "k3",
+      "contextWindowTokens": 262144,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "kimi",
+      "id": "k3.1-pro-highspeed",
+      "displayName": "Kimi K3.1 Pro Highspeed",
+      "description": "Kimi Code. The same K3.1 Pro model, about 2-3x faster. Pro and Allegretto only, with a 1,048,576 context window.",
+      "minClientRevision": 2,
+      "insertBefore": "k3",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "moonshotai/kimi-k3.1-pro",
+      "displayName": "Kimi K3.1 Pro",
+      "description": "OpenRouter API. Flagship open-weight model with a 1,048,576 context. Kimi Code's offline baseline for this model is 262,144.",
+      "minClientRevision": 2,
+      "insertBefore": "moonshotai/kimi-k3",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
     },
     {
       "providerId": "openrouter",

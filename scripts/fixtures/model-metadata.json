@@ -4,14 +4,14 @@
   "sources": {
     "openai": "Codex 0.163.0 signed-in catalog context_window, rechecked 2026-10-23: 500000 for gpt-6.1-sol, 272000 for the other current models. A logged-out `codex debug models` prints the bundled 272000 stub for Sol. API maxima are separate. https://learn.chatgpt.com/docs/models",
     "anthropic": "Claude Code 2.1.308 serves 1M by default for every picker model except Haiku 4.5 at 200K. The API table and OpenRouter's anthropic rows also serve 1M; those are separate connections. https://platform.claude.com/docs/en/build-with-claude/context-windows rechecked 2026-10-23.",
-    "kimi": "https://www.kimi.com/code/docs/en/kimi-code/models.html rechecked 2026-10-22. k3 is 262144 on Plus/Moderato and 1048576 on Pro/Allegretto. The offline baseline is the lower ceiling; the runtime window wins.",
+    "kimi": "https://www.kimi.com/code/docs/en/kimi-code/models.html rechecked 2026-10-23. k3 and k3.1-pro are 262144 on Plus/Moderato and 1048576 on Pro/Allegretto. k3.1-pro-highspeed is Pro/Allegretto only at 1048576. The offline baseline is the lower ceiling; the runtime window wins. Efforts are low/high/max; K3.1 defaults to max. https://www.kimi.com/code/docs/en/kimi-code/whats-new.html",
     "xai": "Grok Build CLI 1.0.67 models cache, fetched 2026-10-23 from https://cli-chat-proxy.grok.com/v1/models. context_window is 256000 for grok-4.7, grok-4.6, grok-4.5, and grok-4.7-build-fast. 500000 is only the optional larger CLI window. This connection is not the public API.",
     "antigravity": "Official Google Antigravity ACP 1.3.0 handshake; models discovered after authentication. No fixed context or effort advertised. https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json",
     "cursor": "Configured externally; no fixed context or effort advertised.",
     "opencode": "Configured externally; no fixed context or effort advertised.",
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing/ rechecked 2026-10-23. Both models publish a 1M context length, stored as 1000000.",
     "mistral": "https://docs.mistral.ai/resources/known-limitations rechecked 2026-10-23. 256k for Medium 3.5, Large 3, and Small 4; 128k for Codestral. mistral-large-latest still resolves to Large 3. Large 4 is a separate 1M id and is not in the picker.",
-    "openrouter": "https://openrouter.ai/api/v1/models fetched 2026-10-23. context_length and top_provider.context_length agree for every curated id."
+    "openrouter": "https://openrouter.ai/api/v1/models fetched 2026-10-23. context_length and top_provider.context_length agree for every curated id. moonshotai/kimi-k3.1-pro is 1048576 with efforts max/high/low (none omitted) and default max. No separate highspeed model id."
   },
   "columns": [
     "providerId",
@@ -128,6 +128,8 @@
       "medium"
     ],
     ["anthropic", "claude-haiku-4-5", 200000, [], null],
+    ["kimi", "k3.1-pro", 262144, ["low", "high", "max"], "max"],
+    ["kimi", "k3.1-pro-highspeed", 1048576, ["low", "high", "max"], "max"],
     ["kimi", "k3", 262144, ["low", "high", "max"], "high"],
     ["xai", "grok-4.7", 256000, ["low", "medium", "high", "xhigh"], "high"],
     ["xai", "grok-4.6", 256000, ["low", "medium", "high", "xhigh"], "high"],
@@ -190,6 +192,13 @@
       1000000,
       ["low", "medium", "high", "xhigh", "max"],
       "high"
+    ],
+    [
+      "openrouter",
+      "moonshotai/kimi-k3.1-pro",
+      1048576,
+      ["low", "high", "max"],
+      "max"
     ],
     [
       "openrouter",

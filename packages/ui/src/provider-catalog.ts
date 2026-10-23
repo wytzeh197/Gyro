@@ -82,11 +82,11 @@ export const OPENROUTER_REASONING_EFFORTS: ReasoningEffort[] = [
 ];
 
 /**
- * The thinking effort levels Kimi K3 accepts.
+ * The thinking effort levels Kimi K3 and K3.1 accept.
  *
- * The Kimi Code service provisions k3 with `support_efforts` of low, high,
- * and max (default high); any other value is rejected at turn time and the
- * session falls back to the model default.
+ * Kimi Code provisions these models with `support_efforts` of low, high, and
+ * max. K3 defaults to high. K3.1 Pro defaults to max, and thinking cannot be
+ * turned off. Any other value is rejected at turn time.
  */
 export const KIMI_K3_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
@@ -363,10 +363,30 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "k3.1-pro",
+        displayName: "Kimi K3.1 Pro",
+        description:
+          "Kimi Code. Flagship of the K3.1 series. Up to 1M context on Pro and Allegretto; Plus and Moderato stay at 262,144. Thinking is required.",
+        // Plus and Moderato are capped at 262,144. Pro and Allegretto receive
+        // 1,048,576. A session's runtime-reported window takes precedence.
+        contextWindowTokens: 262_144,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
+      },
+      {
+        id: "k3.1-pro-highspeed",
+        displayName: "Kimi K3.1 Pro Highspeed",
+        description:
+          "Kimi Code. The same K3.1 Pro model, about 2-3x faster. Pro and Allegretto only, with a 1,048,576 context window.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
+      },
+      {
         id: "k3",
         displayName: "Kimi K3",
         description:
-          "Kimi Code. Flagship coding model. Up to 1M context on eligible plans. The OpenRouter API row is a separate 1,048,576.",
+          "Kimi Code. Previous flagship coding model. Up to 1M context on eligible plans. The OpenRouter API row is a separate 1,048,576.",
         // Plus and Moderato are capped at 262,144. Pro and Allegretto receive
         // 1,048,576. A session's runtime-reported window takes precedence.
         contextWindowTokens: 262_144,
@@ -706,6 +726,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
           "OpenRouter API. Low-cost general model. DeepSeek's own API serves 1M.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "high",
+        supportedReasoningEfforts: ["low", "high", "max"],
+      },
+      {
+        id: "moonshotai/kimi-k3.1-pro",
+        displayName: "Kimi K3.1 Pro",
+        description:
+          "OpenRouter API. Flagship open-weight model with a 1,048,576 context. Kimi Code's offline baseline for this model is 262,144.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "max",
         supportedReasoningEfforts: ["low", "high", "max"],
       },
       {

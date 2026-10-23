@@ -758,6 +758,13 @@ assert.equal(
       ],
     },
     {
+      name: "Kimi K3.1 Pro",
+      rows: [
+        ["kimi", "k3.1-pro", "cli", 262_144],
+        ["openrouter", "moonshotai/kimi-k3.1-pro", "api", 1_048_576],
+      ],
+    },
+    {
       name: "Kimi K3",
       rows: [
         ["kimi", "k3", "cli", 262_144],
