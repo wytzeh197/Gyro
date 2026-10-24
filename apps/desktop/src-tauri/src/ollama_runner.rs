@@ -334,10 +334,14 @@ pub(super) fn run_ollama_chat(
     );
     let mut response = None;
     let mut paused_at_tool_budget = false;
-    // The window the live context note measures against: the catalog's value
-    // when it has one for the model, otherwise the note says no window is
-    // known and reports the prompt count alone.
-    let mut context_window = None;
+    // The window the live context note measures against. Catalog and runtime
+    // windows are known before the first request, so a full thread can compact
+    // on round two instead of waiting for this turn to discover the size. A
+    // window the model reports later replaces that figure.
+    let mut context_window = crate::provider_context::provider_model_context_window(
+        &request.provider_id,
+        request.model_id.as_deref(),
+    );
     // `usageGuard.autoCompactPercent`, read once: the guard is native-owned and
     // a settings save cannot change it mid-turn.
     let auto_compact_percent = config.usage_guard.auto_compact_percent;
@@ -465,7 +469,11 @@ pub(super) fn run_ollama_chat(
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
             }
             // What the live context note reports before the next request.
-            context_window = turn.context_window_tokens;
+            // A missing report must not wipe a window already resolved.
+            context_window = turn
+                .context_window_tokens
+                .filter(|window| *window > 0)
+                .or(context_window);
             last_measured = Some((turn.input_tokens, turn.output_tokens));
             // The meter shows this request's prompt, not the turn's summed bill.
             if let Some(usage) = crate::provider_context::occupancy_from_request(

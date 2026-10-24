@@ -192,12 +192,6 @@ impl WorkspaceCheckReport {
         if let Some(error) = self.error.as_deref() {
             lines.push(format!("Check note: {error}"));
         }
-        if self.status != WorkspaceCheckStatus::Unavailable {
-            lines.push(
-                "This check is already attached and current. Call gyro_workspace_check or gyro_workspace_get_context only for a newer reading; use other Workspace tools for file contents. Do not guess missing files."
-                    .into(),
-            );
-        }
         lines.join("\n")
     }
 }
@@ -801,8 +795,8 @@ mod tests {
         assert!(report.markers.iter().any(|marker| marker == "Cargo.toml"));
         let briefing = report.briefing();
         assert!(briefing.contains("Project: rust"));
-        assert!(briefing.contains("gyro_workspace_check"));
-        assert!(briefing.contains("already attached and current"));
+        assert!(!briefing.contains("gyro_workspace_check"));
+        assert!(!briefing.contains("already attached and current"));
         assert!(!briefing.contains("to refresh this snapshot"));
     }
 

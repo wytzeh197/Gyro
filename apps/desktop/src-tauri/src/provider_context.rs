@@ -321,6 +321,110 @@ fn is_context_compaction(message: &Value) -> bool {
         .is_some_and(|content| content.starts_with(CONTEXT_COMPACTION_MARKER))
 }
 
+/// One provider reading of how full the window is.
+///
+/// Counts are the prompt the provider measured. The window is the one that
+/// reading named. A catalog window is filled in by the caller when this one
+/// did not name one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AutoCompactReading {
+    pub(super) input_tokens: Option<u64>,
+    pub(super) output_tokens: Option<u64>,
+    pub(super) model_context_window: Option<u64>,
+}
+
+/// One persisted chat event, reduced to what the auto-compact decision needs.
+#[derive(Clone, Debug)]
+pub(super) struct SessionContextSignal {
+    pub(super) provider_id: Option<String>,
+    pub(super) model_id: Option<String>,
+    pub(super) reading: Option<AutoCompactReading>,
+    /// A session rewrite, the same kind `/compact` records. An in-loop note
+    /// does not set this: that rewrite never replaces the resumed session.
+    pub(super) session_compaction: bool,
+}
+
+/// Whether the next turn should compact before it sends, for any provider.
+///
+/// The tool-loop rewrite only sees messages Gyro owns. Codex, Claude, Grok,
+/// Kimi, Antigravity, and any other resumed session keep their own transcript,
+/// so the decision lives here and the caller runs the same compaction `/compact`
+/// runs. A reported window is enough. The catalog fills in when the reading
+/// named tokens but not a size. No window, an estimate, a switched-off
+/// setting, another provider's reading, or a compaction that already followed
+/// this reading all decline.
+pub(super) fn should_auto_compact_session(
+    percent: u32,
+    provider_id: &str,
+    model_id: Option<&str>,
+    catalog_window: Option<u64>,
+    signals: &[SessionContextSignal],
+) -> bool {
+    if percent == 0 {
+        return false;
+    }
+    let mut reading: Option<AutoCompactReading> = None;
+    let mut compacted_after = false;
+    for signal in signals {
+        if signal_is_for_other_model(signal, provider_id, model_id) {
+            if signal.reading.is_some() || signal.session_compaction {
+                reading = None;
+                compacted_after = false;
+            }
+            continue;
+        }
+        if signal.session_compaction && reading.is_some() {
+            compacted_after = true;
+        }
+        if let Some(next) = signal.reading.clone() {
+            reading = Some(next);
+            compacted_after = false;
+        }
+    }
+    if compacted_after {
+        return false;
+    }
+    let Some(mut reading) = reading else {
+        return false;
+    };
+    if reading
+        .model_context_window
+        .filter(|window| *window > 0)
+        .is_none()
+    {
+        reading.model_context_window = catalog_window.filter(|window| *window > 0);
+    }
+    auto_compaction_fill(
+        reading.input_tokens,
+        reading.output_tokens,
+        reading.model_context_window,
+        percent,
+    )
+    .is_some()
+}
+
+fn signal_is_for_other_model(
+    signal: &SessionContextSignal,
+    provider_id: &str,
+    model_id: Option<&str>,
+) -> bool {
+    if signal
+        .provider_id
+        .as_deref()
+        .is_some_and(|id| !id.is_empty() && id != provider_id)
+    {
+        return true;
+    }
+    match (signal.model_id.as_deref(), model_id) {
+        (Some(signal_model), Some(current))
+            if !signal_model.is_empty() && signal_model != current =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
 fn message_role(message: &Value) -> Option<&str> {
     message.get("role").and_then(Value::as_str)
 }
@@ -1159,5 +1263,104 @@ mod tests {
         // No measurement yet: the first round of a turn has nothing to report.
         assert!(auto_compact_messages(&mut messages, None, None, Some(8_000), 80).is_none());
         assert_eq!(messages, snapshot);
+    }
+
+    fn reading(input: u64, window: u64) -> SessionContextSignal {
+        SessionContextSignal {
+            provider_id: Some("xai".into()),
+            model_id: Some("grok-4.7".into()),
+            reading: Some(AutoCompactReading {
+                input_tokens: Some(input),
+                output_tokens: Some(0),
+                model_context_window: Some(window),
+            }),
+            session_compaction: false,
+        }
+    }
+
+    #[test]
+    fn session_auto_compact_uses_a_reported_window_for_any_provider() {
+        let full = reading(205_000, 256_000);
+        assert!(
+            should_auto_compact_session(80, "xai", Some("grok-4.7"), None, &[full.clone()]),
+            "205K of a reported 256K window is the default threshold"
+        );
+        assert!(
+            !should_auto_compact_session(
+                80,
+                "xai",
+                Some("grok-4.7"),
+                None,
+                &[reading(200_000, 256_000)]
+            ),
+            "just under the share stays"
+        );
+        assert!(!should_auto_compact_session(
+            0,
+            "xai",
+            Some("grok-4.7"),
+            None,
+            &[full.clone()]
+        ));
+        let mut other = full.clone();
+        other.provider_id = Some("anthropic".into());
+        other.model_id = Some("claude-sonnet-5".into());
+        assert!(!should_auto_compact_session(
+            80,
+            "xai",
+            Some("grok-4.7"),
+            None,
+            &[other]
+        ));
+    }
+
+    #[test]
+    fn session_auto_compact_waits_for_a_new_reading_after_it_already_ran() {
+        let full = reading(205_000, 256_000);
+        let compacted = SessionContextSignal {
+            provider_id: Some("xai".into()),
+            model_id: Some("grok-4.7".into()),
+            reading: None,
+            session_compaction: true,
+        };
+        assert!(!should_auto_compact_session(
+            80,
+            "xai",
+            Some("grok-4.7"),
+            None,
+            &[full.clone(), compacted.clone()]
+        ));
+        let still_full = reading(210_000, 256_000);
+        assert!(should_auto_compact_session(
+            80,
+            "xai",
+            Some("grok-4.7"),
+            None,
+            &[full, compacted, still_full]
+        ));
+    }
+
+    #[test]
+    fn session_auto_compact_borrows_the_catalog_when_the_reading_has_no_window() {
+        let mut tokens_only = reading(90_000, 1);
+        if let Some(reading) = tokens_only.reading.as_mut() {
+            reading.model_context_window = None;
+        }
+        tokens_only.provider_id = Some("custom".into());
+        tokens_only.model_id = Some("local-model".into());
+        assert!(!should_auto_compact_session(
+            80,
+            "custom",
+            Some("local-model"),
+            None,
+            &[tokens_only.clone()]
+        ));
+        assert!(should_auto_compact_session(
+            80,
+            "custom",
+            Some("local-model"),
+            Some(100_000),
+            &[tokens_only]
+        ));
     }
 }

@@ -312,6 +312,8 @@ pub(super) fn run_openai_compatible_chat(
         let mut compatibility = compatibility;
         let mut malformed_responses = 0usize;
         let mut completed_rounds = 0usize;
+        let mut output_continuations = 0usize;
+        let mut joined_output = String::new();
         loop {
             let round = completed_rounds;
             if round_budget.is_some_and(|limit| round > limit) {
@@ -325,7 +327,14 @@ pub(super) fn run_openai_compatible_chat(
             // in Usage Limits, the oldest tool exchanges are replaced so later
             // rounds stop re-sending results the turn has moved past. It costs
             // no provider call -- the message list itself is what shrinks --
-            // which is what makes it safe to leave on by default.
+            // which is what makes it safe to leave on by default. The lookup
+            // is repeated so a window learned from an earlier response in this
+            // process counts even when the catalog has no row for the model.
+            let context_window = crate::provider_context::provider_model_context_window(
+                &request.provider_id,
+                Some(model),
+            )
+            .or(context_window);
             if let Some((input_tokens, output_tokens)) = last_measured {
                 if let Some(compaction) = crate::provider_context::auto_compact_messages(
                     &mut messages,
@@ -458,6 +467,37 @@ pub(super) fn run_openai_compatible_chat(
             );
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
+            }
+            // A text-only length finish is an unfinished answer. Join the next
+            // chunk with no extra newline, up to the same three continuations
+            // ACP uses, and do not spend a tool round on the retry. A cut that
+            // included tool calls never reaches here. The compatibility bridge
+            // must not parse that partial text as a protocol object.
+            match continue_owned_output_limit(
+                &turn.content,
+                turn.truncated,
+                turn.tool_calls.is_empty(),
+                &mut joined_output,
+                &mut output_continuations,
+            ) {
+                OwnedOutputLimit::Continue => {
+                    completed_rounds -= 1;
+                    messages.push(
+                        serde_json::json!({"role":"assistant","content":turn.content}),
+                    );
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": gyro_core::kimi_acp::ACP_OUTPUT_LIMIT_CONTINUATION
+                    }));
+                    continue;
+                }
+                OwnedOutputLimit::Finish(content) => {
+                    turn.content = content;
+                    paused_at_tool_budget = false;
+                    response = Some(turn);
+                    break;
+                }
+                OwnedOutputLimit::Proceed => {}
             }
             if compatibility {
                 anyhow::ensure!(
@@ -688,9 +728,78 @@ pub(super) fn run_openai_compatible_chat(
     run_result
 }
 
+#[derive(Debug)]
+enum OwnedOutputLimit {
+    Proceed,
+    Continue,
+    Finish(String),
+}
+
+/// Join a text-only output cap onto the next chunk. Tool calls proceed unchanged.
+fn continue_owned_output_limit(
+    content: &str,
+    truncated: bool,
+    tool_calls_empty: bool,
+    joined: &mut String,
+    attempts: &mut usize,
+) -> OwnedOutputLimit {
+    if !tool_calls_empty || (!truncated && joined.is_empty()) {
+        return OwnedOutputLimit::Proceed;
+    }
+    joined.push_str(content);
+    if truncated && *attempts < gyro_core::kimi_acp::ACP_AGENT_STOP_RECOVERY_ATTEMPTS {
+        *attempts += 1;
+        OwnedOutputLimit::Continue
+    } else {
+        OwnedOutputLimit::Finish(std::mem::take(joined))
+    }
+}
+
 #[cfg(test)]
 mod image_tests {
     use super::*;
+
+    #[test]
+    fn a_text_only_length_finish_joins_three_times_then_stays_cut_off() {
+        let mut joined = String::new();
+        let mut attempts = 0usize;
+        for chunk in ["hel", "lo wor", "ld"] {
+            assert!(matches!(
+                continue_owned_output_limit(chunk, true, true, &mut joined, &mut attempts),
+                OwnedOutputLimit::Continue
+            ));
+        }
+        assert_eq!(attempts, 3);
+        assert_eq!(joined, "hello world");
+        match continue_owned_output_limit("!", true, true, &mut joined, &mut attempts) {
+            OwnedOutputLimit::Finish(text) => assert_eq!(text, "hello world!"),
+            other => panic!("expected the capped answer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_finished_continuation_joins_without_a_newline_and_tool_calls_proceed() {
+        let mut joined = String::new();
+        let mut attempts = 0usize;
+        assert!(matches!(
+            continue_owned_output_limit("par", true, true, &mut joined, &mut attempts),
+            OwnedOutputLimit::Continue
+        ));
+        match continue_owned_output_limit("tial", false, true, &mut joined, &mut attempts) {
+            OwnedOutputLimit::Finish(text) => assert_eq!(text, "partial"),
+            other => panic!("expected a joined finish, got {other:?}"),
+        }
+        let mut joined = String::new();
+        assert!(matches!(
+            continue_owned_output_limit("call", true, false, &mut joined, &mut attempts),
+            OwnedOutputLimit::Proceed
+        ));
+        assert!(joined.is_empty());
+        assert!(matches!(
+            continue_owned_output_limit("done", false, true, &mut joined, &mut attempts),
+            OwnedOutputLimit::Proceed
+        ));
+    }
 
     #[test]
     fn structured_bridge_fallback_requires_an_explicit_tool_rejection() {

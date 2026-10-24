@@ -110,11 +110,9 @@ pub(super) fn advertised_tool_parameters(id: CapabilityId) -> serde_json::Value 
     if inline_tool_schema(id) {
         desktop_capability_tool_schema(id)
     } else {
-        let prefix = catalog_prefix(id);
         serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "description": format!("Call gyro_tool_catalog with prefix {prefix} before using this tool. Execution still checks the full schema."),
             "properties": {}
         })
     }
@@ -384,14 +382,10 @@ mod tests {
                     );
                 } else {
                     let parameters = &tool["function"]["parameters"];
-                    assert!(
-                        parameters["description"]
-                            .as_str()
-                            .unwrap()
-                            .contains("gyro_tool_catalog"),
-                        "{}",
-                        descriptor.id.provider_tool_name()
-                    );
+                    assert!(parameters.get("description").is_none());
+                    assert_eq!(parameters["type"], "object");
+                    assert_eq!(parameters["additionalProperties"], false);
+                    assert_eq!(parameters["properties"], serde_json::json!({}));
                     assert_ne!(
                         parameters,
                         &desktop_capability_tool_schema(descriptor.id)

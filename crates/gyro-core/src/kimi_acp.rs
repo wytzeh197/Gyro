@@ -63,7 +63,7 @@ and say plainly what you could not do.";
 /// How many times one turn may be re-asked after the agent stopped its own turn.
 /// Agents report a declined or failed tool as their own stop, and a turn that
 /// does real work can meet more than one.
-const ACP_AGENT_STOP_RECOVERY_ATTEMPTS: usize = 3;
+pub const ACP_AGENT_STOP_RECOVERY_ATTEMPTS: usize = 3;
 
 /// Sent to the agent when its own output limit ended the prompt mid-answer.
 ///
@@ -71,7 +71,7 @@ const ACP_AGENT_STOP_RECOVERY_ATTEMPTS: usize = 3;
 /// instead of failing it, and ACP reports that as a normal stopped prompt. The
 /// turn then looked finished while the text stopped mid-word. Asking the same
 /// session to carry on is what turns that into one complete answer.
-const ACP_OUTPUT_LIMIT_CONTINUATION: &str = "Your previous message stopped at the \
+pub const ACP_OUTPUT_LIMIT_CONTINUATION: &str = "Your previous message stopped at the \
 output limit before the answer was finished. Continue from the exact character where \
 you stopped, with no preamble and without repeating what you already wrote.";
 
@@ -105,6 +105,29 @@ fn acp_stop_is_output_limit(reason: &str) -> bool {
             | "contextlimit"
             | "maxcontexttokens"
     )
+}
+
+fn acp_stop_is_end_turn(reason: &str) -> bool {
+    let normalized = reason
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    normalized == "endturn"
+}
+
+/// A boolean the provider set on this result. Token totals and prose are not a cut.
+fn acp_result_marks_output_truncated(result: &Value) -> bool {
+    result.get("truncated").and_then(Value::as_bool) == Some(true)
+        || result
+            .pointer("/_meta/truncated")
+            .and_then(Value::as_bool)
+            == Some(true)
+}
+
+fn acp_result_needs_output_continuation(reason: &str, result: &Value) -> bool {
+    acp_stop_is_output_limit(reason)
+        || (acp_stop_is_end_turn(reason) && acp_result_marks_output_truncated(result))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -982,7 +1005,7 @@ where
             .get("stopReason")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let cut_short = acp_stop_is_output_limit(stopped);
+        let cut_short = acp_result_needs_output_continuation(stopped, &result);
         if stopped != "cancelled" && !cut_short {
             break;
         }
@@ -1099,7 +1122,7 @@ where
         // being reported as a complete answer.
         _ => {}
     }
-    let truncated = acp_stop_is_output_limit(&stop_reason);
+    let truncated = acp_result_needs_output_continuation(&stop_reason, &result);
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
@@ -2444,6 +2467,7 @@ mod tests {
 
     use super::{
         acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
+        acp_result_marks_output_truncated, acp_result_needs_output_continuation,
         acp_session_reopen_methods, acp_stop_is_output_limit, check_kimi_acp_health,
         classify_approval, is_acp_method_not_found, permission_option_id,
         plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, CredentialPolicy,
@@ -3791,6 +3815,112 @@ done
         assert!(!cancellation.is_cancelled(), "nobody pressed Stop");
     }
 
+    /// `end_turn` continues only when that same result sets truncated.
+    #[cfg(unix)]
+    fn end_turn_mark_fixture(kind: &str) -> (tempfile::TempDir, PathBuf) {
+        let answer = match kind {
+            "join" => {
+                r#"if test "$prompts" -eq 1; then
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hel"}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn","truncated":true}}'
+      else
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"lo"}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      fi"#
+            }
+            "always" => {
+                r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ab"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn","_meta":{"truncated":true}}}'"#
+            }
+            _ => {
+                r#"if test "$prompts" -eq 1; then
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Finished."}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      else
+        printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"SHOULD NOT CONTINUE"}}}}'
+        printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"stopReason":"end_turn"}}'
+      fi"#
+            }
+        };
+        let script = r#"
+prompts=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"limit-session"}}' ;;
+    *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      id=${line#*'"id":'}
+      id=${id%%,*}
+      prompts=$((prompts + 1))
+      @ANSWER@ ;;
+  esac
+done
+"#
+        .replace("@ANSWER@", answer);
+        acp_fixture(&script)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn end_turn_with_an_explicit_truncated_mark_continues_and_joins() {
+        let (temp, program) = end_turn_mark_fixture("join");
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), Default::default(), None),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("end_turn plus truncated must continue");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert!(!output.truncated);
+        assert!(
+            output.response.contains("hello"),
+            "halves did not rejoin: {}",
+            output.response
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn end_turn_that_stays_truncated_is_flagged_after_three_continuations() {
+        let (temp, program) = end_turn_mark_fixture("always");
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), Default::default(), None),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("the streamed answer is kept");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert!(output.truncated);
+        assert_eq!(output.response.matches("ab").count(), 4, "{}", output.response);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_end_turn_stays_finished() {
+        let (temp, program) = end_turn_mark_fixture("plain");
+        let output = run_kimi_acp(
+            fixture_request(program, temp.path().into(), Default::default(), None),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .expect("a plain end_turn is a finished answer");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert!(!output.truncated);
+        assert!(output.response.contains("Finished."));
+        assert!(!output.response.contains("SHOULD NOT CONTINUE"));
+    }
+
     /// An agent that ends the prompt at the model's output cap, the way Grok,
     /// Kimi and OpenCode report it: an ordinary result with `max_tokens` and
     /// the text stopping inside a word.
@@ -3908,6 +4038,25 @@ done
                 "{reason} is not an output limit"
             );
         }
+    }
+
+    #[test]
+    fn end_turn_continues_only_when_the_same_result_marks_output_truncated() {
+        let marked = json!({"stopReason":"end_turn","truncated":true});
+        let meta = json!({"stopReason":"endTurn","_meta":{"truncated":true}});
+        let plain = json!({
+            "stopReason": "end_turn",
+            "truncated": false,
+            "_meta": {"totalTokens": 3_000_000, "usage": {"input": 1}}
+        });
+        assert!(acp_result_needs_output_continuation("end_turn", &marked));
+        assert!(acp_result_needs_output_continuation("endTurn", &meta));
+        assert!(!acp_result_needs_output_continuation("end_turn", &plain));
+        assert!(acp_result_needs_output_continuation("max_tokens", &plain));
+        assert!(!acp_result_marks_output_truncated(&json!({
+            "stopReason": "end_turn",
+            "_meta": {"totalTokens": 9}
+        })));
     }
 
     #[cfg(unix)]

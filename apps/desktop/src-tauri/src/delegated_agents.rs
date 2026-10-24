@@ -1705,7 +1705,8 @@ mod tests {
                     approvals_sent_separately: false,
                 },
             );
-            assert!(prompt.contains("This turn runs with one agent"));
+            // Resume has no stored posture, so the one-agent line is opening-only.
+            assert_eq!(!resumed, prompt.contains("This turn runs with one agent"));
             assert!(!prompt.contains("gyro_agent_spawn/wait/send/stop"));
             assert!(!prompt.contains("task complexity warrants another model call"));
             request.reasoning_effort = Some("max".into());
@@ -1728,7 +1729,10 @@ mod tests {
                     approvals_sent_separately: false,
                 },
             );
-            assert!(prompt.contains("gyro_agent_spawn/wait/send/stop"));
+            assert_eq!(
+                !resumed,
+                prompt.contains("gyro_agent_spawn/wait/send/stop")
+            );
             request.message = original_message;
             request.reasoning_effort = Some("high".into());
         }

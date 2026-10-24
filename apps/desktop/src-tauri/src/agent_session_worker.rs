@@ -13,6 +13,14 @@ use gyro_core::{provider_is_executable_for, GyroConfig};
 use std::time::Duration;
 
 pub(super) fn start(app: tauri::AppHandle) {
+    let hook_app = app.clone();
+    gyro_core::agent_sessions::set_session_stop_hook(std::sync::Arc::new(move |session_id| {
+        let _ = stop_provider_run(
+            &hook_app,
+            &session_id.to_string(),
+            ProviderStopReason::User,
+        );
+    }));
     let spawned = std::thread::Builder::new()
         .name("gyro-agent-sessions".into())
         .spawn(move || worker(app));
@@ -73,6 +81,9 @@ fn worker(app: tauri::AppHandle) {
 fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
     let finish = |outcome: Result<String, String>| {
         if let Ok(store) = AgentSessionStore::open(paths.clone()) {
+            if let Some(session_id) = row.session_id {
+                let _ = store.clear_command_block_for_session(session_id);
+            }
             if let Err(error) = store.finish(row.id, outcome) {
                 eprintln!("could not finish agent session {}: {error}", row.id);
             }

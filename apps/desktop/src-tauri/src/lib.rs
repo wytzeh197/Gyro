@@ -6149,13 +6149,13 @@ fn provider_context_message_with_capabilities_for_turn(
     } else if supports_tools {
         // The tool list already names each call. This line only stops the model
         // from repeating work it already has; the longer form said the same thing.
-        let efficiency = "Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.";
-        if turn.resumed {
-            context.push(efficiency.into());
-        } else {
-            stable.push(efficiency.into());
+        // The opening turn already delivered these standing rules. A resumed
+        // thread stores no previous posture, so delegation guidance is omitted
+        // on every resume rather than guessed from a change that cannot be seen.
+        if !turn.resumed {
+            stable.push("Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.".into());
+            context.push(delegated_agents::prompt_guidance(request, false).into());
         }
-        context.push(delegated_agents::prompt_guidance(request, turn.resumed).into());
         if let Some(workspace) = request.workspace_path.as_deref() {
             context.push(format!("Selected workspace: {workspace}"));
         }
@@ -6167,11 +6167,8 @@ fn provider_context_message_with_capabilities_for_turn(
             // Tool descriptions already name list, search, read, and edit.
             // Repeating that tutorial on every fresh session was paid again
             // on each request and did not add a rule the short form lacks.
-            let implementation = "Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes by passing knownContentHash from the prior read. Read the body again only when the hash differs or that range was never loaded, and confirm with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results.";
-            if turn.resumed {
-                context.push(implementation.into());
-            } else {
-                stable.push(implementation.into());
+            if !turn.resumed {
+                stable.push("Finish requested implementation with authorized edits and relevant verification. Read files before gyro_workspace_edit or gyro_workspace_propose_edit; inspect its status, report pending review when applicable, and verify applied changes by passing knownContentHash from the prior read. Read the body again only when the hash differs or that range was never loaded, and confirm with a fresh read or diff. Never claim success without confirming tool evidence. Correct failed requests using their errors; report an unavailable bridge rather than inventing results.".into());
             }
         }
         if let Some(check) = request.workspace_check.as_ref() {
@@ -6209,14 +6206,18 @@ fn provider_context_message_with_capabilities_for_turn(
             );
             stable.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
         }
+        if !turn.resumed {
+            stable.push(
+                "Call gyro_tool_catalog with the tool's domain prefix (gyro_workspace_, gyro_code_, gyro_terminal_, gyro_browser_, gyro_git_, gyro_ide_, gyro_github_, gyro_memory_, gyro_research_, or gyro_agent_) before using a tool whose schema was not inlined.".into(),
+            );
+        }
+    }
+    // Any mode can ask. The short form stays in the stable prefix of the opening turn.
+    if !turn.resumed {
         stable.push(
-            "Call gyro_tool_catalog with the tool's domain prefix (gyro_workspace_, gyro_code_, gyro_terminal_, gyro_browser_, gyro_git_, gyro_ide_, gyro_github_, gyro_memory_, gyro_research_, or gyro_agent_) before using a tool whose schema was not inlined.".into(),
+            "Ask only for a user decision that changes your action and cannot be settled by project reads; otherwise keep working. Write one short sentence, then one hidden JSON line: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Decision?\",\"options\":[{\"label\":\"A\",\"detail\":\"Effect\",\"recommended\":true},{\"label\":\"B\",\"detail\":\"Effect\"}]}]}. At most 3 questions, 2–4 options each, at most one recommended option per question. Do not repeat questions in prose; end the turn and wait for answers.".into(),
         );
     }
-    // Any mode can ask. The short form stays in the stable prefix.
-    stable.push(
-        "Ask only for a user decision that changes your action and cannot be settled by project reads; otherwise keep working. Write one short sentence, then one hidden JSON line: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Decision?\",\"options\":[{\"label\":\"A\",\"detail\":\"Effect\",\"recommended\":true},{\"label\":\"B\",\"detail\":\"Effect\"}]}]}. At most 3 questions, 2–4 options each, at most one recommended option per question. Do not repeat questions in prose; end the turn and wait for answers.".into(),
-    );
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -12932,6 +12933,128 @@ fn usage_guard_block(
     }
 }
 
+fn session_context_signal(event: &SessionEvent) -> provider_context::SessionContextSignal {
+    let object = event.payload.as_object();
+    let text = |key: &str| {
+        object
+            .and_then(|payload| payload.get(key))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let session_compaction = object.is_some_and(|payload| {
+        payload.get("kind").and_then(serde_json::Value::as_str) == Some("provider-activity")
+            && payload
+                .get("activityKind")
+                .and_then(serde_json::Value::as_str)
+                == Some("context")
+            && payload
+                .get("activityId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| id.starts_with("context-compaction-"))
+    });
+    // Usage written onto the compaction itself is the summary call, not the
+    // thread the next turn will resume. Treating it as a fresh reading would
+    // compact again on every message.
+    let reading = if session_compaction {
+        None
+    } else {
+        object
+            .and_then(|payload| payload.get("contextUsage"))
+            .and_then(serde_json::Value::as_object)
+            .filter(|usage| {
+                usage.get("estimated").and_then(serde_json::Value::as_bool) != Some(true)
+            })
+            .map(|usage| provider_context::AutoCompactReading {
+                input_tokens: usage.get("inputTokens").and_then(serde_json::Value::as_u64),
+                output_tokens: usage.get("outputTokens").and_then(serde_json::Value::as_u64),
+                model_context_window: usage
+                    .get("modelContextWindow")
+                    .and_then(serde_json::Value::as_u64),
+            })
+    };
+    provider_context::SessionContextSignal {
+        provider_id: text("providerId"),
+        model_id: text("modelId"),
+        reading,
+        session_compaction,
+    }
+}
+
+/// Compact a resumed session before the next prompt when its last measured
+/// fill is at or past the configured share.
+///
+/// Every provider reaches the model through `run_provider_chat_with_retry`,
+/// so this is the one place a new adapter cannot skip. The rewrite is the
+/// same one `/compact` runs: Codex compacts inside its session, and every
+/// other provider starts the next prompt from the saved checkpoint. A
+/// compaction summary is itself a provider call and must not compact again.
+fn auto_compact_owned_session(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    binding: Option<ProviderSessionBinding>,
+    usage_context: UsageContext,
+) -> Option<ProviderSessionBinding> {
+    if usage_context.origin == UsageOrigin::ContextCompaction
+        || request.message.trim() == "/compact"
+    {
+        return binding;
+    }
+    let percent = match load_config_blocking() {
+        Ok(config) => config.usage_guard.auto_compact_percent,
+        Err(_) => return binding,
+    };
+    let Ok(session_id) = parse_uuid(&request.session_id) else {
+        return binding;
+    };
+    let Ok(events) = store.read_events(session_id) else {
+        return binding;
+    };
+    let signals = events.iter().map(session_context_signal).collect::<Vec<_>>();
+    let catalog_window = provider_context::provider_model_context_window(
+        &request.provider_id,
+        request.model_id.as_deref(),
+    );
+    if !provider_context::should_auto_compact_session(
+        percent,
+        &request.provider_id,
+        request.model_id.as_deref(),
+        catalog_window,
+        &signals,
+    ) {
+        return binding;
+    }
+    let run_id = request
+        .turn_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .unwrap_or_else(Uuid::new_v4);
+    // Codex compacts inside the resumed session. Everyone else drops the
+    // binding so the following prompt starts from the checkpoint instead of
+    // reopening the full transcript.
+    let keeps_resume = binding.as_ref().is_some_and(|binding| {
+        provider_resume_cursor_from_binding(binding)
+            .is_some_and(|cursor| cursor.kind == "codex-session")
+    });
+    match compact_provider_chat_blocking(app.clone(), request.session_id.clone(), run_id) {
+        Ok(_) => {
+            if keeps_resume {
+                binding
+            } else {
+                None
+            }
+        }
+        Err(error) => {
+            eprintln!(
+                "auto-compaction skipped: {}",
+                gyro_core::security::redact_secrets(&error)
+            );
+            binding
+        }
+    }
+}
+
 fn run_provider_chat_with_retry(
     store: &SessionStore,
     app: &tauri::AppHandle,
@@ -12941,6 +13064,7 @@ fn run_provider_chat_with_retry(
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let profiled = efficiency::profile(request);
     let request = &profiled;
+    let binding = auto_compact_owned_session(store, app, request, binding, usage_context);
     let mut output =
         run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
     let mut continuation = request.clone();
@@ -15202,6 +15326,26 @@ fn codex_provider_approval_response(decision: ProviderApprovalDecision) -> &'sta
     }
 }
 
+struct AgentCommandBlockGuard {
+    session_id: Uuid,
+    active: bool,
+}
+
+impl Drop for AgentCommandBlockGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let Ok(paths) = GyroPaths::for_current_user() else {
+            return;
+        };
+        let Ok(store) = gyro_core::agent_sessions::AgentSessionStore::open(paths) else {
+            return;
+        };
+        let _ = store.clear_command_block_for_session(self.session_id);
+    }
+}
+
 fn wait_for_provider_approval(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -15257,6 +15401,19 @@ fn wait_for_provider_approval_with_transaction(
         .get("command")
         .and_then(serde_json::Value::as_str)
         .map(gyro_core::sanitize_harness_text);
+    let _agent_command_block = if approval_type == "command" {
+        let summary = command.clone().unwrap_or_else(|| "command".into());
+        let active = GyroPaths::for_current_user()
+            .and_then(gyro_core::agent_sessions::AgentSessionStore::open)
+            .and_then(|store| store.note_command_block(session_id, approval_id, &summary))
+            .unwrap_or(false);
+        Some(AgentCommandBlockGuard {
+            session_id,
+            active,
+        })
+    } else {
+        None
+    };
     let reason = details
         .get("reason")
         .and_then(serde_json::Value::as_str)
@@ -16968,7 +17125,9 @@ fn openai_codex_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if message.contains("![short description](/absolute/path.png)") {
+    let image_instruction = if resumed
+        || message.contains("![short description](/absolute/path.png)")
+    {
         ""
     } else {
         CHAT_IMAGE_REPLY_INSTRUCTION
@@ -17029,7 +17188,9 @@ fn claude_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if message.contains("![short description](/absolute/path.png)") {
+    let image_instruction = if resumed
+        || message.contains("![short description](/absolute/path.png)")
+    {
         ""
     } else {
         CHAT_IMAGE_REPLY_INSTRUCTION
@@ -17220,6 +17381,92 @@ fn completed_stream_title(text: &str, message_complete: bool) -> Option<String> 
         return None;
     }
     sanitize_session_title_candidate(&line[..end.unwrap_or(line.len())])
+}
+
+struct VisibleStreamText {
+    visible: String,
+    title: Option<String>,
+}
+
+/// Split one streamed chunk into text the chat may show and a session title.
+///
+/// The title line is a backend instruction. It is removed before anything is
+/// stored or emitted, including when it is glued onto the narration in front
+/// of it. A chunk that ends in the middle of the marker, or in the middle of
+/// the title line, stays in `hold` until the line finishes or the text block
+/// closes.
+fn take_visible_stream_text(hold: &mut String, delta: &str, close_line: bool) -> VisibleStreamText {
+    let mut buffer = String::with_capacity(hold.len() + delta.len());
+    buffer.push_str(hold);
+    buffer.push_str(delta);
+    hold.clear();
+    let mut visible = String::new();
+    let mut title = None;
+    loop {
+        if let Some(at) = buffer.find(GYRO_SESSION_TITLE_MARKER) {
+            visible.push_str(&buffer[..at]);
+            let after_start = at + GYRO_SESSION_TITLE_MARKER.len();
+            let after = &buffer[after_start..];
+            if let Some(end) = after.find('\n') {
+                if title.is_none() {
+                    title = sanitize_session_title_candidate(&after[..end]);
+                }
+                buffer = buffer[after_start + end + 1..].to_string();
+                continue;
+            }
+            if close_line {
+                if title.is_none() {
+                    title = sanitize_session_title_candidate(after);
+                }
+                break;
+            }
+            *hold = buffer[at..].to_string();
+            break;
+        }
+        let keep = if close_line {
+            0
+        } else {
+            trailing_session_title_prefix_len(&buffer)
+        };
+        let split = buffer.len() - keep;
+        visible.push_str(&buffer[..split]);
+        *hold = buffer[split..].to_string();
+        break;
+    }
+    if title.is_some() && visible.trim().is_empty() {
+        visible.clear();
+    }
+    VisibleStreamText { visible, title }
+}
+
+fn trailing_session_title_prefix_len(text: &str) -> usize {
+    let marker = GYRO_SESSION_TITLE_MARKER.as_bytes();
+    let bytes = text.as_bytes();
+    let max = marker.len().saturating_sub(1).min(bytes.len());
+    for len in (1..=max).rev() {
+        if marker.starts_with(&bytes[bytes.len() - len..]) {
+            return len;
+        }
+    }
+    0
+}
+
+fn publish_stream_session_title(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    stream_state: &StreamingCommandState,
+    message_complete: bool,
+) {
+    if let Some(title) = stream_state.captured_session_title.as_deref() {
+        let line = format!("{GYRO_SESSION_TITLE_MARKER} {title}\n");
+        publish_streamed_session_title(app, request, &line, true);
+    }
+    publish_streamed_session_title(
+        app,
+        request,
+        &stream_state.assistant_text,
+        message_complete,
+    );
 }
 
 /// The title control a turn starts with: open, expecting the title Gyro just
@@ -18209,6 +18456,12 @@ struct StreamingCommandState {
     /// "this CLI printed plain text", which decide different fallbacks.
     parsed_stream_json: bool,
     last_emit_at: Option<Instant>,
+    /// The tail of a `GYRO_SESSION_TITLE` line that is not finished yet.
+    /// Nothing in here has been shown.
+    session_title_hold: String,
+    /// The title from that line, once it was long enough to keep. The visible
+    /// transcript does not contain the marker.
+    captured_session_title: Option<String>,
 }
 
 impl StreamingCommandState {
@@ -18242,6 +18495,8 @@ impl StreamingCommandState {
             skipping_oversize_stdout_line: false,
             parsed_stream_json: false,
             last_emit_at: None,
+            session_title_hold: String::new(),
+            captured_session_title: None,
         }
     }
 
@@ -18509,14 +18764,55 @@ impl StreamingCommandState {
     }
 
     /// Show text the provider reported, in the display's own coordinate system.
+    fn remember_session_title(&mut self, title: Option<String>) {
+        if self.captured_session_title.is_none() {
+            self.captured_session_title = title;
+        }
+    }
+
+    /// A tool call, a new text block, or the end of the run finishes a title
+    /// line that never received its newline. The marker stays off the screen.
+    fn close_session_title_hold(&mut self) {
+        if self.session_title_hold.is_empty() {
+            return;
+        }
+        let filtered = take_visible_stream_text(&mut self.session_title_hold, "", true);
+        self.remember_session_title(filtered.title);
+        if filtered.visible.is_empty() {
+            return;
+        }
+        self.append_visible_assistant_text(&filtered.visible, false);
+    }
+
     fn push_assistant_text(&mut self, advance: gyro_core::text_stream::TextStreamAdvance) {
         if self.assistant_text_truncated {
             return;
         }
-        if advance.starts_block && !self.assistant_text.is_empty() {
+        let filtered = take_visible_stream_text(&mut self.session_title_hold, &advance.text, false);
+        self.remember_session_title(filtered.title);
+        if filtered.visible.is_empty() {
+            return;
+        }
+        self.append_visible_assistant_text(&filtered.visible, advance.starts_block);
+    }
+
+    fn append_visible_assistant_text(&mut self, visible: &str, starts_block: bool) {
+        if self.assistant_text_truncated {
+            return;
+        }
+        if starts_block && !self.assistant_text.is_empty() {
             self.text_block_separator_pending = true;
         }
-        let delta = advance.text.as_str();
+        // The title line sat where the paragraph break would have gone. Drop
+        // the newlines it left so the break is added once, in front of the text.
+        let delta = if self.text_block_separator_pending {
+            visible.trim_start_matches(['\n', '\r'])
+        } else {
+            visible
+        };
+        if delta.is_empty() {
+            return;
+        }
         if self.assistant_text.is_empty() || self.text_block_separator_pending {
             self.text_blocks.push(StreamedTextBlock {
                 start: self.assistant_text.len(),
@@ -18639,6 +18935,9 @@ impl StreamingCommandState {
         request: &ProviderChatRequest,
         force: bool,
     ) {
+        if force {
+            self.close_session_title_hold();
+        }
         if !self.has_pending_delta() {
             return;
         }
@@ -18806,6 +19105,7 @@ fn run_streaming_command(
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
     stream_state.flush_pending_delta(app, request, true);
+    publish_stream_session_title(app, request, &stream_state, true);
     // Published before the termination checks below, so a stopped or timed-out
     // run reports the session it started rather than losing it to the bail.
     observed_session_id.clone_from(&stream_state.provider_session_id);
@@ -19088,11 +19388,13 @@ fn handle_provider_stdout_value(
     if provider_stream_opens_text_content_block(value) {
         // A new block means the previous one closed, so a title marker that
         // ended it without a newline is complete.
-        publish_streamed_session_title(app, request, &stream_state.assistant_text, true);
+        stream_state.close_session_title_hold();
+        publish_stream_session_title(app, request, &stream_state, true);
         stream_state.note_new_text_content_block();
     }
     if let Some(commentary) = extract_provider_commentary_activity(value) {
         stream_state.flush_pending_delta(app, request, true);
+        publish_stream_session_title(app, request, &stream_state, true);
         if let Some(activity) = stream_state.push_activity(commentary) {
             let activity_sequence = stream_state.activity_sequence(&activity);
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
@@ -19110,7 +19412,7 @@ fn handle_provider_stdout_value(
         // Tools only start after the text block before them closed. Without
         // this, a marker line followed straight by a tool call left the
         // session untitled until the next text arrived, often minutes later.
-        publish_streamed_session_title(app, request, &stream_state.assistant_text, true);
+        publish_stream_session_title(app, request, &stream_state, true);
         for activity in activities {
             if let Some(activity) = stream_state.push_activity(activity) {
                 let activity_sequence = stream_state.activity_sequence(&activity);
@@ -19188,7 +19490,7 @@ fn handle_provider_stdout_value(
                 );
             }
         }
-        publish_streamed_session_title(app, request, &stream_state.assistant_text, false);
+        publish_stream_session_title(app, request, &stream_state, false);
         stream_state.flush_pending_delta(app, request, false);
     }
 }
@@ -24800,7 +25102,7 @@ mod tests {
         assert!(text.contains("1 diagnostic"));
         assert!(text.contains("gyro_workspace_check"));
         assert!(text.contains("compact workspace check is attached"));
-        assert!(text.contains("already attached and current"));
+        assert!(!text.contains("already attached and current"));
         assert!(!text.contains("to refresh this snapshot"));
     }
 
@@ -27171,12 +27473,12 @@ while True:
                 },
             );
             assert!(opening.len() > resumed.len(), "{provider}");
-            for required in [
+            for opening_only in [
                 "gyro_agent_spawn/wait/send/stop",
-                "self-contained tasks",
-                "inherit this model and permissions",
+                "self-contained task",
+                "this chat's permissions",
                 "cannot delegate",
-                "read-only in Plan mode",
+                "Plan-mode children are read-only",
                 "Wait for all children",
                 "Reuse current evidence",
                 "task complexity warrants another model call",
@@ -27189,6 +27491,15 @@ while True:
                 "GYRO_QUESTIONS:",
                 "2–4 options",
                 "end the turn and wait",
+                "Call gyro_tool_catalog",
+            ] {
+                assert!(opening.contains(opening_only), "{provider} lost {opening_only}");
+                assert!(
+                    !resumed.contains(opening_only),
+                    "{provider} repeated {opening_only}"
+                );
+            }
+            for required in [
                 "rootId",
                 "Workspace check: ready",
                 "configured approval policy",
@@ -27226,7 +27537,7 @@ while True:
                     },
                 );
                 assert!(context.contains(requirement), "{provider}");
-                assert!(context.contains("GYRO_QUESTIONS:"), "{provider}");
+                assert!(!context.contains("GYRO_QUESTIONS:"), "{provider}");
                 assert!(
                     !context.contains("Finish requested implementation"),
                     "{provider}"
@@ -27250,8 +27561,10 @@ while True:
         );
         assert!(opening.len() > resumed.len());
         assert!(opening.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
+        assert!(opening.contains("![short description](/absolute/path.png)"));
         assert!(!opening.contains(browser_knowledge::SIDE_PANEL_GUIDE));
         assert!(!resumed.contains(browser_knowledge::ORDINARY_SURFACE_HINT));
+        assert!(!resumed.contains("![short description](/absolute/path.png)"));
         assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
         assert!(!resumed.contains("never end with a promise to report later"));
         assert!(resumed.contains("configured approval policy"));
@@ -27271,6 +27584,7 @@ while True:
 
         let claude_resumed = claude_chat_prompt("next", Some("/tmp/project"), false, true, true);
         assert!(!claude_resumed.contains("GYRO_ARTIFACTS:"));
+        assert!(!claude_resumed.contains("![short description](/absolute/path.png)"));
         // A resumed turn is never asked to name the session again; the opening
         // turn is, so every provider titles the chat it starts.
         assert!(claude_resumed.contains("Do not write a GYRO_SESSION_TITLE line"));
@@ -27278,10 +27592,12 @@ while True:
         let claude_opening = claude_chat_prompt("start", Some("/tmp/project"), true, true, false);
         assert!(claude_opening.contains("GYRO_SESSION_TITLE: <2-6 word title>"));
         assert!(claude_opening.contains("name the session immediately"));
+        assert!(claude_opening.contains("![short description](/absolute/path.png)"));
         assert!(claude_resumed.contains("must follow Gyro's permission decisions"));
         let codex_resumed =
             openai_codex_chat_prompt("next", Some("/workspace"), Some("GPT"), false, false, true);
         assert!(!codex_resumed.contains("polished, scannable Markdown"));
+        assert!(!codex_resumed.contains("![short description](/absolute/path.png)"));
         assert!(codex_resumed.contains("Do not edit files"));
         assert!(codex_resumed.contains("selected model label is: GPT"));
     }
@@ -28246,6 +28562,35 @@ while True:
 
         assert_eq!(state.assistant_text, "hello");
         assert_eq!(state.take_pending_delta(), "hello");
+    }
+
+    #[test]
+    fn streaming_state_keeps_the_session_title_off_the_visible_text() {
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("I'll check the window. GYRO_SESS");
+        state.push_assistant_delta("ION_TITLE: Auto compact all providers");
+        let shown = state.take_pending_delta();
+        assert_eq!(state.assistant_text, "I'll check the window. ");
+        assert_eq!(shown, "I'll check the window. ");
+        assert!(!shown.contains("GYRO_SESSION_TITLE"));
+        assert!(state.captured_session_title.is_none());
+        state.close_session_title_hold();
+        assert_eq!(
+            state.captured_session_title.as_deref(),
+            Some("Auto compact all providers")
+        );
+        assert!(!state.assistant_text.contains("GYRO_SESSION_TITLE"));
+
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta(
+            "GYRO_SESSION_TITLE: Auto compact all providers\nI'll check the window.",
+        );
+        assert_eq!(
+            state.captured_session_title.as_deref(),
+            Some("Auto compact all providers")
+        );
+        assert_eq!(state.assistant_text, "I'll check the window.");
+        assert!(!state.take_pending_delta().contains("GYRO_SESSION_TITLE"));
     }
 
     #[test]
@@ -30104,15 +30449,15 @@ while True:
         );
 
         assert_eq!(
-            state.assistant_text,
-            "Now the edits.\n\nNow the desktop handler:\n\nGYRO_SESSION_TITLE: Create branch from picker\n\nAdded a branch action."
+            state.captured_session_title.as_deref(),
+            Some("Create branch from picker")
         );
-        let cleaned = extract_session_title_marker(&state.assistant_text, true);
-        assert_eq!(cleaned.title.as_deref(), Some("Create branch from picker"));
         assert_eq!(
-            cleaned.message,
+            state.assistant_text,
             "Now the edits.\n\nNow the desktop handler:\n\nAdded a branch action."
         );
+        assert!(!state.assistant_text.contains("GYRO_SESSION_TITLE"));
+        assert!(!state.take_pending_delta().contains("GYRO_SESSION_TITLE"));
     }
 
     #[test]

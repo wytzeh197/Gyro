@@ -605,9 +605,9 @@ where
         return Err(error);
     }
     let truncated = state.truncated;
-    // An output cap is an incomplete answer. Returning the partial text would
-    // let a later tool round treat it as the model's finished decision.
-    if truncated {
+    // A cap that cut tool calls is unsafe to execute. Text alone is an
+    // unfinished answer: the runner joins a continuation instead of failing.
+    if truncated && (state.incomplete_tools || content.is_empty()) {
         return Err(anyhow!(
             "the provider reached its output token limit; no tool calls from this response were executed"
         ));
@@ -866,6 +866,8 @@ struct ChatAccumulator {
     reasoning_content: Option<String>,
     tool_calls: Vec<ToolCallAccumulator>,
     truncated: bool,
+    /// Length arrived with tool calls. Those calls were cleared and must not run.
+    incomplete_tools: bool,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     usage: WireUsage,
@@ -942,9 +944,10 @@ impl ChatAccumulator {
             match choice.finish_reason.as_deref() {
                 Some("length") => {
                     // The cap can fall between tool calls. Drop every call from
-                    // this answer; the finished response fails below even when
-                    // some text already arrived.
+                    // this answer. Text with no calls is unfinished and the
+                    // runner may continue it; a cut call is not safe to run.
                     self.truncated = true;
+                    self.incomplete_tools |= !self.tool_calls.is_empty();
                     self.tool_calls.clear();
                 },
                 Some("content_filter") => anyhow::bail!(
@@ -956,6 +959,9 @@ impl ChatAccumulator {
                 _ => {}
             }
             let message = choice.effective_message();
+            if self.truncated && !message.tool_calls.is_empty() {
+                self.incomplete_tools = true;
+            }
             if let Some(reasoning) = &message.reasoning_content {
                 self.reasoning_content
                     .get_or_insert_with(String::new)
@@ -2634,12 +2640,15 @@ mod tests {
             release.send(()).unwrap();
             server.join().unwrap();
             cancel.join().unwrap();
-            let error = result.unwrap_err().to_string();
             if stop {
+                let error = result.unwrap_err().to_string();
                 assert!(cancellation.is_cancelled());
-                assert!(began.elapsed() < Duration::from_secs(1));
+                assert!(began.elapsed() < Duration::from_secs(1), "{error}");
             } else {
-                assert!(error.contains("output token limit"), "{error}");
+                let response = result.expect("a text-only length finish returns the partial answer");
+                assert_eq!(response.content, "partial");
+                assert!(response.truncated);
+                assert!(response.tool_calls.is_empty());
                 assert!(began.elapsed() < Duration::from_secs(5));
             }
         }
@@ -2878,7 +2887,7 @@ mod tests {
             ),
             (
                 "application/json",
-                r#"{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]}"#,
+                r#"{"choices":[{"message":{"content":"partial answer","tool_calls":[{"id":"edit","function":{"name":"write_file","arguments":"{}"}}]},"finish_reason":"length"}]}"#,
                 "output token limit",
             ),
         ] {
@@ -2895,6 +2904,28 @@ mod tests {
             server.join().unwrap();
             assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn a_text_only_length_finish_is_an_unfinished_answer() {
+        let (address, server) = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]}"#,
+        );
+        let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            base_url: &format!("http://{address}/v1"),
+            api_key: "",
+            model: "test",
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: None,
+        })
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(response.content, "partial answer");
+        assert!(response.truncated);
+        assert!(response.tool_calls.is_empty());
     }
 
     #[test]

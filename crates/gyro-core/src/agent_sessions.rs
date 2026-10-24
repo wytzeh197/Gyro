@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use uuid::Uuid;
@@ -23,7 +23,7 @@ use crate::mutations::{decide_mutation_proposal, MutationDecision};
 use crate::paths::{secure_private_file, GyroPaths};
 use crate::security::redact_secrets;
 use crate::sessions::{
-    CreateSessionContext, MutationProposalOperation, SessionOrigin, SessionStore,
+    CreateSessionContext, MutationProposalOperation, SessionEventKind, SessionOrigin, SessionStore,
     SessionWorkspaceMode,
 };
 
@@ -103,7 +103,7 @@ pub enum AgentSessionState {
 }
 
 impl AgentSessionState {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
@@ -191,6 +191,61 @@ pub struct AgentPendingApproval {
     pub requested_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionListItem {
+    pub session_id: Option<Uuid>,
+    pub inbox_id: Uuid,
+    pub workspace: String,
+    pub status: String,
+    pub title: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionTurn {
+    pub id: Uuid,
+    pub role: String,
+    pub text: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionRead {
+    #[serde(flatten)]
+    pub report: AgentSessionReport,
+    pub turns: Vec<AgentSessionTurn>,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentControl {
+    pub inbox_id: Uuid,
+    pub session_id: Option<Uuid>,
+    pub status: String,
+}
+
+fn stop_hook_slot() -> &'static Mutex<Option<Arc<dyn Fn(Uuid) + Send + Sync>>> {
+    static HOOK: OnceLock<Mutex<Option<Arc<dyn Fn(Uuid) + Send + Sync>>>> = OnceLock::new();
+    HOOK.get_or_init(|| Mutex::new(None))
+}
+
+/// Desktop registers this so a running provider turn can be cancelled from MCP.
+pub fn set_session_stop_hook(hook: Arc<dyn Fn(Uuid) + Send + Sync>) {
+    if let Ok(mut slot) = stop_hook_slot().lock() {
+        *slot = Some(hook);
+    }
+}
+
+fn invoke_stop_hook(session_id: Uuid) {
+    let hook = stop_hook_slot().lock().ok().and_then(|slot| slot.clone());
+    if let Some(hook) = hook {
+        hook(session_id);
+    }
+}
+
 /// A Mac that dials a public relay. The credential itself stays in the keychain.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,6 +319,15 @@ impl AgentSessionStore {
                error text,
                created_at text not null,
                updated_at text not null
+             );
+             create table if not exists agent_command_blocks (
+               proposal_id text primary key,
+               inbox_id text not null,
+               summary text not null,
+               requested_at text not null
+             );
+             create table if not exists agent_relay_command_acks (
+               command_id text primary key
              );",
         )?;
         Ok(())
@@ -461,6 +525,12 @@ impl AgentSessionStore {
                 }
             }
         }
+        if pending_approval.is_none() && status == AgentReportStatus::Running {
+            if let Some(block) = self.command_block_for_inbox(row.id)? {
+                status = AgentReportStatus::WaitingForApproval;
+                pending_approval = Some(block);
+            }
+        }
         Ok(AgentSessionReport {
             session_id: row.session_id,
             inbox_id: row.id,
@@ -580,6 +650,342 @@ impl AgentSessionStore {
         Ok(())
     }
 
+    pub fn list_sessions(
+        &self,
+        limit: usize,
+        before: Option<DateTime<Utc>>,
+    ) -> Result<Vec<AgentSessionListItem>> {
+        let limit = limit.clamp(1, 50);
+        let before = before.map(|time| time.to_rfc3339());
+        let mut statement = self.conn.prepare(
+            "select id from agent_sessions
+             where ?1 is null or updated_at < ?1
+             order by updated_at desc
+             limit ?2",
+        )?;
+        let ids = statement.query_map(params![before, limit as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut items = Vec::new();
+        for id in ids {
+            let id = Uuid::parse_str(&id?)?;
+            let Some(row) = self.get(id)? else {
+                continue;
+            };
+            let report = self.report(row.id)?;
+            items.push(AgentSessionListItem {
+                session_id: row.session_id,
+                inbox_id: row.id,
+                workspace: row.workspace_path.display().to_string(),
+                status: report.status,
+                title: agent_session_title(&row.prompt),
+                updated_at: row.updated_at,
+            });
+        }
+        Ok(items)
+    }
+
+    pub fn read_session(
+        &self,
+        id: Uuid,
+        after: Option<Uuid>,
+        limit: usize,
+    ) -> Result<AgentSessionRead> {
+        let report = self.report(id)?;
+        let session_id = report
+            .session_id
+            .ok_or_else(|| anyhow!("session was not opened"))?;
+        let sessions = SessionStore::open(self.paths.clone())?;
+        let events = sessions.read_transcript_events(session_id)?;
+        let messages: Vec<_> = events
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
+                )
+            })
+            .collect();
+        let start = if let Some(after) = after {
+            messages
+                .iter()
+                .position(|event| event.id == after)
+                .map(|index| index + 1)
+                .ok_or_else(|| anyhow!("unknown cursor"))?
+        } else {
+            0
+        };
+        let limit = limit.clamp(1, 20);
+        let mut turns = Vec::new();
+        let mut chars = 0usize;
+        let mut stopped_early = false;
+        for event in messages.iter().skip(start) {
+            if turns.len() == limit {
+                stopped_early = true;
+                break;
+            }
+            let text = redact_secrets(&event.message);
+            let next_chars = chars.saturating_add(text.chars().count());
+            if next_chars > 32_000 && !turns.is_empty() {
+                stopped_early = true;
+                break;
+            }
+            let text = if text.chars().count() > 32_000 {
+                let mut bounded: String = text.chars().take(31_999).collect();
+                bounded.push('\u{2026}');
+                bounded
+            } else {
+                text
+            };
+            chars = chars.saturating_add(text.chars().count());
+            turns.push(AgentSessionTurn {
+                id: event.id,
+                role: if event.kind == SessionEventKind::UserMessage {
+                    "user"
+                } else {
+                    "assistant"
+                }
+                .to_string(),
+                text,
+                created_at: event.created_at,
+            });
+        }
+        let has_more = stopped_early || start + turns.len() < messages.len();
+        Ok(AgentSessionRead {
+            report,
+            turns,
+            has_more,
+        })
+    }
+
+    pub fn continue_session(
+        &self,
+        id: Uuid,
+        prompt: &str,
+        choice: ChoiceRequest,
+    ) -> Result<AgentSessionRow> {
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return Err(anyhow!("prompt cannot be empty"));
+        }
+        if prompt.chars().count() > MAX_PROMPT_CHARS {
+            return Err(anyhow!(
+                "prompt cannot exceed {MAX_PROMPT_CHARS} characters"
+            ));
+        }
+        let row = self
+            .get(id)?
+            .ok_or_else(|| anyhow!("unknown session"))?;
+        if matches!(
+            row.state,
+            AgentSessionState::Queued | AgentSessionState::Running
+        ) {
+            return Err(anyhow!("session is still {}", row.state.as_str()));
+        }
+        let running: i64 = self.conn.query_row(
+            "select count(*) from agent_sessions
+             where workspace_path = ?1 and status = 'running'",
+            params![row.workspace_path.display().to_string()],
+            |row| row.get(0),
+        )?;
+        if running > 0 {
+            return Err(anyhow!("workspace already has a running session"));
+        }
+        let canonical = canonical_workspace(&row.workspace_path)?;
+        let allowed = self.list_workspaces()?;
+        if !allowed
+            .iter()
+            .any(|path| path == &canonical.display().to_string())
+        {
+            return Err(anyhow!("workspace is not allowed"));
+        }
+        let catalog = self.choice_catalog()?;
+        let resolved = resolve_choice(&catalog, &choice)?;
+        let session_id = row
+            .session_id
+            .ok_or_else(|| anyhow!("session was not opened"))?;
+        let sessions = SessionStore::open(self.paths.clone())?;
+        let event = sessions.append_user_turn_message(
+            session_id,
+            prompt,
+            json!({ "surface": "agent-session" }),
+        )?;
+        let now = Utc::now().to_rfc3339();
+        let changed = self.conn.execute(
+            "update agent_sessions
+             set prompt = ?1, turn_id = ?2, status = 'queued', summary = null, error = null,
+                 provider_id = ?3, provider_label = ?4, model_id = ?5, model_label = ?6,
+                 reasoning_effort = ?7, updated_at = ?8
+             where id = ?9 and status in ('done', 'failed')",
+            params![
+                prompt,
+                event.turn_id.map(|turn| turn.to_string()),
+                resolved.provider_id,
+                resolved.provider_label,
+                resolved.model_id,
+                resolved.model_label,
+                resolved.reasoning_effort,
+                now,
+                row.id.to_string(),
+            ],
+        )?;
+        if changed != 1 {
+            return Err(anyhow!("session is still running"));
+        }
+        self.clear_command_blocks_for_inbox(row.id)?;
+        self.get(row.id)?
+            .ok_or_else(|| anyhow!("agent session was not persisted"))
+    }
+
+    pub fn stop_session(&self, id: Uuid) -> Result<AgentControl> {
+        let row = self
+            .get(id)?
+            .ok_or_else(|| anyhow!("unknown session"))?;
+        match row.state {
+            AgentSessionState::Queued => {
+                self.cancel(row.id)?;
+                Ok(AgentControl {
+                    inbox_id: row.id,
+                    session_id: row.session_id,
+                    status: "cancelled".into(),
+                })
+            }
+            AgentSessionState::Running => {
+                let now = Utc::now().to_rfc3339();
+                let changed = self.conn.execute(
+                    "update agent_sessions
+                     set status = 'failed', summary = null, error = 'stopped', updated_at = ?1
+                     where id = ?2 and status = 'running'",
+                    params![now, row.id.to_string()],
+                )?;
+                self.clear_command_blocks_for_inbox(row.id)?;
+                if changed == 1 {
+                    if let Some(session_id) = row.session_id {
+                        invoke_stop_hook(session_id);
+                    }
+                    return Ok(AgentControl {
+                        inbox_id: row.id,
+                        session_id: row.session_id,
+                        status: "stopped".into(),
+                    });
+                }
+                let current = self
+                    .get(row.id)?
+                    .ok_or_else(|| anyhow!("unknown session"))?;
+                Ok(AgentControl {
+                    inbox_id: current.id,
+                    session_id: current.session_id,
+                    status: current.state.as_str().into(),
+                })
+            }
+            AgentSessionState::Done | AgentSessionState::Failed => Ok(AgentControl {
+                inbox_id: row.id,
+                session_id: row.session_id,
+                status: row.state.as_str().into(),
+            }),
+        }
+    }
+
+    pub fn note_command_block(
+        &self,
+        session_id: Uuid,
+        proposal_id: Uuid,
+        summary: &str,
+    ) -> Result<bool> {
+        let inbox_id: Option<String> = self
+            .conn
+            .query_row(
+                "select id from agent_sessions where session_id = ?1 and status = 'running'",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(inbox_id) = inbox_id else {
+            return Ok(false);
+        };
+        self.conn.execute(
+            "insert into agent_command_blocks (proposal_id, inbox_id, summary, requested_at)
+             values (?1, ?2, ?3, ?4)
+             on conflict(proposal_id) do update set
+               inbox_id = excluded.inbox_id,
+               summary = excluded.summary,
+               requested_at = excluded.requested_at",
+            params![
+                proposal_id.to_string(),
+                inbox_id,
+                bounded_agent_summary(summary),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(true)
+    }
+
+    pub fn clear_command_block_for_session(&self, session_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "delete from agent_command_blocks
+             where inbox_id in (
+               select id from agent_sessions where session_id = ?1
+             )",
+            params![session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn deny_approval(&self, proposal_id: Uuid) -> Result<AgentControl> {
+        let inbox_id: Option<String> = self
+            .conn
+            .query_row(
+                "select inbox_id from agent_command_blocks where proposal_id = ?1",
+                params![proposal_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(inbox_id) = inbox_id {
+            let inbox_id = Uuid::parse_str(&inbox_id)?;
+            return self.stop_session(inbox_id);
+        }
+        let sessions = SessionStore::open(self.paths.clone())?;
+        decide_mutation_proposal(&sessions, proposal_id, MutationDecision::Reject)?;
+        Ok(AgentControl {
+            inbox_id: proposal_id,
+            session_id: None,
+            status: "denied".into(),
+        })
+    }
+
+    fn clear_command_blocks_for_inbox(&self, inbox_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "delete from agent_command_blocks where inbox_id = ?1",
+            params![inbox_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    fn command_block_for_inbox(&self, inbox_id: Uuid) -> Result<Option<AgentPendingApproval>> {
+        self.conn
+            .query_row(
+                "select proposal_id, summary, requested_at
+                 from agent_command_blocks where inbox_id = ?1",
+                params![inbox_id.to_string()],
+                |row| {
+                    Ok(AgentPendingApproval {
+                        proposal_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                error.into(),
+                            )
+                        })?,
+                        tool: "command".into(),
+                        summary: row.get(1)?,
+                        requested_at: parse_time(row.get(2)?)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn pairing(&self) -> Result<Option<AgentPairing>> {
         self.conn
             .query_row(
@@ -692,6 +1098,59 @@ impl AgentSessionStore {
             reports.push(value);
         }
         Ok(reports)
+    }
+
+    fn command_ack_ids(&self) -> Result<Vec<String>> {
+        let mut statement = self.conn.prepare(
+            "select command_id from agent_relay_command_acks order by command_id asc",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    fn command_ack_known(&self, command_id: &str) -> Result<bool> {
+        let found: Option<i64> = self
+            .conn
+            .query_row(
+                "select 1 from agent_relay_command_acks where command_id = ?1",
+                params![command_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    fn remember_command_ack(&self, command_id: &str) -> Result<()> {
+        self.conn.execute(
+            "insert into agent_relay_command_acks (command_id) values (?1)
+             on conflict(command_id) do nothing",
+            params![command_id],
+        )?;
+        Ok(())
+    }
+
+    fn forget_command_acks(&self, ids: &[String]) -> Result<()> {
+        for id in ids {
+            self.conn.execute(
+                "delete from agent_relay_command_acks where command_id = ?1",
+                params![id],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn gyro_session_for_relay_task(&self, relay_task_id: &str) -> Result<Option<Uuid>> {
+        let session: Option<String> = self
+            .conn
+            .query_row(
+                "select session_id from agent_relay_tasks
+                 where relay_task_id = ?1 and accepted = 1",
+                params![relay_task_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(session.and_then(|value| Uuid::parse_str(&value).ok()))
     }
 }
 
@@ -1153,6 +1612,38 @@ fn mcp_response(store: &AgentSessionStore, request: &Value) -> String {
                     "properties": { "sessionId": { "type": "string" } },
                     "required": ["sessionId"]
                 })),
+                tool_def("list_sessions", "List sessions this inbox opened, newest first.", json!({
+                    "type": "object",
+                    "properties": {
+                        "limit": { "type": "integer" },
+                        "before": { "type": "string" }
+                    }
+                })),
+                tool_def("read_session", "Read the saved user and assistant turns for one inbox session.", json!({
+                    "type": "object",
+                    "properties": {
+                        "sessionId": { "type": "string" },
+                        "after": { "type": "string" },
+                        "limit": { "type": "integer" }
+                    },
+                    "required": ["sessionId"]
+                })),
+                tool_def("continue_session", "Append a prompt to a finished inbox session and queue that same session again.", json!({
+                    "type": "object",
+                    "properties": {
+                        "sessionId": { "type": "string" },
+                        "prompt": { "type": "string" },
+                        "providerId": { "type": "string" },
+                        "modelId": { "type": "string" },
+                        "reasoningEffort": { "type": "string" }
+                    },
+                    "required": ["sessionId", "prompt"]
+                })),
+                tool_def("stop_session", "Withdraw a queued session, or stop a session Gyro is running. A finished session stays saved.", json!({
+                    "type": "object",
+                    "properties": { "sessionId": { "type": "string" } },
+                    "required": ["sessionId"]
+                })),
                 tool_def("resolve_approval", "Deny an approval that is blocking a session. Approving stays with the person using Gyro.", json!({
                     "type": "object",
                     "properties": {
@@ -1246,13 +1737,57 @@ fn call_tool(store: &AgentSessionStore, name: &str, arguments: &Value) -> Result
             store.cancel(id).map_err(|error| error.to_string())?;
             Ok(json!({ "sessionId": id, "status": "cancelled" }))
         }
+        "list_sessions" => {
+            let limit = argument_limit(arguments, 20, 50);
+            let before = match optional_argument(arguments, "before") {
+                Some(value) => Some(
+                    DateTime::parse_from_rfc3339(&value)
+                        .map_err(|_| "before must be a timestamp".to_string())?
+                        .with_timezone(&Utc),
+                ),
+                None => None,
+            };
+            let items = store
+                .list_sessions(limit, before)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({ "sessions": items }))
+        }
+        "read_session" => {
+            let id = argument_uuid(arguments, "sessionId")?;
+            let after = match optional_argument(arguments, "after") {
+                Some(value) => {
+                    Some(Uuid::parse_str(&value).map_err(|_| "unknown cursor".to_string())?)
+                }
+                None => None,
+            };
+            let page = store
+                .read_session(id, after, argument_limit(arguments, 20, 20))
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(page).map_err(|error| error.to_string())
+        }
+        "continue_session" => {
+            let id = argument_uuid(arguments, "sessionId")?;
+            let prompt = argument_string(arguments, "prompt")?;
+            let row = store
+                .continue_session(id, &prompt, choice_from_arguments(arguments))
+                .map_err(|error| error.to_string())?;
+            Ok(session_started_json(&row))
+        }
+        "stop_session" => {
+            let id = argument_uuid(arguments, "sessionId")?;
+            let control = store.stop_session(id).map_err(|error| error.to_string())?;
+            Ok(json!({
+                "sessionId": control.session_id,
+                "inboxId": control.inbox_id,
+                "status": control.status
+            }))
+        }
         "resolve_approval" => {
             let proposal_id = argument_uuid(arguments, "proposalId")?;
             match argument_string(arguments, "decision")?.as_str() {
                 "deny" => {
-                    let sessions = SessionStore::open(store.paths().clone())
-                        .map_err(|error| error.to_string())?;
-                    decide_mutation_proposal(&sessions, proposal_id, MutationDecision::Reject)
+                    store
+                        .deny_approval(proposal_id)
                         .map_err(|error| error.to_string())?;
                     Ok(json!({ "proposalId": proposal_id, "decision": "denied" }))
                 }
@@ -1265,6 +1800,35 @@ fn call_tool(store: &AgentSessionStore, name: &str, arguments: &Value) -> Result
         }
         _ => Err(format!("unknown tool {name}")),
     }
+}
+
+fn choice_from_arguments(arguments: &Value) -> ChoiceRequest {
+    ChoiceRequest {
+        provider_id: optional_argument(arguments, "providerId"),
+        model_id: optional_argument(arguments, "modelId"),
+        reasoning_effort: optional_argument(arguments, "reasoningEffort"),
+    }
+}
+
+fn session_started_json(row: &AgentSessionRow) -> Value {
+    json!({
+        "sessionId": row.session_id,
+        "inboxId": row.id,
+        "status": row.state.as_str(),
+        "providerId": row.provider_id,
+        "providerLabel": row.provider_label,
+        "modelId": row.model_id,
+        "modelLabel": row.model_label,
+        "reasoningEffort": row.reasoning_effort
+    })
+}
+
+fn argument_limit(arguments: &Value, default: u64, max: u64) -> usize {
+    let raw = arguments
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(default);
+    raw.clamp(1, max) as usize
 }
 
 fn argument_string(arguments: &Value, key: &str) -> Result<String, String> {
@@ -1409,6 +1973,7 @@ pub fn poll_paired_relay(paths: &GyroPaths) -> Result<Vec<PolledRelayTask>> {
     };
     let relay = validate_relay_url(&pairing.relay_url)?;
     let workspaces = store.list_workspaces()?;
+    let applied_command_ids = store.command_ack_ids()?;
     let response = match post_relay(
         &relay_endpoint(&relay, "/v1/poll")?,
         Some(&secret),
@@ -1417,6 +1982,7 @@ pub fn poll_paired_relay(paths: &GyroPaths) -> Result<Vec<PolledRelayTask>> {
             "workspaces": workspaces,
             "catalog": store.choice_catalog()?,
             "reports": store.relay_status_reports()?,
+            "appliedCommandIds": applied_command_ids,
         }),
     ) {
         Ok(response) => response,
@@ -1426,6 +1992,7 @@ pub fn poll_paired_relay(paths: &GyroPaths) -> Result<Vec<PolledRelayTask>> {
         }
         Err(error) => return Err(error),
     };
+    store.forget_command_acks(&applied_command_ids)?;
     let tasks = response
         .get("tasks")
         .and_then(Value::as_array)
@@ -1513,7 +2080,131 @@ pub fn poll_paired_relay(paths: &GyroPaths) -> Result<Vec<PolledRelayTask>> {
             Err(error) => return Err(error),
         }
     }
+    let applied = apply_polled_commands(&store, response.get("commands"))?;
+    let pages = pages_for_polled_reads(&store, response.get("reads"))?;
+    if !applied.is_empty() || !pages.is_empty() {
+        let posted = post_relay(
+            &relay_endpoint(&relay, "/v1/poll")?,
+            Some(&secret),
+            &json!({
+                "deviceId": pairing.device_id,
+                "appliedCommandIds": applied,
+                "pages": pages,
+            }),
+        );
+        if posted.is_ok() {
+            store.forget_command_acks(&applied)?;
+        }
+    }
     Ok(started)
+}
+
+fn apply_polled_commands(
+    store: &AgentSessionStore,
+    commands: Option<&Value>,
+) -> Result<Vec<String>> {
+    let Some(commands) = commands.and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut applied = Vec::new();
+    for command in commands {
+        let Some(id) = command.get("id").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        if !store.command_ack_known(id)? {
+            store.remember_command_ack(id)?;
+            let _ = apply_one_polled_command(store, command);
+        }
+        applied.push(id.to_string());
+    }
+    Ok(applied)
+}
+
+fn apply_one_polled_command(store: &AgentSessionStore, command: &Value) -> Result<()> {
+    let kind = command.get("kind").and_then(Value::as_str).unwrap_or("");
+    let task_id = command.get("taskId").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "continue" => {
+            let Some(session_id) = store.gyro_session_for_relay_task(task_id)? else {
+                return Err(anyhow!("unknown session"));
+            };
+            let prompt = command.get("prompt").and_then(Value::as_str).unwrap_or("");
+            let choice = ChoiceRequest {
+                provider_id: command
+                    .get("providerId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                model_id: command.get("modelId").and_then(Value::as_str).map(str::to_string),
+                reasoning_effort: command
+                    .get("reasoningEffort")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            };
+            store.continue_session(session_id, prompt, choice)?;
+        }
+        "stop" => {
+            let Some(session_id) = store.gyro_session_for_relay_task(task_id)? else {
+                return Err(anyhow!("unknown session"));
+            };
+            store.stop_session(session_id)?;
+        }
+        "deny" => {
+            let proposal_id = command
+                .get("proposalId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let proposal_id = Uuid::parse_str(proposal_id)?;
+            store.deny_approval(proposal_id)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn pages_for_polled_reads(store: &AgentSessionStore, reads: Option<&Value>) -> Result<Vec<Value>> {
+    let Some(reads) = reads.and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut pages = Vec::new();
+    for read in reads {
+        let Some(token) = read.get("token").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(task_id) = read.get("taskId").and_then(Value::as_str) else {
+            continue;
+        };
+        let after = read
+            .get("after")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok());
+        let limit = read.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
+        let Some(session_id) = store.gyro_session_for_relay_task(task_id)? else {
+            pages.push(json!({
+                "token": token,
+                "page": { "error": "unknown session" }
+            }));
+            continue;
+        };
+        match store.read_session(session_id, after, limit) {
+            Ok(page) => {
+                let mut value = serde_json::to_value(page)?;
+                if let Some(object) = value.as_object_mut() {
+                    let gyro = object.get("sessionId").cloned().unwrap_or(Value::Null);
+                    object.insert("gyroSessionId".into(), gyro);
+                    object.insert("sessionId".into(), Value::String(task_id.to_string()));
+                }
+                pages.push(json!({ "token": token, "page": value }));
+            }
+            Err(error) => pages.push(json!({
+                "token": token,
+                "page": { "error": error.to_string() }
+            })),
+        }
+    }
+    Ok(pages)
 }
 
 fn permanent_start_refusal(error: &anyhow::Error) -> bool {
@@ -2524,5 +3215,144 @@ mod tests {
         let kept = store.get(row.id).unwrap().unwrap();
         assert_eq!(kept.state, AgentSessionState::Queued);
         assert!(store.pairing().unwrap().is_some());
+    }
+
+    #[test]
+    fn read_session_returns_saved_turns_and_refuses_a_foreign_session() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(
+                &workspace,
+                "Look at sk-abcdefghijklmnopqrstuvwxyz",
+                ChoiceRequest::default(),
+            )
+            .unwrap();
+        let sessions = SessionStore::open(store.paths().clone()).unwrap();
+        sessions
+            .append_event(
+                row.session_id.unwrap(),
+                SessionEventKind::AssistantMessage,
+                "assistant says hello",
+                json!({}),
+            )
+            .unwrap();
+        let page = store.read_session(row.id, None, 20).unwrap();
+        assert_eq!(page.turns.len(), 2);
+        assert_eq!(page.turns[0].role, "user");
+        assert!(page.turns[0].text.contains("[REDACTED]"));
+        assert!(!page.turns[0].text.contains("sk-abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(page.turns[1].role, "assistant");
+        assert_eq!(page.turns[1].text, "assistant says hello");
+        assert!(!page.has_more);
+        let listed = store.list_sessions(20, None).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].inbox_id, row.id);
+        let error = store
+            .read_session(Uuid::new_v4(), None, 20)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown session"));
+    }
+
+    #[test]
+    fn continue_appends_to_the_same_saved_session() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "First task", ChoiceRequest::default())
+            .unwrap();
+        let claimed = store.claim_next().unwrap().unwrap();
+        assert!(store.finish(claimed.id, Ok("first answer".into())).unwrap());
+        let continued = store
+            .continue_session(row.session_id.unwrap(), "Second task", ChoiceRequest::default())
+            .unwrap();
+        assert_eq!(continued.session_id, row.session_id);
+        assert_eq!(continued.state, AgentSessionState::Queued);
+        let page = store.read_session(continued.id, None, 20).unwrap();
+        assert_eq!(page.turns.len(), 2);
+        assert_eq!(page.turns[1].text, "Second task");
+    }
+
+    #[test]
+    fn continue_refuses_a_running_session_and_a_busy_workspace() {
+        let (_temp, store, workspace) = fixture();
+        let running = store
+            .start_session(&workspace, "Still going", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let error = store
+            .continue_session(running.id, "More", ChoiceRequest::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("session is still running"));
+
+        assert!(store.finish(running.id, Ok("done".into())).unwrap());
+        let other = store
+            .start_session(&workspace, "Other", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let error = store
+            .continue_session(running.session_id.unwrap(), "Again", ChoiceRequest::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("workspace already has a running session"));
+        assert_eq!(store.get(other.id).unwrap().unwrap().state, AgentSessionState::Running);
+    }
+
+    #[test]
+    fn stop_marks_a_running_session_and_does_not_let_finish_overwrite_it() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Stop me", ChoiceRequest::default())
+            .unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let hook_seen = seen.clone();
+        set_session_stop_hook(Arc::new(move |session_id| {
+            hook_seen.lock().unwrap().push(session_id);
+        }));
+        store.claim_next().unwrap().unwrap();
+        let control = store.stop_session(row.id).unwrap();
+        assert_eq!(control.status, "stopped");
+        assert!(seen.lock().unwrap().contains(&row.session_id.unwrap()));
+        assert!(!store.finish(row.id, Ok("late answer".into())).unwrap());
+        let kept = store.get(row.id).unwrap().unwrap();
+        assert_eq!(kept.state, AgentSessionState::Failed);
+        assert_eq!(kept.error.as_deref(), Some("stopped"));
+        let queued = store
+            .start_session(&workspace, "Not started", ChoiceRequest::default())
+            .unwrap();
+        let control = store.stop_session(queued.id).unwrap();
+        assert_eq!(control.status, "cancelled");
+        assert!(store.get(queued.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_blocked_command_is_visible_and_deny_stops_it() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Run tests", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let proposal_id = Uuid::new_v4();
+        assert!(store
+            .note_command_block(row.session_id.unwrap(), proposal_id, "cargo test")
+            .unwrap());
+        let report = store.report(row.id).unwrap();
+        assert_eq!(report.status, "waiting-for-approval");
+        let pending = report.pending_approval.unwrap();
+        assert_eq!(pending.tool, "command");
+        assert_eq!(pending.summary, "cargo test");
+        assert_eq!(pending.proposal_id, proposal_id);
+        let control = store.deny_approval(proposal_id).unwrap();
+        assert_eq!(control.status, "stopped");
+        let report = store.report(row.id).unwrap();
+        assert_eq!(report.status, "failed");
+        assert!(report.pending_approval.is_none());
+        let refused = call_tool(
+            &store,
+            "resolve_approval",
+            &json!({"proposalId": proposal_id.to_string(), "decision": "allow"}),
+        )
+        .unwrap_err();
+        assert!(refused.contains("Only the person using Gyro can approve"));
     }
 }
