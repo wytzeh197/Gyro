@@ -191,24 +191,55 @@ impl TextStreamAssembler {
 
 /// The part of `incoming` that follows the longest suffix of `existing` it
 /// starts with.
+///
+/// An overlap that consumes `incoming` yields an empty tail. That length used
+/// to be skipped: `char_indices().nth(len)` is past the last character, so a
+/// frame that only repeated the tail was treated as unrelated and appended
+/// again. A shorter accidental match could also win and append a corrupted
+/// piece, as with `"banana"` plus `"ana"`.
 fn tail_after_overlap(existing: &str, incoming: &str) -> Option<String> {
     if existing.is_empty() || incoming.is_empty() {
         return None;
     }
-    let max_chars = existing
-        .chars()
-        .count()
-        .min(incoming.chars().count())
-        .min(MAX_RESYNC_OVERLAP_CHARS);
-    for length in (1..=max_chars).rev() {
-        let Some(offset) = incoming.char_indices().nth(length).map(|(index, _)| index) else {
-            continue;
-        };
-        if existing.ends_with(&incoming[..offset]) {
-            return Some(incoming[offset..].to_string());
+    // The cap is the only overlap that can match, so count that window instead
+    // of every character in a long message, once per candidate length.
+    let existing_tail = &existing[suffix_start(existing, MAX_RESYNC_OVERLAP_CHARS)..];
+    // `suffix_start` already keeps this at the overlap cap.
+    let existing_chars = existing_tail.chars().count();
+    let incoming_limit = prefix_end(incoming, existing_chars);
+    let incoming_head = &incoming[..incoming_limit];
+    let mut prefix_ends = Vec::with_capacity(existing_chars);
+    for (index, character) in incoming_head.char_indices() {
+        prefix_ends.push(index + character.len_utf8());
+    }
+    for &end in prefix_ends.iter().rev() {
+        if existing_tail.ends_with(&incoming_head[..end]) {
+            return Some(incoming[end..].to_string());
         }
     }
     None
+}
+
+fn prefix_end(text: &str, max_chars: usize) -> usize {
+    let mut seen = 0usize;
+    for (index, character) in text.char_indices() {
+        seen += 1;
+        if seen == max_chars {
+            return index + character.len_utf8();
+        }
+    }
+    text.len()
+}
+
+fn suffix_start(text: &str, max_chars: usize) -> usize {
+    let mut seen = 0usize;
+    for (index, _) in text.char_indices().rev() {
+        seen += 1;
+        if seen == max_chars {
+            return index;
+        }
+    }
+    0
 }
 
 impl fmt::Display for TextStreamAssembler {
@@ -325,5 +356,47 @@ mod tests {
         assert_eq!(assembler.push_snapshot(""), None);
         assert_eq!(assembler.finish(""), None);
         assert!(assembler.is_empty());
+    }
+
+    #[test]
+    fn suffix_snapshot_is_not_appended_again() {
+        let mut assembler = TextStreamAssembler::new();
+        assembler.push_delta("The answer is 42");
+        assert_eq!(assembler.push_snapshot("42"), None);
+        assert_eq!(assembler.text(), "The answer is 42");
+    }
+
+    #[test]
+    fn suffix_snapshot_does_not_keep_a_shorter_accidental_tail() {
+        // "ana" is entirely a suffix of "banana". A one-character match on the
+        // leading "a" must not win and turn the message into "bananana".
+        let mut assembler = TextStreamAssembler::new();
+        assembler.push_delta("banana");
+        assert_eq!(assembler.push_snapshot("ana"), None);
+        assert_eq!(assembler.text(), "banana");
+    }
+
+    #[test]
+    fn tail_overlap_appends_only_the_unseen_suffix() {
+        let mut assembler = TextStreamAssembler::new();
+        assembler.push_delta("The answer is 42");
+        assert_eq!(
+            assembler.push_snapshot("is 42 today"),
+            advance(" today", false)
+        );
+        assert_eq!(assembler.text(), "The answer is 42 today");
+    }
+
+    #[test]
+    fn tail_overlap_keeps_multibyte_character_boundaries() {
+        let mut assembler = TextStreamAssembler::new();
+        assembler.push_delta("café menu");
+        assert_eq!(
+            assembler.push_snapshot("fé menu updated"),
+            advance(" updated", false)
+        );
+        assert_eq!(assembler.text(), "café menu updated");
+        assert_eq!(assembler.push_snapshot("updated"), None);
+        assert_eq!(assembler.text(), "café menu updated");
     }
 }
