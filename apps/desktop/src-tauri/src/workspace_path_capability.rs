@@ -27,10 +27,55 @@ pub(super) fn execute(
     bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
+    if request.capability_id == CapabilityId::WorkspaceUndoPath {
+        let Some(action) = undo_workspace_path_impl()? else {
+            return Ok((
+                "Nothing to undo".to_string(),
+                json!({
+                    "schema": WORKSPACE_PATH_SCHEMA,
+                    "action": "none",
+                    "changes": [],
+                }),
+                None,
+            ));
+        };
+        let change = path_history_change(&action);
+        let data = serde_json::to_value(&change)?;
+        emit_workspace_path_change(app, change);
+        return Ok((
+            "Undid the last workspace path change".to_string(),
+            json!({
+                "schema": WORKSPACE_PATH_SCHEMA,
+                "action": "undo",
+                "change": data,
+            }),
+            None,
+        ));
+    }
     let parsed = parse_arguments(request.capability_id, &request.arguments)?;
     let path = parsed.path.clone();
     assert_no_unsaved_editor_changes(app, bound, &path)?;
     let workspace_path = bound.workspace.to_string_lossy().to_string();
+    // Recorded before the branches consume their inputs: what an open editor
+    // needs to follow this change, in the shape the explorer commands announce.
+    let change = WorkspacePathChange {
+        action: match request.capability_id {
+            CapabilityId::WorkspaceCreatePath | CapabilityId::WorkspaceDuplicatePath => "created",
+            CapabilityId::WorkspaceMovePath => "moved",
+            CapabilityId::WorkspaceRenamePath => match parsed.destination.as_deref() {
+                Some(destination) if !same_workspace_folder(&path, destination) => "moved",
+                _ => "renamed",
+            },
+            _ => "deleted",
+        },
+        path: absolute_workspace_path(&workspace_path, &path),
+        destination: parsed
+            .destination
+            .as_deref()
+            .map(|destination| absolute_workspace_path(&workspace_path, destination)),
+        kind: parsed.kind.clone(),
+        origin: "model",
+    };
     let (summary, resource_label, data) = match request.capability_id {
         CapabilityId::WorkspaceCreatePath => {
             let kind = parsed.kind.clone().unwrap_or_default();
@@ -45,7 +90,7 @@ pub(super) fn execute(
                 json!({ "schema": WORKSPACE_PATH_SCHEMA, "action": "create", "path": path, "kind": kind }),
             )
         }
-        CapabilityId::WorkspaceRenamePath => {
+        CapabilityId::WorkspaceMovePath | CapabilityId::WorkspaceRenamePath => {
             let destination = parsed.destination.clone().unwrap_or_default();
             assert_no_unsaved_editor_changes(app, bound, &destination)?;
             rename_workspace_path_impl(&WorkspacePathRenameRequest {
@@ -54,13 +99,32 @@ pub(super) fn execute(
                 to_path: destination.clone(),
             })?;
             (
-                format!("Renamed {path} to {destination}"),
+                format!("Moved {path} to {destination}"),
                 destination.clone(),
                 json!({
                     "schema": WORKSPACE_PATH_SCHEMA,
-                    "action": "rename",
+                    "action": "move",
                     "path": path,
                     "destination": destination,
+                    // The explorer remaps open editors on its own; this is the
+                    // mapping a non-interactive caller needs to follow them.
+                    "editors": [{ "from": path, "to": destination }],
+                }),
+            )
+        }
+        CapabilityId::WorkspaceDuplicatePath => {
+            let stat = duplicate_workspace_path_impl(&WorkspacePathDuplicateRequest {
+                workspace_path,
+                path: path.clone(),
+            })?;
+            (
+                format!("Duplicated {path} as {}", stat.path),
+                stat.path.clone(),
+                json!({
+                    "schema": WORKSPACE_PATH_SCHEMA,
+                    "action": "duplicate",
+                    "path": stat.path,
+                    "source": path,
                 }),
             )
         }
@@ -85,6 +149,10 @@ pub(super) fn execute(
         kind: "file".into(),
         label: resource_label,
     };
+    // A model rename or delete reaches the explorer and every open editor the
+    // same way the user's own action does; nothing in the interface has to know
+    // the change came from a model.
+    emit_workspace_path_change(app, change);
     Ok((summary, data, Some(resource)))
 }
 
@@ -118,7 +186,7 @@ fn parse_arguments(
                 expected_hash: None,
             }
         }
-        CapabilityId::WorkspaceRenamePath => {
+        CapabilityId::WorkspaceRenamePath | CapabilityId::WorkspaceMovePath => {
             let destination = gyro_core::normalize_capability_relative_path(
                 capability_argument_string(arguments, "destination")?,
             )?;
@@ -132,6 +200,12 @@ fn parse_arguments(
                 expected_hash: None,
             }
         }
+        CapabilityId::WorkspaceDuplicatePath => LifecycleRequest {
+            path,
+            kind: None,
+            destination: None,
+            expected_hash: None,
+        },
         CapabilityId::WorkspaceDeletePath => LifecycleRequest {
             path,
             kind: None,
@@ -192,19 +266,26 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             }),
             vec!["path", "kind"],
         ),
-        CapabilityId::WorkspaceRenamePath => (
+        CapabilityId::WorkspaceRenamePath | CapabilityId::WorkspaceMovePath => (
             json!({
                 "path": { "type": "string", "description": "Existing workspace-relative path to rename or move." },
                 "destination": {
                     "type": "string",
-                    "description": "New workspace-relative path. Missing parent directories are created; an existing path is refused."
+                    "description": "New workspace-relative path, including a new file name. Missing parent directories are created; an existing path is refused so nothing is overwritten."
                 }
             }),
             vec!["path", "destination"],
         ),
+        CapabilityId::WorkspaceDuplicatePath => (
+            json!({
+                "path": { "type": "string", "description": "Existing workspace-relative file or folder to duplicate beside itself." }
+            }),
+            vec!["path"],
+        ),
+        CapabilityId::WorkspaceUndoPath => (json!({}), vec![]),
         CapabilityId::WorkspaceDeletePath => (
             json!({
-                "path": { "type": "string", "description": "Workspace-relative path to delete. A directory must already be empty." },
+                "path": { "type": "string", "description": "Workspace-relative path to delete. It is moved to the Trash, so the user can still recover it; gyro_workspace_undo restores it." },
                 "expectedHash": {
                     "type": "string",
                     "description": "Hash returned when the file was read. Required for a file, so a changed file is never deleted by a stale decision."

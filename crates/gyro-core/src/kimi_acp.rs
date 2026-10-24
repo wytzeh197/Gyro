@@ -1621,6 +1621,10 @@ where
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
     WriteFile: FnMut(&Path, &str) -> Result<()>,
 {
+    // The live thinking line: a provider streams its reasoning as
+    // `agent_thought_chunk` deltas that never reach the reply text. Hold them
+    // here so each published snapshot is the thought so far, not one fragment.
+    let mut thought = String::new();
     loop {
         let message = connection.receive()?;
         // ACP is bidirectional: an incoming request may reuse our outgoing ID.
@@ -1672,6 +1676,7 @@ where
                         &params,
                         &connection.provider_label,
                         response,
+                        &mut thought,
                         on_delta,
                         on_activity,
                     );
@@ -1802,10 +1807,50 @@ where
     }
 }
 
+/// How much new thought text accrues before the rail gets another snapshot.
+///
+/// One row per delta would write a store row per token; one row per this many
+/// bytes is invisible at reading speed and keeps a long thought to a handful of
+/// events.
+const THOUGHT_STEP_BYTES: usize = 160;
+
+/// How much of the thought rides in the activity label.
+///
+/// The rail shows this on one line, so only the current end of a thought can be
+/// read. Sending the whole buffer would grow every event with text no row can
+/// display.
+const THOUGHT_LABEL_CHARS: usize = 240;
+
+/// The tail of the live thought, cut on a character boundary.
+///
+/// An ellipsis marks the cut so the row never reads as if the thought started
+/// mid-sentence.
+fn thought_tail(thought: &str) -> String {
+    // Take from the end only. This runs once per published snapshot on a
+    // buffer that keeps growing, so collecting the whole thought first would
+    // make a long one cost O(n) on every publish.
+    let mut tail: Vec<char> = thought
+        .chars()
+        .rev()
+        .take(THOUGHT_LABEL_CHARS + 1)
+        .collect();
+    let truncated = tail.len() > THOUGHT_LABEL_CHARS;
+    if truncated {
+        tail.pop();
+    }
+    tail.reverse();
+    if truncated {
+        tail.insert(0, '…');
+    }
+    let tail: String = tail.into_iter().collect();
+    tail
+}
+
 fn handle_session_update<Delta, Activity>(
     params: &Value,
     provider_label: &str,
     response: &mut String,
+    thought: &mut String,
     on_delta: &mut Delta,
     on_activity: &mut Activity,
 ) where
@@ -1824,6 +1869,36 @@ fn handle_session_update<Delta, Activity>(
             {
                 response.push_str(text);
                 on_delta(text);
+            }
+        }
+        Some("agent_thought_chunk") => {
+            // Reasoning never becomes reply text, so without this arm a
+            // provider's thinking is dropped and the rail can only say
+            // "Thinking". Publish the thought so far as a reasoning activity;
+            // one row per THOUGHT_STEP_BYTES keeps the store proportional to
+            // the thought rather than to the token stream.
+            if let Some(text) = update
+                .get("content")
+                .and_then(|content| content.get("text"))
+                .and_then(Value::as_str)
+            {
+                let before = thought.len();
+                thought.push_str(text);
+                if thought.len() / THOUGHT_STEP_BYTES > before / THOUGHT_STEP_BYTES {
+                    on_activity(&KimiAcpActivity {
+                        id: format!(
+                            "{}-thought-{}",
+                            acp_activity_id_slug(provider_label),
+                            thought.len()
+                        ),
+                        kind: "reasoning".to_string(),
+                        label: thought_tail(thought),
+                        detail: None,
+                        file_counts: None,
+                        status: "running".to_string(),
+                        context_usage: None,
+                    });
+                }
             }
         }
         Some("tool_call") | Some("tool_call_update") => {
@@ -2470,9 +2545,9 @@ mod tests {
         acp_result_marks_output_truncated, acp_result_needs_output_continuation,
         acp_session_reopen_methods, acp_stop_is_output_limit, check_kimi_acp_health,
         classify_approval, is_acp_method_not_found, permission_option_id,
-        plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, CredentialPolicy,
-        KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode,
-        KimiAcpRequest,
+        plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, thought_tail,
+        CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
+        KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS,
     };
 
     #[test]
@@ -4233,6 +4308,28 @@ done
         assert_eq!(acp_activity_id_slug("Kimi"), "kimi");
         assert_eq!(acp_activity_id_slug("Gemini"), "gemini");
         assert_eq!(acp_activity_id_slug("  "), "acp");
+    }
+
+    #[test]
+    fn thought_tail_keeps_the_current_end_of_a_long_thought() {
+        let short = "checking the composer layout";
+        assert_eq!(thought_tail(short), short);
+
+        let long = "a".repeat(THOUGHT_LABEL_CHARS + 40);
+        let tail = thought_tail(&long);
+        assert_eq!(tail.chars().count(), THOUGHT_LABEL_CHARS + 1);
+        assert!(tail.starts_with('…'));
+        // Only the head is dropped: the newest words stay readable.
+        assert!(tail.ends_with('a'));
+    }
+
+    #[test]
+    fn thought_tail_cuts_on_a_character_boundary() {
+        let multibyte = "思考".repeat(THOUGHT_LABEL_CHARS);
+        let tail = thought_tail(&multibyte);
+        assert_eq!(tail.chars().count(), THOUGHT_LABEL_CHARS + 1);
+        assert!(tail.starts_with('…'));
+        assert_eq!(tail, format!("…{}", "思考".repeat(THOUGHT_LABEL_CHARS / 2)));
     }
 
     #[test]

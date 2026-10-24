@@ -13,6 +13,7 @@ import { createTranscriptTurnCache } from "./chat-history-efficiency";
 import { capabilityLabel } from "./capability-ui.ts";
 import { EfficiencySettings } from "./efficiency-settings";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
+import { validateWorkspaceEntryName } from "./workspace-names";
 import {
   CHAT_SESSION_DRAG_MIME,
   beginChatSessionDrag,
@@ -276,6 +277,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+
+import { confirmAction } from "./confirm-action";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
 import {
@@ -836,8 +839,11 @@ type AppChromeProps = {
     parentPath?: string,
     path?: string,
   ) => void;
-  onRenameWorkspacePath?: (path: string) => void;
+  onRenameWorkspacePath?: (path: string, nextName: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
+  onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
+  onDuplicateWorkspacePath?: (path: string) => void;
+  onRevealWorkspacePath?: (path: string) => void;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
   onApplyWorkspaceReplace?: (
@@ -1694,6 +1700,9 @@ export function AppChrome({
   onCreateWorkspacePath,
   onRenameWorkspacePath,
   onDeleteWorkspacePath,
+  onMoveWorkspacePath,
+  onDuplicateWorkspacePath,
+  onRevealWorkspacePath,
   onSelectIdeView,
   onRunWorkspaceSearch,
   onApplyWorkspaceReplace,
@@ -2492,6 +2501,9 @@ export function AppChrome({
               onCreateWorkspacePath={onCreateWorkspacePath}
               onRenameWorkspacePath={onRenameWorkspacePath}
               onDeleteWorkspacePath={onDeleteWorkspacePath}
+              onMoveWorkspacePath={onMoveWorkspacePath}
+              onDuplicateWorkspacePath={onDuplicateWorkspacePath}
+              onRevealWorkspacePath={onRevealWorkspacePath}
               onOpenToolPanel={onOpenToolPanel}
               onOpenWorkspace={onOpenWorkspace}
               onAddWorkspaceFolder={onAddWorkspaceFolder}
@@ -3722,6 +3734,9 @@ function WorkspaceSidebarContent({
   onCreateWorkspacePath,
   onRenameWorkspacePath,
   onDeleteWorkspacePath,
+  onMoveWorkspacePath,
+  onDuplicateWorkspacePath,
+  onRevealWorkspacePath,
   onOpenCommandPalette,
   onSelectIdeView,
   onRunWorkspaceSearch,
@@ -3820,8 +3835,11 @@ function WorkspaceSidebarContent({
     parentPath?: string,
     path?: string,
   ) => void;
-  onRenameWorkspacePath?: (path: string) => void;
+  onRenameWorkspacePath?: (path: string, nextName: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
+  onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
+  onDuplicateWorkspacePath?: (path: string) => void;
+  onRevealWorkspacePath?: (path: string) => void;
   onOpenCommandPalette: () => void;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
@@ -4078,6 +4096,7 @@ function WorkspaceSidebarContent({
     kind: "file" | "directory";
     parentPath?: string;
     value: string;
+    renamePath?: string;
   }>();
   const startExplorerDraft = (
     kind: "file" | "directory",
@@ -4091,11 +4110,46 @@ function WorkspaceSidebarContent({
     }
     setExplorerDraft({ kind, parentPath, value: "" });
   };
+  /* Rename seeds the same inline row with the current basename, the way the
+     Explorer's create row already works. That keeps rename off window.prompt,
+     which WKWebView answers with null, and off the absolute path: only the
+     basename is editable and the entry keeps its folder. */
+  const startExplorerRename = (path: string) => {
+    setExplorerContextMenu(undefined);
+    if (!path) return;
+    const separator = path.lastIndexOf("/");
+    const parentPath = separator > 0 ? path.slice(0, separator) : undefined;
+    if (parentPath) {
+      setExpandedWorkspaceDirectories((current) =>
+        current.has(parentPath) ? current : new Set(current).add(parentPath),
+      );
+    }
+    setExplorerDraft({
+      kind: "file",
+      parentPath,
+      value: path.slice(separator + 1),
+      renamePath: path,
+    });
+  };
   const commitExplorerDraft = () => {
     const draft = explorerDraft;
-    setExplorerDraft(undefined);
     const name = draft?.value.trim().replace(/^\/+/, "");
-    if (!draft || !name) return;
+    if (!draft || !name) {
+      setExplorerDraft(undefined);
+      return;
+    }
+    // A name that cannot be a single path segment is refused here rather than
+    // sent to Rust; the inline row stays open so it can be corrected.
+    if (validateWorkspaceEntryName(name)) return;
+    setExplorerDraft(undefined);
+    if (draft.renamePath) {
+      const currentName = draft.renamePath.slice(
+        draft.renamePath.lastIndexOf("/") + 1,
+      );
+      if (name === currentName) return;
+      onRenameWorkspacePath?.(draft.renamePath, name);
+      return;
+    }
     const parentPath = draft.parentPath?.replace(/\/+$/, "");
     onCreateWorkspacePath?.(
       draft.kind,
@@ -4704,7 +4758,7 @@ function WorkspaceSidebarContent({
                       aria-label="Rename selected path"
                       disabled={!selectedExplorerPath && !ide?.activePath}
                       onClick={() =>
-                        onRenameWorkspacePath?.(
+                        startExplorerRename(
                           selectedExplorerPath ?? ide?.activePath ?? "",
                         )
                       }
@@ -4786,6 +4840,26 @@ function WorkspaceSidebarContent({
                               explorerRootGroupForFile(candidate);
                             if (previousRootGroup) break;
                           }
+                        }
+                        if (explorerDraft?.renamePath === file.path) {
+                          return (
+                            <ExplorerDraftRow
+                              draft={{
+                                ...explorerDraft,
+                                kind:
+                                  file.kind === "directory"
+                                    ? "directory"
+                                    : "file",
+                              }}
+                              onCancel={() => setExplorerDraft(undefined)}
+                              onChange={(value) =>
+                                setExplorerDraft((current) =>
+                                  current ? { ...current, value } : current,
+                                )
+                              }
+                              onCommit={commitExplorerDraft}
+                            />
+                          );
                         }
                         return (
                           <WorkspaceExplorerRow
@@ -4969,14 +5043,58 @@ function WorkspaceSidebarContent({
                     </button>
                   ) : null}
                   <button
-                    onClick={() => {
-                      onRenameWorkspacePath?.(explorerContextMenu.path);
-                      setExplorerContextMenu(undefined);
-                    }}
+                    onClick={() => startExplorerRename(explorerContextMenu.path)}
                     role="menuitem"
                     type="button"
                   >
                     Rename
+                  </button>
+                  <button
+                    onClick={() => {
+                      const target = explorerContextMenu.path;
+                      setExplorerContextMenu(undefined);
+                      onDuplicateWorkspacePath?.(target);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    onClick={() => {
+                      const target = explorerContextMenu.path;
+                      setExplorerContextMenu(undefined);
+                      const entry = files.find((file) => file.path === target);
+                      void navigator.clipboard?.writeText(
+                        entry?.workspacePath ?? entry?.path ?? target,
+                      );
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Copy Path
+                  </button>
+                  <button
+                    onClick={() => {
+                      const target = explorerContextMenu.path;
+                      setExplorerContextMenu(undefined);
+                      void navigator.clipboard?.writeText(target);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Copy Relative Path
+                  </button>
+                  <button
+                    onClick={() => {
+                      const target = explorerContextMenu.path;
+                      setExplorerContextMenu(undefined);
+                      onRevealWorkspacePath?.(target);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Reveal in Finder
                   </button>
                   <button
                     className="is-danger"
@@ -5534,9 +5652,9 @@ function WorkspaceSidebarContent({
                               aria-label="Discard selected source control changes"
                               onClick={async () => {
                                 if (
-                                  !window.confirm(
+                                  !(await confirmAction(
                                     `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
-                                  )
+                                  ))
                                 ) {
                                   return;
                                 }
@@ -7541,11 +7659,18 @@ function ExplorerDraftRow({
   onCommit,
   onCancel,
 }: {
-  draft: { kind: "file" | "directory"; parentPath?: string; value: string };
+  draft: {
+    kind: "file" | "directory";
+    parentPath?: string;
+    value: string;
+    renamePath?: string;
+  };
   onChange: (value: string) => void;
   onCommit: () => void;
   onCancel: () => void;
 }) {
+  const selectedRenameText = useRef(false);
+  const isRename = Boolean(draft.renamePath);
   const depth = draft.parentPath
     ? draft.parentPath.split("/").filter(Boolean).length + 2
     : 2;
@@ -7577,10 +7702,27 @@ function ExplorerDraftRow({
       )}
       <input
         aria-label={
-          draft.kind === "directory" ? "New folder name" : "New file name"
+          isRename
+            ? "New name"
+            : draft.kind === "directory"
+              ? "New folder name"
+              : "New file name"
         }
         autoFocus
         onChange={(event) => onChange(event.target.value)}
+        onFocus={(event) => {
+          /* VS Code selects the basename so typing replaces it and keeps the
+             extension; only do that once, on entry, so editing is untouched. */
+          if (!isRename || selectedRenameText.current) return;
+          selectedRenameText.current = true;
+          const input = event.currentTarget;
+          const extension = draft.value.lastIndexOf(".");
+          if (extension > 0) {
+            input.setSelectionRange(0, extension);
+          } else {
+            input.select();
+          }
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -7593,7 +7735,13 @@ function ExplorerDraftRow({
           }
         }}
         onBlur={onCommit}
-        placeholder={draft.kind === "directory" ? "folder name" : "name.ext"}
+        placeholder={
+          isRename
+            ? "name"
+            : draft.kind === "directory"
+              ? "folder name"
+              : "name.ext"
+        }
         spellCheck={false}
         value={draft.value}
       />

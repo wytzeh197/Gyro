@@ -406,11 +406,7 @@ export function ChatRun({
             <li className="gyro-run-row-item">
               {/* A reasoning headline, when the provider sent one, is the more
                   honest version of "Thinking": it says what about. */}
-              {isSegments && tailStatus ? (
-                <RunPulse label={tailStatus} />
-              ) : (
-                <RunPulse label="Thinking" />
-              )}
+              <RunPulse label="Thinking" thought={tailStatus} />
             </li>
           ) : null}
           {retryPhase ? (
@@ -1012,14 +1008,25 @@ function RunRetry({
   );
 }
 
-/** The "still going" beat: sits on the rail spine so an empty run still has shape. */
-function RunPulse({ label }: { label: string }) {
+/**
+ * The "still going" beat: sits on the rail spine so an empty run still has shape.
+ *
+ * `thought` is what the model is thinking right now. It rides beside the label
+ * on the same line — never wrapped — so the row reads as an in-progress
+ * sentence instead of a paragraph landing on the rail.
+ */
+function RunPulse({ label, thought }: { label: string; thought?: string }) {
   return (
     <div className="gyro-run-pulse" role="status">
       <span aria-hidden="true" className="gyro-run-row-icon">
         <Lightbulb size={15} />
       </span>
-      <span className="gyro-run-pulse-label">{label}</span>
+      <span className="gyro-run-pulse-line">
+        <span className="gyro-run-pulse-label">{label}</span>
+        {thought ? (
+          <span className="gyro-run-pulse-thought">{thought}</span>
+        ) : null}
+      </span>
     </div>
   );
 }

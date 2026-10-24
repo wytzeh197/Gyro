@@ -13,7 +13,15 @@ import {
   hasEditRecovery,
   writeEditRecovery,
 } from "./editor/edit-recovery";
-import { WorkspaceRenameDialog, WorkspaceEditBar } from "@gyro-dev/ui";
+import {
+  WorkspaceRenameDialog,
+  WorkspaceEditBar,
+  askTextValue,
+  browserConfirm,
+  validateWorkspaceEntryName,
+  workspaceEntryName,
+} from "@gyro-dev/ui";
+import { confirmAction, setConfirmActionHandler } from "@gyro-dev/ui";
 import { ManagedDiffEditor } from "./managed-diff-editor";
 import {
   providerLoginProfile,
@@ -185,6 +193,8 @@ import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { confirm as nativeConfirm } from "@tauri-apps/plugin-dialog";
+
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -4316,9 +4326,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Remove the worktree for ${branch}? The branch and chat history will be kept.`,
-        )
+        ))
       ) {
         return;
       }
@@ -5594,10 +5604,17 @@ export function App() {
       /* The Explorer's inline row already names the entry, so skip the dialog. */
       const entered =
         namedPath ??
-        window.prompt(
-          kind === "directory" ? "New folder path" : "New file path",
-          parentPath ? `${parentPath}/` : "",
-        );
+        (await askTextValue({
+          title: kind === "directory" ? "New folder" : "New file",
+          label: kind === "directory" ? "Folder name" : "File name",
+          message: parentPath
+            ? `Inside ${parentPath}`
+            : "Inside the workspace root",
+          initialValue: parentPath ? `${parentPath}/` : "",
+          confirmLabel: "Create",
+          validate: (value) =>
+            validateWorkspaceEntryName(workspaceEntryName(value)),
+        }));
       const enteredPath = entered?.trim();
       if (!enteredPath) {
         return;
@@ -5655,8 +5672,28 @@ export function App() {
     [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
+  /* The macOS WebView has no JavaScript dialog support, so confirmations go
+     through the native dialog plugin. Without this every `window.confirm` in
+     this file returned false and the guarded action silently did nothing. */
+  useEffect(() => {
+    setConfirmActionHandler(async (message) => {
+      if (!isTauriRuntime()) {
+        return browserConfirm(message);
+      }
+      try {
+        return await nativeConfirm(message, {
+          title: "Gyro",
+          kind: "warning",
+        });
+      } catch {
+        return false;
+      }
+    });
+    return () => setConfirmActionHandler(undefined);
+  }, []);
+
   const renameWorkspacePath = useCallback(
-    async (fromPath: string) => {
+    async (fromPath: string, nextName: string) => {
       const root = workspaceRootForPath(workspaceRoots, fromPath);
       if (!root || !fromPath) {
         return;
@@ -5684,9 +5721,16 @@ export function App() {
         );
         return;
       }
-      const entered = window.prompt("Rename workspace path", fromPath);
-      const toPath = entered?.trim()
-        ? absoluteWorkspaceFilePath(root, entered.trim())
+      /* The Explorer collects the new name in its own inline row. Rename must
+         never depend on window.prompt: WKWebView returns null for it, so every
+         rename on macOS used to cancel itself with no feedback. Only the
+         basename changes, so the entry stays in its current folder. */
+      const requestedName = nextName.trim();
+      const fromPathParent = fromPath.includes("/")
+        ? fromPath.slice(0, fromPath.lastIndexOf("/"))
+        : "";
+      const toPath = requestedName
+        ? absoluteWorkspaceFilePath(root, `${fromPathParent}/${requestedName}`)
         : undefined;
       if (!toPath || toPath === fromPath) {
         return;
@@ -5733,6 +5777,68 @@ export function App() {
     ],
   );
 
+  /* A model, a second window or a script can rename or delete a file this
+     editor has open. The explorer's own commands announce themselves on the
+     same event, so one listener follows every mutation, whoever made it. */
+  type WorkspacePathChange = {
+    action: "created" | "renamed" | "moved" | "deleted";
+    path: string;
+    destination?: string;
+    kind?: string;
+    origin: "ui" | "model";
+  };
+
+  const workspacePathChanged = useRef<(change: WorkspacePathChange) => void>(
+    () => {},
+  );
+  useEffect(() => {
+    workspacePathChanged.current = (change) => {
+      if (change.action === "deleted") {
+        dispatchWorkbench({ type: "ide-delete-path", path: change.path });
+        disposeEditorModels([change.path]);
+        if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+          setSelectedFile(undefined);
+        }
+        return;
+      }
+      if (change.action === "created" || !change.destination) {
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: change.path,
+        toPath: change.destination,
+      });
+      disposeEditorModels([change.path, change.destination]);
+      if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, change.path, change.destination),
+        );
+      }
+    };
+  });
+
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<WorkspacePathChange>(
+      "gyro://workspace-paths-changed",
+      (event) => {
+        workspacePathChanged.current(event.payload);
+      },
+    ).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
+
   const deleteWorkspacePath = useCallback(
     async (path: string) => {
       const root = workspaceRootForPath(workspaceRoots, path);
@@ -5763,7 +5869,9 @@ export function App() {
         );
         return;
       }
-      if (!window.confirm(`Delete ${path}? This cannot be undone in Gyro.`)) {
+      if (
+        !(await confirmAction(`Move ${path} to the Trash?`))
+      ) {
         return;
       }
       if (!isTauriRuntime()) {
@@ -5803,6 +5911,113 @@ export function App() {
       workspaceRoots,
     ],
   );
+
+  const moveWorkspacePath = useCallback(
+    async (fromPath: string, destinationDirectory: string) => {
+      if (!fromPath) return;
+      const root = workspaceRootForPath(workspaceRoots, fromPath);
+      if (!root) return;
+      const name = fromPath.slice(fromPath.lastIndexOf("/") + 1);
+      const toPath = destinationDirectory
+        ? `${destinationDirectory}/${name}`
+        : name;
+      if (!toPath || toPath === fromPath) return;
+      try {
+        await invoke("rename_workspace_path", {
+          request: { workspacePath: root, fromPath, toPath },
+        });
+        await refreshWorkspaceTree();
+        notify("tests-passed", "Moved", `${fromPath} → ${toPath}`);
+      } catch (error) {
+        notify("command-failed", "Move failed", String(error));
+      }
+    },
+    [notify, refreshWorkspaceTree, workspaceRoots],
+  );
+
+  const duplicateWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        const created = await invoke<{ path: string }>("duplicate_workspace_path", {
+          request: { workspacePath: root, path },
+        });
+        await refreshWorkspaceTree();
+        notify("tests-passed", "Duplicated", created.path);
+      } catch (error) {
+        notify("command-failed", "Duplicate failed", String(error));
+      }
+    },
+    [notify, refreshWorkspaceTree, workspaceRoots],
+  );
+
+  const revealWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        await revealItemInDir(`${root}/${path}`);
+      } catch (error) {
+        notify("command-failed", "Reveal failed", String(error));
+      }
+    },
+    [notify, workspaceRoots],
+  );
+
+  const undoWorkspacePathChange = useCallback(async () => {
+    try {
+      const undone = await invoke<boolean>("undo_workspace_path");
+      if (!undone) {
+        notify("command-failed", "Nothing to undo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Undo failed", String(error));
+    }
+  }, [notify, refreshWorkspaceTree]);
+
+  const redoWorkspacePathChange = useCallback(async () => {
+    try {
+      const redone = await invoke<boolean>("redo_workspace_path");
+      if (!redone) {
+        notify("command-failed", "Nothing to redo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Redo failed", String(error));
+    }
+  }, [notify, refreshWorkspaceTree]);
+
+  // ⌘Z / ⇧⌘Z for file operations. Monaco and text fields keep their own undo
+  // stacks; the workspace journal only takes over when focus is elsewhere.
+  useEffect(() => {
+    const onUndoKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, [contenteditable='true'], .monaco-editor",
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        void redoWorkspacePathChange();
+      } else {
+        void undoWorkspacePathChange();
+      }
+    };
+    window.addEventListener("keydown", onUndoKey);
+    return () => window.removeEventListener("keydown", onUndoKey);
+  }, [redoWorkspacePathChange, undoWorkspacePathChange]);
 
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
@@ -7626,7 +7841,14 @@ export function App() {
       if (!session) {
         return;
       }
-      const nextTitle = window.prompt("Rename chat", session.title)?.trim();
+      const nextTitle = (
+        await askTextValue({
+          title: "Rename chat",
+          label: "Chat name",
+          initialValue: session.title,
+          confirmLabel: "Rename",
+        })
+      )?.trim();
       if (!nextTitle || nextTitle === session.title) {
         return;
       }
@@ -8058,10 +8280,12 @@ export function App() {
                 multiple: false,
                 title: "Open terminal in folder",
               })
-            : window.prompt(
-                "Open terminal in folder",
-                workspaceActionRoot ?? "",
-              );
+            : await askTextValue({
+                title: "Open terminal in folder",
+                label: "Folder path",
+                initialValue: workspaceActionRoot ?? "",
+                confirmLabel: "Open",
+              });
           if (typeof selected !== "string" || !selected.trim()) return;
           folderPath = selected;
         }
@@ -10170,12 +10394,19 @@ export function App() {
       if (!pane) {
         return;
       }
-      const title = window.prompt("Rename terminal", pane.title)?.trim();
-      if (!title || title === pane.title) {
-        return;
-      }
-      dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
-      notify("terminal", "Terminal renamed", title);
+      void askTextValue({
+        title: "Rename terminal",
+        label: "Terminal name",
+        initialValue: pane.title,
+        confirmLabel: "Rename",
+      }).then((nextTitle) => {
+        const title = nextTitle?.trim();
+        if (!title || title === pane.title) {
+          return;
+        }
+        dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
+        notify("terminal", "Terminal renamed", title);
+      });
     },
     [notify, workbench.terminalPanes],
   );
@@ -11465,12 +11696,18 @@ export function App() {
       if (plan.items.length === 0 && !plan.content) {
         return false;
       }
+      // Approving lands in a fresh Normal-mode draft, whose model picker starts
+      // empty. Carry the model and effort the approval bar showed — the plan
+      // pane's own selection — so the run does not fall back to the global
+      // picker's defaults.
+      const planModel = chatDraftModels[target?.draftKey ?? activeDraftKey];
       return sendDraft("Implement the approved plan.", {
         goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
         plan,
         preserveDraft: true,
         sessionId: target?.sessionId,
+        ...(planModel ? { sessionModel: planModel } : {}),
       });
     },
     [
@@ -11478,6 +11715,7 @@ export function App() {
       activeSessionGoal,
       activeSessionPlan,
       changeChatMode,
+      chatDraftModels,
       notify,
       sendDraft,
     ],
@@ -12427,7 +12665,7 @@ export function App() {
   );
 
   const closeEditorTab = useCallback(
-    (path: string, groupId?: string) => {
+    async (path: string, groupId?: string) => {
       const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
         group.tabs.some((tab) => tab.path === path),
       );
@@ -12435,7 +12673,7 @@ export function App() {
       if (
         closesLastReference &&
         editorBufferHasUnsavedChanges(workbench.ide.buffers[path]) &&
-        !window.confirm(`Discard unsaved changes in ${workspaceName(path)}?`)
+        !(await confirmAction(`Discard unsaved changes in ${workspaceName(path)}?`))
       ) {
         return;
       }
@@ -12471,7 +12709,7 @@ export function App() {
   );
 
   const closeEditorGroup = useCallback(
-    (groupId: string) => {
+    async (groupId: string) => {
       const group = workbench.ide.layout.groups.find(
         (item) => item.id === groupId,
       );
@@ -12493,11 +12731,11 @@ export function App() {
         );
       if (
         dirtyPaths.length > 0 &&
-        !window.confirm(
+        !(await confirmAction(
           dirtyPaths.length === 1
             ? `Discard unsaved changes in ${workspaceName(dirtyPaths[0] ?? "file")}?`
             : `Discard unsaved changes in ${dirtyPaths.length} files?`,
-        )
+        ))
       ) {
         return;
       }
@@ -12870,9 +13108,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Replace “${searchText}” in ${uniquePaths.length} selected file${uniquePaths.length === 1 ? "" : "s"}?`,
-        )
+        ))
       ) {
         return;
       }
@@ -17038,6 +17276,9 @@ export function App() {
       onCreateWorkspacePath={createWorkspacePath}
       onRenameWorkspacePath={renameWorkspacePath}
       onDeleteWorkspacePath={deleteWorkspacePath}
+      onMoveWorkspacePath={moveWorkspacePath}
+      onDuplicateWorkspacePath={duplicateWorkspacePath}
+      onRevealWorkspacePath={revealWorkspacePath}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
@@ -19071,17 +19312,52 @@ function normalizeChatMessage(value: string) {
 
 // Same rules as `session_title_from_message` in the desktop backend.
 // Titles stay local so the selected model is not billed to name the chat.
+// Keep in step with `strip_list_marker` in the desktop backend. A marker on
+// its own ("1" from "1. …") carries no title words, so callers skip it.
+function stripTitleListMarker(text: string) {
+  let rest = text.trim();
+  for (;;) {
+    const trimmed = rest.replace(/^[#>]+\s*/, "").trimStart();
+    const bullet = /^[-*+•]\s+/.exec(trimmed);
+    if (bullet) {
+      rest = trimmed.slice(bullet[0].length);
+      continue;
+    }
+    const ordered = /^(\d+)([.):])?\s*/.exec(trimmed);
+    if (ordered) {
+      if (!ordered[2]) {
+        // A bare number left by the sentence split is still a marker.
+        if (trimmed.slice(ordered[0].length).trim() === "") {
+          return "";
+        }
+        return trimmed;
+      }
+      rest = trimmed.slice(ordered[0].length);
+      continue;
+    }
+    return trimmed;
+  }
+}
+
 function sessionTitleFromMessage(message: string) {
-  const cleaned = normalizeChatMessage(message)
+  const base = normalizeChatMessage(message)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/^\/\w+\s+/, "")
-    .split(/[.!?\n]/)[0]
-    ?.replace(
-      /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
-      "",
+    .replace(/^\/\w+\s+/, "");
+  // A numbered or bulleted opening ("1. …") must not become the title: the
+  // sentence split would otherwise keep only the marker itself.
+  const cleaned = base
+    .split(/[.!?\n]/)
+    .map(stripTitleListMarker)
+    .map((part) =>
+      part
+        .replace(
+          /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
+          "",
+        )
+        .trim(),
     )
-    .trim();
+    .find((part) => /[a-z]/i.test(part));
   const words = (cleaned ?? "")
     .split(/\s+/)
     .filter(Boolean)
@@ -19112,6 +19388,11 @@ function shouldSuggestSessionTitle(
 // placeholder this list misses is treated as a real title, so the first turn
 // skips its rename and the chat keeps the placeholder forever.
 function isGenericSessionTitle(title: string) {
+  // A title with no letters is a marker or a placeholder ("1", "-"), never a
+  // name the user chose, so the model may still replace it.
+  if (!/[a-z]/i.test(title)) {
+    return true;
+  }
   return [
     "Desktop session",
     "New chat",

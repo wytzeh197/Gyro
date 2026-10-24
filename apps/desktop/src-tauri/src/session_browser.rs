@@ -304,6 +304,10 @@ impl SessionBrowserManager {
         })
     }
 
+    fn visible_flag(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.visible)
+    }
+
     fn remove_slot(&self, session_id: &str) -> Result<Option<SessionBrowserSlot>, String> {
         let mut guard = self
             .inner
@@ -311,6 +315,24 @@ impl SessionBrowserManager {
             .map_err(|_| "session browser state is unavailable".to_string())?;
         Ok(guard.remove(session_id))
     }
+}
+
+/// A child webview shares the window with the chat UI, so the browser steals
+/// the keyboard while it is being driven: AppKit makes a newly shown webview
+/// first responder and leaves first responder on a view that is hidden. The
+/// user keeps typing in a chat the model is not working in, so those keystrokes
+/// disappear into a native view nobody is looking at. Give the keyboard back to
+/// the app webview whenever a browser visibility change moved it.
+fn restore_main_webview_focus<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.set_focus();
+    }
+}
+
+/// Only a visibility change can move the window's keyboard focus; repeated
+/// requests for the state the browser is already in must leave the user alone.
+fn visibility_moves_keyboard_focus(was_visible: bool, visible: bool) -> bool {
+    was_visible != visible
 }
 
 fn browser_visibility(background_only: bool, requested_visible: bool) -> bool {
@@ -1139,6 +1161,7 @@ pub fn open_session_browser<R: Runtime>(
             apply_session_browser_layout(app, &request.session_id, request.bounds.clone(), None)?;
             let visible =
                 browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
+            let was_visible = existing.visible;
             if visible {
                 let _ = webview.show();
             } else {
@@ -1146,6 +1169,9 @@ pub fn open_session_browser<R: Runtime>(
             }
             manager.set_url(&request.session_id, url.as_str())?;
             manager.set_visible_flag(&request.session_id, visible)?;
+            if visibility_moves_keyboard_focus(was_visible, visible) {
+                restore_main_webview_focus(app);
+            }
             let _ = manager.approve_origin(&request.session_id, &origin);
             return manager
                 .get_snapshot(&request.session_id)?
@@ -1260,6 +1286,10 @@ pub fn open_session_browser<R: Runtime>(
         webview
             .hide()
             .map_err(|error| format!("could not hide browser: {error}"))?;
+    } else if !background_only {
+        // A child webview created visible becomes first responder, so a model
+        // opening a page must not pull the keyboard out of the user's chat.
+        restore_main_webview_focus(app);
     }
 
     let mut approved = HashSet::new();
@@ -1324,6 +1354,7 @@ pub fn set_session_browser_visible<R: Runtime>(
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
+    let was_visible = manager.visible_flag(session_id)?;
     if visible {
         webview
             .show()
@@ -1334,6 +1365,9 @@ pub fn set_session_browser_visible<R: Runtime>(
             .map_err(|error| format!("could not hide browser: {error}"))?;
     }
     manager.set_visible_flag(session_id, visible)?;
+    if visibility_moves_keyboard_focus(was_visible, visible) {
+        restore_main_webview_focus(app);
+    }
     Ok(())
 }
 
@@ -1857,6 +1891,18 @@ pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_browser_visibility_change_gives_the_keyboard_back_to_the_chat() {
+        // Showing or hiding the child webview moves first responder in the
+        // window, so the app webview has to reclaim it or keystrokes stop
+        // reaching the chat the user is typing in.
+        assert!(visibility_moves_keyboard_focus(false, true));
+        assert!(visibility_moves_keyboard_focus(true, false));
+        // Re-sending the state the browser is already in must leave typing alone.
+        assert!(!visibility_moves_keyboard_focus(true, true));
+        assert!(!visibility_moves_keyboard_focus(false, false));
+    }
 
     fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
         SessionBrowserSlot {

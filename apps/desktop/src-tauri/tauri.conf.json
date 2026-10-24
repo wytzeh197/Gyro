@@ -32,7 +32,10 @@
       "dangerousDisableAssetCspModification": ["style-src"],
       "assetProtocol": {
         "enable": true,
-        "scope": ["$DATA/Gyro/sessions/attachments/**"]
+        "scope": [
+          "$DATA/Gyro/sessions/attachments/**",
+          "$DATA/Gyro/browser-captures/**"
+        ]
       }
     },
     "macOSPrivateApi": true

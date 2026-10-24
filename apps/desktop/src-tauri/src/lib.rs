@@ -195,6 +195,7 @@ mod workspace_capability_read;
 mod workspace_edit_capability;
 mod workspace_mutations;
 mod workspace_path_capability;
+mod workspace_path_history;
 #[cfg(test)]
 use workspace_mutations::create_file_mutation_proposal_in_store;
 use workspace_mutations::{
@@ -300,6 +301,10 @@ const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const PROVIDER_USAGE_UPDATED_EVENT: &str = "gyro://provider-usage-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
+/// One create, rename/move or delete, with the path it moved to. The watcher
+/// event above carries the resulting tree; this one tells open editors which
+/// path became which, which a tree snapshot cannot reconstruct.
+const WORKSPACE_PATHS_CHANGED_EVENT: &str = "gyro://workspace-paths-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 /// How often a live run reminds the desktop it is still working when the CLI is
 /// quiet (long tools, thinking). The chat idle watchdog is five minutes; this
@@ -1134,6 +1139,13 @@ struct WorkspacePathDeleteRequest {
     workspace_path: String,
     path: String,
     expected_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathDuplicateRequest {
+    workspace_path: String,
+    path: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -8325,10 +8337,23 @@ async fn watch_workspace(
 
 #[tauri::command]
 async fn create_workspace_file(
+    app: tauri::AppHandle,
     request: WorkspacePathCreateRequest,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        create_workspace_path_impl(&request).map_err(to_string)
+        run_workspace_lifecycle(
+            Some(&app),
+            "ui",
+            || WorkspacePathChange {
+                action: "created",
+                path: absolute_workspace_path(&request.workspace_path, &request.path),
+                destination: None,
+                kind: Some(request.kind.clone()),
+                origin: "ui",
+            },
+            || create_workspace_path_impl(&request),
+        )
+        .map_err(to_string)
     })
     .await
     .map_err(|error| format!("workspace file create worker failed: {error}"))?
@@ -8336,22 +8361,111 @@ async fn create_workspace_file(
 
 #[tauri::command]
 async fn rename_workspace_path(
+    app: tauri::AppHandle,
     request: WorkspacePathRenameRequest,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        rename_workspace_path_impl(&request).map_err(to_string)
+        run_workspace_lifecycle(
+            Some(&app),
+            "ui",
+            || WorkspacePathChange {
+                action: if same_workspace_folder(&request.from_path, &request.to_path) {
+                    "renamed"
+                } else {
+                    "moved"
+                },
+                path: absolute_workspace_path(&request.workspace_path, &request.from_path),
+                destination: Some(absolute_workspace_path(
+                    &request.workspace_path,
+                    &request.to_path,
+                )),
+                kind: None,
+                origin: "ui",
+            },
+            || rename_workspace_path_impl(&request),
+        )
+        .map_err(to_string)
     })
     .await
     .map_err(|error| format!("workspace path rename worker failed: {error}"))?
 }
 
 #[tauri::command]
-async fn delete_workspace_path(request: WorkspacePathDeleteRequest) -> Result<bool, String> {
+async fn delete_workspace_path(
+    app: tauri::AppHandle,
+    request: WorkspacePathDeleteRequest,
+) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        delete_workspace_path_impl(&request).map_err(to_string)
+        run_workspace_lifecycle(
+            Some(&app),
+            "ui",
+            || WorkspacePathChange {
+                action: "deleted",
+                path: absolute_workspace_path(&request.workspace_path, &request.path),
+                destination: None,
+                kind: None,
+                origin: "ui",
+            },
+            || delete_workspace_path_impl(&request),
+        )
+        .map_err(to_string)
+        .map(|_trashed| true)
     })
     .await
     .map_err(|error| format!("workspace path delete worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn duplicate_workspace_path(
+    app: tauri::AppHandle,
+    request: WorkspacePathDuplicateRequest,
+) -> Result<WorkspaceFileStat, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let stat = duplicate_workspace_path_impl(&request).map_err(to_string)?;
+        emit_workspace_path_change(
+            &app,
+            WorkspacePathChange {
+                action: "created",
+                path: absolute_workspace_path(&request.workspace_path, &stat.path),
+                destination: None,
+                kind: Some(stat.kind.clone()),
+                origin: "ui",
+            },
+        );
+        Ok(stat)
+    })
+    .await
+    .map_err(|error| format!("workspace path duplicate worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn undo_workspace_path(app: tauri::AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let action = undo_workspace_path_impl().map_err(to_string)?;
+        if let Some(action) = action {
+            emit_workspace_path_change(&app, path_history_change(&action));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    })
+    .await
+    .map_err(|error| format!("workspace undo worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn redo_workspace_path(app: tauri::AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let action = redo_workspace_path_impl().map_err(to_string)?;
+        if let Some(action) = action {
+            emit_workspace_path_change(&app, path_history_change(&action));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    })
+    .await
+    .map_err(|error| format!("workspace redo worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -9953,6 +10067,148 @@ fn assert_workspace_entry(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
     gyro_core::security::assert_entry_inside_workspace(root, Path::new(path))
 }
 
+/// What one lifecycle call did, in the shape an open editor needs to follow it.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathChange {
+    /// `created`, `renamed`, `moved` or `deleted`.
+    action: &'static str,
+    /// Absolute path the entry had before the change.
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    /// `ui` or `model`: who asked, so a surface can skip work it already did.
+    origin: &'static str,
+}
+
+/// Runs one lifecycle call and announces it.
+///
+/// This is the only place a workspace mutation becomes an event, and both the
+/// workspace explorer commands and the model-facing capabilities come through
+/// it. A rename or delete performed by a model therefore reaches the explorer
+/// and every open editor exactly like the one the user performed by hand.
+fn emit_workspace_path_change(app: &tauri::AppHandle, change: WorkspacePathChange) {
+    let _ = app.emit(WORKSPACE_PATHS_CHANGED_EVENT, change);
+}
+
+fn run_workspace_lifecycle<T>(
+    app: Option<&tauri::AppHandle>,
+    origin: &'static str,
+    change: impl FnOnce() -> WorkspacePathChange,
+    operation: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let outcome = operation()?;
+    if let Some(app) = app {
+        let mut recorded = change();
+        recorded.origin = origin;
+        emit_workspace_path_change(app, recorded);
+    }
+    Ok(outcome)
+}
+
+/// The absolute form of a workspace path, whichever form the caller passed.
+fn absolute_workspace_path(workspace_path: &str, path: &str) -> String {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        return candidate.to_string_lossy().into_owned();
+    }
+    Path::new(workspace_path)
+        .join(candidate)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// A rename keeps its folder, a move changes it.
+fn same_workspace_folder(from: &str, to: &str) -> bool {
+    Path::new(from).parent() == Path::new(to).parent()
+}
+
+/// Where this platform keeps files the user deleted.
+fn trash_directory() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    if cfg!(target_os = "macos") {
+        Some(home.join(".Trash"))
+    } else if cfg!(target_os = "linux") {
+        Some(home.join(".local/share/Trash/files"))
+    } else {
+        None
+    }
+}
+
+/// The name a second delete of the same entry gets: `notes 2.md`, `notes 3.md`.
+fn unique_trash_destination(directory: &Path, name: &std::ffi::OsStr) -> PathBuf {
+    let name = name.to_string_lossy();
+    let (stem, extension) = match name.rfind('.') {
+        Some(index) if index > 0 => (name[..index].to_string(), name[index..].to_string()),
+        _ => (name.to_string(), String::new()),
+    };
+    let mut candidate = directory.join(name.as_ref());
+    let mut attempt = 2;
+    while candidate.symlink_metadata().is_ok() {
+        candidate = directory.join(format!("{stem} {attempt}{extension}"));
+        attempt += 1;
+    }
+    candidate
+}
+
+/// `files.enableTrash`: a delete moves the entry into the trash so it can be
+/// recovered, which is what Finder's ⌘⌫ does. Nothing is unlinked for good, and
+/// a trash that cannot be reached is an error rather than a silent destroy.
+fn move_entry_to_trash(path: &Path) -> anyhow::Result<PathBuf> {
+    let directory = trash_directory()
+        .ok_or_else(|| anyhow::anyhow!("this platform has no trash for workspace deletes"))?;
+    move_entry_into_trash(path, &directory)
+}
+
+/// The move itself, against a caller-chosen directory so a test can use a
+/// temporary one instead of the user's real trash.
+fn move_entry_into_trash(path: &Path, directory: &Path) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(directory)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("workspace path has no file name"))?;
+    let destination = unique_trash_destination(directory, name);
+    if std::fs::rename(path, &destination).is_ok() {
+        return Ok(destination);
+    }
+    // The trash lives on the boot volume: copy across, then drop the original.
+    copy_entry(path, &destination)?;
+    remove_entry(path)?;
+    Ok(destination)
+}
+
+fn copy_entry(from: &Path, to: &Path) -> anyhow::Result<()> {
+    let metadata = std::fs::symlink_metadata(from)?;
+    if metadata.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            copy_entry(&entry.path(), &to.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if metadata.file_type().is_symlink() {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)?;
+        #[cfg(not(unix))]
+        std::fs::copy(from, to)?;
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    Ok(())
+}
+
+fn remove_entry(path: &Path) -> anyhow::Result<()> {
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
 fn create_workspace_path_impl(
     request: &WorkspacePathCreateRequest,
 ) -> anyhow::Result<WorkspaceFileStat> {
@@ -9977,6 +10233,9 @@ fn create_workspace_path_impl(
         }
         _ => anyhow::bail!("workspace path kind must be file or directory"),
     }
+    workspace_path_history::record(workspace_path_history::PathHistoryAction::Created {
+        path: candidate.clone(),
+    });
     stat_workspace_file_impl(&request.workspace_path, &request.path)
 }
 
@@ -9998,20 +10257,28 @@ fn rename_workspace_path_impl(
         }
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::rename(from, to)?;
+    std::fs::rename(&from, &to)?;
+    workspace_path_history::record(workspace_path_history::PathHistoryAction::Moved {
+        from: from.clone(),
+        to: to.clone(),
+    });
     stat_workspace_file_impl(&request.workspace_path, &request.to_path)
 }
 
-fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::Result<bool> {
+fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::Result<PathBuf> {
     let root = workspace_root(&request.workspace_path)?;
     let candidate = assert_workspace_entry(&root, &request.path)?;
     let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
         anyhow::bail!("workspace path does not exist");
     };
     if metadata.is_symlink() {
-        // Removing a link never loses the content it points at.
-        std::fs::remove_file(candidate)?;
-        return Ok(true);
+        // Moving the link into the trash never loses the content it points at.
+        let trashed = move_entry_to_trash(&candidate)?;
+        workspace_path_history::record(workspace_path_history::PathHistoryAction::Trashed {
+            original: candidate.clone(),
+            trashed: trashed.clone(),
+        });
+        return Ok(trashed);
     }
     if metadata.is_file() {
         if let Some(expected_hash) = request.expected_hash.as_deref() {
@@ -10031,11 +10298,183 @@ fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::R
                 anyhow::bail!("file changed on disk; reload before deleting");
             }
         }
-        std::fs::remove_file(candidate)?;
-        return Ok(true);
     }
-    std::fs::remove_dir(candidate)?;
-    Ok(true)
+    // A folder travels as one entry, which is also why a non-empty folder can
+    // be deleted at all: nothing is unlinked, the whole tree is moved aside.
+    let trashed = move_entry_to_trash(&candidate)?;
+    workspace_path_history::record(workspace_path_history::PathHistoryAction::Trashed {
+        original: candidate.clone(),
+        trashed: trashed.clone(),
+    });
+    Ok(trashed)
+}
+
+/// Splits a name into stem and extension, leaving directories alone.
+fn split_duplicate_name(file_name: &str, is_directory: bool) -> (String, String) {
+    if is_directory {
+        return (file_name.to_string(), String::new());
+    }
+    match file_name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => {
+            (stem.to_string(), format!(".{extension}"))
+        }
+        _ => (file_name.to_string(), String::new()),
+    }
+}
+
+/// Copies one workspace entry beside itself, choosing a free "copy" name.
+fn duplicate_workspace_path_impl(
+    request: &WorkspacePathDuplicateRequest,
+) -> anyhow::Result<WorkspaceFileStat> {
+    let root = workspace_root(&request.workspace_path)?;
+    let source = assert_workspace_entry(&root, &request.path)?;
+    let metadata = std::fs::symlink_metadata(&source)
+        .map_err(|_| anyhow::anyhow!("workspace path does not exist"))?;
+    let parent = source
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("workspace path has no parent folder"))?;
+    let file_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("workspace path has no name"))?;
+    let (stem, extension) = split_duplicate_name(file_name, metadata.is_dir());
+    let mut destination = parent.join(format!("{stem} copy{extension}"));
+    let mut suffix = 2;
+    while std::fs::symlink_metadata(&destination).is_ok() {
+        destination = parent.join(format!("{stem} copy {suffix}{extension}"));
+        suffix += 1;
+        if suffix > 1000 {
+            anyhow::bail!("could not find a free name for the duplicate");
+        }
+    }
+    copy_entry(&source, &destination)?;
+    workspace_path_history::record(workspace_path_history::PathHistoryAction::Created {
+        path: destination.clone(),
+    });
+    let relative = destination
+        .strip_prefix(&root)
+        .map_err(|_| anyhow::anyhow!("duplicate landed outside the workspace"))?
+        .to_string_lossy()
+        .replace('\\', "/");
+    stat_workspace_file_impl(&request.workspace_path, &relative)
+}
+
+/// Moves a trashed entry back home, recreating a parent folder if it is gone.
+fn restore_entry_from_trash(trashed: &Path, original: &Path) -> anyhow::Result<()> {
+    if std::fs::symlink_metadata(original).is_ok() {
+        anyhow::bail!(
+            "cannot restore {}: that path exists again",
+            original.display()
+        );
+    }
+    if let Some(parent) = original.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::rename(trashed, original).is_err() {
+        copy_entry(trashed, original)?;
+        remove_entry(trashed)?;
+    }
+    Ok(())
+}
+
+/// Applies the inverse of one journal entry and returns the action that redoes it.
+fn apply_path_history_action(
+    action: &workspace_path_history::PathHistoryAction,
+) -> anyhow::Result<workspace_path_history::PathHistoryAction> {
+    use workspace_path_history::PathHistoryAction;
+    match action {
+        PathHistoryAction::Created { path } => {
+            let trashed = move_entry_to_trash(path)?;
+            Ok(PathHistoryAction::Trashed {
+                original: path.clone(),
+                trashed,
+            })
+        }
+        PathHistoryAction::Moved { from, to } => {
+            if std::fs::symlink_metadata(to).is_err() {
+                anyhow::bail!("cannot undo the move: {} no longer exists", to.display());
+            }
+            if let Some(parent) = from.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::rename(to, from)?;
+            Ok(PathHistoryAction::Moved {
+                from: to.clone(),
+                to: from.clone(),
+            })
+        }
+        PathHistoryAction::Trashed { original, trashed } => {
+            restore_entry_from_trash(trashed, original)?;
+            Ok(PathHistoryAction::Trashed {
+                original: original.clone(),
+                trashed: trashed.clone(),
+            })
+        }
+    }
+}
+
+fn undo_workspace_path_impl(
+) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+    let Some(action) = workspace_path_history::pop_undo() else {
+        return Ok(None);
+    };
+    match apply_path_history_action(&action) {
+        Ok(reversed) => {
+            workspace_path_history::push_redo(reversed);
+            Ok(Some(action))
+        }
+        Err(error) => {
+            workspace_path_history::push_undo(action);
+            Err(error)
+        }
+    }
+}
+
+fn redo_workspace_path_impl(
+) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+    let Some(action) = workspace_path_history::pop_redo() else {
+        return Ok(None);
+    };
+    match apply_path_history_action(&action) {
+        Ok(reversed) => {
+            workspace_path_history::push_undo(reversed);
+            Ok(Some(action))
+        }
+        Err(error) => {
+            workspace_path_history::push_redo(action);
+            Err(error)
+        }
+    }
+}
+
+/// The explorer-facing shape of an undone or redone journal entry.
+fn path_history_change(
+    action: &workspace_path_history::PathHistoryAction,
+) -> WorkspacePathChange {
+    use workspace_path_history::PathHistoryAction;
+    match action {
+        PathHistoryAction::Created { path } => WorkspacePathChange {
+            action: "deleted",
+            path: path.to_string_lossy().into_owned(),
+            destination: None,
+            kind: None,
+            origin: "ui",
+        },
+        PathHistoryAction::Moved { from, to } => WorkspacePathChange {
+            action: "moved",
+            path: to.to_string_lossy().into_owned(),
+            destination: Some(from.to_string_lossy().into_owned()),
+            kind: None,
+            origin: "ui",
+        },
+        PathHistoryAction::Trashed { original, .. } => WorkspacePathChange {
+            action: "created",
+            path: original.to_string_lossy().into_owned(),
+            destination: None,
+            kind: None,
+            origin: "ui",
+        },
+    }
 }
 
 fn search_workspace_impl(
@@ -16913,6 +17352,11 @@ fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
 /// Placeholder titles a new chat still has when its first message arrives.
 /// A title the user already chose is left alone.
 fn is_generic_session_title(title: &str) -> bool {
+    // A title with no letters is a marker or a placeholder ("1", "-"), never
+    // a name the user chose, so the model may still replace it.
+    if !title.chars().any(char::is_alphabetic) {
+        return true;
+    }
     matches!(
         title.trim(),
         "" | "Desktop session"
@@ -16957,19 +17401,79 @@ fn session_title_from_message(message: &str) -> Option<String> {
     let without_fences = strip_fenced_code_blocks(&message.replace('\0', ""));
     let without_inline = strip_inline_code_markers(&without_fences);
     let without_command = strip_leading_slash_command(without_inline.trim());
-    let first_sentence = without_command
+    // A message that opens with a numbered or bulleted list ("1. …", "- …")
+    // puts the first `.` inside the list marker, so splitting on sentence
+    // punctuation alone yields a title like "1". Walk every fragment and take
+    // the first one that still has words once the marker is gone.
+    let Some(fragment) = without_command
         .split(|character| matches!(character, '.' | '!' | '?' | '\n'))
-        .next()
-        .unwrap_or("")
-        .trim();
-    let stripped = strip_title_preamble(first_sentence);
-    let words = stripped
+        .map(strip_list_marker)
+        .map(str::trim)
+        .map(strip_title_preamble)
+        .find(|fragment| fragment.chars().any(char::is_alphabetic))
+    else {
+        return None;
+    };
+    let words = fragment
         .split_whitespace()
         .take(6)
         .map(title_case_word)
         .collect::<Vec<_>>()
         .join(" ");
     sanitize_session_title_candidate(&words)
+}
+
+/// Drop a leading list marker so `1. Fix the picker` and `- fix the picker`
+/// both start at the words that name the task.
+///
+/// The sentence split runs before this, so an ordered marker usually arrives
+/// with its `.` already consumed ("1") and must still be recognised as a
+/// marker rather than as a title.
+fn strip_list_marker(text: &str) -> &str {
+    let mut rest = text.trim_start();
+    loop {
+        let trimmed = rest.trim_start();
+        // Markdown headings and quotes carry no title content.
+        let after_prefix = trimmed
+            .trim_start_matches('#')
+            .trim_start_matches('>')
+            .trim_start();
+        rest = after_prefix;
+        let mut chars = rest.char_indices();
+        match chars.next() {
+            Some((index, ch @ ('-' | '*' | '+' | '•'))) => {
+                let after = &rest[index + ch.len_utf8()..];
+                if after.is_empty() || after.starts_with(char::is_whitespace) {
+                    rest = after;
+                    continue;
+                }
+            }
+            Some((_, ch)) if ch.is_ascii_digit() => {
+                let end = rest
+                    .find(|ch: char| !ch.is_ascii_digit())
+                    .unwrap_or(rest.len());
+                let after = &rest[end..];
+                let marked = after
+                    .strip_prefix(['.', ')', ':'])
+                    .unwrap_or(after);
+                if marked.len() != after.len() {
+                    rest = marked.trim_start();
+                    if rest.is_empty() {
+                        return "";
+                    }
+                    continue;
+                }
+                // A bare number left by the sentence split ("1." became "1")
+                // is a marker with its words elsewhere, never a title.
+                if after.trim().is_empty() {
+                    return "";
+                }
+                return rest;
+            }
+            _ => {}
+        }
+        return rest;
+    }
 }
 
 fn strip_fenced_code_blocks(text: &str) -> String {
@@ -17496,8 +18000,16 @@ fn streamed_title_replacement(
         return None;
     };
     if stored_title != expected_title {
-        state.1 = true;
-        return None;
+        // The window writes its own provisional title from the message while
+        // the turn starts, so the stored title can differ from the baseline
+        // this turn captured. A placeholder is still Gyro's, not a rename the
+        // user made by hand, so the model may replace it.
+        if is_generic_session_title(stored_title) {
+            state.0 = Some(stored_title.to_string());
+        } else {
+            state.1 = true;
+            return None;
+        }
     }
     Some(title)
 }
@@ -21309,6 +21821,7 @@ fn execute_provider_capability(
         CapabilityId::CodeDefinition
         | CapabilityId::CodeReferences
         | CapabilityId::CodeHover
+        | CapabilityId::CodeFormat
         | CapabilityId::CodeSymbols => lsp_capability::execute(app, bound, request)?,
         CapabilityId::WorkspaceDiagnostics => {
             let diagnostics = with_ide_evidence(app, bound, |context| {
@@ -21367,7 +21880,10 @@ fn execute_provider_capability(
         }
         CapabilityId::WorkspaceCreatePath
         | CapabilityId::WorkspaceRenamePath
-        | CapabilityId::WorkspaceDeletePath => {
+        | CapabilityId::WorkspaceDeletePath
+        | CapabilityId::WorkspaceMovePath
+        | CapabilityId::WorkspaceDuplicatePath
+        | CapabilityId::WorkspaceUndoPath => {
             workspace_path_capability::execute(app, bound, request)?
         }
         CapabilityId::WorkspaceGitLog
@@ -23619,6 +24135,9 @@ pub fn run() {
             discover_google_models_command,
             delete_session,
             delete_workspace_path,
+            duplicate_workspace_path,
+            undo_workspace_path,
+            redo_workspace_path,
             export_diagnostics,
             get_account_session,
             get_notification_permission,
@@ -30223,9 +30742,29 @@ while True:
             session_title_from_message("one two three four five six seven").as_deref(),
             Some("One Two Three Four Five Six")
         );
+        // A numbered or bulleted opening names the task, never the marker.
+        assert_eq!(
+            session_title_from_message(
+                "1. The Workspace needs an upgrade.\n\n2. Tools for AI models."
+            )
+            .as_deref(),
+            Some("The Workspace Needs An Upgrade")
+        );
+        assert_eq!(
+            session_title_from_message("- fix the picker").as_deref(),
+            Some("Fix The Picker")
+        );
+        assert_eq!(
+            session_title_from_message("1) fix the picker").as_deref(),
+            Some("Fix The Picker")
+        );
+        assert!(session_title_from_message("1.").is_none());
         assert!(session_title_from_message("   ").is_none());
         assert!(is_generic_session_title("New chat"));
         assert!(is_generic_session_title("Desktop session"));
+        // A marker-only title is never a name the user chose, so the model may
+        // still replace it.
+        assert!(is_generic_session_title("1"));
         assert!(!is_generic_session_title("Fix The Model Picker"));
     }
 
@@ -33053,6 +33592,107 @@ while True:
             "git {:?} failed: {}",
             args,
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// Deleting a workspace entry must always land in a trash, whichever volume it
+/// stood on. These drive the move against a temporary directory so the user's
+/// real trash is never involved.
+#[cfg(test)]
+mod workspace_trash_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "gyro-trash-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn a_second_delete_keeps_the_extension_and_counts_up() {
+        let trash = scratch("names");
+        let name = std::ffi::OsStr::new("notes.md");
+
+        let first = unique_trash_destination(&trash, name);
+        assert_eq!(first.file_name().unwrap(), std::ffi::OsStr::new("notes.md"));
+        std::fs::write(&first, b"one").unwrap();
+
+        let second = unique_trash_destination(&trash, name);
+        assert_eq!(
+            second.file_name().unwrap(),
+            std::ffi::OsStr::new("notes 2.md")
+        );
+        std::fs::write(&second, b"two").unwrap();
+
+        let third = unique_trash_destination(&trash, name);
+        assert_eq!(
+            third.file_name().unwrap(),
+            std::ffi::OsStr::new("notes 3.md")
+        );
+
+        std::fs::remove_dir_all(&trash).unwrap();
+    }
+
+    #[test]
+    fn a_non_empty_folder_is_trashed_as_one_entry() {
+        let root = scratch("folder");
+        let trash = root.join("trash");
+        let folder = root.join("project");
+        std::fs::create_dir_all(folder.join("nested")).unwrap();
+        std::fs::write(folder.join("nested").join("file.txt"), b"kept").unwrap();
+
+        let destination = move_entry_into_trash(&folder, &trash).unwrap();
+
+        assert!(!folder.exists(), "the deleted folder is gone from the tree");
+        assert_eq!(
+            std::fs::read(destination.join("nested").join("file.txt")).unwrap(),
+            b"kept",
+            "the whole tree survives the delete"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_tree_can_be_copied_across_volumes_before_it_is_dropped() {
+        let root = scratch("copy");
+        let source = root.join("source");
+        std::fs::create_dir_all(source.join("inner")).unwrap();
+        std::fs::write(source.join("inner").join("a.txt"), b"a").unwrap();
+        let destination = root.join("elsewhere");
+
+        copy_entry(&source, &destination).unwrap();
+        remove_entry(&source).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read(destination.join("inner").join("a.txt")).unwrap(),
+            b"a"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_rename_inside_one_folder_is_not_a_move() {
+        assert!(same_workspace_folder("/w/src/lib.rs", "/w/src/main.rs"));
+        assert!(!same_workspace_folder("/w/src/lib.rs", "/w/tests/lib.rs"));
+    }
+
+    #[test]
+    fn a_relative_path_resolves_against_the_workspace_root() {
+        assert_eq!(
+            absolute_workspace_path("/w", "src/lib.rs"),
+            "/w/src/lib.rs"
+        );
+        assert_eq!(
+            absolute_workspace_path("/w", "/elsewhere/lib.rs"),
+            "/elsewhere/lib.rs"
         );
     }
 }

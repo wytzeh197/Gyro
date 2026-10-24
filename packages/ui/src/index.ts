@@ -19,6 +19,16 @@ export { MotionDisclosure } from "./motion-disclosure";
 export { UsageCard } from "./settings-presentation";
 export { useDialogDismiss } from "./use-dialog-dismiss";
 export {
+  browserConfirm,
+  confirmAction,
+  setConfirmActionHandler,
+} from "./confirm-action";
+export { askTextValue, type TextPromptOptions } from "./text-prompt";
+export {
+  validateWorkspaceEntryName,
+  workspaceEntryName,
+} from "./workspace-names";
+export {
   focusedElement,
   isTextInput,
   surfaceOwnsFocus,

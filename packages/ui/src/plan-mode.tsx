@@ -152,7 +152,7 @@ export function ImplementPlanDock({
           aria-label="Tell Gyro what to change in the plan"
           disabled={isPending}
           onChange={(event) => setFeedback(event.target.value)}
-          placeholder="No, and tell Gyro what to change"
+          placeholder="Keep planning… tell Gyro what to change"
           value={feedback}
         />
         {feedback.trim() ? (

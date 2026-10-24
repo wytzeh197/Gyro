@@ -925,10 +925,10 @@
   display: grid;
   place-items: center;
   padding: 0;
-  height: calc(28px * var(--gyro-ui-scale, 1));
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  min-width: calc(28px * var(--gyro-ui-scale, 1));
-  width: calc(28px * var(--gyro-ui-scale, 1));
+  height: var(--gyro-composer-action-size);
+  min-height: var(--gyro-composer-action-size);
+  min-width: var(--gyro-composer-action-size);
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-send-button > svg {

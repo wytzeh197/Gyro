@@ -83,6 +83,17 @@ pub(super) fn execute(
         },
         CapabilityId::CodeHover => LspFileRequest::Hover { line, column },
         CapabilityId::CodeSymbols => LspFileRequest::DocumentSymbol,
+        CapabilityId::CodeFormat => LspFileRequest::Formatting {
+            tab_size: arguments
+                .get("tabSize")
+                .and_then(Value::as_u64)
+                .map(|value| value.clamp(1, 16) as u32)
+                .unwrap_or(4),
+            insert_spaces: arguments
+                .get("insertSpaces")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        },
         _ => anyhow::bail!("lsp_capability does not handle {}", request.capability_id),
     };
     let manager = app.state::<LanguageServerManager>();
@@ -96,6 +107,20 @@ pub(super) fn execute(
             "message": "The language server is still indexing this workspace; retry shortly instead of concluding the symbol is missing.",
         }),
         LspFileOutcome::Result(result) => match request.capability_id {
+            CapabilityId::CodeFormat => {
+                let (edits, total) = format_entries(Path::new(&path), &result, page);
+                paged_result(
+                    json!({
+                        "schema": CODE_OBSERVATION_SCHEMA,
+                        "path": &path,
+                        "status": "ok",
+                        "edits": edits,
+                        "total": total,
+                        "offset": page.offset,
+                    }),
+                    "edits",
+                )
+            }
             CapabilityId::CodeDefinition | CapabilityId::CodeReferences => {
                 let (locations, total) = location_entries(&canonical_workspace, &result, page);
                 paged_result(
@@ -421,6 +446,37 @@ fn hover_text(result: &Value) -> String {
     text
 }
 
+/// Project `textDocument/formatting` edits into 1-based workspace positions.
+fn format_entries(path: &Path, result: &Value, page: CodePage) -> (Vec<Value>, usize) {
+    let Value::Array(items) = result else {
+        return (Vec::new(), 0);
+    };
+    let mut entries = Vec::new();
+    let mut total = 0usize;
+    for edit in items {
+        let range = &edit["range"];
+        if !range.is_object() {
+            continue;
+        }
+        let index = total;
+        total += 1;
+        if !page.includes(index) {
+            continue;
+        }
+        let start = &range["start"];
+        let end = &range["end"];
+        entries.push(json!({
+            "path": path.to_string_lossy(),
+            "startLine": start["line"].as_u64().unwrap_or(0) + 1,
+            "startColumn": start["character"].as_u64().unwrap_or(0) + 1,
+            "endLine": end["line"].as_u64().unwrap_or(0) + 1,
+            "endColumn": end["character"].as_u64().unwrap_or(0) + 1,
+            "newText": edit["newText"].clone(),
+        }));
+    }
+    (entries, total)
+}
+
 fn symbol_entries(
     workspace: &Path,
     file: &Path,
@@ -508,6 +564,14 @@ fn bound_code_result(data: Value, max_bytes: usize) -> anyhow::Result<Value> {
 /// of one arm per capability.
 pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (mut properties, required) = match id {
+        CapabilityId::CodeFormat => (
+            json!({
+                "path": { "type": "string" },
+                "tabSize": { "type": "integer", "minimum": 1, "maximum": 16, "description": "Indent width in spaces for the formatter; defaults to 4." },
+                "insertSpaces": { "type": "boolean", "description": "True to indent with spaces (default), false to indent with tabs." }
+            }),
+            vec!["path"],
+        ),
         CapabilityId::CodeDefinition | CapabilityId::CodeHover => (
             json!({
                 "path": { "type": "string" },
@@ -669,6 +733,46 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["kind"], "function");
         assert_eq!(entries[0]["line"], 10);
+    }
+
+    #[test]
+    fn format_entries_project_one_based_ranges_and_respect_the_page() {
+        let result = serde_json::json!([
+            {
+                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 3 } },
+                "newText": "let"
+            },
+            {
+                "range": { "start": { "line": 4, "character": 2 }, "end": { "line": 4, "character": 2 } },
+                "newText": "    "
+            }
+        ]);
+        let path = std::path::Path::new("src/lib.rs");
+        let (entries, total) = format_entries(path, &result, CodePage { offset: 0, limit: 10 });
+        assert_eq!(total, 2);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["startLine"], 1);
+        assert_eq!(entries[0]["startColumn"], 1);
+        assert_eq!(entries[0]["endColumn"], 4);
+        assert_eq!(entries[0]["newText"], "let");
+        assert_eq!(entries[1]["startLine"], 5);
+        assert_eq!(entries[1]["startColumn"], 3);
+
+        let (paged, total) = format_entries(path, &result, CodePage { offset: 1, limit: 1 });
+        assert_eq!(total, 2);
+        assert_eq!(paged.len(), 1);
+        assert_eq!(paged[0]["startLine"], 5);
+    }
+
+    #[test]
+    fn format_entries_tolerate_a_null_server_answer() {
+        let (entries, total) = format_entries(
+            std::path::Path::new("src/lib.rs"),
+            &serde_json::Value::Null,
+            CodePage { offset: 0, limit: 10 },
+        );
+        assert!(entries.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]

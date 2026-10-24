@@ -60,6 +60,17 @@
   object-fit: contain;
   width: 100%;
 }
+.gyro-chat-file-thumbnail.is-placeholder {
+  aspect-ratio: auto;
+  color: var(--gyro-faint);
+  gap: 8px;
+  min-height: 0;
+  padding: 12px var(--gyro-space-group);
+}
+.gyro-chat-file-placeholder-note {
+  font-size: var(--gyro-font-micro, 11px);
+  letter-spacing: 0.01em;
+}
 .gyro-chat-file-caption {
   align-items: center;
   display: flex;

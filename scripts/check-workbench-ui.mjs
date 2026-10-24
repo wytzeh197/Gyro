@@ -7468,10 +7468,17 @@ expect(
     styleSource.includes(
       ".gyro-composer-shell.has-overlay > :not(.gyro-question-dock)",
     ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > .gyro-composer-bar",
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > .gyro-composer-bar > *",
+    ) &&
+    styleSource.includes("> .gyro-composer-control-effort {") &&
     !styleSource.includes(".gyro-plan-decision-card") &&
     !styleSource.includes(".gyro-plan-artifact-card") &&
     styleSource.includes(".gyro-plan-rail.is-document"),
-  "Plan mode should ask one question at a time, land the plan as a card in the transcript, and put the implement decision where the composer sits.",
+  "Plan mode should ask one question at a time, land the plan as a card in the transcript, keep the model and effort chips above the implement decision, and put that decision where the composer sits.",
 );
 
 expect(

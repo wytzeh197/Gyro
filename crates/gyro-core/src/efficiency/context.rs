@@ -198,7 +198,9 @@ pub fn prepare_owned_model_request(messages: &mut [Value]) -> usize {
 /// Replace tool results older than the newest assistant exchange once they
 /// reach 2 KB. The message and its call id stay, so the provider can still
 /// pair the result with the call. A catalog page stays whole: dropping a schema
-/// makes the next call load it again. A second pass saves nothing.
+/// makes the next call load it again. A tool call's `arguments` follow the same
+/// rule per value, so a replay of an old write keeps its path and drops its
+/// file body rather than resending it. A second pass saves nothing.
 pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
     let newest = messages
         .iter()
@@ -211,6 +213,7 @@ pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
         }
         let removed_images = strip_stale_images(message);
         saved += removed_images;
+        saved += retire_stale_arguments(message);
         let Some(text) = message["content"].as_str() else {
             continue;
         };
@@ -244,6 +247,73 @@ pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
     saved
 }
 
+/// Old `tool_calls` keep their identity and their small fields but lose the bulk
+/// of their payload. A write tool's `arguments` is the entire file; nothing in
+/// the transcript needs it again once the call has run, because the result and
+/// the file on disk carry the outcome. Pruning only oversized *values* keeps the
+/// JSON shape valid, so a provider that re-validates the call still accepts it.
+const STALE_ARGUMENT_BYTES: usize = 512;
+const ARGUMENT_KEEP_BYTES: usize = 200;
+const RETIRED_ARGUMENTS: &str =
+    "{\"retired\":\"arguments omitted from replay; the call already ran\"}";
+fn prune_arguments(value: &mut Value) -> usize {
+    match value {
+        Value::String(text) => {
+            if text.len() <= ARGUMENT_KEEP_BYTES {
+                return 0;
+            }
+            let len = text.len();
+            let marker = format!("[retired: {len} bytes dropped]");
+            let saved = len - marker.len();
+            *text = marker;
+            saved
+        }
+        Value::Array(items) => items.iter_mut().map(prune_arguments).sum(),
+        Value::Object(map) => map.values_mut().map(prune_arguments).sum(),
+        _ => 0,
+    }
+}
+fn retire_stale_arguments(message: &mut Value) -> usize {
+    let Some(calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut saved = 0;
+    for call in calls {
+        let Some(arguments) = call.get_mut("function").and_then(|f| f.get_mut("arguments")) else {
+            continue;
+        };
+        match arguments {
+            Value::String(text) => match serde_json::from_str::<Value>(text) {
+                Ok(mut parsed) if parsed.is_object() => {
+                    if prune_arguments(&mut parsed) == 0 {
+                        continue;
+                    }
+                    let next = parsed.to_string();
+                    if next.len() < text.len() {
+                        saved += text.len() - next.len();
+                        *arguments = Value::String(next);
+                    }
+                }
+                _ => {
+                    if text.len() <= STALE_ARGUMENT_BYTES {
+                        continue;
+                    }
+                    saved += text.len() - RETIRED_ARGUMENTS.len();
+                    *arguments = Value::String(RETIRED_ARGUMENTS.to_string());
+                }
+            },
+            Value::Object(_) => {
+                let before = arguments.to_string().len();
+                if prune_arguments(arguments) > 0 {
+                    let after = arguments.to_string().len();
+                    saved += before.saturating_sub(after);
+                }
+            }
+            _ => continue,
+        }
+    }
+    saved
+}
 fn is_image_part(part: &Value) -> bool {
     matches!(
         part.get("type").and_then(Value::as_str),
@@ -847,5 +917,62 @@ mod tests {
         assert_eq!(a.instructions, 4);
         assert!(a.hidden_content);
         assert_eq!(a.estimated_tokens, 1);
+    }
+
+    #[test]
+    fn retires_payload_arguments_but_keeps_call_identity() {
+        let arguments = format!("{{\"path\":\"a.rs\",\"content\":\"{}\"}}", "x".repeat(2000));
+        let before = arguments.len();
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"write it"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "write_file", "arguments": arguments}
+                }]
+            }),
+            serde_json::json!({"role":"tool","tool_call_id":"call_1","content":"ok"}),
+            serde_json::json!({"role":"assistant","content":"done"}),
+        ];
+        let saved = retire_stale_tool_results(&mut messages);
+        assert!(saved > 1000, "saved {saved}");
+        let call = &messages[2]["tool_calls"][0];
+        assert_eq!(call["id"], "call_1");
+        assert_eq!(call["function"]["name"], "write_file");
+        let retired_text = call["function"]["arguments"].as_str().unwrap();
+        assert!(retired_text.len() < before);
+        let retired: Value = serde_json::from_str(retired_text)
+            .expect("retired arguments stay valid json");
+        assert_eq!(retired["path"], "a.rs");
+        assert!(retired["content"].as_str().unwrap().contains("retired"));
+        assert_eq!(retire_stale_tool_results(&mut messages), 0);
+    }
+
+    #[test]
+    fn keeps_arguments_of_the_newest_exchange() {
+        let arguments = format!("{{\"content\":\"{}\"}}", "y".repeat(2000));
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"write it"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_2",
+                    "type": "function",
+                    "function": {"name": "write_file", "arguments": arguments}
+                }]
+            }),
+        ];
+        let expected = messages[2]["tool_calls"][0]["function"]["arguments"].clone();
+        assert_eq!(retire_stale_tool_results(&mut messages), 0);
+        assert_eq!(
+            messages[2]["tool_calls"][0]["function"]["arguments"],
+            expected
+        );
     }
 }

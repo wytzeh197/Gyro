@@ -55,6 +55,17 @@ reads, and browser actions are sequential barriers. Each call still enters the
 capability broker for policy, scope, approval, and cancellation checks. Reads
 remain observations of live disk state, not an atomic workspace snapshot.
 
+## Code formatting
+
+`gyro_code_format` asks the workspace language server for
+`textDocument/formatting` and returns the formatter's edits instead of writing
+the file. Each edit carries a 1-based `startLine`, `startColumn`, `endLine`,
+`endColumn`, and its `newText`, so it can be applied with
+`gyro_workspace_edit` or handed to the editor. Pass `tabSize` (1-16, default 4)
+and `insertSpaces` (default true) to match the file's style. Edit pages use the
+same `offset`/`limit`/`total`/`nextOffset` protocol as definitions and
+references.
+
 ## Code navigation
 
 `gyro_code_definition`, `gyro_code_references`, and `gyro_code_symbols` accept

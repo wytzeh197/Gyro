@@ -57,6 +57,7 @@ export function ChatFileCard({
   const dialog = useRef<HTMLDivElement>(null);
   const [resolvedPreview, setResolvedPreview] = useState<string>();
   const [failed, setFailed] = useState(false);
+  const [previewPending, setPreviewPending] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const media =
     file.kind === "image" || file.kind === "video" || file.kind === "audio";
@@ -72,14 +73,21 @@ export function ChatFileCard({
       file.local &&
       (file.kind === "image" || file.kind === "video" || file.kind === "audio")
     ) {
-      void actions
-        ?.preview(file.target, file.kind)
-        .then((url) => {
-          if (current) setResolvedPreview(url);
-        })
-        .catch(() => {
-          if (current) setFailed(true);
-        });
+      if (actions?.preview) {
+        setPreviewPending(true);
+        void actions
+          .preview(file.target, file.kind)
+          .then((url) => {
+            if (!current) return;
+            setResolvedPreview(url);
+            setPreviewPending(false);
+          })
+          .catch(() => {
+            if (!current) return;
+            setFailed(true);
+            setPreviewPending(false);
+          });
+      }
     }
     return () => {
       current = false;
@@ -160,7 +168,13 @@ export function ChatFileCard({
       {media &&
       file.kind !== "audio" &&
       (variant !== "thumbnail" || file.kind !== "image" || hasPreview) ? (
-        <span className="gyro-chat-file-thumbnail">
+        <span
+          className={
+            hasPreview
+              ? "gyro-chat-file-thumbnail"
+              : "gyro-chat-file-thumbnail is-placeholder"
+          }
+        >
           {hasPreview && file.kind === "image" ? (
             <img
               alt=""
@@ -178,7 +192,12 @@ export function ChatFileCard({
               src={src}
             />
           ) : (
-            <Icon aria-hidden="true" size={32} />
+            <>
+              <Icon aria-hidden="true" size={22} />
+              <span className="gyro-chat-file-placeholder-note">
+                {previewPending ? "Loading preview…" : "Preview unavailable"}
+              </span>
+            </>
           )}
         </span>
       ) : null}

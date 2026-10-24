@@ -1577,8 +1577,8 @@ button.gyro-account-menu-row:hover {
 .gyro-composer-tool,
 .gyro-send-button {
   flex: 0 0 auto;
-  height: 30px;
-  width: 30px;
+  height: var(--gyro-composer-action-size);
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-composer-tool {
@@ -11809,7 +11809,7 @@ textarea:focus-visible {
 }
 
 .gyro-composer-tool {
-  width: 28px;
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-start .gyro-composer-chip,
@@ -11829,7 +11829,7 @@ textarea:focus-visible {
 }
 
 .gyro-chat-start .gyro-composer-tool {
-  width: 30px;
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-start .gyro-composer-shell button:focus-visible {
@@ -11872,12 +11872,10 @@ textarea:focus-visible {
   border-radius: 999px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
   color: #151515;
-  height: 31px;
   transition:
     background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
     color var(--gyro-premium-motion) var(--gyro-premium-ease),
     transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-  width: 31px;
 }
 
 .gyro-send-button:hover {
@@ -12132,8 +12130,8 @@ textarea:focus-visible {
   background: #202329;
   border-color: #30343a;
   border-radius: 999px;
-  height: 30px;
-  width: 30px;
+  height: var(--gyro-composer-action-size);
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-composer-dock .gyro-composer-tool:hover,
@@ -13347,11 +13345,6 @@ body {
   color: #c6c0b7;
 }
 
-.gyro-chat-composer-dock .gyro-send-button {
-  height: 32px;
-  width: 32px;
-}
-
 .gyro-chat-surface.has-environment .gyro-environment-rail {
   background: #2b2c2f;
   border-radius: var(--gyro-radius-xl);
@@ -14430,7 +14423,7 @@ body {
 }
 
 .gyro-chat-composer-dock .gyro-composer-tool {
-  width: 28px;
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-composer-dock .gyro-composer-chip:hover,
@@ -14480,8 +14473,6 @@ body {
     0 8px 18px rgba(0, 0, 0, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.28);
   color: #25262a;
-  height: 32px;
-  width: 32px;
 }
 
 .gyro-chat-composer-dock .gyro-send-button:hover {
@@ -21757,9 +21748,9 @@ button.gyro-settings-row em::after {
   background: var(--gyro-hero-send);
   border-radius: 999px;
   color: var(--gyro-hero-send-text);
-  height: 29px;
+  height: var(--gyro-composer-action-size);
   opacity: 0.95;
-  width: 29px;
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-start .gyro-send-button:not(:disabled) {
@@ -21881,9 +21872,9 @@ button.gyro-settings-row em::after {
   background: var(--gyro-hero-send);
   border-radius: 999px;
   color: var(--gyro-hero-send-text);
-  height: 29px;
+  height: var(--gyro-composer-action-size);
   opacity: 0.95;
-  width: 29px;
+  width: var(--gyro-composer-action-size);
 }
 
 .gyro-chat-composer-dock .gyro-send-button:not(:disabled) {
@@ -25651,6 +25642,41 @@ button.gyro-account-menu-row:hover,
 /* Questions replace the composer while preserving the draft. */
 .gyro-composer-shell.has-overlay > :not(.gyro-question-dock) {
   display: none;
+}
+
+/* The model and effort chips are the one exception: a plan decision reads
+   "implement this — with whom?", so the bar is lifted above the dock and
+   reduced to the two controls that answer it. The rest of the bar (tools,
+   modes, send) belongs to the input the dock replaced, so it stays hidden. */
+.gyro-composer-shell.has-overlay {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.gyro-composer-shell.has-overlay > .gyro-composer-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  border-top: 0;
+  display: flex;
+  min-height: 0;
+  order: -1;
+  padding: calc(10px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1))
+    calc(10px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-composer-shell.has-overlay > .gyro-composer-bar > * {
+  display: none !important;
+}
+
+.gyro-composer-shell.has-overlay
+  > .gyro-composer-bar
+  > .gyro-composer-control-model,
+.gyro-composer-shell.has-overlay
+  > .gyro-composer-bar
+  > .gyro-composer-control-effort {
+  display: flex !important;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -32003,7 +32029,9 @@ button.gyro-account-menu-row:hover,
   animation: gyro-run-breathe 1.6s ease-in-out infinite;
   color: var(--gyro-muted);
   display: grid;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  /* The live line is one more row in the rail, not a headline: it takes the
+     working-process scale instead of sizing a step above its own header. */
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
   gap: 12px;
   grid-template-columns: 19px minmax(0, 1fr);
   letter-spacing: -0.01em;
@@ -32015,8 +32043,34 @@ button.gyro-account-menu-row:hover,
   opacity: 1;
 }
 
+/* The thinking row: label, then the live thought, on one line, always. A
+   thought is an in-progress sentence, so the overflow fades out at the right
+   edge instead of wrapping a paragraph into the rail or stopping on a clipped
+   word. */
+.gyro-run-pulse-line {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .gyro-run-pulse-label {
+  flex: 0 0 auto;
   font-weight: 450;
+}
+
+.gyro-run-pulse-thought {
+  -webkit-mask-image: linear-gradient(to right, #000 84%, transparent 100%);
+  flex: 1 1 auto;
+  font-weight: 400;
+  mask-image: linear-gradient(to right, #000 84%, transparent 100%);
+  min-width: 0;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 /* The retry beat borrows .gyro-run-row wholesale, so it is the same size as a
@@ -36449,6 +36503,9 @@ textarea:focus-visible,
   --gyro-ide-control-size: calc(22px * var(--gyro-ui-scale, 1));
   --gyro-control-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-icon-target: calc(24px * var(--gyro-ui-scale, 1));
+  /* One size for every control in the composer action row, so mic, attach and
+     send stay the same square and scale with the rest of the UI. */
+  --gyro-composer-action-size: calc(30px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-density="comfortable"] {

@@ -118,6 +118,10 @@ pub enum LspFileRequest {
         line: u64,
         column: u64,
     },
+    Formatting {
+        tab_size: u32,
+        insert_spaces: bool,
+    },
     DocumentSymbol,
 }
 
@@ -127,6 +131,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "definitionProvider",
             Self::References { .. } => "referencesProvider",
             Self::Hover { .. } => "hoverProvider",
+            Self::Formatting { .. } => "documentFormattingProvider",
             Self::DocumentSymbol => "documentSymbolProvider",
         }
     }
@@ -136,6 +141,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "definition",
             Self::References { .. } => "references",
             Self::Hover { .. } => "hover",
+            Self::Formatting { .. } => "formatting",
             Self::DocumentSymbol => "document symbols",
         }
     }
@@ -145,6 +151,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "textDocument/definition",
             Self::References { .. } => "textDocument/references",
             Self::Hover { .. } => "textDocument/hover",
+            Self::Formatting { .. } => "textDocument/formatting",
             Self::DocumentSymbol => "textDocument/documentSymbol",
         }
     }
@@ -539,6 +546,13 @@ impl LanguageServerManager {
                 "textDocument": { "uri": uri },
                 "position": position_params(&lines, line, column, relative_path)?,
                 "context": { "includeDeclaration": include_declaration },
+            }),
+            LspFileRequest::Formatting {
+                tab_size,
+                insert_spaces,
+            } => serde_json::json!({
+                "textDocument": { "uri": uri },
+                "options": { "tabSize": tab_size, "insertSpaces": insert_spaces },
             }),
             LspFileRequest::DocumentSymbol => serde_json::json!({
                 "textDocument": { "uri": uri },
