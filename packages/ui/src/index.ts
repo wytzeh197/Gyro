@@ -599,6 +599,7 @@ export {
   normalizedWorkspaceFolderPath,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  planWorkspaceMove,
   workspaceRelativeFilePath,
   workspaceRootForPath,
   parseGyroWorkspaceFile,

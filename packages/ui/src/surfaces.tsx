@@ -279,6 +279,7 @@ import {
 } from "react";
 
 import { confirmAction } from "./confirm-action";
+import { askTextValue } from "./text-prompt";
 import { createPortal } from "react-dom";
 import { browserCapabilityText } from "./chat-run.ts";
 import {
@@ -3690,6 +3691,9 @@ function ScmChangeGroup({
   );
 }
 
+/** Explorer-only drag. Media drops ignore every `application/x-gyro-*` type. */
+const EXPLORER_PATH_DRAG_MIME = "application/x-gyro-explorer-path";
+
 function WorkspaceSidebarContent({
   sessions,
   commandProfiles,
@@ -4085,6 +4089,8 @@ function WorkspaceSidebarContent({
     x: number;
     y: number;
   }>();
+  const explorerDragPath = useRef<string | undefined>(undefined);
+  const [explorerDropPath, setExplorerDropPath] = useState<string>();
   const explorerContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(explorerContextMenu),
     () => setExplorerContextMenu(undefined),
@@ -4871,6 +4877,8 @@ function WorkspaceSidebarContent({
                               file.depth ?? file.path.split(/[\\/]/).length
                             }
                             bufferStatus={ide?.buffers[file.path]?.status}
+                            draggable={!file.isWorkspaceRoot}
+                            isDropTarget={explorerDropPath === file.path}
                             isActive={
                               selectedExplorerPaths.has(file.path) ||
                               selectedExplorerPath === file.path ||
@@ -4959,6 +4967,76 @@ function WorkspaceSidebarContent({
                                 x: event.clientX,
                                 y: event.clientY,
                               });
+                            }}
+                            onDragStart={(event) => {
+                              if (file.isWorkspaceRoot) {
+                                event.preventDefault();
+                                return;
+                              }
+                              explorerDragPath.current = file.path;
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData(
+                                EXPLORER_PATH_DRAG_MIME,
+                                file.path,
+                              );
+                              event.dataTransfer.setData(
+                                "text/plain",
+                                file.path,
+                              );
+                            }}
+                            onDragEnd={() => {
+                              explorerDragPath.current = undefined;
+                              setExplorerDropPath(undefined);
+                            }}
+                            onDragOver={(event) => {
+                              if (file.kind !== "directory") return;
+                              const from = explorerDragPath.current;
+                              const types = Array.from(event.dataTransfer.types);
+                              if (
+                                !from &&
+                                !types.includes(EXPLORER_PATH_DRAG_MIME)
+                              ) {
+                                return;
+                              }
+                              if (
+                                from &&
+                                (file.path === from ||
+                                  file.path.startsWith(`${from}/`))
+                              ) {
+                                return;
+                              }
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = "move";
+                              setExplorerDropPath((current) =>
+                                current === file.path ? current : file.path,
+                              );
+                            }}
+                            onDragLeave={(event) => {
+                              const next = event.relatedTarget;
+                              if (
+                                next instanceof Node &&
+                                event.currentTarget.contains(next)
+                              ) {
+                                return;
+                              }
+                              setExplorerDropPath((current) =>
+                                current === file.path ? undefined : current,
+                              );
+                            }}
+                            onDrop={(event) => {
+                              if (file.kind !== "directory") return;
+                              const from =
+                                event.dataTransfer.getData(
+                                  EXPLORER_PATH_DRAG_MIME,
+                                ) ||
+                                explorerDragPath.current ||
+                                "";
+                              explorerDragPath.current = undefined;
+                              setExplorerDropPath(undefined);
+                              if (!from) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onMoveWorkspacePath?.(from, file.path);
                             }}
                             onDoubleClick={
                               file.kind === "file"
@@ -5060,6 +5138,33 @@ function WorkspaceSidebarContent({
                   >
                     Duplicate
                   </button>
+                  {files.find((item) => item.path === explorerContextMenu.path)
+                    ?.isWorkspaceRoot ? null : (
+                    <button
+                      onClick={() => {
+                        const target = explorerContextMenu.path;
+                        const separator = target.lastIndexOf("/");
+                        const parent =
+                          separator > 0 ? target.slice(0, separator) : target;
+                        setExplorerContextMenu(undefined);
+                        void askTextValue({
+                          title: "Move",
+                          label: "Destination folder",
+                          message:
+                            "The file keeps its name. Leave the destination inside this workspace folder.",
+                          initialValue: parent,
+                          confirmLabel: "Move",
+                        }).then((destination) => {
+                          if (!destination) return;
+                          onMoveWorkspacePath?.(target, destination);
+                        });
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      Move…
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       const target = explorerContextMenu.path;
@@ -7567,12 +7672,19 @@ function WorkspaceExplorerRow({
   collapsed,
   isActive,
   isOpen,
+  isDropTarget,
   path,
   rowRef,
   tabIndex,
+  draggable,
   onClick,
   onDoubleClick,
   onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   label: string;
   decoration?: IdeState["fileDecorations"][number];
@@ -7584,12 +7696,19 @@ function WorkspaceExplorerRow({
   collapsed: boolean;
   isActive: boolean;
   isOpen: boolean;
+  isDropTarget?: boolean;
   path: string;
   rowRef: (element: HTMLButtonElement | null) => void;
   tabIndex: number;
+  draggable?: boolean;
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onDoubleClick?: () => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragLeave?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDrop?: (event: ReactDragEvent<HTMLButtonElement>) => void;
 }) {
   const badge = kind === "file" ? scmFileBadge(path) : undefined;
   const FileIcon = badge?.icon ?? FileCode2;
@@ -7602,9 +7721,13 @@ function WorkspaceExplorerRow({
       aria-level={Math.max(1, depth)}
       aria-selected={isActive}
       className={
-        isActive
-          ? "gyro-sidebar-row gyro-sidebar-explorer-row is-active"
-          : "gyro-sidebar-row gyro-sidebar-explorer-row"
+        [
+          "gyro-sidebar-row gyro-sidebar-explorer-row",
+          isActive ? "is-active" : "",
+          isDropTarget ? "is-drop-target" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       }
       data-buffer-state={bufferStatus}
       data-explorer-path={path}
@@ -7613,9 +7736,15 @@ function WorkspaceExplorerRow({
       data-root-group={rootGroup}
       data-root-group-start={startsRootGroup || undefined}
       data-open={isOpen || undefined}
+      draggable={draggable || undefined}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
+      onDragEnd={onDragEnd}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDragStart={onDragStart}
+      onDrop={onDrop}
       ref={rowRef}
       role="treeitem"
       style={{ paddingLeft: `${Math.max(8, Math.min(depth, 8) * 11)}px` }}

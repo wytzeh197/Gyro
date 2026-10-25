@@ -66,6 +66,7 @@ import {
   serializeGyroWorkspaceFile,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  planWorkspaceMove,
   workspaceRelativeFilePath,
   workspaceRootForPath,
 } from "../packages/ui/src/workspace-project.ts";
@@ -2471,8 +2472,46 @@ expect(
     surfaceSource.includes('aria-label="Add folder to workspace"') &&
     surfaceSource.includes("selectedExplorerPaths") &&
     surfaceSource.includes("gyro-explorer-context-menu") &&
-    surfaceSource.includes('"Remove folder from workspace"'),
+    surfaceSource.includes('"Remove folder from workspace"') &&
+    surfaceSource.includes("Move…") &&
+    surfaceSource.includes("application/x-gyro-explorer-path") &&
+    appSource.includes("planWorkspaceMove("),
   "Multi-root workspaces should persist folder membership, expose root identity in Explorer, and resolve file actions to the owning root.",
+);
+const sameFolderMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Gyro",
+);
+const nestedMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/docs",
+  "/Users/example/Gyro/docs/api",
+);
+const crossRootMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Shared/inbox",
+);
+const relativeMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "docs",
+);
+const rootMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Shared/src/index.ts",
+  "",
+);
+expect(
+  sameFolderMove.kind === "noop" &&
+    nestedMove.kind === "noop" &&
+    crossRootMove.kind === "blocked" &&
+    relativeMove.kind === "move" &&
+    relativeMove.toPath === "/Users/example/Gyro/docs/notes.md" &&
+    rootMove.kind === "move" &&
+    rootMove.toPath === "/Users/example/Shared/index.ts",
+  "Explorer moves stay in the source workspace, skip same-folder and descendant drops, and keep the entry name.",
 );
 state = workbenchReducer(state, {
   type: "set-workspace-settings",

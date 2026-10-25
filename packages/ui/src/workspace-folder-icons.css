@@ -19,3 +19,8 @@
   color: var(--gyro-muted);
   flex: none;
 }
+
+.gyro-sidebar-explorer-row.is-drop-target {
+  outline: 1px solid var(--gyro-accent, currentColor);
+  outline-offset: -1px;
+}

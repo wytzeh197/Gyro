@@ -261,6 +261,7 @@ import {
   workspaceFilesForRoot,
   workspaceRelativeFilePath,
   workspaceRootForPath,
+  planWorkspaceMove,
   workspacePathExcluded,
   normalizedConfig,
   COUNCIL_COMING_SOON,
@@ -5936,25 +5937,81 @@ export function App() {
 
   const moveWorkspacePath = useCallback(
     async (fromPath: string, destinationDirectory: string) => {
-      if (!fromPath) return;
-      const root = workspaceRootForPath(workspaceRoots, fromPath);
-      if (!root) return;
-      const name = fromPath.slice(fromPath.lastIndexOf("/") + 1);
-      const toPath = destinationDirectory
-        ? `${destinationDirectory}/${name}`
-        : name;
-      if (!toPath || toPath === fromPath) return;
+      const plan = planWorkspaceMove(
+        workspaceRoots,
+        fromPath,
+        destinationDirectory,
+      );
+      if (plan.kind === "noop") return;
+      if (plan.kind === "blocked") {
+        notify("command-failed", "Move blocked", plan.reason);
+        return;
+      }
+      const affectedEditorPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((path) => editorPathMatches(path, plan.fromPath));
+      if (
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
+        )
+      ) {
+        notify(
+          "command-failed",
+          "Move blocked",
+          "Save or revert the file first",
+        );
+        return;
+      }
+      const name = plan.toPath.slice(plan.toPath.lastIndexOf("/") + 1);
+      if (isTauriRuntime()) {
+        try {
+          await invoke("stat_workspace_file", {
+            workspacePath: plan.root,
+            path: plan.toPath,
+          });
+          await confirmAction(
+            `${name} already exists in that folder, so the move was not applied.`,
+          );
+          return;
+        } catch {
+          // The destination name is free. stat_workspace_file throws when the
+          // path is missing, which is the only case rename will accept.
+        }
+      }
       try {
         await invoke("rename_workspace_path", {
-          request: { workspacePath: root, fromPath, toPath },
+          request: {
+            workspacePath: plan.root,
+            fromPath: plan.fromPath,
+            toPath: plan.toPath,
+          },
         });
         await refreshWorkspaceTree();
-        notify("tests-passed", "Moved", `${fromPath} → ${toPath}`);
       } catch (error) {
         notify("command-failed", "Move failed", String(error));
+        return;
       }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: plan.fromPath,
+        toPath: plan.toPath,
+      });
+      disposeEditorModels(affectedEditorPaths);
+      if (selectedFile && editorPathMatches(selectedFile, plan.fromPath)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, plan.fromPath, plan.toPath),
+        );
+      }
+      notify("tests-passed", "Moved", `${plan.fromPath} → ${plan.toPath}`);
     },
-    [notify, refreshWorkspaceTree, workspaceRoots],
+    [
+      notify,
+      refreshWorkspaceTree,
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.tabs,
+      workspaceRoots,
+    ],
   );
 
   const duplicateWorkspacePath = useCallback(

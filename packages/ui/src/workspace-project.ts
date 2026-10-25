@@ -73,6 +73,59 @@ export function workspaceFolderPaths(
     : roots;
 }
 
+export type WorkspaceMovePlan =
+  | { kind: "move"; root: string; fromPath: string; toPath: string }
+  | { kind: "noop" }
+  | { kind: "blocked"; reason: string };
+
+/**
+ * Where an Explorer drag or Move… should land.
+ *
+ * Same-folder drops and moves into a folder's own contents do nothing.
+ * A destination in another workspace root is refused. The caller still has
+ * to confirm when the destination name already exists.
+ */
+export function planWorkspaceMove(
+  roots: readonly string[],
+  fromPath: string,
+  destinationDirectory: string,
+): WorkspaceMovePlan {
+  const source = trimPath(fromPath);
+  if (!source) return { kind: "noop" };
+  const root = workspaceRootForPath(roots, source);
+  if (!root) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
+  const requested = trimPath(destinationDirectory);
+  const destination = !requested
+    ? root
+    : requested.startsWith("/")
+      ? requested
+      : `${root}/${requested.replace(/^\/+/, "")}`;
+  const destinationRoot = workspaceRootForPath(roots, destination);
+  if (!destinationRoot || destinationRoot !== root) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
+  if (destination === source || destination.startsWith(`${source}/`)) {
+    return { kind: "noop" };
+  }
+  const name = source.slice(source.lastIndexOf("/") + 1);
+  if (!name) return { kind: "noop" };
+  const toPath = `${destination}/${name}`;
+  if (toPath === source) return { kind: "noop" };
+  return { kind: "move", root, fromPath: source, toPath };
+}
+
+function trimPath(path: string) {
+  return path.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
 export function workspaceRootForPath(
   roots: readonly string[],
   path: string | undefined,
