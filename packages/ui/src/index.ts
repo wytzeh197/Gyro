@@ -599,6 +599,7 @@ export {
   normalizedWorkspaceFolderPath,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  formatExplorerAskListing,
   planWorkspaceMove,
   workspaceRelativeFilePath,
   workspaceRootForPath,

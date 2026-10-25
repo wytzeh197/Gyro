@@ -126,6 +126,37 @@ function trimPath(path: string) {
   return path.trim().replaceAll("\\", "/").replace(/\/+$/, "");
 }
 
+/** How many names Ask Gyro includes before it says the rest were left out. */
+export const EXPLORER_ASK_LISTING_LIMIT = 80;
+
+/**
+ * A short folder listing for the composer.
+ *
+ * One or two levels, names only. The caller passes a bounded `list_workspace_tree`
+ * result so this never walks the disk itself.
+ */
+export function formatExplorerAskListing(
+  folderName: string,
+  entries: readonly { path: string; kind: string }[],
+  limit = EXPLORER_ASK_LISTING_LIMIT,
+): string {
+  const name = folderName.trim() || "folder";
+  const lines = [`${name}/`];
+  const visible = entries.slice(0, Math.max(0, limit));
+  for (const entry of visible) {
+    const parts = entry.path.replaceAll("\\", "/").split("/").filter(Boolean);
+    const depth = Math.max(1, parts.length);
+    const label = parts.at(-1) ?? entry.path;
+    lines.push(
+      `${"  ".repeat(depth)}${label}${entry.kind === "directory" ? "/" : ""}`,
+    );
+  }
+  if (entries.length > visible.length) {
+    lines.push(`  … ${entries.length - visible.length} more`);
+  }
+  return lines.join("\n");
+}
+
 export function workspaceRootForPath(
   roots: readonly string[],
   path: string | undefined,

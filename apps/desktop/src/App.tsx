@@ -261,6 +261,7 @@ import {
   workspaceFilesForRoot,
   workspaceRelativeFilePath,
   workspaceRootForPath,
+  formatExplorerAskListing,
   planWorkspaceMove,
   workspacePathExcluded,
   normalizedConfig,
@@ -9387,6 +9388,92 @@ export function App() {
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
 
+  /* Explorer "Ask Gyro" attaches the selection and leaves sending to Return.
+     A folder is a short listing, not a recursive copy of its files. */
+  const askWorkspacePath = useCallback(
+    async (path: string) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root || !path) {
+        notify(
+          "command-failed",
+          "Ask Gyro blocked",
+          "Stay inside this workspace folder",
+        );
+        return;
+      }
+      const entry = explorerFiles.find((file) => file.path === path);
+      const isDirectory =
+        entry?.kind === "directory" ||
+        entry?.isWorkspaceRoot === true ||
+        path === root;
+      try {
+        const attachment = isDirectory
+          ? await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path: "",
+                workspacePath: root,
+                kind: "ide-snapshot",
+                name: `${workspaceName(path)}.snapshot.txt`.slice(0, 255),
+                relativePath:
+                  path === root
+                    ? workspaceName(root)
+                    : relativeFilePath(path, root),
+                bytes: Array.from(
+                  new TextEncoder().encode(
+                    formatExplorerAskListing(
+                      workspaceName(path),
+                      await invoke<WorkspaceFile[]>("list_workspace_tree", {
+                        workspacePath: path,
+                        depth: 2,
+                      }),
+                    ),
+                  ),
+                ),
+              },
+            })
+          : await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path,
+                workspacePath: root,
+                kind: "workspace-file",
+              },
+            });
+        setChatAttachments((current) => {
+          const draft = current[activeDraftKey] ?? [];
+          const alreadyAttached = draft.some(
+            (item) =>
+              item.path === attachment.path ||
+              (item.relativePath &&
+                item.relativePath === attachment.relativePath &&
+                item.name === attachment.name),
+          );
+          if (alreadyAttached) return current;
+          return {
+            ...current,
+            [activeDraftKey]: [...draft, attachment],
+          };
+        });
+        notify(
+          "terminal",
+          isDirectory ? "Folder attached" : "File attached",
+          "It is in the composer. Press Return when you want to send.",
+        );
+        window.dispatchEvent(new Event("gyro-focus-composer"));
+      } catch (error) {
+        notify("command-failed", "Could not attach", String(error));
+      }
+    },
+    [
+      activeDraftKey,
+      activeSessionId,
+      explorerFiles,
+      notify,
+      workspaceRoots,
+    ],
+  );
+
   const attachBrowserSnapshot = useCallback(async () => {
     if (!isTauriRuntime() || !activeSessionId) {
       notify(
@@ -17360,6 +17447,7 @@ export function App() {
       onMoveWorkspacePath={moveWorkspacePath}
       onDuplicateWorkspacePath={duplicateWorkspacePath}
       onRevealWorkspacePath={revealWorkspacePath}
+      onAskWorkspacePath={(path) => void askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}

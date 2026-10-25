@@ -845,6 +845,7 @@ type AppChromeProps = {
   onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
   onDuplicateWorkspacePath?: (path: string) => void;
   onRevealWorkspacePath?: (path: string) => void;
+  onAskWorkspacePath?: (path: string) => void;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
   onApplyWorkspaceReplace?: (
@@ -1704,6 +1705,7 @@ export function AppChrome({
   onMoveWorkspacePath,
   onDuplicateWorkspacePath,
   onRevealWorkspacePath,
+  onAskWorkspacePath,
   onSelectIdeView,
   onRunWorkspaceSearch,
   onApplyWorkspaceReplace,
@@ -2505,6 +2507,7 @@ export function AppChrome({
               onMoveWorkspacePath={onMoveWorkspacePath}
               onDuplicateWorkspacePath={onDuplicateWorkspacePath}
               onRevealWorkspacePath={onRevealWorkspacePath}
+              onAskWorkspacePath={onAskWorkspacePath}
               onOpenToolPanel={onOpenToolPanel}
               onOpenWorkspace={onOpenWorkspace}
               onAddWorkspaceFolder={onAddWorkspaceFolder}
@@ -3741,6 +3744,7 @@ function WorkspaceSidebarContent({
   onMoveWorkspacePath,
   onDuplicateWorkspacePath,
   onRevealWorkspacePath,
+  onAskWorkspacePath,
   onOpenCommandPalette,
   onSelectIdeView,
   onRunWorkspaceSearch,
@@ -3844,6 +3848,7 @@ function WorkspaceSidebarContent({
   onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
   onDuplicateWorkspacePath?: (path: string) => void;
   onRevealWorkspacePath?: (path: string) => void;
+  onAskWorkspacePath?: (path: string) => void;
   onOpenCommandPalette: () => void;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
@@ -5165,6 +5170,18 @@ function WorkspaceSidebarContent({
                       Move…
                     </button>
                   )}
+                  <button
+                    onClick={() => {
+                      const target = explorerContextMenu.path;
+                      setExplorerContextMenu(undefined);
+                      onAskWorkspacePath?.(target);
+                      window.dispatchEvent(new Event("gyro-focus-composer"));
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Ask Gyro
+                  </button>
                   <button
                     onClick={() => {
                       const target = explorerContextMenu.path;
@@ -25573,6 +25590,15 @@ function Composer({
       composerTextareaRef.current?.focus();
     }
   }, [isGoalComposerActive]);
+  useEffect(() => {
+    const focus = () => {
+      const textarea = composerTextareaRef.current;
+      if (!textarea || textarea.getClientRects().length === 0) return;
+      textarea.focus();
+    };
+    window.addEventListener("gyro-focus-composer", focus);
+    return () => window.removeEventListener("gyro-focus-composer", focus);
+  }, []);
   useLayoutEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
