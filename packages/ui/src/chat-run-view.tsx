@@ -47,6 +47,10 @@ import type {
 import type { SessionEvent } from "./types";
 import { pendingSubagentApprovals } from "./subagents";
 import { ChatRetryContext } from "./chat-retry-context";
+import {
+  fileMatchesPathUndo,
+  WorkspacePathUndoContext,
+} from "./workspace-path-undo";
 import "./chat-recovery.css";
 import { MotionDisclosure } from "./motion-disclosure";
 
@@ -484,6 +488,9 @@ function RunWorkGroup({
     .filter(Boolean)
     .join(" ");
   const detailLabel = isExpanded ? "Hide details" : "Show details";
+  const lifecycleFiles = group.steps.flatMap((step) =>
+    step.item.kind === "file" && step.item.lifecycle ? [step.item] : [],
+  );
 
   return (
     <div className={className}>
@@ -518,6 +525,7 @@ function RunWorkGroup({
           <ChevronRight size={13} />
         </span>
       </button>
+      {!isExpanded ? <PathUndoButton files={lifecycleFiles} /> : null}
       <MotionDisclosure open={isExpanded}>
         <ol aria-label="Technical details" className="gyro-run-group-details">
           {group.steps.map((step) => (
@@ -551,6 +559,9 @@ function RunSegmentSummary({
   const [isExpanded, setIsExpanded] = useState(false);
   const summary = splitSegmentSummary(summarizeSegment(calls));
   const lineStats = segmentLineStats(calls);
+  const lifecycleFiles = calls.flatMap((step) =>
+    step.item.kind === "file" && step.item.lifecycle ? [step.item] : [],
+  );
   const className = [
     "gyro-run-segment",
     isExpanded ? "is-expanded" : "",
@@ -591,6 +602,7 @@ function RunSegmentSummary({
           size={12}
         />
       </button>
+      {!isExpanded ? <PathUndoButton files={lifecycleFiles} /> : null}
       <MotionDisclosure open={isExpanded}>
         <RunCalls
           aggregateFileStats={aggregateFileStats}
@@ -738,8 +750,8 @@ function RunCallRow({
       </HistoricalToolDetails>
     );
   }
-  if (file && onOpenChanges) {
-    return (
+  const row =
+    file && onOpenChanges ? (
       <button
         className={`${className} is-actionable`}
         onClick={onOpenChanges}
@@ -753,11 +765,16 @@ function RunCallRow({
           size={12}
         />
       </button>
+    ) : (
+      <div className={className} title={text.description}>
+        {body}
+      </div>
     );
-  }
+  if (!file?.lifecycle || file.status !== "done") return row;
   return (
-    <div className={className} title={text.description}>
-      {body}
+    <div className="gyro-run-call-line">
+      {row}
+      <PathUndoButton files={[file]} />
     </div>
   );
 }
@@ -903,7 +920,7 @@ function RunRow({
   // A file row is the way into Source Control. Keeping the affordance on the row
   // is what lets the rail stay card-free.
   if (file && onOpenChanges) {
-    return (
+    const row = (
       <button
         className={`${className} is-actionable`}
         onClick={onOpenChanges}
@@ -913,6 +930,13 @@ function RunRow({
         {body}
       </button>
     );
+    if (!file.lifecycle || file.status !== "done") return row;
+    return (
+      <div className="gyro-run-call-line">
+        {row}
+        <PathUndoButton files={[file]} />
+      </div>
+    );
   }
   // Only attach a native tooltip when it adds detail the row does not already
   // show (truncated path, full command). Duplicating the label on hover is noise.
@@ -920,9 +944,16 @@ function RunRow({
     text.description && text.description !== text.label
       ? text.description
       : undefined;
-  return (
+  const row = (
     <div className={className} title={title}>
       {body}
+    </div>
+  );
+  if (!file?.lifecycle || file.status !== "done") return row;
+  return (
+    <div className="gyro-run-call-line">
+      {row}
+      <PathUndoButton files={[file]} />
     </div>
   );
 }
@@ -954,6 +985,34 @@ function HistoricalToolDetails({
         </pre>
       </div>
     </details>
+  );
+}
+
+/** Undo for a path card, shown only while that action is still the journal top. */
+function PathUndoButton({
+  files,
+}: {
+  files: Array<Extract<WorkItem, { kind: "file" }>>;
+}) {
+  const undo = useContext(WorkspacePathUndoContext);
+  const match = files.some(
+    (file) =>
+      file.status === "done" &&
+      fileMatchesPathUndo(file, undo.offer, undo.roots),
+  );
+  if (!match || !undo.offer) return null;
+  return (
+    <button
+      className="gyro-run-path-undo"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        undo.undo();
+      }}
+      type="button"
+    >
+      {undo.offer.label}
+    </button>
   );
 }
 

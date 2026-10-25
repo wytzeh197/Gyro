@@ -37,6 +37,14 @@ import {
  */
 
 export type WorkStatus = "running" | "done" | "failed";
+
+/** Create, rename, move, trash, or duplicate. Content edits leave this unset. */
+export type FileLifecycle =
+  | "create"
+  | "rename"
+  | "move"
+  | "trash"
+  | "duplicate";
 type CommandCategory = "inspect" | "test" | "build";
 
 export type WorkItem =
@@ -63,6 +71,11 @@ export type WorkItem =
       path: string;
       additions?: number;
       deletions?: number;
+      /**
+       * Path lifecycle, not a content edit. Undo on the row reverses the
+       * workspace journal. Editor undo stays with Monaco.
+       */
+      lifecycle?: FileLifecycle;
       /**
        * What the agent said it was doing to this file, in its own words. Free
        * and already true, so the review card prefers it over a line count when
@@ -445,7 +458,10 @@ export function runCallText(
         description: displayCommand(item.command),
       };
     case "file":
-      return { label: running ? "Editing" : "Edited", description: item.path };
+      return {
+        label: fileChangeVerb(item.lifecycle, running ? "running" : "done", true),
+        description: item.path,
+      };
     case "read": {
       const target = readTarget(item.path);
       const image = item.media === "image";
@@ -677,7 +693,7 @@ export function buildRunModel(
     }
     const item = workItemFromEvent(event);
     if (item) {
-      if (item.kind === "file") {
+      if (item.kind === "file" && !item.lifecycle) {
         const stats = options.fileStats?.(item.path);
         item.additions = item.additions ?? stats?.additions;
         item.deletions = item.deletions ?? stats?.deletions;
@@ -1370,6 +1386,12 @@ function workItemFromCapabilityCall(
   const ui = capabilityUi(capabilityId);
   const label = ui?.label ?? capabilityLabel(capabilityId);
   const path = resourceLabel ?? summary;
+  const lifecycle = pathLifecycleForCapability(capabilityId);
+  // A finished create, rename, move, trash, or duplicate is a path card.
+  // A failed call changed nothing, so it stays a plain beat.
+  if (lifecycle && resourceLabel && status !== "failed") {
+    return { kind: "file", id, status, path: resourceLabel, lifecycle };
+  }
   if (
     capabilityId === "code-mode-execute" ||
     capabilityId === "code-mode-discover"
@@ -1460,6 +1482,25 @@ function workItemFromCapabilityCall(
 
   // Everything else is a single tool beat with the table's own title.
   return { kind: "tool", id, status, tool: label };
+}
+
+function pathLifecycleForCapability(
+  capabilityId: string,
+): FileLifecycle | undefined {
+  switch (capabilityId) {
+    case "workspace-create-path":
+      return "create";
+    case "workspace-rename-path":
+      return "rename";
+    case "workspace-move-path":
+      return "move";
+    case "workspace-delete-path":
+      return "trash";
+    case "workspace-duplicate-path":
+      return "duplicate";
+    default:
+      return undefined;
+  }
 }
 
 function capabilityWorkStatus(value: string | undefined): WorkStatus {
@@ -1614,7 +1655,10 @@ export function runRowText(step: RunStep): RunRowText {
         description: item.intent ?? item.command,
       };
     case "file":
-      return { label: fileVerb(item.status), description: item.path };
+      return {
+        label: fileChangeVerb(item.lifecycle, item.status, false),
+        description: item.path,
+      };
     case "read":
       return {
         label: readVerb(item.status, item.media),
@@ -1755,9 +1799,43 @@ function isRawToolPayload(value: string): boolean {
   );
 }
 
-function fileVerb(status: WorkStatus) {
-  if (status === "running") return "Editing file";
-  return status === "failed" ? "Edit failed" : "Edited file";
+/**
+ * Wording for a file row.
+ *
+ * Content edits keep the long form ("Edited file") the rail already uses.
+ * A path change names the lifecycle ("Moved") because Undo reverses that
+ * journal entry, not the editor buffer. `short` drops the trailing "file"
+ * for a call nested under a summary that already counted the files.
+ */
+export function fileChangeVerb(
+  lifecycle: FileLifecycle | undefined,
+  status: WorkStatus,
+  short: boolean,
+): string {
+  if (!lifecycle) {
+    if (status === "running") return short ? "Editing" : "Editing file";
+    if (status === "failed") return short ? "Edit failed" : "Edit failed";
+    return short ? "Edited" : "Edited file";
+  }
+  if (status === "failed") {
+    const name = {
+      create: "create",
+      rename: "rename",
+      move: "move",
+      trash: "trash",
+      duplicate: "duplicate",
+    }[lifecycle];
+    return `Could not ${name}`;
+  }
+  const done = status !== "running";
+  const verb = {
+    create: done ? "Created" : "Creating",
+    rename: done ? "Renamed" : "Renaming",
+    move: done ? "Moved" : "Moving",
+    trash: done ? "Trashed" : "Trashing",
+    duplicate: done ? "Duplicated" : "Duplicating",
+  }[lifecycle];
+  return short ? verb : `${verb} file`;
 }
 
 function readVerb(status: WorkStatus, media: "image" | "file") {
@@ -2048,7 +2126,9 @@ function matchingLastStep(steps: RunStep[], identity: string) {
 function workIdentity(item: WorkItem): string | undefined {
   switch (item.kind) {
     case "file":
-      return `file:${item.path}`;
+      return item.lifecycle
+        ? `file:${item.lifecycle}:${item.path}`
+        : `file:${item.path}`;
     case "read":
       return item.path ? `read:${item.media}:${item.path}` : undefined;
     case "command":

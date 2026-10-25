@@ -54,7 +54,11 @@ import {
   createChatRetryDispatcher,
   isChatRetryCurrent,
 } from "./chat-retry-dispatch";
-import { ChatRetryContext } from "@gyro-dev/ui";
+import {
+  ChatRetryContext,
+  WorkspacePathUndoContext,
+  type WorkspacePathUndoOffer,
+} from "@gyro-dev/ui";
 import {
   compareSessionEventsForHistory,
   mergeSessionHistoryPages,
@@ -5818,13 +5822,31 @@ export function App() {
     };
   });
 
+  const [workspacePathUndo, setWorkspacePathUndo] =
+    useState<WorkspacePathUndoOffer | null>(null);
+  const refreshWorkspacePathUndo = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setWorkspacePathUndo(null);
+      return;
+    }
+    try {
+      setWorkspacePathUndo(
+        await invoke<WorkspacePathUndoOffer | null>("peek_workspace_path_undo"),
+      );
+    } catch {
+      setWorkspacePathUndo(null);
+    }
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
+    void refreshWorkspacePathUndo();
     void listen<WorkspacePathChange>(
       "gyro://workspace-paths-changed",
       (event) => {
         workspacePathChanged.current(event.payload);
+        void refreshWorkspacePathUndo();
       },
     ).then((unlisten) => {
       if (disposed) {
@@ -5837,7 +5859,7 @@ export function App() {
       disposed = true;
       stop?.();
     };
-  }, []);
+  }, [refreshWorkspacePathUndo]);
 
   const deleteWorkspacePath = useCallback(
     async (path: string) => {
@@ -5970,6 +5992,7 @@ export function App() {
   const undoWorkspacePathChange = useCallback(async () => {
     try {
       const undone = await invoke<boolean>("undo_workspace_path");
+      await refreshWorkspacePathUndo();
       if (!undone) {
         notify("command-failed", "Nothing to undo", "No path change is pending");
         return;
@@ -5978,11 +6001,12 @@ export function App() {
     } catch (error) {
       notify("command-failed", "Undo failed", String(error));
     }
-  }, [notify, refreshWorkspaceTree]);
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
 
   const redoWorkspacePathChange = useCallback(async () => {
     try {
       const redone = await invoke<boolean>("redo_workspace_path");
+      await refreshWorkspacePathUndo();
       if (!redone) {
         notify("command-failed", "Nothing to redo", "No path change is pending");
         return;
@@ -5991,7 +6015,7 @@ export function App() {
     } catch (error) {
       notify("command-failed", "Redo failed", String(error));
     }
-  }, [notify, refreshWorkspaceTree]);
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
 
   // ⌘Z / ⇧⌘Z for file operations. Monaco and text fields keep their own undo
   // stacks; the workspace journal only takes over when focus is elsewhere.
@@ -18564,8 +18588,19 @@ export function App() {
       ) : null}
     </AppChrome>
   );
+  const workspacePathUndoValue = useMemo(
+    () => ({
+      offer: workspacePathUndo,
+      roots: workspaceRoots,
+      undo: () => {
+        void undoWorkspacePathChange();
+      },
+    }),
+    [undoWorkspacePathChange, workspacePathUndo, workspaceRoots],
+  );
   return (
     <ChatRetryContext.Provider value={chatAutoRetry}>
+      <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
       <ChatFileActionsContext.Provider value={chatFileActions}>
         <TerminalAttachmentActionsContext.Provider
           value={terminalAttachmentActions}
@@ -18594,6 +18629,7 @@ export function App() {
           </ComposerContextCandidates.Provider>
         </TerminalAttachmentActionsContext.Provider>
       </ChatFileActionsContext.Provider>
+      </WorkspacePathUndoContext.Provider>
     </ChatRetryContext.Provider>
   );
 }

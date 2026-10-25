@@ -8439,6 +8439,12 @@ async fn duplicate_workspace_path(
 }
 
 #[tauri::command]
+async fn peek_workspace_path_undo(
+) -> Result<Option<workspace_path_history::WorkspacePathUndoPeek>, String> {
+    Ok(workspace_path_history::peek_workspace_path_undo())
+}
+
+#[tauri::command]
 async fn undo_workspace_path(app: tauri::AppHandle) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let action = undo_workspace_path_impl().map_err(to_string)?;
@@ -24136,6 +24142,7 @@ pub fn run() {
             delete_session,
             delete_workspace_path,
             duplicate_workspace_path,
+            peek_workspace_path_undo,
             undo_workspace_path,
             redo_workspace_path,
             export_diagnostics,

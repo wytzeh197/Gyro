@@ -50,6 +50,63 @@ pub(crate) fn pop_undo() -> Option<PathHistoryAction> {
     lock().undo.pop()
 }
 
+/// The top undo entry, still on the stack. Chat uses this so a path card can
+/// offer Undo only while that action is the one Cmd+Z would reverse.
+pub(crate) fn peek_undo() -> Option<PathHistoryAction> {
+    lock().undo.last().cloned()
+}
+
+/// What the chat card should say about the current top of the journal.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspacePathUndoPeek {
+    /// `created`, `moved`, or `trashed` — the recorded action, not its inverse.
+    pub action: &'static str,
+    /// Absolute path a person would recognize: the created path, the move
+    /// destination, or the path that was sent to the Trash.
+    pub path: String,
+    /// Button copy, for example `Undo move of notes.md`.
+    pub label: String,
+}
+
+pub(crate) fn peek_workspace_path_undo() -> Option<WorkspacePathUndoPeek> {
+    peek_undo().as_ref().map(describe_undo_peek)
+}
+
+fn describe_undo_peek(action: &PathHistoryAction) -> WorkspacePathUndoPeek {
+    match action {
+        PathHistoryAction::Created { path } => WorkspacePathUndoPeek {
+            action: "created",
+            path: path.to_string_lossy().into_owned(),
+            label: format!("Undo create of {}", entry_name(path)),
+        },
+        PathHistoryAction::Moved { from, to } => {
+            let verb = if from.parent() == to.parent() {
+                "rename"
+            } else {
+                "move"
+            };
+            WorkspacePathUndoPeek {
+                action: "moved",
+                path: to.to_string_lossy().into_owned(),
+                label: format!("Undo {verb} of {}", entry_name(to)),
+            }
+        }
+        PathHistoryAction::Trashed { original, .. } => WorkspacePathUndoPeek {
+            action: "trashed",
+            path: original.to_string_lossy().into_owned(),
+            label: format!("Undo trash of {}", entry_name(original)),
+        },
+    }
+}
+
+fn entry_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
 pub(crate) fn pop_redo() -> Option<PathHistoryAction> {
     lock().redo.pop()
 }
@@ -116,6 +173,45 @@ mod tests {
             path: path("/w/b.txt"),
         });
         assert_eq!(pop_redo(), None);
+    }
+
+    #[test]
+    fn peek_names_the_top_move_without_removing_it() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear();
+        record(PathHistoryAction::Moved {
+            from: path("/w/drafts/a.txt"),
+            to: path("/w/notes.md"),
+        });
+        assert_eq!(
+            peek_workspace_path_undo(),
+            Some(WorkspacePathUndoPeek {
+                action: "moved",
+                path: "/w/notes.md".to_string(),
+                label: "Undo move of notes.md".to_string(),
+            })
+        );
+        assert_eq!(
+            peek_undo(),
+            Some(PathHistoryAction::Moved {
+                from: path("/w/drafts/a.txt"),
+                to: path("/w/notes.md"),
+            })
+        );
+    }
+
+    #[test]
+    fn peek_names_a_same_folder_move_as_a_rename() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear();
+        record(PathHistoryAction::Moved {
+            from: path("/w/draft.md"),
+            to: path("/w/notes.md"),
+        });
+        assert_eq!(
+            peek_workspace_path_undo().map(|peek| peek.label),
+            Some("Undo rename of notes.md".to_string())
+        );
     }
 
     #[test]

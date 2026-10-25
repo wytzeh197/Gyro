@@ -127,6 +127,9 @@ export type CapabilityId =
   | "workspace-create-path"
   | "workspace-rename-path"
   | "workspace-delete-path"
+  | "workspace-move-path"
+  | "workspace-duplicate-path"
+  | "workspace-undo-path"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
@@ -134,6 +137,7 @@ export type CapabilityId =
   | "code-references"
   | "code-hover"
   | "code-symbols"
+  | "code-format"
   | "ide-reveal"
   | "ide-open-panel"
   | "terminal-open"
@@ -171,7 +175,8 @@ export type CapabilityId =
   | "agent-spawn"
   | "agent-wait"
   | "agent-send"
-  | "agent-stop";
+  | "agent-stop"
+  | "tool-catalog";
 
 export type CapabilityClass =
   | "workspace-inspect"

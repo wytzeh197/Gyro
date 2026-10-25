@@ -832,6 +832,36 @@
   font-size: var(--gyro-chat-font-meta);
 }
 
+.gyro-run-call-line {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gyro-run-call-line > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.gyro-run-path-undo {
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 999px;
+  color: var(--gyro-text);
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: var(--gyro-chat-font-meta, 12px);
+  line-height: 1.2;
+  margin: 2px 0;
+  padding: 2px 8px;
+}
+
+.gyro-run-path-undo:hover {
+  border-color: var(--gyro-border);
+}
+
 /* Scope to the two main composers; nested companion tools keep their density. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)

@@ -85,6 +85,9 @@ export const CAPABILITY_UI = {
   "workspace-create-path": { label: "Create path", row: "file" },
   "workspace-rename-path": { label: "Rename path", row: "file" },
   "workspace-delete-path": { label: "Delete path", row: "file" },
+  "workspace-move-path": { label: "Move path", row: "file" },
+  "workspace-duplicate-path": { label: "Duplicate path", row: "file" },
+  "workspace-undo-path": { label: "Undo path", row: "tool" },
   "workspace-run-task": { label: "Run task", row: "command" },
   "workspace-run-test": { label: "Run tests", row: "command" },
   "workspace-read-output": { label: "Read output", row: "tool" },
@@ -93,6 +96,7 @@ export const CAPABILITY_UI = {
   "code-references": { label: "Find references", row: "read" },
   "code-hover": { label: "Hover info", row: "read" },
   "code-symbols": { label: "File symbols", row: "read" },
+  "code-format": { label: "Format file", row: "tool" },
 
   "ide-reveal": { label: "Reveal in editor", row: "tool" },
   "ide-open-panel": { label: "Open panel", row: "tool" },
@@ -176,6 +180,7 @@ export const CAPABILITY_UI = {
   "agent-wait": { label: "Wait for sub-agents", row: "tool" },
   "agent-send": { label: "Send agent task", row: "tool" },
   "agent-stop": { label: "Stop sub-agent", row: "tool" },
+  "tool-catalog": { label: "Tool catalog", row: "tool" },
 } as const satisfies Record<CapabilityId, CapabilityUi>;
 
 const LOOKUP = CAPABILITY_UI as Record<string, CapabilityUi>;

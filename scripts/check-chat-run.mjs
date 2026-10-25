@@ -27,6 +27,7 @@ import {
   summarizeSegment,
   workItemFromEvent,
 } from "../packages/ui/src/chat-run.ts";
+import { fileMatchesPathUndo } from "../packages/ui/src/workspace-path-undo.ts";
 
 let sequence = 0;
 assert.deepEqual(
@@ -1805,4 +1806,49 @@ assert.equal(
   }).phase.message,
   "DeepSeek exceeded Gyro's tool-call limit for one turn",
   "failure banners expose the actual cause instead of a generic heading",
+);
+
+// A finished move is a path card, not a content edit, and Undo matches only
+// while that destination is still the top of the journal.
+const moved = workItemFromEvent(
+  capabilityCall("workspace-move-path", {
+    status: "completed",
+    summary: "Moved drafts/a.txt to notes.md",
+    resource: { id: "file-1", kind: "file", label: "notes.md" },
+  }),
+);
+assert.equal(moved?.kind, "file");
+assert.equal(moved?.lifecycle, "move");
+assert.deepEqual(
+  moved && runCallText({ kind: "work", id: "move", at: at(0), item: moved }),
+  { label: "Moved", description: "notes.md" },
+);
+const roots = ["/repo"];
+const topMove = {
+  action: "moved",
+  path: "/repo/notes.md",
+  label: "Undo move of notes.md",
+};
+assert.equal(fileMatchesPathUndo(moved, topMove, roots), true);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    { action: "moved", path: "/repo/docs/notes.md", label: "Undo move of notes.md" },
+    roots,
+  ),
+  false,
+  "a root file must not match a nested file of the same name",
+);
+assert.equal(
+  fileMatchesPathUndo(moved, { ...topMove, action: "created" }, roots),
+  false,
+);
+assert.equal(
+  buildRunModel([
+    capabilityCall("workspace-create-path", {
+      resource: { id: "file-2", kind: "file", label: "notes.md" },
+    }),
+  ]).files.length,
+  0,
+  "creating a path is not a content edit",
 );

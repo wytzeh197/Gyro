@@ -719,6 +719,11 @@ export {
 
 export { ChatRun } from "./chat-run-view";
 export { ChatRetryContext } from "./chat-retry-context";
+export { WorkspacePathUndoContext } from "./workspace-path-undo";
+export type {
+  WorkspacePathUndoOffer,
+  WorkspacePathUndoValue,
+} from "./workspace-path-undo";
 export type { ChatRetryState } from "./chat-retry-context";
 export type { RunModel } from "./chat-run";
 export {
