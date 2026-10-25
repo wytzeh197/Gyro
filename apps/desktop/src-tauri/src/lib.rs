@@ -24796,6 +24796,38 @@ fn automate_summary(automation: &Automation) -> AutomateSummary {
     }
 }
 
+/// Resume only continues a paused automation. A completed or current run stays
+/// as it is, so resume cannot flip a finished automation back to Current.
+fn refuse_unpaused_automation_resume(status: AutomationStatus) -> Result<(), String> {
+    if status == AutomationStatus::Paused {
+        return Ok(());
+    }
+    Err(format!(
+        "Only a paused automation can be resumed. This one is {}.",
+        automate_enum_label(&status)
+    ))
+}
+
+#[cfg(test)]
+mod automate_resume_guard_tests {
+    use super::refuse_unpaused_automation_resume;
+    use gyro_core::AutomationStatus;
+
+    #[test]
+    fn resume_refuses_completed_and_current_automations() {
+        assert!(refuse_unpaused_automation_resume(AutomationStatus::Paused).is_ok());
+        let completed =
+            refuse_unpaused_automation_resume(AutomationStatus::Completed).unwrap_err();
+        assert!(
+            completed.contains("Only a paused automation can be resumed"),
+            "{completed}"
+        );
+        assert!(completed.contains("completed"), "{completed}");
+        let current = refuse_unpaused_automation_resume(AutomationStatus::Current).unwrap_err();
+        assert!(current.contains("current"), "{current}");
+    }
+}
+
 /// Queue or pause in the running app. This does not start a provider turn;
 /// the desktop scheduler still owns execution and the existing approval policy.
 fn handle_automate_ipc(app: &tauri::AppHandle, request: AutomateRequest) -> AutomateResponse {
@@ -24845,26 +24877,31 @@ fn handle_automate_ipc(app: &tauri::AppHandle, request: AutomateRequest) -> Auto
                     vec![automate_summary(&automation)],
                 ))
             }
-            AutomateAction::Pause | AutomateAction::Resume => {
+            AutomateAction::Pause => {
                 let id = parsed_id.ok_or_else(|| "automation id is required".to_string())?;
-                let status = if request.action == AutomateAction::Pause {
-                    AutomationStatus::Paused
-                } else {
-                    AutomationStatus::Current
-                };
-                let automation = set_automation_status_blocking(id.to_string(), status)?;
-                if request.action == AutomateAction::Pause {
-                    cancel_scheduled_automation(app, id);
-                }
+                let automation =
+                    set_automation_status_blocking(id.to_string(), AutomationStatus::Paused)?;
+                cancel_scheduled_automation(app, id);
                 emit_automation_update(app, &automation);
                 app.state::<AutomationSchedulerControl>().wake();
-                let verb = if request.action == AutomateAction::Pause {
-                    "Paused"
-                } else {
-                    "Resumed"
-                };
                 Ok((
-                    format!("{verb} {}.", automation.title),
+                    format!("Paused {}.", automation.title),
+                    vec![automate_summary(&automation)],
+                ))
+            }
+            AutomateAction::Resume => {
+                let id = parsed_id.ok_or_else(|| "automation id is required".to_string())?;
+                let current = open_automation_store()?
+                    .get_automation(id)
+                    .map_err(to_string)?
+                    .ok_or_else(|| "automation not found".to_string())?;
+                refuse_unpaused_automation_resume(current.status)?;
+                let automation =
+                    set_automation_status_blocking(id.to_string(), AutomationStatus::Current)?;
+                emit_automation_update(app, &automation);
+                app.state::<AutomationSchedulerControl>().wake();
+                Ok((
+                    format!("Resumed {}.", automation.title),
                     vec![automate_summary(&automation)],
                 ))
             }
