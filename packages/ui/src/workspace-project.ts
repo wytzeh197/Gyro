@@ -82,8 +82,9 @@ export type WorkspaceMovePlan =
  * Where an Explorer drag or Move… should land.
  *
  * Same-folder drops and moves into a folder's own contents do nothing.
- * A destination in another workspace root is refused. The caller still has
- * to confirm when the destination name already exists.
+ * A destination in another workspace root is refused. `..` is collapsed
+ * before that check, so a typed path cannot look local and then leave the
+ * root. The caller still has to confirm when the destination name already exists.
  */
 export function planWorkspaceMove(
   roots: readonly string[],
@@ -102,9 +103,17 @@ export function planWorkspaceMove(
   const requested = trimPath(destinationDirectory);
   const destination = !requested
     ? root
-    : requested.startsWith("/")
-      ? requested
-      : `${root}/${requested.replace(/^\/+/, "")}`;
+    : collapseWorkspacePath(
+        requested.startsWith("/") || /^[a-z]:\//i.test(requested)
+          ? requested
+          : `${root}/${requested.replace(/^\/+/, "")}`,
+      );
+  if (!destination || destination.split("/").includes("..")) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
   const destinationRoot = workspaceRootForPath(roots, destination);
   if (!destinationRoot || destinationRoot !== root) {
     return {
@@ -124,6 +133,31 @@ export function planWorkspaceMove(
 
 function trimPath(path: string) {
   return path.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+/** Resolve `.` and `..` without leaving a typed destination as a string prefix. */
+function collapseWorkspacePath(path: string) {
+  const normalized = trimPath(path);
+  if (!normalized) return "";
+  const drive = normalized.match(/^[a-z]:/i)?.[0];
+  const absolute = /^(?:[a-z]:)?\//i.test(normalized);
+  const resolved: string[] = [];
+  for (const segment of normalized.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (drive && segment.toLowerCase() === drive.toLowerCase()) {
+      resolved.push(drive);
+      continue;
+    }
+    if (segment === "..") {
+      const top = resolved[resolved.length - 1];
+      if (top && top.toLowerCase() !== drive?.toLowerCase()) resolved.pop();
+      continue;
+    }
+    resolved.push(segment);
+  }
+  const joined = resolved.join("/");
+  if (absolute && !drive) return joined ? `/${joined}` : "/";
+  return joined;
 }
 
 /** How many names Ask Gyro includes before it says the rest were left out. */

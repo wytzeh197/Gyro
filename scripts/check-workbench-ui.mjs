@@ -2503,6 +2503,21 @@ const rootMove = planWorkspaceMove(
   "/Users/example/Shared/src/index.ts",
   "",
 );
+const parentEscapeMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "../Shared/inbox",
+);
+const dottedAbsoluteMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Gyro/../Shared/inbox",
+);
+const dottedInsideMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "docs/../archive",
+);
 expect(
   sameFolderMove.kind === "noop" &&
     nestedMove.kind === "noop" &&
@@ -2510,7 +2525,12 @@ expect(
     relativeMove.kind === "move" &&
     relativeMove.toPath === "/Users/example/Gyro/docs/notes.md" &&
     rootMove.kind === "move" &&
-    rootMove.toPath === "/Users/example/Shared/index.ts",
+    rootMove.toPath === "/Users/example/Shared/index.ts" &&
+    parentEscapeMove.kind === "blocked" &&
+    dottedAbsoluteMove.kind === "blocked" &&
+    dottedInsideMove.kind === "move" &&
+    dottedInsideMove.toPath === "/Users/example/Gyro/archive/notes.md" &&
+    surfaceSource.includes("planWorkspaceMove("),
   "Explorer moves stay in the source workspace, skip same-folder and descendant drops, and keep the entry name.",
 );
 state = workbenchReducer(state, {

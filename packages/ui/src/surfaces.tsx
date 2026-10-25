@@ -409,6 +409,7 @@ import {
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
 import {
+  planWorkspaceMove,
   workspaceExplorerRootEntryGroup,
   workspaceRelativeFilePath,
 } from "./workspace-project";
@@ -4096,6 +4097,15 @@ function WorkspaceSidebarContent({
   }>();
   const explorerDragPath = useRef<string | undefined>(undefined);
   const [explorerDropPath, setExplorerDropPath] = useState<string>();
+  const explorerMoveRoots = useMemo(() => {
+    const roots = new Set<string>();
+    for (const file of files) {
+      if (file.isWorkspaceRoot) roots.add(file.workspacePath ?? file.path);
+      else if (file.workspacePath) roots.add(file.workspacePath);
+    }
+    if (roots.size === 0 && workspacePath) roots.add(workspacePath);
+    return [...roots];
+  }, [files, workspacePath]);
   const explorerContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(explorerContextMenu),
     () => setExplorerContextMenu(undefined),
@@ -5003,10 +5013,16 @@ function WorkspaceSidebarContent({
                               ) {
                                 return;
                               }
+                              // Highlight only a destination planWorkspaceMove
+                              // will accept. Another workspace root must not
+                              // look like a valid target.
                               if (
                                 from &&
-                                (file.path === from ||
-                                  file.path.startsWith(`${from}/`))
+                                planWorkspaceMove(
+                                  explorerMoveRoots,
+                                  from,
+                                  file.path,
+                                ).kind !== "move"
                               ) {
                                 return;
                               }
@@ -5041,6 +5057,15 @@ function WorkspaceSidebarContent({
                               if (!from) return;
                               event.preventDefault();
                               event.stopPropagation();
+                              if (
+                                planWorkspaceMove(
+                                  explorerMoveRoots,
+                                  from,
+                                  file.path,
+                                ).kind !== "move"
+                              ) {
+                                return;
+                              }
                               onMoveWorkspacePath?.(from, file.path);
                             }}
                             onDoubleClick={
