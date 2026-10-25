@@ -36,16 +36,18 @@ function normalizePath(path: string) {
 /**
  * True when the leftover directory is that workspace root.
  *
- * A canonical prefix such as `/private/tmp/repo` still matches `/tmp/repo`.
- * The shorter path has to land on a `/`, so `app` does not match `myapp` and
- * `/Users/me` does not count as the root `/Users/me/app`.
+ * macOS realpath writes `/tmp/repo` as `/private/tmp/repo`. That alias matches
+ * in either direction, and only as a `/private` prefix on the same path.
+ * Any other absolute suffix does not: `/Users/me/app` is not the root `/app`,
+ * and `/Users/me` is not the root `/Users/me/app`. A relative leftover still
+ * has to land on a `/`, so `app` does not match `myapp`.
  */
 function matchesWorkspaceRoot(prefix: string, root: string) {
   if (prefix === root) return true;
   const [longer, shorter] =
     prefix.length >= root.length ? [prefix, root] : [root, prefix];
   if (!shorter || !longer.endsWith(shorter)) return false;
-  if (shorter.startsWith("/")) return true;
+  if (shorter.startsWith("/")) return longer === `/private${shorter}`;
   const splitAt = longer.length - shorter.length;
   return splitAt > 0 && longer[splitAt - 1] === "/";
 }

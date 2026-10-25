@@ -29,6 +29,48 @@ import {
 } from "../packages/ui/src/chat-run.ts";
 import { fileMatchesPathUndo } from "../packages/ui/src/workspace-path-undo.ts";
 
+// These run before the rail wording checks. An unrelated copy mismatch must
+// not hide a path-undo regression.
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a /private/tmp path still matches the /tmp workspace root",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/private/tmp/repo"],
+  ),
+  true,
+  "the /tmp and /private/tmp alias matches in either direction",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/app"],
+  ),
+  false,
+  "an absolute suffix is not the same workspace root",
+);
+
 let sequence = 0;
 assert.deepEqual(
   splitToolName("gyro_capabilities__gyro_terminal_wait"),
