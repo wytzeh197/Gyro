@@ -8190,8 +8190,10 @@ fn dropped_path_kind(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn classify_dropped_path(path: String) -> Result<String, String> {
-    dropped_path_kind(path)
+async fn classify_dropped_path(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || dropped_path_kind(path))
+        .await
+        .map_err(|error| format!("dropped path worker failed: {error}"))?
 }
 
 #[cfg(test)]
