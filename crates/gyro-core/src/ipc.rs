@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub const APP_IPC_SCHEMA_V1: &str = "gyro.app-ipc.v1";
+pub const AUTOMATE_IPC_SCHEMA_V1: &str = "gyro.automate-ipc.v1";
 pub const DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1: &str = "gyro.desktop-provider-approval-ipc.v1";
 
 const APP_NOTIFICATION_MAX_FRAME_BYTES: usize = 64 * 1024;
@@ -135,6 +136,71 @@ impl DesktopProviderApprovalResponse {
             behavior: DesktopProviderApprovalBehavior::Deny,
             message: message.into(),
             updated_input: None,
+        }
+    }
+}
+
+/// Talks to the running app. The CLI does not start a scheduler of its own.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutomateAction {
+    List,
+    Run,
+    Pause,
+    Resume,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomateRequest {
+    pub schema: String,
+    pub sender_version: String,
+    pub action: AutomateAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation_id: Option<String>,
+}
+
+impl AutomateRequest {
+    pub fn new(action: AutomateAction, automation_id: Option<String>) -> Self {
+        Self {
+            schema: AUTOMATE_IPC_SCHEMA_V1.into(),
+            sender_version: env!("CARGO_PKG_VERSION").into(),
+            action,
+            automation_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomateSummary {
+    pub id: String,
+    pub title: String,
+    pub schedule: String,
+    pub status: String,
+    pub last_run_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomateResponse {
+    pub schema: String,
+    pub app_version: String,
+    pub compatible: bool,
+    pub status: String,
+    pub message: String,
+    pub automations: Vec<AutomateSummary>,
+}
+
+impl AutomateResponse {
+    pub fn error(app_version: &str, message: impl Into<String>) -> Self {
+        Self {
+            schema: AUTOMATE_IPC_SCHEMA_V1.into(),
+            app_version: app_version.into(),
+            compatible: true,
+            status: "error".into(),
+            message: message.into(),
+            automations: Vec::new(),
         }
     }
 }
@@ -347,6 +413,81 @@ pub fn notify_running_app_with_status(
         let _ = paths;
         let _ = notification;
         Ok(AppNotificationResult::not_running())
+    }
+}
+
+pub fn app_not_running_message() -> &'static str {
+    "Gyro.app is not running. Open it with `open -a Gyro`, then run this command again."
+}
+
+pub fn request_app_automate(
+    paths: &GyroPaths,
+    request: &AutomateRequest,
+) -> Result<AutomateResponse> {
+    #[cfg(unix)]
+    {
+        let Some(mut stream) = connect_running_app(paths)? else {
+            return Err(anyhow!(app_not_running_message()));
+        };
+        stream.set_read_timeout(Some(APP_NOTIFICATION_IO_TIMEOUT))?;
+        stream.set_write_timeout(Some(APP_NOTIFICATION_IO_TIMEOUT))?;
+        write_json_frame(
+            &mut stream,
+            request,
+            APP_NOTIFICATION_MAX_FRAME_BYTES,
+            "automate request",
+        )
+        .with_context(|| format!("ask Gyro.app at {}", paths.socket_path.display()))?;
+        let frame = match read_bounded_frame(
+            &mut BufReader::new(stream),
+            APP_NOTIFICATION_MAX_FRAME_BYTES,
+        ) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => Vec::new(),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Vec::new()
+            }
+            Err(error) => return Err(error).context("read Gyro.app automate response"),
+        };
+        if frame.iter().all(u8::is_ascii_whitespace) {
+            return Err(anyhow!(
+                "Gyro.app did not answer the automate command. Update the app and the CLI from the same build."
+            ));
+        }
+        let response: AutomateResponse =
+            serde_json::from_slice(&frame).context("decode Gyro.app automate response")?;
+        if response.schema != AUTOMATE_IPC_SCHEMA_V1 || !response.compatible {
+            return Err(anyhow!(
+                "Gyro.app returned an incompatible automate response. Update the app and the CLI from the same build."
+            ));
+        }
+        Ok(response)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = paths;
+        let _ = request;
+        Err(anyhow!(app_not_running_message()))
+    }
+}
+
+#[cfg(test)]
+mod automate_ipc_tests {
+    use super::{AutomateAction, AutomateRequest, AUTOMATE_IPC_SCHEMA_V1};
+
+    #[test]
+    fn automate_request_names_the_schema_and_action() {
+        let request = AutomateRequest::new(AutomateAction::Pause, Some("abc".into()));
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["schema"], AUTOMATE_IPC_SCHEMA_V1);
+        assert_eq!(value["action"], "pause");
+        assert_eq!(value["automationId"], "abc");
     }
 }
 

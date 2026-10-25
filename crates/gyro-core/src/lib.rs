@@ -128,9 +128,11 @@ pub use harness::{
     ProviderResumeCursorPayload, ProviderRunPayload, TerminalRequestPayload, HARNESS_SCHEMA_V1,
 };
 pub use ipc::{
-    request_desktop_provider_capability, AppNotification, AppNotificationKind,
-    DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
-    DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+    app_not_running_message, request_app_automate, request_desktop_provider_capability,
+    AppNotification, AppNotificationKind, AutomateAction, AutomateRequest, AutomateResponse,
+    AutomateSummary, DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+    DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
+    DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
     check_acp_health, check_kimi_acp_health, discover_acp_models, plan_mode_denies_approval,

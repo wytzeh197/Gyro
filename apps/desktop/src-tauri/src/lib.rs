@@ -98,8 +98,10 @@ use gyro_core::{
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
+        AutomateAction, AutomateRequest, AutomateResponse, AutomateSummary,
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
-        DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+        DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
+        DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
     is_openai_compatible_provider, logout_account as account_logout, mutation_approval_payload,
     ollama_tool_chat_with_progress, openai_compat_endpoint, openai_compat_host_is_loopback,
@@ -24775,6 +24777,110 @@ fn bind_cli_ipc_listener(
     )
 }
 
+fn automate_enum_label(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn automate_summary(automation: &Automation) -> AutomateSummary {
+    AutomateSummary {
+        id: automation.id.to_string(),
+        title: automation.title.clone(),
+        schedule: automate_enum_label(&automation.schedule),
+        status: automate_enum_label(&automation.status),
+        last_run_at: automation.last_run_at.map(|time| time.to_rfc3339()),
+    }
+}
+
+/// Queue or pause in the running app. This does not start a provider turn;
+/// the desktop scheduler still owns execution and the existing approval policy.
+fn handle_automate_ipc(app: &tauri::AppHandle, request: AutomateRequest) -> AutomateResponse {
+    let app_version = env!("CARGO_PKG_VERSION");
+    if request.schema != AUTOMATE_IPC_SCHEMA_V1
+        || !versions_compatible(&request.sender_version, app_version)
+    {
+        return AutomateResponse {
+            schema: AUTOMATE_IPC_SCHEMA_V1.into(),
+            app_version: app_version.into(),
+            compatible: false,
+            status: "incompatible".into(),
+            message: format!(
+                "Gyro CLI {} is not compatible with Gyro.app {app_version}",
+                request.sender_version
+            ),
+            automations: Vec::new(),
+        };
+    }
+    let parsed_id = match (&request.action, request.automation_id.as_deref()) {
+        (AutomateAction::List, _) => None,
+        (_, Some(id)) => match uuid::Uuid::parse_str(id.trim()) {
+            Ok(id) => Some(id),
+            Err(_) => {
+                return AutomateResponse::error(app_version, "automation id must be a UUID");
+            }
+        },
+        (_, None) => {
+            return AutomateResponse::error(app_version, "automation id is required");
+        }
+    };
+    let outcome = (|| -> Result<(String, Vec<AutomateSummary>), String> {
+        match request.action {
+            AutomateAction::List => {
+                let store = open_automation_store()?;
+                let automations = store.list_automations().map_err(to_string)?;
+                let shown = automations.iter().take(200).map(automate_summary).collect();
+                Ok(("Listed automations.".into(), shown))
+            }
+            AutomateAction::Run => {
+                let id = parsed_id.ok_or_else(|| "automation id is required".to_string())?;
+                let automation = run_automation_blocking(id.to_string())?;
+                emit_automation_update(app, &automation);
+                app.state::<AutomationSchedulerControl>().wake();
+                Ok((
+                    format!("Queued {}.", automation.title),
+                    vec![automate_summary(&automation)],
+                ))
+            }
+            AutomateAction::Pause | AutomateAction::Resume => {
+                let id = parsed_id.ok_or_else(|| "automation id is required".to_string())?;
+                let status = if request.action == AutomateAction::Pause {
+                    AutomationStatus::Paused
+                } else {
+                    AutomationStatus::Current
+                };
+                let automation = set_automation_status_blocking(id.to_string(), status)?;
+                if request.action == AutomateAction::Pause {
+                    cancel_scheduled_automation(app, id);
+                }
+                emit_automation_update(app, &automation);
+                app.state::<AutomationSchedulerControl>().wake();
+                let verb = if request.action == AutomateAction::Pause {
+                    "Paused"
+                } else {
+                    "Resumed"
+                };
+                Ok((
+                    format!("{verb} {}.", automation.title),
+                    vec![automate_summary(&automation)],
+                ))
+            }
+        }
+    })();
+    match outcome {
+        Ok((message, automations)) => AutomateResponse {
+            schema: AUTOMATE_IPC_SCHEMA_V1.into(),
+            app_version: app_version.into(),
+            compatible: true,
+            status: "ok".into(),
+            message,
+            automations,
+        },
+        Err(error) => AutomateResponse::error(app_version, error),
+    }
+}
+
 #[cfg(unix)]
 fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net::UnixStream) {
     let _ = stream.set_read_timeout(Some(DESKTOP_IPC_IO_TIMEOUT));
@@ -24787,6 +24893,17 @@ fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net:
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame) else {
         return;
     };
+    if value.get("schema").and_then(serde_json::Value::as_str) == Some(AUTOMATE_IPC_SCHEMA_V1) {
+        let response = match serde_json::from_value::<AutomateRequest>(value) {
+            Ok(request) => handle_automate_ipc(app, request),
+            Err(error) => AutomateResponse::error(
+                env!("CARGO_PKG_VERSION"),
+                format!("Gyro could not read that automate command: {error}"),
+            ),
+        };
+        let _ = write_bounded_json_line(reader.get_mut(), &response, MAX_DESKTOP_IPC_MESSAGE_BYTES);
+        return;
+    }
     if value.get("schema").and_then(serde_json::Value::as_str)
         == Some(DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1)
     {

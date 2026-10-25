@@ -14,7 +14,10 @@ use gyro_core::{
     config::CommandProfile,
     create_worktree,
     doctor::run_doctor,
-    ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
+    ipc::{
+        app_ipc_listener_ready, notify_running_app_with_status, request_app_automate,
+        AppNotificationResult, AutomateAction, AutomateRequest, AutomateSummary,
+    },
     prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
     provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
     slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
@@ -91,6 +94,8 @@ enum Commands {
     Setup(SetupArgs),
     /// Open or attach sessions in Gyro.app.
     App(AppArgs),
+    /// List, run, pause, or resume automations in the running Gyro app.
+    Automate(AutomateArgs),
     /// Validate local setup.
     Doctor(DoctorArgs),
     /// Manage local Gyro configuration.
@@ -347,6 +352,24 @@ enum AppCommand {
         #[command(flatten)]
         worktree: WorktreeArgs,
     },
+}
+
+#[derive(Debug, Args)]
+struct AutomateArgs {
+    #[command(subcommand)]
+    command: AutomateCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AutomateCommand {
+    /// Print each automation's title, schedule, last run, and status.
+    List,
+    /// Queue one run in the open app. Ask-first still applies there.
+    Run { id: String },
+    /// Pause an automation. Uses the status the scheduler already stores.
+    Pause { id: String },
+    /// Resume a paused automation.
+    Resume { id: String },
 }
 
 #[derive(Debug, Args)]
@@ -843,6 +866,7 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::Sessions(args)) => sessions_command(args),
         Some(Commands::Setup(args)) => setup_command(args),
         Some(Commands::App(args)) => app_command(args),
+        Some(Commands::Automate(args)) => automate_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
         Some(Commands::Config(args)) => config_command(args),
         Some(Commands::Completions(args)) => completions_command(args),
@@ -5608,6 +5632,56 @@ fn truncate_cli_text(value: &str, width: usize) -> String {
         return value.chars().take(width).collect();
     }
     value.chars().take(width - 3).collect::<String>() + "..."
+}
+
+fn automate_command(args: AutomateArgs) -> Result<()> {
+    let (action, id) = match args.command {
+        AutomateCommand::List => (AutomateAction::List, None),
+        AutomateCommand::Run { id } => (AutomateAction::Run, Some(id)),
+        AutomateCommand::Pause { id } => (AutomateAction::Pause, Some(id)),
+        AutomateCommand::Resume { id } => (AutomateAction::Resume, Some(id)),
+    };
+    let listing = matches!(action, AutomateAction::List);
+    if let Some(id) = id.as_deref() {
+        Uuid::parse_str(id.trim()).map_err(|_| anyhow!("automation id must be a UUID"))?;
+    }
+    let paths = GyroPaths::for_current_user()?;
+    let response = request_app_automate(&paths, &AutomateRequest::new(action, id))?;
+    if response.status != "ok" {
+        return Err(anyhow!(response.message));
+    }
+    if listing {
+        print_automations(&response.automations);
+    } else {
+        println!("{}", response.message);
+    }
+    Ok(())
+}
+
+fn print_automations(automations: &[AutomateSummary]) {
+    if automations.is_empty() {
+        println!("No automations.");
+        return;
+    }
+    println!(
+        "{:<28}  {:<12}  {:<25}  {:<10}  {}",
+        "title", "schedule", "last run", "status", "id"
+    );
+    for automation in automations {
+        let title = if automation.title.chars().count() > 28 {
+            format!("{}…", automation.title.chars().take(27).collect::<String>())
+        } else {
+            automation.title.clone()
+        };
+        println!(
+            "{:<28}  {:<12}  {:<25}  {:<10}  {}",
+            title,
+            automation.schedule,
+            automation.last_run_at.as_deref().unwrap_or("never"),
+            automation.status,
+            automation.id,
+        );
+    }
 }
 
 fn app_command(args: AppArgs) -> Result<()> {
