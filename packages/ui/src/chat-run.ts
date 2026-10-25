@@ -1814,8 +1814,8 @@ export function fileChangeVerb(
 ): string {
   if (!lifecycle) {
     if (status === "running") return short ? "Editing" : "Editing file";
-    if (status === "failed") return short ? "Edit failed" : "Edit failed";
-    return short ? "Edited" : "Edited file";
+    if (short) return status === "failed" ? "Edit failed" : "Edited";
+    return status === "failed" ? "Edit failed" : "Edited file";
   }
   if (status === "failed") {
     const name = {
