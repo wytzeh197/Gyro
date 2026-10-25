@@ -1844,6 +1844,41 @@ assert.equal(
   false,
 );
 assert.equal(
+  fileMatchesPathUndo(
+    { path: "app/main.ts", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/main.ts",
+      label: "Undo move of main.ts",
+    },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a card whose path only shares a suffix must not undo a different root file",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "main.ts", lifecycle: "move" },
+    { action: "moved", path: "p/main.ts", label: "Undo move of main.ts" },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a root that merely ends with the same letters is not that directory",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a canonical directory still matches when the extra prefix sits on a slash",
+);
+assert.equal(
   buildRunModel([
     capabilityCall("workspace-create-path", {
       resource: { id: "file-2", kind: "file", label: "notes.md" },

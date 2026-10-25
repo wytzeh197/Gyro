@@ -34,11 +34,28 @@ function normalizePath(path: string) {
 }
 
 /**
+ * True when the leftover directory is that workspace root.
+ *
+ * A canonical prefix such as `/private/tmp/repo` still matches `/tmp/repo`.
+ * The shorter path has to land on a `/`, so `app` does not match `myapp` and
+ * `/Users/me` does not count as the root `/Users/me/app`.
+ */
+function matchesWorkspaceRoot(prefix: string, root: string) {
+  if (prefix === root) return true;
+  const [longer, shorter] =
+    prefix.length >= root.length ? [prefix, root] : [root, prefix];
+  if (!shorter || !longer.endsWith(shorter)) return false;
+  if (shorter.startsWith("/")) return true;
+  const splitAt = longer.length - shorter.length;
+  return splitAt > 0 && longer[splitAt - 1] === "/";
+}
+
+/**
  * True when this card is the path change the journal would undo.
  *
  * A root-level `notes.md` must not match `docs/notes.md`. The relative path is
  * stripped from the absolute one, and the leftover prefix has to be an open
- * workspace root (or a canonical form of that root).
+ * workspace root, or the same root written with a slash-aligned canonical prefix.
  */
 export function fileMatchesPathUndo(
   file: { path: string; lifecycle?: FileLifecycle },
@@ -60,12 +77,7 @@ export function fileMatchesPathUndo(
   const suffix = `/${relative}`;
   if (!absolute.endsWith(suffix)) return false;
   const prefix = absolute.slice(0, -suffix.length) || "/";
-  return roots.some((root) => {
-    const normalizedRoot = normalizePath(root);
-    return (
-      prefix === normalizedRoot ||
-      normalizedRoot.endsWith(prefix) ||
-      prefix.endsWith(normalizedRoot)
-    );
-  });
+  return roots.some((root) =>
+    matchesWorkspaceRoot(prefix, normalizePath(root)),
+  );
 }
