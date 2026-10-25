@@ -7,6 +7,7 @@
 //! 2. A dropped run is widened backwards to include the assistant message that requested a tool, so
 //!    compaction never orphans a tool result — a shape several providers reject outright.
 use serde_json::{json, Value};
+use std::io::{self, Write};
 
 /// Keep at least this much recent context, even when the target asks for more.
 pub const MIN_TAIL_BYTES: usize = 8_000;
@@ -74,8 +75,32 @@ pub fn role(message: &Value) -> &str {
     message.get("role").and_then(Value::as_str).unwrap_or("")
 }
 
+/// Compact JSON length of one message.
+///
+/// Callers only need the size, often of a multi-megabyte tool result. Formatting
+/// the value to a `String` just to read `.len()` copied that result and dropped
+/// it. The writer counts the same bytes and keeps none of them.
 pub fn message_bytes(message: &Value) -> usize {
-    message.to_string().len()
+    let mut counter = ByteCounter(0);
+    match serde_json::to_writer(&mut counter, message) {
+        Ok(()) => counter.0,
+        // `Value` serialization does not fail for a writer that accepts every
+        // buffer. If it ever does, keep the previous measurement.
+        Err(_) => message.to_string().len(),
+    }
+}
+
+struct ByteCounter(usize);
+
+impl Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 pub fn total_bytes(messages: &[Value]) -> usize {
@@ -134,7 +159,10 @@ fn summary(dropped: usize, dropped_bytes: usize, tools: &str) -> Value {
 /// Compact `messages` in place until it fits `target_bytes`. Returns what actually happened, so the
 /// caller can book the saving in the ledger instead of guessing.
 pub fn compact(messages: &mut Vec<Value>, target_bytes: usize) -> Report {
-    let before = total_bytes(messages);
+    // One measurement of the messages we might drop. The tail walk and the
+    // dropped span used to format those same values again.
+    let sizes: Vec<usize> = messages.iter().map(message_bytes).collect();
+    let before = sizes.iter().sum();
     let anchors = Anchors::pin(messages);
     let mut report = Report {
         before_bytes: before,
@@ -155,7 +183,7 @@ pub fn compact(messages: &mut Vec<Value>, target_bytes: usize) -> Report {
         if anchors.contains(previous) {
             break;
         }
-        tail_bytes += message_bytes(&messages[previous]);
+        tail_bytes += sizes[previous];
         tail_start = previous;
     }
     let Some(mut start) = (0..tail_start).find(|index| !anchors.contains(*index)) else {
@@ -173,7 +201,7 @@ pub fn compact(messages: &mut Vec<Value>, target_bytes: usize) -> Report {
         return report;
     }
     let dropped = end - start;
-    let dropped_bytes: usize = messages[start..end].iter().map(message_bytes).sum();
+    let dropped_bytes: usize = sizes[start..end].iter().sum();
     let note = summary(dropped, dropped_bytes, &tool_names(&messages[start..end]));
     let described = note
         .get("content")
@@ -210,6 +238,18 @@ mod tests {
             for_call("user", "Now also check the golden tests.".into()),
             for_call("assistant", "recent turn ".repeat(4_000)),
         ]
+    }
+
+    #[test]
+    fn message_bytes_match_the_compact_json_length() {
+        for message in [
+            json!("plain"),
+            json!({"k": "quote \" and emoji 🦀\n"}),
+            json!([1, null, true, "a\nb"]),
+            for_call("tool", "x".repeat(50_000)),
+        ] {
+            assert_eq!(message_bytes(&message), message.to_string().len());
+        }
     }
 
     #[test]
