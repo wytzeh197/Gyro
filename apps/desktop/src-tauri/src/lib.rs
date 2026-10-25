@@ -8165,6 +8165,64 @@ async fn stat_workspace_file(
     .map_err(|error| format!("workspace file stat worker failed: {error}"))?
 }
 
+/// Kind of a path dropped on the window. Symlinks stay `other` so a drop
+/// cannot follow a link out of the folder the person actually dragged.
+/// This does not grant workspace trust and does not read the directory.
+fn dropped_path_kind(path: String) -> Result<String, String> {
+    let path = PathBuf::from(path.trim());
+    if !path.is_absolute() {
+        return Err("drop path must be absolute".into());
+    }
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|_| "drop path is missing".to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Ok("other".into());
+    }
+    if metadata.is_dir() {
+        return Ok("directory".into());
+    }
+    if metadata.is_file() {
+        return Ok("file".into());
+    }
+    Ok("other".into())
+}
+
+#[tauri::command]
+fn classify_dropped_path(path: String) -> Result<String, String> {
+    dropped_path_kind(path)
+}
+
+#[cfg(test)]
+mod dropped_path_kind_tests {
+    #[test]
+    fn directory_file_and_symlink_stay_distinct() {
+        let root = std::env::temp_dir().join(format!(
+            "gyro-drop-kind-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("folder")).unwrap();
+        std::fs::write(root.join("notes.md"), b"hi").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("folder"), root.join("link")).unwrap();
+        assert_eq!(
+            super::dropped_path_kind(root.join("folder").display().to_string()).unwrap(),
+            "directory"
+        );
+        assert_eq!(
+            super::dropped_path_kind(root.join("notes.md").display().to_string()).unwrap(),
+            "file"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            super::dropped_path_kind(root.join("link").display().to_string()).unwrap(),
+            "other"
+        );
+        assert!(super::dropped_path_kind("notes.md".into()).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 #[tauri::command]
 async fn write_workspace_file(
     request: WorkspaceFileWriteRequest,
@@ -24235,6 +24293,7 @@ pub fn run() {
             set_session_branch,
             set_automation_status,
             stat_workspace_file,
+            classify_dropped_path,
             summarize_file_changes,
             start_account_login,
             stop_terminal_pane,

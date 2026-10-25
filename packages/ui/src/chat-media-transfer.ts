@@ -31,6 +31,130 @@ export function isMediaDrag(transfer: MediaTransfer | null | undefined) {
   return types.includes("text/uri-list");
 }
 
+/** `file://` URLs a Finder drop put on the pasteboard. Other text is ignored. */
+export function droppedFileUrls(
+  transfer: Pick<MediaTransfer, "getData" | "files"> | null | undefined,
+): string[] {
+  if (!transfer) return [];
+  const read = (type: string) => {
+    try {
+      return transfer.getData?.(type) ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const paths: string[] = [];
+  const push = (value: string | undefined) => {
+    if (!value || paths.includes(value)) return;
+    paths.push(value);
+  };
+  for (const line of `${read("text/uri-list")}\n${read("public.file-url")}`.split(
+    /\r?\n/,
+  )) {
+    push(fileUrlToPath(line));
+  }
+  for (const file of Array.from(transfer.files ?? [])) {
+    const path = (file as File & { path?: string }).path;
+    if (typeof path === "string") push(fileUrlToPath(path) ?? (path.startsWith("/") ? path : undefined));
+  }
+  return paths;
+}
+
+export function fileUrlToPath(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith("file:")) {
+    return undefined;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "file:") return undefined;
+    if (url.hostname && url.hostname !== "localhost") return undefined;
+    const path = decodeURIComponent(url.pathname);
+    return path.startsWith("/") ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type DirectoryItem = {
+  kind?: string;
+  webkitGetAsEntry?: () => { isDirectory?: boolean } | null;
+};
+
+function dropSawDirectory(
+  transfer: MediaTransfer & { items?: ArrayLike<DirectoryItem> },
+) {
+  return Array.from(transfer.items ?? []).some((item) => {
+    try {
+      return item.webkitGetAsEntry?.()?.isDirectory === true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * A Finder folder drop, separate from an image drop.
+ *
+ * Returns nothing for Gyro's own drags and for drops that already carry
+ * image or video files. A plain file URL is returned so the app can classify
+ * it; only a directory is opened.
+ */
+export function workspaceDropFromTransfer(
+  transfer: (MediaTransfer & { items?: ArrayLike<DirectoryItem> }) | null | undefined,
+): { paths: string[] } | undefined {
+  if (!transfer || !isMediaDrag(transfer)) return undefined;
+  const sawDirectory = dropSawDirectory(transfer);
+  if (!sawDirectory && chatMediaFiles(transfer).length > 0) return undefined;
+  const paths = droppedFileUrls(transfer);
+  if (!sawDirectory && paths.length === 0) return undefined;
+  return { paths };
+}
+
+type OpenDroppedWorkspace = (paths: string[], onExplorer: boolean) => void;
+
+let openDroppedWorkspace: OpenDroppedWorkspace | undefined;
+let droppedWorkspaceListenerInstalled = false;
+
+export function setOpenDroppedWorkspaceHandler(
+  handler: OpenDroppedWorkspace | undefined,
+) {
+  openDroppedWorkspace = handler;
+}
+
+function installDroppedWorkspaceListener() {
+  if (droppedWorkspaceListenerInstalled || typeof window === "undefined") return;
+  droppedWorkspaceListenerInstalled = true;
+  window.addEventListener(
+    "dragover",
+    (event) => {
+      if (!isMediaDrag(event.dataTransfer)) return;
+      event.preventDefault();
+    },
+    true,
+  );
+  window.addEventListener(
+    "drop",
+    (event) => {
+      const claim = workspaceDropFromTransfer(event.dataTransfer);
+      if (!claim) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const onExplorer =
+        event.target instanceof Element &&
+        Boolean(
+          event.target.closest(
+            ".gyro-sidebar-explorer-tree, .gyro-sidebar-explorer-row, [data-explorer-path]",
+          ),
+        );
+      openDroppedWorkspace?.(claim.paths, onExplorer);
+    },
+    true,
+  );
+}
+
+installDroppedWorkspaceListener();
+
 /** Read file objects while the drop/paste event still owns its data store. */
 export function chatMediaFiles(
   transfer: Partial<Pick<DataTransfer, "files" | "items">>,

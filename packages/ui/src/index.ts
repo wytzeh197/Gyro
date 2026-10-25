@@ -671,7 +671,13 @@ export type {
 } from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
 export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
-export { sendableChatImage } from "./chat-media-transfer";
+export {
+  droppedFileUrls,
+  fileUrlToPath,
+  sendableChatImage,
+  setOpenDroppedWorkspaceHandler,
+  workspaceDropFromTransfer,
+} from "./chat-media-transfer";
 export {
   browserDictation,
   dictationAccessError,

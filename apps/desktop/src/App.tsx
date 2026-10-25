@@ -193,7 +193,11 @@ import {
   isSupportedChatVideoPath,
   type ChatAttachmentPickerKind,
 } from "./chat-attachment-picker";
-import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
+import {
+  resolveLanguage,
+  editorFilePolicy,
+  setOpenDroppedWorkspaceHandler,
+} from "@gyro-dev/ui";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -7053,17 +7057,17 @@ export function App() {
     }
   }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
 
-  const addWorkspaceFolder = useCallback(async () => {
+  const addWorkspaceFolder = useCallback(async (explicitPath?: string) => {
     if (!activeWorkspaceRoot) {
       await openWorkspace();
       return;
     }
-    let selected: string | null = null;
-    if (!isTauriRuntime()) {
+    let selected: string | null = explicitPath ?? null;
+    if (!selected && !isTauriRuntime()) {
       selected = workspaceRoots.includes("/preview/Components")
         ? "/preview/Documentation"
         : "/preview/Components";
-    } else {
+    } else if (!selected) {
       const chosen = await open({
         directory: true,
         multiple: false,
@@ -7132,6 +7136,60 @@ export function App() {
     workbench.preferences.workspaceTrust,
     workspaceRoots,
   ]);
+
+  const openDroppedWorkspaceFolders = useCallback(
+    async (paths: string[], onExplorer: boolean) => {
+      if (!isTauriRuntime()) return;
+      if (paths.length === 0) {
+        notify(
+          "command-failed",
+          "Could not open that folder",
+          "The drop did not include a folder path.",
+        );
+        return;
+      }
+      const directories: string[] = [];
+      for (const path of paths) {
+        try {
+          const kind = await invoke<string>("classify_dropped_path", { path });
+          if (kind === "directory") directories.push(path);
+        } catch {
+          // A missing path is not a workspace.
+        }
+      }
+      // A file drop stays on the attachment path. This command only opens
+      // directories, and only after the transfer was not an image or video.
+      const selected = directories[0];
+      if (!selected) return;
+      if (workspaceRoots.length > 0 && onExplorer) {
+        await addWorkspaceFolder(selected);
+        return;
+      }
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected, "Workspace opened");
+    },
+    [
+      activateWorkspacePath,
+      addWorkspaceFolder,
+      notify,
+      workbench.preferences.workspaceTrust,
+      workspaceRoots.length,
+    ],
+  );
+
+  useEffect(() => {
+    setOpenDroppedWorkspaceHandler((paths, onExplorer) => {
+      void openDroppedWorkspaceFolders(paths, onExplorer);
+    });
+    return () => setOpenDroppedWorkspaceHandler(undefined);
+  }, [openDroppedWorkspaceFolders]);
 
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
