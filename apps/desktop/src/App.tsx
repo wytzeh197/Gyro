@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
@@ -9457,7 +9458,7 @@ export function App() {
           "Ask Gyro blocked",
           "Stay inside this workspace folder",
         );
-        return;
+        return false;
       }
       const entry = explorerFiles.find((file) => file.path === path);
       const isDirectory =
@@ -9498,29 +9499,32 @@ export function App() {
                 kind: "workspace-file",
               },
             });
-        setChatAttachments((current) => {
-          const draft = current[activeDraftKey] ?? [];
-          const alreadyAttached = draft.some(
-            (item) =>
-              item.path === attachment.path ||
-              (item.relativePath &&
-                item.relativePath === attachment.relativePath &&
-                item.name === attachment.name),
-          );
-          if (alreadyAttached) return current;
-          return {
-            ...current,
-            [activeDraftKey]: [...draft, attachment],
-          };
+        flushSync(() => {
+          setChatAttachments((current) => {
+            const draft = current[activeDraftKey] ?? [];
+            const alreadyAttached = draft.some(
+              (item) =>
+                item.path === attachment.path ||
+                (item.relativePath &&
+                  item.relativePath === attachment.relativePath &&
+                  item.name === attachment.name),
+            );
+            if (alreadyAttached) return current;
+            return {
+              ...current,
+              [activeDraftKey]: [...draft, attachment],
+            };
+          });
         });
         notify(
           "terminal",
           isDirectory ? "Folder attached" : "File attached",
           "It is in the composer. Press Return when you want to send.",
         );
-        window.dispatchEvent(new Event("gyro-focus-composer"));
+        return true;
       } catch (error) {
         notify("command-failed", "Could not attach", String(error));
+        return false;
       }
     },
     [
@@ -17505,7 +17509,7 @@ export function App() {
       onMoveWorkspacePath={moveWorkspacePath}
       onDuplicateWorkspacePath={duplicateWorkspacePath}
       onRevealWorkspacePath={revealWorkspacePath}
-      onAskWorkspacePath={(path) => void askWorkspacePath(path)}
+      onAskWorkspacePath={(path) => askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}

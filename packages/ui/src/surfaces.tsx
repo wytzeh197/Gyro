@@ -267,6 +267,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type FormEvent,
   type MutableRefObject,
@@ -846,7 +847,9 @@ type AppChromeProps = {
   onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
   onDuplicateWorkspacePath?: (path: string) => void;
   onRevealWorkspacePath?: (path: string) => void;
-  onAskWorkspacePath?: (path: string) => void;
+  onAskWorkspacePath?: (
+    path: string,
+  ) => void | boolean | Promise<void | boolean>;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
   onApplyWorkspaceReplace?: (
@@ -3698,6 +3701,26 @@ function ScmChangeGroup({
 /** Explorer-only drag. Media drops ignore every `application/x-gyro-*` type. */
 const EXPLORER_PATH_DRAG_MIME = "application/x-gyro-explorer-path";
 
+/** Blocks composer Return while Ask Gyro is still attaching a file or folder. */
+let explorerAskSendHolds = 0;
+let explorerAskSendHeld = false;
+const explorerAskSendListeners = new Set<() => void>();
+
+function setExplorerAskSendHeld(held: boolean) {
+  explorerAskSendHolds = Math.max(0, explorerAskSendHolds + (held ? 1 : -1));
+  const next = explorerAskSendHolds > 0;
+  if (explorerAskSendHeld === next) return;
+  explorerAskSendHeld = next;
+  for (const listener of explorerAskSendListeners) listener();
+}
+
+function subscribeExplorerAskSend(listener: () => void) {
+  explorerAskSendListeners.add(listener);
+  return () => {
+    explorerAskSendListeners.delete(listener);
+  };
+}
+
 function WorkspaceSidebarContent({
   sessions,
   commandProfiles,
@@ -3849,7 +3872,9 @@ function WorkspaceSidebarContent({
   onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
   onDuplicateWorkspacePath?: (path: string) => void;
   onRevealWorkspacePath?: (path: string) => void;
-  onAskWorkspacePath?: (path: string) => void;
+  onAskWorkspacePath?: (
+    path: string,
+  ) => void | boolean | Promise<void | boolean>;
   onOpenCommandPalette: () => void;
   onSelectIdeView?: (view: IdeViewId) => void;
   onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
@@ -5199,8 +5224,20 @@ function WorkspaceSidebarContent({
                     onClick={() => {
                       const target = explorerContextMenu.path;
                       setExplorerContextMenu(undefined);
-                      onAskWorkspacePath?.(target);
-                      window.dispatchEvent(new Event("gyro-focus-composer"));
+                      // Return must not send the current draft while the
+                      // folder listing is still being attached. Focus only
+                      // after that attachment is in the composer.
+                      setExplorerAskSendHeld(true);
+                      void Promise.resolve(onAskWorkspacePath?.(target))
+                        .then((attached) => {
+                          if (attached === false) return;
+                          window.dispatchEvent(
+                            new Event("gyro-focus-composer"),
+                          );
+                        })
+                        .finally(() => {
+                          setExplorerAskSendHeld(false);
+                        });
                     }}
                     role="menuitem"
                     type="button"
@@ -25829,8 +25866,14 @@ function Composer({
         hasUserWorkspace
       : canSendChat(hasReadyProvider, workspacePath));
   // Starting a goal sends a message, so it needs everything a send needs.
+  const askAttachmentPending = useSyncExternalStore(
+    subscribeExplorerAskSend,
+    () => explorerAskSendHeld,
+    () => false,
+  );
   const canSubmitComposer =
-    isGoalComposerActive && !startsGoalSession ? true : canSubmitChat;
+    !askAttachmentPending &&
+    (isGoalComposerActive && !startsGoalSession ? true : canSubmitChat);
   const needsProviderSetup =
     !boundToSession &&
     !providerConfigs.some((provider) =>
@@ -26177,6 +26220,7 @@ function Composer({
     ],
   );
   const requestSend = () => {
+    if (explorerAskSendHeld) return;
     if (draft.trim().toLowerCase() === "/compact" && onComposerAction) {
       onDraftChange("");
       onComposerAction("compact-context");
@@ -26980,6 +27024,7 @@ function Composer({
             event.preventDefault();
             setActivePopover(null);
             if (dictationAnchorRef.current) releaseDictation(false);
+            if (explorerAskSendHeld) return;
             if (canSubmitComposer && draft.trim().length > 0) {
               setHistoryIndex(undefined);
               requestSend();
