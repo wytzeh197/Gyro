@@ -7113,11 +7113,6 @@ function SidebarProjectRow({
       onDragEnd={onDragEnd}
       onDragStart={onDragStart}
       onKeyDown={onKeyDown}
-      title={
-        draggable
-          ? "Drag to reorder. Alt+Arrow keys also move this project."
-          : undefined
-      }
     >
       <button
         aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
@@ -8312,6 +8307,13 @@ export function ChatGridSurface({
   const paneDragId = useRef<number>();
   const observedDragId = useRef<number>();
   const [dropTargetId, setDropTargetId] = useState<string>();
+  const [splitLeading, setSplitLeading] = useState(0.5);
+  const [isSplitResizing, setIsSplitResizing] = useState(false);
+  const splitResizeRef = useRef<{
+    pointerId: number;
+    width: number;
+    left: number;
+  } | null>(null);
   const isChatDragging = dragSource !== undefined;
   const occupiedCount = layout.slots.slice(0, 4).filter(Boolean).length;
   const hasMultiplePanes = occupiedCount > 1;
@@ -8680,6 +8682,20 @@ export function ChatGridSurface({
     return element;
   };
 
+  const canResizeSplit =
+    occupiedCount === 2 && !isMaximized && arrangement === "columns";
+  const clampSplitLeading = (ratio: number, width: number) => {
+    const minRatio = width > 0 ? Math.min(0.4, 240 / width) : 0.22;
+    return Math.min(1 - minRatio, Math.max(minRatio, ratio));
+  };
+  const resizeSplitTo = (clientX: number) => {
+    const resize = splitResizeRef.current;
+    if (!resize || resize.width <= 0) return;
+    setSplitLeading(
+      clampSplitLeading((clientX - resize.left) / resize.width, resize.width),
+    );
+  };
+
   return (
     <div
       ref={gridRef}
@@ -8692,6 +8708,8 @@ export function ChatGridSurface({
         hasMultiplePanes ? "has-multiple-panes" : "",
         isChatDragging ? "is-dragging" : "",
         isMaximized ? "is-maximized" : "",
+        canResizeSplit ? "is-resizable-split" : "",
+        isSplitResizing ? "is-split-resizing" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -8699,6 +8717,12 @@ export function ChatGridSurface({
       style={
         {
           "--gyro-grid-count": occupiedCount,
+          "--gyro-split-leading": splitLeading,
+          ...(canResizeSplit
+            ? {
+                gridTemplateColumns: `minmax(0, ${splitLeading}fr) minmax(0, ${1 - splitLeading}fr)`,
+              }
+            : {}),
         } as CSSProperties
       }
       onDragLeave={(event) => {
@@ -8889,6 +8913,57 @@ export function ChatGridSurface({
                 : "Choose where to place the chat."}
           </span>
         </>
+      ) : null}
+      {canResizeSplit ? (
+        <button
+          aria-label="Resize right pane"
+          aria-orientation="vertical"
+          aria-valuemax={78}
+          aria-valuemin={22}
+          aria-valuenow={Math.round((1 - splitLeading) * 100)}
+          className="gyro-chat-grid-sash"
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 0.1 : 0.04;
+            const width = gridRef.current?.getBoundingClientRect().width ?? 0;
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const delta = event.key === "ArrowLeft" ? -step : step;
+            setSplitLeading((current) =>
+              clampSplitLeading(current + delta, width),
+            );
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            const bounds = gridRef.current?.getBoundingClientRect();
+            if (!bounds) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            splitResizeRef.current = {
+              pointerId: event.pointerId,
+              width: bounds.width,
+              left: bounds.left,
+            };
+            setIsSplitResizing(true);
+          }}
+          onPointerMove={(event) => {
+            if (event.pointerId !== splitResizeRef.current?.pointerId) return;
+            resizeSplitTo(event.clientX);
+          }}
+          onPointerUp={(event) => {
+            if (event.pointerId !== splitResizeRef.current?.pointerId) return;
+            splitResizeRef.current = null;
+            setIsSplitResizing(false);
+          }}
+          onPointerCancel={(event) => {
+            if (event.pointerId !== splitResizeRef.current?.pointerId) return;
+            splitResizeRef.current = null;
+            setIsSplitResizing(false);
+          }}
+          role="separator"
+          tabIndex={0}
+          title="Drag to resize the right pane"
+          type="button"
+        />
       ) : null}
     </div>
   );
@@ -27839,7 +27914,20 @@ function Composer({
           ) : isGoalComposerActive && !startsGoalSession ? (
             <Check size={17} />
           ) : (
-            <ArrowUp size={17} />
+            <svg
+              aria-hidden="true"
+              className="gyro-send-arrow"
+              fill="none"
+              viewBox="0 0 30 30"
+            >
+              <path
+                d="M15 21.4V8.6M9.6 14.5 15 8.6 20.4 14.5"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.15"
+              />
+            </svg>
           )}
         </button>
       </div>

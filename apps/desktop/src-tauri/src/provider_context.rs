@@ -188,6 +188,10 @@ fn auto_compaction_fill(
 /// few large files can reach a window no single request asked for, and on a
 /// metered API it pays for those results again on every later round.
 ///
+/// A provider that reports no usage of its own is measured from the list it is
+/// about to resend, so the rewrite is not limited to adapters that count their
+/// own tokens.
+///
 /// This is the local half of what `/compact` does for a chat: the oldest tool
 /// exchanges are replaced by one note that says what was removed and that the
 /// work already done stands. The newest exchange and the head are never
@@ -203,6 +207,19 @@ pub(super) fn auto_compact_messages(
     percent: u32,
 ) -> Option<ContextCompaction> {
     let window = model_context_window.filter(|window| *window > 0)?;
+    // A provider that reports no counts still resends this list on every
+    // round, so the text it carries is the size to watch. Without it, the
+    // rewrite silently covered only adapters that measure themselves.
+    let input_tokens = match input_tokens {
+        Some(measured) => Some(measured),
+        None => {
+            let characters = messages
+                .iter()
+                .map(|message| message_size(message).0)
+                .sum::<u64>();
+            Some(estimated_tokens(characters)).filter(|tokens| *tokens > 0)
+        }
+    };
     let fill = auto_compaction_fill(input_tokens, output_tokens, Some(window), percent)?;
     let percent = percent.clamp(1, 100);
     if messages.len() < 3 {
@@ -342,6 +359,10 @@ pub(super) struct SessionContextSignal {
     /// A session rewrite, the same kind `/compact` records. An in-loop note
     /// does not set this: that rewrite never replaces the resumed session.
     pub(super) session_compaction: bool,
+    /// Text this event would carry into the next prompt, excluding encoded
+    /// image bytes. The provider's own count is preferred when it exists; this
+    /// is what a silent adapter leaves to watch.
+    pub(super) characters: u64,
 }
 
 /// Whether the next turn should compact before it sends, for any provider.
@@ -349,10 +370,17 @@ pub(super) struct SessionContextSignal {
 /// The tool-loop rewrite only sees messages Gyro owns. Codex, Claude, Grok,
 /// Kimi, Antigravity, and any other resumed session keep their own transcript,
 /// so the decision lives here and the caller runs the same compaction `/compact`
-/// runs. A reported window is enough. The catalog fills in when the reading
-/// named tokens but not a size. No window, an estimate, a switched-off
-/// setting, another provider's reading, or a compaction that already followed
-/// this reading all decline.
+/// runs. Two fills are weighed and the larger one decides: the provider's own
+/// prompt count when it reported one, and the text this session would carry,
+/// estimated from the stored events. A silent adapter -- a local server, a
+/// gateway, a CLI that never says how full its window is -- reports no count,
+/// and on the reported number alone those sessions grew until the provider
+/// truncated them. The estimate is a lower bound, so it can only bring
+/// compaction forward to where the transcript itself already reached the
+/// share. A switched-off setting, an unknown window (a share of an unknown
+/// window is not a measurement), or a compaction that already rewrote the
+/// transcript since the last reading still decline. The catalog fills in when
+/// the reading named tokens but not a size.
 pub(super) fn should_auto_compact_session(
     percent: u32,
     provider_id: &str,
@@ -364,40 +392,42 @@ pub(super) fn should_auto_compact_session(
         return false;
     }
     let mut reading: Option<AutoCompactReading> = None;
-    let mut compacted_after = false;
+    let mut carried = 0u64;
     for signal in signals {
-        if signal_is_for_other_model(signal, provider_id, model_id) {
-            if signal.reading.is_some() || signal.session_compaction {
-                reading = None;
-                compacted_after = false;
-            }
+        if signal.session_compaction {
+            // The next prompt resumes from this summary, so what came before it
+            // is no longer sent and the measurement that described it is spent.
+            carried = signal.characters;
+            reading = None;
             continue;
         }
-        if signal.session_compaction && reading.is_some() {
-            compacted_after = true;
+        if signal_is_for_other_model(signal, provider_id, model_id) {
+            continue;
         }
+        carried = carried.saturating_add(signal.characters);
         if let Some(next) = signal.reading.clone() {
             reading = Some(next);
-            compacted_after = false;
         }
     }
-    if compacted_after {
-        return false;
-    }
-    let Some(mut reading) = reading else {
-        return false;
-    };
-    if reading
-        .model_context_window
+    let measured = reading.as_ref().and_then(|reading| reading.input_tokens);
+    let window = reading
+        .as_ref()
+        .and_then(|reading| reading.model_context_window)
         .filter(|window| *window > 0)
-        .is_none()
-    {
-        reading.model_context_window = catalog_window.filter(|window| *window > 0);
-    }
+        .or(catalog_window.filter(|window| *window > 0));
+    // The transcript is a lower bound of the next prompt: it leaves out the
+    // system prompt and the provider's own tools. Taking the larger of the two
+    // fills therefore never compacts earlier than the session itself has
+    // reached the share, and it keeps a silent adapter from never compacting.
+    let estimated = (carried > 0).then(|| estimated_tokens(carried));
+    let input_tokens = match (measured, estimated) {
+        (Some(measured), Some(estimated)) => Some(measured.max(estimated)),
+        (measured, estimated) => measured.or(estimated),
+    };
     auto_compaction_fill(
-        reading.input_tokens,
-        reading.output_tokens,
-        reading.model_context_window,
+        input_tokens,
+        reading.as_ref().and_then(|reading| reading.output_tokens),
+        window,
         percent,
     )
     .is_some()
@@ -1274,6 +1304,7 @@ mod tests {
                 output_tokens: Some(0),
                 model_context_window: Some(window),
             }),
+            characters: 0,
             session_compaction: false,
         }
     }
@@ -1321,6 +1352,7 @@ mod tests {
             provider_id: Some("xai".into()),
             model_id: Some("grok-4.7".into()),
             reading: None,
+            characters: 0,
             session_compaction: true,
         };
         assert!(!should_auto_compact_session(
@@ -1362,5 +1394,58 @@ mod tests {
             Some(100_000),
             &[tokens_only]
         ));
+    }
+
+    fn carried(characters: u64) -> SessionContextSignal {
+        SessionContextSignal {
+            provider_id: Some("xai".into()),
+            model_id: Some("grok-4.7".into()),
+            reading: None,
+            characters,
+            session_compaction: false,
+        }
+    }
+
+    #[test]
+    fn session_auto_compact_measures_a_session_that_reports_no_usage() {
+        // A CLI adapter that never says how full its window is still stores
+        // what it carried, so the transcript is the fill.
+        let window = 256_000;
+        let under = vec![carried(400_000)];
+        assert!(
+            !should_auto_compact_session(80, "xai", Some("grok-4.7"), Some(window), &under),
+            "100K estimated tokens of 256K is under the share"
+        );
+        let grown = vec![carried(8_000_000)];
+        assert!(
+            should_auto_compact_session(80, "xai", Some("grok-4.7"), Some(window), &grown),
+            "2M estimated tokens is past 80% of the window"
+        );
+        assert!(
+            !should_auto_compact_session(80, "xai", Some("grok-4.7"), None, &grown),
+            "a share of an unknown window is still not a measurement"
+        );
+    }
+
+    #[test]
+    fn session_auto_compact_counts_only_what_follows_the_last_rewrite() {
+        let compacted = SessionContextSignal {
+            provider_id: Some("xai".into()),
+            model_id: Some("grok-4.7".into()),
+            reading: None,
+            characters: 4_000,
+            session_compaction: true,
+        };
+        let window = 256_000;
+        let before = vec![carried(8_000_000), compacted.clone()];
+        assert!(
+            !should_auto_compact_session(80, "xai", Some("grok-4.7"), Some(window), &before),
+            "the rewrite already dropped what came before it"
+        );
+        let after = vec![carried(8_000_000), compacted, carried(8_000_000)];
+        assert!(
+            should_auto_compact_session(80, "xai", Some("grok-4.7"), Some(window), &after),
+            "the summary plus what followed it fills the window again"
+        );
     }
 }

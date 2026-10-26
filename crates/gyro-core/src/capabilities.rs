@@ -729,7 +729,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search workspace text with a ripgrep regular expression. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. Invalid patterns and ripgrep failures are reported.",
+        description: "Search workspace text with a ripgrep regular expression. Pass path to search one workspace-relative directory. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. A truncated read continues with nextLine, nextColumn, or the returned offset. Invalid patterns and ripgrep failures are reported.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,

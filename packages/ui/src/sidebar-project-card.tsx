@@ -59,7 +59,7 @@ export function SidebarProjectCard({
     const rect = anchor.current?.getBoundingClientRect();
     if (rect)
       setPosition({
-        left: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 278)),
+        left: Math.max(8, Math.min(rect.right - 16, window.innerWidth - 278)),
         top: Math.max(8, Math.min(rect.top, window.innerHeight - 144)),
       });
   };

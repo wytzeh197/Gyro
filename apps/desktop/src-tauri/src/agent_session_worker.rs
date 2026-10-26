@@ -10,7 +10,12 @@ use gyro_core::agent_sessions::{
     ModelChoices, ProviderChoices,
 };
 use gyro_core::{provider_is_executable_for, GyroConfig};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+
+const RUNNING_LEASE: Duration = Duration::from_secs(30);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) fn start(app: tauri::AppHandle) {
     let hook_app = app.clone();
@@ -23,7 +28,19 @@ pub(super) fn start(app: tauri::AppHandle) {
     }));
     let spawned = std::thread::Builder::new()
         .name("gyro-agent-sessions".into())
-        .spawn(move || worker(app));
+        .spawn(move || {
+            loop {
+                let exited = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    worker(app.clone())
+                }));
+                if exited.is_err() {
+                    eprintln!("agent session worker panicked; starting it again");
+                } else {
+                    eprintln!("agent session worker stopped; starting it again");
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
     if let Err(error) = spawned {
         eprintln!("could not start the agent session worker: {error}");
     }
@@ -40,9 +57,8 @@ fn worker(app: tauri::AppHandle) {
     if let Err(error) = publish_choice_catalog(&paths) {
         eprintln!("could not publish the agent choice catalog: {error}");
     }
-    if let Err(error) = gyro_core::agent_sessions::allow_latest_session_workspace(&paths) {
-        eprintln!("could not allow the open workspace: {error}");
-    }
+    // Listener start is the only place that fails every running row. A claim-loop
+    // restart below keeps this listener so a live heartbeat is not treated as a crash.
     let _listener = match gyro_core::agent_sessions::AgentSessionListener::start(&paths) {
         Ok(listener) => listener,
         Err(error) => {
@@ -51,30 +67,86 @@ fn worker(app: tauri::AppHandle) {
         }
     };
     loop {
-        if let Err(error) = publish_choice_catalog(&paths) {
-            eprintln!("could not refresh the agent choice catalog: {error}");
-        }
-        if let Err(error) = gyro_core::agent_sessions::allow_latest_session_workspace(&paths) {
-            eprintln!("could not allow the open workspace: {error}");
-        }
-        if let Err(error) = gyro_core::agent_sessions::poll_paired_relay(&paths) {
-            eprintln!("could not poll the agent relay: {error}");
-        }
-        match AgentSessionStore::open(paths.clone()).and_then(|store| store.claim_next()) {
-            Ok(Some(row)) => {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    execute(&app, &paths, &row)
-                }));
-                if result.is_err() {
-                    let _ = AgentSessionStore::open(paths.clone()).and_then(|store| {
-                        store.finish(row.id, Err("agent session panicked".into()))
-                    });
-                }
-            }
-            Ok(None) => {}
-            Err(error) => eprintln!("could not claim an agent session: {error}"),
+        if !claim_loop_step(|| claim_iteration(&app, &paths)) {
+            eprintln!("agent session worker panicked; continuing the claim loop");
         }
         std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// One claim-loop turn. `true` means the turn finished; `false` means it panicked.
+fn claim_loop_step(claim: impl FnOnce()) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(claim)).is_ok()
+}
+
+fn claim_iteration(app: &tauri::AppHandle, paths: &GyroPaths) {
+    if let Ok(store) = AgentSessionStore::open(paths.clone()) {
+        let cutoff = chrono::Utc::now()
+            - chrono::Duration::from_std(RUNNING_LEASE).unwrap_or(chrono::Duration::seconds(30));
+        if let Err(error) = store.expire_stale_running(cutoff) {
+            eprintln!("could not expire a stale agent session: {error}");
+        }
+    }
+    if let Err(error) = publish_choice_catalog(paths) {
+        eprintln!("could not refresh the agent choice catalog: {error}");
+    }
+    if let Err(error) = gyro_core::agent_sessions::poll_paired_relay(paths) {
+        eprintln!("could not poll the agent relay: {error}");
+    }
+    match AgentSessionStore::open(paths.clone()).and_then(|store| store.claim_next()) {
+        Ok(Some(row)) => {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _heartbeat = SessionHeartbeat::start(paths, row.id);
+                execute(app, paths, &row);
+            }));
+            if result.is_err() {
+                let _ = AgentSessionStore::open(paths.clone()).and_then(|store| {
+                    store.finish(row.id, Err("agent session panicked".into()))
+                });
+            }
+        }
+        Ok(None) => {}
+        Err(error) => eprintln!("could not claim an agent session: {error}"),
+    }
+}
+
+struct SessionHeartbeat {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl SessionHeartbeat {
+    fn start(paths: &GyroPaths, id: uuid::Uuid) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let beat_stop = stop.clone();
+        let beat_paths = paths.clone();
+        let thread = std::thread::Builder::new()
+            .name("gyro-agent-session-heartbeat".into())
+            .spawn(move || {
+                while !beat_stop.load(Ordering::Relaxed) {
+                    if let Ok(store) = AgentSessionStore::open(beat_paths.clone()) {
+                        let _ = store.heartbeat(id);
+                    }
+                    let slices = HEARTBEAT_INTERVAL.as_millis() / 100;
+                    for _ in 0..slices.max(1) {
+                        if beat_stop.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+            })
+            .ok();
+        Self { stop, thread }
+    }
+}
+
+impl Drop for SessionHeartbeat {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -235,4 +307,32 @@ fn published_efforts(provider_id: &str, model_id: &str, catalog_efforts: &[Strin
             .collect();
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::claim_loop_step;
+
+    #[test]
+    fn claim_loop_restarts_after_a_panic() {
+        let runs = std::sync::atomic::AtomicUsize::new(0);
+        let mut panicked = 0;
+        let mut completed = 0;
+        for _ in 0..3 {
+            let continued = claim_loop_step(|| {
+                let n = runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if n == 0 {
+                    panic!("claim loop stopped");
+                }
+            });
+            if continued {
+                completed += 1;
+            } else {
+                panicked += 1;
+            }
+        }
+        assert_eq!(panicked, 1);
+        assert_eq!(completed, 2);
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
 }

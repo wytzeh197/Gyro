@@ -23,6 +23,18 @@ pub(super) fn run_workspace_rg_search_scan(
     max_results: usize,
     use_regex: bool,
 ) -> anyhow::Result<WorkspaceSearchScan> {
+    run_scoped_workspace_rg_search(root, ".", query, globs, max_results, use_regex)
+}
+
+/// `directory` is workspace-relative. `.` searches the root. Callers confine it first.
+pub(super) fn run_scoped_workspace_rg_search(
+    root: &Path,
+    directory: &str,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<WorkspaceSearchScan> {
     let mut command = command_with_gui_path("rg");
     command
         .current_dir(root)
@@ -37,7 +49,7 @@ pub(super) fn run_workspace_rg_search_scan(
             command.arg("--glob").arg(glob);
         }
     }
-    command.arg("--").arg(query).arg(".");
+    command.arg("--").arg(query).arg(directory);
 
     let mut request = ExecutionRequest::new(command.get_program().to_os_string());
     request.args = command
@@ -79,6 +91,17 @@ pub(super) fn run_workspace_rg_search_scan(
         results,
         incomplete: true,
     })
+}
+
+/// Resolve a workspace-relative search directory. Absolute paths, `..`, and
+/// links whose target leaves the workspace are refused.
+pub(super) fn confine_search_directory(root: &Path, path: &str) -> anyhow::Result<String> {
+    let relative = gyro_core::normalize_capability_relative_path(path)?;
+    let resolved = gyro_core::security::assert_path_inside_workspace(root, Path::new(&relative))?;
+    if !resolved.is_dir() {
+        anyhow::bail!("Workspace search path must be an existing directory");
+    }
+    Ok(relative)
 }
 
 #[derive(Default)]
@@ -409,5 +432,41 @@ mod tests {
         assert_eq!(preview["ranges"].as_array().unwrap().len(), 50);
         assert_eq!(preview["rangesTruncated"], true);
         assert!(serde_json::to_vec(&preview).unwrap().len() < DEFAULT_WORKSPACE_RESULT_BYTES);
+    }
+
+    #[test]
+    fn scoped_search_skips_sibling_directories() {
+        let workspace = tempfile::tempdir().unwrap();
+        let src = workspace.path().join("src");
+        let other = workspace.path().join("other");
+        fs::create_dir(&src).unwrap();
+        fs::create_dir(&other).unwrap();
+        fs::write(src.join("hit.txt"), "needle\n").unwrap();
+        fs::write(other.join("hit.txt"), "needle\n").unwrap();
+        let directory = confine_search_directory(workspace.path(), "src").unwrap();
+        let results = run_scoped_workspace_rg_search(
+            workspace.path(),
+            &directory,
+            "needle",
+            None,
+            10,
+            true,
+        )
+        .unwrap();
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.results[0].path, "src/hit.txt");
+    }
+
+    #[test]
+    fn search_directory_refuses_escape_and_outbound_links() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("src")).unwrap();
+        assert!(confine_search_directory(workspace.path(), "../outside").is_err());
+        assert!(confine_search_directory(workspace.path(), "/tmp").is_err());
+
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.txt"), "needle\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("link")).unwrap();
+        assert!(confine_search_directory(workspace.path(), "link").is_err());
     }
 }

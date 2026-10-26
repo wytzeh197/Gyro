@@ -113,7 +113,34 @@ fn acp_stop_is_end_turn(reason: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect::<String>();
-    normalized == "endturn"
+    matches!(
+        normalized.as_str(),
+        "endturn" | "stop" | "complete" | "completed"
+    )
+}
+
+/// Whether visible text stopped inside the answer rather than at a sentence.
+///
+/// A plan document is the whole reply. Providers, including Grok, often report
+/// that reply as a normal end of turn when the model's own output cap cut it.
+/// Sentence-final punctuation and a closed code fence count as finished. A
+/// trailing ellipsis does not: that is how the cut document looks.
+pub fn answer_looks_cut_off(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.chars().count() < 80 {
+        return false;
+    }
+    if trimmed.ends_with("```") {
+        return false;
+    }
+    let trimmed = trimmed.trim_end_matches(['"', '\'', '\u{2019}', '*', '_', '`', ')', ']', '}']);
+    if trimmed.ends_with("...") || trimmed.ends_with('\u{2026}') {
+        return true;
+    }
+    matches!(
+        trimmed.chars().next_back(),
+        Some(last) if !matches!(last, '.' | '!' | '?' | ':')
+    )
 }
 
 /// A boolean the provider set on this result. Token totals and prose are not a cut.
@@ -1005,7 +1032,13 @@ where
             .get("stopReason")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let cut_short = acp_result_needs_output_continuation(stopped, &result);
+        // Plan mode's reply is the document. A normal end_turn that stops
+        // mid-sentence is the same unfinished answer as an output-limit stop,
+        // for Grok and every other agent on this path.
+        let cut_short = acp_result_needs_output_continuation(stopped, &result)
+            || (request.mode == KimiAcpMode::Plan
+                && acp_stop_is_end_turn(stopped)
+                && answer_looks_cut_off(&response));
         if stopped != "cancelled" && !cut_short {
             break;
         }
@@ -1122,7 +1155,8 @@ where
         // being reported as a complete answer.
         _ => {}
     }
-    let truncated = acp_result_needs_output_continuation(&stop_reason, &result);
+    let truncated = acp_result_needs_output_continuation(&stop_reason, &result)
+        || (request.mode == KimiAcpMode::Plan && answer_looks_cut_off(&response));
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
@@ -2543,7 +2577,8 @@ mod tests {
     use super::{
         acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
         acp_result_marks_output_truncated, acp_result_needs_output_continuation,
-        acp_session_reopen_methods, acp_stop_is_output_limit, check_kimi_acp_health,
+        acp_session_reopen_methods, acp_stop_is_end_turn, acp_stop_is_output_limit,
+        answer_looks_cut_off, check_kimi_acp_health,
         classify_approval, is_acp_method_not_found, permission_option_id,
         plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, thought_tail,
         CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
@@ -4132,6 +4167,24 @@ done
             "stopReason": "end_turn",
             "_meta": {"totalTokens": 9}
         })));
+    }
+
+    #[test]
+    fn a_plan_that_stops_mid_sentence_looks_cut_off() {
+        let cut = "On each worker loop, fail only rows whose heartbeat is older than the lease interval and then ";
+        assert!(answer_looks_cut_off(cut));
+        assert!(answer_looks_cut_off(&format!("{cut}...")));
+        assert!(answer_looks_cut_off(&format!("{cut}\u{2026}")));
+        assert!(!answer_looks_cut_off(
+            "Verify the worker loop, keep the existing quality gate, and leave the relay least-privilege."
+        ));
+        assert!(!answer_looks_cut_off("short"));
+        assert!(!answer_looks_cut_off(&format!(
+            "{cut}\n```\nfn main() {{}}\n```"
+        )));
+        assert!(acp_stop_is_end_turn("stop"));
+        assert!(acp_stop_is_end_turn("completed"));
+        assert!(!acp_stop_is_end_turn("refusal"));
     }
 
     #[cfg(unix)]

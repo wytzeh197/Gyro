@@ -473,9 +473,19 @@ pub(super) fn run_openai_compatible_chat(
             // ACP uses, and do not spend a tool round on the retry. A cut that
             // included tool calls never reaches here. The compatibility bridge
             // must not parse that partial text as a protocol object.
+            // Plan mode keeps the reply as the document. A stop that is not
+            // labelled "length" can still end mid-sentence; continue it the
+            // same way, for every OpenAI-compatible model.
+            let plan_cut_off = request.mode == ChatMode::Plan
+                && turn.tool_calls.is_empty()
+                && gyro_core::kimi_acp::answer_looks_cut_off(&{
+                    let mut joined = joined_output.clone();
+                    joined.push_str(&turn.content);
+                    joined
+                });
             match continue_owned_output_limit(
                 &turn.content,
-                turn.truncated,
+                turn.truncated || plan_cut_off,
                 turn.tool_calls.is_empty(),
                 &mut joined_output,
                 &mut output_continuations,
