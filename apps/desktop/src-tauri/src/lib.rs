@@ -25902,8 +25902,15 @@ mod tests {
             let context = provider_context_message_for_turn(&request, None, turn);
             assert!(context.contains("Selected workspace: /tmp/gyro-workspace"));
             assert!(context.contains("do not ask the user to paste files you can read"));
-            assert!(context.contains("gyro_workspace_edit"));
-            assert!(context.contains("report pending review"));
+            // The edit tutorial is standing guidance for the opening turn.
+            // A resumed turn keeps the workspace rules and skips that repeat.
+            if resumed {
+                assert!(!context.contains("gyro_workspace_edit"));
+                assert!(!context.contains("report pending review"));
+            } else {
+                assert!(context.contains("gyro_workspace_edit"));
+                assert!(context.contains("report pending review"));
+            }
             for prompt in [
                 openai_codex_chat_prompt(
                     &context,
@@ -25922,7 +25929,7 @@ mod tests {
                 ),
             ] {
                 assert!(!prompt.contains("only as optional context"));
-                assert!(prompt.contains("inspect its status"));
+                assert_eq!(prompt.contains("inspect its status"), !resumed);
                 assert_eq!(
                     prompt
                         .matches("Selected workspace: /tmp/gyro-workspace")
