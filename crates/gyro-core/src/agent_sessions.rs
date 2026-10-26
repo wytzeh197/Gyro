@@ -31,6 +31,8 @@ const TOKEN_FILE: &str = "agent-session.token";
 const ENDPOINT_FILE: &str = "agent-session-endpoint.json";
 const TOKEN_HEX_LEN: usize = 64;
 const MAX_PROMPT_CHARS: usize = 32_000;
+/// Characters of user and assistant text one `read_session` page may return.
+const MAX_READ_CHARS: usize = 32_000;
 const MAX_SUMMARY_CHARS: usize = 4_000;
 const MAX_HTTP_BODY: usize = 1024 * 1024;
 
@@ -696,48 +698,46 @@ impl AgentSessionStore {
             .session_id
             .ok_or_else(|| anyhow!("session was not opened"))?;
         let sessions = SessionStore::open(self.paths.clone())?;
-        let events = sessions.read_transcript_events(session_id)?;
-        let messages: Vec<_> = events
-            .into_iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
-                )
-            })
-            .collect();
-        let start = if let Some(after) = after {
-            messages
-                .iter()
-                .position(|event| event.id == after)
-                .map(|index| index + 1)
-                .ok_or_else(|| anyhow!("unknown cursor"))?
-        } else {
-            0
-        };
         let limit = limit.clamp(1, 20);
         let mut turns = Vec::new();
         let mut chars = 0usize;
         let mut stopped_early = false;
-        for event in messages.iter().skip(start) {
+        let mut passed_cursor = after.is_none();
+        // A page is at most 20 turns. Stop once that page is decided so the
+        // rest of a long transcript, including a later oversized line, is not
+        // read or decoded.
+        sessions.visit_transcript_events(session_id, |event| {
+            if !matches!(
+                event.kind,
+                SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
+            ) {
+                return true;
+            }
+            if !passed_cursor {
+                if after == Some(event.id) {
+                    passed_cursor = true;
+                }
+                return true;
+            }
             if turns.len() == limit {
                 stopped_early = true;
-                break;
+                return false;
             }
             let text = redact_secrets(&event.message);
-            let next_chars = chars.saturating_add(text.chars().count());
-            if next_chars > 32_000 && !turns.is_empty() {
+            let text_chars = text.chars().count();
+            if chars.saturating_add(text_chars) > MAX_READ_CHARS && !turns.is_empty() {
                 stopped_early = true;
-                break;
+                return false;
             }
-            let text = if text.chars().count() > 32_000 {
-                let mut bounded: String = text.chars().take(31_999).collect();
+            let (text, counted) = if text_chars > MAX_READ_CHARS {
+                let mut bounded: String = text.chars().take(MAX_READ_CHARS - 1).collect();
                 bounded.push('\u{2026}');
-                bounded
+                let counted = bounded.chars().count();
+                (bounded, counted)
             } else {
-                text
+                (text, text_chars)
             };
-            chars = chars.saturating_add(text.chars().count());
+            chars = chars.saturating_add(counted);
             turns.push(AgentSessionTurn {
                 id: event.id,
                 role: if event.kind == SessionEventKind::UserMessage {
@@ -749,12 +749,15 @@ impl AgentSessionStore {
                 text,
                 created_at: event.created_at,
             });
+            true
+        })?;
+        if after.is_some() && !passed_cursor {
+            return Err(anyhow!("unknown cursor"));
         }
-        let has_more = stopped_early || start + turns.len() < messages.len();
         Ok(AgentSessionRead {
             report,
             turns,
-            has_more,
+            has_more: stopped_early,
         })
     }
 
@@ -3252,6 +3255,90 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("unknown session"));
+    }
+
+    #[test]
+    fn read_session_stops_before_a_later_oversized_line() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "first", ChoiceRequest::default())
+            .unwrap();
+        let session_id = row.session_id.unwrap();
+        let sessions = SessionStore::open(store.paths().clone()).unwrap();
+        let second = sessions
+            .append_event(
+                session_id,
+                SessionEventKind::AssistantMessage,
+                "second",
+                json!({}),
+            )
+            .unwrap();
+        sessions
+            .append_event(
+                session_id,
+                SessionEventKind::AssistantMessage,
+                "third",
+                json!({}),
+            )
+            .unwrap();
+        let unknown = store
+            .read_session(row.id, Some(Uuid::new_v4()), 1)
+            .unwrap_err()
+            .to_string();
+        assert!(unknown.contains("unknown cursor"));
+        let session = sessions.get_session(session_id).unwrap().unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(&vec![b'x'; 1024 * 1024 + 1]).unwrap();
+
+        let page = store.read_session(row.id, None, 1).unwrap();
+        assert_eq!(page.turns.len(), 1);
+        assert_eq!(page.turns[0].text, "first");
+        assert!(page.has_more);
+        let next = store.read_session(row.id, Some(page.turns[0].id), 1).unwrap();
+        assert_eq!(next.turns.len(), 1);
+        assert_eq!(next.turns[0].id, second.id);
+        assert_eq!(next.turns[0].text, "second");
+        assert!(next.has_more);
+        let error = sessions
+            .read_transcript_events(session_id)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("line exceeds"),
+            "the unread tail is still oversized: {error}"
+        );
+    }
+
+    #[test]
+    fn read_session_keeps_the_character_budget_across_pages() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "short", ChoiceRequest::default())
+            .unwrap();
+        let session_id = row.session_id.unwrap();
+        let sessions = SessionStore::open(store.paths().clone()).unwrap();
+        sessions
+            .append_event(
+                session_id,
+                SessionEventKind::AssistantMessage,
+                "b".repeat(40_000),
+                json!({}),
+            )
+            .unwrap();
+        let first = store.read_session(row.id, None, 20).unwrap();
+        assert_eq!(first.turns.len(), 1);
+        assert_eq!(first.turns[0].text, "short");
+        assert!(first.has_more);
+        let second = store
+            .read_session(row.id, Some(first.turns[0].id), 20)
+            .unwrap();
+        assert_eq!(second.turns.len(), 1);
+        assert_eq!(second.turns[0].text.chars().count(), 32_000);
+        assert!(second.turns[0].text.ends_with('\u{2026}'));
+        assert!(!second.has_more);
     }
 
     #[test]

@@ -1738,6 +1738,42 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// Walks complete events from the start of the log.
+    ///
+    /// `visit` returns `false` to stop. The returned flag is true when the walk
+    /// stopped early, and nothing past that point is read.
+    pub(crate) fn visit_transcript_events(
+        &self,
+        session_id: Uuid,
+        mut visit: impl FnMut(&SessionEvent) -> bool,
+    ) -> Result<bool> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(false);
+        }
+        let file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for transcript read", events_path.display()))?;
+        let mut reader = BufReader::new(file);
+        let mut line_index = 0;
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            if !line.trim().is_empty() {
+                if let Some(event) =
+                    parse_session_event_line_or_skip(&events_path, line_index, &line)
+                {
+                    if !visit(&event) {
+                        return Ok(true);
+                    }
+                }
+            }
+            line_index += 1;
+        }
+        Ok(false)
+    }
+
     pub fn read_recent_events(
         &self,
         session_id: Uuid,
