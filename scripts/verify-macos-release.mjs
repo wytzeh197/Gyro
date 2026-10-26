@@ -40,6 +40,39 @@ function argument(name) {
   return value;
 }
 
+function staplerFailureIsTransient(output) {
+  return /network connection was lost|NSURLErrorDomain Code=-1005|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
+    output,
+  );
+}
+
+function validateStaple(targetPath) {
+  const attempts = 4;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = spawnSync("xcrun", ["stapler", "validate", targetPath], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (!result.error && result.status === 0) return;
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}${
+      result.error?.message ?? ""
+    }`.trim();
+    const error = new Error(
+      `xcrun stapler validate ${targetPath} exited ${result.status ?? "missing"}${
+        output ? `:\n${output}` : ""
+      }`,
+    );
+    if (attempt === attempts || !staplerFailureIsTransient(output)) throw error;
+    console.error(
+      `stapler validate lost Apple's ticket service (attempt ${attempt} of ${attempts}); retrying.`,
+    );
+    const wait = spawnSync("sleep", [String(10 * attempt)], { encoding: "utf8" });
+    if (wait.error || wait.status !== 0) {
+      throw new Error("could not wait before retrying stapler validate");
+    }
+  }
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
@@ -306,7 +339,7 @@ function verifyDeveloperIdBundle(appPath, signatureDetails, signing) {
       );
     }
   }
-  run("xcrun", ["stapler", "validate", appPath]);
+  validateStaple(appPath);
   const assessment = run("spctl", [
     "--assess",
     "--type",
@@ -339,7 +372,7 @@ function verifyDeveloperIdDmg(dmgPath, signing) {
     ],
     ["Signature=adhoc"],
   );
-  run("xcrun", ["stapler", "validate", dmgPath]);
+  validateStaple(dmgPath);
   const assessment = run("spctl", [
     "--assess",
     "--type",
@@ -472,6 +505,22 @@ function attachAndVerifyDmg(dmgPath, config, target, signing) {
 }
 
 async function main() {
+  if (process.argv.includes("--self-test")) {
+    const dropped =
+      'error is Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost." CloudKit\'s response is inconsistent with expections: (null)';
+    if (!staplerFailureIsTransient(dropped)) {
+      throw new Error("a dropped ticket lookup must be retried");
+    }
+    if (
+      staplerFailureIsTransient(
+        "The validate action failed! Error 65. Gyro.app does not have a ticket stapled to it.",
+      )
+    ) {
+      throw new Error("a missing staple must not be retried");
+    }
+    console.log("Stapler validate retry classification passed.");
+    return;
+  }
   if (process.argv.includes("--help")) {
     console.log(`Verify a Gyro macOS release DMG:
   node scripts/verify-macos-release.mjs --dmg <path> --target <target>
