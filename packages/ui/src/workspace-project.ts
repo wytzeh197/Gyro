@@ -266,6 +266,29 @@ export function absoluteWorkspaceFilePath(root: string, path: string) {
   return `${normalizedRoot}/${normalizedPath.replace(/^\/+/, "")}`;
 }
 
+/** Absolute path for Copy Path and Reveal. Explorer rows already store it on `path`. */
+export function workspaceCopyAbsolutePath(file: Pick<WorkspaceFile, "path">) {
+  return file.path;
+}
+
+/**
+ * Path relative to the workspace root.
+ *
+ * `path` on an explorer row is absolute, so copying that string makes
+ * "Copy Relative Path" identical to an absolute copy. Prefer the stored
+ * relative path, then strip the root.
+ */
+export function workspaceCopyRelativePath(
+  file: Pick<WorkspaceFile, "path" | "workspacePath" | "relativePath">,
+) {
+  const stored = file.relativePath
+    ?.replaceAll("\\", "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  if (stored) return stored;
+  return workspaceRelativeFilePath(file.path, file.workspacePath);
+}
+
 export function workspaceFilesForRoot(
   root: string,
   files: readonly WorkspaceFile[],

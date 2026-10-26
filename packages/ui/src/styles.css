@@ -8326,6 +8326,7 @@ textarea:focus-visible {
   --gyro-ide-foreground: var(--gyro-text);
   --gyro-ide-secondary-foreground: var(--gyro-muted);
   --gyro-ide-tab-height: calc(35px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-control-height: calc(35px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(27px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(24px * var(--gyro-ui-scale, 1));
   background: var(--gyro-ide-editor-bg);
@@ -36524,6 +36525,7 @@ textarea:focus-visible,
    the root-level choice. */
 :root[data-density="compact"] .gyro-workspace-route.is-code {
   --gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-control-height: calc(28px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-status-height: calc(24px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(22px * var(--gyro-ui-scale, 1));
@@ -36531,6 +36533,7 @@ textarea:focus-visible,
 
 :root[data-density="comfortable"] .gyro-workspace-route.is-code {
   --gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1));
+  --gyro-ide-tab-control-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-context-height: calc(30px * var(--gyro-ui-scale, 1));
   --gyro-ide-status-height: calc(26px * var(--gyro-ui-scale, 1));
   --gyro-ide-control-size: calc(26px * var(--gyro-ui-scale, 1));

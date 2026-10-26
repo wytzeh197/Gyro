@@ -221,16 +221,9 @@
   content: none;
 }
 
-/* Only the top row aligns with the native 48px title band; internal split
-   headers retain the compact editor-tab height. */
-:root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell.is-workspace-chrome-active
-  .gyro-editor-groups:not(.is-split-down) > .gyro-editor-pane,
-:root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell.is-workspace-chrome-active
-  .gyro-editor-groups.is-split-down > .gyro-editor-pane:first-child {
-  --gyro-ide-tab-height: 48px;
-}
+/* The sidebar band stays 48px so the traffic lights have room. File tabs
+   do not follow it: stretching this row to 48px made the tabs a tall bar.
+   They keep the compact editor-tab height from the code route. */
 
 @media (prefers-reduced-transparency: reduce) {
   :root[data-native-material="sidebar"][data-theme] {

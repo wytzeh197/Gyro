@@ -8615,6 +8615,30 @@ expect(
   "Density should apply across navigation, chats, Settings, and editor chrome instead of only enlarging Settings rows.",
 );
 
+const windowMaterialSource = readRepoFile(
+  "packages/ui/src/window-material.css",
+);
+expect(
+  surfaceSource.includes('key={`rename:${file.path}`}') &&
+    surfaceSource.includes("file.path === explorerDraft.renamePath") &&
+    surfaceSource.includes("acceptBlur.current") &&
+    styleSource.includes(
+      "--gyro-ide-tab-control-height: calc(35px * var(--gyro-ui-scale, 1))",
+    ) &&
+    styleSource.includes(
+      "--gyro-ide-tab-control-height: calc(28px * var(--gyro-ui-scale, 1))",
+    ) &&
+    !windowMaterialSource.includes("--gyro-ide-tab-height: 48px") &&
+    windowMaterialSource.includes("compact editor-tab height") &&
+    surfaceSource.includes("workspaceCopyAbsolutePath") &&
+    surfaceSource.includes("workspaceCopyRelativePath") &&
+    surfaceSource.includes("explorerDraft.parentPath === file.path") &&
+    surfaceSource.includes('event.key === "F2"') &&
+    !surfaceSource.includes("entry?.workspacePath ?? entry?.path") &&
+    !appSource.includes("revealItemInDir(`${root}/${path}`)"),
+  "Explorer rename should keep a single inline field, workspace file tabs should stay compact inside the title band, and copy/reveal should use the file path.",
+);
+
 for (const settingsSelector of [
   ".gyro-settings-group",
   ".gyro-settings-control-column",

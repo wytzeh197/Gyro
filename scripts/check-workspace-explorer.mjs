@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { mergeExplorerDirectories } from "../apps/desktop/src/workspace-explorer.ts";
 import {
+  absoluteWorkspaceFilePath,
+  workspaceCopyAbsolutePath,
+  workspaceCopyRelativePath,
+} from "../packages/ui/src/workspace-project.ts";
+import {
   defaultWorkspaceUserSettings,
   normalizedWorkspaceUserSettings,
 } from "../packages/ui/src/workspace-settings.ts";
@@ -70,6 +75,40 @@ assert.equal(
   mergeExplorerDirectories([root, dir], [{ path: dir.path, files: many }])
     .length,
   1252,
+);
+
+const workspaceRoot = "/Users/wytze/Gyro";
+const contributing = {
+  path: `${workspaceRoot}/CONTRIBUTING.md`,
+  workspacePath: workspaceRoot,
+  relativePath: "CONTRIBUTING.md",
+};
+assert.equal(
+  workspaceCopyAbsolutePath(contributing),
+  contributing.path,
+  "Copy Path uses the file, not the workspace root stored beside it",
+);
+assert.equal(
+  workspaceCopyRelativePath(contributing),
+  "CONTRIBUTING.md",
+  "Copy Relative Path keeps the path inside the workspace",
+);
+assert.equal(
+  workspaceCopyRelativePath({
+    path: `${workspaceRoot}/docs/qa.md`,
+    workspacePath: workspaceRoot,
+    relativePath: "docs/qa.md",
+  }),
+  "docs/qa.md",
+);
+assert.equal(
+  absoluteWorkspaceFilePath(workspaceRoot, contributing.path),
+  contributing.path,
+  "Reveal must not prefix the workspace root onto an absolute explorer path",
+);
+assert.equal(
+  absoluteWorkspaceFilePath(workspaceRoot, "docs/qa.md"),
+  `${workspaceRoot}/docs/qa.md`,
 );
 
 const legacy = [

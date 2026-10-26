@@ -6044,7 +6044,9 @@ export function App() {
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!root) return;
       try {
-        await revealItemInDir(`${root}/${path}`);
+        // Explorer paths are already absolute. Joining the root again points
+        // Finder at a path that does not exist.
+        await revealItemInDir(absoluteWorkspaceFilePath(root, path));
       } catch (error) {
         notify("command-failed", "Reveal failed", String(error));
       }

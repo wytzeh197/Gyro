@@ -410,7 +410,10 @@ import {
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
 import {
+  normalizedWorkspaceFolderPath,
   planWorkspaceMove,
+  workspaceCopyAbsolutePath,
+  workspaceCopyRelativePath,
   workspaceExplorerRootEntryGroup,
   workspaceRelativeFilePath,
 } from "./workspace-project";
@@ -4149,12 +4152,18 @@ function WorkspaceSidebarContent({
     parentPath?: string,
   ) => {
     setExplorerContextMenu(undefined);
-    if (parentPath) {
+    // No selection means the workspace root. The field is drawn under that
+    // folder, so the parent has to be a real row rather than "somewhere".
+    const rawParent = parentPath || workspacePath;
+    const parent = rawParent
+      ? normalizedWorkspaceFolderPath(rawParent)
+      : undefined;
+    if (parent) {
       setExpandedWorkspaceDirectories((current) =>
-        current.has(parentPath) ? current : new Set(current).add(parentPath),
+        current.has(parent) ? current : new Set(current).add(parent),
       );
     }
-    setExplorerDraft({ kind, parentPath, value: "" });
+    setExplorerDraft({ kind, parentPath: parent, value: "" });
   };
   /* Rename seeds the same inline row with the current basename, the way the
      Explorer's create row already works. That keeps rename off window.prompt,
@@ -4163,6 +4172,11 @@ function WorkspaceSidebarContent({
   const startExplorerRename = (path: string) => {
     setExplorerContextMenu(undefined);
     if (!path) return;
+    // The root is the folder Gyro has open. Renaming it is refused later, so
+    // the field would appear and then fail. Don't open it.
+    if (files.some((file) => file.path === path && file.isWorkspaceRoot)) {
+      return;
+    }
     const separator = path.lastIndexOf("/");
     const parentPath = separator > 0 ? path.slice(0, separator) : undefined;
     if (parentPath) {
@@ -4616,7 +4630,29 @@ function WorkspaceSidebarContent({
       } else {
         onOpenWorkspaceFile?.(file.path);
       }
+    } else if (event.key === "F2") {
+      event.preventDefault();
+      startExplorerRename(file.path);
+    } else if (
+      (event.key === "Delete" || event.key === "Backspace") &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.ctrlKey
+    ) {
+      event.preventDefault();
+      if (file.isWorkspaceRoot) {
+        onRemoveWorkspaceFolder?.(file.workspacePath ?? file.path);
+      } else {
+        onDeleteWorkspacePath?.(file.path);
+      }
     }
+  };
+  const explorerCreateParent = () => {
+    const selected = files.find((file) => file.path === selectedExplorerPath);
+    if (!selected) return undefined;
+    if (selected.kind === "directory") return selected.path;
+    const separator = selected.path.lastIndexOf("/");
+    return separator > 0 ? selected.path.slice(0, separator) : undefined;
   };
   const renderSessionRow = (session: Session, isNested = false) => (
     <SessionSidebarRow
@@ -4784,7 +4820,9 @@ function WorkspaceSidebarContent({
                     </button>
                     <button
                       aria-label="New file"
-                      onClick={() => startExplorerDraft("file")}
+                      onClick={() =>
+                        startExplorerDraft("file", explorerCreateParent())
+                      }
                       title="New file"
                       type="button"
                     >
@@ -4793,7 +4831,12 @@ function WorkspaceSidebarContent({
                     </button>
                     <button
                       aria-label="New folder"
-                      onClick={() => startExplorerDraft("directory")}
+                      onClick={() =>
+                        startExplorerDraft(
+                          "directory",
+                          explorerCreateParent(),
+                        )
+                      }
                       title="New folder"
                       type="button"
                     >
@@ -4802,7 +4845,10 @@ function WorkspaceSidebarContent({
                     </button>
                     <button
                       aria-label="Rename selected path"
-                      disabled={!selectedExplorerPath && !ide?.activePath}
+                      disabled={
+                        (!selectedExplorerPath && !ide?.activePath) ||
+                        Boolean(selectedExplorerFile?.isWorkspaceRoot)
+                      }
                       onClick={() =>
                         startExplorerRename(
                           selectedExplorerPath ?? ide?.activePath ?? "",
@@ -4871,7 +4917,7 @@ function WorkspaceSidebarContent({
                       ref={explorerTreeRef}
                       role="tree"
                     >
-                      {visibleFiles.map((file, index) => {
+                      {visibleFiles.flatMap((file, index) => {
                         const decoration = ide?.fileDecorations.find(
                           (item) => item.path === file.path,
                         );
@@ -4890,6 +4936,7 @@ function WorkspaceSidebarContent({
                         if (explorerDraft?.renamePath === file.path) {
                           return (
                             <ExplorerDraftRow
+                              depth={file.depth}
                               draft={{
                                 ...explorerDraft,
                                 kind:
@@ -4897,6 +4944,7 @@ function WorkspaceSidebarContent({
                                     ? "directory"
                                     : "file",
                               }}
+                              key={`rename:${file.path}`}
                               onCancel={() => setExplorerDraft(undefined)}
                               onChange={(value) =>
                                 setExplorerDraft((current) =>
@@ -4907,7 +4955,7 @@ function WorkspaceSidebarContent({
                             />
                           );
                         }
-                        return (
+                        const row = (
                           <WorkspaceExplorerRow
                             collapsed={
                               !expandedWorkspaceDirectories.has(file.path)
@@ -5103,10 +5151,52 @@ function WorkspaceSidebarContent({
                             }
                           />
                         );
+                        // The new name sits under the folder it will belong to.
+                        // A field at the bottom of the tree looks like a no-op
+                        // in a long project.
+                        if (
+                          explorerDraft &&
+                          !explorerDraft.renamePath &&
+                          explorerDraft.parentPath === file.path
+                        ) {
+                          return [
+                            row,
+                            <ExplorerDraftRow
+                              depth={(file.depth ?? 0) + 1}
+                              draft={explorerDraft}
+                              key="create-explorer-entry"
+                              onCancel={() => setExplorerDraft(undefined)}
+                              onChange={(value) =>
+                                setExplorerDraft((current) =>
+                                  current
+                                    ? { ...current, value }
+                                    : current,
+                                )
+                              }
+                              onCommit={commitExplorerDraft}
+                            />,
+                          ];
+                        }
+                        return row;
                       })}
-                      {explorerDraft ? (
+                      {/* Rename replaces its own row above. A second field here
+                          autofocuses, blurs that row, and the unchanged name
+                          commits the rename shut before it can be typed. */}
+                      {explorerDraft &&
+                      !(
+                        explorerDraft.renamePath
+                          ? visibleFiles.some(
+                              (file) =>
+                                file.path === explorerDraft.renamePath,
+                            )
+                          : visibleFiles.some(
+                              (file) =>
+                                file.path === explorerDraft.parentPath,
+                            )
+                      ) ? (
                         <ExplorerDraftRow
                           draft={explorerDraft}
+                          key="create-explorer-entry"
                           onCancel={() => setExplorerDraft(undefined)}
                           onChange={(value) =>
                             setExplorerDraft((current) =>
@@ -5247,10 +5337,12 @@ function WorkspaceSidebarContent({
                   <button
                     onClick={() => {
                       const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
                       const entry = files.find((file) => file.path === target);
-                      void navigator.clipboard?.writeText(
-                        entry?.workspacePath ?? entry?.path ?? target,
+                      setExplorerContextMenu(undefined);
+                      writeClipboardText(
+                        entry
+                          ? workspaceCopyAbsolutePath(entry)
+                          : target,
                       );
                     }}
                     role="menuitem"
@@ -5261,8 +5353,13 @@ function WorkspaceSidebarContent({
                   <button
                     onClick={() => {
                       const target = explorerContextMenu.path;
+                      const entry = files.find((file) => file.path === target);
                       setExplorerContextMenu(undefined);
-                      void navigator.clipboard?.writeText(target);
+                      writeClipboardText(
+                        entry
+                          ? workspaceCopyRelativePath(entry)
+                          : target,
+                      );
                     }}
                     role="menuitem"
                     type="button"
@@ -7731,6 +7828,32 @@ function SidebarDestinationRow({
   );
 }
 
+/** Copy during the click. The async clipboard API drops the user gesture in
+ *  the macOS webview and then fails with nothing on the clipboard. */
+function writeClipboardText(value: string) {
+  // Start the async write while this click is still the user gesture, then
+  // also copy synchronously. Either path is enough; one of them fails in the
+  // macOS webview depending on the page.
+  const pending = navigator.clipboard?.writeText(value);
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.top = "0";
+  area.style.left = "0";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // The async write above is the other attempt.
+  }
+  area.remove();
+  void pending?.catch(() => undefined);
+}
+
 function explorerRootGroupForFile(file: WorkspaceFile | undefined) {
   if (!file || file.isWorkspaceRoot) return undefined;
   const relativePath =
@@ -7863,6 +7986,7 @@ function WorkspaceExplorerRow({
    the file type, so the row previews the detected language and icon live. */
 function ExplorerDraftRow({
   draft,
+  depth,
   onChange,
   onCommit,
   onCancel,
@@ -7873,15 +7997,32 @@ function ExplorerDraftRow({
     value: string;
     renamePath?: string;
   };
+  depth?: number;
   onChange: (value: string) => void;
   onCommit: () => void;
   onCancel: () => void;
 }) {
   const selectedRenameText = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, []);
+  /* The click that opens this row unmounts the menu that held focus. That
+     focus move can blur the new field in the same turn and commit it shut.
+     Blur only counts once the field has actually been shown. */
+  const acceptBlur = useRef(false);
+  useEffect(() => {
+    acceptBlur.current = true;
+    return () => {
+      acceptBlur.current = false;
+    };
+  }, []);
   const isRename = Boolean(draft.renamePath);
-  const depth = draft.parentPath
-    ? draft.parentPath.split("/").filter(Boolean).length + 2
-    : 2;
+  const indent =
+    depth ??
+    (draft.parentPath
+      ? draft.parentPath.split("/").filter(Boolean).length + 2
+      : 2);
   const name = draft.value.trim();
   const typeLabel =
     draft.kind === "directory"
@@ -7893,7 +8034,8 @@ function ExplorerDraftRow({
   return (
     <div
       className="gyro-explorer-draft"
-      style={{ paddingLeft: `${Math.max(8, Math.min(depth, 8) * 11)}px` }}
+      ref={rowRef}
+      style={{ paddingLeft: `${Math.max(8, Math.min(indent, 8) * 11)}px` }}
     >
       {draft.kind === "directory" ? (
         <Folder
@@ -7939,10 +8081,24 @@ function ExplorerDraftRow({
           } else if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
+            // Unmount blurs the field before this guard resets, and blur
+            // commits. Ignore that blur or Escape keeps the typed name.
+            acceptBlur.current = false;
             onCancel();
           }
         }}
-        onBlur={onCommit}
+        onBlur={(event) => {
+          if (!acceptBlur.current) {
+            const input = event.currentTarget;
+            requestAnimationFrame(() => {
+              if (input.isConnected && document.activeElement !== input) {
+                input.focus();
+              }
+            });
+            return;
+          }
+          onCommit();
+        }}
         placeholder={
           isRename
             ? "name"
