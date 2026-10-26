@@ -100,6 +100,13 @@ impl AgentRelayServer {
             .as_ref()
             .parse()
             .with_context(|| format!("relay bind {} is not an address", bind.as_ref()))?;
+        if !address.ip().is_loopback()
+            && std::env::var("GYRO_RELAY_PUBLIC").ok().as_deref() != Some("1")
+        {
+            anyhow::bail!(
+                "relay bind {address} is not loopback; set GYRO_RELAY_PUBLIC=1 to listen on a public address"
+            );
+        }
         let listener = TcpListener::bind(address).context("bind the agent relay")?;
         listener.set_nonblocking(true)?;
         let local = listener.local_addr()?;
@@ -609,7 +616,7 @@ fn list_sessions(conn: &Connection, arguments: &Value) -> Result<Value, String> 
     let online = mac_is_online(conn);
     let mut stmt = conn
         .prepare(
-            "select id, session_id, workspace, status, prompt, updated_at
+            "select id, session_id, workspace, status, prompt, summary, updated_at
              from relay_tasks
              where ?1 is null or updated_at < ?1
              order by updated_at desc
@@ -623,13 +630,19 @@ fn list_sessions(conn: &Connection, arguments: &Value) -> Result<Value, String> 
             let workspace: String = row.get(2)?;
             let status: String = row.get(3)?;
             let prompt: String = row.get(4)?;
-            let updated_at: String = row.get(5)?;
+            let summary: Option<String> = row.get(5)?;
+            let updated_at: String = row.get(6)?;
+            let title_source = if prompt.trim().is_empty() {
+                summary.unwrap_or_default()
+            } else {
+                prompt
+            };
             Ok(json!({
                 "sessionId": id,
                 "gyroSessionId": gyro,
                 "workspace": workspace,
                 "status": visible_status(&status, online),
-                "title": session_title(&prompt),
+                "title": session_title(&title_source),
                 "updatedAt": updated_at,
             }))
         })
@@ -1238,6 +1251,7 @@ fn apply_report(conn: &Connection, report: &Value, now: &str) -> Result<()> {
            reasoning_effort = coalesce(?8, reasoning_effort),
            session_id = coalesce(?9, session_id),
            pending_approval_json = ?10,
+           prompt = case when coalesce(?1, status) in ('done', 'failed') then '' else prompt end,
            updated_at = ?11
          where id = ?12",
         params![
@@ -1592,6 +1606,21 @@ mod tests {
     }
 
     #[test]
+    fn relay_refuses_a_public_bind_without_the_operator_flag() {
+        let temp = tempfile::tempdir().unwrap();
+        match AgentRelayServer::start(temp.path().join("relay"), "0.0.0.0:0", None) {
+            Ok(_) => panic!("public bind should fail"),
+            Err(error) => {
+                let error = error.to_string();
+                assert!(
+                    error.contains("GYRO_RELAY_PUBLIC"),
+                    "public bind should name the operator flag, got {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn relay_lists_starts_and_reports_without_storing_a_transcript() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = temp.path().join("workspace");
@@ -1743,9 +1772,18 @@ mod tests {
         assert!(status["summary"].as_str().unwrap().contains("[REDACTED]"));
         assert!(!status.to_string().contains("SECRET-TRANSCRIPT"));
         let stored = database_text(&relay_dir);
-        assert!(stored.contains("Say hello"));
+        assert!(!stored.contains("Say hello"));
         assert!(!stored.contains("SECRET-TRANSCRIPT"));
         assert!(!stored.contains("SECRET-FILE-BODY"));
+        let stored_prompt: String = open_db(&relay_dir)
+            .unwrap()
+            .query_row(
+                "select prompt from relay_tasks where id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored_prompt.is_empty());
         assert!(!stored.contains("sk-abcdefghijklmnopqrstuvwxyz"));
 
         relay.set_offline_after(Duration::ZERO).unwrap();

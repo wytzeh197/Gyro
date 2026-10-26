@@ -70,8 +70,8 @@ mod browser_pointer;
 mod file_patch_counts;
 mod workspace_search;
 use workspace_search::{
-    bound_model_search_results, literal_search_ranges, run_workspace_rg_search,
-    run_workspace_rg_search_scan,
+    bound_model_search_results, confine_search_directory, literal_search_ranges,
+    run_scoped_workspace_rg_search, run_workspace_rg_search,
 };
 
 use anyhow::Context;
@@ -6235,7 +6235,7 @@ fn provider_context_message_with_capabilities_for_turn(
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
-        context.push("When the plan is ready for implementation, present the complete plan as polished Markdown with a descriptive heading and clear sections. Gyro displays that response as the Plan document.".into());
+        context.push("When the plan is ready for implementation, present the complete plan as polished Markdown with a descriptive heading and clear sections, through the last step. End on a complete sentence. Do not stop mid-sentence or mid-bullet. Gyro displays that response as the Plan document.".into());
     } else if request.plan.is_some() {
         // Outside Plan mode the model was never told the marker exists, so the
         // checklist sat at all-todo through the whole implementation turn.
@@ -13484,8 +13484,56 @@ fn session_context_signal(event: &SessionEvent) -> provider_context::SessionCont
         provider_id: text("providerId"),
         model_id: text("modelId"),
         reading,
+        characters: event_text_characters(event),
         session_compaction,
     }
+}
+
+/// Text characters one stored event adds to the prompt that resumes from it.
+///
+/// The auto-compact decision needs a size for the sessions whose provider never
+/// reports one, and the stored events are the only source every adapter feeds.
+/// Counting the strings a payload carries is adapter-agnostic; image bytes are
+/// provider-owned, so encoded fields are skipped the way a message's image
+/// payload is skipped when the note measures text.
+fn event_text_characters(event: &SessionEvent) -> u64 {
+    let mut characters = 0u64;
+    collect_text_characters(&event.payload, None, &mut characters);
+    characters
+}
+
+fn collect_text_characters(
+    value: &serde_json::Value,
+    field: Option<&str>,
+    characters: &mut u64,
+) {
+    match value {
+        serde_json::Value::String(text) => {
+            if !is_encoded_text(field, text) {
+                *characters = characters.saturating_add(text.chars().count() as u64);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_text_characters(item, field, characters);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (name, value) in fields {
+                collect_text_characters(value, Some(name), characters);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_encoded_text(field: Option<&str>, text: &str) -> bool {
+    const ENCODED_FIELDS: [&str; 4] = ["image", "images", "data", "base64"];
+    field.is_some_and(|field| {
+        ENCODED_FIELDS
+            .iter()
+            .any(|encoded| field.eq_ignore_ascii_case(encoded))
+    }) || (text.len() > 4_096 && text.starts_with("data:"))
 }
 
 /// Compact a resumed session before the next prompt when its last measured
@@ -21856,8 +21904,22 @@ fn execute_provider_capability(
             // fallback scanner that ignores the requested globs).
             let result_cap = max_results.unwrap_or(50).clamp(1, 1000);
             let max_bytes = workspace_result_byte_limit(arguments)?;
-            let scan = run_workspace_rg_search_scan(
+            let directory = match arguments.get("path") {
+                None => ".".to_string(),
+                Some(value) => {
+                    let Some(path) = value.as_str() else {
+                        anyhow::bail!("Workspace search path must be a string");
+                    };
+                    if path.trim().is_empty() {
+                        ".".to_string()
+                    } else {
+                        confine_search_directory(&bound.workspace, path)?
+                    }
+                }
+            };
+            let scan = run_scoped_workspace_rg_search(
                 &bound.workspace,
+                &directory,
                 &query,
                 globs.as_ref(),
                 result_cap,
@@ -23052,7 +23114,9 @@ fn handle_desktop_provider_capability_request_inner(
                 Some(id) => Some(id),
                 None => return fail("invalid-root", "rootId must be a string.".into()),
             },
-            None if identity.roots.len() == 1 => Some(identity.roots[0].id.as_str()),
+            None if !root_argument_required(identity.roots.len(), false) => {
+                Some(identity.roots[0].id.as_str())
+            }
             None => {
                 return fail(
                     "root-required",
@@ -23662,6 +23726,10 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
             "query": {
                 "type": "string",
                 "description": "Ripgrep regular expression. Use | for alternation and .* for wildcards."
+            },
+            "path": {
+                "type": "string",
+                "description": "Optional workspace-relative directory. Search stays inside this directory."
             },
             "globs": { "type": "array", "items": { "type": "string" } },
             "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50 },

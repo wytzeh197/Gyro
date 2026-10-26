@@ -930,12 +930,30 @@
   font-size: calc(12px * var(--gyro-ui-scale, 1));
 }
 
-/* Icon-only tools carry a circular hover target; text chips stay softly rounded. */
+/* Icon tools and the labeled chips in this bar are round. A chip with
+   text is a pill; an icon tool is a circle. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-composer-chip {
+  border-radius: 999px;
+}
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-composer-tool {
-  border-radius: 50%;
+  aspect-ratio: 1;
+  align-self: center;
+  border-radius: 999px;
+  box-sizing: border-box;
+  flex: 0 0 var(--gyro-composer-action-size);
+  height: var(--gyro-composer-action-size);
+  max-height: var(--gyro-composer-action-size);
+  max-width: var(--gyro-composer-action-size);
+  min-height: var(--gyro-composer-action-size);
+  min-width: var(--gyro-composer-action-size);
+  padding: 0;
+  width: var(--gyro-composer-action-size);
 }
 
 :root[data-theme]
@@ -950,20 +968,39 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button {
-  border-radius: 50%;
+  align-self: center;
+  aspect-ratio: 1;
+  border-radius: 999px;
   box-shadow: none;
+  box-sizing: border-box;
   display: grid;
-  place-items: center;
-  padding: 0;
+  flex: 0 0 var(--gyro-composer-action-size);
   height: var(--gyro-composer-action-size);
+  max-height: var(--gyro-composer-action-size);
+  max-width: var(--gyro-composer-action-size);
   min-height: var(--gyro-composer-action-size);
   min-width: var(--gyro-composer-action-size);
+  overflow: hidden;
+  padding: 0;
+  place-items: center;
   width: var(--gyro-composer-action-size);
+}
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button.is-stop {
+  border-radius: 999px;
 }
 
 .gyro-send-button > svg {
   display: block;
   flex: none;
+}
+
+/* Sized to the Grok send arrow: about half the circle tall. */
+.gyro-send-button > .gyro-send-arrow {
+  height: 100%;
+  width: 100%;
 }
 
 /* Tiled welcome screens already space children with a gap. Do not add the
@@ -989,19 +1026,27 @@
   margin-top: 0;
 }
 
-/* A ready send shares the primary action palette across both chat layouts. */
+/* A ready send is a white circle with a dark arrow. Stop and the empty
+   state keep their own fills. Light theme adds a hairline so the circle
+   still reads on a white composer. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button:not(:disabled):not(.is-stop) {
-  background: var(--gyro-primary-bg);
-  color: var(--gyro-primary-text);
+  background: #ffffff;
+  color: #151515;
+}
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-composer-bar
+  .gyro-send-button:not(:disabled):not(.is-stop) {
+  box-shadow: inset 0 0 0 1px rgba(21, 21, 21, 0.16);
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button:not(:disabled):not(.is-stop):hover {
-  background: var(--gyro-primary-hover);
+  background: #f2f2f2;
 }
 
 /* Artifacts and completed changes share one restrained card treatment. */

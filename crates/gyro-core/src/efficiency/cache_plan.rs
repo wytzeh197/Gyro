@@ -93,7 +93,7 @@ pub fn host_of(endpoint: &Url) -> &str {
 
 pub fn prefix_caching(endpoint: &Url) -> PrefixCaching {
     let host = host_of(endpoint);
-    if host == "api.openai.com" {
+    if host == "api.openai.com" || host == "api.anthropic.com" {
         PrefixCaching::Explicit
     } else if IMPLICIT_HOSTS.contains(&host) {
         PrefixCaching::Implicit
@@ -133,17 +133,22 @@ pub fn plan(endpoint: &Url, model: &str, seed: &[&str], enabled: bool) -> Plan {
     } else {
         None
     };
-    let reason = match (caching, key.is_some()) {
-        (PrefixCaching::Explicit, true) => "explicit key",
-        (PrefixCaching::Explicit, false) => "explicit route without a prefix seed",
-        (PrefixCaching::Implicit, _) => "automatic prefix cache, keep the prefix stable",
-        (PrefixCaching::None, _) => "no prefix cache on this route",
+    let breakpoints = if host == "api.anthropic.com" { 2 } else { 0 };
+    let reason = if host == "api.anthropic.com" {
+        "explicit cache_control breakpoints"
+    } else {
+        match (caching, key.is_some()) {
+            (PrefixCaching::Explicit, true) => "explicit key",
+            (PrefixCaching::Explicit, false) => "explicit route without a prefix seed",
+            (PrefixCaching::Implicit, _) => "automatic prefix cache, keep the prefix stable",
+            (PrefixCaching::None, _) => "no prefix cache on this route",
+        }
     };
     Plan {
         caching,
         key,
         options,
-        breakpoints: 0,
+        breakpoints,
         reason,
     }
 }
@@ -163,7 +168,34 @@ pub fn apply(
     if let Some(options) = &plan.options {
         payload["prompt_cache_options"] = options.clone();
     }
+    if plan.breakpoints > 0 {
+        stamp_anthropic_cache_control(payload);
+    }
     plan
+}
+
+/// Mark the stable system prefix and the last tool. A second call leaves the same bytes in place.
+fn stamp_anthropic_cache_control(payload: &mut Value) {
+    if let Some(system) = payload.get("system").cloned() {
+        payload["system"] = anthropic_cached_system(system);
+    }
+    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+        if let Some(last) = tools.last_mut() {
+            last["cache_control"] = json!({ "type": "ephemeral" });
+        }
+    }
+}
+
+fn anthropic_cached_system(system: Value) -> Value {
+    let mut blocks = match system {
+        Value::Array(blocks) => blocks,
+        Value::String(text) => vec![json!({ "type": "text", "text": text })],
+        other => vec![json!({ "type": "text", "text": other.to_string() })],
+    };
+    if let Some(last) = blocks.last_mut() {
+        last["cache_control"] = json!({ "type": "ephemeral" });
+    }
+    Value::Array(blocks)
 }
 
 /// Length of the leading run of messages that is byte-identical between two rounds.
@@ -323,5 +355,92 @@ mod tests {
             cacheable_bytes(&previous, &current),
             previous[0].to_string().len()
         );
+    }
+
+    fn prefix_digest(payload: &Value) -> String {
+        let system = payload["system"].to_string();
+        let tools = payload["tools"].to_string();
+        digest(&[&system, &tools])
+    }
+
+    #[test]
+    fn anthropic_breakpoints_keep_the_same_prefix_digest_across_turns() {
+        let endpoint = url("https://api.anthropic.com/v1/messages");
+        let tools = json!([
+            {"name": "gyro_workspace_read", "input_schema": {"type": "object"}},
+            {"name": "gyro_workspace_search", "input_schema": {"type": "object"}}
+        ]);
+        let mut first = json!({
+            "system": "stable instructions",
+            "tools": tools,
+            "messages": [{"role": "user", "content": "turn 1"}]
+        });
+        let plan = apply(
+            &mut first,
+            &endpoint,
+            "claude-sonnet",
+            &["stable instructions", "tools"],
+            true,
+        );
+        assert_eq!(plan.caching, PrefixCaching::Explicit);
+        assert_eq!(plan.breakpoints, 2);
+        assert!(plan.key.is_none());
+        assert_eq!(plan.reason, "explicit cache_control breakpoints");
+        assert_eq!(first["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(first["tools"][1]["cache_control"]["type"], "ephemeral");
+        assert!(first.get("prompt_cache_key").is_none());
+
+        let mut second = json!({
+            "system": "stable instructions",
+            "tools": tools,
+            "messages": [
+                {"role": "user", "content": "turn 1"},
+                {"role": "assistant", "content": "working"}
+            ]
+        });
+        apply(
+            &mut second,
+            &endpoint,
+            "claude-sonnet",
+            &["stable instructions", "tools"],
+            true,
+        );
+        assert_eq!(prefix_digest(&first), prefix_digest(&second));
+        apply(
+            &mut second,
+            &endpoint,
+            "claude-sonnet",
+            &["stable instructions", "tools"],
+            true,
+        );
+        assert_eq!(prefix_digest(&first), prefix_digest(&second));
+
+        let mut changed = json!({
+            "system": "stable instructions",
+            "tools": [{"name": "other", "input_schema": {"type": "object"}}]
+        });
+        apply(
+            &mut changed,
+            &endpoint,
+            "claude-sonnet",
+            &["stable instructions", "other"],
+            true,
+        );
+        assert_ne!(prefix_digest(&first), prefix_digest(&changed));
+
+        let mut disabled = json!({
+            "system": "stable instructions",
+            "tools": tools
+        });
+        let off = apply(
+            &mut disabled,
+            &endpoint,
+            "claude-sonnet",
+            &["stable instructions", "tools"],
+            false,
+        );
+        assert_eq!(off.breakpoints, 0);
+        assert!(disabled["system"].is_string());
+        assert!(disabled["tools"][0].get("cache_control").is_none());
     }
 }

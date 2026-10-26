@@ -74,6 +74,11 @@ pub(super) fn workspace_result_byte_limit(arguments: &serde_json::Value) -> anyh
     Ok(bytes as usize)
 }
 
+/// A search or read with several roots must name one. A single root is implied.
+pub(super) fn root_argument_required(root_count: usize, root_id_present: bool) -> bool {
+    !root_id_present && root_count != 1
+}
+
 pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
     !matches!(
         id,
@@ -193,5 +198,9 @@ mod tests {
         ] {
             assert!(workspace_result_byte_limit(&json!({"maxBytes":value})).is_err());
         }
+        assert!(root_argument_required(2, false));
+        assert!(!root_argument_required(1, false));
+        assert!(!root_argument_required(2, true));
+        assert!(root_argument_required(0, false));
     }
 }

@@ -35,6 +35,7 @@ const MAX_PROMPT_CHARS: usize = 32_000;
 const MAX_READ_CHARS: usize = 32_000;
 const MAX_SUMMARY_CHARS: usize = 4_000;
 const MAX_HTTP_BODY: usize = 1024 * 1024;
+const WORKER_STOPPED_BEFORE_FINISH: &str = "worker stopped before the session finished";
 
 /// Provider, model, and effort the user has enabled.
 ///
@@ -613,6 +614,28 @@ impl AgentSessionStore {
              set status = 'failed', error = 'interrupted before the session finished', updated_at = ?1
              where status = 'running'",
             params![now],
+        )?;
+        Ok(changed)
+    }
+
+    /// Refresh the lease while the worker is still inside `execute`.
+    pub fn heartbeat(&self, id: Uuid) -> Result<bool> {
+        let now = Utc::now().to_rfc3339();
+        let changed = self.conn.execute(
+            "update agent_sessions set updated_at = ?1 where id = ?2 and status = 'running'",
+            params![now, id.to_string()],
+        )?;
+        Ok(changed == 1)
+    }
+
+    /// Fail running rows whose lease is older than `cutoff`. A live heartbeat stays running.
+    pub fn expire_stale_running(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        let changed = self.conn.execute(
+            "update agent_sessions
+             set status = 'failed', error = ?1, updated_at = ?2
+             where status = 'running' and updated_at < ?3",
+            params![WORKER_STOPPED_BEFORE_FINISH, now, cutoff.to_rfc3339()],
         )?;
         Ok(changed)
     }
@@ -3410,6 +3433,35 @@ mod tests {
         let control = store.stop_session(queued.id).unwrap();
         assert_eq!(control.status, "cancelled");
         assert!(store.get(queued.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_fresh_heartbeat_keeps_a_running_session_and_a_stale_one_fails() {
+        let (_temp, store, workspace) = fixture();
+        let row = store
+            .start_session(&workspace, "Keep me", ChoiceRequest::default())
+            .unwrap();
+        store.claim_next().unwrap().unwrap();
+        let kept = store
+            .expire_stale_running(Utc::now() - chrono::Duration::hours(1))
+            .unwrap();
+        assert_eq!(kept, 0);
+        assert!(store.heartbeat(row.id).unwrap());
+        assert_eq!(
+            store.get(row.id).unwrap().unwrap().state,
+            AgentSessionState::Running
+        );
+
+        let expired = store
+            .expire_stale_running(Utc::now() + chrono::Duration::seconds(1))
+            .unwrap();
+        assert_eq!(expired, 1);
+        let failed = store.get(row.id).unwrap().unwrap();
+        assert_eq!(failed.state, AgentSessionState::Failed);
+        assert_eq!(
+            failed.error.as_deref(),
+            Some("worker stopped before the session finished")
+        );
     }
 
     #[test]

@@ -173,9 +173,11 @@ each round. `usageGuard.autoCompactPercent` (80 by default, `0` off, adjustable
 in Settings → Usage Limits → Auto Context Compact) is the fill at which the loop
 replaces its oldest tool exchanges with one note: local, so no provider call, no
 change to the stored chat, and the newest exchange plus the prompt head always
-stay. A provider whose window Gyro cannot resolve never auto-compacts, because a
-share of an unknown window is not a measurement — the same rule the live context
-note follows.
+stay. A resumed session is judged before its next prompt by the same share, from
+the provider's reported prompt count when it gives one and, when it reports
+nothing, from the text the session would carry into that prompt. A share of an
+unknown window is not a measurement, so a model whose window Gyro cannot resolve
+still never auto-compacts — the same rule the live context note follows.
 
 A ledger the guard cannot read is not treated as proof of safety, but blocking
 on a read failure would strand the user with no way to work, so the call runs
