@@ -23,6 +23,16 @@
 
 :root {
   color-scheme: dark;
+  /* Native window-chrome geometry: macOS draws the traffic lights and the title
+     bar centres its controls on them. Keep these equal to MAIN_TRAFFIC_LIGHT_X/Y
+     and tauri.conf.json — scripts/check-workbench-ui.mjs enforces it. */
+  --gyro-traffic-light-size: 14px;
+  --gyro-traffic-light-inset-x: 16px;
+  --gyro-traffic-light-inset-y: 17px;
+  --gyro-traffic-light-gap: 9px;
+  --gyro-traffic-light-close: #ff5f57;
+  --gyro-traffic-light-minimize: #febc2e;
+  --gyro-traffic-light-zoom: #28c840;
   /* Neutral surface ramps keep dark mode free of blue casts and light mode
      free of cream casts. Accent hues belong to actions and semantic states. */
   --gyro-user-main: #0874df;

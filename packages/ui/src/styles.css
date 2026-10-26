@@ -40744,9 +40744,16 @@ textarea:focus-visible,
   cursor: default;
 }
 
-/* Native 14px traffic lights sit at y 17, so their centreline is y 24 — the
-   middle of the 48px bar. 28px navigation buttons padded by 10px land on that
-   same line, so the whole top bar reads as one row. At 12px they sat 2px low. */
+/* Native 14px traffic lights sit at x 16, y 17: the 1px nudge moved them down
+   from y 16, and a 14px circle then spans y 17-31, so its centreline is y 24 —
+   exactly where 28px navigation buttons land from the bar's 10px padding. The
+   row reads as one line now; before the nudge the lights floated 1px high.
+   Window controls never carry their own top offset: the padding below derives
+   from the shared --gyro-traffic-light-* tokens, so a future nudge moves the row
+   with the lights instead of breaking the alignment. Those tokens live in the
+   single :root authority (styles-foundation.css); the native values live in
+   MAIN_TRAFFIC_LIGHT_Y and tauri.conf.json, and check-workbench-ui keeps every
+   copy equal. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings),
 .gyro-sidebar-windowbar.is-settings,
 .gyro-sidebar-restore-cluster {
@@ -40754,7 +40761,8 @@ textarea:focus-visible,
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-top: 10px;
+  /* 28px controls centred on the lights: 17 + (14 / 2) - 14 = 10px. */
+  padding-top: calc(var(--gyro-traffic-light-inset-y) + (var(--gyro-traffic-light-size) / 2) - 14px);
   padding-bottom: 0;
 }
 
