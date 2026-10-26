@@ -1958,8 +1958,18 @@ mod tests {
                 |_, _, _, _| panic!("this response must not fetch a generation receipt"),
             );
             server.join().unwrap();
-            if body.contains("length") || body.contains("\"error\"") {
+            if body.contains("\"error\"") {
                 assert!(result.is_err());
+                let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
+                assert_eq!((tokens.input_tokens, tokens.output_tokens), (7, 1));
+            } else if body.contains("finish_reason\":\"length\"") {
+                // A text-only output cap is an unfinished answer. The runner
+                // joins a continuation instead of failing the turn.
+                let response =
+                    result.expect("a text-only length finish returns the partial answer");
+                assert_eq!(response.content, "partial");
+                assert!(response.truncated);
+                assert!(response.tool_calls.is_empty());
                 let tokens = crate::provider_observation::snapshot().unwrap().tokens.unwrap();
                 assert_eq!((tokens.input_tokens, tokens.output_tokens), (7, 1));
             } else {
