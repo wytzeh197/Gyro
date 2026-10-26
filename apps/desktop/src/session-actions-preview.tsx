@@ -29,8 +29,8 @@ function Preview() {
     onSelectSessions={() => undefined} onSelectWorkspaceLayout={() => undefined}
     onPinSession={(id) => setPinned((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id])}>
     <main style={{ padding: 32, color: "var(--gyro-text)" }}>
-      {createPortal(<div aria-label="Traffic lights: screenshot reference fixture" style={{ position: "fixed", left: 16, top: 16, display: "flex", gap: 9, pointerEvents: "none", zIndex: 10000 }}>
-        {["#ff5f57", "#febc2e", "#28c840"].map((color) => <span key={color} style={{ width: 14, height: 14, borderRadius: "50%", background: color }} />)}
+      {createPortal(<div aria-hidden="true" data-fixture="traffic-lights" style={{ position: "fixed", left: "var(--gyro-traffic-light-inset-x)", top: "var(--gyro-traffic-light-inset-y)", display: "flex", gap: "var(--gyro-traffic-light-gap)", pointerEvents: "none", zIndex: 10000 }}>
+        {["--gyro-traffic-light-close", "--gyro-traffic-light-minimize", "--gyro-traffic-light-zoom"].map((token) => <span key={token} style={{ width: "var(--gyro-traffic-light-size)", height: "var(--gyro-traffic-light-size)", borderRadius: "50%", background: `var(${token})` }} />)}
       </div>, document.body)}
       <h1>Session actions fixture</h1>
       <p>Title bar fixture: colored circles mark the traffic-light positions in your screenshot.</p>

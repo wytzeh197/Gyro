@@ -5358,8 +5358,34 @@ expect(
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
-    tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
+    (() => {
+      // Every copy of the native traffic-light geometry must agree: the Rust
+      // constant the app applies, the packaged config, and the CSS tokens the
+      // title bar and its screenshot fixture read.
+      const rustChrome = readRepoFile("apps/desktop/src-tauri/src/window_controls.rs");
+      const rustNumber = (name) => {
+        const declaration = rustChrome
+          .split("\n")
+          .find((line) => line.includes(`${name}: f64`));
+        return Number.parseFloat((declaration ?? "").split("=")[1] ?? "");
+      };
+      const nativeX = rustNumber("MAIN_TRAFFIC_LIGHT_X");
+      const nativeY = rustNumber("MAIN_TRAFFIC_LIGHT_Y");
+      const tokensCss = readRepoFile("packages/ui/src/styles-foundation.css");
+      const barCss = readRepoFile("packages/ui/src/styles.css");
+      const conf = tauriConfig.app.windows[0].trafficLightPosition;
+      return (
+        Number.isFinite(nativeX) &&
+        Number.isFinite(nativeY) &&
+        conf.x === nativeX &&
+        conf.y === nativeY &&
+        tokensCss.includes(`--gyro-traffic-light-inset-x: ${nativeX}px`) &&
+        tokensCss.includes(`--gyro-traffic-light-inset-y: ${nativeY}px`) &&
+        barCss.includes(
+          "calc(var(--gyro-traffic-light-inset-y) + (var(--gyro-traffic-light-size) / 2) - 14px)",
+        )
+      );
+    })() &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
       "inset_macos_traffic_lights",
@@ -6502,9 +6528,10 @@ expect(
     updatesSectionSource.includes(
       'className="gyro-primary-button gyro-update-card-primary"',
     ) &&
-    // The workspace-preparation popover owns .gyro-update-primary and its
-    // hardcoded blue; the card must not borrow it.
+    // .gyro-update-primary and its hardcoded blue are retired; every update
+    // action uses the shared primary button.
     !updatesSectionSource.includes("gyro-update-primary") &&
+    !styleSource.includes(".gyro-update-primary") &&
     updatesSectionSource.includes('aria-live="polite"') &&
     !updatesSectionSource.includes("Unknown") &&
     !updatesSectionSource.includes("gyro-update-pill") &&

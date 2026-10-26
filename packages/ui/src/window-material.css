@@ -79,6 +79,17 @@
   z-index: -1;
 }
 
+/* The isolated sidebar and the clipped main pane are sibling layers, and the
+   main pane comes later, so it painted over footer cards that open past the
+   sidebar edge. Lift the sidebar only while one of those cards is open. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell
+  > .gyro-sidebar:has(
+    :is(.gyro-installed-update-card, .gyro-workspace-preparation-popover)
+  ) {
+  z-index: 1;
+}
+
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell:not(.is-workspace-chrome-active)
   .gyro-sidebar :is(.gyro-sidebar-windowbar, .gyro-sidebar-footer) {

@@ -7565,6 +7565,57 @@ export function App() {
     workspacePath,
   ]);
 
+  /**
+   * A prompt typed before any folder was open is still the message the user
+   * means to send. Choosing a folder starts a chat under a new draft key, so
+   * the composer would re-bind to an empty draft and the prompt and its images
+   * would look discarded. Carry that unsent draft onto the chat the folder
+   * starts; an existing draft for the target chat always wins.
+   */
+  const carryFolderlessDraft = useCallback((targetDraftKey: string) => {
+    // Only a project draft (`new:<project>`) can receive the prompt. A session
+    // id names a live chat whose composer belongs to that conversation, and
+    // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
+    if (!targetDraftKey.startsWith("new:")) return;
+    const sources = [
+      NEW_CHAT_DRAFT_KEY,
+      `new:${chatProjectKey()}`,
+    ].filter((key) => key !== targetDraftKey);
+    setChatDrafts((current) => {
+      if (current[targetDraftKey]?.trim()) return current;
+      const source = sources.find((key) => current[key]?.trim());
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried) return current;
+      return { ...current, [source]: "", [targetDraftKey]: carried };
+    });
+    setChatAttachments((current) => {
+      if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
+      const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried || carried.length === 0) return current;
+      return { ...current, [source]: [], [targetDraftKey]: carried };
+    });
+  }, []);
+
+  // Whichever handler binds the composer to a project's draft — starting a
+  // chat for a chosen folder, or restoring a layout — the prompt typed with no
+  // folder open follows it, so picking a folder never looks like discarding it.
+  // Only a real switch away from the folderless draft carries: a restored
+  // layout must not inherit a prompt left over from an earlier session.
+  const previousDraftKeyRef = useRef(activeDraftKey);
+  useEffect(() => {
+    const previous = previousDraftKeyRef.current;
+    previousDraftKeyRef.current = activeDraftKey;
+    if (previous === activeDraftKey) return;
+    if (
+      previous !== NEW_CHAT_DRAFT_KEY &&
+      previous !== `new:${chatProjectKey()}`
+    ) {
+      return;
+    }
+    carryFolderlessDraft(activeDraftKey);
+  }, [activeDraftKey, carryFolderlessDraft]);
+
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
@@ -7574,6 +7625,10 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // Picking a folder moves the composer to this project's draft. Carry a
+      // prompt (and its images) typed while no folder was open so the message
+      // the user already wrote is not silently discarded.
+      carryFolderlessDraft(draftKey);
       // A project has one unsent draft; if it is already open in a pane, focus
       // it there rather than opening it twice. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
@@ -7618,7 +7673,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, chatGrid.layouts, workspacePath],
+    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath],
   );
 
   /**
@@ -17917,6 +17972,17 @@ export function App() {
                 workspacePath={activeWorkspaceRoot}
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
+                recentProjects={savedProjects}
+                onOpenRecentProject={(path) =>
+                  void activateWorkspacePath(path, "Project opened").catch(
+                    (error) =>
+                      notify(
+                        "command-failed",
+                        "Project unavailable",
+                        String(error),
+                      ),
+                  )
+                }
                 onTrustWorkspace={() => {
                   if (!workspaceActionRoot) return;
                   dispatchWorkbench({

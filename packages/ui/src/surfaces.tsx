@@ -2827,6 +2827,7 @@ function WorkspacePreparationControl({
         <section
           aria-label="Workspace preparation details"
           className="gyro-workspace-preparation-popover"
+          data-status={progress.status}
           ref={popoverRef as never}
           role="dialog"
         >
@@ -2891,7 +2892,7 @@ function WorkspacePreparationControl({
           ) : null}
           {progress.status === "degraded" || progress.status === "failed" ? (
             <button
-              className="gyro-update-primary"
+              className="gyro-primary-button"
               onClick={onRetry}
               type="button"
             >
@@ -3047,6 +3048,11 @@ function InstalledUpdateNotice({
             >
               <img src={gyroLogoTransparentLight} alt="" />
             </span>
+            <div className="gyro-installed-update-card-intro">
+              <span className="gyro-installed-update-eyebrow">GYRO UPDATE</span>
+              <h2>What’s new</h2>
+              <p className="gyro-installed-update-version">Version {version}</p>
+            </div>
             <button
               aria-label="Close What’s new card"
               className="gyro-installed-update-card-close"
@@ -3060,14 +3066,9 @@ function InstalledUpdateNotice({
               <X size={16} />
             </button>
           </div>
-          <div className="gyro-installed-update-card-intro">
-            <span className="gyro-installed-update-eyebrow">GYRO UPDATE</span>
-            <h2>What’s new</h2>
-            <p className="gyro-installed-update-version">Version {version}</p>
-          </div>
           <div className="gyro-installed-update-notes">{releaseNotes}</div>
           <button
-            className="gyro-installed-update-done"
+            className="gyro-primary-button gyro-installed-update-done"
             onClick={onDismiss}
             type="button"
           >
@@ -14670,6 +14671,9 @@ function workspaceKeybindingLabel(binding: WorkspaceKeybinding) {
 
 type IdeSurfaceProps = {
   files: WorkspaceFile[];
+  /** Projects opened before, offered on the no-project screen. */
+  recentProjects?: Array<{ path: string; label: string }>;
+  onOpenRecentProject?: (path: string) => void;
   ide?: IdeState;
   workspacePath?: string;
   workspaceTrusted?: boolean;
@@ -14762,6 +14766,8 @@ type IdeSurfaceProps = {
 };
 
 export function IdeSurface({
+  recentProjects = [],
+  onOpenRecentProject,
   files,
   ide,
   workspacePath,
@@ -14867,6 +14873,31 @@ export function IdeSurface({
             <Folder aria-hidden="true" size={15} />
             Open a project
           </button>
+          {recentProjects.length && onOpenRecentProject ? (
+            <nav
+              aria-labelledby="gyro-ide-project-recent-title"
+              className="gyro-ide-project-recent"
+            >
+              <h2 id="gyro-ide-project-recent-title">Recent projects</h2>
+              <ul>
+                {recentProjects.map((project) => (
+                  <li key={project.path}>
+                    <button
+                      onClick={() => onOpenRecentProject(project.path)}
+                      title={project.path}
+                      type="button"
+                    >
+                      <Folder aria-hidden="true" size={14} />
+                      <span>{project.label}</span>
+                      <small>
+                        {project.path.replace(/^\/Users\/[^/]+/, "~")}
+                      </small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : null}
         </section>
       </div>
     );
