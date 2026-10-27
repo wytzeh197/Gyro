@@ -695,7 +695,7 @@ export function composerLimitWindows(
       byId.set(id, {
         ...window,
         usedPercent: undefined,
-        status: "unknown",
+        status: undefined,
         resetsAt: undefined,
       });
     }
