@@ -165,18 +165,6 @@ export function ComposerEffortSelector({
       role="dialog"
     >
       <div className="gyro-effort-slider-header">
-        {fastMode ? (
-          <button
-            aria-label="Fast mode"
-            aria-pressed={fastMode.enabled}
-            className="gyro-effort-fast-button"
-            onClick={fastMode.onToggle}
-            title={`Fast mode ${fastMode.enabled ? "on" : "off"} · higher usage`}
-            type="button"
-          >
-            <Zap aria-hidden="true" size={15} />
-          </button>
-        ) : null}
         <div className="gyro-effort-slider-heading">
           <span
             className="gyro-effort-value"
@@ -189,6 +177,19 @@ export function ComposerEffortSelector({
               : labels[index]}
           </span>
         </div>
+        {fastMode ? (
+          <button
+            aria-label="Fast mode"
+            aria-pressed={fastMode.enabled}
+            className="gyro-effort-fast-button"
+            onClick={fastMode.onToggle}
+            title={`Fast mode ${fastMode.enabled ? "on" : "off"} · higher usage`}
+            type="button"
+          >
+            <Zap aria-hidden="true" size={12} />
+            <span>Fast</span>
+          </button>
+        ) : null}
       </div>
       <div
         className="gyro-effort-slider"

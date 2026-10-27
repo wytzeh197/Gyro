@@ -10,13 +10,16 @@
   border-radius: var(--gyro-radius-xl);
   overflow: visible;
 }
+/* The level reads on the left; Fast mode is a named toggle on the right, so
+   neither floats alone above a centred label. */
 .gyro-effort-slider-header {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 5.7px;
-  margin-bottom: var(--gyro-space-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: calc(24px * var(--gyro-ui-scale, 1));
+  margin-bottom: calc(10px * var(--gyro-ui-scale, 1));
+  padding-inline-start: 2px;
 }
 .gyro-effort-slider-header button {
   appearance: none;
@@ -28,56 +31,53 @@
 }
 .gyro-effort-slider-heading {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 1.9px;
   min-width: 0;
 }
 .gyro-effort-slider-header .gyro-effort-value {
   display: flex;
   align-items: center;
   gap: 2.85px;
+  overflow: hidden;
   color: var(--gyro-accent);
   font-size: var(--gyro-font-body);
-  font-weight: 500;
+  font-weight: 600;
   line-height: calc(20.9px * var(--gyro-ui-scale, 1));
-  border-radius: 3.8px;
-}
-.gyro-effort-slider-popover[data-fast-mode-supported="true"]
-  .gyro-effort-slider-header {
-  padding-inline: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .gyro-effort-slider-header .gyro-effort-fast-button {
-  position: absolute;
-  inset: 50% auto auto 0;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: var(--gyro-control-standard);
-  height: var(--gyro-control-standard);
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  padding-inline: calc(8px * var(--gyro-ui-scale, 1));
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 999px;
   color: var(--gyro-muted);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
 .gyro-effort-slider-header .gyro-effort-fast-button:hover {
-  background: var(--gyro-surface-raised);
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 .gyro-effort-slider-header .gyro-effort-fast-button[aria-pressed="true"] {
-  background: transparent;
+  border-color: color-mix(in srgb, var(--gyro-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   color: var(--gyro-accent);
 }
 .gyro-effort-fast-button[aria-pressed="true"] > svg {
   fill: currentColor;
 }
-.gyro-effort-slider-header button:hover {
-  color: var(--gyro-text);
-}
 .gyro-effort-slider-header button:focus-visible {
   outline: 1.9px solid var(--gyro-accent);
-  outline-offset: 2.85px;
+  outline-offset: 2px;
 }
 .gyro-effort-slider {
   position: relative;

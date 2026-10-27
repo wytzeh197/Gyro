@@ -34,6 +34,31 @@ function contextLabel(tokens?: number) {
   return `${Math.round(tokens / 1000)}K`;
 }
 
+/** Marks which ends of a scroller hide content, so CSS fades only those ends. */
+function useScrollEdges(
+  ref: { current: HTMLElement | null },
+  contentKey?: string,
+) {
+  useLayoutEffect(() => {
+    const scroller = ref.current;
+    if (!scroller) return;
+    const update = () => {
+      scroller.dataset.overflowStart = String(scroller.scrollTop > 1);
+      scroller.dataset.overflowEnd = String(
+        scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1,
+      );
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [ref, contentKey]);
+}
+
 /**
  * Providers down a rail of their own marks, the previewed provider's models
  * beside it. A provider's models show only once its mark is clicked (or
@@ -77,6 +102,8 @@ export function ComposerModelRail({
   const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  useScrollEdges(railRef);
+  useScrollEdges(listRef, previewId);
 
   // Land on the model in use so Enter re-confirms and arrows start from it.
   useEffect(() => {
@@ -281,23 +308,26 @@ export function ComposerModelRail({
       ref={panelRef}
       role="dialog"
     >
-      <div
-        aria-label="Providers"
-        aria-orientation="vertical"
-        className="gyro-model-rail-providers"
-        onKeyDown={onRailKeyDown}
-        ref={railRef}
-        role="tablist"
-      >
-        {connected.map(railTile)}
-        {available.length > 0 ? (
-          <>
-            {connected.length > 0 ? (
-              <span aria-hidden="true" className="gyro-model-rail-divider" />
-            ) : null}
-            {available.map(railTile)}
-          </>
-        ) : null}
+      <div className="gyro-model-rail-side">
+        <div
+          aria-label="Providers"
+          aria-orientation="vertical"
+          className="gyro-model-rail-providers"
+          onKeyDown={onRailKeyDown}
+          ref={railRef}
+          role="tablist"
+        >
+          {connected.map(railTile)}
+          {available.length > 0 ? (
+            <>
+              {connected.length > 0 ? (
+                <span aria-hidden="true" className="gyro-model-rail-divider" />
+              ) : null}
+              {available.map(railTile)}
+            </>
+          ) : null}
+        </div>
+        {/* Outside the scroller, so the gear never sits on half a logo. */}
         <button
           aria-label="Manage providers"
           className="gyro-model-rail-tile is-utility"
@@ -320,14 +350,17 @@ export function ComposerModelRail({
           <>
             <header className="gyro-model-rail-head">
               <strong id={`${id}-heading`}>{preview.label}</strong>
-              <small>
-                {preview.connection}
-                {" · "}
-                {!preview.connected
-                  ? "Not connected"
-                  : isPreviewInUse
-                    ? "In use"
-                    : `${preview.models.length} ${preview.models.length === 1 ? "model" : "models"}`}
+              <small className="gyro-model-rail-status">
+                <span className="gyro-model-rail-connection">
+                  {preview.connection}
+                </span>
+                <span className={isPreviewInUse ? "is-in-use" : undefined}>
+                  {!preview.connected
+                    ? "Not connected"
+                    : isPreviewInUse
+                      ? "In use"
+                      : `${preview.models.length} ${preview.models.length === 1 ? "model" : "models"}`}
+                </span>
               </small>
             </header>
             {showWarning ? (

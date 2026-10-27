@@ -42138,17 +42138,45 @@ textarea:focus-visible,
   overflow: hidden;
 }
 
-.gyro-model-rail-providers {
+.gyro-model-rail-side {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 0;
+  padding-bottom: 7px;
+  border-right: 1px solid var(--gyro-premium-hairline-strong);
+  background: color-mix(in srgb, var(--gyro-text) 2.5%, transparent);
+}
+.gyro-model-rail-providers {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
   gap: 4px;
+  align-self: stretch;
   min-height: 0;
   padding: 7px 0;
   overflow-y: auto;
   scrollbar-width: none;
-  border-right: 1px solid var(--gyro-premium-hairline-strong);
-  background: color-mix(in srgb, var(--gyro-text) 2.5%, transparent);
+}
+/* Either scroller fades only at an end that hides more, never a hard cut. */
+.gyro-model-rail-providers,
+.gyro-model-rail-list {
+  --gyro-model-rail-fade-start: 0px;
+  --gyro-model-rail-fade-end: 0px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--gyro-model-rail-fade-start),
+    black calc(100% - var(--gyro-model-rail-fade-end)),
+    transparent
+  );
+}
+:is(.gyro-model-rail-providers, .gyro-model-rail-list)[data-overflow-start="true"] {
+  --gyro-model-rail-fade-start: 18px;
+}
+:is(.gyro-model-rail-providers, .gyro-model-rail-list)[data-overflow-end="true"] {
+  --gyro-model-rail-fade-end: 24px;
 }
 .gyro-model-rail-providers::-webkit-scrollbar {
   display: none;
@@ -42225,22 +42253,11 @@ textarea:focus-visible,
   filter: grayscale(0.4);
   opacity: 0.85;
 }
-/* The gear stays reachable however many providers the rail has to scroll. */
+/* The gear sits below the scroller, reachable however many providers scroll. */
 .gyro-model-rail-tile.is-utility {
-  position: sticky;
-  bottom: -7px;
-  z-index: 1;
-  margin-top: auto;
-  --gyro-model-rail-floor: color-mix(
-    in srgb,
-    var(--gyro-text) 2.5%,
-    var(--gyro-surface)
-  );
-  box-shadow: 0 -6px 0 1px var(--gyro-model-rail-floor);
-  background: var(--gyro-model-rail-floor);
   width: 30px;
   height: 30px;
-  border-radius: var(--gyro-radius-md);
+  margin-top: 3px;
   color: var(--gyro-faint);
 }
 .gyro-model-rail-tile.is-utility:hover {
@@ -42259,12 +42276,14 @@ textarea:focus-visible,
   min-width: 0;
   min-height: 0;
 }
+/* Inset 15px so the title lines up with class labels and model names. */
 .gyro-model-rail-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 13px 14px 8px 14px;
+  min-height: 22px;
+  padding: 12px 12px 6px 15px;
 }
 .gyro-model-rail-head strong {
   min-width: 0;
@@ -42276,10 +42295,37 @@ textarea:focus-visible,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gyro-model-rail-head small {
+.gyro-model-rail-status {
+  display: flex;
   flex: none;
+  align-items: center;
+  gap: 6px;
   color: var(--gyro-faint);
   font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+}
+/* Shaped like the context pills, so the panel speaks one tag language. */
+.gyro-model-rail-connection {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-muted);
+  font-size: calc(10.5px * var(--gyro-ui-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+/* The same accent dot the rail puts on the provider in use. */
+.gyro-model-rail-status .is-in-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--gyro-muted);
+}
+.gyro-model-rail-status .is-in-use::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gyro-model-rail-accent);
 }
 .gyro-model-rail-warning {
   display: flex;
@@ -42303,7 +42349,7 @@ textarea:focus-visible,
   flex-direction: column;
   gap: 1px;
   min-height: 0;
-  padding: 0 6px 6px;
+  padding: 0 6px 8px;
   overflow-y: auto;
   animation: gyro-model-rail-swap calc(140ms * var(--gyro-motion-factor, 1))
     ease-out;
@@ -42382,6 +42428,10 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   letter-spacing: 0.01em;
+}
+.gyro-model-rail-model.is-active .gyro-model-rail-context {
+  background: color-mix(in srgb, var(--gyro-model-rail-accent) 16%, transparent);
+  color: var(--gyro-text);
 }
 .gyro-model-rail-check {
   display: grid;
