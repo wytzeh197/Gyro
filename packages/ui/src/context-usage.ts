@@ -684,9 +684,17 @@ export function composerLimitWindows(
     });
   }
 
-  // Cached readings and thread events must not survive their allowance reset.
+  // Cached readings and thread events must not survive their allowance reset,
+  // but the plan still meters the window: past its reset nothing is spent yet.
   for (const [id, window] of byId) {
-    if (window.resetsAt && Date.parse(window.resetsAt) <= now) byId.delete(id);
+    if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
+      byId.set(id, {
+        ...window,
+        usedPercent: 0,
+        status: "ok",
+        resetsAt: undefined,
+      });
+    }
   }
 
   // Only show allowances actually reported for this account. Provider identity

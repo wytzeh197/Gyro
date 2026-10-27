@@ -1477,12 +1477,14 @@ pub fn replace_provider_rate_limits(
     Ok(())
 }
 
-/// The last reading for each of a provider's windows, expired ones dropped.
+/// The last reading for each of a provider's windows, expired ones rolled over.
 ///
 /// A window past its reset time has rolled over, so the stored status describes
-/// an allowance that no longer exists. Returning it would be worse than
-/// returning nothing: an exhausted window would keep reading as exhausted into
-/// the fresh one. Those rows are deleted on the way past.
+/// an allowance that no longer exists: an exhausted window must not keep
+/// reading as exhausted into the fresh one. Dropping it was no better, since
+/// the plan still meters that window and the composer lost the row until the
+/// next message reopened it. Nothing has been spent since the reset, so the
+/// row is rewritten on the way past as an untouched allowance with no reset.
 pub fn provider_rate_limits(
     conn: &Connection,
     provider_id: &str,
@@ -1493,7 +1495,8 @@ pub fn provider_rate_limits(
     // compare instants, not text. A value SQLite cannot read as a time keeps
     // the old text comparison.
     conn.execute(
-        "delete from provider_rate_limits
+        "update provider_rate_limits
+         set status = 'ok', used_percent = 0, resets_at = null
          where provider_id = ?1 and resets_at is not null
            and coalesce(julianday(resets_at) <= julianday(?2), resets_at <= ?2)",
         params![provider_id, now],
@@ -2674,7 +2677,7 @@ mod tests {
     }
 
     #[test]
-    fn a_window_past_its_reset_is_dropped_rather_than_shown_stale() {
+    fn a_window_past_its_reset_reads_as_a_fresh_allowance() {
         let conn = memory_conn();
         let now = Utc::now();
         let expired = (now - chrono::Duration::minutes(1)).to_rfc3339();
@@ -2690,8 +2693,18 @@ mod tests {
         .expect("record windows");
 
         let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].window_id, "weekly");
+        let rolled = stored
+            .iter()
+            .find(|record| record.window_id == "five-hour")
+            .expect("the plan still meters the rolled-over window");
+        assert_eq!(rolled.status, "ok");
+        assert_eq!(rolled.used_percent, Some(0));
+        assert!(rolled.resets_at.is_none());
+        let weekly = stored
+            .iter()
+            .find(|record| record.window_id == "weekly")
+            .expect("the live window is kept");
+        assert_eq!(weekly.resets_at.as_deref(), Some(live.as_str()));
     }
 
     #[test]
@@ -2772,13 +2785,12 @@ mod tests {
         .expect("record windows");
 
         let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
-        assert_eq!(
-            stored
-                .iter()
-                .map(|record| record.window_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["weekly"]
-        );
+        let mut rolled = stored
+            .iter()
+            .map(|record| (record.window_id.as_str(), record.resets_at.is_some()))
+            .collect::<Vec<_>>();
+        rolled.sort();
+        assert_eq!(rolled, vec![("five-hour", false), ("weekly", true)]);
     }
 
     #[test]

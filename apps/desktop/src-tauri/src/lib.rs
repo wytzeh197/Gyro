@@ -12688,7 +12688,7 @@ fn provider_usage_windows_from_anthropic_usage(
 
 /// The long-standing shape: one object per window, keyed by its name.
 fn anthropic_usage_windows_by_key(payload: &serde_json::Value) -> Vec<ProviderRateLimitWindow> {
-    [
+    let mut windows: Vec<ProviderRateLimitWindow> = [
         ("five_hour", "five-hour", "5-hour limit"),
         ("seven_day", "weekly", "Weekly limit"),
         ("seven_day_opus", "weekly-opus", "Weekly · Opus"),
@@ -12717,7 +12717,30 @@ fn anthropic_usage_windows_by_key(payload: &serde_json::Value) -> Vec<ProviderRa
                 .map(str::to_string),
         })
     })
-    .collect()
+    .collect();
+    // The 5-hour session only opens with the first message after the last one
+    // closed, and until then the account reports it as null. Beside a measured
+    // week that null is an untouched allowance, not a plan without one, and
+    // leaving it out made the row vanish whenever Claude sat idle.
+    let session_idle = payload.get("five_hour").is_some_and(|window| {
+        window
+            .get("utilization")
+            .and_then(serde_json::Value::as_f64)
+            .is_none()
+    });
+    if session_idle && windows.iter().any(|window| window.id == "weekly") {
+        windows.insert(
+            0,
+            ProviderRateLimitWindow {
+                id: "five-hour".into(),
+                label: "5-hour limit".into(),
+                status: "ok".into(),
+                used_percent: Some(0),
+                resets_at: None,
+            },
+        );
+    }
+    windows
 }
 
 /// The newer `limits` list the same response also carries.
@@ -30481,6 +30504,28 @@ while True:
             }))
             .is_empty()
         );
+    }
+
+    /// An idle account has no open session, so `five_hour` comes back null.
+    /// The plan still meters one, and none of it is spent yet.
+    #[test]
+    fn anthropic_idle_session_reads_as_a_full_five_hour_allowance() {
+        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": serde_json::Value::Null,
+            "seven_day": {
+                "utilization": 3.0,
+                "resets_at": "2026-11-01T16:59:59.259573+00:00"
+            },
+            "seven_day_opus": serde_json::Value::Null
+        }));
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| (window.id.as_str(), window.used_percent))
+                .collect::<Vec<_>>(),
+            vec![("five-hour", Some(0)), ("weekly", Some(3))]
+        );
+        assert!(windows[0].resets_at.is_none());
     }
 
     #[test]

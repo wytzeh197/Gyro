@@ -858,9 +858,18 @@ const expired = composerLimitWindows(
   [],
   now + 3_600_001,
 );
+// Past their reset the windows are spent-free, not gone: the plan still
+// meters them, so the composer keeps the row at a full allowance.
 assert.deepEqual(
-  expired.map((window) => window.percent),
-  [],
+  expired.map((window) => [
+    window.id,
+    window.remainingPercentLabel,
+    window.resetsLabel,
+  ]),
+  [
+    ["five-hour", "100%", undefined],
+    ["weekly", "100%", undefined],
+  ],
 );
 const newWindow = composerLimitWindows(
   separateWindows,
