@@ -4574,6 +4574,7 @@ fn run_compaction_summary_call(
     };
     // The caller already holds this session's cancellation flag for the whole
     // compaction, so Stop ends the summarizer like it ends any other turn.
+    let _mute = context_compaction::mute_summary_stream(&request.session_id);
     run_provider_chat_with_retry(
         store,
         app,
@@ -20499,6 +20500,9 @@ fn emit_provider_chat_event_with_timeline(
     error: Option<String>,
     timeline: Option<provider_timeline::TimelinePosition>,
 ) {
+    if context_compaction::summary_stream_muted(&request.session_id) {
+        return;
+    }
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
         timing::mark(TimingStage::FirstToken);
@@ -20546,6 +20550,9 @@ fn emit_provider_context_usage(
     request: &ProviderChatRequest,
     usage: &ProviderContextUsage,
 ) {
+    if context_compaction::summary_stream_muted(&request.session_id) {
+        return;
+    }
     let context_window_source = if usage.model_context_window.is_some() {
         "runtime"
     } else {
@@ -20591,6 +20598,9 @@ fn emit_provider_activity_event(
     activity: &ProviderActivity,
     activity_sequence: Option<u64>,
 ) {
+    if context_compaction::summary_stream_muted(&request.session_id) {
+        return;
+    }
     timing::mark(TimingStage::FirstActivity);
     if !matches!(activity.kind.as_str(), "commentary" | "reasoning") {
         timing::tool(&activity.id, &activity.status);

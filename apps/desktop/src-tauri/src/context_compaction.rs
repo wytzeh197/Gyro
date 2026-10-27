@@ -8,6 +8,51 @@
 //! that say a compaction happened without anyone pressing anything.
 
 use super::*;
+use std::collections::HashSet;
+use std::sync::Mutex;
+
+/// Sessions whose provider stream is currently writing a compaction summary.
+///
+/// The summarizer is an ordinary provider call on the chat's own session and
+/// turn ids, so without this every token it writes streams into the chat as a
+/// reply -- and its status frames settle the turn before the checkpoint lands.
+/// The summary belongs in the compaction row, never in the transcript.
+static SUMMARIZING_SESSIONS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Holds a session's stream quiet until dropped.
+pub(super) struct SummaryStreamMute {
+    session_id: String,
+}
+
+pub(super) fn mute_summary_stream(session_id: &str) -> SummaryStreamMute {
+    if let Ok(mut sessions) = SUMMARIZING_SESSIONS.lock() {
+        sessions
+            .get_or_insert_with(HashSet::new)
+            .insert(session_id.to_string());
+    }
+    SummaryStreamMute {
+        session_id: session_id.to_string(),
+    }
+}
+
+impl Drop for SummaryStreamMute {
+    fn drop(&mut self) {
+        if let Ok(mut sessions) = SUMMARIZING_SESSIONS.lock() {
+            if let Some(sessions) = sessions.as_mut() {
+                sessions.remove(&self.session_id);
+            }
+        }
+    }
+}
+
+/// Whether stream frames for this session should stay off the chat.
+pub(super) fn summary_stream_muted(session_id: &str) -> bool {
+    SUMMARIZING_SESSIONS
+        .lock()
+        .ok()
+        .and_then(|sessions| sessions.as_ref().map(|set| set.contains(session_id)))
+        .unwrap_or(false)
+}
 
 /// The activity row for one automatic compaction inside a tool loop.
 ///
@@ -137,6 +182,18 @@ pub async fn set_auto_compact_percent(percent: u32) -> Result<u32, String> {
 mod tests {
     use super::*;
     use crate::conversation_history::LocalCompaction;
+
+    #[test]
+    fn a_summary_mutes_only_its_own_session_and_only_while_it_runs() {
+        let session = "summary-mute-test-session";
+        assert!(!summary_stream_muted(session));
+        {
+            let _mute = mute_summary_stream(session);
+            assert!(summary_stream_muted(session));
+            assert!(!summary_stream_muted("summary-mute-test-other"));
+        }
+        assert!(!summary_stream_muted(session));
+    }
 
     #[test]
     fn a_summarized_row_names_the_model_the_time_and_the_tokens() {

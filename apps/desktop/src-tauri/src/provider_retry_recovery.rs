@@ -109,6 +109,9 @@ fn emit_retry_event(
     max_attempts: u32,
     retry_at: Option<chrono::DateTime<chrono::Utc>>,
 ) {
+    if super::context_compaction::summary_stream_muted(&request.session_id) {
+        return;
+    }
     let mut payload = serde_json::json!({
         "sessionId": request.session_id,
         "turnId": request.turn_id,
